@@ -5,7 +5,7 @@ description: casesInFreezer live tunnel/on-line WIP shown additively next to cas
 
 # Freezer WIP in completion displays
 
-Completion displays show product still in the freezer tunnel / on the line as an ADDITIVE sky-blue "+N in freezer" chip and a translucent second bar segment. Cased count stays the authoritative "% Done" — the freezer number never feeds casesLeftToRun or any spreadsheet formula.
+Completion displays show product still in the freezer tunnel / on the line as an ADDITIVE sky-blue "+N in freezer" chip and a translucent second bar segment. Cased count stays the authoritative "% Done" — the freezer number never feeds casesLeftToRun or any spreadsheet PLANNING formula. (2026-07-10 update: it DOES feed the live press-side surfaces — `pressCasesLeft`/`pressDone` count freezer contents as "made"; see `press-done-model.md`. Spreadsheet/planning math is still freezer-free.)
 
 **Rule:** the math is the pure `computeCasesInFreezer` in `@workspace/inventory-math` — never re-inline it. While running it equals the live casesOnLine model (fill to freezerTime, freeze at pausedAt); after end it drains to zero over freezerTime, capped by the actual fill at end.
 

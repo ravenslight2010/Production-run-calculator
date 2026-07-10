@@ -30,7 +30,7 @@ function makeForm(initial: Record<string, number>) {
   };
 }
 
-const baseCalc = { ppm: 100, perTray: 60, perBatch: 600, traysNeeded: 30, batchesNeeded: 2 };
+const baseCalc = { ppm: 100, perTray: 60, perBatch: 600, traysNeeded: 30, batchesNeeded: 2, pressDone: false };
 
 function makeV(overrides: Partial<Record<string, number>> = {}) {
   return {
@@ -289,10 +289,13 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.casesOnCurrentSkid).toBe(24);
   });
 
-  it("stops decrementing once the dough feed is complete", () => {
+  it("stops decrementing once the press is done (count-based: cased + freezer ≥ needed)", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
     const t0 = 1_700_000_000_000;
-    // casesNeeded 100 @ ppm 100 / 12 per case => feed complete after 12 min.
+    // The stop is COUNT-based, not time-based: calc.pressDone flips true when
+    // the real cased count plus live freezer contents reach casesNeeded. From
+    // that moment the dough counters must freeze — the dough crew is on the
+    // NEXT run's dough.
     const v = makeV({ casesNeeded: 100 });
 
     renderHook(() =>
@@ -301,7 +304,7 @@ describe("auto-track tray/batch up/down tracking", () => {
         runStatus: "running",
         nowTime: new Date(t0),
         elapsedBatchSec: 20 * 60,
-        calc: baseCalc,
+        calc: { ...baseCalc, pressDone: true },
         v,
         form,
       }),
@@ -309,6 +312,30 @@ describe("auto-track tray/batch up/down tracking", () => {
 
     expect(values.traysOnLine).toBe(50);
     expect(values.batchesReady).toBe(10);
+  });
+
+  it("keeps decrementing while the press is NOT done, even long past the time estimate", () => {
+    // Regression guard for the old time-based stop: 20 min elapsed would have
+    // satisfied the elapsed-time estimate (100 cases @ ppm 100 = 12 min), but
+    // the real counts say the press is still going — dough must keep moving.
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
+    const t0 = 1_700_000_000_000;
+    const v = makeV({ casesNeeded: 100 });
+
+    renderHook(() =>
+      useAutoTrack({
+        runId: "run-1",
+        runStatus: "running",
+        nowTime: new Date(t0),
+        elapsedBatchSec: 20 * 60,
+        calc: baseCalc, // pressDone: false
+        v,
+        form,
+      }),
+    );
+
+    expect(values.traysOnLine).toBe(49);
+    expect(values.batchesReady).toBe(9.75);
   });
 
   it("seeds untouched 0 counters with the suggested staging on the first tick, then counts down", () => {

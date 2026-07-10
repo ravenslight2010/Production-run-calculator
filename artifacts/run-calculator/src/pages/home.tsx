@@ -8530,8 +8530,27 @@ export default function Home() {
     // Extra cases produced beyond the run target (only positive once the order
     // is met and the line keeps running).
     const extraCases = Math.max(0, casesCompleted - v.casesNeeded);
-    // Adjusted remaining time: based on cases still left rather than full run
-    const adjustedTimeSec = ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : totalTimeSec;
+    // ── Press-side remaining ("finished at press") ──────────────────────────
+    // The press is done when everything it has made adds up to the run total:
+    // cased product (packaging count) PLUS what's still travelling the freezer
+    // tunnel. So "cases left" at the press counts the LIVE freezer contents as
+    // already made — this is what tells the crew when to stop the press and
+    // when dough moves to the next run.
+    const pressCasesLeft = v.casesNeeded > 0
+      ? Math.max(0, v.casesNeeded - casesCompleted - casesInFreezer)
+      : 0;
+    const pressDone = v.casesNeeded > 0 && casesCompleted + casesInFreezer >= v.casesNeeded;
+    // Adjusted remaining time: while the run is LIVE, count down to the press
+    // stop using the live counts (packing + freezer counted as done). Before
+    // start / after end fall back to the spreadsheet timing basis, which uses
+    // the static full-tunnel discount for planning.
+    const isLiveRun = !!currentRun?.startedAt && !currentRun?.endedAt;
+    const adjustedTimeSec =
+      ppm > 0
+        ? isLiveRun && v.casesNeeded > 0
+          ? (pressCasesLeft * v.pizzasPerCase * 60) / ppm
+          : (casesForTiming * v.pizzasPerCase * 60) / ppm
+        : totalTimeSec;
     // Pace: expected cases completed by now vs actual
     // Subtract freeze tunnel time — cases aren't done until they exit the tunnel
     let paceStatus: "on-pace" | "ahead" | "behind" | null = null;
@@ -8591,6 +8610,8 @@ export default function Home() {
       timePerCaseSec,
       totalTimeSec,
       adjustedTimeSec,
+      pressCasesLeft,
+      pressDone,
       extraCases,
       doughMadeTimeSec,
       rackTimes,
@@ -8750,6 +8771,58 @@ export default function Home() {
     // operator's manual tray/batch edits on every other device.
     disabled: screenMode !== null,
   });
+
+  // ── Pre-seed the NEXT run's dough counters when this run's press is done ──
+  // The dough crew moves onto the next run's dough the moment the press has
+  // made everything this run needs (cased + freezer = target). Seed the next
+  // run's Trays on Line / Batches Ready at their suggested max staging BEFORE
+  // its Start button is pressed, so when it starts the counters are already
+  // fully staged and only count down. One-shot per current→next pair; never
+  // overwrites counts the crew already entered; write-disabled on cast/wall
+  // screens (read-only viewers) and when auto-track is off.
+  const nextRunSeededRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (screenMode !== null || !autoTrackProgress) return;
+    if (runStatus !== "running" || !calc.pressDone) return;
+    const nextRun = dayState.runs[dayState.currentIndex + 1];
+    if (!nextRun || nextRun.startedAt) return;
+    if ((nextRun.subTab ?? "dough") === "crusts") return; // crust runs mix no dough
+    const key = `${currentRunId}->${nextRun.id}`;
+    if (nextRunSeededRef.current.has(key)) return;
+    const nv = { ...DEFAULT_VALUES, ...loadRunValues(nextRun.id) };
+    // Crew already staged dough for the next run — leave their numbers alone.
+    // This IS a terminal outcome for the pair, so consume the one-shot latch.
+    if ((Number(nv.traysOnLine) || 0) > 0 || (Number(nv.batchesReady) || 0) > 0) {
+      nextRunSeededRef.current.add(key);
+      return;
+    }
+    // Next run's cases/pizzas may not be entered yet when the press finishes —
+    // do NOT consume the latch here, so the seed still fires once the run's
+    // numbers land (the latch is only set after an actual write or a
+    // deliberate crew-entered skip).
+    const totalPizzas = (Number(nv.casesNeeded) || 0) * (Number(nv.pizzasPerCase) || 0);
+    if (totalPizzas <= 0) return;
+    const perTray = Number(nv.doughballsPerTray) || 0;
+    const recipeLbs = (nv.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    const yieldPerBatch =
+      recipeLbs > 0 && Number(nv.targetDoughballWeight) > 0
+        ? (recipeLbs * 16) / Number(nv.targetDoughballWeight)
+        : Number(nv.doughBatchYield) || 0;
+    const traysNeeded = perTray > 0 ? totalPizzas / perTray : 0;
+    const batchesNeeded = yieldPerBatch > 0 ? totalPizzas / yieldPerBatch : 0;
+    const seed = suggestedDoughStaging(traysNeeded, batchesNeeded);
+    if (seed.trays === null && seed.batches === null) return;
+    nextRunSeededRef.current.add(key);
+    saveRunValues(nextRun.id, {
+      ...nv,
+      traysOnLine: seed.trays ?? 0,
+      batchesReady: seed.batches ?? 0,
+    });
+    // The next run isn't the active form, so autosave never stamps it — stamp
+    // explicitly or the seeded staging loses the per-run LWW merge to a stale
+    // stamped copy from a peer.
+    markRunValuesUpdated(nextRun.id, Date.now());
+  }, [runStatus, calc.pressDone, autoTrackProgress, screenMode, dayState.runs, dayState.currentIndex, currentRunId]);
 
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
   const secUntilNextBatch = calc.timePerBatchSec > 0
@@ -11801,6 +11874,11 @@ export default function Home() {
                                 </div>
                                 <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
                                   <div className="text-sm font-medium text-foreground tabular-nums">at {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</div>
+                                  {v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
+                                    <div className="text-xs font-semibold text-foreground/80 tabular-nums" data-testid="text-press-cases-left">
+                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + freezer counted done)
+                                    </div>
+                                  )}
                                   {Number(ve.freezerTime) > 0 && (
                                     <div className="text-xs font-semibold text-sky-400 tabular-nums" data-testid="text-line-clear-time">
                                       Line clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)} (incl. freezer)
@@ -11968,19 +12046,21 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Warehouse switchover staging — 2 skids before switchover,
-                    counting everything still to come off the line INCLUDING
-                    product in the freezer tunnel. Short runs (< 2 skids total)
-                    show it from the start and tell warehouse to stage 2+ runs
-                    ahead. Mirrors the notification in useNotifications. */}
+                {/* Warehouse switchover staging — measured at the PRESS (cased
+                    product + freezer contents count as done): frontline must be
+                    staged 2 skids before the switchover, packaging 1 skid
+                    before. Short runs (< 2 skids total) show it from the start
+                    and tell warehouse to stage 2+ runs ahead. Mirrors the
+                    notifications in useNotifications. */}
                 {!currentRun?.endedAt && runStatus === "running" && (() => {
                   const cps = Number(v.casesPerSkid) || 0;
                   const needed = Number(v.casesNeeded) || 0;
                   if (calc.ppm <= 0 || cps <= 0 || needed <= 0) return null;
-                  const casesToCome = Math.max(0, needed - calc.casesCompleted);
-                  if (casesToCome <= 0 || casesToCome > 2 * cps) return null;
+                  const pressLeft = calc.pressCasesLeft;
+                  if (pressLeft <= 0 || pressLeft > 2 * cps) return null;
                   const shortRun = needed < 2 * cps;
-                  const skidsLeft = casesToCome / cps;
+                  const packagingStage = pressLeft <= cps;
+                  const skidsLeft = pressLeft / cps;
                   const names = upcomingRunLabels.slice(0, shortRun ? 3 : 1);
                   const freezerMin = Number(ve.freezerTime) || 0;
                   return (
@@ -11989,12 +12069,18 @@ export default function Home() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">
                           {shortRun
-                            ? `Warehouse: short run (under 2 skids) — stage the next 2+ runs now`
-                            : `Warehouse: ${fmtNum(skidsLeft, 1)} skid${skidsLeft === 1 ? "" : "s"} to switchover — stage the next run`}
+                            ? `Warehouse: short run (under 2 skids) — stage frontline + packaging for the next 2+ runs now`
+                            : `Warehouse: ${fmtNum(skidsLeft, 1)} skid${skidsLeft === 1 ? "" : "s"} to switchover — stage ${packagingStage ? "packaging" : "frontline"} for the next run`}
                         </p>
+                        {!shortRun && packagingStage && (
+                          <p className="text-xs font-semibold text-violet-400/90 mt-0.5" data-testid="text-switchover-packaging-stage">
+                            Under 1 skid left at the press — frontline should already be staged; packaging goes now.
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {fmtComma(casesToCome)} cases still to come off the line{freezerMin > 0 ? " (incl. freezer)" : ""}
-                          {calc.adjustedTimeSec > 0 ? ` — line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
+                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + freezer counted done)
+                          {calc.adjustedTimeSec > 0 ? ` — press stops ~${fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}` : ""}
+                          {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
                           {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
                         </p>
                       </div>
@@ -12020,77 +12106,11 @@ export default function Home() {
                 )}
 
 
-                {/* Carry-over surplus to next run (moved from Current Progress) */}
-                {(() => {
-                  const nextRun = dayState.runs[dayState.currentIndex + 1];
-                  if (!nextRun) return null;
-                  if (v.carryOverDone) return null;
-                  const excessPizzas = calc.buffer * v.pizzasPerCase;
-                  if (excessPizzas < 1 || calc.perTray <= 0) return null;
-                  const excessBatches = calc.perBatch > 0 ? Math.floor(excessPizzas / calc.perBatch) : 0;
-                  const afterBatches = excessBatches > 0 ? excessPizzas - excessBatches * calc.perBatch : excessPizzas;
-                  const excessTrays = Math.floor(afterBatches / calc.perTray);
-                  if (excessTrays === 0 && excessBatches === 0) return null;
-                  const nextLabel = `${nextRun.brand ?? ""}${nextRun.flavor ? ` – ${nextRun.flavor}` : ""}`.trim() || `Run ${dayState.currentIndex + 2}`;
-                  return (
-                    <div className="mb-4 rounded-lg border border-amber-600/40 bg-amber-950/20 px-3 py-2.5 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2">
-                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-                          <p className="text-xs text-amber-300 leading-snug">
-                            <span className="font-semibold">{doughSubTab === "crusts" ? "Surplus crusts" : "Surplus dough"}</span> exceeds this run
-                            {excessTrays > 0 && <span> — <span className="font-semibold">{excessTrays} {doughSubTab === "crusts" ? `stack${excessTrays !== 1 ? "s" : ""}` : `tray${excessTrays !== 1 ? "s" : ""}`}</span></span>}
-                            {excessBatches > 0 && doughSubTab !== "crusts" && <span> + <span className="font-semibold">{excessBatches} batch{excessBatches !== 1 ? "es" : ""}</span></span>}
-                            . Carry to <span className="font-semibold">{nextLabel}</span>?
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
-                          className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 mt-0.5"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const existing = loadRunValues(nextRun.id);
-                            saveRunValues(nextRun.id, {
-                              ...existing,
-                              traysOnLine: (existing.traysOnLine ?? 0) + excessTrays,
-                              batchesReady: (existing.batchesReady ?? 0) + excessBatches,
-                            });
-                            // Stamp the next run's edit: it isn't the active
-                            // form, so the autosave never stamps it and the
-                            // carried trays/batches would lose the per-run LWW
-                            // merge to a peer's stale stamped copy.
-                            markRunValuesUpdated(nextRun.id, Date.now());
-                            // The carried dough leaves THIS run's staged supply —
-                            // deduct it here too, or the current run keeps showing
-                            // (and auto-tracking) trays/batches that now belong to
-                            // the next run.
-                            form.setValue("traysOnLine", Math.max(0, v.traysOnLine - excessTrays), { shouldDirty: true });
-                            form.setValue("batchesReady", Math.max(0, v.batchesReady - excessBatches), { shouldDirty: true });
-                            form.setValue("carryOverDone", true, { shouldDirty: true });
-                            navigator.vibrate?.(15);
-                          }}
-                          className="flex-1 py-1.5 rounded-md bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 text-xs font-semibold transition-colors"
-                        >
-                          Carry over →
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
-                          className="px-3 py-1.5 rounded-md border border-border/50 text-muted-foreground text-xs transition-colors hover:bg-muted/30"
-                        >
-                          Skip
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* Carry-over surplus feature removed (user request 2026-07-10):
+                    dough crew works ahead of the press on the NEXT run's dough,
+                    so surplus-carry prompts don't match how the floor works.
+                    The `carryOverDone` form field is kept for stored-data/sync
+                    compatibility but is no longer surfaced. */}
 
                 {/* Run Details (moved from Dough tab) — sub-view aware */}
                 {doughSubTab === "crusts" ? (

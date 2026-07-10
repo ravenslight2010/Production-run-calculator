@@ -20,11 +20,13 @@ Two ways it used to over-provision past the run's actual need:
    "auto track should be on both on all"). The decrement had no "run satisfied"
    check, so it kept depleting (and the steppers kept re-suggesting more dough)
    after the run already had everything it needed. Fix: gate the decrement on
-   `doughFeedComplete` = **front-of-line** fed cases ≥ `casesNeeded`. Dough enters
-   at the FRONT (web: raw `elapsedBatchSec`; mobile: `expectedCasesRaw` from
-   `netElapsedSec`, both with NO freezer/tunnel offset), so feeding finishes
-   *before* output does — gating on output-complete would over-consume by
-   ~freezerTime.
+   `doughFeedComplete`. **Web (2026-07-10, press-done model):** `doughFeedComplete`
+   is now COUNT-based `calc.pressDone` (cased + live freezer ≥ casesNeeded) — see
+   `press-done-model.md` — because the press is physically done exactly when
+   everything needed is either cased or in the freezer, and real counts beat
+   elapsed-time estimates when the line runs off-pace. Mobile (paused) still uses
+   the old time-based front-of-line estimate (`expectedCasesRaw` from
+   `netElapsedSec`, NO freezer/tunnel offset); when parity resumes, port pressDone.
 
 **Why:** user reported dough/doughballs auto-tracking "keeps going even after we
 have what we need for the run."

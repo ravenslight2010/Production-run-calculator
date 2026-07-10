@@ -10,6 +10,14 @@ interface AutoTrackCalc {
   perBatch: number;
   traysNeeded: number;
   batchesNeeded: number;
+  /**
+   * True once the press has made everything the run needs — cased product
+   * plus live freezer contents ≥ casesNeeded. Count-based (real packaging
+   * count + freezer model), NOT an elapsed-time estimate: this is what stops
+   * the dough counters, because from this moment the dough crew is working on
+   * the NEXT run's dough.
+   */
+  pressDone: boolean;
 }
 
 /**
@@ -329,17 +337,12 @@ export function useAutoTrack({
 
     // Trays / batches: incremental decrement, each at its own cadence.
     // Works after page reloads and naturally handles mid-run replenishments.
-    // Stop once all the dough the run needs has been fed onto the line — dough
-    // enters at the front (no tunnel offset), so feeding finishes when the
-    // front-of-line case count reaches casesNeeded. Without this, auto-track
-    // keeps depleting (and re-suggesting) dough after the run already has
-    // everything it needs.
-    const elapsedMin = elapsedBatchSec / 60;
-    const doughFeedComplete =
-      v.casesNeeded > 0 &&
-      calc.ppm > 0 &&
-      v.pizzasPerCase > 0 &&
-      Math.floor((elapsedMin * calc.ppm) / v.pizzasPerCase) >= v.casesNeeded;
+    // Stop once the press has made everything the run needs — COUNT-based
+    // (cased product + live freezer contents ≥ casesNeeded, via calc.pressDone),
+    // not an elapsed-time estimate. When the line runs slower or faster than
+    // the configured speed, the real counts are what decide when dough stops
+    // moving for this run; from that moment the dough crew is on the NEXT run.
+    const doughFeedComplete = calc.pressDone;
 
     // ── Trays: count up while dough is still being pressed, down as the line
     // eats it. Production (+1 tray per tray-period, offset half a period from

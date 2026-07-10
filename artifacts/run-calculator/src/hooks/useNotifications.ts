@@ -11,6 +11,12 @@ interface NotifCalc {
   ppm: number;
   /** Cases already cased on the floor (skids done + current skid). */
   casesCompleted: number;
+  /**
+   * Cases still to be PRESSED — cased product plus live freezer contents count
+   * as done. This is the warehouse staging basis: frontline stages at 2 skids
+   * left, packaging at 1 skid left.
+   */
+  pressCasesLeft: number;
 }
 
 interface NotifValues {
@@ -81,9 +87,11 @@ export function useNotifications({
   nextRunLabels,
 }: NotifParams): NotifResult {
   const notifiedRunRef = useRef<string | null>(null);
-  // Per-run latch (Set, not a single id): switching to run B and back to a
-  // nearly-done run A must NOT re-fire A's switchover alert.
-  const switchoverNotifRef = useRef<Set<string>>(new Set());
+  // Per-run latches (Sets, not single ids): switching to run B and back to a
+  // nearly-done run A must NOT re-fire A's staging alerts. Frontline (2 skids
+  // left at the press) and packaging (1 skid left) latch independently.
+  const frontlineNotifRef = useRef<Set<string>>(new Set());
+  const packagingNotifRef = useRef<Set<string>>(new Set());
   const batchNotifRef = useRef<string>("");
   const runCompleteNotifRef = useRef<string>("");
   // Tracks the run id that has ever shown positive remaining time. A run started
@@ -132,13 +140,15 @@ export function useNotifications({
     }
   }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec, v.freezerTime]);
 
-  // ── Warehouse switchover alert (2 skids before switchover) ────────────────
-  // Warehouse needs the NEXT run staged 2 skids before the line switches over.
-  // "2 skids" counts everything still to come off the line — cases the press
-  // hasn't made yet PLUS product already in the freezer tunnel / on the line
-  // (casesNeeded − casesCompleted). Runs smaller than 2 skids total trip the
-  // threshold immediately at start, and the message tells warehouse to stage
-  // 2+ runs ahead instead. Fires once per run.
+  // ── Warehouse staging alerts (press basis: packing + freezer count done) ──
+  // Warehouse stages the NEXT run in two steps ahead of the switchover:
+  //  • FRONTLINE at 2 skids left at the press
+  //  • PACKAGING at 1 skid left at the press
+  // "Left at the press" = casesNeeded − cased − live freezer contents
+  // (pressCasesLeft) — the freezer's product is already made, so it counts as
+  // done. Runs smaller than 2 skids total trip the frontline threshold
+  // immediately at start, and the message tells warehouse to stage 2+ runs
+  // ahead instead. Each stage fires once per run.
   useEffect(() => {
     if (runStatus !== "running" || !currentRun?.startedAt || currentRun?.endedAt) return;
     // No valid timing basis → the remaining count is not meaningful yet.
@@ -146,31 +156,43 @@ export function useNotifications({
     const cps = Number(v.casesPerSkid) || 0;
     const needed = Number(v.casesNeeded) || 0;
     if (cps <= 0 || needed <= 0) return;
-    // Everything still to come off the line, INCLUDING freezer/on-line product.
-    const casesToCome = Math.max(0, needed - calc.casesCompleted);
-    if (casesToCome <= 0 || casesToCome > 2 * cps) return;
-    const runId = currentRun.id;
-    if (switchoverNotifRef.current.has(runId)) return;
+    const pressLeft = calc.pressCasesLeft;
+    if (pressLeft <= 0) return;
     if (!("Notification" in window)) return;
-    const fire = () => {
-      switchoverNotifRef.current.add(runId);
+    const runId = currentRun.id;
+    const shortRun = needed < 2 * cps;
+    const nextTxt = nextRunLabels.length > 0
+      ? ` Next up: ${nextRunLabels.slice(0, shortRun ? 3 : 1).join(", ")}.`
+      : "";
+    const fireStage = (stage: "frontline" | "packaging") => {
+      const latch = stage === "frontline" ? frontlineNotifRef : packagingNotifRef;
+      latch.current.add(runId);
       navigator.vibrate?.([200, 100, 200]);
-      const shortRun = needed < 2 * cps;
-      const nextTxt = nextRunLabels.length > 0
-        ? ` Next up: ${nextRunLabels.slice(0, shortRun ? 3 : 1).join(", ")}.`
-        : "";
-      showAppNotification("🚚 Warehouse: switchover coming", {
-        body: shortRun
-          ? `${runLabel(currentRun)} is under 2 skids total — stage the next 2+ runs now.${nextTxt}`
-          : `${runLabel(currentRun)} — about 2 skids left (incl. freezer). Stage the next run.${nextTxt}`,
-        icon: "/icons/icon-192.png",
-        tag: `switchover-${runId}`,
-      });
+      if (stage === "frontline") {
+        showAppNotification("🚚 Warehouse: stage FRONTLINE for next run", {
+          body: shortRun
+            ? `${runLabel(currentRun)} is under 2 skids total — stage the next 2+ runs now.${nextTxt}`
+            : `${runLabel(currentRun)} — 2 skids left at the press (freezer counted done). Stage frontline.${nextTxt}`,
+          icon: "/icons/icon-192.png",
+          tag: `switchover-frontline-${runId}`,
+        });
+      } else {
+        showAppNotification("🚚 Warehouse: stage PACKAGING for next run", {
+          body: `${runLabel(currentRun)} — 1 skid left at the press (freezer counted done). Stage packaging.${nextTxt}`,
+          icon: "/icons/icon-192.png",
+          tag: `switchover-packaging-${runId}`,
+        });
+      }
     };
+    const dueStages: Array<"frontline" | "packaging"> = [];
+    if (pressLeft <= 2 * cps && !frontlineNotifRef.current.has(runId)) dueStages.push("frontline");
+    if (pressLeft <= cps && !packagingNotifRef.current.has(runId)) dueStages.push("packaging");
+    if (dueStages.length === 0) return;
+    const fireAll = () => dueStages.forEach(fireStage);
     if (Notification.permission === "granted") {
-      fire();
+      fireAll();
     } else if (Notification.permission === "default") {
-      Notification.requestPermission().then((p) => { if (p === "granted") fire(); });
+      Notification.requestPermission().then((p) => { if (p === "granted") fireAll(); });
     }
   }, [
     runStatus,
@@ -178,7 +200,7 @@ export function useNotifications({
     currentRun?.startedAt,
     currentRun?.endedAt,
     calc.ppm,
-    calc.casesCompleted,
+    calc.pressCasesLeft,
     v.casesNeeded,
     v.casesPerSkid,
     nextRunLabels,
