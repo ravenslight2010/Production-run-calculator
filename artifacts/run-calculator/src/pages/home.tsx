@@ -533,7 +533,11 @@ function NeedsList({ rows }: { rows: NeedRow[] }) {
   );
 }
 
-function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
+// opts.warehouse tailors the rows for warehouse staff: sauce rows are omitted
+// (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
+// applicator rows are labeled with the specific blend name so staff know
+// exactly WHICH cheese/mix to pull.
+function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean }): NeedRow[] {
   const map = new Map<string, { num: number; unit: string; order: number }>();
   let order = 0;
   const add = (label: string, num: number, unit: string) => {
@@ -555,22 +559,31 @@ function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
     }
     // Named bought/ready-made sauce (name, no mixed recipe rows) is pulled
     // as-is by name in LBS — mirrors computeRunLines in @workspace/inventory-math.
-    const sauceName = (vals.frontlineRecipeName ?? "").trim();
-    const hasSauceRecipe = (vals.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
-      if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
-    } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+    // Warehouse view skips sauce entirely: the sauce maker owns pulling sauce.
+    if (!opts?.warehouse) {
+      const sauceName = (vals.frontlineRecipeName ?? "").trim();
+      const hasSauceRecipe = (vals.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+      if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
+        if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
+      } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+    }
     const apps = [
-      { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
-      { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
-      { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
-      { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
+      { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches, name: vals.app1CheeseRecipeName },
+      { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches, name: vals.app2CheeseRecipeName },
+      { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches, name: vals.app3CheeseRecipeName },
+      { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches, name: vals.app4CheeseRecipeName },
     ];
     for (const a of apps) {
       if (!a.type) continue;
-      const isMix = a.type.trim().toLowerCase().includes("mix");
-      if (isMix && a.lbs > 0) add(a.type, a.lbs, "lbs");
-      else if (!isMix && a.batches > 0) add(a.type, a.batches, "batches");
+      const lower = a.type.trim().toLowerCase();
+      const isMix = lower.includes("mix");
+      const blendName = (a.name ?? "").trim();
+      const label =
+        opts?.warehouse && blendName && (isMix || lower.includes("cheese"))
+          ? `${a.type} — ${blendName}`
+          : a.type;
+      if (isMix && a.lbs > 0) add(label, a.lbs, "lbs");
+      else if (!isMix && a.batches > 0) add(label, a.batches, "batches");
     }
     if (s.pep1Type && s.pep1Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
@@ -9259,7 +9272,7 @@ export default function Home() {
   if (screenMode === "warehouse") {
     const activeRuns = dayState.runs.filter(r => !r.endedAt);
     const valsList = activeRuns.map(r => loadRunValues(r.id));
-    const agg = aggregateNeedRows(valsList);
+    const agg = aggregateNeedRows(valsList, { warehouse: true });
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
         {/* Top bar */}
@@ -13390,7 +13403,7 @@ export default function Home() {
                 {(() => {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);
                   const valsList = activeRuns.map(r => loadRunValues(r.id));
-                  const agg = aggregateNeedRows(valsList);
+                  const agg = aggregateNeedRows(valsList, { warehouse: true });
                   const pkg = aggregatePackagingNeeds(valsList);
                   return (
                     <>
@@ -13437,7 +13450,7 @@ export default function Home() {
                         {activeRuns.map((r) => {
                           const vals = loadRunValues(r.id);
                           const s = computeSummaryStats(vals);
-                          const rows = [...aggregateNeedRows([vals]), ...aggregatePackagingNeeds([vals])];
+                          const rows = [...aggregateNeedRows([vals], { warehouse: true }), ...aggregatePackagingNeeds([vals])];
                           const estSec = s.estimatedTimeSec;
                           const staged = dayState.stagedItems ?? {};
                           const stagedCount = rows.filter(row => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;

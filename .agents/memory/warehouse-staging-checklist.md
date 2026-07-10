@@ -28,3 +28,17 @@ Warehouse staff tick off per-run need rows (ingredients + packaging) in the
 **Why the substitutions pattern:** it's the established today-only synced overlay
 in this codebase; reusing it (whole-map replace, same reset points) keeps the new
 field from being clobbered by additive list unions and keeps web+mobile parity.
+
+## Warehouse-mode need rows (2026-07-10)
+
+Warehouse surfaces (cast screen, warehouse-tab roll-up, per-run checklist) pass
+`{ warehouse: true }` to the need-row builder: sauce rows are OMITTED (pulling
+sauce is the sauce maker's job, not warehouse) and Cheese/Mix applicator rows
+are labeled `Type — BlendName` so staff know WHICH cheese/mix to pull.
+**Why:** user decision — warehouse must not stage sauce, and a bare "Cheese"
+row is useless to them.
+**How to apply:** any NEW warehouse-facing consumer of the need rows must pass
+the warehouse flag; the freezer-pull scheduled path deliberately stays on
+default labels (its labels feed manager-tagged ingredient matching — renaming
+breaks existing tags). Label changes reset that day's staged checkmarks for the
+renamed rows (keys embed the label) — accepted, day-state only.
