@@ -376,6 +376,7 @@ import {
   ClipboardCheck,
   Users,
   ArrowRightLeft,
+  Truck,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
 import * as XLSX from "xlsx";
@@ -8647,6 +8648,19 @@ export default function Home() {
     return null;
   }, [currentRun?.brand, currentRun?.flavor]);
 
+  // Upcoming (not yet started) runs AFTER the current run in day order — the
+  // warehouse switchover alert names what to stage next. Pending runs sitting
+  // BEFORE the current index are not "next up", so they must not be named.
+  const upcomingRunLabels = useMemo(
+    () =>
+      dayState.runs
+        .slice(dayState.currentIndex + 1)
+        .filter((r) => !r.startedAt && !r.endedAt)
+        .slice(0, 3)
+        .map((r) => runLabel(r)),
+    [dayState.runs, dayState.currentIndex],
+  );
+
   const { showBatchDue, setShowBatchDue } = useNotifications({
     runStatus,
     nowTime,
@@ -8654,6 +8668,7 @@ export default function Home() {
     calc,
     v: ve,
     isCrust: doughSubTab === "crusts",
+    nextRunLabels: upcomingRunLabels,
   });
 
   // ── Auto stall detection (advisory) ───────────────────────────────────────
@@ -11786,6 +11801,11 @@ export default function Home() {
                                 </div>
                                 <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
                                   <div className="text-sm font-medium text-foreground tabular-nums">at {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</div>
+                                  {Number(ve.freezerTime) > 0 && (
+                                    <div className="text-xs font-semibold text-sky-400 tabular-nums" data-testid="text-line-clear-time">
+                                      Line clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)} (incl. freezer)
+                                    </div>
+                                  )}
                                   {showDrift && (
                                     <div className={`text-xs font-bold border px-1.5 py-0.5 rounded tabular-nums ${
                                       ahead
@@ -11943,6 +11963,40 @@ export default function Home() {
                             />
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Warehouse switchover staging — 2 skids before switchover,
+                    counting everything still to come off the line INCLUDING
+                    product in the freezer tunnel. Short runs (< 2 skids total)
+                    show it from the start and tell warehouse to stage 2+ runs
+                    ahead. Mirrors the notification in useNotifications. */}
+                {!currentRun?.endedAt && runStatus === "running" && (() => {
+                  const cps = Number(v.casesPerSkid) || 0;
+                  const needed = Number(v.casesNeeded) || 0;
+                  if (calc.ppm <= 0 || cps <= 0 || needed <= 0) return null;
+                  const casesToCome = Math.max(0, needed - calc.casesCompleted);
+                  if (casesToCome <= 0 || casesToCome > 2 * cps) return null;
+                  const shortRun = needed < 2 * cps;
+                  const skidsLeft = casesToCome / cps;
+                  const names = upcomingRunLabels.slice(0, shortRun ? 3 : 1);
+                  const freezerMin = Number(ve.freezerTime) || 0;
+                  return (
+                    <div className="mb-4 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-warehouse-switchover">
+                      <Truck className="w-4 h-4 shrink-0 mt-0.5 text-violet-400" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">
+                          {shortRun
+                            ? `Warehouse: short run (under 2 skids) — stage the next 2+ runs now`
+                            : `Warehouse: ${fmtNum(skidsLeft, 1)} skid${skidsLeft === 1 ? "" : "s"} to switchover — stage the next run`}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {fmtComma(casesToCome)} cases still to come off the line{freezerMin > 0 ? " (incl. freezer)" : ""}
+                          {calc.adjustedTimeSec > 0 ? ` — line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
+                          {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
+                        </p>
                       </div>
                     </div>
                   );

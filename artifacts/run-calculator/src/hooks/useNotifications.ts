@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type FormValues, type RunMeta } from "../types";
-import { runLabel } from "../utils";
+import { fmtClock, runLabel } from "../utils";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -9,10 +9,14 @@ interface NotifCalc {
   timePerBatchSec: number;
   /** Pizzas-per-minute line speed. <= 0 means there is no valid timing basis. */
   ppm: number;
+  /** Cases already cased on the floor (skids done + current skid). */
+  casesCompleted: number;
 }
 
 interface NotifValues {
   freezerTime: FormValues["freezerTime"];
+  casesNeeded: FormValues["casesNeeded"];
+  casesPerSkid: FormValues["casesPerSkid"];
 }
 
 interface NotifParams {
@@ -23,6 +27,8 @@ interface NotifParams {
   v: NotifValues;
   /** Crust runs open pre-made cases — no dough is mixed, so suppress batch alerts. */
   isCrust: boolean;
+  /** Labels of upcoming (not yet started) runs, in order — for the warehouse switchover alert. */
+  nextRunLabels: string[];
 }
 
 interface NotifResult {
@@ -72,8 +78,12 @@ export function useNotifications({
   calc,
   v,
   isCrust,
+  nextRunLabels,
 }: NotifParams): NotifResult {
   const notifiedRunRef = useRef<string | null>(null);
+  // Per-run latch (Set, not a single id): switching to run B and back to a
+  // nearly-done run A must NOT re-fire A's switchover alert.
+  const switchoverNotifRef = useRef<Set<string>>(new Set());
   const batchNotifRef = useRef<string>("");
   const runCompleteNotifRef = useRef<string>("");
   // Tracks the run id that has ever shown positive remaining time. A run started
@@ -100,8 +110,15 @@ export function useNotifications({
       if ("Notification" in window) {
         const fire = () => {
           notifiedRunRef.current = runId;
+          // The press finishes in ~15 min, but product keeps exiting the
+          // freezer tunnel for the full freezer time after that — tell the
+          // crew when the line is actually clear, not just when the press stops.
+          const freezerMin = Number(v.freezerTime) || 0;
+          const freezerNote = freezerMin > 0
+            ? ` Freezer keeps emptying until ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}.`
+            : "";
           showAppNotification("⏰ 15 minutes left", {
-            body: `${runLabel(currentRun)} — wrap up and prepare for end of run.`,
+            body: `${runLabel(currentRun)} — wrap up and prepare for end of run.${freezerNote}`,
             icon: "/icons/icon-192.png",
             tag: `run-end-${runId}`,
           });
@@ -113,7 +130,59 @@ export function useNotifications({
         }
       }
     }
-  }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec]);
+  }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec, v.freezerTime]);
+
+  // ── Warehouse switchover alert (2 skids before switchover) ────────────────
+  // Warehouse needs the NEXT run staged 2 skids before the line switches over.
+  // "2 skids" counts everything still to come off the line — cases the press
+  // hasn't made yet PLUS product already in the freezer tunnel / on the line
+  // (casesNeeded − casesCompleted). Runs smaller than 2 skids total trip the
+  // threshold immediately at start, and the message tells warehouse to stage
+  // 2+ runs ahead instead. Fires once per run.
+  useEffect(() => {
+    if (runStatus !== "running" || !currentRun?.startedAt || currentRun?.endedAt) return;
+    // No valid timing basis → the remaining count is not meaningful yet.
+    if (calc.ppm <= 0) return;
+    const cps = Number(v.casesPerSkid) || 0;
+    const needed = Number(v.casesNeeded) || 0;
+    if (cps <= 0 || needed <= 0) return;
+    // Everything still to come off the line, INCLUDING freezer/on-line product.
+    const casesToCome = Math.max(0, needed - calc.casesCompleted);
+    if (casesToCome <= 0 || casesToCome > 2 * cps) return;
+    const runId = currentRun.id;
+    if (switchoverNotifRef.current.has(runId)) return;
+    if (!("Notification" in window)) return;
+    const fire = () => {
+      switchoverNotifRef.current.add(runId);
+      navigator.vibrate?.([200, 100, 200]);
+      const shortRun = needed < 2 * cps;
+      const nextTxt = nextRunLabels.length > 0
+        ? ` Next up: ${nextRunLabels.slice(0, shortRun ? 3 : 1).join(", ")}.`
+        : "";
+      showAppNotification("🚚 Warehouse: switchover coming", {
+        body: shortRun
+          ? `${runLabel(currentRun)} is under 2 skids total — stage the next 2+ runs now.${nextTxt}`
+          : `${runLabel(currentRun)} — about 2 skids left (incl. freezer). Stage the next run.${nextTxt}`,
+        icon: "/icons/icon-192.png",
+        tag: `switchover-${runId}`,
+      });
+    };
+    if (Notification.permission === "granted") {
+      fire();
+    } else if (Notification.permission === "default") {
+      Notification.requestPermission().then((p) => { if (p === "granted") fire(); });
+    }
+  }, [
+    runStatus,
+    currentRun?.id,
+    currentRun?.startedAt,
+    currentRun?.endedAt,
+    calc.ppm,
+    calc.casesCompleted,
+    v.casesNeeded,
+    v.casesPerSkid,
+    nextRunLabels,
+  ]);
 
   // ── Batch cycle alert ──────────────────────────────────────────────────────
   useEffect(() => {
