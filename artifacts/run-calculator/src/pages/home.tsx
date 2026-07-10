@@ -8947,16 +8947,8 @@ export default function Home() {
       if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0)
         items.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" });
     }
-    if (s.app3Type) {
-      const isMix = s.app3Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0)
-        items.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app3Lbs, 1) + " lbs total" });
-    }
-    if (s.app4Type) {
-      const isMix = s.app4Type.trim().toLowerCase().includes("mix");
-      if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
-        items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
-    }
+    // Pep applicators sit between App 2 and App 3, matching the physical line
+    // order (and the Run/Frontline tabs' card order).
     const pep1Label = v.pep1Combined === true ? "Pep 1 & 2" : "Pep 1";
     if (s.pep1Type) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
@@ -8977,6 +8969,16 @@ export default function Home() {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
       if ((isPepStd ? s.pep2LbsB : s.pep2BatchesB) > 0)
         items.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: isPepStd ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
+    }
+    if (s.app3Type) {
+      const isMix = s.app3Type.trim().toLowerCase().includes("mix");
+      if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0)
+        items.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app3Lbs, 1) + " lbs total" });
+    }
+    if (s.app4Type) {
+      const isMix = s.app4Type.trim().toLowerCase().includes("mix");
+      if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
+        items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
     }
     const cheeseRecipes: { label: string; rows: { ingredient: string; lbs: number }[] }[] = [];
     if ((v.app1CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 1 Cheese Recipe`, rows: v.app1CheeseRecipe.filter(r => r.ingredient && Number(r.lbs) > 0).map(r => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
@@ -13121,19 +13123,8 @@ export default function Home() {
                       testId="output-app2-batches"
                       highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
                     />
-                    <StatRow
-                      label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                      value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
-                      testId="output-app3-batches"
-                      highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
-                    />
-                    <StatRow
-                      label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                      value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
-                      testId="output-app4-batches"
-                      highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
-                    />
-                    <Separator className="my-3 opacity-30" />
+                    {/* Pep applicators sit between App 2 and App 3, matching
+                        the physical line order (and the Run tab's card order). */}
                     <StatRow
                       label={
                         v.pep1Type
@@ -13170,6 +13161,18 @@ export default function Home() {
                         )}
                       </>
                     )}
+                    <StatRow
+                      label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                      value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
+                      testId="output-app3-batches"
+                      highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
+                    />
+                    <StatRow
+                      label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                      value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
+                      testId="output-app4-batches"
+                      highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
+                    />
                   </CardContent>
                 </Card>
                 {[
