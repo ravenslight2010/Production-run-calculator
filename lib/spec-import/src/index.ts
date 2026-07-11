@@ -24,6 +24,15 @@ export type ParsedApplicator = {
    * row sum instead. Omitted when the sheet doesn't state a batch size.
    */
   batchLbs?: number;
+  /**
+   * Physical line station (1-4) this applicator belongs to, when the sheet
+   * makes it discernible. The pep/stick applicators sit BETWEEN stations 2 and
+   * 3 on the line, so a topping the sheet lists after the pep rows belongs on
+   * slot 3/4 even when it is only the 2nd cheese/topping applicator listed.
+   * Omitted when the sheet gives no position — the apply step then fills slots
+   * in listed order (see assignApplicatorSlots).
+   */
+  slot?: number;
 };
 export type ParsedPepperoni = {
   type: string;
@@ -1077,6 +1086,52 @@ export function resolveMixApplicatorSlots(
     return { ...a, type: "Mix" };
   });
   return { applicators: changed ? out : [...applicators], links };
+}
+
+/**
+ * Arrange a parse's applicators into their physical line stations (App 1-4).
+ * The pep/stick applicators physically sit BETWEEN stations 2 and 3, so a spec
+ * sheet that lists a topping after its pep rows means station 3/4 even when it
+ * is only the 2nd topping listed. The AI reports that positioning through each
+ * applicator's optional `slot` (1-4); this helper turns the list into a dense
+ * 4-length array indexed by station:
+ *
+ * - Applicators with a valid, unclaimed `slot` claim that station first
+ *   (first-come-wins on duplicates; the loser falls back to fill-in-order).
+ * - Remaining applicators fill the lowest free stations in listed order —
+ *   identical to the historical slice-into-order behavior when no slots exist.
+ * - Unfilled stations become `{ type: "", ozPerPizza: 0 }` holes, which every
+ *   downstream consumer already skips (empty type = empty slot).
+ * - Overflow beyond 4 stations is dropped, mirroring the old `.slice(0, 4)`.
+ *
+ * Pure — never mutates the input.
+ */
+export function assignApplicatorSlots(
+  applicators: ReadonlyArray<ParsedApplicator>,
+): ParsedApplicator[] {
+  const EMPTY: ParsedApplicator = { type: "", ozPerPizza: 0 };
+  const out: (ParsedApplicator | null)[] = [null, null, null, null];
+  const rest: ParsedApplicator[] = [];
+  for (const a of applicators) {
+    const slot = a.slot;
+    if (
+      typeof slot === "number" &&
+      Number.isInteger(slot) &&
+      slot >= 1 &&
+      slot <= 4 &&
+      out[slot - 1] == null
+    ) {
+      out[slot - 1] = a;
+    } else {
+      rest.push(a);
+    }
+  }
+  for (const a of rest) {
+    const free = out.findIndex((x) => x == null);
+    if (free === -1) break;
+    out[free] = a;
+  }
+  return out.map((a) => (a == null ? { ...EMPTY } : a));
 }
 
 /**
@@ -2684,10 +2739,19 @@ export function sanitizeParsedSpecImport(
         });
       }
       const appBatchLbs = num(ao.batchLbs);
+      // Physical line station (1-4) when the sheet makes it discernible —
+      // anything else (0, 5, 2.5, non-numeric) is dropped so a hallucinated
+      // slot can't scramble the fill-in-order fallback.
+      const rawSlot = num(ao.slot);
+      const appSlot =
+        rawSlot != null && Number.isInteger(rawSlot) && rawSlot >= 1 && rawSlot <= 4
+          ? rawSlot
+          : null;
       applicators.push({
         type,
         ozPerPizza: ozPerPizza ?? 0,
         ...(appBatchLbs != null && appBatchLbs > 0 ? { batchLbs: appBatchLbs } : {}),
+        ...(appSlot != null ? { slot: appSlot } : {}),
       });
     }
     const pepperonis: ParsedPepperoni[] = [];
@@ -3568,7 +3632,8 @@ function applicatorsEqual(
     return (
       ciTrim(x.type) === ciTrim(y.type) &&
       x.ozPerPizza === y.ozPerPizza &&
-      (x.batchLbs ?? null) === (y.batchLbs ?? null)
+      (x.batchLbs ?? null) === (y.batchLbs ?? null) &&
+      (x.slot ?? null) === (y.slot ?? null)
     );
   });
 }

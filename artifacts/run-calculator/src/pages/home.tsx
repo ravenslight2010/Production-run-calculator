@@ -583,14 +583,18 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
         if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
       } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
     }
-    const apps = [
+    // Physical line order: App 1, App 2, then the pep applicators (they sit
+    // between stations 2 and 3 on the line), then App 3, App 4.
+    const appsFront = [
       { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches, name: vals.app1CheeseRecipeName },
       { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches, name: vals.app2CheeseRecipeName },
+    ];
+    const appsBack = [
       { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches, name: vals.app3CheeseRecipeName },
       { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches, name: vals.app4CheeseRecipeName },
     ];
-    for (const a of apps) {
-      if (!a.type) continue;
+    const addApp = (a: { type: string; lbs: number; batches: number; name?: string }) => {
+      if (!a.type) return;
       const lower = a.type.trim().toLowerCase();
       const isMix = lower.includes("mix");
       const blendName = (a.name ?? "").trim();
@@ -600,7 +604,8 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
           : a.type;
       if (isMix && a.lbs > 0) add(label, a.lbs, "lbs");
       else if (!isMix && a.batches > 0) add(label, a.batches, "batches");
-    }
+    };
+    for (const a of appsFront) addApp(a);
     if (s.pep1Type && s.pep1Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
       if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs");
@@ -621,6 +626,7 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
       if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs");
       else add(s.pep2TypeB, s.pep2BatchesB, "batches");
     }
+    for (const a of appsBack) addApp(a);
   }
   return [...map.entries()]
     .sort((a, b) => a[1].order - b[1].order)
@@ -15844,13 +15850,14 @@ export default function Home() {
                     }
                     if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
                     if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
-                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
-                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
+                    // Pep applicators sit between App 2 and App 3 (physical line order).
                     const pepCombinedLbl = vals.pep1Combined === true ? "1 & 2" : "1";
                     if (s.pep1Type) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
                     if (s.pep1TypeB) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep1TypeB) ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
                     if (vals.pep1Combined !== true && s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
                     if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
+                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
+                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
                     const canEdit = !readOnly && (isSupervisor || isCurrent);
                     const caseDelta = run.actualCases != null ? run.actualCases - s.totalCases : null;
 

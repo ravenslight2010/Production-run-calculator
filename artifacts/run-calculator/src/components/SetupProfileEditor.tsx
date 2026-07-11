@@ -806,7 +806,10 @@ export default function SetupProfileEditor({
                         />
                       )}
 
-                      {([1, 2, 3, 4] as ApplicatorNum[]).map(renderApplicator)}
+                      {/* Physical line order: App 1, App 2, then the pep
+                          applicators (they sit between stations 2 and 3 on the
+                          line), then App 3, App 4. */}
+                      {([1, 2] as ApplicatorNum[]).map(renderApplicator)}
 
                       <TypeDropdown
                         label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
@@ -914,6 +917,8 @@ export default function SetupProfileEditor({
                           )}
                         </>
                       )}
+
+                      {([3, 4] as ApplicatorNum[]).map(renderApplicator)}
                     </CardContent>
                   )}
                 </Card>

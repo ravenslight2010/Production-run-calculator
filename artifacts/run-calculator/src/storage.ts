@@ -80,7 +80,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -2479,8 +2479,12 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     // (the run form's pick-only Cheese card gates on that exactly); the blend
     // name is recorded as the slot's cheese recipe name so it hydrates from the
     // server pool, and the recipe-tie loop below writes its rows.
+    // Arrange applicators into their physical line stations first (the AI may
+    // report an explicit slot when the sheet's layout shows a topping belongs
+    // AFTER the pep applicators, i.e. on App 3/4); holes come back as
+    // empty-type entries that the loop below skips.
     const { applicators: cheeseResolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
-      p.applicators.slice(0, 4),
+      assignApplicatorSlots(p.applicators),
       cheeseCandidateNames,
     );
     // Mix slots re-type to the literal "Mix" (the run form's Mix card + Mixes

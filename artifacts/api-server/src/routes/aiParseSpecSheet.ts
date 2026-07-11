@@ -207,6 +207,13 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "ingredients are only such sticks. THE ONE EXCEPTION IS DICED PEPPERONI: " +
     "diced pepperoni is a topping and stays part of a CHEESE/topping recipe, NOT " +
     "a profile pepperoni. " +
+    "APPLICATOR STATIONS: the physical line runs Applicator 1, Applicator 2, then " +
+    "the pep/stick applicators, then Applicator 3, Applicator 4 — the pep " +
+    "applicators sit BETWEEN stations 2 and 3. When the sheet's layout or labels " +
+    "make an applicator's station discernible (an explicit station/applicator " +
+    "number, or a topping column/row that clearly comes AFTER the pepperoni/stick " +
+    "entries — meaning station 3 or 4), set that applicator's `slot` (1-4). Omit " +
+    "`slot` when the position is not discernible — never guess. " +
     "EMBEDDED BLENDS: some spec grids pack a full blend recipe into ONE applicator " +
     "cell — a mix name followed by number+ingredient pairs, e.g. \"Aldo's Cheese " +
     "Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan\" or 'White " +
@@ -302,7 +309,7 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
       '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
       '"sauceOzPerPizza":number,"sauceName":string,"allergen":string,' +
       '"pizzasPerCase":number,"sauceBarrelLbs":number,' +
-      '"applicators":[{"type":string,"ozPerPizza":number,"batchLbs":number}],' +
+      '"applicators":[{"type":string,"ozPerPizza":number,"batchLbs":number,"slot":number}],' +
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number,"batchLbs":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
       '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +
