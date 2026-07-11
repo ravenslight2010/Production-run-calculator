@@ -2522,8 +2522,12 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     });
     // A spec sheet with 2+ distinct pep types means the two applicators run
     // different peps, so they can't be combined; a single pep defaults to
-    // combined (checkbox checked).
-    (values as Record<string, unknown>).pep1Combined = namedPeps.length >= 2 ? false : true;
+    // combined (checkbox checked). Only derived when this import actually
+    // carries pep slots — a re-import whose peps were pruned as unchanged (see
+    // pruneSpecImportAgainstSnapshot) must keep the user's current setting.
+    if (namedPeps.length > 0) {
+      (values as Record<string, unknown>).pep1Combined = namedPeps.length >= 2 ? false : true;
+    }
     saveProfile(brand, flavor, values);
   }
 

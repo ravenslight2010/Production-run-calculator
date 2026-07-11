@@ -33,6 +33,7 @@ import {
   gridsToPromptText,
   mergeParsedSpecImports,
   partitionTombstonedParse,
+  pruneSpecImportAgainstSnapshot,
   recipeTargets,
   resolveRetriedParsePass,
   shouldRetryParsePass,
@@ -69,6 +70,7 @@ import {
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import {
   saveSpecSheet,
+  fetchSavedSpecSheets,
   buildSpecSheetLabel,
   deriveSourceKey,
   loadCurrentReconcileRecipes,
@@ -773,7 +775,30 @@ export async function commitSpecImport(
     // Best-effort — apply with imported names if the pool is unavailable.
   }
 
-  const touchedProfiles = applySpecImport(prepared.parsed);
+  // Re-import prune: compare against the snapshot saved by the PREVIOUS import
+  // of this same file (matched by sourceKey) and strip everything the spec
+  // didn't change, so manual edits made since the last import survive a
+  // re-import. Only what actually changed in the workbook is applied. The
+  // snapshot saved below stays the FULL parse (never the pruned one) so the
+  // next re-import compares against the complete previous state. Best-effort:
+  // if snapshots can't be fetched, apply the full parse (previous behavior).
+  let applyParsed = prepared.parsed;
+  try {
+    const sourceKey = deriveSourceKey(prepared.sourceNames ?? []);
+    if (sourceKey) {
+      const sheets = await fetchSavedSpecSheets();
+      const previous = sheets
+        .filter((s) => (s.sourceKey ?? "").trim() === sourceKey)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)[0];
+      if (previous?.data) {
+        applyParsed = pruneSpecImportAgainstSnapshot(prepared.parsed, previous.data).parsed;
+      }
+    }
+  } catch {
+    // Best-effort — a failed snapshot fetch must never block the import.
+  }
+
+  const touchedProfiles = applySpecImport(applyParsed);
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
   // appear on the Mixes screen alongside premix-imported ones. Manager-gated on
@@ -787,7 +812,7 @@ export async function commitSpecImport(
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
-    const candidates = collectSpecImportMixes(prepared.parsed, userMixNamesLower)
+    const candidates = collectSpecImportMixes(applyParsed, userMixNamesLower)
       .map((d) => specMixDraftToMix(d))
       .filter((m): m is Mix => m != null);
     if (candidates.length) {
@@ -812,7 +837,7 @@ export async function commitSpecImport(
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
-    const drafts = collectSpecImportCheeseRecipes(prepared.parsed, userMixNamesLower);
+    const drafts = collectSpecImportCheeseRecipes(applyParsed, userMixNamesLower);
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
       .filter((r): r is CheeseRecipe => r != null);
@@ -830,9 +855,11 @@ export async function commitSpecImport(
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
   // kept) so it can later be cross-referenced against the current recipe library
-  // (see /ai/spec-reconcile). Best-effort: the import already applied locally, so
-  // a failed snapshot must never surface as an import error.
-  if ((prepared.parsed.recipes?.length ?? 0) > 0) {
+  // (see /ai/spec-reconcile) and diffed by the next re-import of the same file
+  // (see the prune above). Profile-only sheets snapshot too so their re-imports
+  // can also skip unchanged profiles. Best-effort: the import already applied
+  // locally, so a failed snapshot must never surface as an import error.
+  if ((prepared.parsed.recipes?.length ?? 0) > 0 || (prepared.parsed.profiles?.length ?? 0) > 0) {
     try {
       const names = prepared.sourceNames ?? [];
       await saveSpecSheet(

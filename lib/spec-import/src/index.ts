@@ -3458,3 +3458,148 @@ export function shouldRetryParsePass(ai: ParsePassLike, workbookText: string): b
 export function resolveRetriedParsePass<T extends ParsePassLike>(original: T, retry: T): T {
   return isFailedParsePass(retry) ? original : retry;
 }
+
+// ── Re-import prune: keep manual edits when the spec didn't change ─────────────
+
+const ciTrim = (s: string | undefined | null): string => (s ?? "").trim().toLowerCase();
+
+function rowsEqual(a: ReadonlyArray<RecipeRow>, b: ReadonlyArray<RecipeRow>): boolean {
+  if (a.length !== b.length) return false;
+  const key = (r: RecipeRow) => `${ciTrim(r.ingredient)}\u0000${r.lbs}`;
+  const counts = new Map<string, number>();
+  for (const r of a) counts.set(key(r), (counts.get(key(r)) ?? 0) + 1);
+  for (const r of b) {
+    const k = key(r);
+    const n = counts.get(k);
+    if (!n) return false;
+    counts.set(k, n - 1);
+  }
+  return true;
+}
+
+function applicatorsEqual(
+  a: ReadonlyArray<ParsedApplicator>,
+  b: ReadonlyArray<ParsedApplicator>,
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return (
+      ciTrim(x.type) === ciTrim(y.type) &&
+      x.ozPerPizza === y.ozPerPizza &&
+      (x.batchLbs ?? null) === (y.batchLbs ?? null)
+    );
+  });
+}
+
+function pepperonisEqual(
+  a: ReadonlyArray<ParsedPepperoni>,
+  b: ReadonlyArray<ParsedPepperoni>,
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return (
+      ciTrim(x.type) === ciTrim(y.type) &&
+      x.sticks === y.sticks &&
+      x.ozPerPizza === y.ozPerPizza &&
+      (x.batchLbs ?? null) === (y.batchLbs ?? null)
+    );
+  });
+}
+
+export type SpecImportPruneResult = {
+  parsed: ParsedSpecImport;
+  /** Brand+flavor profiles dropped entirely because the spec didn't change them. */
+  unchangedProfiles: number;
+  /** Recipes flipped to reference-only because the spec didn't change them. */
+  unchangedRecipes: number;
+};
+
+/**
+ * Prune a parsed spec import against the SNAPSHOT of the previous import of the
+ * same file, so a re-import only overwrites what the spec actually changed and
+ * the user's manual edits to everything else survive.
+ *
+ * - Profile scalar fields (die type, allergen, sauce oz/pizza, case pack,
+ *   barrel size, sauce name) are dropped individually when identical to the
+ *   previous snapshot — applySpecImport's presence guards then skip them,
+ *   preserving whatever the user set since.
+ * - `applicators` / `pepperonis` are compared ATOMICALLY (all slots identical →
+ *   emptied): slots interact (cheese/mix slot resolution, pep1Combined
+ *   derivation), so partial slot pruning would corrupt the derived state.
+ * - A profile with nothing left to write is dropped entirely (it also no longer
+ *   clears delete/merge tombstones, so a profile the user removed since the
+ *   last import is NOT resurrected by an unchanged re-import).
+ * - A recipe whose rows (order-insensitive) and dough numbers are identical to
+ *   the snapshot is flipped to `referenceOnly`: the library copy (possibly
+ *   user-edited since) is left untouched and profile ties hydrate from it.
+ *
+ * Matching is loose on names (specImportNameMatchKey for recipes, ci-trim for
+ * brand/flavor) because AI parses of the same workbook are not byte-stable.
+ * Both sides must be POST-canonicalization parses (the snapshot is saved after
+ * the same transforms). Pure; never mutates its inputs.
+ */
+export function pruneSpecImportAgainstSnapshot(
+  parsed: ParsedSpecImport,
+  previous: ParsedSpecImport,
+): SpecImportPruneResult {
+  const prevProfiles = new Map<string, ParsedProfile>();
+  for (const p of previous.profiles ?? []) {
+    prevProfiles.set(`${ciTrim(p.brand)}\u0000${ciTrim(p.flavor)}`, p);
+  }
+  const prevRecipes = new Map<string, ParsedRecipe>();
+  for (const r of previous.recipes ?? []) {
+    prevRecipes.set(`${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}`, r);
+  }
+
+  let unchangedProfiles = 0;
+  let unchangedRecipes = 0;
+
+  const profiles: ParsedProfile[] = [];
+  for (const p of parsed.profiles ?? []) {
+    const prev = prevProfiles.get(`${ciTrim(p.brand)}\u0000${ciTrim(p.flavor)}`);
+    if (!prev) {
+      profiles.push(p);
+      continue;
+    }
+    const out: ParsedProfile = { ...p };
+    if (out.dieType !== undefined && ciTrim(out.dieType) === ciTrim(prev.dieType)) delete out.dieType;
+    if (out.allergen !== undefined && ciTrim(out.allergen) === ciTrim(prev.allergen)) delete out.allergen;
+    if (out.sauceName !== undefined && ciTrim(out.sauceName) === ciTrim(prev.sauceName)) delete out.sauceName;
+    if (out.sauceOzPerPizza !== undefined && out.sauceOzPerPizza === prev.sauceOzPerPizza) delete out.sauceOzPerPizza;
+    if (out.pizzasPerCase !== undefined && out.pizzasPerCase === prev.pizzasPerCase) delete out.pizzasPerCase;
+    if (out.sauceBarrelLbs !== undefined && out.sauceBarrelLbs === prev.sauceBarrelLbs) delete out.sauceBarrelLbs;
+    if (applicatorsEqual(out.applicators ?? [], prev.applicators ?? [])) out.applicators = [];
+    if (pepperonisEqual(out.pepperonis ?? [], prev.pepperonis ?? [])) out.pepperonis = [];
+    const nothingLeft =
+      out.dieType === undefined &&
+      out.allergen === undefined &&
+      out.sauceName === undefined &&
+      out.sauceOzPerPizza === undefined &&
+      out.pizzasPerCase === undefined &&
+      out.sauceBarrelLbs === undefined &&
+      out.applicators.length === 0 &&
+      out.pepperonis.length === 0;
+    if (nothingLeft) {
+      unchangedProfiles += 1;
+      continue;
+    }
+    profiles.push(out);
+  }
+
+  const recipes: ParsedRecipe[] = (parsed.recipes ?? []).map((r) => {
+    if (r.referenceOnly) return r;
+    const prev = prevRecipes.get(`${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}`);
+    if (!prev || prev.referenceOnly) return r;
+    const unchanged =
+      rowsEqual(r.rows ?? [], prev.rows ?? []) &&
+      (r.doughballOz ?? null) === (prev.doughballOz ?? null) &&
+      (r.doughBatchYield ?? null) === (prev.doughBatchYield ?? null);
+    if (!unchanged) return r;
+    unchangedRecipes += 1;
+    return { ...r, referenceOnly: true };
+  });
+
+  return { parsed: { ...parsed, profiles, recipes }, unchangedProfiles, unchangedRecipes };
+}
