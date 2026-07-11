@@ -2,8 +2,7 @@
 - [Recipe print/share](recipe-print-share.md) — AbortError=shared (never clipboard-clobber), escaped print popup; web-only, mobile pending.
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
-- [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
-- [Die-type master heal](die-type-master-heal.md) — imports write profile dieType VALUE but not the picker's master list; both apps self-heal DIE_TYPES from profiles, honoring deletions.
+- [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; imports write the VALUE only, apps self-heal DIE_TYPES from profiles honoring deletions.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
 - [Ingredient near-dup merges](ingredient-dedupe.md) — INGREDIENT_RENAMES mirrored web+mobile; FR/Parmesan/mozz-fat carve-outs kept, "Diced" merges by default; bump dedupe marker when adding entries.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
@@ -46,9 +45,8 @@
 - [Onboarding flag](onboarding-seen-flag.md) — first-login "Get Started" overview gated by server-side per-user users.onboardingSeen; auto-open once via ref guard, reopen from header menu; web+mobile parity.
 - [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) — `<Comp<T>/>` typechecks but white-screens Vite dev build; drop the type arg, pin via prop casts.
 - [expo-secure-store web crash](expo-secure-store-web-crash.md) — SecureStore has no web impl; blanks Expo web build (Replit preview + UI tests); branch on Platform.OS, use localStorage on web.
-- [Fill-missing assistant](fill-missing-assistant.md) — source priority learned→profile→spec→default→AI; never auto-apply; record must carry subTab; web+mobile parity.
+- [Fill-missing assistant](fill-missing-assistant.md) + [shared lib](fill-missing-shared-lib.md) — source priority learned→profile→spec→default→AI; never auto-apply; record must carry subTab; pure logic in @workspace/fill-missing.
 - [Web test harness](web-test-harness.md) — web artifact owns shared web+mobile vitest; mobile module loaded via strip-imports→transpile→temp-mjs; serialize files + big timeouts or validation flakes under dev-workflow contention.
-- [Fill-missing shared lib](fill-missing-shared-lib.md) — fill-missing pure logic now in @workspace/fill-missing; each app keeps only platform glue + re-exports; test imports lib directly.
 - [inventory-math shared lib](inventory-math-shared-lib.md) — consumption/summary math now in @workspace/inventory-math; web+mobile keep thin wrappers; DEFAULT_PEP_TYPES injected; web maps targetDoughballWeight→doughballWeightOz.
 - [Run-calc parity test](run-calc-parity-test.md) — web computeCalc is inline (not importable); parity guard uses web computeSummaryStats vs mobile computeCalc on a coinciding basis; mobile loaded via strip-imports harness.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
@@ -56,8 +54,7 @@
 - [AI merge suggestions + learned aliases](merge-suggest.md) — AI dedupe assist + factory-wide learned merge memory; cost-guard must sanitize body (blank padding bypasses count cap); web+mobile parity.
 - [Spec-sheet Excel importer](spec-import.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool (not cheese); mobile profileExists must mirror web profileObjHasRealData; web+mobile parity.
 - [Spec/recipe/mix Excel export](spec-export.md) — mirror of the importers; TWO workbooks (AI spec vs deterministic premix, never combine); pure @workspace/spec-export; pep-B slots omitted; web-only (parity paused).
-- [Learned-memory pattern](learned-memory-pattern.md) — server-persisted "remember user corrections" for AI features (import/fill-missing/photo): requireAuth-only, ci-upsert, pure tested matcher w/ existence guard, best-effort, web+mobile.
-- [Learned import aliases](learned-import-aliases.md) — confirmed Excel-import brand/flavor matches persisted server-side, auto-applied next time; priority alias>AI>fuzzy; apply only if target still exists.
+- [Learned-memory pattern](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) — server-persisted user-correction memory (requireAuth-only, ci-upsert, existence guard, best-effort); import aliases auto-apply with priority alias>AI>fuzzy.
 - [AI reviewer + corrections memory](ai-reviewer-and-corrections.md) — 2nd-pass reviewer AI (ok/warn/reject, advisory/fail-safe, strip id at wire) + factory-wide name-corrections pool written on merge/match/spec confirms; web+mobile.
 - [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.
 - [Import run merge](import-run-merge.md) — mergeImportRuns collapses same brand+flavor runs on a day (sum cases, join notes) post-resolution; verbatim web+mobile mirror.
@@ -89,8 +86,7 @@
 - [Freezer phase indicators](freezer-phase-indicators.md) — Run-tab auto-hiding "Freezer filling/emptying" banners; time-based phase detection gated on ppm>0 & freezerTime>0; running-only; web+mobile parity.
 - [Notification view re-fire](notification-view-refire.md) — sticky-true "completion" alerts (e.g. freezer empty) need an "armed while pending" Set latch, not a last-id ref, or browsing completed runs re-fires them; web+mobile parity.
 - [Run-complete alert timing](run-complete-alert-timing.md) — "time's up" fires only when ppm>0 AND time counted down (runWasTimedRef latch); web adjustedTimeSec falls back to totalTimeSec so it needs an explicit ppm>0 guard to match mobile's null minutesRemaining.
-- [Auto-track remainder carry](autotrack-remainder-carry.md) — remainder carry, resets-before-write ordering, and per-counter rate-based cadence (fixed interval setting REJECTED); web+mobile parity.
-- [Auto-track zero seed](autotrack-zero-seed.md) — dough counters decrement-only; one-shot seed from Suggest formula when operator leaves them 0, else they sit at 0 all run; web+mobile parity.
+- [Auto-track remainder carry](autotrack-remainder-carry.md) + [zero seed](autotrack-zero-seed.md) — remainder carry + resets-before-write ordering (fixed interval REJECTED); dough counters decrement-only w/ one-shot Suggest seed when left 0.
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
 - [Saved spec sheets + AI reconcile](saved-spec-reconcile.md) — max-2 saved spec sheets cross-ref'd vs CURRENT recipes; deterministic diff in @workspace/spec-reconcile, AI only narrates, must be rate-limited.
@@ -154,6 +150,7 @@
 - [Freezer WIP completion](freezer-wip-completion.md) — casesInFreezer is additive display-only in planning math; resumeRun shifts startedAt so only an end-while-paused open pause is subtracted in the drain.
 - [Press-done model](press-done-model.md) — web live surfaces count cased+freezer as made: pressCasesLeft drives time-left, 2-stage switchover alerts, dough auto-stop, next-run pre-seed; planning math unchanged; carry-over removed.
 - [Today-schedule edits via live path](today-schedule-edit-live-path.md) — editing TODAY in the schedule editor must write through the live day-state path (stamps+tombstones), never the raw scheduled PUT, or sync/Start Run reverts the edits.
+- [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Learned ingredient batch weights](ingredient-batch-weights.md) — typed batch lbs follow the ingredient (server ci-store); learn only UI-visible fields, serialize saves, sauce branch checks rows lbs>0 not array truthiness.
 - [Mix applicator slots](mix-applicator-slots.md) — slot TYPE is generic "Mix"/"cheese", name lives in the CheeseRecipeName link; allowlist "mix"/"cheese" in stray filters; migration used targeted profile writes, not saveProfile.
 - [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; anything that rewrites a profile out-of-band (spec import) must reload the open form, and identity-change with no profile must reset to defaults.

@@ -6,6 +6,7 @@ import {
   markOnboardingSeenRequest,
   markTourCompletedRequest,
   setFloorModeRequest,
+  setNotificationPrefsRequest,
   setUnauthorizedHandler,
   signInRequest,
   signOutRequest,
@@ -165,6 +166,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [qc],
   );
 
+  // Merge per-alert notification toggles into the user's server-side
+  // preferences. Optimistic like Floor Mode: merge into the cached identity
+  // immediately so switches feel instant, then reconcile with the server's
+  // response; on failure re-probe /me so the UI falls back to the truth.
+  const setNotificationPrefs = useCallback(
+    async (prefs: Record<string, boolean>) => {
+      qc.setQueryData(["me"], (prev: StaffMember | null | undefined) =>
+        prev
+          ? { ...prev, notificationPrefs: { ...prev.notificationPrefs, ...prefs } }
+          : prev,
+      );
+      try {
+        const updated = await setNotificationPrefsRequest(prefs);
+        qc.setQueryData(["me"], updated);
+      } catch (err) {
+        void qc.invalidateQueries({ queryKey: ["me"] });
+        throw err;
+      }
+    },
+    [qc],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -181,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         markOnboardingSeen,
         markTourCompleted,
         setFloorModeEnabled,
+        setNotificationPrefs,
       }}
     >
       {children}

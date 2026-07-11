@@ -148,6 +148,7 @@ import type {
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
   SetFloorMode,
+  SetNotificationPrefs,
   SignUpCredentials,
   SpecImportAliasList,
   SpecReconcileInput,
@@ -9615,6 +9616,78 @@ export const useMarkTourCompleted = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getMarkTourCompletedMutationOptions(options));
+    }
+
+export const getSetNotificationPrefsUrl = () => {
+
+
+
+
+  return `/api/me/notification-prefs`
+}
+
+/**
+ * Merges the supplied alert-kind → enabled toggles into the current user's notification preferences so they follow them across devices. Unknown alert kinds are ignored; keys not supplied are left unchanged.
+ * @summary Set the current user's per-alert notification preferences
+ */
+export const setNotificationPrefs = async (setNotificationPrefs: SetNotificationPrefs, options?: RequestInit): Promise<StaffMember> => {
+
+  return customFetch<StaffMember>(getSetNotificationPrefsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      setNotificationPrefs,)
+  }
+);}
+
+
+
+
+export const getSetNotificationPrefsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setNotificationPrefs>>, TError,{data: BodyType<SetNotificationPrefs>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setNotificationPrefs>>, TError,{data: BodyType<SetNotificationPrefs>}, TContext> => {
+
+const mutationKey = ['setNotificationPrefs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setNotificationPrefs>>, {data: BodyType<SetNotificationPrefs>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setNotificationPrefs(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetNotificationPrefsMutationResult = NonNullable<Awaited<ReturnType<typeof setNotificationPrefs>>>
+    export type SetNotificationPrefsMutationBody = BodyType<SetNotificationPrefs>
+    export type SetNotificationPrefsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Set the current user's per-alert notification preferences
+ */
+export const useSetNotificationPrefs = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setNotificationPrefs>>, TError,{data: BodyType<SetNotificationPrefs>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setNotificationPrefs>>,
+        TError,
+        {data: BodyType<SetNotificationPrefs>},
+        TContext
+      > => {
+      return useMutation(getSetNotificationPrefsMutationOptions(options));
     }
 
 export const getSetFloorModeUrl = () => {

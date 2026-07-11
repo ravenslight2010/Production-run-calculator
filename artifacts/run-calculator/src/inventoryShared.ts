@@ -775,6 +775,10 @@ export type StaffMember = {
   // user. Per-user (not device-local) so the preference follows them across
   // devices.
   floorModeEnabled: boolean;
+  // Per-alert push-notification preferences: alert kind → enabled. A MISSING
+  // key means that alert is ON (default). Per-user so the choices follow them
+  // across devices.
+  notificationPrefs: Record<string, boolean>;
   // True only for the seeded sandbox account, which operates in the isolated
   // "sandbox" data scope. Clients show a persistent banner and a "Reset
   // sandbox" action when this is set.
@@ -802,6 +806,14 @@ export const setFloorModeRequest = (enabled: boolean) =>
   api<StaffMember>("/me/floor-mode", {
     method: "POST",
     body: JSON.stringify({ enabled }),
+  });
+// Merge per-alert notification toggles into the user's server-side
+// preferences so they follow them across devices. Partial map: only the keys
+// supplied change. Returns the updated StaffMember.
+export const setNotificationPrefsRequest = (prefs: Record<string, boolean>) =>
+  api<StaffMember>("/me/notification-prefs", {
+    method: "POST",
+    body: JSON.stringify({ prefs }),
   });
 
 // Auth — username + password. On the web the server sets an httpOnly `rc_auth`

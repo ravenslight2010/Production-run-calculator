@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type FormValues, type RunMeta } from "../types";
 import { fmtClock, runLabel } from "../utils";
+import { isNotifEnabled, type NotificationPrefs } from "../notificationPrefs";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -35,6 +36,13 @@ interface NotifParams {
   isCrust: boolean;
   /** Labels of upcoming (not yet started) runs, in order — for the warehouse switchover alert. */
   nextRunLabels: string[];
+  /**
+   * The user's per-alert preferences (from /me). A missing key means the
+   * alert is ON; only an explicit false suppresses it. Each effect still runs
+   * its latch bookkeeping while suppressed so flipping an alert back on
+   * mid-run doesn't retroactively fire alerts for already-passed milestones.
+   */
+  prefs: NotificationPrefs | undefined;
 }
 
 interface NotifResult {
@@ -85,7 +93,13 @@ export function useNotifications({
   v,
   isCrust,
   nextRunLabels,
+  prefs,
 }: NotifParams): NotifResult {
+  // Read preferences through a ref so toggling a switch never re-runs the
+  // milestone effects (which could otherwise re-evaluate old thresholds);
+  // each effect checks the CURRENT preference at the moment it would fire.
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   const notifiedRunRef = useRef<string | null>(null);
   // Per-run latches (Sets, not single ids): switching to run B and back to a
   // nearly-done run A must NOT re-fire A's staging alerts. Frontline (2 skids
@@ -115,6 +129,12 @@ export function useNotifications({
     const runId = currentRun.id;
     if (notifiedRunRef.current === runId) return;
     if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) {
+      // Turned off by this user: still latch the run so re-enabling the
+      // alert mid-run doesn't fire a stale "15 minutes left" later.
+      if (!isNotifEnabled(prefsRef.current, "fifteenMin")) {
+        notifiedRunRef.current = runId;
+        return;
+      }
       if ("Notification" in window) {
         const fire = () => {
           notifiedRunRef.current = runId;
@@ -188,6 +208,14 @@ export function useNotifications({
     if (pressLeft <= 2 * cps && !frontlineNotifRef.current.has(runId)) dueStages.push("frontline");
     if (pressLeft <= cps && !packagingNotifRef.current.has(runId)) dueStages.push("packaging");
     if (dueStages.length === 0) return;
+    // Turned off by this user: latch the due stages silently so re-enabling
+    // mid-run doesn't retroactively fire an already-passed staging alert.
+    if (!isNotifEnabled(prefsRef.current, "warehouseStaging")) {
+      dueStages.forEach((stage) => {
+        (stage === "frontline" ? frontlineNotifRef : packagingNotifRef).current.add(runId);
+      });
+      return;
+    }
     const fireAll = () => dueStages.forEach(fireStage);
     if (Notification.permission === "granted") {
       fireAll();
@@ -216,6 +244,9 @@ export function useNotifications({
     const key = `${currentRun.id}-${batchNum}`;
     if (batchNotifRef.current === key) return;
     batchNotifRef.current = key;
+    // Turned off by this user: the cycle key above is already latched, so
+    // re-enabling mid-run only alerts on the NEXT batch boundary.
+    if (!isNotifEnabled(prefsRef.current, "batchDue")) return;
     navigator.vibrate?.([100, 50, 100]);
     setShowBatchDue(true);
     if (batchDismissRef.current) clearTimeout(batchDismissRef.current);
@@ -247,6 +278,9 @@ export function useNotifications({
     if (runWasTimedRef.current !== runId) return;
     if (runCompleteNotifRef.current === runId) return;
     runCompleteNotifRef.current = runId;
+    // Turned off by this user: the run id above is already latched, so
+    // re-enabling later never fires a stale "time's up".
+    if (!isNotifEnabled(prefsRef.current, "runComplete")) return;
     navigator.vibrate?.([300, 100, 300, 100, 300]);
     if (Notification.permission === "granted") {
       showAppNotification("✅ Run time complete", {
@@ -270,6 +304,9 @@ export function useNotifications({
     if (!freezerDrainingRef.current.has(runId)) return;
     if (freezerDoneNotifRef.current.has(runId)) return;
     freezerDoneNotifRef.current.add(runId);
+    // Turned off by this user: the run is already latched above, so
+    // re-enabling later never fires a stale "freezer empty".
+    if (!isNotifEnabled(prefsRef.current, "freezerEmpty")) return;
     navigator.vibrate?.([200, 100, 200]);
     if (Notification.permission === "granted") {
       showAppNotification("❄️ Freezer empty", {

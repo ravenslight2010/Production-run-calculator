@@ -1195,6 +1195,81 @@ describe("per-user Floor Mode preference", () => {
   });
 });
 
+describe("per-user notification preferences", () => {
+  // Per-alert push toggles are stored on the account (users.notificationPrefs
+  // jsonb) so they follow the user across devices, like Floor Mode. A MISSING
+  // key means the alert is ON; POST /me/notification-prefs MERGES the supplied
+  // partial map (never replaces) and silently drops unknown alert kinds.
+  it("a freshly created user defaults to {} (all alerts on)", async () => {
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(row.notificationPrefs).toEqual({});
+
+    const me = await req(OPERATOR, "GET", "/api/me");
+    expect(me.status).toBe(200);
+    const meBody = (await me.json()) as { notificationPrefs: Record<string, boolean> };
+    expect(meBody.notificationPrefs).toEqual({});
+  });
+
+  it("merges partial updates (never replaces) and drops unknown keys", async () => {
+    const first = await req(OPERATOR, "POST", "/api/me/notification-prefs", {
+      prefs: { batchDue: false, evilKey: true },
+    });
+    expect(first.status).toBe(200);
+    expect(
+      ((await first.json()) as { notificationPrefs: Record<string, boolean> }).notificationPrefs,
+    ).toEqual({ batchDue: false });
+
+    // A later single-toggle update from another device must not clobber the
+    // earlier choice — merge, not replace.
+    const second = await req(OPERATOR, "POST", "/api/me/notification-prefs", {
+      prefs: { fifteenMin: false },
+    });
+    expect(second.status).toBe(200);
+    expect(
+      ((await second.json()) as { notificationPrefs: Record<string, boolean> }).notificationPrefs,
+    ).toEqual({ batchDue: false, fifteenMin: false });
+
+    // Settable back on; the explicit true is stored (harmless — missing and
+    // true both mean enabled) and the OTHER key still survives.
+    const backOn = await req(OPERATOR, "POST", "/api/me/notification-prefs", {
+      prefs: { batchDue: true },
+    });
+    expect(backOn.status).toBe(200);
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(row.notificationPrefs).toEqual({ batchDue: true, fifteenMin: false });
+  });
+
+  it("rejects a malformed body with 400 and unauthenticated with 401", async () => {
+    const bad = await req(OPERATOR, "POST", "/api/me/notification-prefs", {
+      prefs: { batchDue: "nope" },
+    });
+    expect(bad.status).toBe(400);
+    const anon = await req(null, "POST", "/api/me/notification-prefs", {
+      prefs: { batchDue: false },
+    });
+    expect(anon.status).toBe(401);
+  });
+
+  it("server allow-list stays in lockstep with the web client's alert kinds", async () => {
+    // NOTIFICATION_PREF_KEYS (server) and NOTIFICATION_KINDS (web settings
+    // panel) must agree or a toggle in the UI would be silently dropped by the
+    // server. The web module is pure TS with no app deps, so import it
+    // directly for a cross-layer parity guard.
+    const { NOTIFICATION_PREF_KEYS } = await import("../lib/roles");
+    const webMod = await import(
+      "../../../run-calculator/src/notificationPrefs"
+    );
+    const webKinds = webMod.NOTIFICATION_KINDS.map((k: { kind: string }) => k.kind);
+    expect([...NOTIFICATION_PREF_KEYS].sort()).toEqual([...webKinds].sort());
+  });
+});
+
 describe("bootstrap manager assignment (INITIAL_MANAGER_USERNAME)", () => {
   // STAFF_SIGNUP_CODE is a shared onboarding secret handed to every ordinary
   // new hire, so it must never be sufficient on its own to become the first

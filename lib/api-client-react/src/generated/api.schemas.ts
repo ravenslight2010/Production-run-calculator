@@ -611,6 +611,11 @@ export const Capability = {
   'use-ai-tools': 'use-ai-tools',
 } as const;
 
+/**
+ * Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.
+ */
+export type StaffMemberNotificationPrefs = {[key: string]: boolean};
+
 export interface StaffMember {
   userId: string;
   /** The name of the role assigned to this user. */
@@ -627,6 +632,8 @@ export interface StaffMember {
   tourCompleted: boolean;
   /** Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices. */
   floorModeEnabled: boolean;
+  /** Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices. */
+  notificationPrefs: StaffMemberNotificationPrefs;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
   /**
@@ -667,6 +674,16 @@ export interface RoleDefinition {
 export interface SetFloorMode {
   /** Whether Floor Mode should be enabled for this user. */
   enabled: boolean;
+}
+
+/**
+ * Partial map of alert kind → enabled. Only known alert kinds are stored; the server merges these keys into the user's existing preferences, so a single-toggle update never clobbers the rest.
+ */
+export type SetNotificationPrefsPrefs = {[key: string]: boolean};
+
+export interface SetNotificationPrefs {
+  /** Partial map of alert kind → enabled. Only known alert kinds are stored; the server merges these keys into the user's existing preferences, so a single-toggle update never clobbers the rest. */
+  prefs: SetNotificationPrefsPrefs;
 }
 
 export interface CreateRole {

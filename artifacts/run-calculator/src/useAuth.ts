@@ -44,6 +44,10 @@ export type AuthContextValue = {
   // Persist the user's Floor Mode on/off preference server-side so it follows
   // them across devices. Optimistically updates the cached identity.
   setFloorModeEnabled: (enabled: boolean) => Promise<void>;
+  // Merge per-alert notification toggles into the user's server-side
+  // preferences (partial map — only the supplied keys change). Optimistically
+  // updates the cached identity.
+  setNotificationPrefs: (prefs: Record<string, boolean>) => Promise<void>;
 };
 
 // Belt-and-braces: in dev, stash the created context on a globalThis singleton

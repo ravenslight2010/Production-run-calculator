@@ -176,6 +176,10 @@ export type StaffMember = {
   // user. Per-user (not device-local) so the preference follows them across
   // devices. Defaults on.
   floorModeEnabled: boolean;
+  // Per-alert push-notification preferences: alert kind → enabled. A MISSING
+  // key means that alert is ON (default), so newly added alert kinds are
+  // automatically enabled. Per-user so the choices follow them across devices.
+  notificationPrefs: Record<string, boolean>;
   sandbox: boolean;
   // ISO timestamp of when the sandbox was last re-copied from live, or null when
   // it has never been copied. Only meaningful for the sandbox account; null for
@@ -334,6 +338,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
       onboardingSeen: usersTable.onboardingSeen,
       tourCompleted: usersTable.tourCompleted,
       floorModeEnabled: usersTable.floorModeEnabled,
+      notificationPrefs: usersTable.notificationPrefs,
       sandbox: usersTable.sandbox,
     })
     .from(usersTable)
@@ -350,6 +355,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     onboardingSeen: user?.onboardingSeen ?? false,
     tourCompleted: user?.tourCompleted ?? false,
     floorModeEnabled: user?.floorModeEnabled ?? true,
+    notificationPrefs: user?.notificationPrefs ?? {},
     sandbox: user?.sandbox ?? false,
     sandboxCopiedAt: copiedAt ? copiedAt.toISOString() : null,
     sandboxStale: user?.sandbox ? isSandboxCopyStale(copiedAt) : false,
@@ -391,6 +397,46 @@ export async function setFloorModeEnabled(
   return getStaffMember(userId);
 }
 
+// The alert kinds users may toggle. Must stay in lockstep with the web
+// client's NOTIFICATION_KINDS (src/notificationPrefs.ts). Unknown keys in a
+// request are silently dropped so the column can never accumulate junk.
+export const NOTIFICATION_PREF_KEYS = [
+  "fifteenMin",
+  "batchDue",
+  "warehouseStaging",
+  "runComplete",
+  "freezerEmpty",
+] as const;
+
+// Merge the supplied alert toggles into the user's stored preferences.
+// Merge (not replace) so a single-switch update from one device never
+// clobbers toggles set elsewhere; only known alert kinds are kept. Keys that
+// return to the default (enabled) are stored anyway — an explicit true is
+// harmless and keeps the merge logic trivial.
+export async function setNotificationPrefs(
+  userId: string,
+  prefs: Record<string, boolean>,
+): Promise<StaffMember> {
+  const allowed = new Set<string>(NOTIFICATION_PREF_KEYS);
+  const sanitized: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(prefs)) {
+    if (allowed.has(key) && typeof value === "boolean") sanitized[key] = value;
+  }
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ notificationPrefs: usersTable.notificationPrefs })
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .for("update");
+    const merged = { ...(row?.notificationPrefs ?? {}), ...sanitized };
+    await tx
+      .update(usersTable)
+      .set({ notificationPrefs: merged })
+      .where(eq(usersTable.id, userId));
+  });
+  return getStaffMember(userId);
+}
+
 export async function listStaff(): Promise<StaffMember[]> {
   const [rows, capsByRole] = await Promise.all([
     db
@@ -401,6 +447,7 @@ export async function listStaff(): Promise<StaffMember[]> {
         onboardingSeen: usersTable.onboardingSeen,
         tourCompleted: usersTable.tourCompleted,
         floorModeEnabled: usersTable.floorModeEnabled,
+        notificationPrefs: usersTable.notificationPrefs,
         sandbox: usersTable.sandbox,
       })
       .from(userRolesTable)
@@ -417,6 +464,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     onboardingSeen: r.onboardingSeen,
     tourCompleted: r.tourCompleted,
     floorModeEnabled: r.floorModeEnabled,
+    notificationPrefs: r.notificationPrefs ?? {},
     sandbox: r.sandbox,
     // The copy timestamp / staleness are only surfaced via the sandbox account's
     // own /me; the roster never needs them, so leave them at their inert values.

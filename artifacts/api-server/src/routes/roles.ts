@@ -3,6 +3,7 @@ import {
   CreateRoleBody,
   ResetStaffPasswordBody,
   SetFloorModeBody,
+  SetNotificationPrefsBody,
   SetStaffRoleBody,
   UpdateRoleBody,
 } from "@workspace/api-zod";
@@ -17,6 +18,7 @@ import {
   markTourCompleted,
   resetUserPassword,
   setFloorModeEnabled,
+  setNotificationPrefs,
   setUserRole,
   updateRoleCapabilities,
   type Capability,
@@ -55,6 +57,19 @@ router.post("/me/onboarding-seen", async (req, res): Promise<void> => {
 router.post("/me/tour-completed", async (req, res): Promise<void> => {
   const userId = req.userId!;
   res.json(await markTourCompleted(userId));
+});
+
+// Merge per-alert notification toggles into the current user's preferences.
+// Per-user (not device-local) so the choices follow them across devices, like
+// Floor Mode. Unknown alert kinds are dropped server-side (see lib/roles).
+router.post("/me/notification-prefs", async (req, res): Promise<void> => {
+  const parsed = SetNotificationPrefsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const userId = req.userId!;
+  res.json(await setNotificationPrefs(userId, parsed.data.prefs ?? {}));
 });
 
 // Set the current user's Floor Mode on/off preference. Per-user (not

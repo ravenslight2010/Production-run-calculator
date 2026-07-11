@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Capability } from './capability';
+import type { StaffMemberNotificationPrefs } from './staffMemberNotificationPrefs';
 
 export interface StaffMember {
   userId: string;
@@ -23,6 +24,8 @@ export interface StaffMember {
   tourCompleted: boolean;
   /** Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices. */
   floorModeEnabled: boolean;
+  /** Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices. */
+  notificationPrefs: StaffMemberNotificationPrefs;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
   /**

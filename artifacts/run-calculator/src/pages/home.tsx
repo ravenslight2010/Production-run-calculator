@@ -174,6 +174,7 @@ import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
+import AlertSettingsDialog from "../components/AlertSettingsDialog";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useRunTemplates } from "../hooks/useRunTemplates";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
@@ -376,6 +377,7 @@ import {
   Boxes,
   Menu,
   LogOut,
+  Bell,
   Smartphone,
   Snowflake,
   Zap,
@@ -2315,6 +2317,7 @@ export default function Home() {
     markOnboardingSeen,
     markTourCompleted,
     setFloorModeEnabled: persistFloorModeEnabled,
+    setNotificationPrefs: persistNotificationPrefs,
   } = useAuth();
   // Automatic sandbox refresh: when the server reports the sandbox copy is stale
   // (older than its cutoff, or never copied), re-copy live → sandbox and reload —
@@ -3450,6 +3453,8 @@ export default function Home() {
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
   const [showFloorMode, setShowFloorMode] = useState(false);
+  // Combined per-user "Alerts & Floor Mode" settings panel (header menu).
+  const [showAlertSettings, setShowAlertSettings] = useState(false);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
@@ -8791,6 +8796,7 @@ export default function Home() {
     v: ve,
     isCrust: doughSubTab === "crusts",
     nextRunLabels: upcomingRunLabels,
+    prefs: me?.notificationPrefs,
   });
 
   // ── Auto stall detection (advisory) ───────────────────────────────────────
@@ -9601,6 +9607,20 @@ export default function Home() {
         else { if (dayState.currentIndex > 0) switchToRun(dayState.currentIndex - 1); }
       }}
     >
+      {/* ── Alerts & Floor Mode settings (per-user, follows the account) ── */}
+      <AlertSettingsDialog
+        open={showAlertSettings}
+        onOpenChange={setShowAlertSettings}
+        prefs={me?.notificationPrefs}
+        onTogglePref={(kind, enabled) => {
+          // Optimistic cache merge happens inside persistNotificationPrefs; a
+          // failed save re-probes /me so the switch falls back to the truth.
+          void persistNotificationPrefs({ [kind]: enabled }).catch(() => { /* reverted via /me re-probe */ });
+        }}
+        floorModeEnabled={floorModeEnabled}
+        onToggleFloorMode={toggleFloorModeEnabled}
+      />
+
       {/* ── Floor Mode overlay ──────────────────────────────────────────── */}
       {showFloorMode && (() => {
         const totalSkids = v.casesNeeded > 0 && v.casesPerSkid > 0 ? Math.ceil(v.casesNeeded / v.casesPerSkid) : 0;
@@ -11317,8 +11337,8 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("setup")}>
                   <Settings className="w-4 h-4 mr-2" /> Setup
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={(e) => { e.preventDefault(); toggleFloorModeEnabled(); }}>
-                  <Layers className="w-4 h-4 mr-2" /> Floor Mode: {floorModeEnabled ? "On" : "Off"}
+                <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
+                  <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
