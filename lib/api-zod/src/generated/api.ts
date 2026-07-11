@@ -2455,8 +2455,10 @@ export const ListDoughRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -2473,8 +2475,10 @@ export const SaveDoughRecipesBody = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
 export const SaveDoughRecipesResponse = zod.object({
@@ -2486,8 +2490,10 @@ export const SaveDoughRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -2508,8 +2514,10 @@ export const DeleteDoughRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -2526,8 +2534,10 @@ export const ListSauceRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -2544,8 +2554,10 @@ export const SaveSauceRecipesBody = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
 export const SaveSauceRecipesResponse = zod.object({
@@ -2557,8 +2569,10 @@ export const SaveSauceRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 
@@ -2579,8 +2593,10 @@ export const DeleteSauceRecipesResponse = zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient')
 }).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
-  "enabled": zod.boolean()
-}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+  "enabled": zod.boolean(),
+  "brand": zod.string().optional().describe('Optional customer (brand) this recipe is made for; empty = shared\/untagged. Display-only — never filters run pickers.'),
+  "flavors": zod.array(zod.string()).optional().describe('Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes).')
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
 

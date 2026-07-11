@@ -7306,9 +7306,10 @@ components:
       description: >-
         A manager-defined factory-wide named recipe used by the Dough and Sauce
         sections: a name plus a list of components — each an ingredient and its
-        pounds. Unlike cheese/mixes there is no brand/flavor grouping. The run
-        form's Dough / Sauce cards pick one and hydrate their rows from its
-        components. Disabled recipes are kept but hidden from run pickers.
+        pounds. Like cheese/mixes it can carry a display-only brand/flavor tag
+        ("who it goes to"). The run form's Dough / Sauce cards pick one and
+        hydrate their rows from its components. Disabled recipes are kept but
+        hidden from run pickers.
       required:
         - id
         - name
@@ -7331,6 +7332,18 @@ components:
             $ref: "#/components/schemas/NamedRecipeComponent"
         enabled:
           type: boolean
+        brand:
+          type: string
+          description: >-
+            Optional customer (brand) this recipe is made for; empty =
+            shared/untagged. Display-only — never filters run pickers.
+        flavors:
+          type: array
+          description: >-
+            Product flavors of `brand` this recipe is used on. Empty with a
+            brand set means all varieties (same convention as cheese recipes).
+          items:
+            type: string
 
     NamedRecipeList:
       type: object

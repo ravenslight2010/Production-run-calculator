@@ -14,8 +14,11 @@ type NamedRecipeComponentRow = { ingredient: string; lbs: number };
 
 // Manager-defined, factory-wide SAUCE (frontline) recipes. Rebuilt to work like
 // the Mixes / Cheese Recipes master-data: a sauce recipe is just a name plus a
-// list of components — each an ingredient and its pounds. Unlike cheese/mixes
-// there is no brand/flavor grouping.
+// list of components — each an ingredient and its pounds. Like cheese/mixes it
+// carries an optional display-only brand/flavor tag ("who it goes to"): `brand`
+// is the customer, `flavors` the products it's used on (empty + brand set = all
+// varieties; empty brand = shared/untagged). Both columns are ADDITIVE with
+// defaults so the change is push-force-safe on the populated table.
 //
 // Like the other master-data tables, these are global (not per-day state), so
 // they live in their own relational table and are NOT part of the per-day sync
@@ -32,6 +35,8 @@ export const sauceRecipesTable = pgTable(
     notes: text("notes").notNull().default(""),
     components: jsonb("components").notNull().default([]).$type<NamedRecipeComponentRow[]>(),
     enabled: boolean("enabled").notNull().default(true),
+    brand: text("brand").notNull().default(""),
+    flavors: jsonb("flavors").notNull().default([]).$type<string[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -8,10 +8,13 @@
 // the run form's Dough / Sauce cards pick one (hydrating their rows from the
 // chosen recipe) instead of each device keeping its own preset map.
 //
-// Unlike Mixes (per-pizza ounces + brand/flavor) and Cheese Recipes (brand +
-// flavors + shredder setting), Dough and Sauce carry no brand/flavor grouping —
-// they are just a name and a list of {ingredient, lbs} rows, matching the
-// existing per-run `doughRecipe` / `frontlineRecipe` RecipeRow shape so
+// Like Mixes and Cheese Recipes, a named recipe can carry an OPTIONAL
+// brand/flavor tag ("who it goes to"): a single customer (brand) plus the
+// product flavors it is used on. Empty flavors with a brand means "all
+// varieties" of that brand (mirroring the Cheese Recipes convention); no brand
+// means the recipe is shared/untagged. The tags are DISPLAY-ONLY — run-form
+// Dough/Sauce pickers keep listing every enabled recipe — and the rows still
+// match the per-run `doughRecipe` / `frontlineRecipe` RecipeRow shape so
 // hydration is a straight copy.
 //
 // This module is PURE so both apps agree on what a well-formed recipe is and how
@@ -43,6 +46,12 @@ export interface NamedRecipe {
   components: NamedRecipeComponent[];
   // Disabled recipes are kept (so toggling is easy) but hidden from run pickers.
   enabled: boolean;
+  // Optional "who it goes to" tag: the customer (brand) this recipe is made
+  // for. Empty string = shared/untagged. Display-only (never filters pickers).
+  brand: string;
+  // Product flavors of `brand` this recipe is used on. Empty with a brand set
+  // means "all varieties" (same convention as Cheese Recipes).
+  flavors: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -77,9 +86,28 @@ export function normalizeNamedRecipeComponent(
   return { ingredient, lbs };
 }
 
+// Coerce a raw flavors value into a clean, ci-deduped list of non-blank names.
+// Tolerates absent/malformed input (older records have no flavors field).
+export function normalizeNamedRecipeFlavors(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    const f = coerceStr(raw);
+    if (!f) continue;
+    const ci = f.toLowerCase();
+    if (seen.has(ci)) continue;
+    seen.add(ci);
+    out.push(f);
+  }
+  return out;
+}
+
 // Coerce a raw API/DB record into a clean NamedRecipe, or null if it has no
 // usable name. Numeric component pounds are clamped to >= 0; enabled defaults to
-// true; malformed components are dropped.
+// true; malformed components are dropped. brand/flavors default to untagged
+// (older records predate the tags) — flavors are only kept when a brand is set,
+// since a flavor tag is meaningless without knowing whose flavor it is.
 export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
   if (!input || typeof input !== "object") return null;
   const raw = input as Record<string, unknown>;
@@ -93,12 +121,15 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
         .map(normalizeNamedRecipeComponent)
         .filter((c): c is NamedRecipeComponent => c !== null)
     : [];
+  const brand = coerceStr(raw.brand);
   const recipe: NamedRecipe = {
     id,
     name,
     notes: coerceStr(raw.notes),
     components,
     enabled,
+    brand,
+    flavors: brand ? normalizeNamedRecipeFlavors(raw.flavors) : [],
   };
   if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
   return recipe;
@@ -200,6 +231,8 @@ export function namedRecipeFromDraft(draft: {
   components: ReadonlyArray<{ ingredient: string; lbs: number }>;
   idPrefix: string;
   notes?: string;
+  brand?: string;
+  flavors?: ReadonlyArray<string>;
 }): NamedRecipe | null {
   const name = draft.name.trim();
   if (!name) return null;
@@ -214,7 +247,73 @@ export function namedRecipeFromDraft(draft: {
     notes: draft.notes ?? "",
     components: draft.components,
     enabled: true,
+    brand: draft.brand ?? "",
+    flavors: draft.flavors ?? [],
   });
+}
+
+// ---------------------------------------------------------------------------
+// Brand/flavor tag fill (spec-import backfill)
+// ---------------------------------------------------------------------------
+
+/** "Who it goes to" tag learned for one recipe name during a spec import. */
+export interface NamedRecipeTag {
+  brand: string;
+  /** Empty = all varieties of `brand` (whole-brand / catch-all recipe). */
+  flavors: string[];
+}
+
+/**
+ * Additively fill brand/flavor tags onto EXISTING pool recipes from what a spec
+ * import just learned, without ever fighting a manager's explicit tags:
+ * - untagged recipe (no brand) + learned tag → adopt the learned brand/flavors
+ * - same brand (case-insensitive) → union the learned flavors in; a recipe
+ *   already tagged "all varieties" (brand set, no flavors) stays all-varieties
+ * - different brand already set → left untouched (the manager's tag wins)
+ * Matching is by recipe NAME (case-insensitive). Returns ONLY the recipes that
+ * changed so the caller can save just those. Pure — shared web/mobile.
+ */
+export function fillNamedRecipeTags(
+  recipes: ReadonlyArray<NamedRecipe>,
+  tagsByName: ReadonlyMap<string, NamedRecipeTag> | Record<string, NamedRecipeTag>,
+): NamedRecipe[] {
+  const tags = new Map<string, NamedRecipeTag>();
+  const entries =
+    tagsByName instanceof Map
+      ? tagsByName.entries()
+      : Object.entries(tagsByName);
+  for (const [name, tag] of entries) {
+    const key = (name ?? "").trim().toLowerCase();
+    const brand = (tag?.brand ?? "").trim();
+    if (!key || !brand) continue;
+    tags.set(key, {
+      brand,
+      flavors: normalizeNamedRecipeFlavors(tag.flavors),
+    });
+  }
+  if (tags.size === 0) return [];
+  const changed: NamedRecipe[] = [];
+  for (const r of recipes) {
+    const tag = tags.get(r.name.trim().toLowerCase());
+    if (!tag) continue;
+    if (!r.brand) {
+      changed.push({ ...r, brand: tag.brand, flavors: [...tag.flavors] });
+      continue;
+    }
+    if (r.brand.trim().toLowerCase() !== tag.brand.toLowerCase()) continue;
+    // Same brand: union flavors — but "all varieties" (empty flavors) stays.
+    if (r.flavors.length === 0) continue;
+    if (tag.flavors.length === 0) {
+      // Import says whole-brand; widen to all varieties.
+      changed.push({ ...r, flavors: [] });
+      continue;
+    }
+    const have = new Set(r.flavors.map((f) => f.toLowerCase()));
+    const extra = tag.flavors.filter((f) => !have.has(f.toLowerCase()));
+    if (extra.length === 0) continue;
+    changed.push({ ...r, flavors: [...r.flavors, ...extra] });
+  }
+  return changed;
 }
 
 // ---------------------------------------------------------------------------

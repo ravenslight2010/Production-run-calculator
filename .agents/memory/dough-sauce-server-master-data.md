@@ -39,3 +39,13 @@ Cheese/Mixes.
 - The dev DB tables must be pushed (`db push-force`) and BOTH api-server
   workflows restarted after adding the routes, or clients get 404
   (`dual-api-workflows.md`).
+- **Brand/flavor tags ("who it goes to") are DISPLAY-ONLY.** `NamedRecipe`
+  carries `brand` + `flavors` (empty brand = shared/untagged; brand set +
+  empty flavors = "all varieties"; flavors are dropped without a brand).
+  Tags must NEVER filter run applicator pickers — they only render as badges
+  in Manage Lists. Spec-import derives tags via
+  `namedRecipeTagFromParsed` (single-brand only; multi-brand → untagged) and
+  backfills existing pool rows through `fillNamedRecipeTags` (untagged
+  adopts, same-brand unions flavors, all-varieties is sticky and widens),
+  threaded as `tagsByName` through `addNamedRecipesToServerIfAbsent`.
+  Never override a different manager-set brand from an import.

@@ -9,7 +9,9 @@ import {
   addNamedRecipesIfAbsentByName,
   repointNamedRecipeIngredients,
   planNameConsolidation,
+  fillNamedRecipeTags,
   type NamedRecipe,
+  type NamedRecipeTag,
 } from "./index";
 
 function makeNamed(over: Partial<NamedRecipe> = {}): NamedRecipe {
@@ -19,6 +21,8 @@ function makeNamed(over: Partial<NamedRecipe> = {}): NamedRecipe {
     notes: over.notes ?? "",
     components: over.components ?? [],
     enabled: over.enabled ?? true,
+    brand: over.brand ?? "",
+    flavors: over.flavors ?? [],
     ...(over.scope !== undefined ? { scope: over.scope } : {}),
   };
 }
@@ -71,6 +75,8 @@ describe("normalizeNamedRecipe", () => {
       notes: "",
       components: [],
       enabled: true,
+      brand: "",
+      flavors: [],
     });
   });
 
@@ -98,6 +104,8 @@ describe("normalizeNamedRecipe", () => {
         { ingredient: "Flour", lbs: 50 },
         { ingredient: "Water", lbs: 0 },
       ],
+      brand: "",
+      flavors: [],
     });
   });
 });
@@ -305,5 +313,79 @@ describe("planNameConsolidation", () => {
     });
     expect(plan.additions).toEqual(["CRB Dough"]);
     expect(plan.renames).toEqual({});
+  });
+});
+
+describe("normalizeNamedRecipe brand/flavor tags", () => {
+  it("defaults older records to untagged", () => {
+    const r = normalizeNamedRecipe({ id: "d1", name: "CRB Dough" })!;
+    expect(r.brand).toBe("");
+    expect(r.flavors).toEqual([]);
+  });
+
+  it("keeps brand + ci-deduped flavors", () => {
+    const r = normalizeNamedRecipe({
+      id: "d1",
+      name: "CRB Dough",
+      brand: " Hannaford ",
+      flavors: ["Cheese", " cheese ", "", "Pepperoni"],
+    })!;
+    expect(r.brand).toBe("Hannaford");
+    expect(r.flavors).toEqual(["Cheese", "Pepperoni"]);
+  });
+
+  it("drops flavors when no brand is set (a flavor tag is meaningless alone)", () => {
+    const r = normalizeNamedRecipe({
+      id: "d1",
+      name: "CRB Dough",
+      flavors: ["Cheese"],
+    })!;
+    expect(r.brand).toBe("");
+    expect(r.flavors).toEqual([]);
+  });
+});
+
+describe("fillNamedRecipeTags", () => {
+  const tag = (brand: string, flavors: string[] = []): NamedRecipeTag => ({ brand, flavors });
+
+  it("tags an untagged recipe by ci name match, returns only changed", () => {
+    const pool = [
+      makeNamed({ id: "d1", name: "CRB Dough" }),
+      makeNamed({ id: "d2", name: "Other Dough" }),
+    ];
+    const changed = fillNamedRecipeTags(pool, new Map([["crb dough", tag("Hannaford", ["Cheese"])]]));
+    expect(changed.map((r) => r.id)).toEqual(["d1"]);
+    expect(changed[0].brand).toBe("Hannaford");
+    expect(changed[0].flavors).toEqual(["Cheese"]);
+    // pure — input untouched
+    expect(pool[0].brand).toBe("");
+  });
+
+  it("unions flavors for the same brand (ci) and skips no-op unions", () => {
+    const pool = [makeNamed({ id: "d1", name: "CRB Dough", brand: "hannaford", flavors: ["Cheese"] })];
+    const changed = fillNamedRecipeTags(pool, new Map([["crb dough", tag("Hannaford", ["cheese", "Pepperoni"])]]));
+    expect(changed).toHaveLength(1);
+    expect(changed[0].flavors).toEqual(["Cheese", "Pepperoni"]);
+    const noop = fillNamedRecipeTags(pool, new Map([["crb dough", tag("Hannaford", ["cheese"])]]));
+    expect(noop).toEqual([]);
+  });
+
+  it("all-varieties is sticky, and a whole-brand tag widens a flavored recipe", () => {
+    const allVar = [makeNamed({ id: "d1", name: "CRB Dough", brand: "Hannaford", flavors: [] })];
+    expect(fillNamedRecipeTags(allVar, new Map([["crb dough", tag("Hannaford", ["Cheese"])]]))).toEqual([]);
+    const flavored = [makeNamed({ id: "d1", name: "CRB Dough", brand: "Hannaford", flavors: ["Cheese"] })];
+    const widened = fillNamedRecipeTags(flavored, new Map([["crb dough", tag("Hannaford")]]));
+    expect(widened).toHaveLength(1);
+    expect(widened[0].flavors).toEqual([]);
+  });
+
+  it("never overrides a different manager-set brand", () => {
+    const pool = [makeNamed({ id: "d1", name: "CRB Dough", brand: "Lucia", flavors: ["Cheese"] })];
+    expect(fillNamedRecipeTags(pool, new Map([["crb dough", tag("Hannaford", ["Pepperoni"])]]))).toEqual([]);
+  });
+
+  it("ignores blank names and blank-brand tags", () => {
+    const pool = [makeNamed({ id: "d1", name: "CRB Dough" })];
+    expect(fillNamedRecipeTags(pool, new Map([["  ", tag("Hannaford")], ["crb dough", tag("  ")]]))).toEqual([]);
   });
 });

@@ -8,7 +8,7 @@
 import type { NamedRecipeComponent } from './namedRecipeComponent';
 
 /**
- * A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese/mixes there is no brand/flavor grouping. The run form's Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.
+ * A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese/mixes it can carry a display-only brand/flavor tag ("who it goes to"). The run form's Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.
  */
 export interface NamedRecipe {
   /** Stable client-generated id */
@@ -20,4 +20,8 @@ export interface NamedRecipe {
   /** The ingredients that make up the recipe */
   components: NamedRecipeComponent[];
   enabled: boolean;
+  /** Optional customer (brand) this recipe is made for; empty = shared/untagged. Display-only — never filters run pickers. */
+  brand?: string;
+  /** Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes). */
+  flavors?: string[];
 }

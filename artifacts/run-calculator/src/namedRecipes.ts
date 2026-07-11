@@ -16,7 +16,9 @@
 import {
   normalizeNamedRecipes,
   addNamedRecipesIfAbsentByName,
+  fillNamedRecipeTags,
   type NamedRecipe,
+  type NamedRecipeTag,
 } from "@workspace/named-recipes";
 import { inventoryClientId } from "./inventoryShared";
 
@@ -57,17 +59,28 @@ export async function saveNamedRecipes(
 // Append recipes to the server pool, skipping any whose name (case-insensitive)
 // or id already exists — the "match, don't clobber" rule shared by the one-time
 // local→server migration and by spec-import. Reads the current server pool,
-// merges additively, and POSTs only when something new was added. Best-effort by
-// design: writes require the manage-inventory role, so a non-manager (or an
-// offline device) simply no-ops. Returns how many recipes were newly added.
+// merges additively, and POSTs only when something new was added. When a spec
+// import learned "who it goes to" brand/flavor tags, they are additively filled
+// onto matching EXISTING recipes too (never overriding a manager's different
+// brand — see fillNamedRecipeTags), so re-importing a sheet tags recipes that
+// were imported before the tags existed. Best-effort by design: writes require
+// the manage-inventory role, so a non-manager (or an offline device) simply
+// no-ops. Returns how many recipes were newly added.
 export async function addNamedRecipesToServerIfAbsent(
   kind: NamedRecipeKind,
   candidates: NamedRecipe[],
+  tagsByName?: ReadonlyMap<string, NamedRecipeTag>,
 ): Promise<{ added: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
   const { merged, added } = addNamedRecipesIfAbsentByName(existing, candidates);
-  if (added === 0) return { added: 0, items: existing };
-  const items = await saveNamedRecipes(kind, merged);
+  const tagged =
+    tagsByName && tagsByName.size > 0
+      ? fillNamedRecipeTags(existing, tagsByName)
+      : [];
+  if (added === 0 && tagged.length === 0) return { added: 0, items: existing };
+  const taggedById = new Map(tagged.map((r) => [r.id, r]));
+  const toSave = merged.map((r) => taggedById.get(r.id) ?? r);
+  const items = await saveNamedRecipes(kind, toSave);
   return { added, items };
 }
 

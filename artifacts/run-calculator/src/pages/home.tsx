@@ -406,7 +406,7 @@ import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import { mergeSpecAliases, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
+import { mergeSpecAliases, namedRecipeTagFromParsed, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
@@ -429,7 +429,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, type NamedRecipe } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
 
 import {
   Form,
@@ -3347,21 +3347,39 @@ export default function Home() {
   // Push every locally-saved dough / sauce recipe preset up into the server pool
   // (match-by-name, no clobber) so they become factory-wide master-data like
   // Cheese Recipes / Mixes. Shared by the one-time migration and by spec-import.
+  // A spec import also passes the "who it goes to" brand/flavor tags it learned
+  // (per recipe name); new drafts carry them and matching existing recipes get
+  // them backfilled additively (never overriding a manager's different brand).
   // Best-effort: the server enforces manage-inventory on writes, so a non-manager
   // (or offline device) simply no-ops. Updates the react-query cache on success.
-  const pushLocalDoughSauceToServer = useCallback(async (): Promise<number> => {
+  const pushLocalDoughSauceToServer = useCallback(async (tags?: {
+    dough?: ReadonlyMap<string, NamedRecipeTag>;
+    sauce?: ReadonlyMap<string, NamedRecipeTag>;
+  }): Promise<number> => {
+    const tagFor = (map: ReadonlyMap<string, NamedRecipeTag> | undefined, name: string) =>
+      map?.get(name.trim().toLowerCase());
     const doughDrafts = Object.entries(loadDoughRecipePresets())
-      .map(([name, p]) => namedRecipeFromDraft({ name, components: p?.rows ?? [], idPrefix: "dough" }))
+      .map(([name, p]) => {
+        const tag = tagFor(tags?.dough, name);
+        return namedRecipeFromDraft({ name, components: p?.rows ?? [], idPrefix: "dough", brand: tag?.brand, flavors: tag?.flavors });
+      })
       .filter((r): r is NamedRecipe => r !== null);
     const sauceDrafts = Object.entries(loadFrontlineRecipePresets())
-      .map(([name, rows]) => namedRecipeFromDraft({ name, components: rows ?? [], idPrefix: "sauce" }))
+      .map(([name, rows]) => {
+        const tag = tagFor(tags?.sauce, name);
+        return namedRecipeFromDraft({ name, components: rows ?? [], idPrefix: "sauce", brand: tag?.brand, flavors: tag?.flavors });
+      })
       .filter((r): r is NamedRecipe => r !== null);
     const [d, s] = await Promise.all([
-      doughDrafts.length ? addNamedRecipesToServerIfAbsent("dough", doughDrafts) : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
-      sauceDrafts.length ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts) : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
+      doughDrafts.length || (tags?.dough?.size ?? 0) > 0
+        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough)
+        : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
+      sauceDrafts.length || (tags?.sauce?.size ?? 0) > 0
+        ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce)
+        : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
     ]);
-    if (d.added > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
-    if (s.added > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items);
+    if (d.items.length > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
+    if (s.items.length > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items);
     return d.added + s.added;
   }, [cycleCountQc]);
 
@@ -7872,8 +7890,24 @@ export default function Home() {
       }
       // Any dough / sauce recipes the sheet added are pushed into the server pool
       // so they become factory-wide master-data (like the Mixes / Cheese pools).
+      // Pass along the "who it goes to" brand/flavor tags the sheet ties each
+      // recipe to (single-brand only; multi-brand recipes stay shared/untagged)
+      // so new AND previously-imported recipes get tagged.
       // Best-effort, manager-only server-side; never blocks the committed import.
-      if (importedRecipes && canManageInventory) void pushLocalDoughSauceToServer().catch(() => {});
+      if (importedRecipes && canManageInventory) {
+        const doughTags = new Map<string, NamedRecipeTag>();
+        const sauceTags = new Map<string, NamedRecipeTag>();
+        for (const r of editedParsed.recipes) {
+          if (r.referenceOnly) continue;
+          if (r.kind !== "dough" && r.kind !== "sauce") continue;
+          const name = r.name.trim();
+          if (!name) continue;
+          const tag = namedRecipeTagFromParsed(r, editedParsed.profiles);
+          if (!tag) continue;
+          (r.kind === "dough" ? doughTags : sauceTags).set(name.toLowerCase(), tag);
+        }
+        void pushLocalDoughSauceToServer({ dough: doughTags, sauce: sauceTags }).catch(() => {});
+      }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
@@ -10581,6 +10615,8 @@ export default function Home() {
                       <NamedRecipesManager
                         kind={manageCategory === "dough" ? "dough" : "sauce"}
                         ingredientSuggestions={manageCategory === "dough" ? doughIngredients : frontlineIngredients}
+                        brands={brands}
+                        brandFlavors={brandFlavors}
                       />
                     )}
                   </div>

@@ -1214,6 +1214,57 @@ export function recipeApplyTargets(
   return out;
 }
 
+/**
+ * Derive the display-only "who it goes to" brand/flavor TAG for a dough/sauce
+ * recipe from what the import ties it to (mirrors the Cheese Recipes model:
+ * one customer brand + the flavors it's used on, empty flavors = all
+ * varieties). Returns null when the recipe has no brand anchor at all, or when
+ * it serves MULTIPLE brands — a single-brand tag would be misleading there, so
+ * the recipe stays shared/untagged. Whole-brand recipes (a brand anchor, or a
+ * singular brand with no flavor) tag as all-varieties (empty flavors). Pure.
+ */
+export function namedRecipeTagFromParsed(
+  r: ParsedRecipe,
+  profiles: ReadonlyArray<ParsedProfile>,
+): { brand: string; flavors: string[] } | null {
+  const targets = recipeApplyTargets(r, profiles);
+  // Collect every distinct brand this recipe is anchored to (explicit targets,
+  // catch-all anchors, and the singular brand field).
+  const brandsCi = new Map<string, string>();
+  const noteBrand = (raw: string | undefined): void => {
+    const b = (raw ?? "").trim();
+    if (!b) return;
+    const ci = b.toLowerCase();
+    if (!brandsCi.has(ci)) brandsCi.set(ci, b);
+  };
+  for (const t of targets) noteBrand(t.brand);
+  for (const b of r.brandAnchors ?? []) noteBrand(b);
+  noteBrand(r.brand);
+  if (brandsCi.size !== 1) return null;
+  const brand = Array.from(brandsCi.values())[0];
+  const brandCi = brand.toLowerCase();
+  // Whole-brand ("all varieties"): a catch-all anchor, or a singular brand with
+  // no flavor and no explicit per-flavor targets from the sheet itself.
+  const anchored = (r.brandAnchors ?? []).some(
+    (b) => b.trim().toLowerCase() === brandCi,
+  );
+  if (anchored) return { brand, flavors: [] };
+  const explicit = recipeTargets(r);
+  if (explicit.length === 0) return { brand, flavors: [] };
+  const flavors: string[] = [];
+  const seen = new Set<string>();
+  for (const t of targets) {
+    if (t.brand.trim().toLowerCase() !== brandCi) continue;
+    const f = t.flavor.trim();
+    if (!f) continue;
+    const ci = f.toLowerCase();
+    if (seen.has(ci)) continue;
+    seen.add(ci);
+    flavors.push(f);
+  }
+  return { brand, flavors };
+}
+
 // ── Tombstone filtering (respect merged-away / deleted names on import) ───────
 
 /** The parsed items an import skipped because they were previously merged/deleted away. */

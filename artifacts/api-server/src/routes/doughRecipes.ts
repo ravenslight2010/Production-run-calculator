@@ -24,6 +24,8 @@ function toApiItem(row: DoughRecipeRow): NamedRecipe {
     notes: row.notes,
     components: row.components ?? [],
     enabled: row.enabled,
+    brand: row.brand ?? "",
+    flavors: row.flavors ?? [],
   };
 }
 
@@ -35,6 +37,8 @@ function toDbValues(item: NamedRecipe) {
     notes: item.notes ?? "",
     components: item.components,
     enabled: item.enabled,
+    brand: item.brand ?? "",
+    flavors: item.flavors ?? [],
     updatedAt: new Date(),
   };
 }
@@ -90,6 +94,8 @@ router.post(
               notes: values.notes,
               components: values.components,
               enabled: values.enabled,
+              brand: values.brand,
+              flavors: values.flavors,
               updatedAt: values.updatedAt,
             },
           });
