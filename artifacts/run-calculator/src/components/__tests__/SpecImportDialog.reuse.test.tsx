@@ -23,7 +23,11 @@ vi.mock("@/storage", () => ({
 
 afterEach(() => cleanup());
 
-function makePrepared(recipe: ParsedRecipe, profiles: ParsedProfile[] = []): SpecImportPrepared {
+function makePrepared(
+  recipe: ParsedRecipe,
+  profiles: ParsedProfile[] = [],
+  aliasLinkSuggestions?: Record<string, string>,
+): SpecImportPrepared {
   const parsed: ParsedSpecImport = { profiles, recipes: [recipe] };
   return {
     parsed,
@@ -41,10 +45,14 @@ function makePrepared(recipe: ParsedRecipe, profiles: ParsedProfile[] = []): Spe
     skipped: { profiles: [], recipes: [] },
     brands: [],
     flavorsByBrand: {},
+    ...(aliasLinkSuggestions ? { aliasLinkSuggestions } : {}),
   };
 }
 
-function renderDialog(prepared: SpecImportPrepared, onConfirm: (p: ParsedSpecImport) => void) {
+function renderDialog(
+  prepared: SpecImportPrepared,
+  onConfirm: (p: ParsedSpecImport, learned?: unknown) => void,
+) {
   const result = render(
     <SpecImportDialog
       open={true}
@@ -56,7 +64,7 @@ function renderDialog(prepared: SpecImportPrepared, onConfirm: (p: ParsedSpecImp
       existingRecipeNamesByKind={{
         dough: ["House Dough", "Thin Crust"],
         sauce: [],
-        cheese: [],
+        cheese: ["Aldo's Cheese Mix", "Lowe's Spinach Cheese Mix"],
         mix: [],
       }}
       onConfirm={onConfirm}
@@ -211,5 +219,91 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
     expect(out.recipes[0].name).toBe("Sheet Dough");
     expect(out.recipes[0].referenceOnly).toBeUndefined();
+  });
+
+  it("pre-selects 'Use existing' from a remembered link suggestion (cheese)", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Aldo's Spinach Blend",
+      brand: "Aldo's",
+      flavor: "SPINACH",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Aldo's", flavor: "SPINACH" }], {
+        "aldo's spinach blend": "Lowe's Spinach Cheese Mix",
+      }),
+      () => {},
+    );
+
+    const select = screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement;
+    expect(select.value).toBe("Lowe's Spinach Cheese Mix");
+    // Advisory only — the reuse note shows and the user could still clear it.
+    expect(screen.getByText(/Using your existing/)).toBeTruthy();
+  });
+
+  it("ignores a remembered link whose target recipe no longer exists in the pool", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Aldo's Spinach Blend",
+      brand: "Aldo's",
+      flavor: "SPINACH",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Aldo's", flavor: "SPINACH" }], {
+        "aldo's spinach blend": "Deleted Cheese Mix",
+      }),
+      () => {},
+    );
+
+    const select = screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement;
+    expect(select.value).toBe("");
+  });
+
+  it("learns a manual 'Use existing' cheese pick as an appType alias on Apply", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Aldo's Spinach Blend",
+      brand: "Aldo's",
+      flavor: "SPINACH",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Aldo's", flavor: "SPINACH" }]), onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Lowe's Spinach Cheese Mix" },
+    });
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    const learned = onConfirm.mock.calls[0][1] as Array<Record<string, unknown>>;
+    expect(learned).toContainEqual({
+      kind: "appType",
+      externalName: "Aldo's Spinach Blend",
+      canonicalName: "Lowe's Spinach Cheese Mix",
+      context: null,
+    });
+  });
+
+  it("does NOT learn an alias for a dough 'Use existing' pick (blend-name namespace only)", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "Corner Booth",
+      flavor: "PLAIN",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "House Dough" },
+    });
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const learned = onConfirm.mock.calls[0][1] as Array<Record<string, unknown>>;
+    expect(learned.filter((a) => a.kind === "appType")).toEqual([]);
   });
 });

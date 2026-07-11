@@ -117,8 +117,34 @@ export type SpecImportPrepared = {
   flavorsByBrand: Record<string, string[]>;
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
+  /**
+   * Previously learned "use existing recipe" picks (sheet blend/mix name →
+   * existing saved recipe name, lower-cased key). The review dialog uses these
+   * to PRE-SELECT the "Use existing" picker for cheese/mix recipes so a
+   * re-import of a known sheet recommends linking instead of "create new".
+   * Advisory only — the user can still clear or change the pick.
+   */
+  aliasLinkSuggestions?: Record<string, string>;
   note?: string;
 };
+
+/**
+ * Build the review's link suggestions from the saved learned aliases. Cheese
+ * blend / mix name links are stored under the "appType" kind (the applicator /
+ * blend-name namespace) — the same pool the user's confirmed "Use existing"
+ * picks are written back to on Apply.
+ */
+function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const a of aliases) {
+    if (a.kind !== "appType") continue;
+    const ext = a.externalName.trim().toLowerCase();
+    const canon = a.canonicalName.trim();
+    if (!ext || !canon || ext === canon.toLowerCase()) continue;
+    out[ext] = canon;
+  }
+  return out;
+}
 
 // Map a learned spec-import alias kind to a shared-corrections domain.
 function aliasKindToDomain(kind: SpecAliasKind): string {
@@ -623,6 +649,7 @@ export async function prepareSpecImport(data: ArrayBuffer): Promise<SpecImportPr
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
+    aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
     ...(note ? { note } : {}),
   };
 }
@@ -735,6 +762,7 @@ export async function prepareSpecImportMulti(
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
+    aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
     ...(note ? { note } : {}),
   };
 }

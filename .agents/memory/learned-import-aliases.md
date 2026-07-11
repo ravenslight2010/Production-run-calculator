@@ -60,3 +60,27 @@ so hand-typed corrections were forgotten on re-upload of the same sheet.
   flavor canonicalization on re-import).
 - Pure logic: `collectSpecRenameAliases` / `mergeSpecAliases` in
   `@workspace/spec-import`.
+
+## "Use existing recipe" picks are learned too (cheese/mix only, appType kind)
+
+A manual "Use existing" link pick in the spec review (cheese/mix recipe rows)
+is learned as an `appType` alias (parsed sheet blend name → chosen existing
+recipe name) and, on the next import, PRE-SELECTS the link in the review
+instead of silently renaming.
+
+**Why:** the user re-imported a sheet and it recommended "create new recipe"
+every time even after they had linked the blend to the right existing recipe.
+
+**How to apply:**
+- `appType` is deliberately the blend-name namespace (same kind the old learned
+  cheese-name links / the once-poisoned aliases lived in) — do NOT invent a new
+  alias kind without a server contract change.
+- Suggestion is advisory + guarded: only pre-select when the remembered target
+  still exists in that kind's saved pool (stale-target guard, same rule as the
+  brand/flavor apply guard above).
+- Dough/sauce "use existing" picks are intentionally NOT learned — there is no
+  recipe-name alias kind for them; overloading appType would pollute the blend
+  namespace.
+- External key = the PRISTINE review-time parsed name (post
+  canonicalizeSpecImportCheeseRecipeNames), so the key is stable across
+  re-imports of the same sheet.

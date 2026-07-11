@@ -150,20 +150,42 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
   return [...kept, ...skipped];
 }
 
-function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
-  const kept = prepared.parsed.recipes.map((r, i) => ({
-    key: `rk${i}`,
-    orig: r,
-    baseOrig: r,
-    brandTouched: false,
-    flavorTouched: false,
-    name: r.name ?? "",
-    kind: specImportRecipeDisplayKind(r),
-    brand: r.brand ?? "",
-    flavor: r.flavor ?? "",
-    include: true,
-    tombstoned: false,
-  }));
+function buildRecipeItems(
+  prepared: SpecImportPrepared,
+  existingByKind?: Record<string, string[]>,
+): RecipeItem[] {
+  // A previously learned "use existing" pick pre-selects the link so a
+  // re-import of a known sheet recommends reuse instead of "create new".
+  // Only offered when the remembered recipe still exists in that kind's saved
+  // pool (otherwise the picker would show an invalid selection).
+  const suggestions = prepared.aliasLinkSuggestions ?? {};
+  const suggestLink = (name: string, kind: string): string | undefined => {
+    const suggested = suggestions[name.trim().toLowerCase()];
+    if (!suggested) return undefined;
+    if (suggested.trim().toLowerCase() === name.trim().toLowerCase()) return undefined;
+    return (existingByKind?.[kind] ?? []).find(
+      (n) => n.trim().toLowerCase() === suggested.trim().toLowerCase(),
+    );
+  };
+  const kept = prepared.parsed.recipes.map((r, i) => {
+    const kind = specImportRecipeDisplayKind(r);
+    const linkExisting =
+      kind === "cheese" || kind === "mix" ? suggestLink(r.name ?? "", kind) : undefined;
+    return {
+      key: `rk${i}`,
+      orig: r,
+      baseOrig: r,
+      brandTouched: false,
+      flavorTouched: false,
+      name: r.name ?? "",
+      kind,
+      brand: r.brand ?? "",
+      flavor: r.flavor ?? "",
+      ...(linkExisting ? { linkExisting } : {}),
+      include: true,
+      tombstoned: false,
+    };
+  });
   const skipped = prepared.skipped.recipes.map((r, i) => ({
     key: `rs${i}`,
     orig: r,
@@ -240,7 +262,11 @@ export default function SpecImportDialog({
   useEffect(() => {
     if (prepared) {
       setProfiles(buildProfileItems(prepared));
-      setRecipes(buildRecipeItems(prepared));
+      // existingRecipeNamesByKind is intentionally NOT a dependency: this
+      // effect must only reset the review when a NEW prepared payload arrives,
+      // never because the parent re-rendered with a fresh options object (that
+      // would wipe the user's in-progress edits).
+      setRecipes(buildRecipeItems(prepared, existingRecipeNamesByKind));
       setStep(1);
     } else {
       setProfiles([]);
@@ -352,12 +378,39 @@ export default function SpecImportDialog({
     [profiles, prepared],
   );
 
+  // "Use existing recipe" picks on INCLUDED cheese/mix recipes, turned into
+  // learnable aliases (parsed sheet blend name → chosen existing recipe name)
+  // under the "appType" kind — the blend-name namespace the prepare pass reads
+  // back as link suggestions. Saved alongside the step-1 renames on Apply so a
+  // re-import of the same sheet recommends the link instead of "create new".
+  const learnedLinks: SpecImportAlias[] = useMemo(() => {
+    const out: SpecImportAlias[] = [];
+    for (const r of recipes) {
+      if (!r.include) continue;
+      if (r.kind !== "cheese" && r.kind !== "mix") continue;
+      const linked = r.linkExisting?.trim();
+      const external = (r.baseOrig.name ?? "").trim();
+      if (!linked || !external) continue;
+      if (external.toLowerCase() === linked.toLowerCase()) continue;
+      out.push({ kind: "appType", externalName: external, canonicalName: linked, context: null });
+    }
+    return out;
+  }, [recipes]);
+
+  // Everything learnable this Apply will persist: step-1 brand/flavor renames
+  // plus the user's "use existing" recipe links (links win on key collisions —
+  // an explicit pick beats a rename of the same label).
+  const learnedAll = useMemo(
+    () => mergeSpecAliases(learnedRenames, learnedLinks),
+    [learnedRenames, learnedLinks],
+  );
+
   // What the step-2 "mappings will be remembered" note reports: the prepare-time
-  // learned mappings PLUS the user's step-1 renames (rename wins on collisions),
+  // learned mappings PLUS the user's step-1 renames and "use existing" links,
   // exactly what will be saved on Apply.
   const rememberedMappingCount = useMemo(
-    () => mergeSpecAliases(prepared?.newAliases ?? [], learnedRenames).length,
-    [prepared, learnedRenames],
+    () => mergeSpecAliases(prepared?.newAliases ?? [], learnedAll).length,
+    [prepared, learnedAll],
   );
 
   // The edited, include-only import that would be applied. Recomputed live so the
@@ -773,7 +826,7 @@ export default function SpecImportDialog({
           ) : (
             <button
               type="button"
-              onClick={() => onConfirm(edited, learnedRenames)}
+              onClick={() => onConfirm(edited, learnedAll)}
               disabled={
                 loading ||
                 applying ||
