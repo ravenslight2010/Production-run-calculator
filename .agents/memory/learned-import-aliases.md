@@ -84,3 +84,25 @@ every time even after they had linked the blend to the right existing recipe.
 - External key = the PRISTINE review-time parsed name (post
   canonicalizeSpecImportCheeseRecipeNames), so the key is stable across
   re-imports of the same sheet.
+
+## appType aliases must NEVER rename blend-named applicator types at prepare
+
+Because appType doubles as the blend-name namespace, the prepare-time
+canonicalizer must SKIP applicator slots whose type loose-matches a cheese/mix
+recipe parsed from the same sheet — the alias surfaces only as the advisory
+dialog pre-select. Conversely, when the user DOES pick "Use existing", the
+dialog's edited output must re-point matching applicator types to the linked
+name.
+
+**Why:** apply-time slot resolvers re-type applicators to the generic
+"cheese"/"Mix" card by loose-matching the applicator type against the import's
+recipe names. Any one-sided rename (alias renames the type while the user
+creates new, or the link renames the recipe while the type keeps the sheet
+name) breaks that match, and the blend leaks into the raw applicator Type
+dropdown — the exact bug the user hit.
+
+**How to apply:** keep the two sides in lockstep: prepare-time skip
+(blend-named types stay verbatim) + dialog-confirm re-point (linked cheese/mix
+picks rename matching applicator types, keyed by pristine AND current names via
+the shared loose key). Both sides are regression-tested — extend those tests
+when touching either side.

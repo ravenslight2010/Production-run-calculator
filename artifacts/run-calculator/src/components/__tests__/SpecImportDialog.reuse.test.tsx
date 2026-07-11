@@ -287,6 +287,43 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     });
   });
 
+  it("re-points a blend-named applicator type to the linked recipe on Apply", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Aldo's Spinach Blend",
+      brand: "Aldo's",
+      flavor: "SPINACH",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    const prepared = makePrepared(recipe, [
+      {
+        brand: "Aldo's",
+        flavor: "SPINACH",
+        applicators: [
+          { type: "Aldo's Spinach Blend", ozPerPizza: 3 },
+          { type: "Sausage", ozPerPizza: 1 },
+        ],
+        pepperonis: [],
+      } as ParsedProfile,
+    ]);
+    const onConfirm = vi.fn();
+    renderDialog(prepared, onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Lowe's Spinach Cheese Mix" },
+    });
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    const types = (out.profiles[0]?.applicators ?? []).map((a) => a.type);
+    // The blend slot follows the linked recipe name so applySpecImport's slot
+    // resolver re-types it to the generic cheese card; unrelated slots untouched.
+    expect(types).toEqual(["Lowe's Spinach Cheese Mix", "Sausage"]);
+    // The linked (reference-only) recipe carries the same name — they match.
+    expect(out.recipes[0].name).toBe("Lowe's Spinach Cheese Mix");
+    expect(out.recipes[0].referenceOnly).toBe(true);
+  });
+
   it("does NOT learn an alias for a dough 'Use existing' pick (blend-name namespace only)", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",

@@ -9,6 +9,8 @@ import {
   crossFillSpecImport,
   collectSpecRenameAliases,
   mergeSpecAliases,
+  cleanSpecCheeseRecipeName,
+  specImportNameMatchKey,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedRecipeTarget,
@@ -416,6 +418,36 @@ export default function SpecImportDialog({
   // The edited, include-only import that would be applied. Recomputed live so the
   // change list and counts always reflect the user's edits.
   const edited: ParsedSpecImport = useMemo(() => {
+    // "Use existing recipe" picks rename the RECIPE to the linked name, so any
+    // profile applicator slot whose type names that blend must follow: the
+    // apply-time slot resolvers loose-match applicator types against this
+    // import's recipe names to re-type slots to the generic "cheese"/"Mix" card.
+    // Without the re-point, a linked blend's slot no longer matches anything and
+    // leaks into the raw applicator Type dropdown. Keyed by BOTH the pristine
+    // parsed name and the current (possibly renamed) name.
+    const linkedTypeRenames = new Map<string, string>();
+    for (const r of recipes) {
+      if (!r.include) continue;
+      if (r.kind !== "cheese" && r.kind !== "mix") continue;
+      const linked = r.linkExisting?.trim();
+      if (!linked) continue;
+      for (const nm of [r.baseOrig.name ?? "", r.orig.name ?? "", r.name]) {
+        const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(nm ?? ""));
+        if (key && !linkedTypeRenames.has(key)) linkedTypeRenames.set(key, linked);
+      }
+    }
+    const repointApplicators = (p: ParsedProfile): ParsedProfile => {
+      if (linkedTypeRenames.size === 0 || !p.applicators?.length) return p;
+      let changed = false;
+      const applicators = p.applicators.map((a) => {
+        const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(a.type ?? ""));
+        const linked = key ? linkedTypeRenames.get(key) : undefined;
+        if (!linked || linked === a.type) return a;
+        changed = true;
+        return { ...a, type: linked };
+      });
+      return changed ? { ...p, applicators } : p;
+    };
     const outProfiles = profiles
       .filter((p) => p.include)
       .map((p): ParsedProfile => {
@@ -423,7 +455,7 @@ export default function SpecImportDialog({
         const die = p.dieType.trim();
         if (die) out.dieType = die;
         else delete out.dieType;
-        return out;
+        return repointApplicators(out);
       });
     const outRecipes = recipes
       .filter((r) => r.include)

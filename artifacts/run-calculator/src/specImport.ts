@@ -19,6 +19,7 @@ import {
   collectSpecImportMixes,
   collectSpecImportCheeseRecipes,
   canonicalizeSpecImportCheeseRecipeNames,
+  cleanSpecCheeseRecipeName,
   dedupeSpecImportCheeseRecipes,
   linkSpecImportCheeseToExisting,
   linkSpecImportNamedRecipesToExisting,
@@ -37,6 +38,7 @@ import {
   recipeTargets,
   resolveRetriedParsePass,
   shouldRetryParsePass,
+  specImportNameMatchKey,
   splitGridsForPrompt,
   summarizeSpecImport,
   type CanonicalResult,
@@ -206,6 +208,28 @@ function canonicalizeParsed(
     return result.value;
   };
 
+  // Applicator slots whose grid cell names a cheese/mix RECIPE parsed from this
+  // same sheet must keep the sheet's blend name VERBATIM: applySpecImport's
+  // slot resolvers (resolveCheeseApplicatorSlots / resolveMixApplicatorSlots)
+  // re-type those slots to the generic "cheese"/"Mix" card by loose-matching the
+  // applicator type against the import's recipe names. Letting an appType alias
+  // (the blend-name namespace — learned from "Use existing recipe" picks) or a
+  // fuzzy appType match rename the type here silently disconnects the slot from
+  // its recipe (e.g. the user declines the suggested link and creates new), and
+  // the blend leaks into the raw applicator Type dropdown instead of the
+  // cheese/mix slot. Link decisions are the review dialog's job, never a
+  // prepare-time rename.
+  const blendTypeKeys = new Set<string>();
+  for (const r of raw.recipes) {
+    if (r.kind !== "cheese") continue;
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(r.name ?? ""));
+    if (key) blendTypeKeys.add(key);
+  }
+  const isBlendNamedType = (type: string): boolean => {
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(type));
+    return !!key && blendTypeKeys.has(key);
+  };
+
   const profiles = raw.profiles.map(p => {
     const brand = track("brand", canonicalize(p.brand, known.brands, aliases, "brand"));
     const knownFlavors = known.flavorsByBrand[brand] ?? [];
@@ -214,10 +238,14 @@ function canonicalizeParsed(
       ...p,
       brand,
       flavor,
-      applicators: p.applicators.map(a => ({
-        ...a,
-        type: track("appType", canonicalize(a.type, known.appTypes, aliases, "appType")),
-      })),
+      applicators: p.applicators.map(a =>
+        isBlendNamedType(a.type ?? "")
+          ? { ...a }
+          : {
+              ...a,
+              type: track("appType", canonicalize(a.type, known.appTypes, aliases, "appType")),
+            },
+      ),
       pepperonis: p.pepperonis.map(pp => ({
         ...pp,
         type: track("pepType", canonicalize(pp.type, known.pepTypes, aliases, "pepType")),
