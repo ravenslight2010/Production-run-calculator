@@ -11002,6 +11002,7 @@ export default function Home() {
                           <li><span className="font-medium text-foreground">Cheese Mix Recipe Specs</span> — Manage Lists ▸ Cheese Recipes, last</li>
                         </ol>
                         <p className="text-[11px] text-muted-foreground">If a name still doesn&apos;t match (e.g. an extra word or a typo), confirm the match once in the review step — the app remembers it next time.</p>
+                        <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">Import one customer&apos;s spec sheet at a time. Importing several customers&apos; sheets in one go can mix up their look-alike recipe names (e.g. two different &quot;Spinach Cheese Mix&quot; blends) — and a wrong match confirmed once gets remembered for future imports.</p>
                       </div>
                     )}
                     {isManager && (

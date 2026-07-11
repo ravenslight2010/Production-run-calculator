@@ -3,6 +3,7 @@
 export * from "./runs";
 export * from "./sync";
 export * from "./dataReset";
+export * from "./dataHeals";
 export * from "./inventory";
 export * from "./users";
 export * from "./userRoles";

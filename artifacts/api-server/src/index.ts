@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";
+import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 
 const rawPort = process.env["PORT"];
@@ -29,6 +30,12 @@ app.listen(port, (err) => {
   // capability gating has a role catalog to resolve against. Best-effort.
   seedRoles().catch((err) => {
     logger.error({ err }, "Failed to seed roles");
+  });
+
+  // Apply any pending one-time data heals (marker-guarded, exactly once per
+  // database). Best-effort: a failure logs, rolls back, and retries next boot.
+  runDataHeals().catch((err) => {
+    logger.error({ err }, "Failed to run data heals");
   });
 
   // Ensure the seeded sandbox account exists with a known password + manager
