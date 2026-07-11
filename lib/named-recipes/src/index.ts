@@ -19,7 +19,7 @@
 // the per-day sync payload) and edited by managers only; the apps keep only thin
 // platform glue (fetch/save/delete) plus the run-side hydration.
 
-import { buildNearDupNameMatcher } from "@workspace/name-match";
+import { buildNearDupNameMatcher, looseNameKey } from "@workspace/name-match";
 
 // One component of a named recipe: an ingredient and how many POUNDS of it the
 // recipe uses. Matches the per-run RecipeRow shape ({ ingredient, lbs }).
@@ -215,6 +215,135 @@ export function namedRecipeFromDraft(draft: {
     components: draft.components,
     enabled: true,
   });
+}
+
+// ---------------------------------------------------------------------------
+// One-time local→server name consolidation planning
+// ---------------------------------------------------------------------------
+
+/**
+ * The consolidation decision for one master-data pool: which device-local
+ * recipe names should be PUSHED to the server pool (they become canonical
+ * entries), which are near-duplicate VARIANTS of an existing (or newly pushed)
+ * name and should be merged into it, and which already exist on the server
+ * verbatim (nothing to push — just clean up the local list).
+ */
+export interface NameConsolidationPlan {
+  /** Local-only names to add to the server pool, in canonical-first order. */
+  additions: string[];
+  /** Variant local name → the canonical name it should be merged into. */
+  renames: Record<string, string>;
+  /** Local names already in the server pool (case-insensitive exact match). */
+  alreadyPresent: string[];
+}
+
+/**
+ * Plan how a device-local recipe-name list folds into its server master-data
+ * pool so run-form pickers and Manage Lists converge on ONE canonical entry per
+ * recipe. Matching uses the shared near-dup layers (word order / single typo,
+ * ambiguity + digit guards; the extra-word layer stays OFF — "Garlic Alfredo"
+ * must NOT fold into "Alfredo Sauce"), with kind-generic filler tokens (e.g.
+ * "sauce", "recipe") stripped from the key so "Mystic", "Mystic Recipe" and
+ * "mystic sauce" all resolve to the same recipe.
+ *
+ * Two passes: (1) each local name is matched against the server pool — an exact
+ * case-insensitive hit is reported as already-present, a near-dup hit becomes a
+ * rename onto the server spelling; (2) the remaining local-only names are
+ * deduped among THEMSELVES — `preferAsCanonical` (e.g. "has saved recipe rows")
+ * then shorter-name/alphabetical order picks the canonical spelling, and the
+ * other variants become renames onto it. Pure.
+ */
+export function planNameConsolidation(opts: {
+  localNames: ReadonlyArray<string>;
+  serverNames: ReadonlyArray<string>;
+  /**
+   * Kind-generic filler tokens stripped (lowercased) from the match key, on
+   * top of the shared generic fillers looseNameKey already removes. If
+   * stripping would empty the key, the unstripped key is kept ("Sauce" stays
+   * "sauce", it does not match everything).
+   */
+  genericTokens?: ReadonlyArray<string>;
+  /** Prefer this name as the canonical spelling when deduping local names. */
+  preferAsCanonical?: (name: string) => boolean;
+}): NameConsolidationPlan {
+  const generic = new Set(
+    (opts.genericTokens ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean),
+  );
+  const keyOf = (name: string): string => {
+    const base = looseNameKey(name);
+    if (!base) return base;
+    const tokens = base.split(" ");
+    const kept = tokens.filter((t) => !generic.has(t));
+    return (kept.length ? kept : tokens).join(" ");
+  };
+
+  // Server pool, first spelling wins per case-insensitive name.
+  const serverByCi = new Map<string, string>();
+  for (const raw of opts.serverNames) {
+    const name = (raw ?? "").trim();
+    if (!name) continue;
+    const ci = name.toLowerCase();
+    if (!serverByCi.has(ci)) serverByCi.set(ci, name);
+  }
+
+  // Clean + ci-dedupe the local list (first spelling wins).
+  const locals: string[] = [];
+  const seenLocal = new Set<string>();
+  for (const raw of opts.localNames) {
+    const name = (raw ?? "").trim();
+    if (!name) continue;
+    const ci = name.toLowerCase();
+    if (seenLocal.has(ci)) continue;
+    seenLocal.add(ci);
+    locals.push(name);
+  }
+
+  const alreadyPresent: string[] = [];
+  const renames: Record<string, string> = {};
+  const rest: string[] = [];
+  const matchServer = buildNearDupNameMatcher([...serverByCi.values()], {
+    keyOf,
+  });
+  for (const name of locals) {
+    const exact = serverByCi.get(name.toLowerCase());
+    if (exact) {
+      alreadyPresent.push(name);
+      continue;
+    }
+    const hit = matchServer(name);
+    if (hit && hit.toLowerCase() !== name.toLowerCase()) {
+      renames[name] = hit;
+      continue;
+    }
+    rest.push(name);
+  }
+
+  // Dedupe the remaining local-only names among themselves. Canonical
+  // preference: caller's predicate (e.g. has saved rows), then the shorter
+  // spelling, then alphabetical. The matcher is rebuilt per accepted addition —
+  // fine here because this is a ONE-TIME migration over small pools (≤ ~100
+  // names), not a per-keystroke scan.
+  const prefer = opts.preferAsCanonical ?? (() => false);
+  rest.sort(
+    (a, b) =>
+      Number(prefer(b)) - Number(prefer(a)) ||
+      a.length - b.length ||
+      a.localeCompare(b),
+  );
+  const additions: string[] = [];
+  for (const name of rest) {
+    const hit =
+      additions.length > 0
+        ? buildNearDupNameMatcher(additions, { keyOf })(name)
+        : null;
+    if (hit && hit.toLowerCase() !== name.toLowerCase()) {
+      renames[name] = hit;
+    } else {
+      additions.push(name);
+    }
+  }
+
+  return { additions, renames, alreadyPresent };
 }
 
 /**

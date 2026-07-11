@@ -8,6 +8,7 @@ import {
   namedRecipeFromDraft,
   addNamedRecipesIfAbsentByName,
   repointNamedRecipeIngredients,
+  planNameConsolidation,
   type NamedRecipe,
 } from "./index";
 
@@ -214,5 +215,95 @@ describe("addNamedRecipesIfAbsentByName", () => {
       normalizeNamedRecipe({ id: "sauce:spicy-house-sauce", name: "Spicy House Sauce" })!,
     ]);
     expect(added).toBe(1);
+  });
+});
+
+describe("planNameConsolidation", () => {
+  it("classifies exact ci server matches as alreadyPresent", () => {
+    const plan = planNameConsolidation({
+      localNames: ["mystic pizza sauce", "New Sauce"],
+      serverNames: ["Mystic Pizza Sauce"],
+      genericTokens: ["sauce", "recipe"],
+    });
+    expect(plan.alreadyPresent).toEqual(["mystic pizza sauce"]);
+    expect(plan.additions).toEqual(["New Sauce"]);
+    expect(plan.renames).toEqual({});
+  });
+
+  it("folds generic-token variants onto the server spelling", () => {
+    const plan = planNameConsolidation({
+      localNames: ["Mystic", "Mystic Recipe", "mystic sauce"],
+      serverNames: ["Mystic Pizza Sauce"],
+      genericTokens: ["sauce", "recipe", "pizza"],
+    });
+    expect(plan.renames).toEqual({
+      Mystic: "Mystic Pizza Sauce",
+      "Mystic Recipe": "Mystic Pizza Sauce",
+      "mystic sauce": "Mystic Pizza Sauce",
+    });
+    expect(plan.additions).toEqual([]);
+    expect(plan.alreadyPresent).toEqual([]);
+  });
+
+  it("dedupes local-only variants onto one canonical addition", () => {
+    const plan = planNameConsolidation({
+      localNames: ["Lucia's Craft Sauce Recipe", "Lucia's Craft", "Lucias Craft Sauce"],
+      serverNames: [],
+      genericTokens: ["sauce", "recipe"],
+    });
+    expect(plan.additions).toEqual(["Lucia's Craft"]);
+    expect(plan.renames["Lucia's Craft Sauce Recipe"]).toBe("Lucia's Craft");
+    expect(plan.renames["Lucias Craft Sauce"]).toBe("Lucia's Craft");
+  });
+
+  it("prefers preferAsCanonical names over shorter spellings", () => {
+    const plan = planNameConsolidation({
+      localNames: ["Alfredo", "Alfredo Sauce"],
+      serverNames: [],
+      genericTokens: ["sauce", "recipe"],
+      preferAsCanonical: (n) => n === "Alfredo Sauce",
+    });
+    expect(plan.additions).toEqual(["Alfredo Sauce"]);
+    expect(plan.renames).toEqual({ Alfredo: "Alfredo Sauce" });
+  });
+
+  it("does NOT fold a qualified name into a base name (extra-word layer stays off)", () => {
+    const plan = planNameConsolidation({
+      localNames: ["Garlic Alfredo"],
+      serverNames: ["Alfredo Sauce"],
+      genericTokens: ["sauce", "recipe"],
+    });
+    expect(plan.renames).toEqual({});
+    expect(plan.additions).toEqual(["Garlic Alfredo"]);
+  });
+
+  it("keeps a name that IS only a generic token instead of matching everything", () => {
+    const plan = planNameConsolidation({
+      localNames: ["Sauce"],
+      serverNames: ["Marinara Sauce"],
+      genericTokens: ["sauce", "recipe"],
+    });
+    expect(plan.additions).toEqual(["Sauce"]);
+    expect(plan.renames).toEqual({});
+  });
+
+  it("digit guard: sizes never cross-match", () => {
+    const plan = planNameConsolidation({
+      localNames: ["12in NY Dough"],
+      serverNames: ["16in NY Dough"],
+      genericTokens: ["dough", "recipe"],
+    });
+    expect(plan.additions).toEqual(["12in NY Dough"]);
+    expect(plan.renames).toEqual({});
+  });
+
+  it("drops blank and ci-duplicate local names", () => {
+    const plan = planNameConsolidation({
+      localNames: ["  ", "CRB Dough", "crb dough"],
+      serverNames: [],
+      genericTokens: ["dough", "recipe"],
+    });
+    expect(plan.additions).toEqual(["CRB Dough"]);
+    expect(plan.renames).toEqual({});
   });
 });

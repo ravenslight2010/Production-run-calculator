@@ -157,6 +157,7 @@ import {
   migrateIngredientListsToCatalogIfNeeded,
   hydrateRecipeRowsWithCatalog,
   existingRecipeNamesForImport,
+  specImportCheeseRecipeIsMix,
   healDieTypesFromProfiles,
   healPackagingFromProfiles,
   normalizePackagingFields,
@@ -421,12 +422,14 @@ import {
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
   repointCheeseRecipeIngredients,
+  specCheeseDraftToRecipe,
+  addCheeseRecipesIfAbsentByName,
 } from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, type NamedRecipe } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, type NamedRecipe } from "@workspace/named-recipes";
 
 import {
   Form,
@@ -3681,6 +3684,247 @@ export default function Home() {
     },
     [],
   );
+
+  // ── One-time recipe-name consolidation into the server master-data pools ──
+  // The run-form pickers union server pool names with legacy LOCAL name lists,
+  // so old local-only entries ("Mystic", "Mystic Recipe", "mystic sauce") show
+  // up in pickers but never in Manage Lists (which shows server pools only).
+  // This migration, on a manager device: pushes every local-only name into the
+  // right server pool (cheese-list names that are really mixes route to Mixes),
+  // folds near-duplicate variants onto one canonical spelling (rewriting run
+  // values + presets via the existing merge machinery, with tombstones so sync
+  // can't resurrect them), then empties the legacy local lists. Marker-guarded;
+  // re-armed on failure so it retries next mount. Names that can't safely land
+  // on the server (ambiguous near-dups) are left in the local list untouched.
+  const nameConsolidationRef = useRef(false);
+  useEffect(() => {
+    if (nameConsolidationRef.current || !canManageInventory) return;
+    const MARKER = "run-calc-recipe-name-consolidation-v1";
+    try {
+      if (localStorage.getItem(MARKER)) { nameConsolidationRef.current = true; return; }
+    } catch {}
+    const localSauce = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n) => !SEED_MIX_RECIPE_NAMES.has(n));
+    const localDough = loadList(DOUGH_RECIPE_NAMES_KEY, []);
+    const localCheeseAll = loadList(CHEESE_RECIPE_NAMES_KEY, []);
+    const localMix = loadList(MIX_RECIPE_NAMES_KEY, []);
+    // A fresh device may simply not have pulled its first sync yet. Don't set
+    // the marker; the list states in the deps re-fire this effect when the
+    // legacy lists actually arrive (and if they never do, there is no work).
+    if (localSauce.length + localDough.length + localCheeseAll.length + localMix.length === 0) return;
+    nameConsolidationRef.current = true;
+    (async () => {
+      const before = captureMasterDataSnapshot();
+      const [saucePool, doughPool, mixPool, cheesePool] = await Promise.all([
+        fetchNamedRecipes("sauce"),
+        fetchNamedRecipes("dough"),
+        fetchMixes(),
+        fetchCheeseRecipes(),
+      ]);
+      // Saved local recipe rows keyed case-insensitively: used both to prefer
+      // the variant that actually has a recipe as the canonical spelling and to
+      // carry those rows along when a name is pushed to the server.
+      const rowsCi = (entries: Array<[string, RecipeRow[] | undefined]>) => {
+        const m = new Map<string, RecipeRow[]>();
+        for (const [name, rows] of entries) {
+          const k = name.trim().toLowerCase();
+          if (k && rows && rows.length > 0 && !m.has(k)) m.set(k, rows);
+        }
+        return m;
+      };
+      const doughRows = rowsCi(Object.entries(loadDoughRecipePresets()).map(([n, p]) => [n, p?.rows]));
+      const sauceRows = rowsCi(Object.entries(loadFrontlineRecipePresets()));
+      const cheeseRows = rowsCi(Object.entries(loadCheeseRecipePresets()));
+      const hasRows = (m: Map<string, RecipeRow[]>) => (n: string) =>
+        (m.get(n.trim().toLowerCase())?.length ?? 0) > 0;
+      // Legacy cheese-list names that are really mixes (same heuristic +
+      // user-categorization-wins rule spec-import uses) route to the Mixes pool.
+      const mixNamesLower = new Set(
+        [...localMix, ...mixPool.map((m) => m.name)].map((n) => n.trim().toLowerCase()),
+      );
+      const cheeseAsMix: string[] = [];
+      const localCheese: string[] = [];
+      for (const n of localCheeseAll) {
+        const rows = cheeseRows.get(n.trim().toLowerCase()) ?? [];
+        (specImportCheeseRecipeIsMix(n, mixNamesLower, rows.length) ? cheeseAsMix : localCheese).push(n);
+      }
+      const cheeseOriginLower = new Set(cheeseAsMix.map((n) => n.trim().toLowerCase()));
+      // Plan per pool: which local names are already on the server, which fold
+      // onto an existing/canonical spelling, and which get added.
+      const plans = {
+        sauce: planNameConsolidation({
+          localNames: localSauce,
+          serverNames: saucePool.map((r) => r.name),
+          genericTokens: ["sauce", "recipe"],
+          preferAsCanonical: hasRows(sauceRows),
+        }),
+        dough: planNameConsolidation({
+          localNames: localDough,
+          serverNames: doughPool.map((r) => r.name),
+          genericTokens: ["dough", "recipe"],
+          preferAsCanonical: hasRows(doughRows),
+        }),
+        cheese: planNameConsolidation({
+          localNames: localCheese,
+          serverNames: cheesePool.map((r) => r.name),
+          genericTokens: ["recipe"],
+          preferAsCanonical: hasRows(cheeseRows),
+        }),
+        mixes: planNameConsolidation({
+          localNames: [...localMix, ...cheeseAsMix],
+          serverNames: mixPool.map((m) => m.name),
+          genericTokens: ["recipe"],
+          preferAsCanonical: hasRows(cheeseRows),
+        }),
+      };
+      // Push planned additions into each server pool. The add helpers run their
+      // own (narrower) near-dup matcher and may skip a candidate; reconcile by
+      // re-planning skipped names against the final pool — matches become
+      // renames, anything still unmatched stays in the local list (leftover).
+      const leftovers = {
+        sauce: new Set<string>(),
+        dough: new Set<string>(),
+        cheese: new Set<string>(),
+        mixes: new Set<string>(),
+      };
+      const reconcile = (
+        kind: keyof typeof plans,
+        finalNames: string[],
+        genericTokens: string[],
+      ) => {
+        const ci = new Set(finalNames.map((n) => n.trim().toLowerCase()));
+        const missing = plans[kind].additions.filter((n) => !ci.has(n.trim().toLowerCase()));
+        if (missing.length === 0) return;
+        const follow = planNameConsolidation({
+          localNames: missing,
+          serverNames: finalNames,
+          genericTokens,
+        });
+        Object.assign(plans[kind].renames, follow.renames);
+        for (const n of follow.additions) leftovers[kind].add(n);
+      };
+      if (plans.sauce.additions.length > 0) {
+        const drafts = plans.sauce.additions
+          .map((n) => namedRecipeFromDraft({ name: n, components: sauceRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "sauce" }))
+          .filter((r): r is NamedRecipe => r !== null);
+        const { added, items } = await addNamedRecipesToServerIfAbsent("sauce", drafts);
+        if (added > 0) cycleCountQc.setQueryData(["sauceRecipes"], items);
+        reconcile("sauce", items.map((r) => r.name), ["sauce", "recipe"]);
+      }
+      if (plans.dough.additions.length > 0) {
+        const drafts = plans.dough.additions
+          .map((n) => namedRecipeFromDraft({ name: n, components: doughRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "dough" }))
+          .filter((r): r is NamedRecipe => r !== null);
+        const { added, items } = await addNamedRecipesToServerIfAbsent("dough", drafts);
+        if (added > 0) cycleCountQc.setQueryData(["doughRecipes"], items);
+        reconcile("dough", items.map((r) => r.name), ["dough", "recipe"]);
+      }
+      if (plans.cheese.additions.length > 0) {
+        const drafts = plans.cheese.additions
+          .map((n) => specCheeseDraftToRecipe({ name: n, brand: "", flavors: [], components: cheeseRows.get(n.trim().toLowerCase()) ?? [] }))
+          .filter((r): r is CheeseRecipe => r !== null);
+        const { merged, added } = addCheeseRecipesIfAbsentByName(cheesePool, drafts);
+        let finalNames = cheesePool.map((r) => r.name);
+        if (added > 0) {
+          const saved = await saveCheeseRecipes(merged);
+          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          finalNames = saved.map((r) => r.name);
+        }
+        reconcile("cheese", finalNames, ["recipe"]);
+      }
+      if (plans.mixes.additions.length > 0) {
+        const drafts = plans.mixes.additions
+          .map((n) => specMixDraftToMix({
+            name: n,
+            brand: "",
+            flavor: "",
+            componentIngredients: (cheeseRows.get(n.trim().toLowerCase()) ?? []).map((r) => r.ingredient),
+          }))
+          .filter((m): m is Mix => m != null);
+        const { merged, added } = addSpecMixesIfAbsent(mixPool, drafts);
+        let finalNames = mixPool.map((m) => m.name);
+        if (added > 0) {
+          const saved = await saveMixes(merged);
+          cycleCountQc.setQueryData(["mixes"], saved);
+          finalNames = saved.map((m) => m.name);
+        }
+        reconcile("mixes", finalNames, ["recipe"]);
+      }
+      // Fold near-dup variants onto their canonical spelling through the same
+      // machinery the Merge tab uses (rewrites run values, presets, list +
+      // tombstones the merged-away names). Mix renames whose source came from
+      // the legacy CHEESE list are also applied under "cheese" so cheese-side
+      // references and the cheese list/tombstone namespace get rewritten too.
+      const affectedRunIds: string[] = [];
+      const applyRenames = (category: RecipeNameMergeCategory, renames: Record<string, string>) => {
+        const map: MergeMap = {};
+        for (const [src, tgt] of Object.entries(renames)) {
+          if (src.trim().toLowerCase() !== tgt.trim().toLowerCase()) map[src] = tgt;
+        }
+        if (Object.keys(map).length === 0) return;
+        affectedRunIds.push(...applyRecipeNameMerge(category, map));
+      };
+      applyRenames("sauce", plans.sauce.renames);
+      applyRenames("dough", plans.dough.renames);
+      applyRenames("cheese", plans.cheese.renames);
+      applyRenames("mixes", plans.mixes.renames);
+      const mixRenamesFromCheese = Object.fromEntries(
+        Object.entries(plans.mixes.renames).filter(([src]) => cheeseOriginLower.has(src.trim().toLowerCase())),
+      );
+      applyRenames("cheese", mixRenamesFromCheese);
+      // Empty the legacy local lists: every name is now either on the server
+      // (alreadyPresent/addition), renamed away (tombstoned by the merge), or a
+      // leftover we intentionally keep. Tombstone dropped names so the additive
+      // sync union can't re-add them from a peer.
+      const wipeCovered = (
+        listKey: string,
+        namespace: string,
+        keep: Set<string>,
+      ) => {
+        const cur = loadList(listKey, []);
+        const kept = cur.filter((n) => keep.has(n));
+        const dropped = cur.filter((n) => !keep.has(n));
+        if (dropped.length === 0) return;
+        for (const n of dropped) tombstoneDeleted(namespace, n);
+        saveList(listKey, kept);
+      };
+      const cheeseKeep = new Set([...leftovers.cheese, ...[...leftovers.mixes].filter((n) => cheeseOriginLower.has(n.trim().toLowerCase()))]);
+      const mixKeep = new Set([...leftovers.mixes].filter((n) => !cheeseOriginLower.has(n.trim().toLowerCase())));
+      // Namespace strings mirror RECIPE_NAME_MERGE_STORE in storage.ts so these
+      // tombstones land in the same per-list namespace the merge path uses.
+      wipeCovered(FRONTLINE_RECIPE_NAMES_KEY, "frontlineRecipeNames", leftovers.sauce);
+      wipeCovered(DOUGH_RECIPE_NAMES_KEY, "doughRecipeNames", leftovers.dough);
+      wipeCovered(CHEESE_RECIPE_NAMES_KEY, "cheeseRecipeNames", cheeseKeep);
+      wipeCovered(MIX_RECIPE_NAMES_KEY, "mixRecipeNames", mixKeep);
+      // Advance the edit stamp on every run the renames re-pointed so the sync
+      // push below wins the per-run lost-update guard on every peer.
+      if (affectedRunIds.length > 0) {
+        const stamp = Date.now();
+        const upd = loadRunValuesUpdated();
+        for (const id of affectedRunIds) upd[id] = stamp;
+        saveRunValuesUpdated(upd);
+      }
+      refreshAfterMerge();
+      // Push immediately so an incoming sync-pull's additive union can't
+      // resurrect the wiped names on this device. Best-effort.
+      try {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {}
+      noteChange(
+        "merge",
+        "Consolidated legacy recipe names into the shared Manage Lists pools",
+        before,
+      );
+      try { localStorage.setItem(MARKER, "1"); } catch {}
+    })().catch(() => { nameConsolidationRef.current = false; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageInventory, frontlineRecipeNames, doughRecipeNames, cheeseRecipeNames, mixRecipeNames, cycleCountQc, noteChange]);
 
   const dedupSorted = (all: string[]) => {
     const seen = new Set<string>();
