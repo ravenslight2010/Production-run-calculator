@@ -156,11 +156,88 @@ export type ParsedSpecImport = {
 };
 
 /**
+ * Overlay `next`'s DEFINED fields onto `prev` — a later file only overrides
+ * what it actually states, it never blanks a field an earlier file provided.
+ * (A plain `{...prev, ...next}` would clobber prev's value with an explicit
+ * `undefined` when the later parse carries the key unset.)
+ */
+function overlayDefined<T extends object>(prev: T, next: T): T {
+  const out = { ...prev } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(next)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as T;
+}
+
+/**
+ * Merge two same-brand+flavor profiles from different files of one batch.
+ * Field-level, later-wins-only-when-stated: scalars overlay per field, and the
+ * applicator/pepperoni arrays (where an EMPTY array means "this sheet didn't
+ * state them", not "there are none") keep the earlier file's slots unless the
+ * later file actually lists some.
+ */
+function mergeProfilePair(prev: ParsedProfile, next: ParsedProfile): ParsedProfile {
+  const merged = overlayDefined(prev, next);
+  merged.applicators = next.applicators?.length ? next.applicators : prev.applicators ?? [];
+  merged.pepperonis = next.pepperonis?.length ? next.pepperonis : prev.pepperonis ?? [];
+  return merged;
+}
+
+/**
+ * Merge two same-kind+name recipes from different files of one batch. The
+ * later file's rows win when it has any (matching the single-file
+ * overwrite-by-name apply semantics), but the brand/flavor TIES are UNIONED —
+ * two files that share one recipe name must both keep their profiles attached,
+ * or the earlier file's products silently lose the recipe (the classic
+ * multi-file "mixed things up" report). Flavorless singular brands are folded
+ * into `brandAnchors` so each file's whole-brand fan-out survives the union.
+ */
+function mergeRecipePair(prev: ParsedRecipe, next: ParsedRecipe): ParsedRecipe {
+  const merged = overlayDefined(prev, next);
+  merged.rows = next.rows?.length ? next.rows : prev.rows ?? [];
+
+  // Union the explicit flavor-level targets of BOTH sides (recipeTargets folds
+  // each side's singular brand+flavor in as well).
+  const targets: ParsedRecipeTarget[] = [];
+  const seenTargets = new Set<string>();
+  for (const t of [...recipeTargets(prev), ...recipeTargets(next)]) {
+    const key = `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`;
+    if (seenTargets.has(key)) continue;
+    seenTargets.add(key);
+    targets.push(t);
+  }
+  if (targets.length) merged.targets = targets;
+  else delete merged.targets;
+
+  // Union brand anchors, folding in each side's flavorless singular brand
+  // (recipeTargets drops those, but recipeApplyTargets fans them per brand).
+  const anchors: string[] = [];
+  const seenAnchors = new Set<string>();
+  const addAnchor = (b: string | undefined): void => {
+    const name = (b ?? "").trim();
+    if (!name || seenAnchors.has(name.toLowerCase())) return;
+    seenAnchors.add(name.toLowerCase());
+    anchors.push(name);
+  };
+  for (const b of prev.brandAnchors ?? []) addAnchor(b);
+  for (const b of next.brandAnchors ?? []) addAnchor(b);
+  for (const r of [prev, next]) {
+    if ((r.brand ?? "").trim() && !(r.flavor ?? "").trim()) addAnchor(r.brand);
+  }
+  if (anchors.length) merged.brandAnchors = anchors;
+  else delete merged.brandAnchors;
+
+  return merged;
+}
+
+/**
  * Merge several parsed spec imports (e.g. from importing multiple workbooks at
  * once) into one combined result. Profiles are de-duplicated by brand+flavor and
- * recipes by kind+name, both case-insensitively, with LATER entries winning so a
- * more recent file overrides an earlier one — matching the single-file
- * overwrite-by-name apply semantics. Notes are concatenated. Pure.
+ * recipes by kind+name, both case-insensitively. Collisions merge FIELD-LEVEL
+ * (later file wins only for what it actually states; recipe brand/flavor ties
+ * union across files) — a wholesale later-wins replace would silently drop the
+ * earlier file's fields and profile ties, cross-wiring a multi-file batch.
+ * Notes are concatenated. Pure.
  */
 export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImport {
   const profileMap = new Map<string, ParsedProfile>();
@@ -173,11 +250,15 @@ export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImpo
   let anon = 0;
   for (const item of list) {
     for (const p of item.profiles) {
-      profileMap.set(`${p.brand.trim().toLowerCase()}|${p.flavor.trim().toLowerCase()}`, p);
+      const key = `${p.brand.trim().toLowerCase()}|${p.flavor.trim().toLowerCase()}`;
+      const prev = profileMap.get(key);
+      profileMap.set(key, prev ? mergeProfilePair(prev, p) : p);
     }
     for (const r of item.recipes) {
       const nm = r.name.trim().toLowerCase();
-      recipeMap.set(nm ? `${r.kind}|${nm}` : `${r.kind}|__anon${anon++}`, r);
+      const key = nm ? `${r.kind}|${nm}` : `${r.kind}|__anon${anon++}`;
+      const prev = recipeMap.get(key);
+      recipeMap.set(key, prev ? mergeRecipePair(prev, r) : r);
     }
     if (item.note && item.note.trim()) notes.push(item.note.trim());
     for (const w of item.warnings ?? []) {

@@ -30,3 +30,14 @@ more capacity is needed. The AI output side has a matching trap:
 result isn't cut into invalid JSON (truncated JSON → JSON.parse fail → that file
 yields nothing). Both apps call `gridsToPromptText(grids)` with no overrides, so
 raising the lib defaults keeps web+mobile at parity automatically.
+
+## Cross-file collisions must merge field-level, never wholesale last-wins
+When two files in one batch mention the same brand+flavor profile or the same
+kind+name recipe, `mergeParsedSpecImports` merges FIELD-LEVEL: a later file only
+overrides fields it actually states; empty applicator/pepperoni arrays mean
+"not stated" (earlier slots kept); recipe brand/flavor ties are UNIONED (incl.
+flavorless singular brands folded into brandAnchors).
+**Why:** wholesale later-wins silently dropped the earlier file's fields and
+recipe→profile ties — users saw multi-file imports "mixing things up."
+**How to apply:** any new ParsedProfile/ParsedRecipe field must survive this
+merge; explicit "clear" semantics would need a sentinel, not an empty array.

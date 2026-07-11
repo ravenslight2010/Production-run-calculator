@@ -821,3 +821,14 @@ number+ingredient pairs → one cheese-kind recipe.
   made a recipe the user reclassified to "mix" still show on the run's Cheese
   card — mixes are Mixes-screen master-data (per-pizza oz, buildMixPlan), not
   applicator cheese recipes.
+
+## Re-import prunes against the previous snapshot (manual edits survive)
+commitSpecImport diffs the incoming (post-canonicalize) parse against the
+newest saved spec-sheet snapshot with the same sourceKey and applies ONLY what
+changed (`pruneSpecImportAgainstSnapshot`): unchanged profile scalars deleted,
+applicator/pep arrays atomic, fully-unchanged profiles dropped, unchanged
+recipes demoted to referenceOnly. The snapshot saved after apply is always the
+FULL unpruned parse or the next diff mis-compares. pep1Combined is only derived
+when the import carries pep slots so pruned re-imports keep the user's setting.
+**Why:** re-importing a sheet used to wholesale-overwrite, clobbering manual
+edits made since the last import.
