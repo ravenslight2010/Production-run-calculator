@@ -1367,8 +1367,8 @@ function RecipeRow({
               {item.kind === "cheese" && (
                 <>
                   {" "}
-                  Spec sheets show per-pizza amounts; to change its batch pounds,
-                  re-import your Cheese Mix Recipe Specs workbook.
+                  This sheet's per-pizza ounces will be saved to its oz-per-pizza
+                  column; its batch pounds are kept as-is.
                 </>
               )}
             </div>

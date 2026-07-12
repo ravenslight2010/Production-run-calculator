@@ -7,11 +7,13 @@
  */
 
 /**
- * One ingredient of a mix and how many pounds of it go into a single pizza's worth of the finished mix.
+ * One ingredient of a mix and how many ounces of it go into a single pizza's worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).
  */
 export interface MixComponent {
   /** Ingredient name */
   ingredient: string;
-  /** Pounds of this ingredient per pizza */
+  /** Ounces of this ingredient per pizza */
   perPizza: number;
+  /** Pounds of this ingredient in one batch of the mix (reference only). Absent/0 = not recorded. */
+  perBatchLbs?: number;
 }

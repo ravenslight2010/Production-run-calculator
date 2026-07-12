@@ -34,7 +34,7 @@ function genId(prefix: string): string {
 }
 
 function blankNamedRecipe(prefix: string, name: string): NamedRecipe {
-  return { id: genId(prefix), name, notes: "", components: [], enabled: true };
+  return { id: genId(prefix), name, brand: "", flavors: [], notes: "", components: [], enabled: true };
 }
 
 export default function NamedRecipesManager({

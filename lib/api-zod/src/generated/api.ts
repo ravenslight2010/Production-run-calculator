@@ -2201,8 +2201,9 @@ export const ListMixesResponse = zod.object({
   "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
-}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
+}).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
@@ -2224,8 +2225,9 @@ export const SaveMixesBody = zod.object({
   "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
-}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
+}).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')).describe('The batch of mixes to create or update (by id)')
 })
@@ -2242,8 +2244,9 @@ export const SaveMixesResponse = zod.object({
   "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
-}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
+}).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
@@ -2269,8 +2272,9 @@ export const DeleteMixesResponse = zod.object({
   "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
-}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "perPizza": zod.number().describe('Ounces of this ingredient per pizza'),
+  "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
+}).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
@@ -2370,8 +2374,9 @@ export const ListCheeseRecipesResponse = zod.object({
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "lbs": zod.number().describe('Pounds of this ingredient per batch')
-}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch'),
+  "ozPerPizza": zod.number().optional().describe('Ounces of this ingredient on one pizza (from spec sheets). Absent\/0 = not recorded.')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend, plus an optional per-pizza ounce amount (the unit spec sheets use) kept in its own column so spec-sheet imports never overwrite curated batch pounds.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
@@ -2392,8 +2397,9 @@ export const SaveCheeseRecipesBody = zod.object({
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "lbs": zod.number().describe('Pounds of this ingredient per batch')
-}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch'),
+  "ozPerPizza": zod.number().optional().describe('Ounces of this ingredient on one pizza (from spec sheets). Absent\/0 = not recorded.')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend, plus an optional per-pizza ounce amount (the unit spec sheets use) kept in its own column so spec-sheet imports never overwrite curated batch pounds.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of cheese recipes to create or update (by id)')
 })
@@ -2409,8 +2415,9 @@ export const SaveCheeseRecipesResponse = zod.object({
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "lbs": zod.number().describe('Pounds of this ingredient per batch')
-}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch'),
+  "ozPerPizza": zod.number().optional().describe('Ounces of this ingredient on one pizza (from spec sheets). Absent\/0 = not recorded.')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend, plus an optional per-pizza ounce amount (the unit spec sheets use) kept in its own column so spec-sheet imports never overwrite curated batch pounds.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
@@ -2435,8 +2442,9 @@ export const DeleteCheeseRecipesResponse = zod.object({
   "notes": zod.string().optional().describe('Optional free-form notes'),
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
-  "lbs": zod.number().describe('Pounds of this ingredient per batch')
-}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch'),
+  "ozPerPizza": zod.number().optional().describe('Ounces of this ingredient on one pizza (from spec sheets). Absent\/0 = not recorded.')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend, plus an optional per-pizza ounce amount (the unit spec sheets use) kept in its own column so spec-sheet imports never overwrite curated batch pounds.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })

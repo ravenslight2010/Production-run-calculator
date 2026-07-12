@@ -38,7 +38,14 @@ export const DEFAULT_DAYS_EARLY = 0;
 // in pounds, so plan math converts ounces → pounds by dividing by 16.
 export interface MixComponent {
   ingredient: string;
+  /** Ounces of this ingredient per pizza — drives all make-day math. */
   perPizza: number;
+  /**
+   * Pounds of this ingredient in one BATCH of the mix (manager-entered
+   * reference, e.g. from a batch recipe card). Display/record only — the plan
+   * math scales from `perPizza`. Absent/0 = not recorded.
+   */
+  perBatchLbs?: number;
 }
 
 // Ounces in a pound — per-pizza component weights are in ounces while batch
@@ -110,7 +117,10 @@ export function normalizeMixComponent(input: unknown): MixComponent | null {
     typeof raw.ingredient === "string" ? raw.ingredient.trim() : "";
   if (!ingredient) return null;
   const perPizza = Math.max(0, coerceNum(raw.perPizza, 0));
-  return { ingredient, perPizza };
+  const perBatchLbs = Math.max(0, coerceNum(raw.perBatchLbs, 0));
+  const out: MixComponent = { ingredient, perPizza };
+  if (perBatchLbs > 0) out.perBatchLbs = perBatchLbs;
+  return out;
 }
 
 // Coerce a raw API/DB record into a clean Mix, or null if it has no usable name.

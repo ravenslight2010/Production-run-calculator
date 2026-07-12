@@ -533,7 +533,7 @@ function MixEditor({
       {/* Components */}
       <div className="space-y-1.5">
         <p className="text-[11px] font-semibold text-muted-foreground">
-          Components (oz per pizza)
+          Components (oz per pizza · lbs per batch)
         </p>
         {draft.components.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">No components yet.</p>
@@ -566,6 +566,22 @@ function MixEditor({
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
                 <span className="text-[11px] text-muted-foreground">oz/pizza</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={c.perBatchLbs ?? 0}
+                  onChange={(e) =>
+                    patchComponent(idx, {
+                      perBatchLbs: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  onBlur={() => commit()}
+                  disabled={disabled}
+                  title="Pounds per batch (reference only — plan math uses oz/pizza)"
+                  className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground">lbs/batch</span>
                 <button
                   type="button"
                   onClick={() => removeComponent(idx)}

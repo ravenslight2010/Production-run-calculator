@@ -99,6 +99,7 @@ import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
 import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
+  applyCheeseOzPerPizza,
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
 import type { ReviewVerdict } from "@workspace/ai-review";
@@ -1023,8 +1024,14 @@ export async function commitSpecImport(
   mixesAdded: number;
   cheeseRecipesAdded: number;
   /**
-   * Saved server-pool recipes (cheese / dough / sauce) whose ingredient rows
-   * were REPLACED with this sheet's, because the user linked the parsed recipe
+   * Existing server-pool cheese recipes whose components' PER-PIZZA OUNCE
+   * column was refreshed from this sheet (matched by name). Batch pounds are
+   * never touched — spec sheets carry per-pizza ounces only.
+   */
+  cheeseOzUpdated: number;
+  /**
+   * Saved server-pool recipes (dough / sauce) whose ingredient rows were
+   * REPLACED with this sheet's, because the user linked the parsed recipe
    * to them AND checked "update it with this sheet" in the review.
    */
   recipesUpdated: number;
@@ -1121,10 +1128,10 @@ export async function commitSpecImport(
   // and here the matching SERVER pool recipe's ingredient rows are replaced
   // too — the dough/sauce pickers hydrate rows from the pools, so without
   // this the on-screen recipe would keep its old rows. DOUGH/SAUCE ONLY:
-  // cheese is a units mismatch (spec sheets carry per-PIZZA ounces, the
-  // cheese pool stores per-BATCH pounds), so cheese pool rows are never
-  // touched here — the Cheese Mix Recipe Specs workbook importer updates
-  // them in place with correct per-batch pounds.
+  // cheese rows are never replaced here — spec sheets carry per-PIZZA ounces
+  // while the cheese pool's rows are per-BATCH pounds (the Cheese Mix Recipe
+  // Specs workbook importer owns those). Instead the cheese block below
+  // refreshes ONLY the components' separate per-pizza-oz column.
   const updateTargets = (applyParsed.recipes ?? []).filter(
     (r): r is typeof r & { name: string } =>
       Boolean(r.updateExisting) &&
@@ -1136,6 +1143,7 @@ export async function commitSpecImport(
   let recipesUpdated = 0;
 
   let cheeseRecipesAdded = 0;
+  let cheeseOzUpdated = 0;
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
@@ -1143,12 +1151,19 @@ export async function commitSpecImport(
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
       .filter((r): r is CheeseRecipe => r != null);
-    if (candidates.length) {
+    if (drafts.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
       const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
-      if (added > 0) {
-        await saveCheeseRecipes(merged);
+      // Refresh the PER-PIZZA OUNCE column on pool recipes this sheet names
+      // (linked picks were already renamed onto the pool name). Safe by
+      // construction: only ozPerPizza is written, per-batch lbs is untouched,
+      // so a spec import can never corrupt curated batch pounds. Recipes just
+      // added above are unchanged (their oz values already match the drafts).
+      const ozRes = applyCheeseOzPerPizza(merged, drafts);
+      if (added > 0 || ozRes.updated > 0) {
+        await saveCheeseRecipes(ozRes.next);
         cheeseRecipesAdded = added;
+        cheeseOzUpdated = ozRes.updated;
       }
     }
   } catch {
@@ -1212,5 +1227,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, touchedProfiles };
+  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, touchedProfiles };
 }

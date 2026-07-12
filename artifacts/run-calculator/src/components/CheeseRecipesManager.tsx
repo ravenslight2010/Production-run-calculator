@@ -393,7 +393,7 @@ function CheeseRecipeEditor({
   function addComponent() {
     setDraft((d) => ({
       ...d,
-      components: [...d.components, { ingredient: "", lbs: 0 }],
+      components: [...d.components, { ingredient: "", lbs: 0, ozPerPizza: 0 }],
     }));
   }
 
@@ -534,7 +534,7 @@ function CheeseRecipeEditor({
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <p className="text-[11px] font-semibold text-muted-foreground">
-            Ingredients (lbs per batch)
+            Ingredients (lbs per batch · oz per pizza)
           </p>
           {totalLbs > 0 && (
             <span className="text-[11px] text-muted-foreground font-mono">
@@ -573,6 +573,22 @@ function CheeseRecipeEditor({
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
                 <span className="text-[11px] text-muted-foreground">lbs</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={c.ozPerPizza ?? 0}
+                  onChange={(e) =>
+                    patchComponent(idx, {
+                      ozPerPizza: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  onBlur={() => commit()}
+                  disabled={disabled}
+                  title="Ounces per pizza (from spec sheets)"
+                  className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground">oz/pizza</span>
                 <button
                   type="button"
                   onClick={() => removeComponent(idx)}

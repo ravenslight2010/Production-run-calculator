@@ -28,7 +28,15 @@
 // straight copy.
 export interface CheeseComponent {
   ingredient: string;
+  /** Pounds of this ingredient in one BATCH of the blend (manager-entered). */
   lbs: number;
+  /**
+   * Ounces of this ingredient on ONE PIZZA — the unit spec sheets use. Kept in
+   * its own column so a spec-sheet import can record per-pizza amounts without
+   * ever touching the curated per-batch pounds (and vice versa: the cheese
+   * workbook importer owns `lbs`). Absent/0 = not recorded.
+   */
+  ozPerPizza?: number;
 }
 
 // A single manager-defined cheese recipe. Flat shape (plus a components array)
@@ -85,7 +93,10 @@ export function normalizeCheeseComponent(input: unknown): CheeseComponent | null
   const ingredient = coerceStr(raw.ingredient);
   if (!ingredient) return null;
   const lbs = Math.max(0, coerceNum(raw.lbs, 0));
-  return { ingredient, lbs };
+  const ozPerPizza = Math.max(0, coerceNum(raw.ozPerPizza, 0));
+  const out: CheeseComponent = { ingredient, lbs };
+  if (ozPerPizza > 0) out.ozPerPizza = ozPerPizza;
+  return out;
 }
 
 // Whole-brand "catch-all" flavor labels that mean "applies to EVERY flavor of
@@ -216,7 +227,13 @@ export function specCheeseDraftToRecipe(draft: {
   name: string;
   brand: string;
   flavors: string[];
-  components: ReadonlyArray<{ ingredient: string; lbs: number }>;
+  /**
+   * Spec-sheet amounts are PER-PIZZA OUNCES and must arrive under `ozPerPizza`
+   * so they land in the component's oz column — never masquerading as batch
+   * pounds. `lbs` is only for callers that genuinely hold per-batch pounds
+   * (e.g. the one-time local→server preset consolidation).
+   */
+  components: ReadonlyArray<{ ingredient: string; lbs?: number; ozPerPizza?: number }>;
 }): CheeseRecipe | null {
   const name = draft.name.trim();
   if (!name) return null;
@@ -232,7 +249,11 @@ export function specCheeseDraftToRecipe(draft: {
     shredderSetting: "",
     cellulose: "",
     notes: "",
-    components: draft.components,
+    components: draft.components.map((c) => ({
+      ingredient: c.ingredient,
+      lbs: c.lbs ?? 0,
+      ozPerPizza: c.ozPerPizza ?? 0,
+    })),
     enabled: true,
   });
 }
@@ -262,6 +283,59 @@ export function addCheeseRecipesIfAbsentByName(
     added++;
   }
   return { merged, added };
+}
+
+/**
+ * Write spec-sheet PER-PIZZA OUNCES onto existing cheese recipes' components —
+ * the `ozPerPizza` column ONLY. Per-batch `lbs` is never touched (that column
+ * belongs to managers and the cheese workbook importer), so a spec import can
+ * refresh per-pizza amounts without any risk of corrupting curated batch
+ * pounds. Recipes are matched by trimmed case-insensitive NAME; within a
+ * matched recipe, components are matched by trimmed case-insensitive
+ * ingredient name. Unmatched update ingredients are ignored (no components are
+ * added or removed). Pure. Returns the next list plus how many RECIPES had at
+ * least one component's ozPerPizza actually change.
+ */
+export function applyCheeseOzPerPizza(
+  existing: ReadonlyArray<CheeseRecipe>,
+  updates: ReadonlyArray<{
+    name: string;
+    components: ReadonlyArray<{ ingredient: string; ozPerPizza: number }>;
+  }>,
+): { next: CheeseRecipe[]; updated: number } {
+  const byName = new Map<
+    string,
+    Map<string, number>
+  >();
+  for (const u of updates) {
+    const nameKey = u.name.trim().toLowerCase();
+    if (!nameKey) continue;
+    const oz = new Map<string, number>();
+    for (const c of u.components) {
+      const ing = c.ingredient.trim().toLowerCase();
+      const v = Number(c.ozPerPizza);
+      if (!ing || !Number.isFinite(v) || v <= 0) continue;
+      if (!oz.has(ing)) oz.set(ing, v);
+    }
+    if (oz.size) byName.set(nameKey, oz);
+  }
+  if (!byName.size) return { next: [...existing], updated: 0 };
+  let updated = 0;
+  const next = existing.map((r) => {
+    const oz = byName.get(r.name.trim().toLowerCase());
+    if (!oz) return r;
+    let changed = false;
+    const components = r.components.map((c) => {
+      const v = oz.get(c.ingredient.trim().toLowerCase());
+      if (v === undefined || c.ozPerPizza === v) return c;
+      changed = true;
+      return { ...c, ozPerPizza: v };
+    });
+    if (!changed) return r;
+    updated++;
+    return { ...r, components };
+  });
+  return { next, updated };
 }
 
 /**

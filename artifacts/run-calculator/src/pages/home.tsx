@@ -3174,13 +3174,22 @@ export default function Home() {
     return map;
   }, [enabledCheeseRecipes]);
   // Recipe rows ({ ingredient, lbs }) for a picked cheese recipe — a straight
-  // copy of its components (already the per-batch-lbs RecipeRow shape).
+  // copy of its components (already the per-batch-lbs RecipeRow shape). A
+  // spec-sheet-created recipe may have NO batch pounds yet (spec sheets carry
+  // per-pizza ounces, stored in the separate ozPerPizza column so they never
+  // overwrite curated pounds) — fall back to those oz numbers so the card
+  // still shows the blend's ratio instead of a wall of zeros. This matches
+  // what the pre-dual-column import used to display for these recipes.
   const serverCheeseRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of enabledCheeseRecipes) {
+      const hasBatchLbs = r.components.some((c) => Number(c.lbs) > 0);
       const rows = r.components
         .filter((c) => c.ingredient.trim())
-        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+        .map((c) => ({
+          ingredient: c.ingredient,
+          lbs: hasBatchLbs ? c.lbs : (c.ozPerPizza ?? 0),
+        }));
       const key = r.name.trim().toLowerCase();
       if (key) map.set(key, rows);
     }
@@ -7868,7 +7877,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, touchedProfiles } =
+      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, touchedProfiles } =
         await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
@@ -7927,12 +7936,13 @@ export default function Home() {
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
-      // so the run applicator "Cheese" pickers list them right away. When an
-      // existing pool recipe's rows were replaced via the review's "update it
-      // with this sheet" checkbox (dough/sauce ONLY — cheese is per-batch
-      // pounds and never updates from a per-pizza spec sheet), those pickers
-      // must refetch to show the new ingredients.
-      if (cheeseRecipesAdded > 0)
+      // so the run applicator "Cheese" pickers list them right away. Existing
+      // pool recipes may also have had their per-pizza OZ column refreshed
+      // from the sheet (batch pounds are never touched), which the Cheese
+      // Recipes editor shows. When an existing pool recipe's rows were
+      // replaced via the review's "update it with this sheet" checkbox
+      // (dough/sauce ONLY), those pickers must refetch too.
+      if (cheeseRecipesAdded > 0 || cheeseOzUpdated > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
       if (recipesUpdated > 0) {
         void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });

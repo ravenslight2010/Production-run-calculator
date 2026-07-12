@@ -7,11 +7,13 @@
  */
 
 /**
- * One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.
+ * One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend, plus an optional per-pizza ounce amount (the unit spec sheets use) kept in its own column so spec-sheet imports never overwrite curated batch pounds.
  */
 export interface CheeseComponent {
   /** Ingredient name */
   ingredient: string;
   /** Pounds of this ingredient per batch */
   lbs: number;
+  /** Ounces of this ingredient on one pizza (from spec sheets). Absent/0 = not recorded. */
+  ozPerPizza?: number;
 }

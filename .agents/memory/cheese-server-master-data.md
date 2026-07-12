@@ -42,3 +42,17 @@ picker, ask whether the pool is server-backed now — most are.
 apps start empty and users re-import their own spec sheets (see one-time-data-purge.md);
 seeding/migrating cheese would resurrect purged data and break web+mobile parity (web did
 not migrate either). Users re-populate cheese via the importer.
+
+**Dual weight columns (2026-07-12).** Cheese components carry BOTH `lbs` (per-batch,
+curated via the Cheese Mix Recipe Specs workbook or hand edits) and optional
+`ozPerPizza` (from pizza spec sheets). Mix components similarly gained optional
+`perBatchLbs` (reference-only — plan math still uses per-pizza oz). Rules:
+- Spec-sheet cheese amounts arrive in the parsed rows' `lbs` field (parser quirk) but
+  are TRUE per-pizza ounces; `collectSpecImportCheeseRecipes` surfaces them as
+  `ozPerPizza` and `specCheeseDraftToRecipe` writes them to the oz column with lbs=0.
+- On commit, spec imports refresh ONLY the oz column of name-matched pool recipes via
+  pure `applyCheeseOzPerPizza` (ci name+ingredient match) — curated batch lbs must stay
+  byte-identical. Guard test: specImportCheeseUpdateGuard.test.ts.
+- Applicator card hydration (`serverCheeseRowsByName`) falls back to oz values only when
+  a recipe has NO component with lbs>0, so spec-created recipes still show their ratio.
+- Any new write path into cheese components must never copy oz values into `lbs`.
