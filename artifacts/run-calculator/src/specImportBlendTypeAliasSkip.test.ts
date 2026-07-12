@@ -1,22 +1,20 @@
 // @vitest-environment node
 //
-// Prepare-time regression: a learned appType alias must NEVER silently rename
-// an applicator whose grid cell names a cheese/mix RECIPE parsed from the same
-// sheet.
+// Prepare-time regression: a learned appType (blend-name) alias must never
+// rename a blend-named applicator slot WITHOUT its recipe — the two must move
+// in LOCKSTEP or applySpecImport's slot resolvers can no longer loose-match
+// the slot against the import's cheese/mix recipe and the blend leaks into the
+// raw applicator Type dropdown.
 //
-// The appType alias kind doubles as the blend-name namespace: a "Use existing
-// recipe" pick in the review dialog learns `sheet blend name → existing recipe
-// name`. On a later import, canonicalizeParsed applies appType aliases to
-// applicator types — if it renames a blend-named applicator to the existing
-// recipe's name while the user declines the suggested link (creates new), the
-// applicator type no longer loose-matches the created recipe, so
-// applySpecImport's slot resolvers never re-type the slot to the generic
-// "cheese"/"Mix" card and the blend leaks into the raw applicator Type
-// dropdown. The alias must surface ONLY as an advisory link suggestion
-// (aliasLinkSuggestions → dialog pre-select), never as a prepare-time rename.
+// canonicalizeParsed still skips appType aliases on blend-named slots (the
+// unsafe one-sided rename); applySpecImportBlendNameAliases is the safe
+// counterpart that then renames the RECIPE and every matching slot together,
+// so a prior review-time "Use existing recipe" pick or manual rename is
+// REMEMBERED on re-import (this was the "cheese changes are forgotten" bug —
+// mix/dough/sauce remembered, cheese didn't).
 //
 // Genuine applicator-type aliases (e.g. "RAN SAUS" → "Sausage") must keep
-// applying — only blend-named slots are exempt.
+// applying to plain topping slots.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
@@ -141,21 +139,27 @@ beforeEach(() => {
   parseSpy.mockImplementation(async () => fixtureParse());
 });
 
-describe("prepare — blend-named applicator slots are exempt from appType aliases", () => {
-  it("keeps the sheet's blend name on the applicator, aliases the plain topping, and still surfaces the link suggestion", async () => {
+describe("prepare — blend-name aliases rename recipe + slots in lockstep", () => {
+  it("applies the remembered blend link to the recipe AND its slot together, and still aliases the plain topping", async () => {
     const prepared = await prepareSpecImport(realBuffer(), undefined, ["specs.xlsx"]);
 
+    // The remembered reassignment applies to the RECIPE…
+    const cheese = prepared.parsed.recipes.find((r) => r.kind === "cheese");
+    expect(cheese?.name).toBe(LINKED_NAME);
+
+    // …and to the blend-named slot IN LOCKSTEP, so the slot still loose-matches
+    // the import's cheese recipe (never a one-sided rename).
     const apps = prepared.parsed.profiles[0]?.applicators ?? [];
     const types = apps.map((a) => a.type);
-    // The blend-named slot survives verbatim so applySpecImport's slot resolver
-    // still loose-matches it against the import's cheese recipe.
-    expect(types).toContain(BLEND_NAME);
-    expect(types).not.toContain(LINKED_NAME);
+    expect(types).toContain(LINKED_NAME);
+    expect(types).not.toContain(BLEND_NAME);
+
     // The genuine applicator-type alias still applies.
     expect(types).toContain("Sausage");
     expect(types).not.toContain("RAN SAUS");
 
-    // The learned link surfaces as the advisory dialog suggestion instead.
+    // The learned link still surfaces in the advisory suggestion map (harmless
+    // now that the name already matches — the dialog skips self-suggestions).
     expect(prepared.aliasLinkSuggestions?.[BLEND_NAME.toLowerCase()]).toBe(LINKED_NAME);
   });
 });

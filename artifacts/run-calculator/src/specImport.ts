@@ -18,6 +18,7 @@ import {
   collectSpecAliases,
   collectSpecImportMixes,
   collectSpecImportCheeseRecipes,
+  applySpecImportBlendNameAliases,
   canonicalizeSpecImportCheeseRecipeNames,
   cleanSpecCheeseRecipeName,
   dedupeSpecImportCheeseRecipes,
@@ -743,7 +744,10 @@ function buildReusedPrepared(
     recipeNameIsTombstoned,
   );
   const parsed = dedupeSpecImportCheeseRecipes(
-    canonicalizeSpecImportCheeseRecipeNames(kept),
+    applySpecImportBlendNameAliases(
+      canonicalizeSpecImportCheeseRecipeNames(kept),
+      aliases,
+    ),
   );
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
   const discrepancies = buildDiscrepancies(parsed);
@@ -818,9 +822,15 @@ export async function prepareSpecImport(
   // Collapse per-weight cheese-blend name variants and merge the resulting
   // duplicate cheese recipes into one (unioning their profile targets) so the
   // review shows a single "Aldo's Cheese Mix" attaching to every flavor instead
-  // of one numbered recipe per applicator weight. Mirrors mobile (parity).
+  // of one numbered recipe per applicator weight. Learned blend-name aliases
+  // (prior review links/renames) are then applied to recipe + slots in
+  // lockstep so a re-import remembers the user's reassignment. Mirrors mobile
+  // (parity paused — web only for now).
   const parsed = dedupeSpecImportCheeseRecipes(
-    canonicalizeSpecImportCheeseRecipeNames(kept),
+    applySpecImportBlendNameAliases(
+      canonicalizeSpecImportCheeseRecipeNames(kept),
+      aliases,
+    ),
   );
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
@@ -929,9 +939,14 @@ export async function prepareSpecImportMulti(
 
   // Collapse per-weight cheese-blend name variants + merge duplicate cheese
   // recipes into one (union targets) so review shows a single "Aldo's Cheese Mix"
-  // attaching to every flavor, not one per applicator weight. Mirrors mobile.
+  // attaching to every flavor, not one per applicator weight. Learned
+  // blend-name aliases then apply to recipe + slots in lockstep (remembered
+  // reassignments). Mirrors mobile.
   const parsed = dedupeSpecImportCheeseRecipes(
-    canonicalizeSpecImportCheeseRecipeNames(kept),
+    applySpecImportBlendNameAliases(
+      canonicalizeSpecImportCheeseRecipeNames(kept),
+      aliases,
+    ),
   );
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);

@@ -225,3 +225,56 @@ describe("prepareSpecImport — learned recipeName aliases apply to profile assi
     expect(prepared.parsed.profiles[0].doughName).toBe("Sheet Dough");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 3. Pipeline — a RE-import applies learned "appType" (blend-name) aliases to
+//    cheese/mix recipes AND their applicator slots in lockstep, so prior
+//    review-time cheese links/renames are remembered like mix/dough/sauce.
+// ---------------------------------------------------------------------------
+
+describe("prepareSpecImport — learned blend-name aliases apply to cheese recipes + slots", () => {
+  it("renames a cheese recipe and its applicator slot together from a learned alias", async () => {
+    parseSpy.mockImplementation(async (): Promise<ParsedSpecImport> => ({
+      profiles: [
+        profile({
+          applicators: [{ type: "Sheet Blend", ozPerPizza: 2 }],
+        }),
+      ],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Sheet Blend 2.07 oz",
+          rows: [{ ingredient: "Mozzarella", lbs: 10 }],
+        },
+      ],
+    }));
+    aliasesSpy.mockImplementation(async () => [
+      { kind: "appType", externalName: "Sheet Blend", canonicalName: "House Blend", context: null },
+    ] satisfies SpecImportAlias[]);
+
+    const prepared = await prepareSpecImport(goodBuffer());
+    const cheese = prepared.parsed.recipes.find((r) => r.kind === "cheese");
+    expect(cheese?.name).toBe("House Blend");
+    expect(prepared.parsed.profiles[0].applicators[0].type).toBe("House Blend");
+  });
+
+  it("no alias → cheese recipe and slot keep the (cleaned) sheet name", async () => {
+    parseSpy.mockImplementation(async (): Promise<ParsedSpecImport> => ({
+      profiles: [
+        profile({ applicators: [{ type: "Sheet Blend", ozPerPizza: 2 }] }),
+      ],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Sheet Blend 2.07 oz",
+          rows: [{ ingredient: "Mozzarella", lbs: 10 }],
+        },
+      ],
+    }));
+
+    const prepared = await prepareSpecImport(goodBuffer());
+    const cheese = prepared.parsed.recipes.find((r) => r.kind === "cheese");
+    expect(cheese?.name).toBe("Sheet Blend");
+    expect(prepared.parsed.profiles[0].applicators[0].type).toBe("Sheet Blend");
+  });
+});

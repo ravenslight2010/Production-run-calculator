@@ -845,6 +845,74 @@ export function canonicalizeSpecImportCheeseRecipeNames(
 }
 
 /**
+ * Apply learned "appType" aliases (the blend-name namespace — saved from the
+ * review's "Use existing recipe" picks and manual cheese/mix renames) to the
+ * import's cheese/mix RECIPE names IN LOCKSTEP with every profile applicator
+ * slot that references them. Prepare-time canonicalization deliberately skips
+ * aliasing blend-named applicator TYPES (renaming only the type would silently
+ * disconnect the slot from its recipe — see canonicalizeParsed's blend guard in
+ * the web importer); this pass is the safe counterpart: it renames the recipe
+ * AND its matching slots together, so a remembered reassignment reconnects to
+ * the user's chosen name instead of resurrecting the raw sheet label.
+ *
+ * Alias-only on purpose (no exact/fuzzy pool snapping — that stays the link
+ * pass's job, with its stronger near-dup guards). Mix names are looked up raw
+ * (they are never cleaned); cheese names are looked up raw then via
+ * cleanSpecCheeseRecipeName so pre/post-cleaning aliases both hit. Never
+ * rewrites a user-typed (userNamed) recipe name, and conflicting aliases are
+ * dropped first. Pure + non-mutating (returns the same object when nothing
+ * renames).
+ */
+export function applySpecImportBlendNameAliases(
+  parsed: ParsedSpecImport,
+  aliases: ReadonlyArray<SpecImportAlias>,
+): ParsedSpecImport {
+  const usable = dropConflictingSpecAliases(aliases).filter(
+    (a) => a.kind === "appType",
+  );
+  if (!usable.length) return parsed;
+  const lookup = (nm: string): string | null => {
+    const raw = (nm ?? "").trim();
+    if (!raw) return null;
+    const direct = pickAlias(usable, "appType", raw);
+    if (direct) return direct;
+    const cleaned = cleanSpecCheeseRecipeName(raw);
+    if (cleaned && cleaned.toLowerCase() !== raw.toLowerCase()) {
+      return pickAlias(usable, "appType", cleaned);
+    }
+    return null;
+  };
+  // Old-name loose key → new name, for the lockstep applicator-slot rewrite.
+  const renames = new Map<string, string>();
+  let changed = false;
+  const recipes = (parsed.recipes ?? []).map((r) => {
+    if (r.kind !== "cheese") return r; // mixes are cheese-kind too (routed by category)
+    if (r.userNamed) return r;
+    const next = lookup(r.name ?? "");
+    if (!next || next.trim().toLowerCase() === (r.name ?? "").trim().toLowerCase()) {
+      return r;
+    }
+    const oldKey = specImportNameMatchKey(cleanSpecCheeseRecipeName(r.name ?? ""));
+    if (oldKey) renames.set(oldKey, next.trim());
+    changed = true;
+    return { ...r, name: next.trim() };
+  });
+  if (!changed) return parsed;
+  const profiles = (parsed.profiles ?? []).map((p) => {
+    let touched = false;
+    const applicators = (p.applicators ?? []).map((a) => {
+      const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(a.type ?? ""));
+      const next = key ? renames.get(key) : undefined;
+      if (!next || next === a.type) return a;
+      touched = true;
+      return { ...a, type: next };
+    });
+    return touched ? { ...p, applicators } : p;
+  });
+  return { ...parsed, recipes, profiles };
+}
+
+/**
  * Merge cheese (non-mix) recipes that share the same (case-insensitive) name into
  * ONE recipe. After canonicalizeSpecImportCheeseRecipeNames folds a blend the AI
  * split into per-weight numbered variants ("Aldo's Cheese Mix 1" / "…2") back to a

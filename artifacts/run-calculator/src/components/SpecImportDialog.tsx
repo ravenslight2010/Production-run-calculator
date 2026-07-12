@@ -412,27 +412,31 @@ export default function SpecImportDialog({
         });
       }
     }
-    // Manual RENAMES of dough/sauce recipes are learnable too (brand/flavor
-    // renames already are): remember "sheet label → the user's typed name" so
-    // a re-import of the same sheet pre-selects linking to the renamed recipe
-    // (it exists after this Apply) instead of recreating the raw sheet name.
-    // Cheese/mix renames stay unlearned on purpose — their name namespace
-    // doubles as the applicator blend-type namespace, where a prepare-time
-    // rename can silently disconnect slots from their recipes.
+    // Manual RENAMES are learnable too (brand/flavor renames already are):
+    // remember "sheet label → the user's typed name" so a re-import of the
+    // same sheet applies the rename instead of recreating the raw sheet name.
+    // Dough/sauce renames go under "recipeName" (kind-scoped); cheese/mix
+    // renames go under "appType" — safe to learn because the prepare pass
+    // applies blend-name aliases to the recipe AND its matching applicator
+    // slots in LOCKSTEP (applySpecImportBlendNameAliases), so a remembered
+    // rename can never disconnect a slot from its recipe.
     for (const r of recipes) {
       if (!r.include) continue;
-      if (r.kind !== "dough" && r.kind !== "sauce") continue;
       if (r.linkExisting?.trim()) continue;
       const external = (r.baseOrig.name ?? "").trim();
       const renamed = r.name.trim();
       if (!external || !renamed) continue;
       if (external.toLowerCase() === renamed.toLowerCase()) continue;
-      out.push({
-        kind: "recipeName",
-        externalName: external,
-        canonicalName: renamed,
-        context: r.kind,
-      });
+      if (r.kind === "cheese" || r.kind === "mix") {
+        out.push({ kind: "appType", externalName: external, canonicalName: renamed, context: null });
+      } else {
+        out.push({
+          kind: "recipeName",
+          externalName: external,
+          canonicalName: renamed,
+          context: r.kind,
+        });
+      }
     }
     return out;
   }, [recipes]);
@@ -456,22 +460,26 @@ export default function SpecImportDialog({
   // The edited, include-only import that would be applied. Recomputed live so the
   // change list and counts always reflect the user's edits.
   const edited: ParsedSpecImport = useMemo(() => {
-    // "Use existing recipe" picks rename the RECIPE to the linked name, so any
-    // profile applicator slot whose type names that blend must follow: the
-    // apply-time slot resolvers loose-match applicator types against this
+    // "Use existing recipe" picks AND manual renames change the RECIPE's name,
+    // so any profile applicator slot whose type names that blend must follow:
+    // the apply-time slot resolvers loose-match applicator types against this
     // import's recipe names to re-type slots to the generic "cheese"/"Mix" card.
-    // Without the re-point, a linked blend's slot no longer matches anything and
-    // leaks into the raw applicator Type dropdown. Keyed by BOTH the pristine
-    // parsed name and the current (possibly renamed) name.
+    // Without the re-point, a linked/renamed blend's slot no longer matches
+    // anything and leaks into the raw applicator Type dropdown. Keyed by BOTH
+    // the pristine parsed name and the current (possibly renamed) name.
     const linkedTypeRenames = new Map<string, string>();
     for (const r of recipes) {
       if (!r.include) continue;
       if (r.kind !== "cheese" && r.kind !== "mix") continue;
       const linked = r.linkExisting?.trim();
-      if (!linked) continue;
+      const typed = r.name.trim();
+      const renamed =
+        !linked && typed && typed !== (r.orig.name ?? "").trim() ? typed : "";
+      const finalName = linked || renamed;
+      if (!finalName) continue;
       for (const nm of [r.baseOrig.name ?? "", r.orig.name ?? "", r.name]) {
         const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(nm ?? ""));
-        if (key && !linkedTypeRenames.has(key)) linkedTypeRenames.set(key, linked);
+        if (key && !linkedTypeRenames.has(key)) linkedTypeRenames.set(key, finalName);
       }
     }
     const repointApplicators = (p: ParsedProfile): ParsedProfile => {
