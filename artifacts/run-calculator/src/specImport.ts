@@ -459,7 +459,11 @@ async function parseWorkbookCore(
   // number+ingredient pairs → ONE cheese recipe). Must run post-merge, never
   // per chunk — see extractEmbeddedApplicatorBlends.
   const rawMerged = extractEmbeddedApplicatorBlends(
-    rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList),
+    // Chunks of ONE workbook: union same-profile applicator/pepperoni lists —
+    // a chunk boundary can split a product's spec block, so the chunks'
+    // lists are complementary; the default wholesale replace would silently
+    // drop the earlier chunk's applicator weights.
+    rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList, { profileSlots: "union" }),
   );
   const { parsed, resolved } = canonicalizeParsed(rawMerged, known, aliases);
 

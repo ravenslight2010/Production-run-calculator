@@ -188,16 +188,129 @@ function overlayDefined<T extends object>(prev: T, next: T): T {
 }
 
 /**
- * Merge two same-brand+flavor profiles from different files of one batch.
- * Field-level, later-wins-only-when-stated: scalars overlay per field, and the
- * applicator/pepperoni arrays (where an EMPTY array means "this sheet didn't
- * state them", not "there are none") keep the earlier file's slots unless the
- * later file actually lists some.
+ * How mergeParsedSpecImports combines two same-profile applicator/pepperoni
+ * lists:
+ *
+ * - `"replace"` (default; MULTI-FILE batches): the later file's list wins
+ *   wholesale when it states any — a later workbook restating a product is a
+ *   correction of the earlier one.
+ * - `"union"` (CHUNKS of ONE workbook): the lists are complementary, not
+ *   corrective — a big sheet is split mid-grid, so one product's spec block can
+ *   span two chunks and each chunk emits the same brand+flavor with a PARTIAL
+ *   applicator list. Wholesale replace here silently drops the earlier chunk's
+ *   applicator weights (the classic "import missed a weight" report). Union
+ *   keeps every distinct entry: identical re-emits collapse (enriched with
+ *   slot/batchLbs when the re-emit carries more), and a 0-oz partial re-emit is
+ *   dropped when the same type also appears with a real weight. The SAME type
+ *   at two DIFFERENT weights is deliberately kept as TWO entries — a pizza can
+ *   run one topping/blend on two stations at different per-pizza weights.
  */
-function mergeProfilePair(prev: ParsedProfile, next: ParsedProfile): ParsedProfile {
+export type SpecImportProfileSlotMerge = "replace" | "union";
+
+/** Loose identity key for an applicator's type (weight-suffix tolerant). */
+function applicatorTypeKey(type: string): string {
+  const t = (type ?? "").trim();
+  return specImportNameMatchKey(cleanSpecCheeseRecipeName(t)) || t.toLowerCase();
+}
+
+/**
+ * Union two applicator lists from CHUNKS of one workbook (see
+ * {@link SpecImportProfileSlotMerge}). Order: prev's entries first, then next's
+ * new ones — assignApplicatorSlots later places them by explicit slot / listed
+ * order. Pure.
+ */
+function unionApplicators(
+  prev: ReadonlyArray<ParsedApplicator>,
+  next: ReadonlyArray<ParsedApplicator>,
+): ParsedApplicator[] {
+  const out: ParsedApplicator[] = [];
+  for (const a of [...prev, ...next]) {
+    if (!(a.type ?? "").trim()) continue;
+    const key = applicatorTypeKey(a.type);
+    const dup = out.find(
+      (b) =>
+        applicatorTypeKey(b.type) === key &&
+        Math.abs((b.ozPerPizza ?? 0) - (a.ozPerPizza ?? 0)) < 1e-9,
+    );
+    if (dup) {
+      // Identical re-emit — keep one entry, enriched with whatever extra the
+      // re-emit carries (a chunk sometimes sees the slot/batch cell the other
+      // chunk's slice cut off).
+      if (dup.slot == null && a.slot != null) dup.slot = a.slot;
+      if (!(dup.batchLbs != null && dup.batchLbs > 0) && a.batchLbs != null && a.batchLbs > 0) {
+        dup.batchLbs = a.batchLbs;
+      }
+      continue;
+    }
+    out.push({ ...a });
+  }
+  // A 0-oz entry alongside a same-type entry with a real weight is a partial
+  // re-emit (the weight cell fell in the other chunk), not a second station.
+  return out.filter(
+    (a) =>
+      (a.ozPerPizza ?? 0) > 0 ||
+      !out.some(
+        (b) =>
+          b !== a &&
+          applicatorTypeKey(b.type) === applicatorTypeKey(a.type) &&
+          (b.ozPerPizza ?? 0) > 0,
+      ),
+  );
+}
+
+/** Pepperoni mirror of {@link unionApplicators}. Pure. */
+function unionPepperonis(
+  prev: ReadonlyArray<ParsedPepperoni>,
+  next: ReadonlyArray<ParsedPepperoni>,
+): ParsedPepperoni[] {
+  const typeKey = (t: string): string => (t ?? "").trim().toLowerCase();
+  const out: ParsedPepperoni[] = [];
+  for (const p of [...prev, ...next]) {
+    if (!(p.type ?? "").trim()) continue;
+    const dup = out.find(
+      (b) =>
+        typeKey(b.type) === typeKey(p.type) &&
+        Math.abs((b.ozPerPizza ?? 0) - (p.ozPerPizza ?? 0)) < 1e-9 &&
+        (b.sticks ?? 0) === (p.sticks ?? 0),
+    );
+    if (dup) {
+      if (!(dup.batchLbs != null && dup.batchLbs > 0) && p.batchLbs != null && p.batchLbs > 0) {
+        dup.batchLbs = p.batchLbs;
+      }
+      continue;
+    }
+    out.push({ ...p });
+  }
+  const hasData = (p: ParsedPepperoni): boolean =>
+    (p.ozPerPizza ?? 0) > 0 || (p.sticks ?? 0) > 0;
+  return out.filter(
+    (p) =>
+      hasData(p) ||
+      !out.some((b) => b !== p && typeKey(b.type) === typeKey(p.type) && hasData(b)),
+  );
+}
+
+/**
+ * Merge two same-brand+flavor profiles from one batch. Field-level,
+ * later-wins-only-when-stated: scalars overlay per field, and the
+ * applicator/pepperoni arrays (where an EMPTY array means "this sheet didn't
+ * state them", not "there are none") merge per `slotMerge` — wholesale
+ * later-wins for multi-FILE batches, additive union for CHUNKS of one workbook
+ * (see {@link SpecImportProfileSlotMerge}).
+ */
+function mergeProfilePair(
+  prev: ParsedProfile,
+  next: ParsedProfile,
+  slotMerge: SpecImportProfileSlotMerge,
+): ParsedProfile {
   const merged = overlayDefined(prev, next);
-  merged.applicators = next.applicators?.length ? next.applicators : prev.applicators ?? [];
-  merged.pepperonis = next.pepperonis?.length ? next.pepperonis : prev.pepperonis ?? [];
+  if (slotMerge === "union") {
+    merged.applicators = unionApplicators(prev.applicators ?? [], next.applicators ?? []);
+    merged.pepperonis = unionPepperonis(prev.pepperonis ?? [], next.pepperonis ?? []);
+  } else {
+    merged.applicators = next.applicators?.length ? next.applicators : prev.applicators ?? [];
+    merged.pepperonis = next.pepperonis?.length ? next.pepperonis : prev.pepperonis ?? [];
+  }
   return merged;
 }
 
@@ -256,8 +369,19 @@ function mergeRecipePair(prev: ParsedRecipe, next: ParsedRecipe): ParsedRecipe {
  * union across files) — a wholesale later-wins replace would silently drop the
  * earlier file's fields and profile ties, cross-wiring a multi-file batch.
  * Notes are concatenated. Pure.
+ *
+ * `opts.profileSlots` controls how a colliding profile's applicator/pepperoni
+ * lists combine: `"replace"` (default) for multi-FILE batches, `"union"` when
+ * the list holds CHUNKS of ONE workbook — a chunk boundary can split a
+ * product's spec block, so same-profile chunk lists are complementary and must
+ * be unioned or the earlier chunk's applicator weights are silently lost. See
+ * {@link SpecImportProfileSlotMerge}.
  */
-export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImport {
+export function mergeParsedSpecImports(
+  list: ParsedSpecImport[],
+  opts: { profileSlots?: SpecImportProfileSlotMerge } = {},
+): ParsedSpecImport {
+  const slotMerge: SpecImportProfileSlotMerge = opts.profileSlots ?? "replace";
   const profileMap = new Map<string, ParsedProfile>();
   const recipeMap = new Map<string, ParsedRecipe>();
   const notes: string[] = [];
@@ -270,7 +394,7 @@ export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImpo
     for (const p of item.profiles) {
       const key = `${p.brand.trim().toLowerCase()}|${p.flavor.trim().toLowerCase()}`;
       const prev = profileMap.get(key);
-      profileMap.set(key, prev ? mergeProfilePair(prev, p) : p);
+      profileMap.set(key, prev ? mergeProfilePair(prev, p, slotMerge) : p);
     }
     for (const r of item.recipes) {
       const nm = r.name.trim().toLowerCase();

@@ -214,6 +214,14 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "number, or a topping column/row that clearly comes AFTER the pepperoni/stick " +
     "entries — meaning station 3 or 4), set that applicator's `slot` (1-4). Omit " +
     "`slot` when the position is not discernible — never guess. " +
+    "DUPLICATE APPLICATORS: a pizza can run the SAME topping or blend on TWO " +
+    "different applicator stations at DIFFERENT per-pizza weights (e.g. the same " +
+    "cheese mix applied under and over the toppings). When a profile's sheet lists " +
+    "the same ingredient/blend name on two applicator rows or columns, emit TWO " +
+    "separate entries in that profile's `applicators` — one per station, each with " +
+    "its OWN `ozPerPizza` exactly as written (and its own `slot` when discernible). " +
+    "NEVER collapse same-named applicators into one entry, never add their weights " +
+    "together, and never copy one station's weight onto the other. " +
     "EMBEDDED BLENDS: some spec grids pack a full blend recipe into ONE applicator " +
     "cell — a mix name followed by number+ingredient pairs, e.g. \"Aldo's Cheese " +
     "Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan\" or 'White " +

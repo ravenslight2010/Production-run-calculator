@@ -17,6 +17,7 @@ import {
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   mergeParsedSpecImports,
+  assignApplicatorSlots,
   partitionTombstonedParse,
   recipeApplyIssue,
   profileApplyIssue,
@@ -1884,6 +1885,99 @@ describe("mergeParsedSpecImports", () => {
     expect(merged.note).toBeUndefined();
     expect(merged.profiles).toEqual([]);
     expect(merged.recipes).toEqual([]);
+  });
+});
+
+// Chunk-boundary safety: a big workbook is split into chunks and a product's
+// spec block can span the split, so the same brand+flavor comes back from TWO
+// chunks with PARTIAL applicator lists. profileSlots:"union" must keep every
+// distinct weight instead of the default wholesale later-wins replace (which
+// silently dropped the earlier chunk's applicators — the "import missed a
+// weight" report).
+describe("mergeParsedSpecImports (profileSlots: union — chunks of one workbook)", () => {
+  const prof = (applicators: object[], pepperonis: object[] = []) => ({
+    profiles: [{ brand: "Aldo's", flavor: "Cheese", applicators, pepperonis }],
+    recipes: [],
+  });
+  const mergedApps = (a: object[], b: object[]) =>
+    mergeParsedSpecImports(
+      [prof(a) as never, prof(b) as never],
+      { profileSlots: "union" },
+    ).profiles[0]!.applicators;
+
+  it("unions complementary applicator lists split across chunks", () => {
+    const apps = mergedApps(
+      [{ type: "Cheese Mix", ozPerPizza: 1.75 }],
+      [{ type: "Bacon", ozPerPizza: 0.5 }],
+    );
+    expect(apps).toHaveLength(2);
+    expect(apps.map((a) => a.ozPerPizza).sort()).toEqual([0.5, 1.75]);
+  });
+
+  it("keeps the SAME type at two DIFFERENT weights as two entries (two stations)", () => {
+    const apps = mergedApps(
+      [{ type: "Aldo's Cheese Mix", ozPerPizza: 1.75 }],
+      [{ type: "Aldo's Cheese Mix", ozPerPizza: 2.07 }],
+    );
+    expect(apps).toHaveLength(2);
+    expect(apps.map((a) => a.ozPerPizza).sort()).toEqual([1.75, 2.07]);
+  });
+
+  it("collapses identical re-emits, enriching slot/batchLbs from the re-emit", () => {
+    const apps = mergedApps(
+      [{ type: "Cheese Mix", ozPerPizza: 1.75 }],
+      [{ type: "cheese mix", ozPerPizza: 1.75, slot: 3, batchLbs: 40 }],
+    );
+    expect(apps).toHaveLength(1);
+    expect(apps[0]).toMatchObject({ ozPerPizza: 1.75, slot: 3, batchLbs: 40 });
+  });
+
+  it("drops a 0-oz partial re-emit when the same type also carries a real weight", () => {
+    const apps = mergedApps(
+      [{ type: "Cheese Mix", ozPerPizza: 0 }],
+      [{ type: "Cheese Mix", ozPerPizza: 1.75 }],
+    );
+    expect(apps).toHaveLength(1);
+    expect(apps[0]!.ozPerPizza).toBe(1.75);
+  });
+
+  it("unions pepperonis the same way", () => {
+    const a = prof([], [{ type: "Pepperoni", sticks: 12, ozPerPizza: 1.2 }]);
+    const b = prof([], [
+      { type: "Pepperoni", sticks: 12, ozPerPizza: 1.2 },
+      { type: "Cheese Stick", sticks: 8, ozPerPizza: 0.9 },
+    ]);
+    const peps = mergeParsedSpecImports([a as never, b as never], { profileSlots: "union" })
+      .profiles[0]!.pepperonis;
+    expect(peps).toHaveLength(2);
+    expect(peps.map((p) => p.type).sort()).toEqual(["Cheese Stick", "Pepperoni"]);
+  });
+
+  it("a >4-entry union still resolves deterministically through slot assignment (4-slot cap)", () => {
+    const apps = mergedApps(
+      [
+        { type: "A", ozPerPizza: 1 },
+        { type: "B", ozPerPizza: 2 },
+        { type: "C", ozPerPizza: 3 },
+      ],
+      [
+        { type: "D", ozPerPizza: 4 },
+        { type: "E", ozPerPizza: 5 },
+      ],
+    );
+    expect(apps).toHaveLength(5);
+    const slotted = assignApplicatorSlots(apps).filter((a) => a.type.trim());
+    expect(slotted).toHaveLength(4);
+    expect(slotted.map((a) => a.type)).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("default mode still replaces wholesale (multi-file corrections)", () => {
+    const apps = mergeParsedSpecImports([
+      prof([{ type: "Cheese Mix", ozPerPizza: 1.5 }]) as never,
+      prof([{ type: "Cheese Mix", ozPerPizza: 1.75 }]) as never,
+    ]).profiles[0]!.applicators;
+    expect(apps).toHaveLength(1);
+    expect(apps[0]!.ozPerPizza).toBe(1.75);
   });
 });
 

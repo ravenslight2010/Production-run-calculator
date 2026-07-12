@@ -165,6 +165,21 @@ describe("buildParseSpecSheetPrompt numeric accuracy", () => {
   });
 });
 
+// Regression guard: the same topping/blend can run on TWO applicator stations
+// at DIFFERENT per-pizza weights. Without this instruction the model tends to
+// dedupe same-named applicators into one entry (or reuse one weight for both)
+// — the "import doesn't get all the weights right" report. Pinned so it can't
+// be silently dropped from the prompt.
+describe("buildParseSpecSheetPrompt duplicate applicators", () => {
+  it("tells the model to emit one applicators[] entry per station, never collapsing same-named ones", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("DUPLICATE APPLICATORS");
+    expect(system).toContain("TWO separate entries");
+    expect(system).toContain("NEVER collapse same-named applicators");
+    expect(system).toContain("never copy one station's weight");
+  });
+});
+
 // Pepperoni is a pep TYPE (captured on a profile's `pepperonis`), never a
 // cheese/topping recipe. The prompt tells the model not to emit it as a recipe,
 // and the sanitizer deterministically drops any that slip through — so the

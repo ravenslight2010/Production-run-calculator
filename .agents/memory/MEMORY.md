@@ -155,4 +155,5 @@
 - [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere (peps sit between stations 2 and 3); importer honors it via ParsedApplicator.slot + assignApplicatorSlots.
 - [Name-first dough/sauce relink](spec-import-name-first-relink.md) — spec import assigns the dough/sauce NAME pre-recipe; later recipe import relinks by loose name; ghost guard + registry gotchas for tests.
 - [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.
+- [Spec-import chunk union](spec-import-chunk-union.md) — chunk merges union applicator lists (split blocks are complementary); file merges replace; same type at two weights = two stations, never dedupe.
 - [Import redirect aliases](import-redirect-aliases.md) — cheese/premix "use existing" picks share the context-free appType alias namespace; suggestion-only auto-apply, one-to-one claim guards.
