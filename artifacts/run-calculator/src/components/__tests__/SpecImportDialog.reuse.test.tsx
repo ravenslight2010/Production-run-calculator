@@ -547,9 +547,10 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     });
     // Even with parsed rows, cheese picks get NO update checkbox — spec sheets
     // carry per-pizza ounces while the cheese pool stores per-batch pounds.
+    // The hint explains the sheet's ounces land in the oz-per-pizza column only.
     expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
     expect(screen.getByText(/won't be changed/)).toBeTruthy();
-    expect(screen.getByText(/per-pizza amounts/)).toBeTruthy();
+    expect(screen.getByText(/batch pounds are kept as-is/)).toBeTruthy();
 
     fireEvent.click(screen.getByText(/^Apply/));
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;

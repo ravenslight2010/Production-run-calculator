@@ -363,13 +363,21 @@ export default function ConfigureScreen() {
     return map;
   }, [enabledCheeseRecipes]);
   // Recipe rows ({ ingredient, lbs }) for a picked cheese recipe — a straight
-  // copy of its components (already the per-batch-lbs RecipeRow shape).
+  // copy of its components (already the per-batch-lbs RecipeRow shape). A
+  // spec-sheet-created recipe may have NO batch pounds yet (spec sheets carry
+  // per-pizza ounces, stored in the separate ozPerPizza column so they never
+  // overwrite curated pounds) — fall back to those oz numbers so the card
+  // still shows the blend's ratio instead of a wall of zeros.
   const serverCheeseRowsByName = React.useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of enabledCheeseRecipes) {
+      const hasBatchLbs = r.components.some((c) => Number(c.lbs) > 0);
       const rows = r.components
         .filter((c) => c.ingredient.trim())
-        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+        .map((c) => ({
+          ingredient: c.ingredient,
+          lbs: hasBatchLbs ? c.lbs : (c.ozPerPizza ?? 0),
+        }));
       const key = r.name.trim().toLowerCase();
       if (key) map.set(key, rows);
     }

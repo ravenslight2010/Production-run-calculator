@@ -252,10 +252,18 @@ export default function SetupProfilesScreen() {
   const serverCheeseRowsByName = new Map<string, RecipeRow[]>();
   for (const r of enabledCheeseRecipes) {
     const key = r.name.trim().toLowerCase();
+    // Fall back to the per-pizza-oz column when a spec-created recipe has no
+    // batch pounds yet — mirrors the run-screen cheese pick hydration.
+    const hasBatchLbs = r.components.some((c) => Number(c.lbs) > 0);
     if (key)
       serverCheeseRowsByName.set(
         key,
-        r.components.filter((c) => c.ingredient.trim()).map((c) => ({ ingredient: c.ingredient, lbs: c.lbs })),
+        r.components
+          .filter((c) => c.ingredient.trim())
+          .map((c) => ({
+            ingredient: c.ingredient,
+            lbs: hasBatchLbs ? c.lbs : (c.ozPerPizza ?? 0),
+          })),
       );
   }
   const serverCheeseNames = [
