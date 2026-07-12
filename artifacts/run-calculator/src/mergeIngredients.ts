@@ -120,6 +120,12 @@ export function mergeRecipePresetMap<R extends { ingredient?: unknown }>(
  * Count how many references a merge map would rewrite across the supplied
  * surfaces. Used to drive the confirmation preview. Counts list entries that get
  * renamed, type-field hits, and recipe-row hits.
+ *
+ * `ciRowLists` holds recipe rows from the SERVER master-data pools (cheese
+ * recipes, mixes, dough/sauce recipes). The server re-point helpers match
+ * ingredient names case-insensitively (trim + lowercase), so these rows are
+ * counted the same way — otherwise the preview undercounts what the merge will
+ * actually rewrite and shows a misleading "0 references".
  */
 export function countMergeReferences(
   map: MergeMap,
@@ -127,6 +133,7 @@ export function countMergeReferences(
     lists?: string[][];
     settingsObjects?: Record<string, unknown>[];
     presetMaps?: Record<string, { ingredient?: unknown }[]>[];
+    ciRowLists?: { ingredient?: unknown }[][];
   },
 ): number {
   let count = 0;
@@ -144,6 +151,18 @@ export function countMergeReferences(
   for (const presets of surfaces.presetMaps ?? []) {
     for (const rows of Object.values(presets)) {
       if (Array.isArray(rows)) for (const row of rows) if (hit(row.ingredient)) count++;
+    }
+  }
+  const ciSources = new Set(
+    Object.keys(map).map((s) => s.trim().toLowerCase()).filter(Boolean),
+  );
+  if (ciSources.size > 0) {
+    for (const rows of surfaces.ciRowLists ?? []) {
+      if (!Array.isArray(rows)) continue;
+      for (const row of rows) {
+        const ing = row?.ingredient;
+        if (typeof ing === "string" && ciSources.has(ing.trim().toLowerCase())) count++;
+      }
     }
   }
   return count;

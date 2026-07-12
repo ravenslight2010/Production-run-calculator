@@ -4157,7 +4157,17 @@ export default function Home() {
     const doughRows: Record<string, { ingredient?: unknown }[]> = {};
     for (const [n, p] of Object.entries(doughPresets)) doughRows[n] = p.rows ?? [];
     const presetMaps = [doughRows, loadFrontlineRecipePresets(), loadCheeseRecipePresets()];
-    return { lists, settingsObjects, presetMaps };
+    // Server master-data pools (cheese recipes, mixes, dough/sauce recipes) —
+    // the merge re-points their ingredient rows case-insensitively via the
+    // repoint helpers, so the preview must count them too or a name that lives
+    // only in factory recipes shows a misleading "0 references".
+    const ciRowLists: { ingredient?: unknown }[][] = [
+      ...cheeseRecipesList.map((r) => r.components ?? []),
+      ...mixes.map((m) => m.components ?? []),
+      ...doughRecipesList.map((r) => r.components ?? []),
+      ...sauceRecipesList.map((r) => r.components ?? []),
+    ];
+    return { lists, settingsObjects, presetMaps, ciRowLists };
   }
 
   // Recipe-name preview surfaces: the category's name list, the settings objects
@@ -4193,7 +4203,7 @@ export default function Home() {
       return countMergeReferences(mergeMap, collectMergeSurfaces());
     } catch { return 0; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeSources, mergeTarget, mergeCategory]);
+  }, [mergeSources, mergeTarget, mergeCategory, cheeseRecipesList, mixes, doughRecipesList, sauceRecipesList]);
 
   function toggleMergeSource(name: string) {
     setMergeError("");

@@ -35,6 +35,13 @@ folded into the target.
   first using the shared `scoreNameMatch` helper, not alphabetical. Rank by max
   similarity to any selected source (or the typed target); fall back to alphabetical
   when nothing is selected.
+- **Preview count must include server master-data pools.** The confirm dialog's
+  "N references will be updated" must count ingredient rows in the SERVER pools
+  (cheese recipes, mixes, dough/sauce named recipes) case-insensitively (trim+lower,
+  matching the repoint helpers), not just local surfaces — otherwise a name that
+  lives only in factory recipes shows a misleading "0 references" even though the
+  merge rewrites it. Any NEW server pool added to the merge repoint pass must also
+  be added to the preview's `ciRowLists`.
 
 **Why:** the whole point of the feature is a clean rewrite with no orphaned references
 and no inventory drift; silently swallowing an inventory read failure reintroduces drift.
