@@ -2827,6 +2827,7 @@ export const ListSpecSheetsResponse = zod.object({
   "id": zod.number(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
+  "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
@@ -2851,6 +2852,7 @@ export const ListSpecSheetsResponse = zod.object({
 export const SaveSpecSheetBody = zod.object({
   "label": zod.string(),
   "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older\/mobile clients (they share a legacy bucket).'),
+  "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot\'s parse instead of re-running the AI. Omitted by older\/mobile clients.'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.object({
@@ -2870,6 +2872,7 @@ export const SaveSpecSheetResponse = zod.object({
   "id": zod.number(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
+  "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
@@ -2899,6 +2902,7 @@ export const DeleteSpecSheetResponse = zod.object({
   "id": zod.number(),
   "label": zod.string(),
   "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
+  "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot\'s parse instead of re-running the AI. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),

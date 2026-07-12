@@ -26,6 +26,11 @@ export type SavedSpecSheet = {
   label: string;
   /** Stable per-file identity (normalized filename); null for legacy snapshots. */
   sourceKey?: string | null;
+  /**
+   * SHA-256 content fingerprint of the imported file bytes (per-file hashes
+   * sorted + re-hashed for multi-file imports); null for legacy snapshots.
+   */
+  sourceHash?: string | null;
   createdAt: number;
   data: ParsedSpecImport;
 };
@@ -71,6 +76,31 @@ export function selectPruneSnapshots<
         .some((part) => current.has(part.trim()));
     })
     .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+}
+
+/**
+ * Pick the snapshot whose parse can be REUSED for a new import: the file set
+ * must be exactly the same (identical sourceKey) AND the file bytes must be
+ * identical (matching sourceHash). Exact-key only — a batch snapshot's data is
+ * the MERGED parse of every file in the batch, so reusing it for a partial
+ * re-import would resurrect the other files' content. Newest first; returns
+ * undefined when nothing qualifies. Reusing the stored parse sidesteps AI
+ * re-read drift: the same workbook parsed twice can come back with slightly
+ * different numbers, which the re-import prune then treats as real changes.
+ */
+export function selectReusableSnapshot<
+  T extends { id: number; sourceKey?: string | null; sourceHash?: string | null; createdAt: number },
+>(sheets: ReadonlyArray<T>, sourceKey: string, sourceHash: string): T | undefined {
+  const key = sourceKey.trim();
+  const hash = sourceHash.trim();
+  if (!key || !hash) return undefined;
+  return [...sheets]
+    .filter(
+      (s) =>
+        (s.sourceKey ?? "").trim() === key &&
+        (s.sourceHash ?? "").trim() === hash,
+    )
+    .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)[0];
 }
 
 /**
@@ -121,11 +151,17 @@ export async function saveSpecSheet(
   label: string,
   data: ParsedSpecImport,
   sourceKey?: string,
+  sourceHash?: string,
 ): Promise<SavedSpecSheet[]> {
   const res = await fetch("/api/spec-sheets", {
     method: "POST",
     headers: authHeaders(true),
-    body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
+    body: JSON.stringify({
+      label,
+      data,
+      ...(sourceKey ? { sourceKey } : {}),
+      ...(sourceHash ? { sourceHash } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`Save spec sheet failed (${res.status})`);
   const out = (await res.json()) as { specSheets: SavedSpecSheet[] };

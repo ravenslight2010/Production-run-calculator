@@ -77,6 +77,8 @@ import {
   buildSpecSheetLabel,
   deriveSourceKey,
   selectPruneSnapshots,
+  selectReusableSnapshot,
+  type SavedSpecSheet,
   loadCurrentReconcileRecipes,
 } from "./savedSpecSheets";
 import { requestParseSpecSheet } from "./parseSpecSheet";
@@ -121,6 +123,13 @@ export type SpecImportPrepared = {
   flavorsByBrand: Record<string, string[]>;
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
+  /**
+   * SHA-256 content fingerprint of the uploaded file bytes (per-file hashes
+   * sorted + re-hashed for multi-file imports). Saved with the snapshot so a
+   * later re-import of the EXACT same file reuses the stored parse instead of
+   * re-running the AI (whose read of the same sheet can drift between calls).
+   */
+  sourceHash?: string;
   /**
    * Previously learned "use existing recipe" picks (sheet blend/mix name →
    * existing saved recipe name, lower-cased key). The review dialog uses these
@@ -616,6 +625,113 @@ function appendOverflowNote(
   return note ? `${note}\n${msg}` : msg;
 }
 
+/** SHA-256 hex of one buffer via WebCrypto (throws when unavailable). */
+async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new Error("WebCrypto unavailable");
+  // Copy into a fresh Uint8Array so TS sees a plain ArrayBuffer-backed view.
+  const view = bytes instanceof Uint8Array ? Uint8Array.from(bytes) : new Uint8Array(bytes);
+  const digest = await subtle.digest("SHA-256", view);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Content fingerprint for an import's uploaded file bytes: the file's SHA-256
+ * for a single file; for multi-file imports the per-file hashes are SORTED
+ * (order-independent, matching deriveSourceKey's sorted filename join) then
+ * re-hashed into one digest. Returns undefined when hashing isn't possible —
+ * callers then simply skip parse reuse (fail-safe, never block an import).
+ */
+export async function hashSpecImportSource(
+  buffers: ReadonlyArray<ArrayBuffer>,
+): Promise<string | undefined> {
+  try {
+    if (!buffers.length) return undefined;
+    const hashes: string[] = [];
+    for (const b of buffers) hashes.push(await sha256Hex(b));
+    if (hashes.length === 1) return hashes[0];
+    hashes.sort();
+    return await sha256Hex(new TextEncoder().encode(hashes.join("|")));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Look for a saved snapshot whose parse can be reused for this import: the
+ * EXACT same file set (identical sourceKey) with identical bytes (matching
+ * sourceHash). Reusing the stored parse instead of re-running the AI keeps a
+ * re-import of an unchanged file byte-for-byte identical to the previous
+ * import — the AI's read of the same sheet can drift between calls (values
+ * swapping between rows, a weight misread), and the re-import prune would
+ * treat that drift as real spec changes and clobber the user's data with it.
+ * Best-effort: any failure returns just the hash so the normal AI parse runs.
+ */
+async function findReusableParse(
+  names: ReadonlyArray<string>,
+  buffers: ReadonlyArray<ArrayBuffer>,
+): Promise<{ sourceHash?: string; snapshot?: SavedSpecSheet }> {
+  const sourceHash = await hashSpecImportSource(buffers);
+  if (!sourceHash) return {};
+  const sourceKey = deriveSourceKey(names);
+  if (!sourceKey) return { sourceHash };
+  try {
+    const sheets = await fetchSavedSpecSheets();
+    const snapshot = selectReusableSnapshot(sheets, sourceKey, sourceHash);
+    if (
+      snapshot?.data &&
+      ((snapshot.data.profiles?.length ?? 0) > 0 || (snapshot.data.recipes?.length ?? 0) > 0)
+    ) {
+      return { sourceHash, snapshot };
+    }
+  } catch {
+    // Best-effort — fall back to a fresh AI parse.
+  }
+  return { sourceHash };
+}
+
+/**
+ * Build the prepared review from a reused snapshot parse: same post-parse
+ * hygiene as a fresh parse (current tombstones still respected, cheese-name
+ * canonicalize + dedupe, summary/discrepancies against CURRENT data) minus the
+ * AI passes — the snapshot data was already canonicalized and linked when it
+ * was first imported. newAliases/flagged stay empty: nothing new was learned
+ * and any reviewer flags were already surfaced on the original import.
+ */
+function buildReusedPrepared(
+  snapshotData: ParsedSpecImport,
+  known: ReturnType<typeof loadSpecImportKnown>,
+  aliases: SpecImportAlias[],
+  sourceHash: string | undefined,
+): SpecImportPrepared {
+  const { kept, skipped } = partitionTombstonedParse(
+    snapshotData,
+    importProfileIsTombstoned,
+    recipeNameIsTombstoned,
+  );
+  const parsed = dedupeSpecImportCheeseRecipes(
+    canonicalizeSpecImportCheeseRecipeNames(kept),
+  );
+  const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
+  const discrepancies = buildDiscrepancies(parsed);
+  const reuseNote =
+    "This exact file was imported before — reused the earlier read (no new AI parse), so unchanged values stay identical to the previous import.";
+  const note = parsed.note ? `${parsed.note}\n${reuseNote}` : reuseNote;
+  return {
+    parsed,
+    summary,
+    newAliases: [],
+    flagged: [],
+    discrepancies,
+    skipped,
+    brands: known.brands,
+    flavorsByBrand: known.flavorsByBrand,
+    aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
+    ...(sourceHash ? { sourceHash } : {}),
+    note,
+  };
+}
+
 /** Load the known lists + learned aliases shared by every file in an import. */
 async function loadSpecImportContext(): Promise<{
   known: ReturnType<typeof loadSpecImportKnown>;
@@ -636,8 +752,20 @@ async function loadSpecImportContext(): Promise<{
  * Full read → AI → canonicalize → summarize step. Throws on a hard failure
  * (e.g. unreadable workbook, AI unavailable/forbidden) so the UI can show why.
  */
-export async function prepareSpecImport(data: ArrayBuffer): Promise<SpecImportPrepared> {
+export async function prepareSpecImport(
+  data: ArrayBuffer,
+  name?: string,
+): Promise<SpecImportPrepared> {
   const { known, aliases } = await loadSpecImportContext();
+
+  // Exact re-import of an unchanged file: reuse the previous import's stored
+  // parse instead of asking the AI to re-read it (AI re-reads of the same
+  // sheet can drift, and the prune would apply that drift as "changes").
+  const { sourceHash, snapshot } = await findReusableParse(name ? [name] : [], [data]);
+  if (snapshot) {
+    return buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
+  }
+
   const grids = await readWorkbookGrids(data);
   const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows } =
     await parseWorkbookCore(grids, known, aliases);
@@ -680,6 +808,7 @@ export async function prepareSpecImport(data: ArrayBuffer): Promise<SpecImportPr
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
     aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
+    ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
   };
 }
@@ -700,6 +829,15 @@ export async function prepareSpecImportMulti(
   names?: string[],
 ): Promise<SpecImportPrepared> {
   const { known, aliases } = await loadSpecImportContext();
+
+  // Exact re-import of the SAME unchanged file set: reuse the stored parse
+  // (see prepareSpecImport). Must run before the parse loop — it releases the
+  // buffers as it goes, and the hash needs the original bytes.
+  const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
+  if (snapshot) {
+    onProgress?.(buffers.length, buffers.length);
+    return buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
+  }
 
   const parsedList: ParsedSpecImport[] = [];
   const allResolved: ParseCore["resolved"] = [];
@@ -793,6 +931,7 @@ export async function prepareSpecImportMulti(
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
     aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
+    ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
   };
 }
@@ -928,6 +1067,7 @@ export async function commitSpecImport(
         buildSpecSheetLabel(prepared.parsed, names),
         prepared.parsed,
         deriveSourceKey(names),
+        prepared.sourceHash,
       );
     } catch {
       // best-effort

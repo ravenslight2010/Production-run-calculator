@@ -11,5 +11,7 @@ export interface SaveSpecSheetInput {
   label: string;
   /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older/mobile clients (they share a legacy bucket). */
   sourceKey?: string;
+  /** Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot's parse instead of re-running the AI. Omitted by older/mobile clients. */
+  sourceHash?: string;
   data: SavedSpecSheetData;
 }

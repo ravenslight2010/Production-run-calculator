@@ -16,10 +16,15 @@ const MAX_LABEL_LEN = 200;
 
 const MAX_SOURCE_KEY_LEN = 300;
 
+// Content fingerprint format: SHA-256 hex (64 chars). Anything else is stored
+// as null — reuse eligibility must never key off a malformed client value.
+const SOURCE_HASH_RE = /^[0-9a-f]{64}$/;
+
 type ApiSpecSheet = {
   id: number;
   label: string;
   sourceKey: string | null;
+  sourceHash: string | null;
   createdAt: number;
   data: unknown;
 };
@@ -29,6 +34,7 @@ function toApi(row: SavedSpecSheetRow): ApiSpecSheet {
     id: row.id,
     label: row.label,
     sourceKey: row.sourceKey ?? null,
+    sourceHash: row.sourceHash ?? null,
     createdAt: row.createdAt.getTime(),
     data: row.data,
   };
@@ -61,12 +67,15 @@ router.post("/spec-sheets", async (req: Request, res: Response) => {
   }
   const label = (parsed.data.label ?? "").trim().slice(0, MAX_LABEL_LEN) || "Spec sheet";
   const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
+  const rawHash = (parsed.data.sourceHash ?? "").trim().toLowerCase();
+  const sourceHash = SOURCE_HASH_RE.test(rawHash) ? rawHash : null;
 
   try {
     await db.insert(savedSpecSheetsTable).values({
       scope: currentScope(),
       label,
       sourceKey,
+      sourceHash,
       data: parsed.data.data,
     });
 

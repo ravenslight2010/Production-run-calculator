@@ -112,7 +112,14 @@ beforeEach(async () => {
   await db.execute(sql`TRUNCATE ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`);
 });
 
-type ApiSpecSheet = { id: number; label: string; sourceKey?: string | null; createdAt: number; data: unknown };
+type ApiSpecSheet = {
+  id: number;
+  label: string;
+  sourceKey?: string | null;
+  sourceHash?: string | null;
+  createdAt: number;
+  data: unknown;
+};
 type TestScope = "live" | "sandbox";
 
 function headers(scope: TestScope): Record<string, string> {
@@ -130,11 +137,17 @@ async function save(
   data: unknown,
   scope: TestScope = "live",
   sourceKey?: string,
+  sourceHash?: string,
 ): Promise<ApiSpecSheet[]> {
   const res = await fetch(`${baseUrl}/api/spec-sheets`, {
     method: "POST",
     headers: headers(scope),
-    body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
+    body: JSON.stringify({
+      label,
+      data,
+      ...(sourceKey ? { sourceKey } : {}),
+      ...(sourceHash ? { sourceHash } : {}),
+    }),
   });
   expect(res.status).toBe(200);
   return ((await res.json()) as { specSheets: ApiSpecSheet[] }).specSheets;
@@ -182,6 +195,19 @@ describe("saved-spec-sheets routes", () => {
     expect(labels).not.toContain("dough v1");
     expect(labels).not.toContain("sauce v1");
     expect(labels).toHaveLength(4);
+  });
+
+  it("round-trips sourceHash (null when omitted)", async () => {
+    const hash = "a".repeat(64);
+    const saved = await save("hashed", specData("a"), "live", "my-file", hash);
+    expect(saved.find((s) => s.label === "hashed")?.sourceHash).toBe(hash);
+    await save("no-hash", specData("b"), "live", "other-file");
+    // Malformed hashes (wrong length / non-hex) are stored as null, never trusted.
+    await save("bad-hash", specData("c"), "live", "third-file", "not-a-sha256!");
+    const sheets = await list();
+    expect(sheets.find((s) => s.label === "hashed")?.sourceHash).toBe(hash);
+    expect(sheets.find((s) => s.label === "no-hash")?.sourceHash).toBeNull();
+    expect(sheets.find((s) => s.label === "bad-hash")?.sourceHash).toBeNull();
   });
 
   it("round-trips sourceKey and buckets keyless snapshots separately", async () => {

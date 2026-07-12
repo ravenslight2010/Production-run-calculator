@@ -15,6 +15,11 @@ export const savedSpecSheetsTable = pgTable("saved_spec_sheets", {
   // two most recent versions of EACH distinct spec sheet, not just two overall.
   // Nullable: older/mobile clients that don't send one share a single legacy bucket.
   sourceKey: text("source_key"),
+  // SHA-256 content fingerprint of the uploaded file bytes (per-file hashes
+  // sorted + re-hashed for multi-file imports). Lets a re-import of the EXACT
+  // same file reuse this snapshot's parse instead of re-running the AI (whose
+  // read of the same sheet can drift between calls). Nullable: legacy rows.
+  sourceHash: text("source_hash"),
   // The canonicalized ParsedSpecImport ({ profiles, recipes, note? }).
   data: jsonb("data").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -7807,7 +7807,7 @@ export default function Home() {
       }
       const prepared =
         buffers.length === 1
-          ? await prepareSpecImport(buffers[0])
+          ? await prepareSpecImport(buffers[0], files[0]?.name)
           : await prepareSpecImportMulti(
               buffers,
               (done, total) => {
