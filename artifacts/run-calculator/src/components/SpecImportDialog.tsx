@@ -11,7 +11,9 @@ import {
   mergeSpecAliases,
   cleanSpecCheeseRecipeName,
   recipeLinkSuggestionKey,
+  repointProfileNamedRecipes,
   specImportNameMatchKey,
+  type NamedRecipeRename,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedRecipeTarget,
@@ -410,6 +412,28 @@ export default function SpecImportDialog({
         });
       }
     }
+    // Manual RENAMES of dough/sauce recipes are learnable too (brand/flavor
+    // renames already are): remember "sheet label → the user's typed name" so
+    // a re-import of the same sheet pre-selects linking to the renamed recipe
+    // (it exists after this Apply) instead of recreating the raw sheet name.
+    // Cheese/mix renames stay unlearned on purpose — their name namespace
+    // doubles as the applicator blend-type namespace, where a prepare-time
+    // rename can silently disconnect slots from their recipes.
+    for (const r of recipes) {
+      if (!r.include) continue;
+      if (r.kind !== "dough" && r.kind !== "sauce") continue;
+      if (r.linkExisting?.trim()) continue;
+      const external = (r.baseOrig.name ?? "").trim();
+      const renamed = r.name.trim();
+      if (!external || !renamed) continue;
+      if (external.toLowerCase() === renamed.toLowerCase()) continue;
+      out.push({
+        kind: "recipeName",
+        externalName: external,
+        canonicalName: renamed,
+        context: r.kind,
+      });
+    }
     return out;
   }, [recipes]);
 
@@ -462,15 +486,36 @@ export default function SpecImportDialog({
       });
       return changed ? { ...p, applicators } : p;
     };
-    const outProfiles = profiles
-      .filter((p) => p.include)
-      .map((p): ParsedProfile => {
-        const out: ParsedProfile = { ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() };
-        const die = p.dieType.trim();
-        if (die) out.dieType = die;
-        else delete out.dieType;
-        return repointApplicators(out);
-      });
+    // Dough/sauce recipe decisions ("use existing" links AND manual renames)
+    // must follow through to the profiles' dough/sauce TYPE assignments, or the
+    // apply-time relink never connects them and the raw sheet name leaks into
+    // the type dropdowns as a bogus new option.
+    const namedRenames: NamedRecipeRename[] = [];
+    for (const r of recipes) {
+      if (!r.include) continue;
+      if (r.kind !== "dough" && r.kind !== "sauce") continue;
+      const finalName = r.linkExisting?.trim() || r.name.trim();
+      if (!finalName) continue;
+      const fromNames = [r.baseOrig.name ?? "", r.orig.name ?? ""].filter(
+        (nm) =>
+          nm.trim() &&
+          specImportNameMatchKey(nm) !== specImportNameMatchKey(finalName),
+      );
+      if (!fromNames.length) continue;
+      namedRenames.push({ kind: r.kind, fromNames, to: finalName });
+    }
+    const outProfiles = repointProfileNamedRecipes(
+      profiles
+        .filter((p) => p.include)
+        .map((p): ParsedProfile => {
+          const out: ParsedProfile = { ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() };
+          const die = p.dieType.trim();
+          if (die) out.dieType = die;
+          else delete out.dieType;
+          return repointApplicators(out);
+        }),
+      namedRenames,
+    );
     const outRecipes = recipes
       .filter((r) => r.include)
       .map((r): ParsedRecipe => {

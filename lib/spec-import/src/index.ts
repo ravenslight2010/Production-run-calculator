@@ -1382,6 +1382,56 @@ export function recipeLinkSuggestionKey(displayKind: string, name: string): stri
   return `${displayKind.trim().toLowerCase()}\u0000${name.trim().toLowerCase()}`;
 }
 
+/** A review-time dough/sauce recipe rename or "use existing" link, to be mirrored onto profile TYPE assignments. */
+export type NamedRecipeRename = {
+  kind: "dough" | "sauce";
+  /** The parsed sheet name(s) this recipe carried before the user's decision. */
+  fromNames: string[];
+  /** The recipe's FINAL name (the linked existing recipe, or the user's typed rename). */
+  to: string;
+};
+
+/**
+ * Rename profile-level dough/sauce TYPE assignments (`doughName` / `sauceName`)
+ * to a recipe's FINAL review-time name. Without this, a "use existing" pick or
+ * a manual rename only renames the RECIPE — the profiles keep the raw sheet
+ * name, so the apply-time relink never connects them and the raw name leaks
+ * into the type dropdowns. Loose-keyed via specImportNameMatchKey so minor
+ * formatting drift still matches. Kind-scoped: a dough rename never touches
+ * sauce assignments (and vice versa). Pure; untouched profiles keep identity.
+ */
+export function repointProfileNamedRecipes(
+  profiles: ReadonlyArray<ParsedProfile>,
+  renames: ReadonlyArray<NamedRecipeRename>,
+): ParsedProfile[] {
+  const doughMap = new Map<string, string>();
+  const sauceMap = new Map<string, string>();
+  for (const r of renames) {
+    const to = r.to.trim();
+    if (!to) continue;
+    const map = r.kind === "dough" ? doughMap : sauceMap;
+    for (const nm of r.fromNames) {
+      const key = specImportNameMatchKey(nm ?? "");
+      if (key && !map.has(key)) map.set(key, to);
+    }
+  }
+  if (doughMap.size === 0 && sauceMap.size === 0) return [...profiles];
+  return profiles.map((p) => {
+    const dKey = specImportNameMatchKey(p.doughName ?? "");
+    const sKey = specImportNameMatchKey(p.sauceName ?? "");
+    const dTo = dKey ? doughMap.get(dKey) : undefined;
+    const sTo = sKey ? sauceMap.get(sKey) : undefined;
+    const dChanged = !!dTo && dTo !== (p.doughName ?? "");
+    const sChanged = !!sTo && sTo !== (p.sauceName ?? "");
+    if (!dChanged && !sChanged) return p;
+    return {
+      ...p,
+      ...(dChanged ? { doughName: dTo } : {}),
+      ...(sChanged ? { sauceName: sTo } : {}),
+    };
+  });
+}
+
 export type SpecImportAlias = {
   kind: SpecAliasKind;
   externalName: string;

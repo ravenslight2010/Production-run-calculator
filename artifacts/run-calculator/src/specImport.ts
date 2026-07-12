@@ -21,6 +21,8 @@ import {
   canonicalizeSpecImportCheeseRecipeNames,
   cleanSpecCheeseRecipeName,
   dedupeSpecImportCheeseRecipes,
+  dropConflictingSpecAliases,
+  pickAlias,
   linkSpecImportCheeseToExisting,
   linkSpecImportNamedRecipesToExisting,
   linkSpecImportDieTypesToExisting,
@@ -46,6 +48,7 @@ import {
   type CanonicalResult,
   type ExtraNameMatches,
   type NameMatch,
+  type ParsedProfile,
   type ParsedRecipeTarget,
   type ParsedSpecImport,
   type ScopedNameMatch,
@@ -251,14 +254,34 @@ function canonicalizeParsed(
     return !!key && blendTypeKeys.has(key);
   };
 
+  // Profile-level dough/sauce TYPE assignments honor learned "recipeName"
+  // aliases (the user's prior review-time renames / "use existing" picks for
+  // dough & sauce recipes) so a re-import applies the user's reassignment
+  // instead of resurrecting the raw sheet name — even when the recipe itself
+  // isn't in this sheet. Alias-only on purpose: exact/fuzzy snapping to the
+  // saved pools is the link pass's job (it has stronger near-dup guards).
+  const usableAliases = dropConflictingSpecAliases(aliases);
+  const aliasNamedRecipe = (
+    nm: string | undefined,
+    kindCtx: "dough" | "sauce",
+  ): string | undefined => {
+    const raw = (nm ?? "").trim();
+    if (!raw) return undefined;
+    return pickAlias(usableAliases, "recipeName", raw, kindCtx) ?? undefined;
+  };
+
   const profiles = raw.profiles.map(p => {
     const brand = track("brand", canonicalize(p.brand, known.brands, aliases, "brand"));
     const knownFlavors = known.flavorsByBrand[brand] ?? [];
     const flavor = track("flavor", canonicalize(p.flavor, knownFlavors, aliases, "flavor", brand), brand);
+    const doughAlias = aliasNamedRecipe(p.doughName, "dough");
+    const sauceAlias = aliasNamedRecipe(p.sauceName, "sauce");
     return {
       ...p,
       brand,
       flavor,
+      ...(doughAlias ? { doughName: doughAlias } : {}),
+      ...(sauceAlias ? { sauceName: sauceAlias } : {}),
       applicators: p.applicators.map(a =>
         isBlendNamedType(a.type ?? "")
           ? { ...a }
