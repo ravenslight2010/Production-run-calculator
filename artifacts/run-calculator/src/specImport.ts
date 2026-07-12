@@ -13,6 +13,7 @@
 import * as XLSX from "xlsx";
 import {
   applyNameMatches,
+  blendLinkSuggestionKey,
   canonicalize,
   collectMatchCandidates,
   collectSpecAliases,
@@ -46,6 +47,7 @@ import {
   specImportNameMatchKey,
   splitGridsForPrompt,
   summarizeSpecImport,
+  updateRecipePoolComponents,
   type CanonicalResult,
   type ExtraNameMatches,
   type NameMatch,
@@ -91,6 +93,7 @@ import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
+import { fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
 import {
@@ -159,7 +162,14 @@ function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<string, s
     if (a.kind === "appType") {
       const ext = a.externalName.trim().toLowerCase();
       if (!ext || !canon || ext === canon.toLowerCase()) continue;
-      out[ext] = canon;
+      const brandCtx = (a.context ?? "").trim();
+      // Brand-scoped rows (saved alongside the context-free row since picks
+      // became brand-aware) go under a brand-scoped key so two brands using
+      // the same generic blend name each keep their OWN remembered pick;
+      // context-free rows keep the legacy plain-name key (the cross-brand
+      // fallback).
+      if (brandCtx) out[blendLinkSuggestionKey(brandCtx, ext)] = canon;
+      else out[ext] = canon;
     } else if (a.kind === "recipeName") {
       // Dough/sauce "use existing" picks, scoped by kind via context so a
       // dough link never pre-selects on a sauce row (or vice versa).
@@ -1012,6 +1022,12 @@ export async function commitSpecImport(
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
+  /**
+   * Saved server-pool recipes (cheese / dough / sauce) whose ingredient rows
+   * were REPLACED with this sheet's, because the user linked the parsed recipe
+   * to them AND checked "update it with this sheet" in the review.
+   */
+  recipesUpdated: number;
   /** Brand+flavor profiles this import wrote — see applySpecImport. */
   touchedProfiles: Array<{ brand: string; flavor: string }>;
 }> {
@@ -1100,7 +1116,24 @@ export async function commitSpecImport(
   // recipe — it simply links to it. Manager-gated on the server and fully
   // best-effort: the recipes already applied locally, so a failed sync must
   // never surface as an import error.
+  // "Update the existing recipe with this sheet" picks from the review: the
+  // recipe applied locally like a normal one (under the linked existing name),
+  // and here the matching SERVER pool recipe's ingredient rows are replaced
+  // too — cheese cards and the dough/sauce pickers hydrate rows from the
+  // pools, so without this the on-screen recipe would keep its old rows.
+  const updateTargets = (applyParsed.recipes ?? []).filter(
+    (r): r is typeof r & { name: string } =>
+      Boolean(r.updateExisting) &&
+      !r.referenceOnly &&
+      Boolean((r.name ?? "").trim()) &&
+      (r.rows?.length ?? 0) > 0,
+  );
+  let recipesUpdated = 0;
+
   let cheeseRecipesAdded = 0;
+  const cheeseUpdates = updateTargets
+    .filter((r) => r.kind === "cheese" && r.forcedCategory !== "mix")
+    .map((r) => ({ name: r.name.trim(), rows: r.rows ?? [] }));
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
@@ -1108,16 +1141,40 @@ export async function commitSpecImport(
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
       .filter((r): r is CheeseRecipe => r != null);
-    if (candidates.length) {
+    if (candidates.length || cheeseUpdates.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
       const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
-      if (added > 0) {
-        await saveCheeseRecipes(merged);
+      // Apply the user's "update with this sheet" picks on the SAME list so a
+      // single save carries both the additions and the row updates (a second
+      // stale-list save would clobber one or the other).
+      const upd = updateRecipePoolComponents(merged, cheeseUpdates);
+      if (added > 0 || upd.updated > 0) {
+        await saveCheeseRecipes(upd.next);
         cheeseRecipesAdded = added;
+        recipesUpdated += upd.updated;
       }
     }
   } catch {
     // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  }
+
+  // Same update step for the Dough / Sauce named-recipe pools. Best-effort for
+  // the same reasons — the sheet's rows already applied locally either way.
+  for (const kind of ["dough", "sauce"] as const) {
+    const updates = updateTargets
+      .filter((r) => r.kind === kind)
+      .map((r) => ({ name: r.name.trim(), rows: r.rows ?? [] }));
+    if (!updates.length) continue;
+    try {
+      const pool = await fetchNamedRecipes(kind);
+      const upd = updateRecipePoolComponents(pool, updates);
+      if (upd.updated > 0) {
+        await saveNamedRecipes(kind, upd.next);
+        recipesUpdated += upd.updated;
+      }
+    } catch {
+      // Best-effort (non-manager 403, offline) — import applied.
+    }
   }
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
@@ -1158,5 +1215,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, touchedProfiles };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, touchedProfiles };
 }

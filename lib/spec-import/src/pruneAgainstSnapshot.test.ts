@@ -144,6 +144,20 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     expect(out.parsed.recipes[1].referenceOnly).toBeUndefined();
   });
 
+  it("never demotes an explicit 'update existing' pick, even when the sheet is unchanged", () => {
+    // The user linked the parsed recipe to an existing pool recipe AND checked
+    // "update it with this sheet" — the pool copy may have drifted from the
+    // sheet, so an unchanged re-import must still carry the update through.
+    const userPick = recipe({ updateExisting: true });
+    const out = pruneSpecImportAgainstSnapshot(
+      parsedOf([], [userPick]),
+      parsedOf([], [recipe()]),
+    );
+    expect(out.parsed.recipes[0]).toEqual(userPick);
+    expect(out.parsed.recipes[0].referenceOnly).toBeUndefined();
+    expect(out.unchangedRecipes).toBe(0);
+  });
+
   it("does not mutate its inputs", () => {
     const parsed = parsedOf([profile()], [recipe()]);
     const snapshot = JSON.parse(JSON.stringify(parsed)) as ParsedSpecImport;

@@ -3,13 +3,17 @@ name: Importer "use existing" redirect aliases
 description: How cheese/premix importer redirect picks are remembered and auto-applied on re-import
 ---
 
-# Importer redirect picks live in the shared context-free "appType" alias namespace
+# Importer redirect picks live in the shared "appType" alias namespace
 
 The cheese-recipe importer and premix importer review dialogs each have a per-item
 "Use existing recipe/mix" picker. A confirmed pick is saved as a spec-import alias
 `{kind:"appType", externalName:<sheet name>, canonicalName:<existing name>, context:null}`
 — the SAME namespace the spec importer's cheese/mix "Use existing recipe" picks write.
 This is intentional: a blend-name mapping learned in one importer auto-applies in the others.
+Note: the SPEC importer now ALSO writes a second brand-scoped row
+(context:<brand>) alongside the context:null one so each brand keeps its own
+pick for a generic blend name; the context-free row remains the cross-importer
+fallback these dialogs read (see `learned-import-aliases.md`).
 
 **Why:** managers re-import the same workbooks; without memory they'd redo every redirect,
 and near-dup blends would multiply.

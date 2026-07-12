@@ -10,6 +10,7 @@ import {
   collectSpecRenameAliases,
   mergeSpecAliases,
   cleanSpecCheeseRecipeName,
+  blendLinkSuggestionKey,
   recipeLinkSuggestionKey,
   repointProfileNamedRecipes,
   specImportNameMatchKey,
@@ -119,6 +120,13 @@ type RecipeItem = {
    * instead of creating/overwriting one from the sheet. Empty = create new.
    */
   linkExisting?: string;
+  /**
+   * With `linkExisting` set: the user also checked "update it with this
+   * sheet", so the linked existing recipe's ingredient rows are REPLACED with
+   * the sheet's on Apply (instead of the default reference-only link that
+   * leaves the saved recipe untouched). Reset whenever the link pick changes.
+   */
+  updateExisting?: boolean;
   include: boolean;
   tombstoned: boolean;
 };
@@ -164,12 +172,15 @@ function buildRecipeItems(
   // Only offered when the remembered recipe still exists in that kind's saved
   // pool (otherwise the picker would show an invalid selection).
   const suggestions = prepared.aliasLinkSuggestions ?? {};
-  const suggestLink = (name: string, kind: string): string | undefined => {
-    // Cheese/mix picks live under plain lowercased names (the legacy "appType"
-    // namespace); dough/sauce picks are kind-scoped via recipeLinkSuggestionKey.
+  const suggestLink = (name: string, kind: string, brand: string): string | undefined => {
+    // Cheese/mix picks: the BRAND-scoped key wins (each brand keeps its own
+    // remembered pick for a generic blend name — see blendLinkSuggestionKey),
+    // falling back to the legacy plain lowercased-name key (factory-wide).
+    // Dough/sauce picks are kind-scoped via recipeLinkSuggestionKey.
     const suggested =
       kind === "cheese" || kind === "mix"
-        ? suggestions[name.trim().toLowerCase()]
+        ? suggestions[blendLinkSuggestionKey(brand, name)] ??
+          suggestions[name.trim().toLowerCase()]
         : suggestions[recipeLinkSuggestionKey(kind, name)];
     if (!suggested) return undefined;
     if (suggested.trim().toLowerCase() === name.trim().toLowerCase()) return undefined;
@@ -179,7 +190,7 @@ function buildRecipeItems(
   };
   const kept = prepared.parsed.recipes.map((r, i) => {
     const kind = specImportRecipeDisplayKind(r);
-    const linkExisting = suggestLink(r.name ?? "", kind);
+    const linkExisting = suggestLink(r.name ?? "", kind, r.brand ?? "");
     return {
       key: `rk${i}`,
       orig: r,
@@ -402,7 +413,16 @@ export default function SpecImportDialog({
       if (!linked || !external) continue;
       if (external.toLowerCase() === linked.toLowerCase()) continue;
       if (r.kind === "cheese" || r.kind === "mix") {
+        // Two rows: the context-free one keeps the legacy factory-wide
+        // fallback working, the brand-scoped one (context = brand) lets each
+        // brand remember its OWN pick for a generic blend name instead of the
+        // last brand imported clobbering everyone's (specAliasKey includes
+        // context, so both rows coexist through merge + server upsert).
         out.push({ kind: "appType", externalName: external, canonicalName: linked, context: null });
+        const brandCtx = r.brand.trim();
+        if (brandCtx) {
+          out.push({ kind: "appType", externalName: external, canonicalName: linked, context: brandCtx });
+        }
       } else {
         out.push({
           kind: "recipeName",
@@ -428,7 +448,13 @@ export default function SpecImportDialog({
       if (!external || !renamed) continue;
       if (external.toLowerCase() === renamed.toLowerCase()) continue;
       if (r.kind === "cheese" || r.kind === "mix") {
+        // Same dual-row scheme as the links above: context-free fallback +
+        // brand-scoped row when the recipe carries a brand.
         out.push({ kind: "appType", externalName: external, canonicalName: renamed, context: null });
+        const brandCtx = r.brand.trim();
+        if (brandCtx) {
+          out.push({ kind: "appType", externalName: external, canonicalName: renamed, context: brandCtx });
+        }
       } else {
         out.push({
           kind: "recipeName",
@@ -528,14 +554,30 @@ export default function SpecImportDialog({
       .filter((r) => r.include)
       .map((r): ParsedRecipe => {
         const linked = r.linkExisting?.trim();
+        // Linked + "update it with this sheet" checked → apply like a NORMAL
+        // recipe under the linked name (library copy + profile ties get the
+        // sheet's rows) and flag it so commit also replaces the server-pool
+        // recipe's rows. Mix picks never get the checkbox (their amounts are
+        // manager-entered) and an empty parse can't update anything.
+        const wantsUpdate =
+          !!linked &&
+          !!r.updateExisting &&
+          r.kind !== "mix" &&
+          (r.orig.rows?.length ?? 0) > 0;
         const out: ParsedRecipe = linked
-          ? { ...r.orig, name: linked, kind: parseKindOf(r.kind), referenceOnly: true }
+          ? wantsUpdate
+            ? { ...r.orig, name: linked, kind: parseKindOf(r.kind), updateExisting: true }
+            : { ...r.orig, name: linked, kind: parseKindOf(r.kind), referenceOnly: true }
           : { ...r.orig, name: r.name.trim(), kind: parseKindOf(r.kind) };
-        if (!linked) delete out.referenceOnly;
+        if (!linked || wantsUpdate) delete out.referenceOnly;
+        if (!wantsUpdate) delete out.updateExisting;
         // The user typed a different name than the parse suggested — flag it so
         // the commit-time name passes (canonicalize / snap-to-existing) leave
         // the rename exactly as typed instead of reverting to the suggestion.
-        if (!linked && out.name && out.name !== (r.orig.name ?? "").trim()) {
+        // An update-linked recipe is flagged too: its name IS the user's
+        // explicit pick of an existing recipe, and the canonicalize/snap
+        // passes must not rewrite it away from the pool recipe it targets.
+        if (wantsUpdate || (!linked && out.name && out.name !== (r.orig.name ?? "").trim())) {
           out.userNamed = true;
         } else {
           delete out.userNamed;
@@ -812,11 +854,26 @@ export default function SpecImportDialog({
                         existingOptions={existingRecipeNamesByKind[r.kind] ?? []}
                         onToggle={() => setRecipe(r.key, { include: !r.include })}
                         onName={(name) => setRecipe(r.key, { name })}
-                        onKind={(kind) => setRecipe(r.key, { kind, linkExisting: undefined })}
+                        onKind={(kind) =>
+                          setRecipe(r.key, {
+                            kind,
+                            linkExisting: undefined,
+                            updateExisting: false,
+                          })
+                        }
                         onBrand={(brand) => setRecipe(r.key, { brand, brandTouched: true })}
                         onFlavor={(flavor) => setRecipe(r.key, { flavor, flavorTouched: true })}
                         onLinkExisting={(linkExisting) =>
-                          setRecipe(r.key, { linkExisting: linkExisting || undefined })
+                          // Changing the pick resets the "update it" checkbox —
+                          // consent to overwrite one recipe must never carry
+                          // over to a different one.
+                          setRecipe(r.key, {
+                            linkExisting: linkExisting || undefined,
+                            updateExisting: false,
+                          })
+                        }
+                        onUpdateExisting={(updateExisting) =>
+                          setRecipe(r.key, { updateExisting })
                         }
                       />
                     ))}
@@ -1171,6 +1228,7 @@ function RecipeRow({
   onBrand,
   onFlavor,
   onLinkExisting,
+  onUpdateExisting,
 }: {
   item: RecipeItem;
   editedProfiles: ParsedProfile[];
@@ -1184,6 +1242,7 @@ function RecipeRow({
   onBrand: (v: string) => void;
   onFlavor: (v: string) => void;
   onLinkExisting: (v: string) => void;
+  onUpdateExisting: (v: boolean) => void;
 }) {
   const linked = item.linkExisting?.trim() ?? "";
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
@@ -1203,6 +1262,10 @@ function RecipeRow({
   // list differs), so existence checks use the underlying parse kind.
   const isNew = !linked && (!name || !recipeExistsForImport(parseKindOf(item.kind), name));
   const rowsPreview = recipeRowsPreview(item.orig);
+  // "Update it with this sheet" is only offered when there's something to
+  // update with: the sheet actually read ingredient rows, and the pick isn't a
+  // Mix (mix amounts are manager-entered — a spec sheet can't express them).
+  const updateOffered = item.kind !== "mix" && (item.orig.rows?.length ?? 0) > 0;
   // Which products this recipe will actually attach to when applied. If empty,
   // the recipe name lands in the library but shows up on NO run — the silent
   // "it didn't import" miss the user reported.
@@ -1292,7 +1355,30 @@ function RecipeRow({
 
           {linked && (
             <div className="mt-1.5 text-xs text-muted-foreground">
-              Using your existing “{linked}” — it won't be changed.
+              {item.updateExisting && updateOffered
+                ? `Using your existing “${linked}” — its ingredients will be replaced with this sheet's.`
+                : `Using your existing “${linked}” — it won't be changed.`}
+            </div>
+          )}
+
+          {linked && updateOffered && (
+            <label className="mt-1.5 flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={!!item.updateExisting}
+                onChange={(e) => onUpdateExisting(e.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 accent-primary"
+                data-testid={`spec-recipe-update-existing-${item.key}`}
+              />
+              <span className="text-xs text-foreground">
+                Update “{linked}” with this sheet's ingredients
+              </span>
+            </label>
+          )}
+
+          {linked && item.updateExisting && updateOffered && rowsPreview && (
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Will change to: {rowsPreview}
             </div>
           )}
 

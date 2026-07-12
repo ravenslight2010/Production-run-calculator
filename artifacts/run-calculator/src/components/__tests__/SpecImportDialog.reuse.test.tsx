@@ -372,6 +372,165 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(select.value).toBe("House Dough");
   });
 
+  it("prefers a BRAND-scoped remembered blend pick over the factory-wide one", () => {
+    // Two brands can use the same generic blend name on their sheets; each
+    // brand's remembered pick lives under blendLinkSuggestionKey(brand, name)
+    // and must win over the legacy context-free (plain lowercased name) entry.
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Cheeseburger Cheese Mix",
+      brand: "Aldo's",
+      flavor: "CHEESEBURGER",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Aldo's", flavor: "CHEESEBURGER" }], {
+        // Factory-wide (legacy) entry points at one recipe...
+        "cheeseburger cheese mix": "Lowe's Spinach Cheese Mix",
+        // ...but Aldo's own remembered pick points at another.
+        "blend\u0000aldo's\u0000cheeseburger cheese mix": "Aldo's Cheese Mix",
+      }),
+      () => {},
+    );
+
+    const select = screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement;
+    expect(select.value).toBe("Aldo's Cheese Mix");
+  });
+
+  it("falls back to the factory-wide blend pick when the brand has none remembered", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Cheeseburger Cheese Mix",
+      brand: "Corner Booth",
+      flavor: "CHEESEBURGER",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Corner Booth", flavor: "CHEESEBURGER" }], {
+        "cheeseburger cheese mix": "Lowe's Spinach Cheese Mix",
+        "blend\u0000aldo's\u0000cheeseburger cheese mix": "Aldo's Cheese Mix",
+      }),
+      () => {},
+    );
+
+    const select = screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement;
+    expect(select.value).toBe("Lowe's Spinach Cheese Mix");
+  });
+
+  it("learns a cheese pick under BOTH the context-free and brand-scoped alias rows", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Aldo's Spinach Blend",
+      brand: "Aldo's",
+      flavor: "SPINACH",
+      rows: [{ ingredient: "Mozzarella", lbs: 20 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Aldo's", flavor: "SPINACH" }]), onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Lowe's Spinach Cheese Mix" },
+    });
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const learned = onConfirm.mock.calls[0][1] as Array<Record<string, unknown>>;
+    expect(learned).toContainEqual({
+      kind: "appType",
+      externalName: "Aldo's Spinach Blend",
+      canonicalName: "Lowe's Spinach Cheese Mix",
+      context: null,
+    });
+    expect(learned).toContainEqual({
+      kind: "appType",
+      externalName: "Aldo's Spinach Blend",
+      canonicalName: "Lowe's Spinach Cheese Mix",
+      context: "Aldo's",
+    });
+  });
+
+  it("offers an 'update with this sheet' checkbox on a linked recipe and emits updateExisting", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "Corner Booth",
+      flavor: "PLAIN",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), onConfirm);
+
+    // No checkbox before a link is picked.
+    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "House Dough" },
+    });
+    // Linked → checkbox appears, default unchecked, note says "won't be changed".
+    const checkbox = screen.getByTestId("spec-recipe-update-existing-rk0") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    expect(screen.getByText(/won't be changed/)).toBeTruthy();
+
+    fireEvent.click(checkbox);
+    expect(screen.getByText(/will be replaced/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({
+      name: "House Dough",
+      kind: "dough",
+      updateExisting: true,
+      userNamed: true,
+    });
+    // updateExisting replaces referenceOnly — the sheet's rows must apply.
+    expect(out.recipes[0].referenceOnly).toBeUndefined();
+  });
+
+  it("resets the update checkbox when the linked recipe changes", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "Corner Booth",
+      flavor: "PLAIN",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "House Dough" },
+    });
+    fireEvent.click(screen.getByTestId("spec-recipe-update-existing-rk0"));
+
+    // Consent to overwrite "House Dough" must NOT carry over to "Thin Crust".
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Thin Crust" },
+    });
+    const checkbox = screen.getByTestId("spec-recipe-update-existing-rk0") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(screen.getByText(/^Apply/));
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({ name: "Thin Crust", referenceOnly: true });
+    expect(out.recipes[0].updateExisting).toBeUndefined();
+  });
+
+  it("hides the update checkbox when the sheet parsed no ingredient rows", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "Corner Booth",
+      flavor: "PLAIN",
+      rows: [],
+    };
+    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), () => {});
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "House Dough" },
+    });
+    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
+  });
+
   it("does NOT let a sauce-scoped remembered link pre-select on a dough row", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",

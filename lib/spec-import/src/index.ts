@@ -148,6 +148,17 @@ export type ParsedRecipe = {
    * profiles, leaving the saved recipe exactly as-is. `rows` are ignored at apply.
    */
   referenceOnly?: boolean;
+  /**
+   * Import review only: the user LINKED this recipe to an existing saved
+   * recipe (its `name` is the existing recipe's name) AND checked "update it
+   * with this sheet". The recipe applies like a normal one (library copy +
+   * profile ties get the sheet's rows) and the commit pass also replaces the
+   * matching server-pool recipe's ingredient rows. Mutually exclusive with
+   * `referenceOnly`. The re-import prune must never demote such a recipe to
+   * referenceOnly — the user explicitly asked for the update THIS import,
+   * regardless of whether the sheet changed since last time.
+   */
+  updateExisting?: boolean;
   rows: RecipeRow[];
 };
 
@@ -1572,6 +1583,68 @@ export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
  */
 export function recipeLinkSuggestionKey(displayKind: string, name: string): string {
   return `${displayKind.trim().toLowerCase()}\u0000${name.trim().toLowerCase()}`;
+}
+
+/**
+ * BRAND-scoped lookup key for a cheese/mix "use existing" link suggestion.
+ * The legacy cheese/mix suggestion namespace is a plain lowercased blend name,
+ * which is factory-wide — two brands whose sheets use the same generic blend
+ * name ("Cheeseburger Cheese Mix") overwrite each other's remembered pick on
+ * every import. Picks made on a recipe that carries a brand are ALSO saved
+ * under an alias row whose `context` is that brand, and the review dialog
+ * looks this brand-scoped key up FIRST (falling back to the plain-name key),
+ * so each brand keeps its own memory. Shared between the prepare pass (which
+ * builds the suggestion map) and the review dialog (which reads it).
+ */
+export function blendLinkSuggestionKey(brand: string, name: string): string {
+  return `blend\u0000${brand.trim().toLowerCase()}\u0000${name.trim().toLowerCase()}`;
+}
+
+/**
+ * Replace the ingredient `components` of server-pool recipes with a sheet's
+ * rows, matched by case-insensitive name — the commit half of the review's
+ * "update the existing recipe with this sheet" checkbox. Works for both the
+ * Cheese Recipes pool and the Dough/Sauce named-recipe pools (they share the
+ * `{ ingredient, lbs }` component shape). Rules:
+ * - a target with no usable rows (all blank ingredient names) never touches
+ *   the pool recipe (an empty parse must not wipe a curated recipe);
+ * - a pool recipe whose components already equal the sheet rows (same order,
+ *   ci-name + lbs) is left as the SAME object so callers can skip the save;
+ * - everything else on the pool recipe (id, brand, flavors, notes, enabled…)
+ *   is preserved.
+ * Pure; never mutates its inputs.
+ */
+export function updateRecipePoolComponents<
+  T extends { name: string; components: Array<{ ingredient: string; lbs: number }> },
+>(
+  pool: ReadonlyArray<T>,
+  updates: ReadonlyArray<{ name: string; rows: ReadonlyArray<RecipeRow> }>,
+): { next: T[]; updated: number } {
+  const byName = new Map<string, ReadonlyArray<RecipeRow>>();
+  for (const u of updates) {
+    const key = u.name.trim().toLowerCase();
+    if (key) byName.set(key, u.rows);
+  }
+  let updated = 0;
+  const next = pool.map((rec) => {
+    const rows = byName.get(rec.name.trim().toLowerCase());
+    if (!rows) return rec;
+    const components = rows
+      .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: r.lbs ?? 0 }))
+      .filter((c) => c.ingredient);
+    if (components.length === 0) return rec;
+    const same =
+      rec.components.length === components.length &&
+      rec.components.every(
+        (c, i) =>
+          c.ingredient.trim().toLowerCase() === components[i].ingredient.toLowerCase() &&
+          c.lbs === components[i].lbs,
+      );
+    if (same) return rec;
+    updated++;
+    return { ...rec, components };
+  });
+  return { next, updated };
 }
 
 /** A review-time dough/sauce recipe rename or "use existing" link, to be mirrored onto profile TYPE assignments. */
@@ -4188,6 +4261,11 @@ export function pruneSpecImportAgainstSnapshot(
 
   const recipes: ParsedRecipe[] = (parsed.recipes ?? []).map((r) => {
     if (r.referenceOnly) return r;
+    // The user explicitly checked "update the existing recipe with this
+    // sheet" in the review — the saved/pool copy may have drifted from the
+    // sheet even when the sheet itself is unchanged since the last import,
+    // so this must never be demoted to referenceOnly.
+    if (r.updateExisting) return r;
     const prev = prevRecipes.get(`${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}`);
     if (!prev || prev.referenceOnly) return r;
     const unchanged =

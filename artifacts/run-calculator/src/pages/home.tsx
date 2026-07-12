@@ -7868,7 +7868,8 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, touchedProfiles } = await commitSpecImport(toCommit);
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, touchedProfiles } =
+        await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
       // If the CURRENT run's brand+flavor profile was rewritten by this import,
@@ -7926,9 +7927,17 @@ export default function Home() {
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
-      // so the run applicator "Cheese" pickers list them right away.
-      if (cheeseRecipesAdded > 0)
+      // so the run applicator "Cheese" pickers list them right away. Same when
+      // an existing pool recipe's rows were replaced via the review's "update
+      // it with this sheet" checkbox (cheese, dough, or sauce — the pickers
+      // hydrate rows from these pools, so they must refetch to show the new
+      // ingredients).
+      if (cheeseRecipesAdded > 0 || recipesUpdated > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      if (recipesUpdated > 0) {
+        void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
+        void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
+      }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
@@ -7945,12 +7954,19 @@ export default function Home() {
         cheeseRecipesAdded > 0
           ? ` ${cheeseRecipesAdded} cheese recipe${cheeseRecipesAdded === 1 ? "" : "s"} added to the Cheese Recipes pool — check batch pounds there.`
           : "";
+      const updatedNote =
+        recipesUpdated > 0
+          ? ` ${recipesUpdated} saved recipe${recipesUpdated === 1 ? "" : "s"} updated with this sheet's ingredients.`
+          : "";
       toast({
         title: "Spec sheet imported",
         description:
           (importedRecipes
             ? "Brands, flavors, and recipes have been added."
-            : "Brands and flavors have been added.") + mixNote + cheeseNote,
+            : "Brands and flavors have been added.") +
+          mixNote +
+          cheeseNote +
+          updatedNote,
       });
     } catch (err) {
       setSpecImportError(

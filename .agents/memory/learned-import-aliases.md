@@ -75,12 +75,31 @@ every time even after they had linked the blend to the right existing recipe.
 - `appType` is deliberately the blend-name namespace (same kind the old learned
   cheese-name links / the once-poisoned aliases lived in) — do NOT invent a new
   alias kind without a server contract change.
+- **Picks are learned as TWO rows:** context:null (legacy factory-wide
+  fallback) + context:<brand> (brand-scoped, via `blendLinkSuggestionKey`).
+  The brand-scoped row wins at suggest time. Why: two brands whose sheets use
+  the same generic blend name ("Cheeseburger Cheese Mix") were clobbering each
+  other's remembered pick in the context-free namespace. `specAliasKey`
+  includes context, so both rows coexist through merge and server upsert — no
+  contract change needed.
 - Suggestion is advisory + guarded: only pre-select when the remembered target
   still exists in that kind's saved pool (stale-target guard, same rule as the
   brand/flavor apply guard above).
-- Dough/sauce "use existing" picks are intentionally NOT learned — there is no
-  recipe-name alias kind for them; overloading appType would pollute the blend
-  namespace.
+- Dough/sauce "use existing" picks are learned under the `recipeName` alias
+  kind with context = the parse kind ("dough"/"sauce") — NOT appType, which
+  would pollute the blend namespace.
+- **"Update it with this sheet" checkbox:** a linked pick can optionally
+  REPLACE the existing pool recipe's ingredients with the sheet's rows. The
+  emitted recipe is `{name: linked, updateExisting: true, userNamed: true}`
+  (NOT referenceOnly — it applies locally like a normal recipe under the
+  linked name), and commit replaces pool components via the pure
+  `updateRecipePoolComponents` helper (ci-name match, never wipes on empty
+  rows, skips no-ops). Offered only when the parse read rows and the pick
+  isn't a Mix (mix amounts are manager-entered). The checkbox resets whenever
+  the link or kind changes — consent to overwrite one recipe must never carry
+  to another. `pruneSpecImportAgainstSnapshot` must never demote an
+  updateExisting recipe to referenceOnly (the pool copy may have drifted from
+  an unchanged sheet).
 - External key = the PRISTINE review-time parsed name (post
   canonicalizeSpecImportCheeseRecipeNames), so the key is stable across
   re-imports of the same sheet.
