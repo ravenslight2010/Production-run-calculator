@@ -25,6 +25,7 @@ import {
   premixId,
   summarizePremixImport,
   buildPremixCandidates,
+  suggestPremixRedirects,
   mergePremixIntoMixes,
   collectPremixFreezerPulls,
   collectPremixPrepItems,
@@ -64,6 +65,17 @@ export type PremixImportPrepared = {
   flavorsByBrand: Record<string, string[]>;
   /** Ids of mixes already saved, so a re-match can recompute new-vs-update. */
   existingIds: string[];
+  /**
+   * The CURRENT saved mixes (identity fields only), so the review dialog can
+   * offer a per-mix "Use existing mix instead" redirect picker.
+   */
+  existingMixes: { id: string; name: string; brand: string; flavor: string }[];
+  /**
+   * Learned-alias redirect suggestions the review pre-applies: candidate mix id
+   * (the dialog's stable key) → existing mix id the manager linked that sheet
+   * name to in a past import.
+   */
+  redirectSuggestions: Record<string, string>;
   /**
    * Freezer-pull settings suggested by the sheets' "Pull N days early" notes,
    * keyed by the ORIGINAL parsed mix id (the review dialog's stable key), so
@@ -236,6 +248,10 @@ export async function preparePremixImport(
   }
   const note = noteParts.length ? noteParts.join("\n") : undefined;
 
+  // Learned "use existing mix" picks from past reviews: pre-apply the same
+  // redirect so a re-import of the same sheet updates the chosen mix again.
+  const redirectSuggestions = suggestPremixRedirects(candidates, existing, aliases);
+
   return {
     mixes,
     candidates,
@@ -244,6 +260,10 @@ export async function preparePremixImport(
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
     existingIds: [...existingIds],
+    existingMixes: existing
+      .map((m) => ({ id: m.id, name: m.name, brand: m.brand, flavor: m.flavor }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    redirectSuggestions,
     freezerPulls,
     prepItems,
     ...(note ? { note } : {}),
@@ -268,6 +288,7 @@ export async function commitPremixImport(
   prepared: PremixImportPrepared,
   mixesToApply: ReadonlyArray<Mix>,
   freezerPulls: ReadonlyArray<PremixFreezerPull> = [],
+  extraAliases: ReadonlyArray<SpecImportAlias> = [],
 ): Promise<PremixCommitResult> {
   // Nothing to apply at all — no mixes AND no pull-note reminders (e.g. a
   // prep-only sheet with no pull notes). Bail before touching the server.
@@ -318,21 +339,32 @@ export async function commitPremixImport(
     }
   }
 
-  if (prepared.newAliases.length) {
+  // Persist learned name mappings: the grounding pass's brand/flavor aliases
+  // plus any "use existing mix" picks the review dialog collected (blend-name
+  // "appType" aliases). Best-effort: the import already applied.
+  const aliasesToSave = [...prepared.newAliases, ...extraAliases];
+  if (aliasesToSave.length) {
     try {
-      await saveSpecImportAliases(prepared.newAliases);
+      await saveSpecImportAliases(aliasesToSave);
     } catch {
       // Best-effort: the import already applied; learning is a bonus.
     }
-    // Mirror each learned brand/flavor mapping into the factory-wide corrections
-    // pool so every other name-resolving AI helper honors it too.
-    void saveAiCorrections(
-      prepared.newAliases.map((a) => ({
-        domain: a.kind === "brand" ? "brand" : "flavor",
-        fromText: a.externalName,
-        toText: a.canonicalName,
-      })),
+    // Mirror each learned BRAND/FLAVOR mapping into the factory-wide corrections
+    // pool so every other name-resolving AI helper honors it too. Other kinds
+    // (e.g. the "appType" blend-name picks) have no corrections domain — mixing
+    // them in would mis-file a mix name as a flavor correction.
+    const mirrorable = aliasesToSave.filter(
+      (a) => a.kind === "brand" || a.kind === "flavor",
     );
+    if (mirrorable.length) {
+      void saveAiCorrections(
+        mirrorable.map((a) => ({
+          domain: a.kind === "brand" ? ("brand" as const) : ("flavor" as const),
+          fromText: a.externalName,
+          toText: a.canonicalName,
+        })),
+      );
+    }
   }
 
   return { freezerPullCount, ...(warning ? { warning } : {}) };

@@ -24,6 +24,8 @@
 import {
   canonicalize,
   collectSpecAliases,
+  dropConflictingSpecAliases,
+  pickAlias,
   type CanonicalResult,
   type SheetGrid,
   type SpecImportAlias,
@@ -893,6 +895,105 @@ export function rematchPremixCandidate(
     // candidate always has one, so fall back to the original mix defensively.
     candidate.mix;
   return { mix, status: exists(mix.id) ? "update" : "new" };
+}
+
+/** The identity of an EXISTING saved mix a reviewed candidate can redirect onto. */
+export type MixRedirectTarget = {
+  id: string;
+  name: string;
+  brand: string;
+  flavor: string;
+};
+
+/**
+ * Redirect one reviewable candidate onto an EXISTING saved mix — the manager's
+ * explicit "this sheet block is really that mix" pick in the review dialog. The
+ * candidate keeps its freshly parsed quantities (components, batch size,
+ * days-early note) but takes over the existing mix's identity (id + name +
+ * brand + flavor), so applying it UPDATES that mix in place instead of adding a
+ * near-duplicate under the sheet's wording. Always an "update" by construction
+ * (the target is a saved mix), but status is still recomputed via `exists` for
+ * consistency with the other review transforms. Pure.
+ */
+export function redirectPremixCandidate(
+  candidate: PremixCandidate,
+  target: MixRedirectTarget,
+  exists: (id: string) => boolean,
+): PremixCandidate {
+  const mix =
+    normalizeMix({
+      ...candidate.mix,
+      id: target.id,
+      name: target.name,
+      brand: target.brand,
+      flavor: target.flavor,
+    }) ??
+    // normalizeMix only returns null for a mix with no usable name; redirect
+    // targets are saved mixes (always named), so fall back defensively.
+    candidate.mix;
+  return { mix, status: exists(mix.id) ? "update" : "new" };
+}
+
+/**
+ * Work out which candidates a LEARNED alias redirects onto an existing mix —
+ * the "remember my pick" half of the review dialog's "Use existing mix" select.
+ * Returns candidate-mix-id → existing-mix-id for the review to pre-apply.
+ *
+ * Mix-name redirect picks are stored in the context-free "appType" namespace
+ * (the shared blend-name pool the spec importer's cheese/mix "Use existing
+ * recipe" picks also write into), keyed by the sheet's mix name. A suggestion
+ * only fires when the learned canonical name (ci) matches exactly ONE existing
+ * mix; candidates that are already clean exact-id updates are skipped, and a
+ * target claimed by more than one candidate (another suggestion or an exact-id
+ * update) is dropped entirely — two redirects onto the same mix would collide
+ * in the last-write-wins merge and silently lose one block's data. Pure.
+ */
+export function suggestPremixRedirects(
+  candidates: ReadonlyArray<PremixCandidate>,
+  existing: ReadonlyArray<Mix>,
+  aliases: ReadonlyArray<SpecImportAlias>,
+): Record<string, string> {
+  const usable = dropConflictingSpecAliases(aliases).filter(
+    (a) => a.kind === "appType" && (a.context ?? null) === null,
+  );
+  if (usable.length === 0) return {};
+
+  // Existing mixes by lowercased name; names shared by 2+ mixes are ambiguous
+  // targets and dropped rather than guessed at.
+  const byName = new Map<string, MixRedirectTarget | null>();
+  for (const m of existing) {
+    const key = m.name.trim().toLowerCase();
+    if (!key) continue;
+    if (byName.has(key)) {
+      if (byName.get(key)?.id !== m.id) byName.set(key, null);
+    } else {
+      byName.set(key, { id: m.id, name: m.name, brand: m.brand, flavor: m.flavor });
+    }
+  }
+
+  const existingIds = new Set(existing.map((m) => m.id));
+  const proposed: { from: string; to: string }[] = [];
+  for (const c of candidates) {
+    if (existingIds.has(c.mix.id)) continue; // already a clean exact-id update
+    const canon = pickAlias(usable, "appType", c.mix.name);
+    if (!canon) continue;
+    const target = byName.get(canon.trim().toLowerCase());
+    if (!target || target.id === c.mix.id) continue;
+    proposed.push({ from: c.mix.id, to: target.id });
+  }
+
+  // One-to-one guard: tally every claim on each existing id (exact-id updates
+  // count as a claim too), then keep only uniquely-claimed suggestions.
+  const claims = new Map<string, number>();
+  const bump = (id: string) => claims.set(id, (claims.get(id) ?? 0) + 1);
+  for (const c of candidates) if (existingIds.has(c.mix.id)) bump(c.mix.id);
+  for (const p of proposed) bump(p.to);
+
+  const out: Record<string, string> = {};
+  for (const p of proposed) {
+    if ((claims.get(p.to) ?? 0) === 1) out[p.from] = p.to;
+  }
+  return out;
 }
 
 /**

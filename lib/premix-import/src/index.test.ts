@@ -13,6 +13,8 @@ import {
   summarizePremixImport,
   buildPremixCandidates,
   rematchPremixCandidate,
+  redirectPremixCandidate,
+  suggestPremixRedirects,
   mergePremixIntoMixes,
   collectPremixFreezerPulls,
   collectPremixPrepItems,
@@ -26,6 +28,7 @@ import {
   type ParsedRecipe,
   type ParsedSpecImport,
 } from "@workspace/spec-import";
+import type { Mix } from "@workspace/mixes";
 
 // Single-block tab modeled on the real "Bobos Deluxe" sheet (ingredient col 0).
 const BOBOS: SheetGrid = {
@@ -563,6 +566,136 @@ describe("conversion + summary", () => {
     // Re-pointing to an unknown id stays "new".
     const stillNew = rematchPremixCandidate(candidate, "Bobos", "Deluxe", () => false);
     expect(stillNew.status).toBe("new");
+  });
+});
+
+describe("redirect onto an existing mix", () => {
+  function mkMix(over: Partial<Mix> & { id: string; name: string }): Mix {
+    return {
+      brand: "",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      amountAlreadyMade: 0,
+      components: [],
+      enabled: true,
+      ...over,
+    };
+  }
+
+  const savedA = mkMix({
+    id: "saved-a",
+    name: "Deluxe Veggie Mix",
+    brand: "Bobos",
+    flavor: "Deluxe",
+  });
+  const savedB = mkMix({ id: "saved-b", name: "Buffalo Mix", brand: "Hannaford" });
+
+  it("redirectPremixCandidate takes the target identity, keeps parsed quantities", () => {
+    const parsedMix = mkMix({
+      id: "sheet-id",
+      name: "Deluxe Veg Blend",
+      brand: "Bobos",
+      flavor: "Deluxe",
+      batchSize: 42,
+      components: [{ ingredient: "Onion", perPizza: 0.5 }],
+      notes: "Pull 2 Days Early",
+    });
+    const redirected = redirectPremixCandidate(
+      { mix: parsedMix, status: "new" },
+      savedA,
+      (id) => id === savedA.id,
+    );
+    expect(redirected.mix.id).toBe("saved-a");
+    expect(redirected.mix.name).toBe("Deluxe Veggie Mix");
+    expect(redirected.mix.brand).toBe("Bobos");
+    expect(redirected.mix.flavor).toBe("Deluxe");
+    expect(redirected.mix.batchSize).toBe(42);
+    expect(redirected.mix.components).toEqual([{ ingredient: "Onion", perPizza: 0.5 }]);
+    expect(redirected.status).toBe("update");
+  });
+
+  it("suggestPremixRedirects fires on a learned appType alias with a unique target", () => {
+    const candidate = {
+      mix: mkMix({ id: "sheet-id", name: "Deluxe Veg Blend", brand: "Bobos" }),
+      status: "new" as const,
+    };
+    const out = suggestPremixRedirects(
+      [candidate],
+      [savedA, savedB],
+      [
+        {
+          kind: "appType",
+          externalName: "Deluxe Veg Blend",
+          canonicalName: "Deluxe Veggie Mix",
+          context: null,
+        },
+      ],
+    );
+    expect(out).toEqual({ "sheet-id": "saved-a" });
+  });
+
+  it("skips candidates already updating by exact id and ignores scoped/non-appType aliases", () => {
+    const exactUpdate = { mix: savedA, status: "update" as const };
+    const other = {
+      mix: mkMix({ id: "sheet-2", name: "Buff Blend" }),
+      status: "new" as const,
+    };
+    const out = suggestPremixRedirects(
+      [exactUpdate, other],
+      [savedA, savedB],
+      [
+        { kind: "appType", externalName: "Deluxe Veggie Mix", canonicalName: "Buffalo Mix", context: null },
+        { kind: "appType", externalName: "Buff Blend", canonicalName: "Buffalo Mix", context: "scoped" },
+        { kind: "brand", externalName: "Buff Blend", canonicalName: "Buffalo Mix" },
+      ],
+    );
+    expect(out).toEqual({});
+  });
+
+  it("drops a suggestion whose target another candidate already claims", () => {
+    // savedB is claimed by an exact-id update, so the alias suggestion onto it
+    // is dropped (two writers of one id would collide in the merge).
+    const exactUpdate = { mix: savedB, status: "update" as const };
+    const aliased = {
+      mix: mkMix({ id: "sheet-3", name: "Buff Blend" }),
+      status: "new" as const,
+    };
+    const out = suggestPremixRedirects(
+      [exactUpdate, aliased],
+      [savedA, savedB],
+      [
+        { kind: "appType", externalName: "Buff Blend", canonicalName: "Buffalo Mix", context: null },
+      ],
+    );
+    expect(out).toEqual({});
+  });
+
+  it("drops a suggestion when two candidates alias onto the same target", () => {
+    const a = { mix: mkMix({ id: "s1", name: "Blend One" }), status: "new" as const };
+    const b = { mix: mkMix({ id: "s2", name: "Blend Two" }), status: "new" as const };
+    const out = suggestPremixRedirects(
+      [a, b],
+      [savedB],
+      [
+        { kind: "appType", externalName: "Blend One", canonicalName: "Buffalo Mix", context: null },
+        { kind: "appType", externalName: "Blend Two", canonicalName: "Buffalo Mix", context: null },
+      ],
+    );
+    expect(out).toEqual({});
+  });
+
+  it("drops a suggestion when the canonical name matches two existing mixes", () => {
+    const dupe = mkMix({ id: "saved-c", name: "Buffalo Mix", brand: "Other" });
+    const a = { mix: mkMix({ id: "s1", name: "Buff Blend" }), status: "new" as const };
+    const out = suggestPremixRedirects(
+      [a],
+      [savedB, dupe],
+      [
+        { kind: "appType", externalName: "Buff Blend", canonicalName: "Buffalo Mix", context: null },
+      ],
+    );
+    expect(out).toEqual({});
   });
 });
 

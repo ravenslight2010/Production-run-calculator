@@ -17,6 +17,7 @@ import {
   parseCheeseWorkbook,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
+  buildCheeseAliasLinkMap,
   withCheeseLinks,
   withCheeseSubMixes,
   detectCheeseSubMixes,
@@ -24,13 +25,15 @@ import {
   mergeCheeseRecipes,
   type CheeseImportSummary,
   type CheeseImportCandidate,
+  type CheeseLinkTarget,
   type CheesePrepItem,
   type ParsedCheeseSheet,
 } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
-import { gridSanityIssue } from "@workspace/spec-import";
+import { gridSanityIssue, type SpecImportAlias } from "@workspace/spec-import";
 import { readWorkbookGrids } from "./specImport";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
+import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 
 export type CheeseImportPrepared = {
   /** Ready-to-apply cheese recipes (deterministic ids). */
@@ -46,6 +49,11 @@ export type CheeseImportPrepared = {
    * cheese recipes are unchanged.
    */
   prepItems: CheesePrepItem[];
+  /**
+   * The CURRENT saved cheese pool (id + display name + brand), so the review
+   * dialog can offer a per-recipe "Use existing recipe instead" redirect picker.
+   */
+  existingPool: (CheeseLinkTarget & { brand: string })[];
   /** Uploaded filename(s) for this import. */
   sourceNames?: string[];
   note?: string;
@@ -66,6 +74,15 @@ export async function prepareCheeseImport(
   names?: string[],
 ): Promise<CheeseImportPrepared> {
   const existing = await fetchCheeseRecipes();
+  // Learned blend-name aliases (best-effort): a "use existing recipe" pick the
+  // manager made in a past review is remembered as an "appType" alias, so a
+  // re-import of the same sheet pre-suggests the same link automatically.
+  let aliases: SpecImportAlias[] = [];
+  try {
+    aliases = await fetchSpecImportAliases();
+  } catch {
+    aliases = [];
+  }
 
   const byId = new Map<string, CheeseRecipe>();
   const sheets: ParsedCheeseSheet[] = [];
@@ -117,6 +134,7 @@ export async function prepareCheeseImport(
     withCheeseLinks(
       buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
       existing,
+      buildCheeseAliasLinkMap(aliases),
     ),
     detectCheeseSubMixes(sheets),
   );
@@ -137,6 +155,9 @@ export async function prepareCheeseImport(
     summary,
     existingIds: [...existingIds],
     prepItems,
+    existingPool: existing
+      .map((r) => ({ id: r.id, name: r.name, brand: r.brand }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     ...(note ? { note } : {}),
   };
 }
@@ -155,10 +176,21 @@ export type CheeseCommitResult = {
 export async function commitCheeseImport(
   _prepared: CheeseImportPrepared,
   recipesToApply: ReadonlyArray<CheeseRecipe>,
+  newAliases: ReadonlyArray<SpecImportAlias> = [],
 ): Promise<CheeseCommitResult> {
   if (recipesToApply.length === 0) return { count: 0 };
   const existing = await fetchCheeseRecipes();
   const merged = mergeCheeseRecipes(existing, recipesToApply);
   await saveCheeseRecipes(merged);
+  // Remember the review's manual "use existing recipe" picks as blend-name
+  // aliases so the next import of the same sheet pre-suggests the same links.
+  // Best-effort: the recipes already saved; learning is a bonus.
+  if (newAliases.length) {
+    try {
+      await saveSpecImportAliases([...newAliases]);
+    } catch {
+      // ignore — learning is non-critical
+    }
+  }
   return { count: recipesToApply.length };
 }

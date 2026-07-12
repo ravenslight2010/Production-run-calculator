@@ -559,9 +559,81 @@ export function resolveCheeseCandidate(
 }
 
 /**
+ * A learned blend-name mapping relevant to the cheese "link to existing" pass —
+ * the structural shape of a spec-import alias (kind "appType" is the shared
+ * blend-name namespace the spec importer's review picks write into). Kept
+ * structural so this package stays dependency-free of @workspace/spec-import.
+ */
+export type CheeseNameAlias = {
+  kind: string;
+  externalName: string;
+  canonicalName: string;
+  context?: string | null;
+};
+
+/**
+ * Build the alias link map `withCheeseLinks` consults: lowercased raw workbook
+ * blend name → learned canonical name. Only context-free "appType" aliases (the
+ * blend-name namespace shared with the spec importer's "Use existing recipe"
+ * picks) participate; conflicting aliases (same external name, different
+ * canonical names, ci) are dropped entirely rather than guessing. Pure.
+ */
+export function buildCheeseAliasLinkMap(
+  aliases: ReadonlyArray<CheeseNameAlias>,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  const conflicted = new Set<string>();
+  for (const a of aliases) {
+    if (a.kind !== "appType" || (a.context ?? null) !== null) continue;
+    const ext = (a.externalName ?? "").trim().toLowerCase();
+    const canon = (a.canonicalName ?? "").trim();
+    if (!ext || !canon) continue;
+    const prior = map.get(ext);
+    if (prior === undefined) map.set(ext, canon);
+    else if (prior.toLowerCase() !== canon.toLowerCase()) conflicted.add(ext);
+  }
+  for (const k of conflicted) map.delete(k);
+  return map;
+}
+
+/**
+ * Resolve a candidate's learned-alias link: the manager previously redirected
+ * this exact workbook blend name onto an existing pool recipe, so propose that
+ * same link again (highest precedence — an explicit past decision beats the
+ * loose-key and near-dup heuristics). The target is found by (ci) name in the
+ * pool, preferring a same-brand recipe when several brands share the name;
+ * a cross-brand ambiguity yields nothing rather than guessing.
+ */
+function findCheeseAliasLink(
+  recipe: CheeseRecipe,
+  aliasLinks: ReadonlyMap<string, string>,
+  existing: ReadonlyArray<CheeseRecipe>,
+  existingIds: ReadonlySet<string>,
+): CheeseLinkTarget | undefined {
+  if (existingIds.has(recipe.id)) return undefined;
+  const canon = aliasLinks.get(recipe.name.trim().toLowerCase());
+  if (!canon) return undefined;
+  const canonLower = canon.toLowerCase();
+  const matches = existing.filter((r) => r.name.trim().toLowerCase() === canonLower);
+  if (matches.length === 0) return undefined;
+  let pick = matches[0];
+  if (matches.length > 1) {
+    const sameBrand = matches.filter((r) => nameKey(r.brand) === nameKey(recipe.brand));
+    if (sameBrand.length !== 1) return undefined;
+    pick = sameBrand[0];
+  }
+  if (pick.id === recipe.id) return undefined;
+  return { id: pick.id, name: pick.name };
+}
+
+/**
  * Attach link-to-existing suggestions to a candidate list built from the raw
  * new/update status. Pure; returns a new list, leaving clean exact-id updates and
  * genuinely new recipes untouched.
+ *
+ * Precedence per candidate: a LEARNED alias link (the manager redirected this
+ * exact blend name before — see `buildCheeseAliasLinkMap`) → the loose-key map →
+ * the near-dup matcher.
  *
  * ONE-TO-ONE GUARD: a proposed link is dropped when its target existing recipe
  * would be claimed by more than one candidate — i.e. another candidate also loose
@@ -573,12 +645,16 @@ export function resolveCheeseCandidate(
 export function withCheeseLinks(
   candidates: ReadonlyArray<CheeseImportCandidate>,
   existing: ReadonlyArray<CheeseRecipe>,
+  aliasLinks?: ReadonlyMap<string, string>,
 ): CheeseImportCandidate[] {
   const linkMap = buildCheeseLinkMap(existing);
   const existingIds = new Set(existing.map((r) => r.id));
   const nearDup = buildCheeseNearDupResolver(existing);
   const proposed = candidates.map(
     (c) =>
+      (aliasLinks
+        ? findCheeseAliasLink(c.recipe, aliasLinks, existing, existingIds)
+        : undefined) ??
       findCheeseLink(c.recipe, linkMap, existingIds) ??
       nearDup(c.recipe, existingIds),
   );

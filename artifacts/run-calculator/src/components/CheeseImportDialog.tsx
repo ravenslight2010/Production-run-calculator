@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { resolveCheeseCandidate, type CheeseImportCandidate } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
+import type { SpecImportAlias } from "@workspace/spec-import";
 import type { CheeseImportPrepared } from "@/cheeseImport";
 
 type Props = {
@@ -22,8 +23,11 @@ type Props = {
   error: string | null;
   prepared: CheeseImportPrepared | null;
   applying: boolean;
-  /** Confirm with the reviewed cheese recipes. */
-  onConfirm: (recipesToApply: CheeseRecipe[]) => void;
+  /**
+   * Confirm with the reviewed cheese recipes plus any blend-name aliases the
+   * manual "use existing recipe" picks should be remembered as.
+   */
+  onConfirm: (recipesToApply: CheeseRecipe[], newAliases: SpecImportAlias[]) => void;
 };
 
 type Item = { key: string; candidate: CheeseImportCandidate };
@@ -48,6 +52,9 @@ export default function CheeseImportDialog({
   // Keys whose proposed "link to existing recipe" the manager is accepting.
   // Defaults on for every candidate that has a suggested link.
   const [linkOn, setLinkOn] = useState<Set<string>>(new Set());
+  // Manual "use existing recipe instead" picks: key → existing pool recipe id.
+  // A manual pick overrides the suggested link (and is remembered on confirm).
+  const [redirects, setRedirects] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (prepared) {
@@ -56,10 +63,12 @@ export default function CheeseImportDialog({
       setLinkOn(
         new Set(prepared.candidates.filter((c) => c.linkTo).map((c) => c.recipe.id)),
       );
+      setRedirects(new Map());
     } else {
       setItems([]);
       setSelected(new Set());
       setLinkOn(new Set());
+      setRedirects(new Map());
     }
   }, [prepared]);
 
@@ -85,11 +94,69 @@ export default function CheeseImportDialog({
       return next;
     });
 
+  const setRedirect = (key: string, targetId: string) =>
+    setRedirects((prev) => {
+      const next = new Map(prev);
+      if (targetId) next.set(key, targetId);
+      else next.delete(key);
+      return next;
+    });
+
+  const poolById = new Map((prepared?.existingPool ?? []).map((p) => [p.id, p]));
+
+  /** The manual redirect target for a row, if a valid pick is set. */
+  const redirectTargetOf = (key: string) => {
+    const id = redirects.get(key);
+    return id ? poolById.get(id) : undefined;
+  };
+
+  /** Final recipe a row resolves to (manual redirect wins over suggested link). */
+  const resolveItem = (it: Item): CheeseRecipe => {
+    const target = redirectTargetOf(it.key);
+    if (target) {
+      return resolveCheeseCandidate(
+        { ...it.candidate, linkTo: { id: target.id, name: target.name } },
+        true,
+      );
+    }
+    return resolveCheeseCandidate(it.candidate, linkOn.has(it.key));
+  };
+
+  // Two included rows resolving to the SAME saved recipe would collide in the
+  // last-write-wins merge and silently drop one row's data — block Apply until
+  // the manager changes one of the picks.
+  const included = items.filter((it) => selected.has(it.key));
+  const finalIdCounts = new Map<string, number>();
+  for (const it of included) {
+    const id = resolveItem(it).id;
+    finalIdCounts.set(id, (finalIdCounts.get(id) ?? 0) + 1);
+  }
+  const duplicateTargets = [...finalIdCounts.entries()]
+    .filter(([, n]) => n > 1)
+    .map(([id]) => poolById.get(id)?.name ?? id);
+
   const confirm = () => {
-    const included = items.filter((it) => selected.has(it.key));
-    onConfirm(
-      included.map((it) => resolveCheeseCandidate(it.candidate, linkOn.has(it.key))),
-    );
+    if (duplicateTargets.length > 0) return;
+    const newAliases: SpecImportAlias[] = [];
+    const seen = new Set<string>();
+    for (const it of included) {
+      const target = redirectTargetOf(it.key);
+      if (!target) continue;
+      const external = it.candidate.recipe.name.trim();
+      const canonical = target.name.trim();
+      if (!external || !canonical) continue;
+      if (external.toLowerCase() === canonical.toLowerCase()) continue;
+      const dedupeKey = external.toLowerCase();
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      newAliases.push({
+        kind: "appType",
+        externalName: external,
+        canonicalName: canonical,
+        context: null,
+      });
+    }
+    onConfirm(included.map(resolveItem), newAliases);
   };
 
   return (
@@ -176,7 +243,8 @@ export default function CheeseImportDialog({
                     const c = it.candidate;
                     const r = c.recipe;
                     const isSel = selected.has(it.key);
-                    const linked = !!c.linkTo && linkOn.has(it.key);
+                    const redirectTarget = redirectTargetOf(it.key);
+                    const linked = !!redirectTarget || (!!c.linkTo && linkOn.has(it.key));
                     return (
                       <li
                         key={it.key}
@@ -248,7 +316,7 @@ export default function CheeseImportDialog({
                                 </span>
                               </div>
                             )}
-                            {c.linkTo && (
+                            {c.linkTo && !redirectTarget && (
                               <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-400/50 bg-blue-500/10 p-2">
                                 <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
                                 <span className="text-xs text-blue-700">
@@ -262,12 +330,48 @@ export default function CheeseImportDialog({
                                   <input
                                     type="checkbox"
                                     className="h-3.5 w-3.5 accent-blue-600"
-                                    checked={linked}
+                                    checked={!!c.linkTo && linkOn.has(it.key)}
                                     onChange={() => toggleLink(it.key)}
                                     data-testid={`cheese-link-${it.key}`}
                                   />
                                   Update it instead of adding new
                                 </label>
+                              </div>
+                            )}
+                            {prepared.existingPool.length > 0 && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <label
+                                  className="text-xs text-muted-foreground"
+                                  htmlFor={`cheese-redirect-${it.key}`}
+                                >
+                                  Use existing recipe:
+                                </label>
+                                <select
+                                  id={`cheese-redirect-${it.key}`}
+                                  value={redirects.get(it.key) ?? ""}
+                                  onChange={(e) => setRedirect(it.key, e.target.value)}
+                                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                                  data-testid={`cheese-redirect-${it.key}`}
+                                >
+                                  <option value="">No — import as shown above</option>
+                                  {prepared.existingPool.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name}
+                                      {p.brand ? ` (${p.brand})` : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                            {redirectTarget && (
+                              <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-blue-400/50 bg-blue-500/10 p-2">
+                                <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                                <span className="text-xs text-blue-700">
+                                  Will update your existing{" "}
+                                  <span className="font-medium">"{redirectTarget.name}"</span>{" "}
+                                  with this sheet's ingredients — and remember this
+                                  choice for future imports.
+                                </span>
                               </div>
                             )}
                           </div>
@@ -309,6 +413,26 @@ export default function CheeseImportDialog({
                 </div>
               )}
 
+              {duplicateTargets.length > 0 && (
+                <div
+                  className="rounded-md border border-destructive/60 bg-destructive/10 p-3"
+                  data-testid="cheese-duplicate-target-warning"
+                >
+                  <div className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      Two recipes point at the same saved recipe
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-destructive/90">
+                    More than one checked recipe would update{" "}
+                    {duplicateTargets.map((n) => `"${n}"`).join(", ")} — only one
+                    would survive. Change one of the "Use existing recipe" picks
+                    (or uncheck one) before applying.
+                  </p>
+                </div>
+              )}
+
               {prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
                   <div className="flex items-center gap-2 text-amber-600">
@@ -340,7 +464,15 @@ export default function CheeseImportDialog({
           <button
             type="button"
             onClick={confirm}
-            disabled={loading || applying || !!error || !prepared || nothing || selectedCount === 0}
+            disabled={
+              loading ||
+              applying ||
+              !!error ||
+              !prepared ||
+              nothing ||
+              selectedCount === 0 ||
+              duplicateTargets.length > 0
+            }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {applying ? (

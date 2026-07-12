@@ -8014,11 +8014,17 @@ export default function Home() {
   async function handlePremixImportConfirm(
     mixesToApply: Mix[],
     freezerPulls: PremixFreezerPull[],
+    newAliases: SpecImportAlias[],
   ) {
     if (!premixImportPrepared) return;
     setPremixImportApplying(true);
     try {
-      const result = await commitPremixImport(premixImportPrepared, mixesToApply, freezerPulls);
+      const result = await commitPremixImport(
+        premixImportPrepared,
+        mixesToApply,
+        freezerPulls,
+        newAliases,
+      );
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
@@ -8155,11 +8161,14 @@ export default function Home() {
     }
   }
 
-  async function handleCheeseImportConfirm(recipesToApply: CheeseRecipe[]) {
+  async function handleCheeseImportConfirm(
+    recipesToApply: CheeseRecipe[],
+    newAliases: SpecImportAlias[],
+  ) {
     if (!cheeseImportPrepared) return;
     setCheeseImportApplying(true);
     try {
-      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply);
+      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases);
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
       void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });

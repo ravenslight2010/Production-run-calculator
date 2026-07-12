@@ -7,6 +7,7 @@ import {
   buildCheeseImportCandidates,
   cheeseLinkKey,
   buildCheeseLinkMap,
+  buildCheeseAliasLinkMap,
   withCheeseLinks,
   resolveCheeseCandidate,
   detectCheeseSubMixes,
@@ -503,6 +504,164 @@ describe("link-to-existing detection", () => {
     ];
     const map = buildCheeseLinkMap(dupes);
     expect(map.size).toBe(1);
+  });
+});
+
+describe("buildCheeseAliasLinkMap", () => {
+  it("keeps only context-free appType aliases, lowercased by external name", () => {
+    const map = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: " Shorthand Mix ", canonicalName: "Real Mix", context: null },
+      { kind: "appType", externalName: "Scoped", canonicalName: "Nope", context: "brand:x" },
+      { kind: "brand", externalName: "Brandish", canonicalName: "Nope" },
+      { kind: "appType", externalName: "", canonicalName: "Nope", context: null },
+    ]);
+    expect(map.size).toBe(1);
+    expect(map.get("shorthand mix")).toBe("Real Mix");
+  });
+
+  it("drops an external name mapped to two different canonicals", () => {
+    const map = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: "Mix A", canonicalName: "Target 1", context: null },
+      { kind: "appType", externalName: "mix a", canonicalName: "Target 2", context: null },
+      { kind: "appType", externalName: "Mix B", canonicalName: "Target 1", context: null },
+    ]);
+    expect(map.has("mix a")).toBe(false);
+    expect(map.get("mix b")).toBe("Target 1");
+  });
+
+  it("keeps a repeated identical mapping (ci canonical)", () => {
+    const map = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: "Mix A", canonicalName: "Target 1", context: null },
+      { kind: "appType", externalName: "Mix A", canonicalName: "target 1", context: null },
+    ]);
+    expect(map.get("mix a")).toBe("Target 1");
+  });
+});
+
+describe("alias-driven link precedence", () => {
+  const existing: CheeseRecipe[] = [
+    cheese({
+      id: "cheese:basha:whole-mozzarella-cheese-mix",
+      brand: "Basha's",
+      name: "Whole Mozzarella Cheese Mix",
+    }),
+    cheese({
+      id: "cheese:basha:five-cheese-mix",
+      brand: "Basha's",
+      name: "5 Cheese Mix",
+    }),
+  ];
+
+  it("an alias link wins even when the loose/near-dup matchers find nothing", () => {
+    // "House Blend" shares no tokens with any existing name — only the learned
+    // alias can link it.
+    const imported = [
+      cheese({ id: "cheese:basha:house-blend", brand: "Basha's", name: "House Blend" }),
+    ];
+    const aliasLinks = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: "House Blend", canonicalName: "5 Cheese Mix", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+      aliasLinks,
+    );
+    expect(linked[0].linkTo).toEqual({
+      id: "cheese:basha:five-cheese-mix",
+      name: "5 Cheese Mix",
+    });
+  });
+
+  it("an alias link overrides a different loose-key match", () => {
+    // The shorthand would loose-match "Whole Mozzarella Cheese Mix", but the
+    // manager previously redirected it to "5 Cheese Mix" — the alias wins.
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozz Cheese Mix",
+      }),
+    ];
+    const aliasLinks = buildCheeseAliasLinkMap([
+      {
+        kind: "appType",
+        externalName: "Whole Mozz Cheese Mix",
+        canonicalName: "5 Cheese Mix",
+        context: null,
+      },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+      aliasLinks,
+    );
+    expect(linked[0].linkTo).toEqual({
+      id: "cheese:basha:five-cheese-mix",
+      name: "5 Cheese Mix",
+    });
+  });
+
+  it("alias links still respect the one-to-one claims guard", () => {
+    // Both blends alias to the SAME existing recipe → both links are dropped
+    // rather than colliding in the last-write-wins merge.
+    const imported = [
+      cheese({ id: "cheese:basha:blend-a", brand: "Basha's", name: "Blend A" }),
+      cheese({ id: "cheese:basha:blend-b", brand: "Basha's", name: "Blend B" }),
+    ];
+    const aliasLinks = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: "Blend A", canonicalName: "5 Cheese Mix", context: null },
+      { kind: "appType", externalName: "Blend B", canonicalName: "5 Cheese Mix", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+      aliasLinks,
+    );
+    expect(linked.every((c) => c.linkTo === undefined)).toBe(true);
+  });
+
+  it("no alias link when the candidate already updates by exact id", () => {
+    const imported = [
+      cheese({
+        id: "cheese:basha:five-cheese-mix",
+        brand: "Basha's",
+        name: "5 Cheese Mix",
+      }),
+    ];
+    const aliasLinks = buildCheeseAliasLinkMap([
+      {
+        kind: "appType",
+        externalName: "5 Cheese Mix",
+        canonicalName: "Whole Mozzarella Cheese Mix",
+        context: null,
+      },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, (id) => id === imported[0].id),
+      existing,
+      aliasLinks,
+    );
+    expect(linked[0].status).toBe("update");
+    expect(linked[0].linkTo).toBeUndefined();
+  });
+
+  it("ambiguous canonical name across brands without a same-brand winner links nothing", () => {
+    const pool: CheeseRecipe[] = [
+      cheese({ id: "p1", brand: "Zed", name: "Duplicate Mix" }),
+      cheese({ id: "p2", brand: "Wye", name: "Duplicate Mix" }),
+    ];
+    const imported = [
+      cheese({ id: "cheese:other:blend", brand: "Other", name: "Blend X" }),
+    ];
+    const aliasLinks = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: "Blend X", canonicalName: "Duplicate Mix", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      pool,
+      aliasLinks,
+    );
+    expect(linked[0].linkTo).toBeUndefined();
   });
 });
 
