@@ -153,10 +153,14 @@ export type ParsedRecipe = {
    * recipe (its `name` is the existing recipe's name) AND checked "update it
    * with this sheet". The recipe applies like a normal one (library copy +
    * profile ties get the sheet's rows) and the commit pass also replaces the
-   * matching server-pool recipe's ingredient rows. Mutually exclusive with
-   * `referenceOnly`. The re-import prune must never demote such a recipe to
-   * referenceOnly — the user explicitly asked for the update THIS import,
-   * regardless of whether the sheet changed since last time.
+   * matching server-pool recipe's ingredient rows. DOUGH/SAUCE ONLY: their
+   * recipe workbooks carry per-batch rows matching what their pools store.
+   * Cheese never sets this — spec sheets express cheese as per-PIZZA ounces
+   * while the cheese pool stores per-BATCH pounds, so a spec-driven update
+   * would corrupt the pool; the cheese workbook importer owns those updates.
+   * Mutually exclusive with `referenceOnly`. The re-import prune must never
+   * demote such a recipe to referenceOnly — the user explicitly asked for the
+   * update THIS import, regardless of whether the sheet changed since then.
    */
   updateExisting?: boolean;
   rows: RecipeRow[];

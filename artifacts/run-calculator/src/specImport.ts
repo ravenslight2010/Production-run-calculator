@@ -1119,21 +1119,23 @@ export async function commitSpecImport(
   // "Update the existing recipe with this sheet" picks from the review: the
   // recipe applied locally like a normal one (under the linked existing name),
   // and here the matching SERVER pool recipe's ingredient rows are replaced
-  // too — cheese cards and the dough/sauce pickers hydrate rows from the
-  // pools, so without this the on-screen recipe would keep its old rows.
+  // too — the dough/sauce pickers hydrate rows from the pools, so without
+  // this the on-screen recipe would keep its old rows. DOUGH/SAUCE ONLY:
+  // cheese is a units mismatch (spec sheets carry per-PIZZA ounces, the
+  // cheese pool stores per-BATCH pounds), so cheese pool rows are never
+  // touched here — the Cheese Mix Recipe Specs workbook importer updates
+  // them in place with correct per-batch pounds.
   const updateTargets = (applyParsed.recipes ?? []).filter(
     (r): r is typeof r & { name: string } =>
       Boolean(r.updateExisting) &&
       !r.referenceOnly &&
+      (r.kind === "dough" || r.kind === "sauce") &&
       Boolean((r.name ?? "").trim()) &&
       (r.rows?.length ?? 0) > 0,
   );
   let recipesUpdated = 0;
 
   let cheeseRecipesAdded = 0;
-  const cheeseUpdates = updateTargets
-    .filter((r) => r.kind === "cheese" && r.forcedCategory !== "mix")
-    .map((r) => ({ name: r.name.trim(), rows: r.rows ?? [] }));
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
@@ -1141,17 +1143,12 @@ export async function commitSpecImport(
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
       .filter((r): r is CheeseRecipe => r != null);
-    if (candidates.length || cheeseUpdates.length) {
+    if (candidates.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
       const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
-      // Apply the user's "update with this sheet" picks on the SAME list so a
-      // single save carries both the additions and the row updates (a second
-      // stale-list save would clobber one or the other).
-      const upd = updateRecipePoolComponents(merged, cheeseUpdates);
-      if (added > 0 || upd.updated > 0) {
-        await saveCheeseRecipes(upd.next);
+      if (added > 0) {
+        await saveCheeseRecipes(merged);
         cheeseRecipesAdded = added;
-        recipesUpdated += upd.updated;
       }
     }
   } catch {

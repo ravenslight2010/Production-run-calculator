@@ -557,12 +557,14 @@ export default function SpecImportDialog({
         // Linked + "update it with this sheet" checked → apply like a NORMAL
         // recipe under the linked name (library copy + profile ties get the
         // sheet's rows) and flag it so commit also replaces the server-pool
-        // recipe's rows. Mix picks never get the checkbox (their amounts are
-        // manager-entered) and an empty parse can't update anything.
+        // recipe's rows. Only Dough/Sauce ever update: mix amounts are
+        // manager-entered, and cheese is a units mismatch (spec sheets are
+        // per-PIZZA ounces, the cheese pool is per-BATCH pounds — the cheese
+        // workbook importer owns those updates).
         const wantsUpdate =
           !!linked &&
           !!r.updateExisting &&
-          r.kind !== "mix" &&
+          (r.kind === "dough" || r.kind === "sauce") &&
           (r.orig.rows?.length ?? 0) > 0;
         const out: ParsedRecipe = linked
           ? wantsUpdate
@@ -1262,10 +1264,14 @@ function RecipeRow({
   // list differs), so existence checks use the underlying parse kind.
   const isNew = !linked && (!name || !recipeExistsForImport(parseKindOf(item.kind), name));
   const rowsPreview = recipeRowsPreview(item.orig);
-  // "Update it with this sheet" is only offered when there's something to
-  // update with: the sheet actually read ingredient rows, and the pick isn't a
-  // Mix (mix amounts are manager-entered — a spec sheet can't express them).
-  const updateOffered = item.kind !== "mix" && (item.orig.rows?.length ?? 0) > 0;
+  // "Update it with this sheet" is only offered for Dough/Sauce picks with
+  // parsed rows. Mix amounts are manager-entered (a spec sheet can't express
+  // them), and Cheese is a UNITS mismatch: spec sheets carry per-PIZZA ounces
+  // while the saved cheese recipes store per-BATCH pounds — updating would
+  // overwrite good batch pounds with per-pizza numbers. Cheese batch pounds
+  // update via the Cheese Mix Recipe Specs workbook importer instead.
+  const updateOffered =
+    (item.kind === "dough" || item.kind === "sauce") && (item.orig.rows?.length ?? 0) > 0;
   // Which products this recipe will actually attach to when applied. If empty,
   // the recipe name lands in the library but shows up on NO run — the silent
   // "it didn't import" miss the user reported.
@@ -1358,6 +1364,13 @@ function RecipeRow({
               {item.updateExisting && updateOffered
                 ? `Using your existing “${linked}” — its ingredients will be replaced with this sheet's.`
                 : `Using your existing “${linked}” — it won't be changed.`}
+              {item.kind === "cheese" && (
+                <>
+                  {" "}
+                  Spec sheets show per-pizza amounts; to change its batch pounds,
+                  re-import your Cheese Mix Recipe Specs workbook.
+                </>
+              )}
             </div>
           )}
 

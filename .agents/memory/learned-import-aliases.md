@@ -88,18 +88,23 @@ every time even after they had linked the blend to the right existing recipe.
 - Dough/sauce "use existing" picks are learned under the `recipeName` alias
   kind with context = the parse kind ("dough"/"sauce") — NOT appType, which
   would pollute the blend namespace.
-- **"Update it with this sheet" checkbox:** a linked pick can optionally
-  REPLACE the existing pool recipe's ingredients with the sheet's rows. The
-  emitted recipe is `{name: linked, updateExisting: true, userNamed: true}`
-  (NOT referenceOnly — it applies locally like a normal recipe under the
-  linked name), and commit replaces pool components via the pure
-  `updateRecipePoolComponents` helper (ci-name match, never wipes on empty
-  rows, skips no-ops). Offered only when the parse read rows and the pick
-  isn't a Mix (mix amounts are manager-entered). The checkbox resets whenever
-  the link or kind changes — consent to overwrite one recipe must never carry
-  to another. `pruneSpecImportAgainstSnapshot` must never demote an
-  updateExisting recipe to referenceOnly (the pool copy may have drifted from
-  an unchanged sheet).
+- **"Update it with this sheet" checkbox (DOUGH/SAUCE ONLY):** a linked pick
+  can optionally REPLACE the existing pool recipe's ingredients with the
+  sheet's rows. The emitted recipe is `{name: linked, updateExisting: true,
+  userNamed: true}` (NOT referenceOnly — it applies locally like a normal
+  recipe under the linked name), and commit replaces pool components via the
+  pure `updateRecipePoolComponents` helper (ci-name match, never wipes on
+  empty rows, skips no-ops). NEVER offered for Mix (amounts are
+  manager-entered) or CHEESE — units mismatch: spec sheets carry per-PIZZA
+  ounces (in the `lbs` field quirk) while the cheese pool stores per-BATCH
+  pounds, so a spec-driven update would corrupt curated batch pounds. Cheese
+  pool rows update only via the Cheese Mix Recipe Specs workbook importer
+  (stable ids / link-to-existing update in place, correct units); the dialog
+  shows a hint pointing there on linked cheese picks. The checkbox resets
+  whenever the link or kind changes — consent to overwrite one recipe must
+  never carry to another. `pruneSpecImportAgainstSnapshot` must never demote
+  an updateExisting recipe to referenceOnly (the pool copy may have drifted
+  from an unchanged sheet).
 - External key = the PRISTINE review-time parsed name (post
   canonicalizeSpecImportCheeseRecipeNames), so the key is stable across
   re-imports of the same sheet.

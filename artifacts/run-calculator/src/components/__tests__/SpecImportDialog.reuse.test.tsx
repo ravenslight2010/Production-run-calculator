@@ -531,6 +531,36 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
   });
 
+  it("never offers the update checkbox on a linked CHEESE pick (per-pizza vs per-batch units)", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Aldo's Spinach Blend",
+      brand: "Aldo's",
+      flavor: "SPINACH",
+      rows: [{ ingredient: "Mozzarella", lbs: 2.07 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Aldo's", flavor: "SPINACH" }]), onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Lowe's Spinach Cheese Mix" },
+    });
+    // Even with parsed rows, cheese picks get NO update checkbox — spec sheets
+    // carry per-pizza ounces while the cheese pool stores per-batch pounds.
+    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
+    expect(screen.getByText(/won't be changed/)).toBeTruthy();
+    expect(screen.getByText(/per-pizza amounts/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/^Apply/));
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    // The linked cheese pick stays reference-only — never an update.
+    expect(out.recipes[0]).toMatchObject({
+      name: "Lowe's Spinach Cheese Mix",
+      referenceOnly: true,
+    });
+    expect(out.recipes[0].updateExisting).toBeUndefined();
+  });
+
   it("does NOT let a sauce-scoped remembered link pre-select on a dough row", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",

@@ -7927,12 +7927,12 @@ export default function Home() {
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
-      // so the run applicator "Cheese" pickers list them right away. Same when
-      // an existing pool recipe's rows were replaced via the review's "update
-      // it with this sheet" checkbox (cheese, dough, or sauce — the pickers
-      // hydrate rows from these pools, so they must refetch to show the new
-      // ingredients).
-      if (cheeseRecipesAdded > 0 || recipesUpdated > 0)
+      // so the run applicator "Cheese" pickers list them right away. When an
+      // existing pool recipe's rows were replaced via the review's "update it
+      // with this sheet" checkbox (dough/sauce ONLY — cheese is per-batch
+      // pounds and never updates from a per-pizza spec sheet), those pickers
+      // must refetch to show the new ingredients.
+      if (cheeseRecipesAdded > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
       if (recipesUpdated > 0) {
         void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
