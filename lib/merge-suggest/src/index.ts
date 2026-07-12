@@ -262,6 +262,101 @@ export function filterConflictingSuggestions<T extends MergeSuggestion>(
   return out;
 }
 
+// ── Cross-brand guard ────────────────────────────────────────────────────────
+// Recipe/mix names often embed the pizza brand they belong to ("Lowes 7in 5
+// Cheese Mix", "Bashas Ultra Thin Crust Cheese"). Two names that clearly belong
+// to DIFFERENT brands are never the same real-world thing no matter how many
+// words they share, so suggestions pairing them are wrong by construction and
+// are stripped before anything is shown — from the AI, remembered groups, and
+// the deterministic near-dup scan alike. This is a deterministic safety net so
+// the guarantee does not depend on the model obeying its prompt.
+
+const genericBrandTokens = new Set(["pizza", "pizzas", "the", "co", "inc", "llc"]);
+
+/** Distinguishing tokens of a known brand name (generic filler removed). */
+function brandTokenList(brand: string): string[] {
+  return norm(brand)
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1 && !genericBrandTokens.has(t));
+}
+
+/**
+ * Build a matcher that returns the set of known brands a name MENTIONS: a
+ * brand is mentioned when every one of its distinguishing tokens appears in
+ * the name. Brands whose names are entirely generic filler never match.
+ */
+export function buildBrandMentionMatcher(
+  knownBrands: ReadonlyArray<string>,
+): (name: string) => Set<string> {
+  const brands: { key: string; tokens: string[] }[] = [];
+  const seen = new Set<string>();
+  for (const raw of knownBrands ?? []) {
+    const b = (raw ?? "").trim();
+    if (!b) continue;
+    const key = norm(b);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const tokens = brandTokenList(b);
+    if (tokens.length === 0) continue;
+    brands.push({ key, tokens });
+  }
+  return (name: string): Set<string> => {
+    const toks = nameTokens(name ?? "");
+    const out = new Set<string>();
+    for (const b of brands) {
+      if (b.tokens.every((t) => toks.has(t))) out.add(b.key);
+    }
+    return out;
+  };
+}
+
+/**
+ * True when the two names mention non-overlapping, non-empty sets of known
+ * brands ("Lowes …" vs "Bashas …"). A name mentioning no known brand conflicts
+ * with nothing (we can't tell whose it is), and names sharing at least one
+ * mentioned brand are compatible (e.g. both say "Bashas").
+ */
+export function namesMentionDifferentBrands(
+  a: string,
+  b: string,
+  mentionsOf: (name: string) => Set<string>,
+): boolean {
+  const ma = mentionsOf(a);
+  if (ma.size === 0) return false;
+  const mb = mentionsOf(b);
+  if (mb.size === 0) return false;
+  for (const k of ma) if (mb.has(k)) return false;
+  return true;
+}
+
+/**
+ * Strip cross-brand pairings out of suggestions using the factory's known
+ * brand list. A source is dropped when it and the group's target mention
+ * different known brands, or when it brand-conflicts with a source kept before
+ * it (so a brand-neutral target can't quietly collapse two brands' recipes
+ * into one). Groups left with no sources are dropped. NOT for the "brand"
+ * merge tab — there the names ARE brands and every legitimate typo-merge would
+ * be blocked. Pure; never throws.
+ */
+export function filterCrossBrandSuggestions<T extends MergeSuggestion>(
+  suggestions: T[],
+  knownBrands: ReadonlyArray<string>,
+): T[] {
+  if (!knownBrands || knownBrands.length === 0) return suggestions;
+  const mentionsOf = buildBrandMentionMatcher(knownBrands);
+  const out: T[] = [];
+  for (const s of suggestions) {
+    const kept: string[] = [];
+    for (const src of s.sources ?? []) {
+      if (namesMentionDifferentBrands(s.target, src, mentionsOf)) continue;
+      if (kept.some((k) => namesMentionDifferentBrands(k, src, mentionsOf))) continue;
+      kept.push(src);
+    }
+    if (kept.length > 0) out.push({ ...s, sources: kept });
+  }
+  return out;
+}
+
 // ── Denied (ignored) merge pairs ─────────────────────────────────────────────
 // When the user explicitly denies/ignores a merge suggestion, we remember the
 // unordered name pairs so the AI/learned suggester never re-proposes merging

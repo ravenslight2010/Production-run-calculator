@@ -9,30 +9,37 @@
 // `.local/parity-pause-log.md`). Mirror this to the mobile app when parity
 // resumes.
 
-import type { MergeMap } from "./mergeIngredients";
+import { buildCiMergeLookup, mapNameCi, type MergeMap } from "./mergeIngredients";
 
 export type RecipeNameMergeCategory = "dough" | "sauce" | "cheese" | "mixes";
 
 // The FormValues string fields that hold a recipe-name selection, per category.
-// Mixes have no per-run selection field (mixes are managed separately), so a mix
-// merge only folds the name list — nothing on a run is re-pointed.
+// Mix names are picked through the SAME app{n}CheeseRecipeName link fields as
+// cheese blends (the applicator slot type is generic "Mix"/"cheese"; the name
+// lives in the link — see .agents/memory/mix-applicator-slots.md), so a mix
+// merge must re-point those fields too or runs keep referencing a deleted mix.
 export const RECIPE_NAME_FIELDS_BY_CATEGORY: Record<RecipeNameMergeCategory, readonly string[]> = {
   dough: ["doughRecipeName"],
   sauce: ["frontlineRecipeName"],
   cheese: ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"],
-  mixes: [],
+  mixes: ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"],
 };
 
-/** Rewrite the recipe-name selection fields on a settings/values object. */
+/**
+ * Rewrite the recipe-name selection fields on a settings/values object.
+ * Matching is case-insensitive (trim + lowercase) — imported selections often
+ * drift in case from the server pool's canonical spelling.
+ */
 export function mergeRecipeNameSettingsObject<T extends Record<string, unknown>>(
   obj: T,
   map: MergeMap,
   fields: readonly string[],
 ): T {
+  const lookup = buildCiMergeLookup(map);
   const out = { ...obj } as Record<string, unknown>;
   for (const k of fields) {
-    const v = out[k];
-    if (typeof v === "string" && map[v]) out[k] = map[v];
+    const renamed = mapNameCi(out[k], lookup);
+    if (renamed !== undefined) out[k] = renamed;
   }
   return out as T;
 }
@@ -44,16 +51,28 @@ export function mergeRecipeNameSettingsObject<T extends Record<string, unknown>>
  * pass through unchanged.
  */
 export function foldPresetKeys<V>(presets: Record<string, V>, map: MergeMap): Record<string, V> {
+  const lookup = buildCiMergeLookup(map);
+  const ci = (s: string) => s.trim().toLowerCase();
   const out: Record<string, V> = {};
-  // Pass 1: keep every non-source key. This preserves the target's own preset.
+  const outKeysCi = new Set<string>();
+  // Pass 1: keep every non-source key (a key that only differs from its target
+  // by case/whitespace counts as the target itself). Preserves the target's own
+  // preset.
   for (const [k, v] of Object.entries(presets)) {
-    if (!map[k]) out[k] = v;
+    const t = lookup.get(ci(k));
+    if (t === undefined || ci(t) === ci(k)) {
+      out[k] = v;
+      outKeysCi.add(ci(k));
+    }
   }
   // Pass 2: move each source's preset onto its target, but never clobber a
   // target that already has one.
   for (const [k, v] of Object.entries(presets)) {
-    const t = map[k];
-    if (t && !(t in out)) out[t] = v;
+    const t = lookup.get(ci(k));
+    if (t !== undefined && ci(t) !== ci(k) && !outKeysCi.has(ci(t))) {
+      out[t] = v;
+      outKeysCi.add(ci(t));
+    }
   }
   return out;
 }
@@ -62,6 +81,7 @@ export function foldPresetKeys<V>(presets: Record<string, V>, map: MergeMap): Re
  * Count how many recipe-name references a merge map would rewrite across the
  * supplied surfaces: name-list entries, selection-field hits on settings
  * objects, and preset KEYS that get folded. Drives the confirmation preview.
+ * Matching is case-insensitive (trim + lowercase), mirroring the apply path.
  */
 export function countRecipeNameReferences(
   map: MergeMap,
@@ -72,8 +92,9 @@ export function countRecipeNameReferences(
     presetKeyMaps?: Record<string, unknown>[];
   },
 ): number {
+  const lookup = buildCiMergeLookup(map);
   let count = 0;
-  const hit = (name: unknown) => typeof name === "string" && Boolean(map[name]);
+  const hit = (name: unknown) => mapNameCi(name, lookup) !== undefined;
   for (const list of surfaces.lists ?? []) {
     for (const item of list) if (hit(item)) count++;
   }

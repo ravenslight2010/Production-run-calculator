@@ -1342,7 +1342,8 @@ export type SpecAliasKind =
   | "pepType"
   | "cheeseIngredient"
   | "doughIngredient"
-  | "sauceIngredient";
+  | "sauceIngredient"
+  | "recipeName";
 
 export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
   "brand",
@@ -1352,7 +1353,23 @@ export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
   "cheeseIngredient",
   "doughIngredient",
   "sauceIngredient",
+  // A "use existing recipe" pick for a DOUGH or SAUCE recipe in the import
+  // review (sheet recipe name -> chosen existing recipe name), scoped by the
+  // recipe kind via `context` ("dough" | "sauce"). Cheese/mix picks keep the
+  // pre-existing "appType" namespace (the blend-name pool the prepare pass
+  // already reads back as link suggestions).
+  "recipeName",
 ];
+
+/**
+ * Lookup key for a dough/sauce "use existing" link suggestion, shared between
+ * the prepare pass (which builds the suggestion map from learned aliases) and
+ * the review dialog (which pre-selects the pick). Cheese/mix suggestions stay
+ * keyed by plain lowercased name for backward compatibility.
+ */
+export function recipeLinkSuggestionKey(displayKind: string, name: string): string {
+  return `${displayKind.trim().toLowerCase()}\u0000${name.trim().toLowerCase()}`;
+}
 
 export type SpecImportAlias = {
   kind: SpecAliasKind;

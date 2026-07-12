@@ -135,6 +135,10 @@ export function buildSuggestMergesPrompt(input: SuggestMergesInput): {
     "the list — and list the OTHER names in that cluster as the ones to merge " +
     "away. Be conservative: only group names you are confident are the same. " +
     "Do NOT group genuinely different things just because the words overlap. " +
+    "Names that belong to DIFFERENT pizza brands or product lines are NEVER " +
+    "duplicates of each other, no matter how many other words they share — " +
+    "e.g. a name mentioning one brand ('Lowes 7in 5 Cheese Mix') must never be " +
+    "grouped with a name mentioning another brand ('Bashas 5 Cheese'). " +
     "Every name you output (target and sources) MUST be copied VERBATIM from the " +
     "provided list — never invent or alter a name. Omit a name entirely if it has " +
     "no duplicate. This is read-only; the user reviews every suggestion before " +

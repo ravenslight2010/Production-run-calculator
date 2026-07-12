@@ -19,6 +19,7 @@ import {
   collectDeniedPairs,
   filterDeniedSuggestions,
   filterConflictingSuggestions,
+  filterCrossBrandSuggestions,
   type MergeAlias,
   type MergeSuggestion,
   type DeniedMerge,
@@ -242,7 +243,13 @@ export async function suggestMerges(
   names: string[],
   category?: MergeSuggestCategory,
   brand?: string,
+  knownBrands?: string[],
 ): Promise<MergeSuggestResult> {
+  // Cross-brand guard: names embedding DIFFERENT known brands ("Lowes …" vs
+  // "Bashas …") are never the same thing. Skipped on the Brand tab, where the
+  // names ARE brands and every legitimate typo-merge would be blocked.
+  const dropCrossBrand = (list: ReviewedMergeSuggestion[]): ReviewedMergeSuggestion[] =>
+    category === "brand" ? list : filterCrossBrandSuggestions(list, knownBrands ?? []);
   let aliases: MergeAlias[] = [];
   try {
     aliases = await fetchMergeAliases(category, brand);
@@ -279,12 +286,16 @@ export async function suggestMerges(
     // Conflicting-descriptor guard (e.g. "cured" vs "natural" are different
     // products): stripped from every shown suggestion, AI or baseline.
     return {
-      suggestions: filterConflictingSuggestions(filterDeniedSuggestions(merged, denied)),
+      suggestions: dropCrossBrand(
+        filterConflictingSuggestions(filterDeniedSuggestions(merged, denied)),
+      ),
       usedAi: true,
     };
   } catch (e) {
     return {
-      suggestions: filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
+      suggestions: dropCrossBrand(
+        filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
+      ),
       usedAi: false,
       error: e instanceof Error ? e.message : "AI suggestions unavailable",
     };

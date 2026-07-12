@@ -4244,6 +4244,10 @@ export default function Home() {
         scope.universe,
         scope.category,
         scope.brand,
+        // Known brands power the deterministic cross-brand guard: a suggestion
+        // pairing names that mention DIFFERENT brands ("Lowes …" vs "Bashas …")
+        // is dropped no matter what the AI said.
+        brands,
       );
       setMergeSuggestions(suggestions);
       setMergeSuggestSelected(new Set());

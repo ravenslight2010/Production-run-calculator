@@ -45,9 +45,30 @@ export function buildMergeMap(sources: string[], target: string): MergeMap {
   return map;
 }
 
-/** Apply a rename to a single name. */
+/**
+ * Case-insensitive (trim + lowercase) source→target lookup for a merge map.
+ * Imported data commonly drifts in case/whitespace from the master lists, and
+ * the server-side repoint/fold helpers already match case-insensitively — the
+ * local rewrite and the preview count must match the same occurrences or the
+ * preview undercounts ("0 references") and the apply leaves stragglers behind.
+ */
+export function buildCiMergeLookup(map: MergeMap): Map<string, string> {
+  const lookup = new Map<string, string>();
+  for (const [s, t] of Object.entries(map)) {
+    const k = s.trim().toLowerCase();
+    if (k) lookup.set(k, t);
+  }
+  return lookup;
+}
+
+/** Case-insensitive rename of one name via a prebuilt lookup. */
+export function mapNameCi(name: unknown, lookup: Map<string, string>): string | undefined {
+  return typeof name === "string" ? lookup.get(name.trim().toLowerCase()) : undefined;
+}
+
+/** Apply a rename to a single name (case-insensitive on the source). */
 export function mapName(name: string, map: MergeMap): string {
-  return map[name] ?? name;
+  return mapNameCi(name, buildCiMergeLookup(map)) ?? name;
 }
 
 /**
@@ -55,10 +76,11 @@ export function mapName(name: string, map: MergeMap): string {
  * rename produces while preserving first-seen order.
  */
 export function mergeList(list: string[], map: MergeMap): string[] {
+  const lookup = buildCiMergeLookup(map);
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of list) {
-    const renamed = map[item] ?? item;
+    const renamed = mapNameCi(item, lookup) ?? item;
     const key = renamed.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
@@ -77,11 +99,14 @@ export function mergeRecipeRows<R extends { ingredient?: unknown }>(
   rows: R[],
   map: MergeMap,
 ): R[] {
-  return rows.map((row) =>
-    row && typeof row === "object" && typeof row.ingredient === "string" && map[row.ingredient]
-      ? { ...row, ingredient: map[row.ingredient] }
-      : row,
-  );
+  const lookup = buildCiMergeLookup(map);
+  return rows.map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const renamed = mapNameCi(row.ingredient, lookup);
+    return renamed !== undefined && renamed !== row.ingredient
+      ? { ...row, ingredient: renamed }
+      : row;
+  });
 }
 
 /**
@@ -92,10 +117,11 @@ export function mergeSettingsObject<T extends Record<string, unknown>>(
   obj: T,
   map: MergeMap,
 ): T {
+  const lookup = buildCiMergeLookup(map);
   const out = { ...obj } as Record<string, unknown>;
   for (const k of MERGE_NAME_FIELDS) {
-    const v = out[k];
-    if (typeof v === "string" && map[v]) out[k] = map[v];
+    const renamed = mapNameCi(out[k], lookup);
+    if (renamed !== undefined) out[k] = renamed;
   }
   for (const k of MERGE_RECIPE_FIELDS) {
     const arr = out[k];
@@ -119,13 +145,13 @@ export function mergeRecipePresetMap<R extends { ingredient?: unknown }>(
 /**
  * Count how many references a merge map would rewrite across the supplied
  * surfaces. Used to drive the confirmation preview. Counts list entries that get
- * renamed, type-field hits, and recipe-row hits.
+ * renamed, type-field hits, and recipe-row hits. All matching is
+ * case-insensitive (trim + lowercase) — the same occurrences the apply path and
+ * the server re-point helpers rewrite — so the preview can't undercount and
+ * show a misleading "0 references" for names that drifted in case/whitespace.
  *
  * `ciRowLists` holds recipe rows from the SERVER master-data pools (cheese
- * recipes, mixes, dough/sauce recipes). The server re-point helpers match
- * ingredient names case-insensitively (trim + lowercase), so these rows are
- * counted the same way — otherwise the preview undercounts what the merge will
- * actually rewrite and shows a misleading "0 references".
+ * recipes, mixes, dough/sauce recipes), which the merge re-points server-side.
  */
 export function countMergeReferences(
   map: MergeMap,
@@ -136,8 +162,9 @@ export function countMergeReferences(
     ciRowLists?: { ingredient?: unknown }[][];
   },
 ): number {
+  const lookup = buildCiMergeLookup(map);
   let count = 0;
-  const hit = (name: unknown) => typeof name === "string" && Boolean(map[name]);
+  const hit = (name: unknown) => mapNameCi(name, lookup) !== undefined;
   for (const list of surfaces.lists ?? []) {
     for (const item of list) if (hit(item)) count++;
   }
@@ -153,17 +180,9 @@ export function countMergeReferences(
       if (Array.isArray(rows)) for (const row of rows) if (hit(row.ingredient)) count++;
     }
   }
-  const ciSources = new Set(
-    Object.keys(map).map((s) => s.trim().toLowerCase()).filter(Boolean),
-  );
-  if (ciSources.size > 0) {
-    for (const rows of surfaces.ciRowLists ?? []) {
-      if (!Array.isArray(rows)) continue;
-      for (const row of rows) {
-        const ing = row?.ingredient;
-        if (typeof ing === "string" && ciSources.has(ing.trim().toLowerCase())) count++;
-      }
-    }
+  for (const rows of surfaces.ciRowLists ?? []) {
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) if (row && hit(row.ingredient)) count++;
   }
   return count;
 }

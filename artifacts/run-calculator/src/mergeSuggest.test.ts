@@ -278,4 +278,62 @@ describe("suggestMerges — conflicting descriptor guard (cured vs natural)", ()
     expect(res.usedAi).toBe(false);
     expect(res.suggestions).toEqual([]);
   });
+
+  it("strips a cross-brand pairing from AI output when known brands are passed", async () => {
+    stubFetch({
+      ai: {
+        suggestions: [
+          { target: "Bashas 5 Cheese Mix", sources: ["Lowes 7in 5 Cheese Mix"] },
+          { target: "Mozzarella", sources: ["Mozarella"] },
+        ],
+      },
+    });
+    const res = await suggestMerges(
+      ["Bashas 5 Cheese Mix", "Lowes 7in 5 Cheese Mix", "Mozzarella", "Mozarella"],
+      "ingredient",
+      undefined,
+      ["Lowes", "Bashas"],
+    );
+    expect(res.usedAi).toBe(true);
+    expect(res.suggestions).toHaveLength(1);
+    expect(res.suggestions[0].target).toBe("Mozzarella");
+  });
+
+  it("strips a remembered cross-brand pairing on the AI-fallback path too", async () => {
+    stubFetch({
+      aliases: [{ externalName: "Lowes 5 Cheese Mix", canonicalName: "Bashas 5 Cheese Mix" }],
+      ai: "fail",
+    });
+    const res = await suggestMerges(
+      ["Lowes 5 Cheese Mix", "Bashas 5 Cheese Mix"],
+      "ingredient",
+      undefined,
+      ["Lowes", "Bashas"],
+    );
+    expect(res.usedAi).toBe(false);
+    expect(res.suggestions).toEqual([]);
+  });
+
+  it("does NOT apply the cross-brand guard on the Brand tab (names ARE brands)", async () => {
+    stubFetch({
+      ai: {
+        suggestions: [{ target: "Bashas", sources: ["Bashas'"] }],
+      },
+    });
+    const res = await suggestMerges(["Bashas", "Bashas'"], "brand", undefined, [
+      "Lowes",
+      "Bashas",
+      "Bashas'",
+    ]);
+    expect(res.usedAi).toBe(true);
+    // The pairing must NOT be stripped: some surviving group still merges the
+    // two brand spellings (the deterministic near-dup scan may add its own
+    // group with the opposite target — irrelevant here).
+    const paired = res.suggestions.some(
+      (s) =>
+        (s.target === "Bashas" && s.sources.includes("Bashas'")) ||
+        (s.target === "Bashas'" && s.sources.includes("Bashas")),
+    );
+    expect(paired).toBe(true);
+  });
 });

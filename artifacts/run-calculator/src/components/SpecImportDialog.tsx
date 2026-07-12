@@ -10,6 +10,7 @@ import {
   collectSpecRenameAliases,
   mergeSpecAliases,
   cleanSpecCheeseRecipeName,
+  recipeLinkSuggestionKey,
   specImportNameMatchKey,
   type ParsedProfile,
   type ParsedRecipe,
@@ -162,7 +163,12 @@ function buildRecipeItems(
   // pool (otherwise the picker would show an invalid selection).
   const suggestions = prepared.aliasLinkSuggestions ?? {};
   const suggestLink = (name: string, kind: string): string | undefined => {
-    const suggested = suggestions[name.trim().toLowerCase()];
+    // Cheese/mix picks live under plain lowercased names (the legacy "appType"
+    // namespace); dough/sauce picks are kind-scoped via recipeLinkSuggestionKey.
+    const suggested =
+      kind === "cheese" || kind === "mix"
+        ? suggestions[name.trim().toLowerCase()]
+        : suggestions[recipeLinkSuggestionKey(kind, name)];
     if (!suggested) return undefined;
     if (suggested.trim().toLowerCase() === name.trim().toLowerCase()) return undefined;
     return (existingByKind?.[kind] ?? []).find(
@@ -171,8 +177,7 @@ function buildRecipeItems(
   };
   const kept = prepared.parsed.recipes.map((r, i) => {
     const kind = specImportRecipeDisplayKind(r);
-    const linkExisting =
-      kind === "cheese" || kind === "mix" ? suggestLink(r.name ?? "", kind) : undefined;
+    const linkExisting = suggestLink(r.name ?? "", kind);
     return {
       key: `rk${i}`,
       orig: r,
@@ -380,21 +385,30 @@ export default function SpecImportDialog({
     [profiles, prepared],
   );
 
-  // "Use existing recipe" picks on INCLUDED cheese/mix recipes, turned into
-  // learnable aliases (parsed sheet blend name → chosen existing recipe name)
-  // under the "appType" kind — the blend-name namespace the prepare pass reads
-  // back as link suggestions. Saved alongside the step-1 renames on Apply so a
-  // re-import of the same sheet recommends the link instead of "create new".
+  // "Use existing recipe" picks on INCLUDED recipes, turned into learnable
+  // aliases (parsed sheet name → chosen existing recipe name). Cheese/mix picks
+  // go under the "appType" kind (the blend-name namespace the prepare pass reads
+  // back as link suggestions); dough/sauce picks go under "recipeName" scoped by
+  // kind via context. Saved alongside the step-1 renames on Apply so a re-import
+  // of the same sheet recommends the link instead of "create new".
   const learnedLinks: SpecImportAlias[] = useMemo(() => {
     const out: SpecImportAlias[] = [];
     for (const r of recipes) {
       if (!r.include) continue;
-      if (r.kind !== "cheese" && r.kind !== "mix") continue;
       const linked = r.linkExisting?.trim();
       const external = (r.baseOrig.name ?? "").trim();
       if (!linked || !external) continue;
       if (external.toLowerCase() === linked.toLowerCase()) continue;
-      out.push({ kind: "appType", externalName: external, canonicalName: linked, context: null });
+      if (r.kind === "cheese" || r.kind === "mix") {
+        out.push({ kind: "appType", externalName: external, canonicalName: linked, context: null });
+      } else {
+        out.push({
+          kind: "recipeName",
+          externalName: external,
+          canonicalName: linked,
+          context: r.kind,
+        });
+      }
     }
     return out;
   }, [recipes]);

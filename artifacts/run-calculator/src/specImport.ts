@@ -36,6 +36,7 @@ import {
   mergePruneSnapshots,
   partitionTombstonedParse,
   pruneSpecImportAgainstSnapshot,
+  recipeLinkSuggestionKey,
   recipeTargets,
   resolveRetriedParsePass,
   shouldRetryParsePass,
@@ -150,11 +151,20 @@ export type SpecImportPrepared = {
 function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const a of aliases) {
-    if (a.kind !== "appType") continue;
-    const ext = a.externalName.trim().toLowerCase();
     const canon = a.canonicalName.trim();
-    if (!ext || !canon || ext === canon.toLowerCase()) continue;
-    out[ext] = canon;
+    if (a.kind === "appType") {
+      const ext = a.externalName.trim().toLowerCase();
+      if (!ext || !canon || ext === canon.toLowerCase()) continue;
+      out[ext] = canon;
+    } else if (a.kind === "recipeName") {
+      // Dough/sauce "use existing" picks, scoped by kind via context so a
+      // dough link never pre-selects on a sauce row (or vice versa).
+      const ext = a.externalName.trim();
+      const kindCtx = (a.context ?? "").trim();
+      if (!ext || !canon || !kindCtx) continue;
+      if (ext.toLowerCase() === canon.toLowerCase()) continue;
+      out[recipeLinkSuggestionKey(kindCtx, ext)] = canon;
+    }
   }
   return out;
 }
@@ -163,7 +173,7 @@ function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<string, s
 function aliasKindToDomain(kind: SpecAliasKind): string {
   if (kind === "brand") return "brand";
   if (kind === "flavor") return "flavor";
-  if (kind === "appType" || kind === "pepType") return "item";
+  if (kind === "appType" || kind === "pepType" || kind === "recipeName") return "item";
   // dough/sauce/cheese ingredient kinds
   return "ingredient";
 }

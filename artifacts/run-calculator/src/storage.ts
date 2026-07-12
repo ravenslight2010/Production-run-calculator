@@ -1187,7 +1187,8 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
       store.savePresets(foldPresetKeys(store.loadPresets(), map));
     } catch {}
   }
-  // Mixes have no selection field, so no settings-object rewriting is needed.
+  // (Defensive: no category currently has zero selection fields — mix names
+  // live in the shared app{n}CheeseRecipeName link fields, same as cheese.)
   if (fields.length === 0) return [];
   const rewrite = <T extends Record<string, unknown>>(obj: T) =>
     mergeRecipeNameSettingsObject(obj, map, fields);

@@ -49,15 +49,28 @@ describe("mergeRecipeNameSettingsObject", () => {
     expect(out.doughRecipeName).toBe("B");
   });
 
-  it("mixes has no selection field, so nothing is re-pointed", () => {
-    expect(RECIPE_NAME_FIELDS_BY_CATEGORY.mixes).toEqual([]);
-    const map = buildMergeMap(["A"], "B");
+  it("mixes re-point the applicator link fields (mix names live in app{n}CheeseRecipeName)", () => {
+    expect(RECIPE_NAME_FIELDS_BY_CATEGORY.mixes).toEqual(
+      RECIPE_NAME_FIELDS_BY_CATEGORY.cheese,
+    );
+    const map = buildMergeMap(["Club Mix"], "4Hands Club Mix");
     const out = mergeRecipeNameSettingsObject(
-      { doughRecipeName: "A" },
+      { app2CheeseRecipeName: "Club Mix", doughRecipeName: "keep" },
       map,
       RECIPE_NAME_FIELDS_BY_CATEGORY.mixes,
     );
-    expect(out.doughRecipeName).toBe("A");
+    expect(out.app2CheeseRecipeName).toBe("4Hands Club Mix");
+    expect(out.doughRecipeName).toBe("keep");
+  });
+
+  it("re-points selection fields case-insensitively with trimming", () => {
+    const map = buildMergeMap(["Old Dough"], "New Dough");
+    const out = mergeRecipeNameSettingsObject(
+      { doughRecipeName: "  OLD DOUGH " },
+      map,
+      RECIPE_NAME_FIELDS_BY_CATEGORY.dough,
+    );
+    expect(out.doughRecipeName).toBe("New Dough");
   });
 });
 
@@ -86,6 +99,19 @@ describe("foldPresetKeys", () => {
     // First source (A) wins the empty target slot; B is dropped.
     expect(out).toEqual({ C: [1], D: [4] });
   });
+
+  it("folds a source key that differs from the map only by case/whitespace", () => {
+    const map = buildMergeMap(["Old Dough"], "New Dough");
+    const out = foldPresetKeys({ " old dough ": ["src"], Keep: ["k"] }, map);
+    expect(out).toEqual({ "New Dough": ["src"], Keep: ["k"] });
+  });
+
+  it("treats a case-variant of the target key as the target (never clobbered)", () => {
+    const map = buildMergeMap(["Old Dough"], "New Dough");
+    const out = foldPresetKeys({ "new dough": ["tgt"], "Old Dough": ["src"] }, map);
+    // "new dough" IS the target (case drift); the source's preset is dropped.
+    expect(out).toEqual({ "new dough": ["tgt"] });
+  });
 });
 
 describe("countRecipeNameReferences", () => {
@@ -108,6 +134,16 @@ describe("countRecipeNameReferences", () => {
       presetKeyMaps: [{ a: [] }],
     });
     expect(count).toBe(0);
+  });
+
+  it("counts case/whitespace-drifted references (no more misleading '0 references')", () => {
+    const map = buildMergeMap(["Old Dough"], "New Dough");
+    const count = countRecipeNameReferences(map, RECIPE_NAME_FIELDS_BY_CATEGORY.dough, {
+      lists: [[" OLD DOUGH "]],
+      settingsObjects: [{ doughRecipeName: "old dough" }],
+      presetKeyMaps: [{ "Old Dough ": [] }],
+    });
+    expect(count).toBe(3);
   });
 });
 

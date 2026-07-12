@@ -324,7 +324,7 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(out.recipes[0].referenceOnly).toBe(true);
   });
 
-  it("does NOT learn an alias for a dough 'Use existing' pick (blend-name namespace only)", () => {
+  it("learns a dough 'Use existing' pick as a kind-scoped recipeName alias on Apply", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",
       name: "Sheet Dough",
@@ -341,6 +341,53 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     fireEvent.click(screen.getByText(/^Apply/));
 
     const learned = onConfirm.mock.calls[0][1] as Array<Record<string, unknown>>;
+    // Dough/sauce picks are remembered under the kind-scoped "recipeName"
+    // namespace, NOT the cheese/mix blend-name ("appType") namespace.
     expect(learned.filter((a) => a.kind === "appType")).toEqual([]);
+    expect(learned).toContainEqual({
+      kind: "recipeName",
+      externalName: "Sheet Dough",
+      canonicalName: "House Dough",
+      context: "dough",
+    });
+  });
+
+  it("pre-selects a remembered dough link via the kind-scoped suggestion key", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "Corner Booth",
+      flavor: "PLAIN",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }], {
+        // Built by the prepare pass via recipeLinkSuggestionKey("dough", name).
+        "dough\u0000sheet dough": "House Dough",
+      }),
+      () => {},
+    );
+
+    const select = screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement;
+    expect(select.value).toBe("House Dough");
+  });
+
+  it("does NOT let a sauce-scoped remembered link pre-select on a dough row", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "Corner Booth",
+      flavor: "PLAIN",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }], {
+        "sauce\u0000sheet dough": "House Dough",
+      }),
+      () => {},
+    );
+
+    const select = screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement;
+    expect(select.value).toBe("");
   });
 });
