@@ -33,6 +33,7 @@ import {
   gridSanityIssue,
   gridsToPromptText,
   mergeParsedSpecImports,
+  mergePruneSnapshots,
   partitionTombstonedParse,
   pruneSpecImportAgainstSnapshot,
   recipeTargets,
@@ -75,6 +76,7 @@ import {
   fetchSavedSpecSheets,
   buildSpecSheetLabel,
   deriveSourceKey,
+  selectPruneSnapshots,
   loadCurrentReconcileRecipes,
 } from "./savedSpecSheets";
 import { requestParseSpecSheet } from "./parseSpecSheet";
@@ -831,23 +833,27 @@ export async function commitSpecImport(
     // Best-effort — apply with imported names if the pool is unavailable.
   }
 
-  // Re-import prune: compare against the snapshot saved by the PREVIOUS import
-  // of this same file (matched by sourceKey) and strip everything the spec
-  // didn't change, so manual edits made since the last import survive a
-  // re-import. Only what actually changed in the workbook is applied. The
-  // snapshot saved below stays the FULL parse (never the pruned one) so the
-  // next re-import compares against the complete previous state. Best-effort:
-  // if snapshots can't be fetched, apply the full parse (previous behavior).
+  // Re-import prune: compare against the snapshot(s) saved by PREVIOUS imports
+  // of this same file and strip everything the spec didn't change, so manual
+  // edits made since the last import survive a re-import. Only what actually
+  // changed in the workbook is applied. Snapshots are matched per FILE (set
+  // intersection on the "|"-joined sourceKey), not by exact key: a file first
+  // imported inside a multi-file batch lives in a compound-key snapshot that an
+  // exact match would miss — which silently skipped the prune and clobbered
+  // user edits. Multiple matching snapshots (newest first) merge so the newest
+  // occurrence of each profile/recipe wins. The snapshot saved below stays the
+  // FULL parse (never the pruned one) so the next re-import compares against
+  // the complete previous state. Best-effort: if snapshots can't be fetched,
+  // apply the full parse (previous behavior).
   let applyParsed = prepared.parsed;
   try {
     const sourceKey = deriveSourceKey(prepared.sourceNames ?? []);
     if (sourceKey) {
       const sheets = await fetchSavedSpecSheets();
-      const previous = sheets
-        .filter((s) => (s.sourceKey ?? "").trim() === sourceKey)
-        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)[0];
-      if (previous?.data) {
-        applyParsed = pruneSpecImportAgainstSnapshot(prepared.parsed, previous.data).parsed;
+      const candidates = selectPruneSnapshots(sheets, sourceKey).filter((s) => s.data);
+      if (candidates.length > 0) {
+        const previous = mergePruneSnapshots(candidates.map((s) => s.data));
+        applyParsed = pruneSpecImportAgainstSnapshot(prepared.parsed, previous).parsed;
       }
     }
   } catch {

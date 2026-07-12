@@ -46,6 +46,34 @@ export function deriveSourceKey(names: ReadonlyArray<string>): string | undefine
 }
 
 /**
+ * Select the previous-import snapshots relevant to a new import of the file(s)
+ * behind `sourceKey`, newest first. Matching is per-FILE, not per exact key: a
+ * multi-file batch import saves ONE snapshot under a compound sourceKey
+ * (filenames joined with "|"), so a later single-file re-import must still
+ * find the batch snapshot that contained its file — and vice versa. A snapshot
+ * matches when its file set INTERSECTS the current import's file set. Feed the
+ * result (newest first) to mergePruneSnapshots so the newest occurrence of
+ * each profile/recipe wins. Legacy snapshots without a sourceKey never match.
+ */
+export function selectPruneSnapshots<
+  T extends { id: number; sourceKey?: string | null; createdAt: number },
+>(sheets: ReadonlyArray<T>, sourceKey: string): T[] {
+  const current = new Set(
+    sourceKey.split("|").map((s) => s.trim()).filter(Boolean),
+  );
+  if (current.size === 0) return [];
+  return sheets
+    .filter((s) => {
+      const key = (s.sourceKey ?? "").trim();
+      if (!key) return false;
+      return key
+        .split("|")
+        .some((part) => current.has(part.trim()));
+    })
+    .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+}
+
+/**
  * Given saved snapshots, return the ids that are the NEWEST version within their
  * distinct file (sourceKey) — i.e. the default source to use. Legacy snapshots
  * WITHOUT a sourceKey share one bucket, matching the server's `null -> ""`

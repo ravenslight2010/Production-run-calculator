@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  mergePruneSnapshots,
   pruneSpecImportAgainstSnapshot,
   type ParsedProfile,
   type ParsedRecipe,
@@ -149,5 +150,46 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     const parsedCopy = JSON.parse(JSON.stringify(parsed));
     pruneSpecImportAgainstSnapshot(parsed, snapshot);
     expect(parsed).toEqual(parsedCopy);
+  });
+});
+
+describe("mergePruneSnapshots", () => {
+  it("unions profiles and recipes across snapshots", () => {
+    const merged = mergePruneSnapshots([
+      parsedOf([profile()], [recipe()]),
+      parsedOf([profile({ brand: "Other", flavor: "Pep" })], [recipe({ name: "Other Sauce" })]),
+    ]);
+    expect(merged.profiles).toHaveLength(2);
+    expect(merged.recipes).toHaveLength(2);
+  });
+
+  it("keeps the FIRST (newest) occurrence on duplicate identities", () => {
+    const newest = parsedOf(
+      [profile({ sauceOzPerPizza: 9 })],
+      [recipe({ rows: [{ ingredient: "Basil", lbs: 3 }] })],
+    );
+    const older = parsedOf([profile()], [recipe()]);
+    const merged = mergePruneSnapshots([newest, older]);
+    expect(merged.profiles).toHaveLength(1);
+    expect(merged.profiles[0].sauceOzPerPizza).toBe(9);
+    expect(merged.recipes).toHaveLength(1);
+    expect(merged.recipes[0].rows).toEqual([{ ingredient: "Basil", lbs: 3 }]);
+  });
+
+  it("dedupes profiles ci-trim on brand+flavor and recipes on kind + loose name key", () => {
+    const merged = mergePruneSnapshots([
+      parsedOf([profile({ brand: " BASHA'S ", flavor: "cheese" })], [recipe({ name: "bashas sauce" })]),
+      parsedOf([profile()], [recipe({ name: "Basha's  Sauce" }), recipe({ kind: "cheese", name: "Basha's Sauce" })]),
+    ]);
+    expect(merged.profiles).toHaveLength(1);
+    // Same loose name but different kind is a distinct identity.
+    expect(merged.recipes).toHaveLength(2);
+  });
+
+  it("handles empty input and snapshots with missing arrays", () => {
+    expect(mergePruneSnapshots([])).toEqual({ profiles: [], recipes: [] });
+    const merged = mergePruneSnapshots([{} as ParsedSpecImport, parsedOf([profile()])]);
+    expect(merged.profiles).toHaveLength(1);
+    expect(merged.recipes).toHaveLength(0);
   });
 });

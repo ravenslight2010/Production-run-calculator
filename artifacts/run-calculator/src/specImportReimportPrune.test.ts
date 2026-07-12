@@ -66,15 +66,20 @@ vi.mock("./specImportAliases", () => ({
   fetchSpecImportAliases: async () => [],
   saveSpecImportAliases: async () => {},
 }));
-vi.mock("./savedSpecSheets", () => ({
-  saveSpecSheet: saveSheetSpy,
-  fetchSavedSpecSheets: fetchSheetsSpy,
-  buildSpecSheetLabel: () => "Sheet",
-  // Real derivation shape doesn't matter here — commit only needs a stable,
-  // non-empty key per source-name list.
-  deriveSourceKey: (names: string[]) => names.join("|").toLowerCase(),
-  loadCurrentReconcileRecipes: () => [],
-}));
+vi.mock("./savedSpecSheets", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./savedSpecSheets")>();
+  return {
+    saveSpecSheet: saveSheetSpy,
+    fetchSavedSpecSheets: fetchSheetsSpy,
+    buildSpecSheetLabel: () => "Sheet",
+    // REAL key derivation + per-file snapshot selection — the production
+    // key shape (lowercased, extension-stripped, sorted, "|"-joined) and the
+    // batch↔single intersection matching are exactly what's under test.
+    deriveSourceKey: actual.deriveSourceKey,
+    selectPruneSnapshots: actual.selectPruneSnapshots,
+    loadCurrentReconcileRecipes: () => [],
+  };
+});
 vi.mock("./parseSpecSheet", () => ({ requestParseSpecSheet: vi.fn() }));
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => {
@@ -115,7 +120,7 @@ beforeEach(() => {
 describe("commitSpecImport re-import prune wiring", () => {
   it("prunes unchanged content against the matching previous snapshot", async () => {
     const names = ["specs.xlsx"];
-    fetchSheetsSpy.mockResolvedValue([sheetOf(fixtureParse(), "specs.xlsx", 100)]);
+    fetchSheetsSpy.mockResolvedValue([sheetOf(fixtureParse(), "specs", 100)]);
 
     // Same file re-imported with ONE scalar changed; recipe identical.
     const reimport: ParsedSpecImport = {
@@ -146,8 +151,8 @@ describe("commitSpecImport re-import prune wiring", () => {
       recipes: [fixtureRecipe()],
     };
     fetchSheetsSpy.mockResolvedValue([
-      sheetOf(older, "specs.xlsx", 100, 1),
-      sheetOf(newer, "specs.xlsx", 200, 2),
+      sheetOf(older, "specs", 100, 1),
+      sheetOf(newer, "specs", 200, 2),
     ]);
 
     await commitSpecImport(preparedOf(fixtureParse(), names));
@@ -156,8 +161,82 @@ describe("commitSpecImport re-import prune wiring", () => {
     expect(applied.profiles[0].sauceOzPerPizza).toBe(4);
   });
 
+  it("prunes a single-file re-import against a MULTI-FILE batch snapshot (compound sourceKey)", async () => {
+    // Regression: the file's previous import was part of a 10-file batch, whose
+    // snapshot is saved under one compound "a|b|c" sourceKey. An exact-key
+    // lookup missed it, silently skipped the prune, and the full re-apply
+    // clobbered the user's post-import edits (renames, links).
+    const batchParse: ParsedSpecImport = {
+      profiles: [fixtureProfile()],
+      recipes: [
+        fixtureRecipe(),
+        fixtureRecipe({ name: "Other Batch Sauce", rows: [{ ingredient: "Basil", lbs: 2 }] }),
+      ],
+    };
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(batchParse, "aldo sauce|other batch sauce", 100),
+    ]);
+
+    // Re-import ONLY the first file, unchanged.
+    await commitSpecImport(preparedOf(fixtureParse(), ["Aldo Sauce.xlsx"]));
+
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    expect(applied.profiles).toHaveLength(0); // unchanged profile dropped
+    expect(applied.recipes[0].referenceOnly).toBe(true); // unchanged recipe demoted
+  });
+
+  it("prunes a multi-file batch re-import against earlier SINGLE-FILE snapshots", async () => {
+    const fileA = fixtureParse();
+    const fileB: ParsedSpecImport = {
+      profiles: [],
+      recipes: [fixtureRecipe({ name: "Sauce B", rows: [{ ingredient: "Basil", lbs: 2 }] })],
+    };
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(fileA, "a", 100, 1),
+      sheetOf(fileB, "b", 120, 2),
+    ]);
+
+    // Batch re-import of both files: A unchanged, B changed.
+    const batch: ParsedSpecImport = {
+      profiles: [fixtureProfile()],
+      recipes: [
+        fixtureRecipe(),
+        fixtureRecipe({ name: "Sauce B", rows: [{ ingredient: "Basil", lbs: 5 }] }),
+      ],
+    };
+    await commitSpecImport(preparedOf(batch, ["a.xlsx", "b.xlsx"]));
+
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    expect(applied.profiles).toHaveLength(0); // unchanged profile dropped
+    const a = applied.recipes.find((r) => r.name === "House Marinara");
+    const b = applied.recipes.find((r) => r.name === "Sauce B");
+    expect(a?.referenceOnly).toBe(true); // unchanged → demoted
+    expect(b?.referenceOnly).toBeUndefined(); // changed → applied
+  });
+
+  it("newest snapshot wins when a file appears in BOTH a batch and a single-file snapshot", async () => {
+    // Batch snapshot (older) says sauceOzPerPizza 4; single-file snapshot
+    // (newer) says 6. The re-import parse says 4 — vs the NEWEST previous
+    // state (6) that IS a change and must be applied, not pruned.
+    const older: ParsedSpecImport = { profiles: [fixtureProfile()], recipes: [] };
+    const newer: ParsedSpecImport = {
+      profiles: [fixtureProfile({ sauceOzPerPizza: 6 })],
+      recipes: [],
+    };
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(older, "other|specs", 100, 1),
+      sheetOf(newer, "specs", 200, 2),
+    ]);
+
+    await commitSpecImport(
+      preparedOf({ profiles: [fixtureProfile()], recipes: [] }, ["specs.xlsx"]),
+    );
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    expect(applied.profiles[0]?.sauceOzPerPizza).toBe(4);
+  });
+
   it("applies the full parse when no snapshot matches the sourceKey (different file)", async () => {
-    fetchSheetsSpy.mockResolvedValue([sheetOf(fixtureParse(), "other-file.xlsx", 100)]);
+    fetchSheetsSpy.mockResolvedValue([sheetOf(fixtureParse(), "other-file", 100)]);
 
     const parsed = fixtureParse();
     await commitSpecImport(preparedOf(parsed, ["specs.xlsx"]));

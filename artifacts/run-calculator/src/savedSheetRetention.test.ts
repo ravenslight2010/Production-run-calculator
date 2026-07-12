@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveSourceKey, latestSourceKeyIds } from "./savedSpecSheets";
+import { deriveSourceKey, latestSourceKeyIds, selectPruneSnapshots } from "./savedSpecSheets";
 
 describe("deriveSourceKey", () => {
   it("normalizes a single filename (lowercase, strip ext, collapse ws)", () => {
@@ -47,5 +47,35 @@ describe("latestSourceKeyIds", () => {
       { id: 9, sourceKey: "x", createdAt: 100 },
     ]);
     expect([...latest]).toEqual([9]);
+  });
+});
+
+describe("selectPruneSnapshots", () => {
+  const sheets = [
+    { id: 1, sourceKey: "aldo sauce|bobo sauce|gravy mix", createdAt: 100 },
+    { id: 2, sourceKey: "aldo sauce", createdAt: 200 },
+    { id: 3, sourceKey: "other spec", createdAt: 300 },
+    { id: 4, sourceKey: null, createdAt: 400 },
+    { id: 5, sourceKey: "", createdAt: 500 },
+  ];
+
+  it("matches a single-file key against a compound batch snapshot (per-file intersection)", () => {
+    const out = selectPruneSnapshots(sheets, "aldo sauce");
+    expect(out.map((s) => s.id)).toEqual([2, 1]); // newest first, batch included
+  });
+
+  it("matches a compound batch key against single-file snapshots", () => {
+    const out = selectPruneSnapshots(sheets, "aldo sauce|new file");
+    expect(out.map((s) => s.id)).toEqual([2, 1]);
+  });
+
+  it("returns [] when no file overlaps and ignores legacy blank keys", () => {
+    expect(selectPruneSnapshots(sheets, "brand new file")).toEqual([]);
+    expect(selectPruneSnapshots(sheets, "")).toEqual([]);
+  });
+
+  it("does not partial-string-match distinct filenames", () => {
+    // "aldo" is not "aldo sauce" — only whole normalized filenames match.
+    expect(selectPruneSnapshots(sheets, "aldo")).toEqual([]);
   });
 });

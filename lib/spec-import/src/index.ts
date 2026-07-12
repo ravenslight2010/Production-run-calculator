@@ -3714,6 +3714,38 @@ export type SpecImportPruneResult = {
 };
 
 /**
+ * Merge multiple previous-import snapshots (NEWEST FIRST) into one combined
+ * "previous state" for pruneSpecImportAgainstSnapshot. A file's last import may
+ * live inside a multi-file batch snapshot (compound sourceKey) rather than its
+ * own single-file snapshot, so the prune must consider every snapshot that
+ * included this file — the newest occurrence of each profile (brand+flavor,
+ * ci) and recipe (kind + loose name key) wins. Pure; never mutates its inputs.
+ */
+export function mergePruneSnapshots(
+  snapshots: ReadonlyArray<ParsedSpecImport>,
+): ParsedSpecImport {
+  const profiles: ParsedProfile[] = [];
+  const recipes: ParsedRecipe[] = [];
+  const seenProfiles = new Set<string>();
+  const seenRecipes = new Set<string>();
+  for (const snap of snapshots) {
+    for (const p of snap?.profiles ?? []) {
+      const key = `${ciTrim(p.brand)}\u0000${ciTrim(p.flavor)}`;
+      if (seenProfiles.has(key)) continue;
+      seenProfiles.add(key);
+      profiles.push(p);
+    }
+    for (const r of snap?.recipes ?? []) {
+      const key = `${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}`;
+      if (seenRecipes.has(key)) continue;
+      seenRecipes.add(key);
+      recipes.push(r);
+    }
+  }
+  return { profiles, recipes };
+}
+
+/**
  * Prune a parsed spec import against the SNAPSHOT of the previous import of the
  * same file, so a re-import only overwrites what the spec actually changed and
  * the user's manual edits to everything else survive.
@@ -3736,6 +3768,9 @@ export type SpecImportPruneResult = {
  * brand/flavor) because AI parses of the same workbook are not byte-stable.
  * Both sides must be POST-canonicalization parses (the snapshot is saved after
  * the same transforms). Pure; never mutates its inputs.
+ *
+ * When the previous import(s) of this file were part of multi-file batches,
+ * combine the relevant snapshots with mergePruneSnapshots first.
  */
 export function pruneSpecImportAgainstSnapshot(
   parsed: ParsedSpecImport,

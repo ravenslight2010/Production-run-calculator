@@ -115,7 +115,6 @@
 - [Spec-import scale harness](spec-import-scale-harness.md) — run BOTH committed real-AI harnesses after any model change; exporter cells bound for the AI prompt must wrap under PROMPT_MAX_CELL_CHARS or targets silently truncate.
 - [Sandbox scope isolation](sandbox-scope-isolation.md) — sandboxAllowed() prod gate; requireLiveScope for global no-scope tables (users/roles); everything else uses a real scope column + currentScope().
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
-- [Sync epoch on every client write](sync-reset-boundary-hardening.md) — fail-closed PUT guard means every sync write must send epoch= and parse {stale:true} (200 ≠ persisted); verify against the daily_sync row, not same-browser reload.
 - [xlsx audit false positive](xlsx-audit-false-positive.md) — CDN-sourced xlsx is patched but still flagged since SheetJS abandoned the npm name; alias to npm:@e965/xlsx to clear scanners.
 - [Password-change session invalidation](password-change-session-invalidation.md) — invalidateUserSessions fences tokens by iat vs passwordChangedAt (same-second grace); approver privilege boundary via canManagePasswordResetFor.
 - [Mobile require-cycle init](mobile-require-cycle-init.md) — Metro require cycles silently make module-scope constants undefined at init (blank Expo web app); read shared constants lazily.
@@ -146,7 +145,7 @@
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time spec-sheet profile reconciliation in shared @workspace/profile-cleanup; mobile MUST apply via functional setAppState; any "has real data" gate must exclude dough or dough-only profiles become ghosts.
 - [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
 - [Import gen guards](import-gen-guard.md) — slow import prepares need per-kind generation refs (stale parse clobbers next import); post-import merge scan is background + toast, never force-navigates.
-- [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — epoch guard must fail-closed once a scope was ever reset; resetAt→resetBoundaryAt clamp needs a small future-skew allowance, not exact now, or session-fence tests break.
+- [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — every sync write sends epoch= and parses {stale:true} (200 ≠ persisted); guard fails closed once a scope was reset; clamp needs small future-skew allowance.
 - [Cold-start import hang](cold-start-import-hang.md) — autoscale scale-to-zero can hang fetches at the edge (zero app logs); blocking-dialog fetches need AbortSignal.timeout + visible Cancel.
 - [Freezer WIP completion](freezer-wip-completion.md) — casesInFreezer is additive display-only in planning math; resumeRun shifts startedAt so only an end-while-paused open pause is subtracted in the drain.
 - [Press-done model](press-done-model.md) — web live surfaces count cased+freezer as made: pressCasesLeft drives time-left, 2-stage switchover alerts, dough auto-stop, next-run pre-seed; planning math unchanged; carry-over removed.
@@ -157,3 +156,4 @@
 - [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; anything that rewrites a profile out-of-band (spec import) must reload the open form, and identity-change with no profile must reset to defaults.
 - [Local→server name consolidation](local-to-server-name-consolidation.md) — one-time migration of legacy local name lists into server pools: reconcile leftovers (never drop), tombstone wipes, stamp re-pointed runs.
 - [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere (peps sit between stations 2 and 3); importer honors it via ParsedApplicator.slot + assignApplicatorSlots.
+- [Spec snapshot prune matching](saved-spec-snapshot-prune.md) — batch imports save ONE compound "a|b|c" sourceKey snapshot; prune lookup must intersect per-file, never exact-match, or re-imports clobber edits.
