@@ -674,9 +674,22 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
 }
 
 /**
- * Content fingerprint for an import's uploaded file bytes: the file's SHA-256
- * for a single file; for multi-file imports the per-file hashes are SORTED
- * (order-independent, matching deriveSourceKey's sorted filename join) then
+ * Parse-pipeline version mixed into the source fingerprint. Bump this whenever
+ * the AI parse prompt or the parse/merge pipeline changes in a way that should
+ * produce a BETTER read of the same bytes: old snapshots' hashes stop matching,
+ * so a re-import of an unchanged file re-runs the (improved) AI parse instead
+ * of resurrecting a stale parse made by the old pipeline. Without this, hash
+ * reuse pins users to whatever the parser produced when the file was first
+ * imported — prompt fixes silently never take effect on re-imports.
+ * v2: duplicate-applicator prompt hardening (per-station entries, tolerance
+ * values never emitted as a second applicator).
+ */
+export const SPEC_PARSE_VERSION = "2";
+
+/**
+ * Content fingerprint for an import's uploaded file bytes: the per-file
+ * SHA-256 hashes are SORTED (order-independent, matching deriveSourceKey's
+ * sorted filename join), joined with the parse-pipeline version salt, then
  * re-hashed into one digest. Returns undefined when hashing isn't possible —
  * callers then simply skip parse reuse (fail-safe, never block an import).
  */
@@ -687,9 +700,10 @@ export async function hashSpecImportSource(
     if (!buffers.length) return undefined;
     const hashes: string[] = [];
     for (const b of buffers) hashes.push(await sha256Hex(b));
-    if (hashes.length === 1) return hashes[0];
     hashes.sort();
-    return await sha256Hex(new TextEncoder().encode(hashes.join("|")));
+    return await sha256Hex(
+      new TextEncoder().encode(`v${SPEC_PARSE_VERSION}|${hashes.join("|")}`),
+    );
   } catch {
     return undefined;
   }

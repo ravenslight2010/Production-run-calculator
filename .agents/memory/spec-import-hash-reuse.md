@@ -9,7 +9,8 @@ description: Re-importing a byte-identical spec file must reuse the saved snapsh
 
 **How to apply:**
 - Reuse requires an EXACT `sourceKey` match — a batch snapshot's data is the merged whole-batch parse, so reusing it for a partial/single-file re-import would resurrect the other files' content.
-- Multi-file fingerprint = per-file SHA-256 hex sorted + joined `|` + re-hashed (order-independent, mirrors `deriveSourceKey` sorting). Hash failure ⇒ `undefined` ⇒ skip reuse, never block the import.
+- The fingerprint is SALTED with `SPEC_PARSE_VERSION` (`v<N>|` prefix before re-hashing, single-file included). BUMP the version whenever the parse prompt or parse/merge pipeline improves — otherwise re-imports of unchanged files keep resurrecting the OLD pipeline's stale parse and the fix silently never takes effect (prod evidence: a prompt fix was deployed but a re-import reused a pre-fix snapshot whose every flavor carried a phantom "Cheese Mix 0.2 oz" tolerance entry).
+- Fingerprint = per-file SHA-256 hex sorted + joined `|` with the version salt + re-hashed (order-independent, mirrors `deriveSourceKey` sorting). Hash failure ⇒ `undefined` ⇒ skip reuse, never block the import.
 - The reuse path still re-runs the post-parse hygiene against CURRENT data (tombstone partition, cheese canonicalize/dedupe, summary, discrepancies); only the AI passes are skipped (`newAliases`/`flagged` empty).
 - Multi-file: hash BEFORE the parse loop — it releases buffers as it goes.
 - Server accepts only `^[0-9a-f]{64}$` for `sourceHash`; anything else is stored null (legacy/malformed never qualify for reuse).

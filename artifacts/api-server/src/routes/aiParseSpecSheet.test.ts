@@ -178,6 +178,18 @@ describe("buildParseSpecSheetPrompt duplicate applicators", () => {
     expect(system).toContain("NEVER collapse same-named applicators");
     expect(system).toContain("never copy one station's weight");
   });
+
+  // The flip side: a second same-named entry must come from a genuinely
+  // separate station on the sheet. Tolerance/range figures printed next to a
+  // target weight (±0.2, min/max) must never become a phantom second
+  // applicator — the observed failure was every flavor gaining a bogus
+  // "Cheese Mix 0.2 oz" entry alongside the real target weight.
+  it("forbids emitting tolerance/range values as a second same-named applicator", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("genuinely SEPARATE applicator row/column/station");
+    expect(system).toContain("are NOT another applicator");
+    expect(system).toContain("\u00b10.2 tolerance is ONE");
+  });
 });
 
 // Pepperoni is a pep TYPE (captured on a profile's `pepperonis`), never a

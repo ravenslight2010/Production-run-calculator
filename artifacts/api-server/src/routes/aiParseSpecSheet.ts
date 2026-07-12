@@ -221,7 +221,13 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "separate entries in that profile's `applicators` — one per station, each with " +
     "its OWN `ozPerPizza` exactly as written (and its own `slot` when discernible). " +
     "NEVER collapse same-named applicators into one entry, never add their weights " +
-    "together, and never copy one station's weight onto the other. " +
+    "together, and never copy one station's weight onto the other. A second entry " +
+    "requires a genuinely SEPARATE applicator row/column/station on the sheet: " +
+    "tolerance or range numbers attached to a single station — a \u00b1 value, a " +
+    "min/max pair, an over/under allowance, or any small check-weight figure printed " +
+    "next to the target weight — are NOT another applicator; never emit them as a " +
+    "second same-named entry (a target of 3.65 with a \u00b10.2 tolerance is ONE " +
+    "applicator at 3.65, not two). " +
     "EMBEDDED BLENDS: some spec grids pack a full blend recipe into ONE applicator " +
     "cell — a mix name followed by number+ingredient pairs, e.g. \"Aldo's Cheese " +
     "Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan\" or 'White " +

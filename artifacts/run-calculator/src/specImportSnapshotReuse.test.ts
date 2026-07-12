@@ -120,6 +120,17 @@ describe("hashSpecImportSource", () => {
   it("returns undefined for an empty file list", async () => {
     expect(await hashSpecImportSource([])).toBeUndefined();
   });
+
+  // The fingerprint must be salted with the parse-pipeline version: when the
+  // AI prompt/parse pipeline improves, old snapshots' hashes stop matching so
+  // a re-import of the SAME bytes re-runs the improved parse instead of
+  // resurrecting a stale parse. Without the salt, a single file's fingerprint
+  // would equal its raw SHA-256 and prompt fixes would never reach re-imports.
+  it("salts the fingerprint with the parse version (single-file hash != raw file hash)", async () => {
+    const { createHash } = await import("node:crypto");
+    const raw = createHash("sha256").update(Buffer.from("hello")).digest("hex");
+    expect(await hashSpecImportSource([bufOf("hello")])).not.toBe(raw);
+  });
 });
 
 describe("selectReusableSnapshot", () => {
