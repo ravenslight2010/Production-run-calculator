@@ -69,12 +69,15 @@ describe("buildSpecExportGrids", () => {
     expect(row[0]).toBe("Bobo's Original");
     expect(row[2]).toBe("12 inch");
     expect(row[3]).toBe("4");
-    expect(row[4]).toBe("Mozzarella");
-    expect(row[5]).toBe("3.5");
+    // dough/sauce recipe name columns (the product's assigned types)
+    expect(row[4]).toBe("Standard Dough");
+    expect(row[5]).toBe("Pizza Sauce");
+    expect(row[6]).toBe("Mozzarella");
+    expect(row[7]).toBe("3.5");
     // pep 1 type/sticks/oz
-    expect(row[12]).toBe("Sliced Pepperoni");
-    expect(row[13]).toBe("2");
-    expect(row[14]).toBe("1.5");
+    expect(row[14]).toBe("Sliced Pepperoni");
+    expect(row[15]).toBe("2");
+    expect(row[16]).toBe("1.5");
   });
 
   it("emits recipe blocks with Brand: flavor targets and ingredient tables", () => {

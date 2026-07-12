@@ -56,6 +56,15 @@ export type ParsedProfile = {
    */
   sauceName?: string;
   /**
+   * Name of the dough/crust the spec sheet states for this product (e.g.
+   * "Ultra Thin Dough"). Recorded even when the workbook carries no dough
+   * mixing recipe — the apply step assigns it as the profile's dough recipe
+   * NAME so a later dough-recipe import can attach the rows/weights to every
+   * product already pointing at that name. Omitted when the sheet just says a
+   * generic "dough"/"crust" without naming one.
+   */
+  doughName?: string;
+  /**
    * Food allergen the sheet designates for this product (e.g. "egg", "soy", or
    * another named allergen). Lower-cased free-form token; omitted when the sheet
    * lists no allergen. The apply step writes it onto the profile so the run
@@ -690,10 +699,11 @@ export function linkSpecImportCheeseToExisting(
  * (addNamedRecipesIfAbsentByName) dedupe to the existing recipe and keeps every
  * reference pointing at it.
  *
- * For sauce, a profile also references its sauce recipe by `sauceName`, so any
- * profile whose sauceName loose-matches a renamed recipe is snapped to the same
- * existing name (kept in lockstep with the recipe). Pure and non-mutating —
- * returns the SAME object when nothing changes.
+ * A profile also references its recipe of this kind by NAME (`sauceName` for
+ * sauce, `doughName` for dough), so any profile whose name loose-matches a
+ * renamed recipe is snapped to the same existing name (kept in lockstep with
+ * the recipe). Pure and non-mutating — returns the SAME object when nothing
+ * changes.
  */
 export function linkSpecImportNamedRecipesToExisting(
   parsed: ParsedSpecImport,
@@ -713,15 +723,16 @@ export function linkSpecImportNamedRecipesToExisting(
     return { ...r, name: existing };
   });
   let profiles = parsed.profiles;
-  if (kind === "sauce") {
+  {
+    const field = kind === "sauce" ? ("sauceName" as const) : ("doughName" as const);
     let profilesChanged = false;
     const next = (parsed.profiles ?? []).map((p) => {
-      const sn = (p.sauceName ?? "").trim();
-      if (!sn) return p;
-      const existing = match(sn);
-      if (!existing || existing === sn) return p;
+      const nm = (p[field] ?? "").trim();
+      if (!nm) return p;
+      const existing = match(nm);
+      if (!existing || existing === nm) return p;
       profilesChanged = true;
-      return { ...p, sauceName: existing };
+      return { ...p, [field]: existing };
     });
     if (profilesChanged) {
       profiles = next;
@@ -2155,6 +2166,15 @@ function isGenericSauceName(name: string): boolean {
   return /^(pizza\s+)?sauce$/i.test(name.trim());
 }
 
+/**
+ * A generic placeholder like "Dough", "Pizza Dough", or "Crust" is not a real
+ * dough name — the parse prompt says to omit these, but this is a
+ * deterministic backstop in case the model returns one anyway.
+ */
+function isGenericDoughName(name: string): boolean {
+  return /^(pizza\s+)?(dough|crust)$/i.test(name.trim());
+}
+
 function num(v: unknown): number | undefined {
   if (v === "" || v == null) return undefined;
   const n = Number(v);
@@ -2347,6 +2367,15 @@ export function buildProfileSauceGrounding(
   return buildNameGroundingCtx(grounding.sourceText, grounding.knownSauceNames);
 }
 
+/** Grounding context for a profile's DOUGH NAME: known names are the factory's
+ * existing dough recipe names. Returns undefined without source text — no
+ * grounding source means dough names are kept as-is (never false-flagged). Pure. */
+export function buildProfileDoughGrounding(
+  grounding: SpecImportGrounding,
+): ProfileFlavorGroundingCtx | undefined {
+  return buildNameGroundingCtx(grounding.sourceText, grounding.knownRecipeNames?.dough);
+}
+
 export type ProfileFlavorGroundResult =
   | { kind: "grounded" }
   | { kind: "snapped"; flavor: string }
@@ -2511,21 +2540,51 @@ function sauceCheckTokens(name: string): string[] {
   return flavorTokens(name).filter((t) => t !== "sauce");
 }
 
+/** Per-kind knobs for the named-recipe grounding backstop below: which words
+ * are generic filler for the kind (never count as evidence), which cells look
+ * like the kind's own row (scoring preference), and what counts as a generic
+ * placeholder name (never a snap target). */
+type ProfileKindNameGroundingOpts = {
+  checkTokens: (name: string) => string[];
+  kindCellRe: RegExp;
+  isGenericName: (name: string) => boolean;
+};
+
+const SAUCE_NAME_GROUNDING_OPTS: ProfileKindNameGroundingOpts = {
+  checkTokens: sauceCheckTokens,
+  kindCellRe: /sauce/i,
+  isGenericName: isGenericSauceName,
+};
+
+/** Dough-name word tokens: "dough" and "crust" are generic in this context
+ * (the sheet's dough/crust rows and unrelated notes all carry them). Pure. */
+function doughCheckTokens(name: string): string[] {
+  return flavorTokens(name).filter((t) => t !== "dough" && t !== "crust");
+}
+
+const DOUGH_NAME_GROUNDING_OPTS: ProfileKindNameGroundingOpts = {
+  checkTokens: doughCheckTokens,
+  kindCellRe: /dough|crust/i,
+  isGenericName: isGenericDoughName,
+};
+
 /**
- * Grounding backstop for a profile's SAUCE NAME, mirroring `groundProfileBrand`:
- * a paraphrased sauce name (e.g. "Buffalo Wing Sauce" for a sheet that says
- * "Hot Buffalo Sauce") silently points the profile at a sauce recipe that
- * doesn't exist, so sauce consumption/batching never matches up. A sauce name
- * is grounded when it is a known sauce name, its full phrase appears in a
- * source cell, or its word tokens (ignoring the generic word "sauce") all sit
- * inside a SINGLE cell — the prompt legitimately captures "Hot Buffalo" from
- * the sheet as "Hot Buffalo Sauce". Otherwise snap to the nearest known sauce
- * name or source cell by shared tokens (cells that mention "sauce" are
- * preferred — they're likelier the actual sauce row); with no confident match
- * it is flagged ungrounded (kept + warned) — never silently invented. Pure. */
-export function groundProfileSauceName(
+ * Grounding backstop for a profile's named recipe reference (sauce or dough
+ * name), mirroring `groundProfileBrand`: a paraphrased name (e.g. "Buffalo
+ * Wing Sauce" for a sheet that says "Hot Buffalo Sauce") silently points the
+ * profile at a recipe that doesn't exist, so consumption/batching never
+ * matches up. A name is grounded when it is a known name, its full phrase
+ * appears in a source cell, or its word tokens (ignoring the kind's generic
+ * words) all sit inside a SINGLE cell — the prompt legitimately captures
+ * "Hot Buffalo" from the sheet as "Hot Buffalo Sauce". Otherwise snap to the
+ * nearest known name or source cell by shared tokens (cells that mention the
+ * kind's own word are preferred — they're likelier the actual row); with no
+ * confident match it is flagged ungrounded (kept + warned) — never silently
+ * invented. Pure. */
+function groundProfileKindName(
   name: string,
   ctx: ProfileFlavorGroundingCtx,
+  opts: ProfileKindNameGroundingOpts,
 ): ProfileFlavorGroundResult {
   const n = name.trim();
   if (!n) return { kind: "grounded" };
@@ -2534,11 +2593,11 @@ export function groundProfileSauceName(
   if (ctx.knownFlavorSet && ctx.knownFlavorSet.has(phrase)) return { kind: "grounded" };
   if (ctx.cells.some((c) => c.normalized.includes(phrase))) return { kind: "grounded" };
 
-  const toks = sauceCheckTokens(n);
+  const toks = opts.checkTokens(n);
   // Nothing checkable beyond the generic word ("Q Sauce" and other very short
   // names tokenize to nothing) — keep, never false-flag a short legit name.
   if (toks.length === 0) return { kind: "grounded" };
-  // The sheet may name the sauce without the literal word "Sauce" ("BBQ" on
+  // The sheet may name the item without the kind's literal word ("BBQ" on
   // the sauce row -> sauceName "BBQ Sauce" is a legitimate transform, not an
   // invention): all remaining tokens inside ONE cell count as grounded.
   for (const c of ctx.cells) {
@@ -2547,10 +2606,10 @@ export function groundProfileSauceName(
   }
 
   // Not in the source and not known -> paraphrased/invented. Try to snap to
-  // the nearest sauce name that IS real, scored by shared word tokens.
+  // the nearest name that IS real, scored by shared word tokens.
   const tokSet = new Set(toks);
   const score = (candidate: string): number => {
-    const cToks = sauceCheckTokens(candidate);
+    const cToks = opts.checkTokens(candidate);
     if (cToks.length === 0 || cToks.length > MAX_SNAP_CANDIDATE_TOKENS) return 0;
     let shared = 0;
     const seen = new Set<string>();
@@ -2565,25 +2624,41 @@ export function groundProfileSauceName(
   };
 
   let best: { flavor: string; score: number } | undefined;
-  // Known sauce names present in the source are the safest candidates —
+  // Known names present in the source are the safest candidates —
   // scoring bonus so they win ties against raw cells.
   for (const ks of ctx.knownInSource) {
     const s = score(ks);
     if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: ks, score: s + 0.25 };
   }
   for (const c of ctx.cells) {
-    // Never snap TO a generic placeholder ("Sauce"/"Pizza Sauce") — the
+    // Never snap TO a generic placeholder ("Sauce"/"Pizza Dough") — the
     // sanitizer drops those names outright, so they're not real candidates.
-    if (isGenericSauceName(c.original)) continue;
+    if (opts.isGenericName(c.original)) continue;
     const base = score(c.original);
     if (base < 0.5) continue;
-    // Cells that mention "sauce" are likelier the sheet's actual sauce row
-    // than a same-token flavor cell (e.g. "Buffalo Chicken") — prefer them.
-    const s = /sauce/i.test(c.original) ? base + 0.2 : base;
+    // Cells that mention the kind's own word are likelier the sheet's actual
+    // row than a same-token flavor cell (e.g. "Buffalo Chicken") — prefer them.
+    const s = opts.kindCellRe.test(c.original) ? base + 0.2 : base;
     if (!best || s > best.score) best = { flavor: c.original, score: s };
   }
   if (best) return { kind: "snapped", flavor: best.flavor };
   return { kind: "ungrounded" };
+}
+
+/** Sauce-name grounding backstop (see groundProfileKindName). Pure. */
+export function groundProfileSauceName(
+  name: string,
+  ctx: ProfileFlavorGroundingCtx,
+): ProfileFlavorGroundResult {
+  return groundProfileKindName(name, ctx, SAUCE_NAME_GROUNDING_OPTS);
+}
+
+/** Dough-name grounding backstop (see groundProfileKindName). Pure. */
+export function groundProfileDoughName(
+  name: string,
+  ctx: ProfileFlavorGroundingCtx,
+): ProfileFlavorGroundResult {
+  return groundProfileKindName(name, ctx, DOUGH_NAME_GROUNDING_OPTS);
 }
 
 // ── Recipe-name grounding (stop paraphrased names minting duplicate recipes) ──
@@ -2716,6 +2791,7 @@ export function sanitizeParsedSpecImport(
   const profileCtx = buildProfileFlavorGrounding(grounding);
   const brandCtx = buildProfileBrandGrounding(grounding);
   const sauceCtx = buildProfileSauceGrounding(grounding);
+  const doughCtx = buildProfileDoughGrounding(grounding);
   const groundingWarnings: SpecImportWarning[] = [];
 
   // Shared brand grounding backstop, used for PROFILE brands and RECIPE brand
@@ -2880,6 +2956,35 @@ export function sanitizeParsedSpecImport(
         }
       }
       profile.sauceName = grounded;
+    }
+    const doughName = clampName(o.doughName, lim.maxNameChars);
+    if (doughName && !isGenericDoughName(doughName)) {
+      // Grounding backstop for the profile's DOUGH NAME, same snap-or-flag
+      // semantics as the sauce name above: a paraphrased dough name silently
+      // points the profile at a dough recipe that doesn't exist, so a later
+      // dough-recipe import never lines up with it.
+      let grounded = doughName;
+      if (doughCtx) {
+        const g = groundProfileDoughName(doughName, doughCtx);
+        if (g.kind === "snapped") {
+          const corrected = clampName(g.flavor, lim.maxNameChars);
+          if (corrected && !isGenericDoughName(corrected)) {
+            groundingWarnings.push({
+              brand,
+              flavor,
+              message: `Corrected dough "${doughName}" to "${g.flavor}" (brand ${brand}, flavor ${flavor}).`,
+            });
+            grounded = corrected;
+          }
+        } else if (g.kind === "ungrounded") {
+          groundingWarnings.push({
+            brand,
+            flavor,
+            message: `Dough "${doughName}" (brand ${brand}, flavor ${flavor}) was not found on the sheet — please verify.`,
+          });
+        }
+      }
+      profile.doughName = grounded;
     }
     // Allergen the sheet names for this product. Free-form so a NEW allergen
     // beyond egg/soy survives; "none"-style spellings and blanks are dropped
@@ -3816,6 +3921,7 @@ export function pruneSpecImportAgainstSnapshot(
     if (out.dieType !== undefined && ciTrim(out.dieType) === ciTrim(prev.dieType)) delete out.dieType;
     if (out.allergen !== undefined && ciTrim(out.allergen) === ciTrim(prev.allergen)) delete out.allergen;
     if (out.sauceName !== undefined && ciTrim(out.sauceName) === ciTrim(prev.sauceName)) delete out.sauceName;
+    if (out.doughName !== undefined && ciTrim(out.doughName) === ciTrim(prev.doughName)) delete out.doughName;
     if (out.sauceOzPerPizza !== undefined && out.sauceOzPerPizza === prev.sauceOzPerPizza) delete out.sauceOzPerPizza;
     if (out.pizzasPerCase !== undefined && out.pizzasPerCase === prev.pizzasPerCase) delete out.pizzasPerCase;
     if (out.sauceBarrelLbs !== undefined && out.sauceBarrelLbs === prev.sauceBarrelLbs) delete out.sauceBarrelLbs;
@@ -3825,6 +3931,7 @@ export function pruneSpecImportAgainstSnapshot(
       out.dieType === undefined &&
       out.allergen === undefined &&
       out.sauceName === undefined &&
+      out.doughName === undefined &&
       out.sauceOzPerPizza === undefined &&
       out.pizzasPerCase === undefined &&
       out.sauceBarrelLbs === undefined &&

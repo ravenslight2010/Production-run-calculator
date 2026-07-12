@@ -254,6 +254,11 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "sauces come as-is and have no mixing recipe in the workbook, so the name is the " +
     "only way the app can identify what to pull. Omit `sauceName` when the sheet just " +
     "says a generic 'sauce' without naming one. " +
+    "Likewise, when a spec sheet NAMES a specific dough or crust for a product (e.g. " +
+    "'Ultra Thin Dough', a 'Dough'/'Crust' row or column naming one), capture that name " +
+    "as the profile's `doughName` — even when this workbook carries no dough mixing " +
+    "recipe, the name lets the app link the product to its dough recipe imported later. " +
+    "Omit `doughName` when the sheet just says a generic 'dough'/'crust' without naming one. " +
     "This is read-only; the user reviews and can edit a summary before anything is saved.";
 
   const known = input.known ?? {};
@@ -307,7 +312,7 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
   lines.push(
     "Return ONLY JSON of the exact shape: " +
       '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
-      '"sauceOzPerPizza":number,"sauceName":string,"allergen":string,' +
+      '"sauceOzPerPizza":number,"sauceName":string,"doughName":string,"allergen":string,' +
       '"pizzasPerCase":number,"sauceBarrelLbs":number,' +
       '"applicators":[{"type":string,"ozPerPizza":number,"batchLbs":number,"slot":number}],' +
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number,"batchLbs":number}]}],' +

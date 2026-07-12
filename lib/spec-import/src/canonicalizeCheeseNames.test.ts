@@ -402,6 +402,18 @@ describe("linkSpecImportNamedRecipesToExisting", () => {
     expect(linked.recipes.map((r) => r.name)).toEqual(["Aldos  THIN crust"]);
   });
 
+  it("snaps a dough recipe AND any profile.doughName that references it, in lockstep", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Aldo's", flavor: "Cheese", applicators: [], pepperonis: [], doughName: "Thin Crust" },
+      ],
+      recipes: [{ kind: "dough", name: "Thin Crust", rows: [{ ingredient: "Flour", lbs: 50 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["thin-crust"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["thin-crust"]);
+    expect(linked.profiles.map((p) => p.doughName)).toEqual(["thin-crust"]);
+  });
+
   it("snaps a sauce recipe AND any profile.sauceName that references it, in lockstep", () => {
     const parsed: ParsedSpecImport = {
       profiles: [

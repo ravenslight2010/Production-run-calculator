@@ -2405,6 +2405,7 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
   const newAppTypes: string[] = [];
   const newPepTypes: string[] = [];
   const profileSauceNames: string[] = [];
+  const profileDoughNames: string[] = [];
   // Every profile this import writes to (applicator types and/or recipe ties) —
   // the post-loop cheese-mirror pass revisits each to fill any cheese applicator
   // left blank by a single-blend spec.
@@ -2476,6 +2477,25 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     if (specSauceName && !hasMixedSauce && !(values.frontlineRecipeName ?? "").trim()) {
       values.frontlineRecipeName = specSauceName;
     }
+    // Named dough/crust from the spec sheet (e.g. "Ultra Thin Dough"): the
+    // sheet names the dough but this workbook carries no dough mixing recipe —
+    // record the TYPE now so the product is assigned its dough from day one,
+    // and a later dough-recipe import re-links rows/weights onto every profile
+    // pointing at this name (see the name-match pass in the tie loop below).
+    // Never clobber an existing dough recipe or a name the user already set.
+    const specDoughName = (p.doughName ?? "").trim();
+    if (specDoughName) {
+      // Register the name as a selectable Dough Recipe option regardless of
+      // whether this profile keeps it, and clear any delete/merge tombstone so
+      // the sync receive-side filters don't strip it right back out.
+      profileDoughNames.push(specDoughName);
+      clearDeleted("doughRecipeNames", specDoughName);
+      clearMergedAway(specDoughName);
+    }
+    const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+    if (specDoughName && !hasMixedDough && !(values.doughRecipeName ?? "").trim()) {
+      values.doughRecipeName = specDoughName;
+    }
     // Detect cheese applicator slots and re-type them to the literal "cheese"
     // (the run form's pick-only Cheese card gates on that exactly); the blend
     // name is recorded as the slot's cheese recipe name so it hydrates from the
@@ -2539,6 +2559,9 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
   if (profileSauceNames.length) {
     saveList(FRONTLINE_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES), profileSauceNames).sort((a, b) => a.localeCompare(b)));
   }
+  if (profileDoughNames.length) {
+    saveList(DOUGH_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES), profileDoughNames).sort((a, b) => a.localeCompare(b)));
+  }
 
   // ── Tie recipes onto their profiles ──
   // One recipe can serve many brand/flavor profiles (recipeApplyTargets unions
@@ -2571,7 +2594,34 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
       : r.rows;
     if (r.referenceOnly && sourceRows.length === 0) continue;
     const rows = sourceRows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
-    for (const { brand, flavor } of recipeApplyTargets(r, applyProfilePool)) {
+    // ── Re-link by NAME ──
+    // A dough/sauce recipe also ties onto every ALREADY-SAVED profile whose
+    // dough/sauce recipe NAME matches this recipe by the loose key — the
+    // earlier spec import may have assigned only the name (no recipe existed
+    // yet); when the actual recipe arrives later, every product pointing at
+    // that name gets its rows/weights (and the canonical spelling) attached
+    // without the sheet having to restate the brand/flavor targets.
+    const targets = [...recipeApplyTargets(r, applyProfilePool)];
+    if (r.kind === "dough" || r.kind === "sauce") {
+      const nameField = r.kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
+      const rNameKey = specImportNameMatchKey(r.name);
+      if (rNameKey) {
+        const seen = new Set(targets.map(t => `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`));
+        for (const [brand, flavors] of Object.entries(loadBrandFlavors())) {
+          for (const flavor of flavors ?? []) {
+            const key = `${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`;
+            if (seen.has(key)) continue;
+            const saved = loadProfile(brand, flavor);
+            if (!saved) continue;
+            const nm = String((saved as Record<string, unknown>)[nameField] ?? "").trim();
+            if (!nm || specImportNameMatchKey(nm) !== rNameKey) continue;
+            seen.add(key);
+            targets.push({ brand, flavor });
+          }
+        }
+      }
+    }
+    for (const { brand, flavor } of targets) {
       if (isMixRecipe) {
         // Fill the profile's "Mix" applicator slot(s) that reference this mix
         // (matched by loose name key, or still blank). No legacy slot fallback:

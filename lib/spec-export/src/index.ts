@@ -203,6 +203,8 @@ const PROFILE_HEADER = [
   "Flavor",
   "Die Type",
   "Sauce oz per pizza",
+  "Dough Recipe",
+  "Sauce Recipe",
   "App 1 Type",
   "App 1 oz per pizza",
   "App 2 Type",
@@ -236,6 +238,12 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
       flavor,
       text(p.dieType),
       num(p.sauceOzPerPizza),
+      // Dough/Sauce recipe NAMES: the product's assigned dough and sauce types.
+      // On re-import the AI reads these as the profile's doughName/sauceName, so
+      // a factory export round-trips each product's dough/sauce assignment even
+      // when the recipe itself lives on another tab (or doesn't exist yet).
+      text(p.doughRecipeName),
+      text(p.sauceRecipeName),
     ];
     for (let i = 0; i < 4; i++) {
       const a = apps[i];

@@ -153,4 +153,5 @@
 - [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; anything that rewrites a profile out-of-band (spec import) must reload the open form, and identity-change with no profile must reset to defaults.
 - [Local→server name consolidation](local-to-server-name-consolidation.md) — one-time migration of legacy local name lists into server pools: reconcile leftovers (never drop), tombstone wipes, stamp re-pointed runs.
 - [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere (peps sit between stations 2 and 3); importer honors it via ParsedApplicator.slot + assignApplicatorSlots.
+- [Name-first dough/sauce relink](spec-import-name-first-relink.md) — spec import assigns the dough/sauce NAME pre-recipe; later recipe import relinks by loose name; ghost guard + registry gotchas for tests.
 - [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.

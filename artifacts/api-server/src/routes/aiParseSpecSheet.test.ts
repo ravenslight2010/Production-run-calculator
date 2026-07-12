@@ -403,7 +403,78 @@ describe("known sauceNames ground profile sauceName", () => {
     );
     expect(user).toContain("Sauce names (existing mixed or ready-made sauces): Marinara, BBQ Sauce");
   });
+});
 
+// A profile's doughName (the dough/crust the sheet names for the product) gets
+// the same grounding treatment as sauceName: known dough recipe names are
+// legitimate even off-sheet, unknown paraphrases snap to the nearest real name,
+// and generic placeholders ("Dough"/"Pizza Dough"/"Crust") are dropped.
+describe("profile doughName capture + grounding", () => {
+  const workbookText =
+    "Brand\tFlavor\tDough\nLowes\tPepperoni\tUltra Thin Dough\n";
+  const rawWithDough = (doughName: string) => ({
+    profiles: [
+      {
+        brand: "Lowes",
+        flavor: "Pepperoni",
+        doughName,
+        applicators: [],
+        pepperonis: [],
+      },
+    ],
+    recipes: [],
+  });
+
+  it("keeps a dough name written on the sheet, without warning", () => {
+    const out = sanitizeParseSpecSheet(
+      rawWithDough("Ultra Thin Dough"),
+      input({ known: {}, workbookText }),
+    );
+    expect(out.profiles[0]?.doughName).toBe("Ultra Thin Dough");
+    expect(out.warnings ?? []).toHaveLength(0);
+  });
+
+  it("does not warn for a known dough recipe name absent from the sheet", () => {
+    const out = sanitizeParseSpecSheet(
+      rawWithDough("Sourdough Base"),
+      input({
+        known: { doughRecipes: ["Sourdough Base"] },
+        workbookText: "Brand\tFlavor\tDough\nLowes\tPepperoni\tsee dough spec\n",
+      }),
+    );
+    expect(out.profiles[0]?.doughName).toBe("Sourdough Base");
+    expect(out.warnings ?? []).toHaveLength(0);
+  });
+
+  it("snaps an unknown paraphrase to the nearest known dough recipe name", () => {
+    const out = sanitizeParseSpecSheet(
+      rawWithDough("Skinny Thin Dough"),
+      input({
+        known: { doughRecipes: ["Ultra Thin Dough"] },
+        workbookText,
+      }),
+    );
+    expect(out.profiles[0]?.doughName).toBe("Ultra Thin Dough");
+  });
+
+  it("drops a generic placeholder dough name", () => {
+    for (const generic of ["Dough", "Pizza Dough", "Crust"]) {
+      const out = sanitizeParseSpecSheet(
+        rawWithDough(generic),
+        input({ known: {}, workbookText }),
+      );
+      expect(out.profiles[0]?.doughName).toBeUndefined();
+    }
+  });
+
+  it("asks the model for doughName in the prompt + JSON shape", () => {
+    const { system, user } = buildParseSpecSheetPrompt(input({}));
+    expect(system).toContain("doughName");
+    expect(user).toContain('"doughName":string');
+  });
+});
+
+describe("known list bounds", () => {
   it("counts sauceNames toward the MAX_KNOWN_LIST bound", () => {
     const res = validateParseSpecSheetBody({
       workbookText: "x",
