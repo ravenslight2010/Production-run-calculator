@@ -1262,9 +1262,17 @@ describe("per-user notification preferences", () => {
     // server. The web module is pure TS with no app deps, so import it
     // directly for a cross-layer parity guard.
     const { NOTIFICATION_PREF_KEYS } = await import("../lib/roles");
-    const webMod = await import(
-      "../../../run-calculator/src/notificationPrefs"
+    // The specifier is computed at runtime ON PURPOSE: a literal path here
+    // makes tsc pull the web file into the api-server program and fail the
+    // typecheck with TS6059 (file not under rootDir). Vitest still transforms
+    // and resolves the absolute-path dynamic import, so the parity guard
+    // keeps working.
+    const nodePath = await import("node:path");
+    const webModPath: string = nodePath.resolve(
+      __dirname,
+      "../../../run-calculator/src/notificationPrefs.ts",
     );
+    const webMod = await import(webModPath);
     const webKinds = webMod.NOTIFICATION_KINDS.map((k: { kind: string }) => k.kind);
     expect([...NOTIFICATION_PREF_KEYS].sort()).toEqual([...webKinds].sort());
   });
