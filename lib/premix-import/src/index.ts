@@ -694,6 +694,9 @@ export function premixToMix(
   const components: MixComponent[] = source.map((c) => ({
     ingredient: c.ingredient,
     perPizza: c.perPizza,
+    // The premix sheet is the ONLY source for per-batch pounds — carry them
+    // into the reference-only lbs/batch column (normalizeMix drops <= 0).
+    ...(c.perBatch > 0 ? { perBatchLbs: c.perBatch } : {}),
   }));
   return normalizeMix({
     id: premixId(parsed),

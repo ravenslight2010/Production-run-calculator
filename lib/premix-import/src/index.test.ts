@@ -430,6 +430,16 @@ describe("conversion + summary", () => {
     expect(mix.components.some((c) => c.ingredient === "1/8 Green Pepper")).toBe(true);
   });
 
+  it("carries the sheet's per-batch pounds into the reference lbs/batch column", () => {
+    const [parsed] = parsePremixWorkbook([BOBOS]);
+    const mix = premixToMix(groundPremix(parsed, KNOWN, []).mix, { perPizzaOnly: true })!;
+    // The premix workbook is the only source for these pounds.
+    const onion = mix.components.find((c) => c.ingredient === "Red Onion, FR Strips");
+    expect(onion?.perBatchLbs).toBe(20.7);
+    // Every included component with a positive Per Batch cell keeps it.
+    expect(mix.components.every((c) => (c.perBatchLbs ?? 0) > 0)).toBe(true);
+  });
+
   it("perPizzaOnly drops the per-batch-only prep rows from the mix", () => {
     const [parsed] = parsePremixWorkbook([BOBOS]);
     const mix = premixToMix(groundPremix(parsed, KNOWN, []).mix, { perPizzaOnly: true })!;
