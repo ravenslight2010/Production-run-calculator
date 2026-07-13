@@ -56,6 +56,11 @@ import {
 } from "./types";
 import { MIX_SEED } from "./mixSeed";
 import {
+  canonicalProfileKey,
+  markProfileEdited,
+  markProfileDeleted,
+} from "./profileServerSync";
+import {
   type MergeMap,
   mergeList as mergeListNames,
   mergeSettingsObject,
@@ -319,7 +324,20 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
     const rawHadCombined = typeof (doughVals as Record<string, unknown>).pep1Combined === "boolean"
       || typeof (crustVals as Record<string, unknown>).pep1Combined === "boolean";
     resolvePep1Combined(result as unknown as Record<string, unknown>, rawHadCombined);
-    return normalizePepFields(result as unknown as Record<string, unknown>) as unknown as FormValues;
+    const loaded = normalizePepFields(result as unknown as Record<string, unknown>) as unknown as FormValues;
+    // Remember what this profile looked like when it was handed to the caller
+    // (form load, editor open, …). saveProfile compares against this snapshot:
+    // a form that comes back UNCHANGED while the cached profile has since moved
+    // on (a newer copy adopted from the server pool) must NOT republish its
+    // stale values — that was the recurring loss mode of the old sync-map
+    // transport.
+    try {
+      rememberProfileSnapshot(
+        canonicalProfileKey(brand, flavor),
+        extractProfileBlobs(loaded),
+      );
+    } catch {}
+    return loaded;
   } catch {}
   return null;
 }
@@ -407,6 +425,62 @@ export function backfillSauceFromProfile(
   return out;
 }
 
+/**
+ * Generalized profile backfill for scheduled/imported runs. Scheduled runs
+ * snapshot the profile at scheduling time, so anything added to the profile
+ * afterwards (a cheese recipe, packaging settings, a die size, …) never
+ * reached them — the sauce-only backfill above fixed one instance of a
+ * general problem. Now that profiles live in a factory-wide server pool and
+ * can change under a schedule at any time, blank-fill EVERY profile-carried
+ * field: a field is taken from the profile only when the run still holds the
+ * untouched DEFAULT for it (never overwrites data the run already has).
+ *
+ * Skipped on purpose:
+ *   • PER_RUN_FIELDS / PROGRESS_FIELDS — never part of a profile;
+ *   • booleans — their default is a meaningful choice, "still default" is
+ *     indistinguishable from "deliberately set to the default";
+ *   • brand/flavor identity fields (not FormValues fields, but guarded anyway).
+ *
+ * Runs the sauce backfill first (its blank test is smarter than raw
+ * default-equality: an empty-rows sauce array still counts as blank).
+ */
+export function backfillFromProfile(
+  values: FormValues,
+  brand: string | undefined,
+  flavor: string | undefined,
+): FormValues {
+  let out = backfillSauceFromProfile(values, brand, flavor);
+  if (!brand) return out;
+  const profile = loadProfile(brand, flavor ?? "");
+  if (!profile) return out;
+  const skip = new Set<string>([
+    ...PER_RUN_FIELDS,
+    ...PROGRESS_FIELDS,
+    "brand",
+    "flavor",
+  ]);
+  for (const field of Object.keys(DEFAULT_VALUES) as (keyof FormValues)[]) {
+    if (skip.has(field)) continue;
+    const def = DEFAULT_VALUES[field];
+    if (typeof def === "boolean") continue;
+    const prof = profile[field];
+    if (prof === undefined) continue;
+    let curBlank = false;
+    let profBlank = false;
+    try {
+      const defJson = JSON.stringify(def);
+      curBlank = JSON.stringify(out[field]) === defJson;
+      profBlank = JSON.stringify(prof) === defJson;
+    } catch {
+      continue;
+    }
+    if (!curBlank || profBlank) continue;
+    if (out === values) out = { ...values };
+    (out as Record<string, unknown>)[field] = prof;
+  }
+  return out;
+}
+
 /** True when the stored profile for brand+flavor has real recipe/applicator data. */
 export function profileHasRealData(brand: string, flavor: string): boolean {
   try {
@@ -418,6 +492,35 @@ export function profileHasRealData(brand: string, flavor: string): boolean {
   }
 }
 
+// The exact dough-blob / crust-blob JSON a profile write would persist for
+// `values` — the single extraction shared by saveProfile (what it writes) and
+// loadProfile (the "as loaded" snapshot), so the two are byte-comparable.
+function extractProfileBlobs(values: FormValues): { dough: string; crust: string } {
+  const doughVals = { ...values } as Record<string, unknown>;
+  CRUST_FIELDS.forEach((f) => delete doughVals[f]);
+  PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
+  PER_RUN_FIELDS.forEach((f) => delete doughVals[f]);
+  const crustVals: Partial<Record<CrustField, unknown>> = {};
+  CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
+  return { dough: JSON.stringify(doughVals), crust: JSON.stringify(crustVals) };
+}
+
+// Every distinct blob pair loadProfile has handed out for a key this page load
+// (bounded). saveProfile treats a form matching ANY of them as "unchanged since
+// some load" — a single latest-only snapshot is not enough, because another
+// reader calling loadProfile AFTER a newer server copy was adopted would
+// overwrite the snapshot and let the stale open form republish old values.
+const SNAPSHOT_HISTORY_CAP = 12;
+const loadedProfileSnapshots = new Map<string, { dough: string; crust: string }[]>();
+
+function rememberProfileSnapshot(key: string, snap: { dough: string; crust: string }): void {
+  const list = loadedProfileSnapshots.get(key) ?? [];
+  if (list.some((s) => s.dough === snap.dough && s.crust === snap.crust)) return;
+  list.push(snap);
+  if (list.length > SNAPSHOT_HISTORY_CAP) list.shift();
+  loadedProfileSnapshots.set(key, list);
+}
+
 export function saveProfile(brand: string, flavor: string, values: FormValues): void {
   if (!brand && !flavor) return;
   // Never persist a blank/default form as a brand+flavor profile. A profile only
@@ -427,14 +530,38 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   // for the selected brand+flavor — and unlike the previous guard, this refuses the
   // write even when the existing profile briefly looks empty (race during heal).
   if (!profileObjHasRealData(values as unknown as Record<string, unknown>)) return;
-  const doughVals = { ...values } as Record<string, unknown>;
-  CRUST_FIELDS.forEach((f) => delete doughVals[f]);
-  PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
-  PER_RUN_FIELDS.forEach((f) => delete doughVals[f]);
-  try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(doughVals)); } catch {}
-  const crustVals: Partial<Record<CrustField, unknown>> = {};
-  CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
-  try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), JSON.stringify(crustVals)); } catch {}
+  const { dough, crust } = extractProfileBlobs(values);
+  const key = canonicalProfileKey(brand, flavor);
+  // Change detection — profiles are now a factory-wide server pool with
+  // per-profile last-write-wins stamps, so an unchanged nav-save must not mint
+  // a fresh stamp (it would outrank a genuinely newer edit from another device):
+  //   1. identical to the cached blobs → nothing changed, skip entirely;
+  //   2. identical to what loadProfile handed out while the CACHE has since
+  //      moved on (newer server copy adopted) → the open form is stale, don't
+  //      republish it over the fresher data.
+  try {
+    const storedDough = localStorage.getItem(PROFILE_KEY(brand, flavor));
+    const storedCrust = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
+    if (storedDough === dough && storedCrust === crust) return;
+    // The stale-form guard only applies while a stored profile EXISTS to
+    // protect: if the local copy is gone (deleted, factory reset, fresh
+    // device), an incoming save must persist even when it matches an old
+    // in-memory snapshot — otherwise the profile silently never re-saves.
+    // A form matching ANY blob loadProfile handed out this page load is an
+    // unchanged re-save of that load, not a user edit — even when a LATER
+    // loadProfile call has since seen a newer (server-adopted) copy.
+    const snaps = loadedProfileSnapshots.get(key);
+    if (
+      storedDough != null &&
+      snaps?.some((s) => s.dough === dough && s.crust === crust)
+    ) {
+      return;
+    }
+  } catch {}
+  try { localStorage.setItem(PROFILE_KEY(brand, flavor), dough); } catch {}
+  try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), crust); } catch {}
+  loadedProfileSnapshots.set(key, [{ dough, crust }]);
+  markProfileEdited(key);
 }
 
 /**
@@ -461,6 +588,7 @@ export function applyPackagingPatchToProfile(
     } catch {}
     for (const k of keys) existing[k] = patch[k];
     localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(existing));
+    markProfileEdited(canonicalProfileKey(brand, flavor));
   } catch {}
 }
 
@@ -1648,7 +1776,10 @@ export function applyMixSlotRecategorizeIfNeeded(): void {
         // Targeted dough-blob write (NOT saveProfile: the loaded blob has no
         // crust fields, so saveProfile would overwrite the crust profile with
         // an empty extract). Mirrors applyPackagingPatchToProfile.
-        try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(rec)); } catch {}
+        try {
+          localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(rec));
+          markProfileEdited(canonicalProfileKey(brand, flavor));
+        } catch {}
       }
     }
 
@@ -1786,9 +1917,15 @@ export function deleteProfilesForBrand(brand: string): void {
     if (!k) continue;
     if (k.startsWith(doughPrefix) || k.startsWith(crustPrefix)) toRemove.push(k);
   }
+  const deletedKeys = new Set<string>();
   for (const k of toRemove) {
     try { localStorage.removeItem(k); } catch {}
+    if (k.startsWith(doughPrefix)) deletedKeys.add(k.slice("run-calc-profile-".length));
+    else deletedKeys.add(k.slice("run-calc-crust-profile-".length));
   }
+  // Propagate to the factory-wide server pool so the deleted brand's profiles
+  // disappear everywhere (and can't be re-adopted on the next reconcile).
+  for (const key of deletedKeys) markProfileDeleted(key);
 }
 
 /**
@@ -1812,6 +1949,11 @@ export function rewriteDieTypeInProfiles(oldName: string, newName: string): void
       if (obj && typeof obj.dieType === "string" && obj.dieType.trim() === from) {
         obj.dieType = to;
         localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
       }
     } catch {
       // Skip an unreadable profile — never let one bad row block the rewrite.
@@ -1828,6 +1970,7 @@ export function deleteProfileEntry(brand: string, flavor: string): void {
   if (typeof localStorage === "undefined") return;
   try { localStorage.removeItem(PROFILE_KEY(brand, flavor)); } catch {}
   try { localStorage.removeItem(CRUST_PROFILE_KEY(brand, flavor)); } catch {}
+  markProfileDeleted(canonicalProfileKey(brand, flavor));
 }
 
 const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v1";
@@ -1863,9 +2006,13 @@ export function purgeOrphanedProfilesIfNeeded(): void {
       const brandLc = rest.slice(0, sep);
       if (!known.has(brandLc)) orphans.push(k);
     }
+    const deletedKeys = new Set<string>();
     for (const k of orphans) {
       try { localStorage.removeItem(k); } catch {}
+      if (k.startsWith("run-calc-crust-profile-")) deletedKeys.add(k.slice("run-calc-crust-profile-".length));
+      else deletedKeys.add(k.slice("run-calc-profile-".length));
     }
+    for (const key of deletedKeys) markProfileDeleted(key);
     localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
   } catch {}
 }

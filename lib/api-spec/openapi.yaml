@@ -2282,6 +2282,74 @@ paths:
         "403":
           description: Manager role required
 
+  /brand-profiles:
+    get:
+      operationId: listBrandProfiles
+      tags: [brandProfiles]
+      summary: List factory-wide brand+flavor setup profiles
+      description: >-
+        Returns every factory-wide brand+flavor setup profile (the saved run
+        form for a product: applicators, pep types, die type, recipes,
+        packaging, crust settings). These are global master data (not part of
+        the per-day sync payload). Reading is available to any signed-in user
+        so the run form and Setup Profiles editor can hydrate from them.
+      responses:
+        "200":
+          description: All brand+flavor setup profiles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfileList"
+    post:
+      operationId: saveBrandProfiles
+      tags: [brandProfiles]
+      summary: Create or update brand+flavor setup profiles (stamp-guarded)
+      description: >-
+        Upserts a batch of setup profiles by key. Each profile carries a client
+        edit stamp (`updatedAt`, ms epoch); the server keeps the existing row
+        unless the incoming stamp is strictly newer (per-profile last-write
+        wins), so a stale device re-publishing an old form cannot clobber a
+        fresher edit. Available to any signed-in user (floor staff save
+        profiles from the run form, matching the previous sync-map behavior).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveBrandProfilesInput"
+      responses:
+        "200":
+          description: The full updated profile list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfileList"
+        "400":
+          description: Invalid input
+    delete:
+      operationId: deleteBrandProfiles
+      tags: [brandProfiles]
+      summary: Delete brand+flavor setup profiles by key
+      description: >-
+        Removes a batch of setup profiles by key. Available to any signed-in
+        user (profile deletion accompanies brand/flavor deletion, which floor
+        clients already perform through the master-list flows).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteBrandProfilesInput"
+      responses:
+        "200":
+          description: The full updated profile list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandProfileList"
+        "400":
+          description: Invalid input
+
   /cycle-count-schedules:
     get:
       operationId: listCycleCountSchedules
@@ -7401,6 +7469,76 @@ components:
         ids:
           type: array
           description: The ids of the named recipes to delete
+          items:
+            type: string
+
+    BrandProfile:
+      type: object
+      description: >-
+        A factory-wide brand+flavor setup profile: the saved run form for a
+        product. `key` is the canonical lowercase `${brand}__${flavor}` profile
+        key (identical to the clients' local key). `values` is the dough-blob
+        (all non-crust profile fields) and `crustValues` the crust-blob,
+        preserved exactly as the client stores them. `updatedAt` is the client
+        edit stamp (ms epoch) used for per-profile last-write-wins.
+      required:
+        - key
+        - brand
+        - flavor
+        - values
+        - crustValues
+        - updatedAt
+      properties:
+        key:
+          type: string
+          description: Canonical lowercase `${brand}__${flavor}` profile key
+        brand:
+          type: string
+          description: Display-cased brand name
+        flavor:
+          type: string
+          description: Display-cased flavor name
+        values:
+          type: object
+          description: The dough-blob profile fields (non-crust)
+          additionalProperties: true
+        crustValues:
+          type: object
+          description: The crust-blob profile fields
+          additionalProperties: true
+        updatedAt:
+          type: number
+          description: Client edit stamp (ms epoch) for last-write-wins
+
+    BrandProfileList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrandProfile"
+
+    SaveBrandProfilesInput:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: The batch of setup profiles to create or update (by key)
+          items:
+            $ref: "#/components/schemas/BrandProfile"
+
+    DeleteBrandProfilesInput:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          description: The profile keys to delete
           items:
             type: string
 

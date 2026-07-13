@@ -153,3 +153,4 @@
 - [Spec-import chunk union](spec-import-chunk-union.md) — chunk merges union applicator lists (split blocks are complementary); file merges replace; same type at two weights = two stations, never dedupe.
 - [Import redirect aliases](import-redirect-aliases.md) — cheese/premix "use existing" picks share the context-free appType alias namespace; suggestion-only auto-apply, one-to-one claim guards.
 - [Profile autofill](profile-autofill-from-saved-sheets.md) — planner must mirror applySpecImport EXACTLY, incl. the dough/sauce RECIPE tie loop (not just profile names); form-only until Save Setup.
+- [Brand-profile server pool](brand-profile-server-pool.md) — profiles are a server pool w/ per-profile LWW stamps (NOT in sync); marker keys under the blob prefix + snapshot-guard + orphan-purge gotchas.

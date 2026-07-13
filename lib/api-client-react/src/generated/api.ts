@@ -30,6 +30,7 @@ import type {
   AskResult,
   AuthCredentials,
   AuthResponse,
+  BrandProfileList,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
   CheeseRecipeList,
@@ -41,6 +42,7 @@ import type {
   CreateInventoryLocationInput,
   CreateRole,
   CycleCountScheduleList,
+  DeleteBrandProfilesInput,
   DeleteCheeseRecipesInput,
   DeleteCycleCountSchedulesInput,
   DeleteFreezerPullItemsInput,
@@ -124,6 +126,7 @@ import type {
   RoleDefinition,
   RunTemplateList,
   SaveAiCorrectionsInput,
+  SaveBrandProfilesInput,
   SaveCheeseRecipesInput,
   SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
@@ -7016,6 +7019,228 @@ export const useDeleteSauceRecipes = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteSauceRecipesMutationOptions(options));
+    }
+
+export const getListBrandProfilesUrl = () => {
+
+
+
+
+  return `/api/brand-profiles`
+}
+
+/**
+ * Returns every factory-wide brand+flavor setup profile (the saved run form for a product: applicators, pep types, die type, recipes, packaging, crust settings). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form and Setup Profiles editor can hydrate from them.
+ * @summary List factory-wide brand+flavor setup profiles
+ */
+export const listBrandProfiles = async ( options?: RequestInit): Promise<BrandProfileList> => {
+
+  return customFetch<BrandProfileList>(getListBrandProfilesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListBrandProfilesQueryKey = () => {
+    return [
+    `/api/brand-profiles`
+    ] as const;
+    }
+
+
+export const getListBrandProfilesQueryOptions = <TData = Awaited<ReturnType<typeof listBrandProfiles>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListBrandProfilesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listBrandProfiles>>> = ({ signal }) => listBrandProfiles({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListBrandProfilesQueryResult = NonNullable<Awaited<ReturnType<typeof listBrandProfiles>>>
+export type ListBrandProfilesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List factory-wide brand+flavor setup profiles
+ */
+
+export function useListBrandProfiles<TData = Awaited<ReturnType<typeof listBrandProfiles>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBrandProfiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListBrandProfilesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveBrandProfilesUrl = () => {
+
+
+
+
+  return `/api/brand-profiles`
+}
+
+/**
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Available to any signed-in user (floor staff save profiles from the run form, matching the previous sync-map behavior).
+ * @summary Create or update brand+flavor setup profiles (stamp-guarded)
+ */
+export const saveBrandProfiles = async (saveBrandProfilesInput: SaveBrandProfilesInput, options?: RequestInit): Promise<BrandProfileList> => {
+
+  return customFetch<BrandProfileList>(getSaveBrandProfilesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveBrandProfilesInput,)
+  }
+);}
+
+
+
+
+export const getSaveBrandProfilesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveBrandProfiles>>, TError,{data: BodyType<SaveBrandProfilesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveBrandProfiles>>, TError,{data: BodyType<SaveBrandProfilesInput>}, TContext> => {
+
+const mutationKey = ['saveBrandProfiles'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveBrandProfiles>>, {data: BodyType<SaveBrandProfilesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveBrandProfiles(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveBrandProfilesMutationResult = NonNullable<Awaited<ReturnType<typeof saveBrandProfiles>>>
+    export type SaveBrandProfilesMutationBody = BodyType<SaveBrandProfilesInput>
+    export type SaveBrandProfilesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update brand+flavor setup profiles (stamp-guarded)
+ */
+export const useSaveBrandProfiles = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveBrandProfiles>>, TError,{data: BodyType<SaveBrandProfilesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveBrandProfiles>>,
+        TError,
+        {data: BodyType<SaveBrandProfilesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveBrandProfilesMutationOptions(options));
+    }
+
+export const getDeleteBrandProfilesUrl = () => {
+
+
+
+
+  return `/api/brand-profiles`
+}
+
+/**
+ * Removes a batch of setup profiles by key. Available to any signed-in user (profile deletion accompanies brand/flavor deletion, which floor clients already perform through the master-list flows).
+ * @summary Delete brand+flavor setup profiles by key
+ */
+export const deleteBrandProfiles = async (deleteBrandProfilesInput: DeleteBrandProfilesInput, options?: RequestInit): Promise<BrandProfileList> => {
+
+  return customFetch<BrandProfileList>(getDeleteBrandProfilesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteBrandProfilesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteBrandProfilesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteBrandProfiles>>, TError,{data: BodyType<DeleteBrandProfilesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteBrandProfiles>>, TError,{data: BodyType<DeleteBrandProfilesInput>}, TContext> => {
+
+const mutationKey = ['deleteBrandProfiles'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteBrandProfiles>>, {data: BodyType<DeleteBrandProfilesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteBrandProfiles(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteBrandProfilesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteBrandProfiles>>>
+    export type DeleteBrandProfilesMutationBody = BodyType<DeleteBrandProfilesInput>
+    export type DeleteBrandProfilesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete brand+flavor setup profiles by key
+ */
+export const useDeleteBrandProfiles = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteBrandProfiles>>, TError,{data: BodyType<DeleteBrandProfilesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteBrandProfiles>>,
+        TError,
+        {data: BodyType<DeleteBrandProfilesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteBrandProfilesMutationOptions(options));
     }
 
 export const getListCycleCountSchedulesUrl = () => {

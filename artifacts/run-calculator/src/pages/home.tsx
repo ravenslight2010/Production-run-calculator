@@ -105,11 +105,10 @@ import {
   dropTombstonedPresetKeys,
   dropTombstonesForAliveNames,
   clearRecipeNameSelections,
-  profileKeyIsTombstoned,
   loadTemplates,
   saveTemplates,
   loadProfile,
-  backfillSauceFromProfile,
+  backfillFromProfile,
   saveProfile,
   resolvePep1Combined,
   loadBrandFlavors,
@@ -164,6 +163,7 @@ import {
   rewriteDieTypeInProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
+import { reconcileProfilesFromServer } from "../profileServerSync";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
@@ -5112,7 +5112,7 @@ export default function Home() {
           const stored = scheduleEditorRunValues[r.id];
           const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
           const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
-          const v = backfillSauceFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
+          const v = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
           if (!deepEqual(v, loadRunValues(r.id))) {
             saveRunValues(r.id, v);
             markRunValuesUpdated(r.id, now);
@@ -5148,7 +5148,7 @@ export default function Home() {
         const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
         // Stored editor values are a snapshot — if their sauce is blank but the
         // profile has one now, carry the profile's sauce (blank-fill only).
-        runValues[r.id] = backfillSauceFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
+        runValues[r.id] = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
       }
       const payload: SyncPayload = {
         dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) },
@@ -5711,30 +5711,13 @@ export default function Home() {
         saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, mixAwareDeleted, "cheeseRecipeNames"));
       }
 
-      // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
-      // Profiles are keyed `${brandLc}__${flavorLc}`. Like every other synced list
-      // they must honor the deletion/merge tombstones, or a profile for a deleted
-      // brand/flavor lingers in the blob and can resurrect (or seed) ghost data.
-      if (payload.brandProfiles) {
-        for (const [k, v] of Object.entries(payload.brandProfiles)) {
-          if (profileKeyIsTombstoned(k, deletedMap, tombSet)) continue;
-          try {
-            // Strip mix recipe names from the sauce fields before saving
-            const cleaned = { ...v };
-            if (cleaned.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(cleaned.frontlineRecipeName)) {
-              delete cleaned.frontlineRecipeName;
-              delete cleaned.frontlineRecipe;
-            }
-            localStorage.setItem(`run-calc-profile-${k}`, JSON.stringify(cleaned));
-          } catch {}
-        }
-      }
-      if (payload.crustProfiles) {
-        for (const [k, v] of Object.entries(payload.crustProfiles)) {
-          if (profileKeyIsTombstoned(k, deletedMap, tombSet)) continue;
-          try { localStorage.setItem(`run-calc-crust-profile-${k}`, JSON.stringify(v)); } catch {}
-        }
-      }
+      // ── Brand+flavor profiles: NO LONGER applied from the sync payload ──
+      // Profiles moved to their own factory-wide server pool (/api/brand-profiles)
+      // with per-profile last-write-wins stamps (see profileServerSync.ts). The
+      // old sync-map transport was unstamped — whichever device pushed last won,
+      // so a stale device could clobber a fresher edit. Old clients may still
+      // SEND brandProfiles/crustProfiles in their payload (the fields stay in
+      // SyncPayload for tolerance) but they are deliberately ignored here.
 
       // ── History (merge by date, union of runs per day) ──
       if (payload.history && payload.history.length > 0) {
@@ -5789,6 +5772,33 @@ export default function Home() {
         if (typeof epoch === "number" && applyResetWipe(epoch)) window.location.reload();
       } catch {}
     })();
+  }, []);
+
+  // ── Brand+flavor profile pool reconcile (boot + 60s poll) ──
+  // Profiles live in their own factory-wide server pool with per-profile
+  // last-write-wins stamps (they are no longer part of the sync payload —
+  // the old unstamped map let a stale device clobber fresh edits). On boot
+  // this runs the marker-guarded one-time migration (existing local profiles
+  // are pushed up with a floor stamp) and then reconciles: adopt server-newer
+  // copies into the localStorage cache, push local-newer ones up, and drop
+  // local copies of profiles deleted remotely. The poll keeps long-lived tabs
+  // converged; queued pushes retry on each pass, so offline edits are safe.
+  // Best-effort — a fetch failure changes nothing locally.
+  useEffect(() => {
+    let cancelled = false;
+    const pass = async () => {
+      try {
+        const changed = await reconcileProfilesFromServer();
+        if (cancelled || !changed) return;
+        // Profile-derived pickers/cards read localStorage lazily, but the die
+        // types list self-heals from profiles — re-run so an adopted profile's
+        // die size shows up without a reload.
+        setDieTypes(healDieTypesFromProfiles());
+      } catch {}
+    };
+    void pass();
+    const t = setInterval(() => { void pass(); }, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   // SSE connection — receives updates from other clients
@@ -5952,7 +5962,7 @@ export default function Home() {
               const pulledVals: Record<string, FormValues> = {};
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
                 const meta = metaById.get(id);
-                pulledVals[id] = backfillSauceFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
+                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
                 saveRunValues(id, pulledVals[id]);
               }
               // Adopt the scheduled row's per-run value stamps: these values are
@@ -6114,18 +6124,8 @@ export default function Home() {
     for (const run of ds.runs) {
       if (!(run.id in runValues)) delete runValuesUpdatedAt[run.id];
     }
-    // Collect brand+flavor profiles from localStorage
-    const brandProfiles: Record<string, Partial<FormValues>> = {};
-    const crustProfiles: Record<string, Partial<FormValues>> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (key.startsWith("run-calc-profile-")) {
-        try { brandProfiles[key.slice("run-calc-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
-      } else if (key.startsWith("run-calc-crust-profile-")) {
-        try { crustProfiles[key.slice("run-calc-crust-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
-      }
-    }
+    // Brand+flavor profiles are NOT in the sync payload anymore — they live in
+    // their own stamped factory-wide server pool (see profileServerSync.ts).
     return {
       dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
       runValues,
@@ -6152,8 +6152,6 @@ export default function Home() {
       cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
       mixRecipeNames: loadList(MIX_RECIPE_NAMES_KEY, []),
       cheeseRecipePresets: loadCheeseRecipePresets(),
-      brandProfiles,
-      crustProfiles,
       mergedAway: loadMergedAway(),
       deletedItems: loadDeletedItems(),
     };
@@ -8657,7 +8655,7 @@ export default function Home() {
               const pulledVals: Record<string, FormValues> = {};
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
                 const meta = metaById.get(id);
-                pulledVals[id] = backfillSauceFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
+                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
                 saveRunValues(id, pulledVals[id]);
               }
               // Adopt the scheduled row's per-run value stamps: these values are

@@ -2610,6 +2610,69 @@ export const DeleteSauceRecipesResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide brand+flavor setup profile (the saved run form for a product: applicators, pep types, die type, recipes, packaging, crust settings). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form and Setup Profiles editor can hydrate from them.
+ * @summary List factory-wide brand+flavor setup profiles
+ */
+export const ListBrandProfilesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string().describe('Canonical lowercase `${brand}__${flavor}` profile key'),
+  "brand": zod.string().describe('Display-cased brand name'),
+  "flavor": zod.string().describe('Display-cased flavor name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('The dough-blob profile fields (non-crust)'),
+  "crustValues": zod.record(zod.string(), zod.unknown()).describe('The crust-blob profile fields'),
+  "updatedAt": zod.number().describe('Client edit stamp (ms epoch) for last-write-wins')
+}).describe('A factory-wide brand+flavor setup profile: the saved run form for a product. `key` is the canonical lowercase `${brand}__${flavor}` profile key (identical to the clients\' local key). `values` is the dough-blob (all non-crust profile fields) and `crustValues` the crust-blob, preserved exactly as the client stores them. `updatedAt` is the client edit stamp (ms epoch) used for per-profile last-write-wins.'))
+})
+
+
+/**
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Available to any signed-in user (floor staff save profiles from the run form, matching the previous sync-map behavior).
+ * @summary Create or update brand+flavor setup profiles (stamp-guarded)
+ */
+export const SaveBrandProfilesBody = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string().describe('Canonical lowercase `${brand}__${flavor}` profile key'),
+  "brand": zod.string().describe('Display-cased brand name'),
+  "flavor": zod.string().describe('Display-cased flavor name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('The dough-blob profile fields (non-crust)'),
+  "crustValues": zod.record(zod.string(), zod.unknown()).describe('The crust-blob profile fields'),
+  "updatedAt": zod.number().describe('Client edit stamp (ms epoch) for last-write-wins')
+}).describe('A factory-wide brand+flavor setup profile: the saved run form for a product. `key` is the canonical lowercase `${brand}__${flavor}` profile key (identical to the clients\' local key). `values` is the dough-blob (all non-crust profile fields) and `crustValues` the crust-blob, preserved exactly as the client stores them. `updatedAt` is the client edit stamp (ms epoch) used for per-profile last-write-wins.')).describe('The batch of setup profiles to create or update (by key)')
+})
+
+export const SaveBrandProfilesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string().describe('Canonical lowercase `${brand}__${flavor}` profile key'),
+  "brand": zod.string().describe('Display-cased brand name'),
+  "flavor": zod.string().describe('Display-cased flavor name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('The dough-blob profile fields (non-crust)'),
+  "crustValues": zod.record(zod.string(), zod.unknown()).describe('The crust-blob profile fields'),
+  "updatedAt": zod.number().describe('Client edit stamp (ms epoch) for last-write-wins')
+}).describe('A factory-wide brand+flavor setup profile: the saved run form for a product. `key` is the canonical lowercase `${brand}__${flavor}` profile key (identical to the clients\' local key). `values` is the dough-blob (all non-crust profile fields) and `crustValues` the crust-blob, preserved exactly as the client stores them. `updatedAt` is the client edit stamp (ms epoch) used for per-profile last-write-wins.'))
+})
+
+
+/**
+ * Removes a batch of setup profiles by key. Available to any signed-in user (profile deletion accompanies brand/flavor deletion, which floor clients already perform through the master-list flows).
+ * @summary Delete brand+flavor setup profiles by key
+ */
+export const DeleteBrandProfilesBody = zod.object({
+  "keys": zod.array(zod.string()).describe('The profile keys to delete')
+})
+
+export const DeleteBrandProfilesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "key": zod.string().describe('Canonical lowercase `${brand}__${flavor}` profile key'),
+  "brand": zod.string().describe('Display-cased brand name'),
+  "flavor": zod.string().describe('Display-cased flavor name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('The dough-blob profile fields (non-crust)'),
+  "crustValues": zod.record(zod.string(), zod.unknown()).describe('The crust-blob profile fields'),
+  "updatedAt": zod.number().describe('Client edit stamp (ms epoch) for last-write-wins')
+}).describe('A factory-wide brand+flavor setup profile: the saved run form for a product. `key` is the canonical lowercase `${brand}__${flavor}` profile key (identical to the clients\' local key). `values` is the dough-blob (all non-crust profile fields) and `crustValues` the crust-blob, preserved exactly as the client stores them. `updatedAt` is the client edit stamp (ms epoch) used for per-profile last-write-wins.'))
+})
+
+
+/**
  * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
  * @summary List manager-defined cycle-count schedules
  */

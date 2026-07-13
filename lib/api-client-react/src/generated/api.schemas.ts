@@ -2515,6 +2515,48 @@ export interface DeleteNamedRecipesInput {
 }
 
 /**
+ * The dough-blob profile fields (non-crust)
+ */
+export type BrandProfileValues = { [key: string]: unknown };
+
+/**
+ * The crust-blob profile fields
+ */
+export type BrandProfileCrustValues = { [key: string]: unknown };
+
+/**
+ * A factory-wide brand+flavor setup profile: the saved run form for a product. `key` is the canonical lowercase `${brand}__${flavor}` profile key (identical to the clients' local key). `values` is the dough-blob (all non-crust profile fields) and `crustValues` the crust-blob, preserved exactly as the client stores them. `updatedAt` is the client edit stamp (ms epoch) used for per-profile last-write-wins.
+ */
+export interface BrandProfile {
+  /** Canonical lowercase `${brand}__${flavor}` profile key */
+  key: string;
+  /** Display-cased brand name */
+  brand: string;
+  /** Display-cased flavor name */
+  flavor: string;
+  /** The dough-blob profile fields (non-crust) */
+  values: BrandProfileValues;
+  /** The crust-blob profile fields */
+  crustValues: BrandProfileCrustValues;
+  /** Client edit stamp (ms epoch) for last-write-wins */
+  updatedAt: number;
+}
+
+export interface BrandProfileList {
+  items: BrandProfile[];
+}
+
+export interface SaveBrandProfilesInput {
+  /** The batch of setup profiles to create or update (by key) */
+  items: BrandProfile[];
+}
+
+export interface DeleteBrandProfilesInput {
+  /** The profile keys to delete */
+  keys: string[];
+}
+
+/**
  * A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.
  */
 export interface CycleCountSchedule {
