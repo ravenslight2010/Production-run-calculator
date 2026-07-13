@@ -7,6 +7,7 @@ import {
   migrateLocalProfilesToServerIfNeeded,
   reconcileProfilesFromServer,
   getProfileStamp,
+  resetProfileSyncMemoryFallbackForTests,
 } from "./profileServerSync";
 
 // Focused unit coverage for the profile server-pool sync glue: the persisted
@@ -87,6 +88,7 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   localStorage.clear();
+  resetProfileSyncMemoryFallbackForTests();
   calls = [];
   listItems = [];
   networkDown = false;
@@ -361,6 +363,93 @@ describe("reconcileProfilesFromServer", () => {
     expect(changed).toBe(false);
     expect(postCalls()).toHaveLength(1); // queued push retried anyway
     expect(readQueue()).toEqual([]);
+  });
+});
+
+describe("localStorage full (quota exceeded)", () => {
+  let quotaFull = false;
+  let setItemSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    quotaFull = false;
+    const original = Storage.prototype.setItem;
+    setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, k: string, v: string) {
+        if (quotaFull) throw new DOMException("quota exceeded", "QuotaExceededError");
+        original.call(this, k, v);
+      });
+  });
+
+  afterEach(() => {
+    setItemSpy.mockRestore();
+  });
+
+  it("an edit made while storage is full still reaches the server via the memory fallback", async () => {
+    // Blobs were written earlier while storage still had room.
+    setLocalBlobs(KEY, { doughRecipeName: "edited-while-full" });
+
+    quotaFull = true;
+    markProfileEdited(KEY); // enqueue + stamp persist both throw
+    await settle();
+
+    // Nothing could be persisted…
+    expect(localStorage.getItem(QUEUE_KEY)).toBeNull();
+    expect(localStorage.getItem(STAMPS_KEY)).toBeNull();
+
+    // …but the edit was NOT silently dropped: the immediate flush pushed it
+    // from the in-memory fallback, carrying the real (memory-held) stamp.
+    expect(postCalls()).toHaveLength(1);
+    const body = postCalls()[0].body as { items: ServerItem[] };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].key).toBe(KEY);
+    expect(body.items[0].values).toEqual({ doughRecipeName: "edited-while-full" });
+    expect(body.items[0].updatedAt).toBeGreaterThan(1);
+    expect(body.items[0].updatedAt).toBe(getProfileStamp(KEY));
+  });
+
+  it("an edit made while storage is full AND offline is retained and lands on retry", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "full-and-offline" });
+
+    quotaFull = true;
+    networkDown = true;
+    markProfileEdited(KEY);
+    await settle();
+    // The flush attempt failed (fetch threw) — nothing was marked synced.
+    expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined();
+
+    calls = [];
+    networkDown = false; // storage STILL full — the memory queue must retry
+    await flushProfileQueue();
+    await settle();
+
+    expect(postCalls()).toHaveLength(1);
+    const body = postCalls()[0].body as { items: ServerItem[] };
+    expect(body.items[0].key).toBe(KEY);
+    expect(body.items[0].values).toEqual({ doughRecipeName: "full-and-offline" });
+  });
+
+  it("does not re-send drained ops after storage recovers", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "v" });
+
+    quotaFull = true;
+    markProfileEdited(KEY);
+    await settle();
+    expect(postCalls()).toHaveLength(1); // pushed from memory
+
+    calls = [];
+    quotaFull = false; // storage recovered
+    await flushProfileQueue();
+    await settle();
+
+    // The memory queue was drained by the successful push — nothing re-sent.
+    expect(postCalls()).toHaveLength(0);
+
+    // And a fresh edit persists normally again (memory fallback cleared).
+    markProfileEdited(KEY);
+    await settle();
+    expect(postCalls()).toHaveLength(1);
+    expect(localStorage.getItem(STAMPS_KEY)).not.toBeNull();
   });
 });
 

@@ -53,7 +53,26 @@ function crustStorageKey(key: string): string {
 type StampMap = Record<string, number>;
 type QueueOp = { t: "up" | "del"; key: string };
 
+// In-memory fallbacks for when localStorage writes FAIL (quota exceeded).
+// Without these, a full localStorage made enqueue()/writeQueue() silently
+// no-op and the edit never synced. When a persist throws, the latest value is
+// kept here and becomes AUTHORITATIVE for reads (it was derived from the
+// persisted state plus every later change, so it is always a superset of the
+// stale persisted copy). The immediate flush kick pushes queued edits straight
+// from memory; the fallback is cleared the moment a persist succeeds again.
+// Ops held only in memory do not survive a reload — hence flushing right away.
+let memoryQueue: QueueOp[] | null = null;
+const memoryMaps = new Map<string, StampMap>();
+
+/** Test-only: clear the in-memory storage fallbacks between test cases. */
+export function resetProfileSyncMemoryFallbackForTests(): void {
+  memoryQueue = null;
+  memoryMaps.clear();
+}
+
 function readMap(storageKey: string): StampMap {
+  const mem = memoryMaps.get(storageKey);
+  if (mem) return { ...mem };
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return {};
@@ -68,10 +87,16 @@ function readMap(storageKey: string): StampMap {
 function writeMap(storageKey: string, map: StampMap): void {
   try {
     localStorage.setItem(storageKey, JSON.stringify(map));
-  } catch {}
+    memoryMaps.delete(storageKey);
+  } catch {
+    // Quota exceeded (or storage unavailable) — keep the latest value in
+    // memory so the pending edit's stamp is not silently lost.
+    memoryMaps.set(storageKey, { ...map });
+  }
 }
 
 function readQueue(): QueueOp[] {
+  if (memoryQueue !== null) return [...memoryQueue];
   try {
     const raw = localStorage.getItem(QUEUE_KEY);
     if (!raw) return [];
@@ -93,7 +118,12 @@ function readQueue(): QueueOp[] {
 function writeQueue(ops: QueueOp[]): void {
   try {
     localStorage.setItem(QUEUE_KEY, JSON.stringify(ops));
-  } catch {}
+    memoryQueue = null;
+  } catch {
+    // Quota exceeded — the queue lives in memory until storage recovers; the
+    // caller's flush kick still pushes these ops to the server right away.
+    memoryQueue = [...ops];
+  }
 }
 
 /** Last op per key wins (an edit followed by a delete must delete, and vice versa). */
