@@ -17,4 +17,8 @@ Web-only "edit once, updates everywhere" for run setup data.
 
 **Drift + promotion:** form rows differing from the linked shared recipe show an indicator; "Update shared recipe" (shown when canManageInventory) promotes via the existing per-id named-recipes upsert and setQueryData — the pool effect then fans the accepted version out to other profiles.
 
+**Drift must be computed inline, NOT useMemo.** `form.watch()` mutates recipe row objects IN PLACE, so the rows array's identity never changes on an lbs edit — a memo keyed on `v.doughRecipe` returns the stale cached result and the drift indicator never appears (caught only by real-browser e2e; unit tests on the compare helpers all passed). Recompute each render (cheap) — the page re-renders on every form change anyway.
+
+**Clone pool rows at every form-hydration site.** Setting rows from the server-pool byName map (or local presets) without `rows.map(r => ({...r}))` shares object identity with the pool's client copy; RHF's in-place edits then mutate the pool copy too and the drift comparison silently sees "equal". Same array-identity gotcha as ingredient-catalog hydration.
+
 **How to apply:** any NEW out-of-band writer of profiles or shared recipe pools must reuse these helpers (or the same pattern) rather than writing storage directly.

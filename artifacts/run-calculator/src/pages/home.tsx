@@ -3264,7 +3264,12 @@ export default function Home() {
   // stays local to this run unless a manager deliberately promotes it into the
   // shared pool ("Update shared recipe"), which the server gates on
   // manage-inventory.
-  const doughPoolDrift = useMemo(() => {
+  // NOTE: computed inline (NOT useMemo) on purpose — `v = form.watch()` mutates
+  // recipe row objects in place, so `v.doughRecipe`'s array identity never
+  // changes on an lbs edit and a memo would return a stale cached result.
+  // Recomputing is cheap (a handful of rows) and this component re-renders on
+  // every form change anyway.
+  const doughPoolDrift = (() => {
     const name = (v.doughRecipeName ?? "").trim();
     if (!name) return null;
     const key = name.toLowerCase();
@@ -3274,14 +3279,14 @@ export default function Home() {
     const formW = Number(v.targetDoughballWeight ?? 0);
     const weightDiffers = formW > 0 && formW !== (serverDoughWeightByName.get(key) ?? 0);
     return rowsDiffer || weightDiffers ? { name } : null;
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight, serverDoughRowsByName, serverDoughWeightByName]);
-  const saucePoolDrift = useMemo(() => {
+  })();
+  const saucePoolDrift = (() => {
     const name = (v.frontlineRecipeName ?? "").trim();
     if (!name) return null;
     const poolRows = serverSauceRowsByName.get(name.toLowerCase());
     if (!poolRows) return null;
     return recipeRowsEqual(v.frontlineRecipe ?? [], poolRows) ? null : { name };
-  }, [v.frontlineRecipeName, v.frontlineRecipe, serverSauceRowsByName]);
+  })();
   const [promotingRecipeKind, setPromotingRecipeKind] = useState<null | "dough" | "sauce">(null);
   // Run-form dropdown options: the server pool names unioned with any locally
   // known recipe names (backward compat for names still only in the synced
@@ -15365,8 +15370,13 @@ export default function Home() {
                       form.setValue("doughRecipeName", val, { shouldDirty: true });
                       if (val.trim()) {
                         const key = val.trim().toLowerCase();
-                        const rows = serverDoughRowsByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.rows;
-                        if (rows) { form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows); }
+                        const poolRows = serverDoughRowsByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.rows;
+                        if (poolRows) {
+                          // Clone — RHF mutates rows in place, and sharing references
+                          // with the pool map would corrupt the drift comparison.
+                          const rows = poolRows.map((row) => ({ ...row }));
+                          form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows);
+                        }
                         const ballOz = serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
                         if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
                       }
@@ -15408,7 +15418,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Sauce"
                         value={v.frontlineRecipeName}
-                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const rows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } if (!(rows ?? []).some(r => Number(r.lbs) > 0)) { applyLearnedBatchLbs(val, "sauceBarrelLbs"); } } }}
+                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; const rows = poolRows?.map(row => ({ ...row })); if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } if (!(rows ?? []).some(r => Number(r.lbs) > 0)) { applyLearnedBatchLbs(val, "sauceBarrelLbs"); } } }}
                         options={frontlineRecipeNameOptions}
                         onAddOption={addFrontlineRecipeName}
                         onRemoveOption={removeFrontlineRecipeName}
@@ -15452,7 +15462,8 @@ export default function Home() {
                           onRecipeNameChange={val => {
                             form.setValue("frontlineRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
-                              const rows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()];
+                              const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()];
+                              const rows = poolRows?.map(row => ({ ...row }));
                               if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
                             }
                           }}
