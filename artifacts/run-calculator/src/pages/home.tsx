@@ -3220,6 +3220,18 @@ export default function Home() {
     }
     return map;
   }, [doughRecipesList]);
+  // Pool doughball weights (oz) by name — hydrates the run form's Target
+  // Doughball Weight when a dough recipe is picked (0/absent = unknown).
+  const serverDoughWeightByName = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of doughRecipesList) {
+      if (r.enabled === false) continue;
+      const key = r.name.trim().toLowerCase();
+      const oz = r.doughballWeightOz ?? 0;
+      if (key && oz > 0) map.set(key, oz);
+    }
+    return map;
+  }, [doughRecipesList]);
   const serverSauceRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of sauceRecipesList) {
@@ -3367,12 +3379,21 @@ export default function Home() {
   }): Promise<number> => {
     const tagFor = (map: ReadonlyMap<string, NamedRecipeTag> | undefined, name: string) =>
       map?.get(name.trim().toLowerCase());
-    const doughDrafts = Object.entries(loadDoughRecipePresets())
+    const doughPresetEntries = Object.entries(loadDoughRecipePresets());
+    const doughDrafts = doughPresetEntries
       .map(([name, p]) => {
         const tag = tagFor(tags?.dough, name);
-        return namedRecipeFromDraft({ name, components: p?.rows ?? [], idPrefix: "dough", brand: tag?.brand, flavors: tag?.flavors });
+        return namedRecipeFromDraft({ name, components: p?.rows ?? [], idPrefix: "dough", brand: tag?.brand, flavors: tag?.flavors, doughballWeightOz: p?.doughballWeightOz });
       })
       .filter((r): r is NamedRecipe => r !== null);
+    // Learned doughball weights (from spec imports / the run form) so EXISTING
+    // pool recipes with no weight get backfilled, not just newly added drafts.
+    const doughWeights = new Map<string, number>();
+    for (const [name, p] of doughPresetEntries) {
+      const oz = p?.doughballWeightOz ?? 0;
+      const key = name.trim().toLowerCase();
+      if (key && oz > 0) doughWeights.set(key, oz);
+    }
     const sauceDrafts = Object.entries(loadFrontlineRecipePresets())
       .map(([name, rows]) => {
         const tag = tagFor(tags?.sauce, name);
@@ -3380,8 +3401,8 @@ export default function Home() {
       })
       .filter((r): r is NamedRecipe => r !== null);
     const [d, s] = await Promise.all([
-      doughDrafts.length || (tags?.dough?.size ?? 0) > 0
-        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough)
+      doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0
+        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights)
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
       sauceDrafts.length || (tags?.sauce?.size ?? 0) > 0
         ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce)
@@ -5883,14 +5904,32 @@ export default function Home() {
     return () => clearInterval(id);
   }, []);
 
-  // Auto-save dough recipe preset whenever name + rows are set
+  // Auto-save dough recipe preset whenever name + rows are set. The typed
+  // Target Doughball Weight rides along (falling back to any weight the preset
+  // already carried) so the weight follows the recipe name.
   useEffect(() => {
     const name = v.doughRecipeName?.trim();
     if (!name || (v.doughRecipe ?? []).length === 0) return;
     const presets = loadDoughRecipePresets();
-    presets[name] = { rows: v.doughRecipe ?? [] };
+    const typedOz = Number(v.targetDoughballWeight) || 0;
+    const ballOz = typedOz > 0 ? typedOz : presets[name]?.doughballWeightOz;
+    presets[name] = ballOz && ballOz > 0
+      ? { rows: v.doughRecipe ?? [], doughballWeightOz: ballOz }
+      : { rows: v.doughRecipe ?? [] };
     saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe]);
+  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+
+  // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
+  // doughball weight, while the form still sits at 0 oz, adopts the pool
+  // weight (profiles hydrated before the pool carried weights stay broken
+  // otherwise). Never overrides a non-zero value the operator typed.
+  useEffect(() => {
+    const name = v.doughRecipeName?.trim().toLowerCase();
+    if (!name) return;
+    if ((Number(v.targetDoughballWeight) || 0) > 0) return;
+    const ballOz = serverDoughWeightByName.get(name) ?? 0;
+    if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
+  }, [v.doughRecipeName, v.targetDoughballWeight, serverDoughWeightByName, form]);
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
@@ -15143,8 +15182,11 @@ export default function Home() {
                     onRecipeNameChange={val => {
                       form.setValue("doughRecipeName", val, { shouldDirty: true });
                       if (val.trim()) {
-                        const rows = serverDoughRowsByName.get(val.trim().toLowerCase()) ?? loadDoughRecipePresets()[val.trim()]?.rows;
+                        const key = val.trim().toLowerCase();
+                        const rows = serverDoughRowsByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.rows;
                         if (rows) { form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows); }
+                        const ballOz = serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
+                        if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
                       }
                     }}
                   />

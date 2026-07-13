@@ -126,7 +126,7 @@ export function withTempOverrides<T extends Partial<Record<string, unknown>>>(v:
 }
 
 export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
-export type DoughRecipePreset = { rows: RecipeRow[] };
+export type DoughRecipePreset = { rows: RecipeRow[]; doughballWeightOz?: number };
 
 export const DEFAULT_VALUES: FormValues = {
   casesNeeded: 0,

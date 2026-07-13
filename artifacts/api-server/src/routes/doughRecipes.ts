@@ -18,7 +18,7 @@ import { currentScope } from "../lib/requestScope";
 const MAX_BATCH = 500;
 
 function toApiItem(row: DoughRecipeRow): NamedRecipe {
-  return {
+  const item: NamedRecipe = {
     id: row.id,
     name: row.name,
     notes: row.notes,
@@ -27,6 +27,8 @@ function toApiItem(row: DoughRecipeRow): NamedRecipe {
     brand: row.brand ?? "",
     flavors: row.flavors ?? [],
   };
+  if ((row.doughballWeightOz ?? 0) > 0) item.doughballWeightOz = row.doughballWeightOz;
+  return item;
 }
 
 function toDbValues(item: NamedRecipe) {
@@ -39,6 +41,7 @@ function toDbValues(item: NamedRecipe) {
     enabled: item.enabled,
     brand: item.brand ?? "",
     flavors: item.flavors ?? [],
+    doughballWeightOz: item.doughballWeightOz ?? 0,
     updatedAt: new Date(),
   };
 }
@@ -96,6 +99,7 @@ router.post(
               enabled: values.enabled,
               brand: values.brand,
               flavors: values.flavors,
+              doughballWeightOz: values.doughballWeightOz,
               updatedAt: values.updatedAt,
             },
           });

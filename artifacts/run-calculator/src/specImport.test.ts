@@ -191,16 +191,18 @@ describe("collectSpecAliases", () => {
 
   it("keeps only resolved mappings whose raw label meaningfully differs from canonical", () => {
     const out = collectSpecAliases([
+      // Fuzzy hits are NO LONGER learned: an unconfirmed fuzzy guess written to
+      // factory-wide memory is how poison aliases (Lowe's 7" → Lowe's) got in.
       { kind: "brand", result: mk("fuzzy", "Tombstoen", "Tombstone") },
       { kind: "brand", result: mk("exact", "tombstone", "Tombstone") }, // case-only → skipped
       { kind: "brand", result: mk("new", "Totino's", "Totino's") }, // new → skipped
       { kind: "flavor", result: mk("alias", "Pep", "Pepperoni"), context: "Tombstone" },
     ]);
-    // fuzzy(differs) + alias(differs) = 2; case-only and new are skipped
-    expect(out).toHaveLength(2);
-    const fuzzy = out.find((a) => a.externalName === "Tombstoen");
-    expect(fuzzy?.canonicalName).toBe("Tombstone");
+    // alias(differs) only = 1; fuzzy, case-only and new are all skipped
+    expect(out).toHaveLength(1);
+    expect(out.find((a) => a.externalName === "Tombstoen")).toBeUndefined();
     const flavor = out.find((a) => a.kind === "flavor");
+    expect(flavor?.canonicalName).toBe("Pepperoni");
     expect(flavor?.context).toBe("Tombstone");
   });
   it("skips self-references (same name case-insensitively)", () => {
@@ -211,11 +213,18 @@ describe("collectSpecAliases", () => {
   });
   it("dedupes by identity key (last write wins)", () => {
     const out = collectSpecAliases([
-      { kind: "brand", result: mk("fuzzy", "Tmb", "Tombstone") },
-      { kind: "brand", result: mk("fuzzy", "tmb", "DiGiorno") },
+      { kind: "brand", result: mk("alias", "Tmb", "Tombstone") },
+      { kind: "brand", result: mk("alias", "tmb", "DiGiorno") },
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].canonicalName).toBe("DiGiorno");
+  });
+  it("never learns from fuzzy matches (unconfirmed guesses stay out of factory-wide memory)", () => {
+    const out = collectSpecAliases([
+      { kind: "brand", result: mk("fuzzy", "Tmb", "Tombstone") },
+      { kind: "appType", result: mk("fuzzy", "Chz Blend", "Six Cheese Blend") },
+    ]);
+    expect(out).toHaveLength(0);
   });
 });
 

@@ -2498,6 +2498,8 @@ export interface NamedRecipe {
   brand?: string;
   /** Product flavors of `brand` this recipe is used on. Empty with a brand set means all varieties (same convention as cheese recipes). */
   flavors?: string[];
+  /** Dough recipes only — target weight of one doughball in ounces (the spec sheet's "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form's Target Doughball Weight from this. Sauce recipes never set it. */
+  doughballWeightOz?: number;
 }
 
 export interface NamedRecipeList {

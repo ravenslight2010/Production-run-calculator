@@ -24,7 +24,7 @@
 import {
   canonicalize,
   collectSpecAliases,
-  dropConflictingSpecAliases,
+  sanitizeSpecAliases,
   pickAlias,
   type CanonicalResult,
   type SheetGrid,
@@ -956,7 +956,7 @@ export function suggestPremixRedirects(
   existing: ReadonlyArray<Mix>,
   aliases: ReadonlyArray<SpecImportAlias>,
 ): Record<string, string> {
-  const usable = dropConflictingSpecAliases(aliases).filter(
+  const usable = sanitizeSpecAliases(aliases).filter(
     (a) => a.kind === "appType" && (a.context ?? null) === null,
   );
   if (usable.length === 0) return {};

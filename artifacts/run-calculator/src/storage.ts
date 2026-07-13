@@ -2508,7 +2508,13 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     if (!name || r.rows.length === 0) continue;
     const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
     if (r.kind === "dough") {
-      doughPresets[name] = { rows };
+      // Keep the doughball weight with the preset: the import's value wins,
+      // otherwise preserve any weight the preset already carried.
+      const ballOz =
+        r.doughballOz != null && r.doughballOz > 0
+          ? r.doughballOz
+          : doughPresets[name]?.doughballWeightOz;
+      doughPresets[name] = ballOz && ballOz > 0 ? { rows, doughballWeightOz: ballOz } : { rows };
       newDoughNames.push(name);
       newDoughIng.push(...rows.map(x => x.ingredient));
     } else if (r.kind === "sauce") {

@@ -10,6 +10,7 @@ import {
   repointNamedRecipeIngredients,
   planNameConsolidation,
   fillNamedRecipeTags,
+  fillNamedRecipeDoughballWeights,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "./index";
@@ -24,6 +25,7 @@ function makeNamed(over: Partial<NamedRecipe> = {}): NamedRecipe {
     brand: over.brand ?? "",
     flavors: over.flavors ?? [],
     ...(over.scope !== undefined ? { scope: over.scope } : {}),
+    ...(over.doughballWeightOz !== undefined ? { doughballWeightOz: over.doughballWeightOz } : {}),
   };
 }
 
@@ -387,5 +389,61 @@ describe("fillNamedRecipeTags", () => {
   it("ignores blank names and blank-brand tags", () => {
     const pool = [makeNamed({ id: "d1", name: "CRB Dough" })];
     expect(fillNamedRecipeTags(pool, new Map([["  ", tag("Hannaford")], ["crb dough", tag("  ")]]))).toEqual([]);
+  });
+});
+
+describe("doughballWeightOz", () => {
+  it("normalize keeps a positive weight and drops 0/negative/garbage", () => {
+    const keep = normalizeNamedRecipe({ id: "d1", name: "CRB Dough", doughballWeightOz: 5.5 })!;
+    expect(keep.doughballWeightOz).toBe(5.5);
+    for (const bad of [0, -3, "x", null, undefined]) {
+      const r = normalizeNamedRecipe({ id: "d1", name: "CRB Dough", doughballWeightOz: bad })!;
+      expect(r.doughballWeightOz).toBeUndefined();
+    }
+  });
+
+  it("namedRecipeFromDraft threads the weight through", () => {
+    const r = namedRecipeFromDraft({
+      name: "CRB Dough",
+      components: [{ ingredient: "Flour", lbs: 50 }],
+      idPrefix: "dough",
+      doughballWeightOz: 6.25,
+    })!;
+    expect(r.doughballWeightOz).toBe(6.25);
+    const none = namedRecipeFromDraft({
+      name: "CRB Dough",
+      components: [],
+      idPrefix: "dough",
+    })!;
+    expect(none.doughballWeightOz).toBeUndefined();
+  });
+});
+
+describe("fillNamedRecipeDoughballWeights", () => {
+  it("backfills only unset weights by ci name, returns only changed, pure", () => {
+    const pool = [
+      makeNamed({ id: "d1", name: "CRB Dough" }),
+      makeNamed({ id: "d2", name: "Thin Dough", doughballWeightOz: 4 }),
+      makeNamed({ id: "d3", name: "Other Dough" }),
+    ];
+    const changed = fillNamedRecipeDoughballWeights(
+      pool,
+      new Map([
+        ["crb dough", 5.5],
+        ["thin dough", 9], // must NOT override the manager's 4
+      ]),
+    );
+    expect(changed.map((r) => r.id)).toEqual(["d1"]);
+    expect(changed[0].doughballWeightOz).toBe(5.5);
+    expect(pool[0].doughballWeightOz).toBeUndefined(); // pure
+    expect(pool[1].doughballWeightOz).toBe(4);
+  });
+
+  it("ignores blank names and non-positive/non-finite weights", () => {
+    const pool = [makeNamed({ id: "d1", name: "CRB Dough" })];
+    expect(
+      fillNamedRecipeDoughballWeights(pool, new Map([["  ", 5], ["crb dough", 0], ["crb dough", NaN]])),
+    ).toEqual([]);
+    expect(fillNamedRecipeDoughballWeights(pool, {})).toEqual([]);
   });
 });

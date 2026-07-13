@@ -52,6 +52,12 @@ export interface NamedRecipe {
   // Product flavors of `brand` this recipe is used on. Empty with a brand set
   // means "all varieties" (same convention as Cheese Recipes).
   flavors: string[];
+  // DOUGH only: target weight of one doughball in OUNCES (the spec sheet's
+  // "target ball weight"). 0/absent = unknown. Sauce recipes never set it.
+  // Stored on the pool so picking a dough recipe can fill the run form's
+  // Target Doughball Weight — without it every pool-hydrated dough run sat at
+  // 0 oz and the batch-yield math silently died.
+  doughballWeightOz?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +137,8 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
     brand,
     flavors: brand ? normalizeNamedRecipeFlavors(raw.flavors) : [],
   };
+  const ballOz = coerceNum(raw.doughballWeightOz, 0);
+  if (ballOz > 0) recipe.doughballWeightOz = ballOz;
   if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
   return recipe;
 }
@@ -233,6 +241,7 @@ export function namedRecipeFromDraft(draft: {
   notes?: string;
   brand?: string;
   flavors?: ReadonlyArray<string>;
+  doughballWeightOz?: number;
 }): NamedRecipe | null {
   const name = draft.name.trim();
   if (!name) return null;
@@ -249,6 +258,7 @@ export function namedRecipeFromDraft(draft: {
     enabled: true,
     brand: draft.brand ?? "",
     flavors: draft.flavors ?? [],
+    doughballWeightOz: draft.doughballWeightOz,
   });
 }
 
@@ -312,6 +322,38 @@ export function fillNamedRecipeTags(
     const extra = tag.flavors.filter((f) => !have.has(f.toLowerCase()));
     if (extra.length === 0) continue;
     changed.push({ ...r, flavors: [...r.flavors, ...extra] });
+  }
+  return changed;
+}
+
+/**
+ * Backfill doughball weights onto EXISTING pool dough recipes from what a spec
+ * import just learned, without ever fighting a manager's explicit value: only
+ * recipes whose weight is unset/0 adopt the learned weight. Matching is by
+ * recipe NAME (case-insensitive). Returns ONLY the recipes that changed so the
+ * caller can save just those. Pure — mirrors fillNamedRecipeTags.
+ */
+export function fillNamedRecipeDoughballWeights(
+  recipes: ReadonlyArray<NamedRecipe>,
+  weightsByName: ReadonlyMap<string, number> | Record<string, number>,
+): NamedRecipe[] {
+  const weights = new Map<string, number>();
+  const entries =
+    weightsByName instanceof Map
+      ? weightsByName.entries()
+      : Object.entries(weightsByName);
+  for (const [name, oz] of entries) {
+    const key = (name ?? "").trim().toLowerCase();
+    if (!key || !Number.isFinite(oz) || oz <= 0) continue;
+    weights.set(key, oz);
+  }
+  if (weights.size === 0) return [];
+  const changed: NamedRecipe[] = [];
+  for (const r of recipes) {
+    const oz = weights.get(r.name.trim().toLowerCase());
+    if (oz === undefined) continue;
+    if ((r.doughballWeightOz ?? 0) > 0) continue;
+    changed.push({ ...r, doughballWeightOz: oz });
   }
   return changed;
 }

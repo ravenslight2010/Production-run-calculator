@@ -849,8 +849,18 @@ export function linkSpecImportCheeseToExisting(
  * A profile also references its recipe of this kind by NAME (`sauceName` for
  * sauce, `doughName` for dough), so any profile whose name loose-matches a
  * renamed recipe is snapped to the same existing name (kept in lockstep with
- * the recipe). Pure and non-mutating — returns the SAME object when nothing
- * changes.
+ * the recipe).
+ *
+ * Parenthetical fallback (PROFILE references only): spec sheets often qualify
+ * the dough/sauce name with a parenthetical recipe note — "Lucia's Sauce
+ * (Lucia's Recipe)", "Parbake Crust (7" CRB recipe - 7" Dies)". When the full
+ * name matches nothing, the paren-stripped base and each paren's contents are
+ * tried against the pool so the profile still links to the recipe it clearly
+ * means. This fallback NEVER applies to imported RECIPES themselves (renaming
+ * a variant recipe onto its base name would overwrite the base recipe's rows),
+ * and is skipped when this same import carries a recipe of this kind under the
+ * profile's full name (the profile must keep pointing at that incoming recipe).
+ * Pure and non-mutating — returns the SAME object when nothing changes.
  */
 export function linkSpecImportNamedRecipesToExisting(
   parsed: ParsedSpecImport,
@@ -869,6 +879,25 @@ export function linkSpecImportNamedRecipesToExisting(
     changed = true;
     return { ...r, name: existing };
   });
+  // Loose keys of every recipe of this kind CARRIED BY THIS IMPORT (post-snap):
+  // a profile whose name matches one of these keeps its name so the tie to the
+  // incoming recipe survives.
+  const importedKindKeys = new Set(
+    recipes
+      .filter((r) => r.kind === kind)
+      .map((r) => specImportNameMatchKey(r.name ?? ""))
+      .filter(Boolean),
+  );
+  const matchProfileName = (nm: string): string | null => {
+    const full = match(nm);
+    if (full) return full;
+    if (importedKindKeys.has(specImportNameMatchKey(nm))) return null;
+    for (const cand of parentheticalNameCandidates(nm)) {
+      const m = match(cand);
+      if (m) return m;
+    }
+    return null;
+  };
   let profiles = parsed.profiles;
   {
     const field = kind === "sauce" ? ("sauceName" as const) : ("doughName" as const);
@@ -876,7 +905,7 @@ export function linkSpecImportNamedRecipesToExisting(
     const next = (parsed.profiles ?? []).map((p) => {
       const nm = (p[field] ?? "").trim();
       if (!nm) return p;
-      const existing = match(nm);
+      const existing = matchProfileName(nm);
       if (!existing || existing === nm) return p;
       profilesChanged = true;
       return { ...p, [field]: existing };
@@ -887,6 +916,29 @@ export function linkSpecImportNamedRecipesToExisting(
     }
   }
   return changed ? { ...parsed, recipes, profiles } : parsed;
+}
+
+/**
+ * Fallback name candidates for a parenthetically-qualified recipe reference:
+ * the paren-stripped base ("Lucia's Sauce (Lucia's Recipe)" → "Lucia's Sauce")
+ * first, then each parenthetical's contents. The original full name is NOT
+ * included — callers try it first themselves. Deduped case-insensitively.
+ */
+export function parentheticalNameCandidates(name: string): string[] {
+  const raw = (name ?? "").trim();
+  if (!raw || !raw.includes("(")) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (s: string) => {
+    const t = s.replace(/\s+/g, " ").trim();
+    const ci = t.toLowerCase();
+    if (!t || ci === raw.toLowerCase() || seen.has(ci)) return;
+    seen.add(ci);
+    out.push(t);
+  };
+  push(raw.replace(/\([^)]*\)/g, " "));
+  for (const m of raw.matchAll(/\(([^)]*)\)/g)) push(m[1]);
+  return out;
 }
 
 /**
@@ -1014,7 +1066,7 @@ export function applySpecImportBlendNameAliases(
   parsed: ParsedSpecImport,
   aliases: ReadonlyArray<SpecImportAlias>,
 ): ParsedSpecImport {
-  const usable = dropConflictingSpecAliases(aliases).filter(
+  const usable = sanitizeSpecAliases(aliases).filter(
     (a) => a.kind === "appType",
   );
   if (!usable.length) return parsed;
@@ -1411,16 +1463,54 @@ export function recipeApplyTargets(
   const seen = new Set(
     out.map((t) => `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`),
   );
-  // Fan one brand out to every same-brand profile in the pool, appending only
+  // Flavor-qualifier narrowing: a brand-wide fan is meant for a brand's ONE
+  // shared recipe ("Aldo's Pizza Sauce"). But when the recipe NAME carries
+  // flavor words beyond the brand and generic kind words — "Four Hands RED HOT
+  // Pizza Sauce" — spraying it across every flavor of the brand puts a Red Hot
+  // sauce on the BBQ Chicken pizza. If those extra name tokens all appear in
+  // at least one same-brand profile's flavor, fan ONLY to the matching
+  // flavors; when no flavor matches them (they're just brand-line words), the
+  // whole-brand fan stands. Spelled-out numbers fold to digits so a "7 Cheese"
+  // name finds the "Seven Cheese" flavor.
+  const foldTok = (t: string): string => SPEC_NUMBER_WORD_DIGITS[t] ?? t;
+  const GENERIC_RECIPE_NAME_TOKENS = new Set([
+    "sauce", "dough", "mix", "cheese", "crust", "recipe", "blend",
+  ]);
+  const nameQualifierTokens = (brand: string): string[] => {
+    const brandTokens = new Set(
+      specImportNameMatchKey(brand).split(" ").filter(Boolean).map(foldTok),
+    );
+    return specImportNameMatchKey(r.name ?? "")
+      .split(" ")
+      .filter(Boolean)
+      .map(foldTok)
+      .filter((t) => !brandTokens.has(t) && !GENERIC_RECIPE_NAME_TOKENS.has(t));
+  };
+  // Fan one brand out to every same-brand profile in the pool (narrowed to
+  // flavor-qualifier matches when the name names a flavor), appending only
   // profiles not already covered by an explicit (or prior-anchor) target.
   const fanBrand = (brand: string): void => {
     const wantBrand = brand.trim().toLowerCase();
     if (!wantBrand) return;
-    for (const p of profiles) {
+    const sameBrand = profiles.filter((p) => {
       const pb = p.brand.trim();
       const pf = p.flavor.trim();
-      if (!pb || !pf) continue;
-      if (pb.toLowerCase() !== wantBrand) continue;
+      return !!pb && !!pf && pb.toLowerCase() === wantBrand;
+    });
+    let fanTo = sameBrand;
+    const qual = nameQualifierTokens(brand);
+    if (qual.length) {
+      const matching = sameBrand.filter((p) => {
+        const fTokens = new Set(
+          specImportNameMatchKey(p.flavor).split(" ").filter(Boolean).map(foldTok),
+        );
+        return qual.every((t) => fTokens.has(t));
+      });
+      if (matching.length) fanTo = matching;
+    }
+    for (const p of fanTo) {
+      const pb = p.brand.trim();
+      const pf = p.flavor.trim();
       const key = `${pb.toLowerCase()}\u0000${pf.toLowerCase()}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1783,6 +1873,73 @@ export function dropConflictingSpecAliases(
   });
 }
 
+/** Spelled-out numbers folded to digits so "Six Cheese" and "6 Cheese" agree. */
+const SPEC_NUMBER_WORD_DIGITS: Record<string, string> = {
+  one: "1", two: "2", three: "3", four: "4", five: "5", six: "6",
+  seven: "7", eight: "8", nine: "9", ten: "10", eleven: "11", twelve: "12",
+};
+
+/**
+ * Digit signature of a name: every digit character, in order, from the loose
+ * match key, with spelled-out number words ("Six") folded to digits first.
+ * Two names whose signatures differ are talking about DIFFERENT products
+ * (7" vs 11" dies, 5-cheese vs 7-cheese blends) and must never be treated as
+ * near-duplicates of each other.
+ */
+export function specNameDigitSignature(name: string): string {
+  const key = specImportNameMatchKey(name);
+  if (!key) return "";
+  return key
+    .split(" ")
+    .map((t) => SPEC_NUMBER_WORD_DIGITS[t] ?? t)
+    .join(" ")
+    .replace(/[^0-9]/g, "");
+}
+
+/** Alias kinds where a digit mismatch between external and canonical = poison. */
+const DIGIT_GUARDED_ALIAS_KINDS = new Set<string>(["brand", "flavor", "appType", "pepType"]);
+
+/**
+ * Generic slot-card type names ("Mix", "cheese") must never appear on EITHER
+ * side of an appType alias: an alias FROM a generic name would rename every
+ * plain Mix/cheese slot to one specific blend, and an alias TO a generic name
+ * erases a blend's identity. (These crept into learned memory via early fuzzy
+ * matching and caused cross-recipe mix-ups.)
+ */
+function isGenericSlotTypeName(name: string): boolean {
+  const key = specImportNameMatchKey(name);
+  return key === "mix" || key === "cheese" || key === "mix cheese" || key === "cheese mix";
+}
+
+/**
+ * Hygiene filter for learned spec-import aliases, applied before EVERY use:
+ *   1. drops appType aliases with a generic slot-type name ("Mix"/"cheese") on
+ *      either side (see isGenericSlotTypeName);
+ *   2. drops brand/flavor/appType/pepType aliases whose external and canonical
+ *      digit signatures differ (a 7" name must never be renamed to a plain or
+ *      an 11" one — those are different products, not spellings);
+ *   3. finally drops cyclic/chained aliases (dropConflictingSpecAliases).
+ * recipeName and ingredient kinds are exempt from the digit rule on purpose:
+ * a user deliberately picking pool recipe "CRB DOUGH" for the sheet's
+ * `7" CRB recipe` is a legitimate digit-dropping rename. Pure.
+ */
+export function sanitizeSpecAliases(
+  aliases: ReadonlyArray<SpecImportAlias>,
+): SpecImportAlias[] {
+  const clean = aliases.filter((a) => {
+    if (a.kind === "appType" && (isGenericSlotTypeName(a.externalName) || isGenericSlotTypeName(a.canonicalName))) {
+      return false;
+    }
+    if (DIGIT_GUARDED_ALIAS_KINDS.has(a.kind)) {
+      if (specNameDigitSignature(a.externalName) !== specNameDigitSignature(a.canonicalName)) {
+        return false;
+      }
+    }
+    return true;
+  });
+  return dropConflictingSpecAliases(clean);
+}
+
 // ── Name canonicalization (alias → exact → fuzzy → new) ──────────────────────
 
 function levenshtein(a: string, b: string): number {
@@ -1830,18 +1987,39 @@ export function canonicalize(
   const externalName = (raw ?? "").trim();
   if (!externalName) return { value: "", source: "new", externalName };
 
-  // Ignore incoherent (cyclic/chained) learned aliases so polluted memory can't
-  // mis-rename or collide otherwise-valid names; such labels fall through to the
-  // exact/fuzzy/new path instead.
-  const aliased = pickAlias(dropConflictingSpecAliases(aliases), kind, externalName, context);
+  // Ignore poisoned learned aliases (generic slot names, digit-mismatched
+  // renames, cycles/chains) so polluted memory can't mis-rename or collide
+  // otherwise-valid names; such labels fall through to the exact/fuzzy/new
+  // path instead.
+  const aliased = pickAlias(sanitizeSpecAliases(aliases), kind, externalName, context);
   if (aliased) return { value: aliased, source: "alias", externalName };
 
   const lower = externalName.toLowerCase();
   const exact = known.find((k) => k.trim().toLowerCase() === lower);
   if (exact) return { value: exact, source: "exact", externalName };
 
+  // Fuzzy layer guards — a close edit distance alone is NOT enough:
+  //   • digit signatures must agree (`Lowe's 7"` is a DIFFERENT brand from
+  //     "Lowe's", not a misspelling of it — collapsing them merged two whole
+  //     product lines);
+  //   • neither side's token set may be a proper subset of the other ("Red Hot
+  //     Mix" vs "Red Hot Chicken Mix" differ by a whole meaningful word — that
+  //     is a different product, not a typo; pure typos alter a token instead
+  //     of adding one).
+  const rawDigits = specNameDigitSignature(externalName);
+  const rawTokens = new Set(specImportNameMatchKey(externalName).split(" ").filter(Boolean));
+  const isProperTokenSubset = (a: Set<string>, b: Set<string>): boolean => {
+    if (a.size >= b.size) return false;
+    for (const t of a) if (!b.has(t)) return false;
+    return true;
+  };
   let best: { value: string; ratio: number } | null = null;
   for (const k of known) {
+    if (specNameDigitSignature(k) !== rawDigits) continue;
+    const kTokens = new Set(specImportNameMatchKey(k).split(" ").filter(Boolean));
+    if (isProperTokenSubset(rawTokens, kTokens) || isProperTokenSubset(kTokens, rawTokens)) {
+      continue;
+    }
     const dist = levenshtein(lower, k.trim().toLowerCase());
     const ratio = dist / Math.max(lower.length, k.length, 1);
     if (best === null || ratio < best.ratio) best = { value: k, ratio };
@@ -1854,9 +2032,14 @@ export function canonicalize(
 
 /**
  * From a set of resolved names, collect the alias pairs worth persisting: only
- * mappings that resolved to an EXISTING canonical name (alias / exact / fuzzy)
- * where the raw label differs from the canonical one (case-insensitively).
+ * mappings that resolved to an EXISTING canonical name (alias / exact) where
+ * the raw label differs from the canonical one (case-insensitively).
  * "new" creations and self-references carry no information and are skipped.
+ * FUZZY matches are deliberately NOT learned: the fuzzy layer recomputes the
+ * same result deterministically on every import (so persisting adds nothing),
+ * while a learned fuzzy alias CEMENTS an early guess forever — even after the
+ * true canonical name later appears in the pool, the alias would keep
+ * outranking it (this is exactly how cross-brand mix/brand poison spread).
  * Deduped by identity key (last write wins).
  */
 export function collectSpecAliases(
@@ -1864,7 +2047,7 @@ export function collectSpecAliases(
 ): SpecImportAlias[] {
   const byKey = new Map<string, SpecImportAlias>();
   for (const r of resolved) {
-    if (r.result.source === "new") continue;
+    if (r.result.source === "new" || r.result.source === "fuzzy") continue;
     const externalName = r.result.externalName.trim();
     const canonicalName = r.result.value.trim();
     if (!externalName || !canonicalName) continue;

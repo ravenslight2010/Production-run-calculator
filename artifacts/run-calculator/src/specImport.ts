@@ -23,7 +23,7 @@ import {
   canonicalizeSpecImportCheeseRecipeNames,
   cleanSpecCheeseRecipeName,
   dedupeSpecImportCheeseRecipes,
-  dropConflictingSpecAliases,
+  sanitizeSpecAliases,
   pickAlias,
   linkSpecImportCheeseToExisting,
   linkSpecImportNamedRecipesToExisting,
@@ -272,7 +272,7 @@ function canonicalizeParsed(
   // instead of resurrecting the raw sheet name — even when the recipe itself
   // isn't in this sheet. Alias-only on purpose: exact/fuzzy snapping to the
   // saved pools is the link pass's job (it has stronger near-dup guards).
-  const usableAliases = dropConflictingSpecAliases(aliases);
+  const usableAliases = sanitizeSpecAliases(aliases);
   const aliasNamedRecipe = (
     nm: string | undefined,
     kindCtx: "dough" | "sauce",

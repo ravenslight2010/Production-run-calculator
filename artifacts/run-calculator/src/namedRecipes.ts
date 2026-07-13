@@ -17,6 +17,7 @@ import {
   normalizeNamedRecipes,
   addNamedRecipesIfAbsentByName,
   fillNamedRecipeTags,
+  fillNamedRecipeDoughballWeights,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "@workspace/named-recipes";
@@ -70,6 +71,7 @@ export async function addNamedRecipesToServerIfAbsent(
   kind: NamedRecipeKind,
   candidates: NamedRecipe[],
   tagsByName?: ReadonlyMap<string, NamedRecipeTag>,
+  weightsByName?: ReadonlyMap<string, number>,
 ): Promise<{ added: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
   const { merged, added } = addNamedRecipesIfAbsentByName(existing, candidates);
@@ -77,9 +79,23 @@ export async function addNamedRecipesToServerIfAbsent(
     tagsByName && tagsByName.size > 0
       ? fillNamedRecipeTags(existing, tagsByName)
       : [];
-  if (added === 0 && tagged.length === 0) return { added: 0, items: existing };
-  const taggedById = new Map(tagged.map((r) => [r.id, r]));
-  const toSave = merged.map((r) => taggedById.get(r.id) ?? r);
+  // Dough only: backfill learned doughball weights onto EXISTING pool recipes
+  // whose weight is still unset (never overriding a manager's explicit value).
+  const weighted =
+    kind === "dough" && weightsByName && weightsByName.size > 0
+      ? fillNamedRecipeDoughballWeights(
+          tagged.length > 0
+            ? existing.map((r) => tagged.find((t) => t.id === r.id) ?? r)
+            : existing,
+          weightsByName,
+        )
+      : [];
+  if (added === 0 && tagged.length === 0 && weighted.length === 0)
+    return { added: 0, items: existing };
+  const changedById = new Map<string, NamedRecipe>();
+  for (const r of tagged) changedById.set(r.id, r);
+  for (const r of weighted) changedById.set(r.id, r);
+  const toSave = merged.map((r) => changedById.get(r.id) ?? r);
   const items = await saveNamedRecipes(kind, toSave);
   return { added, items };
 }

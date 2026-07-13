@@ -100,12 +100,17 @@ describe("collectSpecRenameAliases", () => {
       canonicalName: "Four Hands",
       context: null,
     });
-    // The merged save list must survive the chain/cycle filter and canonicalize
-    // the raw sheet label straight to the edited name on the next upload.
+    // The merged save list must survive the chain/cycle filter.
     const merged = mergeSpecAliases(prior, out);
     const usable = dropConflictingSpecAliases(merged);
     expect(usable.length).toBe(merged.length);
-    expect(canonicalize("11 IN FOUR HANDS", [], merged, "brand").value).toBe("Four Hands");
+    // But APPLYING the raw→edited alias is now blocked by the digit-signature
+    // hygiene guard: "11 IN FOUR HANDS" (digits: 11) must never be renamed to
+    // the digit-less "Four Hands" — the same rule that stops a 7" brand from
+    // collapsing into its plain sibling. The raw label stays as-is.
+    expect(canonicalize("11 IN FOUR HANDS", [], merged, "brand").value).toBe("11 IN FOUR HANDS");
+    // A digit-compatible rename still applies.
+    expect(canonicalize("Four Hands 11", ["Four Hands 11"], merged, "brand").value).toBe("Four Hands 11");
   });
 
   it("re-points a prior flavor alias under the OLD brand context to the confirmed pair", () => {

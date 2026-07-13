@@ -3,6 +3,7 @@ import {
   text,
   jsonb,
   boolean,
+  doublePrecision,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -37,6 +38,10 @@ export const doughRecipesTable = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     brand: text("brand").notNull().default(""),
     flavors: jsonb("flavors").notNull().default([]).$type<string[]>(),
+    // Target weight of one doughball in OUNCES (spec sheet "target ball
+    // weight"); 0 = unknown. ADDITIVE with a default so the change is
+    // push-force-safe on the populated table.
+    doughballWeightOz: doublePrecision("doughball_weight_oz").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
