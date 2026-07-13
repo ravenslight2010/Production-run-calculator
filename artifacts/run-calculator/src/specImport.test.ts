@@ -320,7 +320,7 @@ describe("sanitizeParsedSpecImport", () => {
       ],
       recipes: [
         { kind: "dough", name: "Std Dough", doughballOz: 16, doughBatchYield: "640",
-          rows: [{ ingredient: "Flour", lbs: 50 }] },
+          doughballsPerTray: "24", rows: [{ ingredient: "Flour", lbs: 50 }] },
       ],
     });
     const p = out.profiles[0];
@@ -330,6 +330,7 @@ describe("sanitizeParsedSpecImport", () => {
     expect(p.pepperonis[0].batchLbs).toBe(25);
     const dough = out.recipes.find((r) => r.kind === "dough");
     expect(dough?.doughBatchYield).toBe(640);
+    expect(dough?.doughballsPerTray).toBe(24);
   });
   it("omits case pack and batch/yield sizes that are absent or non-positive", () => {
     const out = sanitizeParsedSpecImport({
@@ -341,7 +342,7 @@ describe("sanitizeParsedSpecImport", () => {
       ],
       recipes: [
         { kind: "dough", name: "Std Dough", doughballOz: 16, doughBatchYield: 0,
-          rows: [{ ingredient: "Flour", lbs: 50 }] },
+          doughballsPerTray: 0, rows: [{ ingredient: "Flour", lbs: 50 }] },
       ],
     });
     const p = out.profiles[0];
@@ -350,6 +351,7 @@ describe("sanitizeParsedSpecImport", () => {
     expect(p.applicators[0].batchLbs).toBeUndefined();
     const dough = out.recipes.find((r) => r.kind === "dough");
     expect(dough?.doughBatchYield).toBeUndefined();
+    expect(dough?.doughballsPerTray).toBeUndefined();
   });
   it("keeps a real ready-made sauceName but drops generic placeholders", () => {
     const out = sanitizeParsedSpecImport({

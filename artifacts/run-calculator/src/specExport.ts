@@ -70,6 +70,7 @@ function gatherSpecInput(): SpecExportInput {
         })),
         doughRecipeName: v.doughRecipeName,
         targetDoughballWeight: v.targetDoughballWeight,
+        doughballsPerTray: v.doughballsPerTray,
         sauceRecipeName: v.frontlineRecipeName,
         cheeseRecipeNames: [
           v.app1CheeseRecipeName,

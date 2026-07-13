@@ -55,6 +55,8 @@ export type ExportProfile = {
   doughRecipeName?: string;
   /** Dough target doughball weight in oz (exported alongside the dough recipe). */
   targetDoughballWeight?: number;
+  /** Doughballs per tray (exported alongside the dough recipe). */
+  doughballsPerTray?: number;
   /** frontlineRecipeName reference (ties this profile to a sauce recipe). */
   sauceRecipeName?: string;
   /** appNCheeseRecipeName references, index 0..3 → applicator slots 1..4. */
@@ -131,6 +133,8 @@ type RecipeTie = {
   targetsByBrand: Map<string, string[]>;
   /** Dough only: first non-zero target doughball weight found. */
   doughballOz?: number;
+  /** Dough only: first non-zero doughballs-per-tray count found. */
+  doughballsPerTray?: number;
   /** Cheese only: applicator slot (1-4) the recipe first ties to. */
   appSlot?: number;
 };
@@ -177,6 +181,9 @@ function tieRecipes(
         addTarget(tie, p.brand, p.flavor);
         if (tie.doughballOz == null && p.targetDoughballWeight && p.targetDoughballWeight > 0) {
           tie.doughballOz = p.targetDoughballWeight;
+        }
+        if (tie.doughballsPerTray == null && p.doughballsPerTray && p.doughballsPerTray > 0) {
+          tie.doughballsPerTray = p.doughballsPerTray;
         }
       }
     } else if (kind === "sauce") {
@@ -313,6 +320,9 @@ function buildRecipeGrid(
       }
       if (kind === "dough" && tie.doughballOz != null) {
         rows.push(["Target Doughball Weight (oz)", num(tie.doughballOz)]);
+      }
+      if (kind === "dough" && tie.doughballsPerTray != null) {
+        rows.push(["Doughballs Per Tray", num(tie.doughballsPerTray)]);
       }
       if (kind === "cheese" && tie.appSlot != null) {
         rows.push(["Applicator Slot", num(tie.appSlot)]);

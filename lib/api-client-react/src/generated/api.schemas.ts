@@ -2708,6 +2708,8 @@ export interface SpecImportRecipe {
   doughballOz?: number;
   /** Dough only: how many crusts one dough batch yields, when the sheet states it. Fallback only — the recipe rows + doughball weight derive the yield instead when both are present. Optional. */
   doughBatchYield?: number;
+  /** Dough only: how many doughballs fit on one tray, when the sheet states it. Optional. */
+  doughballsPerTray?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
   review?: ReviewVerdict;

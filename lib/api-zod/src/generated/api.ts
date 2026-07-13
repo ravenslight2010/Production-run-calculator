@@ -1761,6 +1761,7 @@ export const AiParseSpecSheetResponse = zod.object({
 })).optional().describe('Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand\/flavor. Unioned with the singular brand\/flavor.'),
   "doughballOz": zod.number().optional(),
   "doughBatchYield": zod.number().optional().describe('Dough only: how many crusts one dough batch yields, when the sheet states it. Fallback only — the recipe rows + doughball weight derive the yield instead when both are present. Optional.'),
+  "doughballsPerTray": zod.number().optional().describe('Dough only: how many doughballs fit on one tray, when the sheet states it. Optional.'),
   "app": zod.number().optional(),
   "rows": zod.array(zod.object({
   "ingredient": zod.string(),

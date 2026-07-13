@@ -121,6 +121,8 @@ export type ParsedRecipe = {
    * present the batch math derives the yield instead. Omitted when not stated.
    */
   doughBatchYield?: number;
+  /** Dough only: how many doughballs fit on one tray, when the sheet states it. */
+  doughballsPerTray?: number;
   /** Cheese only: applicator slot (1-4) the recipe should tie to. */
   app?: number;
   /**
@@ -3501,6 +3503,8 @@ export function sanitizeParsedSpecImport(
       // rows + doughball weight can't derive the yield at run time.
       const dby = num(o.doughBatchYield);
       if (dby != null && dby > 0) recipe.doughBatchYield = Math.round(dby);
+      const dpt = num(o.doughballsPerTray);
+      if (dpt != null && dpt > 0) recipe.doughballsPerTray = Math.round(dpt);
     }
     if (kind === "cheese") {
       const app = num(o.app);
@@ -4281,7 +4285,8 @@ export function pruneSpecImportAgainstSnapshot(
     const unchanged =
       rowsEqual(r.rows ?? [], prev.rows ?? []) &&
       (r.doughballOz ?? null) === (prev.doughballOz ?? null) &&
-      (r.doughBatchYield ?? null) === (prev.doughBatchYield ?? null);
+      (r.doughBatchYield ?? null) === (prev.doughBatchYield ?? null) &&
+      (r.doughballsPerTray ?? null) === (prev.doughballsPerTray ?? null);
     if (!unchanged) return r;
     unchangedRecipes += 1;
     return { ...r, referenceOnly: true };

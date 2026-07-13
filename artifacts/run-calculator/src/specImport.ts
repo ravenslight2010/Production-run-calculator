@@ -694,8 +694,9 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * imported — prompt fixes silently never take effect on re-imports.
  * v2: duplicate-applicator prompt hardening (per-station entries, tolerance
  * values never emitted as a second applicator).
+ * v3: dough sheets now parse "doughballs per tray" (doughballsPerTray).
  */
-export const SPEC_PARSE_VERSION = "2";
+export const SPEC_PARSE_VERSION = "3";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file

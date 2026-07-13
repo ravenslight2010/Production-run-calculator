@@ -38,6 +38,7 @@ describe("buildSpecExportGrids", () => {
         pepperonis: [{ type: "Sliced Pepperoni", sticks: 2, ozPerPizza: 1.5 }],
         doughRecipeName: "Standard Dough",
         targetDoughballWeight: 12,
+        doughballsPerTray: 24,
         sauceRecipeName: "Pizza Sauce",
         cheeseRecipeNames: ["Cheese Blend", undefined, undefined, undefined],
       },
@@ -88,6 +89,7 @@ describe("buildSpecExportGrids", () => {
     // both flavors listed under the one brand
     expect(flat.some((l) => l === "Bobo's Original: Pepperoni, Cheese" || l === "Bobo's Original: Cheese, Pepperoni")).toBe(true);
     expect(flat).toContain("Target Doughball Weight (oz)|12");
+    expect(flat).toContain("Doughballs Per Tray|24");
     expect(flat).toContain("Ingredient|Lbs");
     expect(flat).toContain("Flour|50");
 

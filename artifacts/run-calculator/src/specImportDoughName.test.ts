@@ -118,6 +118,7 @@ describe("later dough recipe import re-links by name", () => {
           flavor: "",
           rows: DOUGH_ROWS,
           doughballOz: 12,
+          doughballsPerTray: 24,
         },
       ],
     } as unknown as ParsedSpecImport);
@@ -130,6 +131,7 @@ describe("later dough recipe import re-links by name", () => {
       expect(prof?.doughRecipeName, `${brand}/${flavor}`).toBe("Ultra Thin Dough");
       expect(prof?.doughRecipe, `${brand}/${flavor}`).toEqual(DOUGH_ROWS);
       expect(prof?.targetDoughballWeight, `${brand}/${flavor}`).toBe(12);
+      expect(prof?.doughballsPerTray, `${brand}/${flavor}`).toBe(24);
     }
   });
 

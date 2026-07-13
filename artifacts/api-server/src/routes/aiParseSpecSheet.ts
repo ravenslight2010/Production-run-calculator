@@ -332,7 +332,8 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number,"batchLbs":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
       '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +
-      '"doughballOz":number,"doughBatchYield":number,"app":number,"rowsUnit":"lbs"|"oz",' +
+      '"doughballOz":number,"doughBatchYield":number,"doughballsPerTray":number,' +
+      '"app":number,"rowsUnit":"lbs"|"oz",' +
       '"rows":[{"ingredient":string,"lbs":number}]}],"note":string}. ' +
       "Omit any field or row you cannot determine. Prefer `targets` for a recipe that " +
       "serves multiple brand/flavor profiles (one recipe, many targets); use the singular " +
@@ -344,8 +345,9 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
       "Set batch/yield sizes ONLY when the sheet explicitly states a made-batch size — never " +
       "compute or guess them from ingredient rows: \"batchLbs\" is the pounds one made batch of a " +
       "topping or pepperoni weighs, \"sauceBarrelLbs\" the pounds one sauce barrel weighs, and " +
-      "\"doughBatchYield\" the number of crusts one dough batch yields. Use \"note\" only for a " +
-      "brief overall comment (e.g. what you could not parse).",
+      "\"doughBatchYield\" the number of crusts one dough batch yields. Set " +
+      "\"doughballsPerTray\" to the number of doughballs per tray when a dough sheet states it. " +
+      "Use \"note\" only for a brief overall comment (e.g. what you could not parse).",
   );
 
   return { system, user: lines.join("\n") };

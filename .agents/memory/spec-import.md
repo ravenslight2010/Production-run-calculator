@@ -168,8 +168,14 @@ rule; the lib's levenshtein fuzzy is safe here — ratio ≫0.34).
 ## Case pack + batch/yield import (fallback-only for batch sizes)
 - Importer also pulls **case pack** (`ParsedProfile.pizzasPerCase`) and **batch/yield
   sizes** (`ParsedApplicator.batchLbs`, `ParsedPepperoni.batchLbs`,
-  `ParsedProfile.sauceBarrelLbs`, `ParsedRecipe.doughBatchYield`). All optional; sanitize
-  keeps them only when `>0` (case pack + dough yield rounded to whole counts).
+  `ParsedProfile.sauceBarrelLbs`, `ParsedRecipe.doughBatchYield`,
+  `ParsedRecipe.doughballsPerTray`). All optional; sanitize
+  keeps them only when `>0` (case pack + dough yield/per-tray rounded to whole counts).
+- `doughballsPerTray` (added 2026-07-13) round-trips: dough sheets import it into the
+  profile field, spec export emits a "Doughballs Per Tray" row on dough blocks. Adding a
+  field like this requires the full lockstep: openapi.yaml + codegen, prompt shape +
+  instruction, sanitize, pruneAgainstSnapshot equality, storage.ts apply, spec-export tie
+  + row, web export glue, and a SPEC_PARSE_VERSION bump (version-salted hash).
 - **CRITICAL semantic: cheese/sauce/dough batch sizes are ALREADY auto-derived from
   imported recipe rows** — the calc uses `sumRecipe(...) > 0 ? sumRecipe : <field>` for
   the effective batch (web `home.tsx`, mobile `computeCalc`), and run-form effects ZERO

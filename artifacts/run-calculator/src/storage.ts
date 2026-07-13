@@ -2661,6 +2661,7 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
         // Crusts-per-batch yield — fallback only; when the dough rows + doughball
         // weight are both present the run form derives the yield and zeroes this.
         if (r.doughBatchYield != null && r.doughBatchYield > 0) values.doughBatchYield = r.doughBatchYield;
+        if (r.doughballsPerTray != null && r.doughballsPerTray > 0) values.doughballsPerTray = r.doughballsPerTray;
       } else if (r.kind === "sauce") {
         values.frontlineRecipeName = r.name;
         values.frontlineRecipe = rows;
