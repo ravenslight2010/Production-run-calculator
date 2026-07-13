@@ -506,23 +506,31 @@ router.post(
     }
 
     // ── Non-streaming path (default) ─────────────────────────────────────────
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-ask call failed");
-      res.status(502).json({ error: "AI provider error" });
+    // A cut-off reply here surfaces to the worker as a garbled half-JSON
+    // "answer" (sanitizeAnswer's raw fallback), so retry once. On final
+    // give-up the existing raw-fallback behavior is kept via result.content.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-ask",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 2048,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok && result.reason !== "malformed") {
+      const failure = aiCallFailureHttp(result, "AI provider error");
+      res.status(failure.status).json({ error: failure.error });
       return;
     }
+    const content = result.ok ? JSON.stringify(result.raw) : result.content;
 
     res.json(await finalize(content));
   },
@@ -614,23 +622,31 @@ router.post(
 
     const { system, user } = buildCommandPrompt(validation.data, inventoryForPrompt);
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("cheap"),
-        max_completion_tokens: 1024,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-command call failed");
-      res.status(502).json({ error: "AI provider error" });
+    // A malformed reply here turns a spoken command into a silent no-op ("I
+    // didn't catch that"), so retry once. On final give-up sanitizeCommand's
+    // existing safe "none" fallback still applies via result.content.
+    const aiResult = await fetchModelJsonWithRetry({
+      label: "ai-command",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("cheap"),
+          max_completion_tokens: 1024,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!aiResult.ok && aiResult.reason !== "malformed") {
+      const failure = aiCallFailureHttp(aiResult, "AI provider error");
+      res.status(failure.status).json({ error: failure.error });
       return;
     }
+    const content = aiResult.ok ? JSON.stringify(aiResult.raw) : aiResult.content;
 
     const result = sanitizeCommand(content, grounding);
     res.json({ ...result, generatedAt: Date.now() });
@@ -738,23 +754,30 @@ router.post(
     }
 
     // ── Non-streaming path (default) ─────────────────────────────────────────
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: grounded },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-recipe-assistant call failed");
-      res.status(502).json({ error: "AI provider error" });
+    // A cut-off reply surfaces as a garbled half-JSON "answer" (raw fallback),
+    // so retry once; final give-up keeps that fallback via result.content.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-recipe-assistant",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 2048,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: grounded },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok && result.reason !== "malformed") {
+      const failure = aiCallFailureHttp(result, "AI provider error");
+      res.status(failure.status).json({ error: failure.error });
       return;
     }
+    const content = result.ok ? JSON.stringify(result.raw) : result.content;
 
     res.json(finalize(content));
   },
@@ -941,23 +964,30 @@ router.post(
       facilityDomains: ["ingredient", "general"],
     });
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 2048,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: grounded },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-mix-assistant call failed");
-      res.status(502).json({ error: "AI provider error" });
+    // A cut-off reply surfaces as a garbled half-JSON "answer" (raw fallback),
+    // so retry once; final give-up keeps that fallback via result.content.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-mix-assistant",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 2048,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: grounded },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok && result.reason !== "malformed") {
+      const failure = aiCallFailureHttp(result, "AI provider error");
+      res.status(failure.status).json({ error: failure.error });
       return;
     }
+    const content = result.ok ? JSON.stringify(result.raw) : result.content;
 
     const { answer, note } = sanitizeMixAnswer(content);
     const replyText = answer || note || "I couldn't answer that from the mix data.";
