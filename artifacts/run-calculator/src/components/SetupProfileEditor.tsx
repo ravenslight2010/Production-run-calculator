@@ -10,6 +10,13 @@ import {
   LABEL_POSITION_OPTIONS,
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
+import { fetchSavedSpecSheets } from "../savedSpecSheets";
+import {
+  buildProfileAutofillPlan,
+  applyAutofillEntries,
+  type AutofillEntry,
+  type ProfileAutofillPlan,
+} from "../profileAutofill";
 import {
   allergenOptions,
   normalizeAllergen,
@@ -32,7 +39,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Settings, Package, Save, X } from "lucide-react";
+import { ChevronDown, Settings, Package, Save, X, Sparkles, Check } from "lucide-react";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -280,6 +287,13 @@ export default function SetupProfileEditor({
   const [sauceWeightsOpen, setSauceWeightsOpen] = useState(true);
   const [pep1ShowB, setPep1ShowB] = useState(false);
   const [pep2ShowB, setPep2ShowB] = useState(false);
+  const [autofill, setAutofill] = useState<{
+    plan: ProfileAutofillPlan;
+    applied: AutofillEntry[];
+    sheetsAvailable: number;
+  } | null>(null);
+  const [autofillBusy, setAutofillBusy] = useState(false);
+  const [autofillError, setAutofillError] = useState("");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -394,6 +408,8 @@ export default function SetupProfileEditor({
     form.reset(values);
     resetFieldArrays(values);
     setLineType(Number(values.crustsPerCase) > 0 && (values.doughRecipe ?? []).length === 0 ? "crusts" : "dough");
+    setAutofill(null);
+    setAutofillError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, brand, flavor]);
 
@@ -418,6 +434,70 @@ export default function SetupProfileEditor({
     saveProfile(b, f, values);
     toast({ title: `Saved setup for ${b} — ${f}` });
   }
+
+  /**
+   * Write accepted auto-fill entries into the form (NOT persisted — the user
+   * still presses Save Setup). Recipe-name fields also hydrate their rows from
+   * the matching server pool (cheese/mix/dough/sauce), mirroring what picking
+   * the same name by hand in this editor does.
+   */
+  function applyAutofillToForm(entries: AutofillEntry[], plan: ProfileAutofillPlan) {
+    if (entries.length === 0) return;
+    const values = applyAutofillEntries(form.getValues(), entries, plan.pepCombinedTarget) as FormValues;
+    const rec = values as unknown as Record<string, unknown>;
+    for (const e of entries) {
+      const nameKey = String(e.specValue).trim().toLowerCase();
+      const appMatch = /^app([1-4])CheeseRecipeName$/.exec(e.field);
+      if (appMatch) {
+        const rows = serverCheeseRowsByName.get(nameKey) ?? serverMixRowsByName.get(nameKey);
+        if (rows) rec[`app${appMatch[1]}CheeseRecipe`] = rows.map(r => ({ ...r }));
+      } else if (e.field === "doughRecipeName") {
+        const rows = serverDoughRowsByName.get(nameKey);
+        if (rows) rec.doughRecipe = rows.map(r => ({ ...r }));
+      } else if (e.field === "frontlineRecipeName") {
+        const rows = serverSauceRowsByName.get(nameKey);
+        if (rows) rec.frontlineRecipe = rows.map(r => ({ ...r }));
+      }
+    }
+    form.reset(values);
+    resetFieldArrays(values);
+  }
+
+  async function runAutofill() {
+    const b = brand.trim();
+    const f = flavor.trim();
+    if (!b || !f || autofillBusy) return;
+    setAutofillBusy(true);
+    setAutofillError("");
+    try {
+      const sheets = await fetchSavedSpecSheets();
+      const plan = buildProfileAutofillPlan({
+        sheets,
+        brand: b,
+        flavor: f,
+        current: form.getValues(),
+        mixNamesLower: new Set(serverMixNames.map(n => n.toLowerCase())),
+      });
+      applyAutofillToForm(plan.fills, plan);
+      setAutofill({ plan, applied: plan.fills, sheetsAvailable: sheets.length });
+      if (plan.fills.length > 0) {
+        toast({ title: `Filled ${plan.fills.length} blank field${plan.fills.length === 1 ? "" : "s"} from your latest imports`, description: "Review below, then press Save Setup to keep them." });
+      }
+    } catch {
+      setAutofillError("Couldn't load your saved imported files. Check your connection and try again.");
+    } finally {
+      setAutofillBusy(false);
+    }
+  }
+
+  function acceptMismatches(entries: AutofillEntry[]) {
+    if (!autofill || entries.length === 0) return;
+    applyAutofillToForm(entries, autofill.plan);
+    setAutofill({ ...autofill, applied: [...autofill.applied, ...entries] });
+  }
+
+  const appliedFields = new Set((autofill?.applied ?? []).map(e => e.field));
+  const pendingMismatches = (autofill?.plan.mismatches ?? []).filter(e => !appliedFields.has(e.field));
 
   function applicatorTypeHandlers(app: ApplicatorNum) {
     const typeKey = `app${app}Type` as const;
@@ -571,6 +651,77 @@ export default function SetupProfileEditor({
 
             {brand.trim() && flavor.trim() && (
               <>
+                <Card className="bg-card/50 border-border/50 shadow-md">
+                  <CardHeader className="pb-2 pt-4 px-5">
+                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-primary" /> Auto-Fill From Imports
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <p className="text-xs text-muted-foreground flex-1 min-w-[200px]">
+                        Fill blank fields from your latest imported spec sheets. Differences are listed for you to review — nothing changes without your OK, and nothing is saved until you press Save Setup.
+                      </p>
+                      <Button type="button" size="sm" variant="outline" onClick={runAutofill} disabled={autofillBusy}>
+                        <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                        {autofillBusy ? "Checking…" : "Check Latest Imports"}
+                      </Button>
+                    </div>
+                    {autofillError && (
+                      <p className="text-xs text-destructive">{autofillError}</p>
+                    )}
+                    {autofill && autofill.sheetsAvailable === 0 && (
+                      <p className="text-xs text-muted-foreground">No imported spec sheets are saved yet — import a spec sheet first, then come back here.</p>
+                    )}
+                    {autofill && autofill.sheetsAvailable > 0 && autofill.plan.matchedSheets === 0 && (
+                      <p className="text-xs text-muted-foreground">Your latest imported files don't mention {brand.trim()} — {flavor.trim()}.</p>
+                    )}
+                    {autofill && autofill.plan.matchedSheets > 0 && autofill.applied.length === 0 && pendingMismatches.length === 0 && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-primary" /> Everything already matches your latest imports.
+                      </p>
+                    )}
+                    {(autofill?.applied.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Filled in ({autofill!.applied.length})</p>
+                        <ul className="space-y-0.5">
+                          {autofill!.applied.map(e => (
+                            <li key={e.field} className="text-xs flex items-center gap-1.5">
+                              <Check className="w-3 h-3 text-primary shrink-0" />
+                              <span className="text-muted-foreground">{e.label}:</span>
+                              <span className="font-semibold">{String(e.specValue)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {pendingMismatches.length > 0 && autofill && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Doesn't match the import ({pendingMismatches.length})</p>
+                          <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => acceptMismatches(pendingMismatches)}>
+                            Use imported for all
+                          </Button>
+                        </div>
+                        <ul className="space-y-1">
+                          {pendingMismatches.map(e => (
+                            <li key={e.field} className="text-xs flex items-center gap-2 flex-wrap rounded-md border border-border/40 bg-muted/20 px-2.5 py-1.5">
+                              <span className="font-semibold">{e.label}</span>
+                              <span className="text-muted-foreground">
+                                now <span className="font-semibold text-foreground">{String(e.currentValue)}</span>
+                                {" · "}import says <span className="font-semibold text-foreground">{String(e.specValue)}</span>
+                              </span>
+                              <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-xs ml-auto" onClick={() => acceptMismatches([e])}>
+                                Use imported
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
                 <details open className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden">
                   <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                     <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
