@@ -110,6 +110,11 @@ import {
   loadProfile,
   backfillFromProfile,
   saveProfile,
+  mergeProfileIntoOpenForm,
+  recipeRowsEqual,
+  normalizeRecipeRowsForCompare,
+  refreshProfilesFromNamedRecipes,
+  type NamedRecipePoolPatch,
   resolvePep1Combined,
   loadBrandFlavors,
   saveBrandFlavors,
@@ -3252,6 +3257,32 @@ export default function Home() {
     () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
     [sauceRecipesList],
   );
+  // ── Unified setup editing: drift vs the linked shared dough/sauce recipe ──
+  // When the open form's dough/sauce rows (or dough target weight) were hand-
+  // tweaked away from the shared server-pool recipe they link by name, show a
+  // small "differs from shared recipe" indicator on the Setup tab. The tweak
+  // stays local to this run unless a manager deliberately promotes it into the
+  // shared pool ("Update shared recipe"), which the server gates on
+  // manage-inventory.
+  const doughPoolDrift = useMemo(() => {
+    const name = (v.doughRecipeName ?? "").trim();
+    if (!name) return null;
+    const key = name.toLowerCase();
+    const poolRows = serverDoughRowsByName.get(key);
+    if (!poolRows) return null;
+    const rowsDiffer = !recipeRowsEqual(v.doughRecipe ?? [], poolRows);
+    const formW = Number(v.targetDoughballWeight ?? 0);
+    const weightDiffers = formW > 0 && formW !== (serverDoughWeightByName.get(key) ?? 0);
+    return rowsDiffer || weightDiffers ? { name } : null;
+  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight, serverDoughRowsByName, serverDoughWeightByName]);
+  const saucePoolDrift = useMemo(() => {
+    const name = (v.frontlineRecipeName ?? "").trim();
+    if (!name) return null;
+    const poolRows = serverSauceRowsByName.get(name.toLowerCase());
+    if (!poolRows) return null;
+    return recipeRowsEqual(v.frontlineRecipe ?? [], poolRows) ? null : { name };
+  }, [v.frontlineRecipeName, v.frontlineRecipe, serverSauceRowsByName]);
+  const [promotingRecipeKind, setPromotingRecipeKind] = useState<null | "dough" | "sauce">(null);
   // Run-form dropdown options: the server pool names unioned with any locally
   // known recipe names (backward compat for names still only in the synced
   // list), sorted for a stable browse order.
@@ -6302,6 +6333,157 @@ export default function Home() {
     schedulePush(ds, 2000);
     flashSaved();
   }, [v]);
+
+  // ── Unified setup editing: edit once, updates everywhere ──────────────────
+  // (1) Setup Profiles editor → open run form. After Save Setup persists a
+  // profile, live-refresh the open form when it shows the same brand+flavor —
+  // otherwise the next autosave/nav-save would write the stale open form right
+  // back over the fresh profile (the open-form-clobber trap every out-of-band
+  // profile writer must handle). Per-run inputs (cases needed, temp overrides)
+  // and progress fields of a started run are kept: mergeProfileIntoOpenForm
+  // only overlays profile-owned fields.
+  function handleSetupProfileSaved(brand: string, flavor: string) {
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay?.runs[liveDay.currentIndex];
+    if (!liveRun) return;
+    if (
+      (liveRun.brand ?? "").trim().toLowerCase() !== brand.trim().toLowerCase() ||
+      (liveRun.flavor ?? "").trim().toLowerCase() !== flavor.trim().toLowerCase()
+    ) {
+      return;
+    }
+    const profile = loadProfile(liveRun.brand, liveRun.flavor);
+    if (!profile) return;
+    // Same guard as the spec-import reload: a mix recipe name must never land
+    // in the sauce fields (mixes live on the applicator cards).
+    if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+      profile.frontlineRecipeName = "";
+      profile.frontlineRecipe = [];
+    }
+    const current = form.getValues();
+    const merged = mergeProfileIntoOpenForm(current, profile);
+    if (merged === current) return;
+    const now = Date.now();
+    saveRunValues(liveRun.id, merged);
+    markRunValuesUpdated(liveRun.id, now);
+    lastLocalEditRef.current = now;
+    form.reset(merged);
+    resetFieldArrays(merged);
+    schedulePush(dayStateRef.current, 0);
+    toast({
+      title: "Run form updated",
+      description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
+    });
+  }
+
+  // (2) Manage Lists dough/sauce pool → run forms + saved profiles. When a
+  // shared recipe's rows (or dough target weight) change — edited locally or
+  // on another device (the pool refetches periodically) — fan the new version
+  // out to every SAVED profile linked by name (refreshProfilesFromNamedRecipes,
+  // a targeted merge that can never blank other profile data) and refresh the
+  // OPEN form's linked rows via setValue so the normal autosave persists and
+  // stamps it. The first snapshot of each pool only primes the ref — a page
+  // load must not look like "everything changed".
+  const namedPoolSnapRef = useRef<{ dough: Map<string, string> | null; sauce: Map<string, string> | null }>({ dough: null, sauce: null });
+  function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
+    const snap = new Map<string, string>();
+    const byKey = new Map<string, NamedRecipePoolPatch>();
+    for (const r of list) {
+      if (r.enabled === false) continue;
+      const key = r.name.trim().toLowerCase();
+      if (!key) continue;
+      const rows = normalizeRecipeRowsForCompare(r.components);
+      const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
+      snap.set(key, JSON.stringify({ rows, weight }));
+      byKey.set(key, { name: r.name, rows, ...(weight > 0 ? { doughballWeightOz: weight } : {}) });
+    }
+    const prev = namedPoolSnapRef.current[kind];
+    namedPoolSnapRef.current[kind] = snap;
+    if (prev === null) return;
+    const changed: NamedRecipePoolPatch[] = [];
+    for (const [key, sig] of snap) {
+      if (prev.get(key) !== undefined && prev.get(key) !== sig) changed.push(byKey.get(key)!);
+    }
+    if (changed.length === 0) return;
+    const touched = refreshProfilesFromNamedRecipes(kind, changed);
+    const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
+    const linked = String(linkedRaw ?? "").trim().toLowerCase();
+    const hit = linked ? changed.find((c) => c.name.trim().toLowerCase() === linked) : undefined;
+    let formUpdated = false;
+    if (hit) {
+      const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
+      if (!recipeRowsEqual(curRows, hit.rows)) {
+        const copy = hit.rows.map((row) => ({ ...row }));
+        if (kind === "dough") {
+          form.setValue("doughRecipe", copy, { shouldDirty: true });
+          replaceDough(copy);
+        } else {
+          form.setValue("frontlineRecipe", copy, { shouldDirty: true });
+          replaceFrontline(copy);
+        }
+        formUpdated = true;
+      }
+      const wantW = hit.doughballWeightOz ?? 0;
+      if (kind === "dough" && wantW > 0 && Number(form.getValues("targetDoughballWeight") ?? 0) !== wantW) {
+        form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
+        formUpdated = true;
+      }
+    }
+    if (!formUpdated && touched.length === 0) return;
+    const label = kind === "dough" ? "dough" : "sauce";
+    toast({
+      title: changed.length === 1 ? `Shared ${label} recipe "${changed[0].name}" updated` : `Shared ${label} recipes updated`,
+      description: formUpdated
+        ? "This run's recipe was refreshed to match."
+        : `${touched.length} saved setup${touched.length === 1 ? "" : "s"} refreshed to match.`,
+    });
+  }
+  useEffect(() => {
+    applyNamedPoolChange("dough", doughRecipesList);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doughRecipesList]);
+  useEffect(() => {
+    applyNamedPoolChange("sauce", sauceRecipesList);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sauceRecipesList]);
+
+  // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
+  // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
+  // the same per-id upsert Manage Lists uses; the server gates the write on
+  // manage-inventory. The pool effect above then fans the accepted version out
+  // to any other saved profiles linked to the same name.
+  async function promoteFormRecipeToShared(kind: "dough" | "sauce") {
+    if (promotingRecipeKind) return;
+    const vals = form.getValues();
+    const name = String((kind === "dough" ? vals.doughRecipeName : vals.frontlineRecipeName) ?? "").trim();
+    if (!name) return;
+    const list = kind === "dough" ? doughRecipesList : sauceRecipesList;
+    const target = list.find((r) => r.enabled !== false && r.name.trim().toLowerCase() === name.toLowerCase());
+    if (!target) return;
+    const rows = normalizeRecipeRowsForCompare((kind === "dough" ? vals.doughRecipe : vals.frontlineRecipe) ?? []);
+    const next: NamedRecipe = { ...target, components: rows };
+    if (kind === "dough") {
+      const w = Number(vals.targetDoughballWeight ?? 0);
+      if (w > 0) next.doughballWeightOz = w;
+    }
+    setPromotingRecipeKind(kind);
+    try {
+      const saved = await saveNamedRecipes(kind, [next]);
+      cycleCountQc.setQueryData([kind === "dough" ? "doughRecipes" : "sauceRecipes"], saved);
+      toast({
+        title: `Shared recipe "${target.name}" updated`,
+        description: "Every run and saved setup linked to it now uses this version.",
+      });
+    } catch {
+      toast({
+        title: "Couldn't update the shared recipe",
+        description: "Check your connection and permissions, then try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPromotingRecipeKind(null);
+    }
+  }
 
   // Commit a single confirmed value from the "Fill in missing data" panel. Goes
   // through the normal form path (setValue → autosave effect persists run values
@@ -15190,6 +15372,25 @@ export default function Home() {
                       }
                     }}
                   />
+                  {doughPoolDrift && (
+                    <div className="flex flex-wrap items-center gap-2 -mt-3 px-1 text-xs text-amber-500" data-testid="dough-pool-drift">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Differs from the shared recipe "{doughPoolDrift.name}" — this change applies to this run only.</span>
+                      {canManageInventory && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-6 px-2 text-[11px]"
+                          disabled={promotingRecipeKind !== null}
+                          onClick={() => promoteFormRecipeToShared("dough")}
+                          data-testid="button-promote-dough-recipe"
+                        >
+                          {promotingRecipeKind === "dough" ? "Updating…" : "Update shared recipe"}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   <Card className="bg-card/50 border-border/50 shadow-md">
                     <button
                       type="button"
@@ -15256,6 +15457,25 @@ export default function Home() {
                             }
                           }}
                         />
+                      )}
+                      {saucePoolDrift && (
+                        <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-amber-500" data-testid="sauce-pool-drift">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>Differs from the shared recipe "{saucePoolDrift.name}" — this change applies to this run only.</span>
+                          {canManageInventory && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[11px]"
+                              disabled={promotingRecipeKind !== null}
+                              onClick={() => promoteFormRecipeToShared("sauce")}
+                              data-testid="button-promote-sauce-recipe"
+                            >
+                              {promotingRecipeKind === "sauce" ? "Updating…" : "Update shared recipe"}
+                            </Button>
+                          )}
+                        </div>
                       )}
 
                       <TypeDropdown
@@ -17125,6 +17345,7 @@ export default function Home() {
         <SetupProfileEditor
           open={setupEditorOpen}
           onClose={() => setSetupEditorOpen(false)}
+          onSaved={handleSetupProfileSaved}
           initialBrand={setupEditorBrand}
           initialFlavor={setupEditorFlavor}
           isSupervisor={isSupervisor}

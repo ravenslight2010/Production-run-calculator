@@ -592,6 +592,149 @@ export function applyPackagingPatchToProfile(
   } catch {}
 }
 
+// ─── Unified setup editing ("edit once, updates everywhere") ─────────────────
+
+/**
+ * Normalize recipe rows for comparison/promotion: trim ingredient names, drop
+ * rows with no ingredient (the blank "+ Add" row), coerce lbs to a finite
+ * non-negative number. Mirrors normalizeNamedRecipeComponent so a form row and
+ * a pool component compare on equal footing.
+ */
+export function normalizeRecipeRowsForCompare(
+  rows: ReadonlyArray<{ ingredient?: unknown; lbs?: unknown }> | undefined | null,
+): { ingredient: string; lbs: number }[] {
+  return (rows ?? [])
+    .map((r) => {
+      const ingredient = typeof r?.ingredient === "string" ? r.ingredient.trim() : "";
+      const n = Number(r?.lbs ?? 0);
+      return { ingredient, lbs: Number.isFinite(n) ? Math.max(0, n) : 0 };
+    })
+    .filter((r) => r.ingredient);
+}
+
+/**
+ * Order-sensitive equality of two recipe-row lists after normalization
+ * (case-insensitive ingredient names). Used to decide whether a run form's
+ * dough/sauce rows have drifted from the linked shared (server-pool) recipe and
+ * whether a pool change actually needs to rewrite anything.
+ */
+export function recipeRowsEqual(
+  a: ReadonlyArray<{ ingredient?: unknown; lbs?: unknown }> | undefined | null,
+  b: ReadonlyArray<{ ingredient?: unknown; lbs?: unknown }> | undefined | null,
+): boolean {
+  const na = normalizeRecipeRowsForCompare(a);
+  const nb = normalizeRecipeRowsForCompare(b);
+  if (na.length !== nb.length) return false;
+  return na.every(
+    (r, i) =>
+      r.ingredient.toLowerCase() === nb[i].ingredient.toLowerCase() &&
+      r.lbs === nb[i].lbs,
+  );
+}
+
+/**
+ * Overlay a freshly saved profile onto the OPEN run form's current values,
+ * keeping everything that belongs to the run rather than the profile:
+ * PER_RUN_FIELDS (cases needed, temp overrides), PROGRESS_FIELDS (skids/cases/
+ * trays/batches progress of a started run) and the brand/flavor identity.
+ * Returns `current` unchanged (same reference) when nothing differs, so the
+ * caller can cheaply skip the reset/stamp/push dance.
+ */
+export function mergeProfileIntoOpenForm(
+  current: FormValues,
+  profile: FormValues,
+): FormValues {
+  const skip = new Set<string>([
+    ...PER_RUN_FIELDS,
+    ...PROGRESS_FIELDS,
+    "brand",
+    "flavor",
+  ]);
+  let out = current;
+  for (const field of Object.keys(DEFAULT_VALUES) as (keyof FormValues)[]) {
+    if (skip.has(field)) continue;
+    const prof = profile[field];
+    if (prof === undefined) continue;
+    if (deepEqual(out[field], prof)) continue;
+    if (out === current) out = { ...current };
+    (out as Record<string, unknown>)[field] = prof;
+  }
+  return out;
+}
+
+/** One changed shared (server-pool) dough/sauce recipe to fan out to profiles. */
+export interface NamedRecipePoolPatch {
+  name: string;
+  rows: { ingredient: string; lbs: number }[];
+  /** Dough only: target doughball weight in oz (> 0 = known). */
+  doughballWeightOz?: number;
+}
+
+/**
+ * Fan a changed shared dough/sauce recipe out to every SAVED brand+flavor
+ * profile that links it by name: profiles whose doughRecipeName /
+ * frontlineRecipeName matches (case-insensitive) get their recipe rows — and,
+ * for dough, the target doughball weight — rewritten to the new pool version.
+ * Targeted field merge onto the stored blob (like applyPackagingPatchToProfile),
+ * so it can never blank other profile data and never creates a profile that
+ * doesn't exist. Returns the (lowercased) brand+flavor pairs actually rewritten
+ * so the caller can reload an affected open form.
+ */
+export function refreshProfilesFromNamedRecipes(
+  kind: "dough" | "sauce",
+  changed: ReadonlyArray<NamedRecipePoolPatch>,
+): { brand: string; flavor: string }[] {
+  if (typeof localStorage === "undefined" || changed.length === 0) return [];
+  const byName = new Map<string, NamedRecipePoolPatch>();
+  for (const c of changed) {
+    const key = c.name.trim().toLowerCase();
+    if (key) byName.set(key, c);
+  }
+  if (byName.size === 0) return [];
+  const nameField = kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
+  const rowsField = kind === "dough" ? "doughRecipe" : "frontlineRecipe";
+  const prefix = "run-calc-profile-";
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(prefix)) keys.push(k);
+  }
+  const touched: { brand: string; flavor: string }[] = [];
+  for (const k of keys) {
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as
+        | Record<string, unknown>
+        | null;
+      if (!obj || typeof obj !== "object") continue;
+      const linked = typeof obj[nameField] === "string" ? (obj[nameField] as string).trim().toLowerCase() : "";
+      if (!linked) continue;
+      const patch = byName.get(linked);
+      if (!patch) continue;
+      const curRows = Array.isArray(obj[rowsField])
+        ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
+        : [];
+      const rowsDiffer = !recipeRowsEqual(curRows, patch.rows);
+      const wantWeight = kind === "dough" ? patch.doughballWeightOz ?? 0 : 0;
+      const weightDiffers =
+        wantWeight > 0 && Number(obj.targetDoughballWeight ?? 0) !== wantWeight;
+      if (!rowsDiffer && !weightDiffers) continue;
+      if (rowsDiffer) obj[rowsField] = patch.rows.map((r) => ({ ...r }));
+      if (weightDiffers) obj.targetDoughballWeight = wantWeight;
+      localStorage.setItem(k, JSON.stringify(obj));
+      markProfileEdited(k.slice(prefix.length));
+      const rest = k.slice(prefix.length);
+      const sep = rest.indexOf("__");
+      touched.push({
+        brand: sep >= 0 ? rest.slice(0, sep) : rest,
+        flavor: sep >= 0 ? rest.slice(sep + 2) : "",
+      });
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the fan-out.
+    }
+  }
+  return touched;
+}
+
 export function freshDayState(): DayState {
   // The placeholder run is `seeded`: auto-created, not a user action. While it
   // stays pristine it is excluded from sync pushes and dropped on receive once

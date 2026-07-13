@@ -183,6 +183,12 @@ const SLIP_SHEET_OPTIONS = [
 export interface SetupProfileEditorProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Called after Save Setup persists the profile, so the host page can
+   * live-refresh an open run form that uses the same brand+flavor (the
+   * "unified setup editing" flow — edit once, updates everywhere).
+   */
+  onSaved?: (brand: string, flavor: string) => void;
   initialBrand?: string;
   initialFlavor?: string;
   isSupervisor: boolean;
@@ -238,6 +244,7 @@ export interface SetupProfileEditorProps {
 export default function SetupProfileEditor({
   open,
   onClose,
+  onSaved,
   initialBrand,
   initialFlavor,
   isSupervisor,
@@ -433,6 +440,7 @@ export default function SetupProfileEditor({
     const values = form.getValues();
     saveProfile(b, f, values);
     toast({ title: `Saved setup for ${b} — ${f}` });
+    onSaved?.(b, f);
   }
 
   /**
