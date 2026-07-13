@@ -24,6 +24,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const MOBILE_DIR = path.resolve(here, "../../run-calculator-mobile");
 const UTIL_FILE = path.join(MOBILE_DIR, "utils/importCaseUpdates.ts");
 const SCHEDULE_FILE = path.join(MOBILE_DIR, "app/schedule.tsx");
+const SUMMARY_FILE = path.join(MOBILE_DIR, "app/(tabs)/summary.tsx");
+const MASTER_DATA_FILE = path.join(MOBILE_DIR, "app/master-data.tsx");
 const RUN_CONTEXT_FILE = path.join(MOBILE_DIR, "context/RunContext.tsx");
 
 type Offer = {
@@ -274,6 +276,61 @@ describe("source guards: the mobile apply path stays id-scoped", () => {
     expect(src).toMatch(
       /promptCaseUpdates\(caseUpdateOffers,\s*skippedNote,\s*\(o\)\s*=>\s*updateRunSettingsById\(o\.runId,\s*\{\s*casesNeeded:\s*o\.to\s*\}\s*\)/,
     );
+  });
+
+  it("summary.tsx (Import Runs) wires the SAME id-scoped apply callback", () => {
+    const src = fs.readFileSync(SUMMARY_FILE, "utf8");
+    expect(src).toMatch(
+      /promptCaseUpdates\(caseUpdateOffers,\s*skippedNote,\s*\(o\)\s*=>\s*updateRunSettingsById\(o\.runId,\s*\{\s*casesNeeded:\s*o\.to\s*\}\s*\)/,
+    );
+  });
+
+  it("master-data.tsx (schedule import) wires the SAME id-scoped apply callback", () => {
+    const src = fs.readFileSync(MASTER_DATA_FILE, "utf8");
+    expect(src).toMatch(
+      /promptCaseUpdates\(caseUpdateOffers,\s*`\$\{summary\}\\n\\n`,\s*\(o\)\s*=>\s*updateRunSettingsById\(o\.runId,\s*\{\s*casesNeeded:\s*o\.to\s*\}\s*\)/,
+    );
+  });
+
+  it("no promptCaseUpdates call site applies through anything but updateRunSettingsById", () => {
+    // If a new screen adopts the offer dialog with a different (broader or
+    // unstamped) write path, this catches it: every apply callback must be
+    // exactly the id-scoped settings merge above.
+    for (const file of [SCHEDULE_FILE, SUMMARY_FILE, MASTER_DATA_FILE]) {
+      const src = fs.readFileSync(file, "utf8");
+      const calls = src.match(/promptCaseUpdates\(/g) ?? [];
+      const scoped =
+        src.match(
+          /promptCaseUpdates\([^)]*\(o\)\s*=>\s*updateRunSettingsById\(o\.runId,\s*\{\s*casesNeeded:\s*o\.to\s*\}\s*\)/g,
+        ) ?? [];
+      // Exclude the import statement itself (no opening-paren match there).
+      expect(scoped.length, path.basename(file)).toBe(calls.length);
+      expect(calls.length, path.basename(file)).toBeGreaterThan(0);
+    }
+  });
+
+  it("accepted updates get the per-run LWW stamp: the change-watcher diffs appState and stamps edited runs", () => {
+    // Mobile has no explicit markRunValuesUpdated at the apply site; instead
+    // updateRunSettingsById goes through setAppState, and the change-watcher
+    // effect (keyed on [appState]) attributes the diff to the edited run via
+    // diffStampRunEdits — the mobile equivalent of the web autosave's
+    // markRunValuesUpdated. If either half changes shape, an accepted count
+    // would sync WITHOUT a fresh stamp and lose the LWW merge to a peer's
+    // stale copy (the exact bug class this dialog shipped with on web).
+    const src = fs.readFileSync(RUN_CONTEXT_FILE, "utf8");
+    // 1. The apply write goes through setAppState (so the watcher sees it).
+    const fnStart = src.indexOf("const updateRunSettingsById");
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(src.slice(fnStart, fnStart + 700)).toMatch(/setAppState\(\(prev\)\s*=>/);
+    // 2. The change-watcher stamps per-run edits and schedules a push.
+    const watcherStart = src.indexOf("diffStampRunEdits(");
+    expect(watcherStart).toBeGreaterThan(-1);
+    const watcher = src.slice(Math.max(0, watcherStart - 2000), watcherStart + 800);
+    expect(watcher).toMatch(/lastLocalEditRef\.current\s*=\s*now/);
+    expect(watcher).toMatch(/runValuesUpdatedAtRef\.current\s*=\s*updatedAt/);
+    expect(watcher).toMatch(/schedulePush\(\)/);
+    // 3. The watcher effect re-runs on every appState change.
+    expect(src).toMatch(/\},\s*\[appState,\s*schedulePush\]\);/);
   });
 
   it("RunContext updateRunSettingsById merges only the matched run's settings (progress and other runs untouched)", () => {
