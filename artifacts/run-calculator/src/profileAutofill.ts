@@ -28,6 +28,7 @@ import {
   specImportCheeseRecipeIsMix,
   specImportNameMatchKey,
   cleanSpecCheeseRecipeName,
+  recipeApplyTargets,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedSpecImport,
@@ -180,6 +181,85 @@ function desiredFromProfile(
   return { desired: out, namedPepCount: namedPeps.length };
 }
 
+/**
+ * Mirror of applySpecImport's dough/sauce RECIPE tie (the recipe loop in
+ * storage.ts): a dough or sauce recipe reaches this brand+flavor when
+ * `recipeApplyTargets` says so — explicit targets, brand anchors, or the
+ * same-brand fan-out over the pool (the sheet's own profiles plus the profile
+ * being edited, standing in for the import's saved-profile pool) — OR when the
+ * profile's CURRENT recipe name loose-matches the recipe (the import's
+ * name re-link). The import overwrites the profile's name/rows/doughball
+ * fields unconditionally at tie time, so these outrank the profile-level
+ * doughName/sauceName within the same sheet; a later recipe in the same sheet
+ * overwrites an earlier one, matching the import loop's order.
+ */
+function desiredFromDoughSauceRecipes(
+  data: ParsedSpecImport,
+  source: string,
+  brand: string,
+  flavor: string,
+  current: FormValues,
+  sheetProfile?: ParsedProfile,
+): Desired[] {
+  const recipes = Array.isArray(data?.recipes) ? data.recipes : [];
+  const b = brand.trim().toLowerCase();
+  const f = flavor.trim().toLowerCase();
+  const cur = current as Record<string, unknown>;
+  // The import's profile loop runs BEFORE the recipe tie, so by relink time
+  // the profile may already carry the sheet's doughName/sauceName (assigned
+  // only when the name is blank and no mixed rows exist). Mirror that
+  // intermediate state when deciding what name the relink compares against.
+  const effectiveName = (nameField: "doughRecipeName" | "frontlineRecipeName"): string => {
+    const curName = String(cur[nameField] ?? "").trim();
+    if (curName) return curName;
+    const pName =
+      nameField === "doughRecipeName"
+        ? (sheetProfile?.doughName ?? "").trim()
+        : (sheetProfile?.sauceName ?? "").trim();
+    const rowsField = nameField === "doughRecipeName" ? "doughRecipe" : "frontlineRecipe";
+    return pName && !hasRealRows(cur[rowsField]) ? pName : "";
+  };
+  const pool: ParsedProfile[] = [
+    ...(Array.isArray(data?.profiles) ? data.profiles : []),
+    { brand, flavor, applicators: [], pepperonis: [] },
+  ];
+  const byField = new Map<string, Desired>();
+  const set = (field: string, label: string, value: string | number, kind: DesiredKind) => {
+    byField.set(field, { field, label, value, kind, source });
+  };
+  for (const r of recipes) {
+    if (r.kind !== "dough" && r.kind !== "sauce") continue;
+    const rName = (r.name ?? "").trim();
+    if (!rName) continue;
+    const nameField = r.kind === "dough" ? ("doughRecipeName" as const) : ("frontlineRecipeName" as const);
+    const rKey = specImportNameMatchKey(rName);
+    const curName = effectiveName(nameField);
+    const targeted =
+      recipeApplyTargets(r, pool).some(
+        (t) => t.brand.trim().toLowerCase() === b && t.flavor.trim().toLowerCase() === f,
+      ) ||
+      (!!rKey && !!curName && specImportNameMatchKey(curName) === rKey);
+    if (!targeted) continue;
+    if (r.kind === "dough") {
+      set("doughRecipeName", "Dough Recipe", rName, "name");
+      // Import parity: storage writes targetDoughballWeight whenever the sheet
+      // states doughballOz at all (`!= null`), including an explicit 0.
+      if (r.doughballOz != null) {
+        set("targetDoughballWeight", "Doughball Weight (oz)", r.doughballOz, "number");
+      }
+      if (r.doughBatchYield != null && r.doughBatchYield > 0) {
+        set("doughBatchYield", "Dough Batch Yield (crusts)", r.doughBatchYield, "number");
+      }
+      if (r.doughballsPerTray != null && r.doughballsPerTray > 0) {
+        set("doughballsPerTray", "Doughballs Per Tray", r.doughballsPerTray, "number");
+      }
+    } else {
+      set("frontlineRecipeName", "Sauce Recipe", rName, "name");
+    }
+  }
+  return [...byField.values()];
+}
+
 function nameKey(v: string): string {
   return specImportNameMatchKey(cleanSpecCheeseRecipeName(v));
 }
@@ -250,16 +330,25 @@ export function buildProfileAutofillPlan(opts: {
     const p = profiles.find(
       (pp) => (pp.brand ?? "").trim().toLowerCase() === b && (pp.flavor ?? "").trim().toLowerCase() === f,
     );
-    if (!p) continue;
-    plan.matchedSheets += 1;
-    const { desired, namedPepCount } = desiredFromProfile(
-      p,
+    // Dough/sauce recipes tie onto profiles independently of the sheet's
+    // profile blocks (a dough workbook usually has none), so scan them even
+    // when this sheet has no matching profile.
+    const recipeDesired = desiredFromDoughSauceRecipes(
       sheet.data,
       sheet.label,
+      brand,
+      flavor,
       current,
-      mixNamesLower,
+      p,
     );
-    for (const d of desired) {
+    if (!p && recipeDesired.length === 0) continue;
+    plan.matchedSheets += 1;
+    const { desired, namedPepCount } = p
+      ? desiredFromProfile(p, sheet.data, sheet.label, current, mixNamesLower)
+      : { desired: [] as Desired[], namedPepCount: 0 };
+    // Recipe-derived fields first: at import time the recipe tie runs AFTER
+    // the profile loop and overwrites it, so within one sheet it wins.
+    for (const d of [...recipeDesired, ...desired]) {
       if (!decided.has(d.field)) decided.set(d.field, d);
     }
     if (plan.pepCombinedTarget === undefined && namedPepCount > 0) {

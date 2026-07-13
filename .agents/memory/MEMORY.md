@@ -7,8 +7,7 @@
 - [Ingredient near-dup merges](ingredient-dedupe.md) — INGREDIENT_RENAMES mirrored web+mobile; FR/Parmesan/mozz-fat carve-outs kept, "Diced" merges by default; bump dedupe marker when adding entries.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
-- [Frontline is sauce](frontline-is-sauce.md) — internal "frontline" recipe system IS the UI's "Sauce Recipe"; seed sauces into frontline plumbing, no new field.
-- [Ready-made sauce](ready-made-sauce.md) — sauce name w/o recipe rows (BBQ/Ranch) = bought as-is: consume `ingredient:<name>:lbs` (needs oz/pizza>0 guard), not generic Sauce batches.
+- [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [sauceBarrelBreakdown signature](sauce-barrel-breakdown-signature.md) — same-named helper takes batches on web but LBS on mobile; pass calc.sauceLbs on mobile, don't copy web call sites.
 - [Cast-to-Screens](cast-screens.md) — web-only station displays via `?screen=` param; parity exception (no mobile equivalent).
 - [Web/mobile parity](web-mobile-parity.md) — run identity on Run screen, line config on Setup; commit-before-saveProfile ordering; single auto-load effect.
@@ -84,8 +83,7 @@
 - [Multi-location inventory](multi-location-inventory.md) — null locationId === onsite; drawdown/consume/adjust onsite-only; pure transfer-needs math warns when offsite stock covers an onsite shortfall.
 - [Warehouse staging checklist](warehouse-staging-checklist.md) — per-run "What Each Run Needs" check-off in synced dayState.stagedItems keyed `${runId}::${label}__${unit}`; mirrors substitutions sync/reset; web+mobile parity.
 - [Freezer phase indicators](freezer-phase-indicators.md) — Run-tab auto-hiding "Freezer filling/emptying" banners; time-based phase detection gated on ppm>0 & freezerTime>0; running-only; web+mobile parity.
-- [Notification view re-fire](notification-view-refire.md) — sticky-true "completion" alerts (e.g. freezer empty) need an "armed while pending" Set latch, not a last-id ref, or browsing completed runs re-fires them; web+mobile parity.
-- [Run-complete alert timing](run-complete-alert-timing.md) — "time's up" fires only when ppm>0 AND time counted down (runWasTimedRef latch); web needs explicit ppm>0 guard.
+- [Notification re-fire](notification-view-refire.md) + [run-complete timing](run-complete-alert-timing.md) — completion alerts need armed-while-pending Set latches (not last-id refs) + explicit ppm>0 guards.
 - [Auto-track remainder carry](autotrack-remainder-carry.md) + [zero seed](autotrack-zero-seed.md) — remainder carry + resets-before-write ordering (fixed interval REJECTED); dough counters decrement-only w/ one-shot Suggest seed when left 0.
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
@@ -95,8 +93,7 @@
 - [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
 - [Freezer-pull notification](freezer-pull.md) — warehouse "Pull Out Freezer for [date]" cards; manager-tagged items w/ per-item daysEarly; factory-wide master-data (NOT synced); GET authed-only, writes manage-inventory; web+mobile parity.
 - [Low-stock reorder list](reorder-list.md) — advisory "Reorder Now" warehouse card; flags on-hand≤reorderThreshold(>0) minus SCHEDULED-run demand; math in @workspace/inventory-math; read-only; web+mobile parity.
-- [Scheduled recipe-setup warning](scheduled-recipe-check.md) — manager card flags scheduled runs missing a recipe profile; shared lib, raw-profile resolver; web+mobile.
-- [Move scheduled runs](schedule-move.md) — shared @workspace/schedule-move; web pool future-only vs mobile today+future; per-run move MUST key on run id, not list index.
+- [Scheduled recipe-setup warning](scheduled-recipe-check.md) + [move runs](schedule-move.md) — manager card flags runs missing a profile; per-run move MUST key on run id, not list index.
 - [Server templates + supervisor PIN](server-templates-supervisor-pin.md) — facility-wide server source of truth; empty PIN ("")="no gate"; gotchas in topic file; web+mobile parity.
 - [Scheduled-day client date](scheduled-day-client-date.md) — ALL sync endpoints must key on client `?today=` not server UTC, or evening live pushes clobber scheduled rows; SSE date-scoped too.
 - [AI model routing + streaming](ai-model-routing-and-streaming.md) — pickModel is the only model source; vi.mock MUST export pickModel/AI_MODELS or routes 502; ask/recipe SSE opt-in.
@@ -119,8 +116,7 @@
 - [Password-change session invalidation](password-change-session-invalidation.md) — invalidateUserSessions fences tokens by iat vs passwordChangedAt (same-second grace); approver privilege boundary via canManagePasswordResetFor.
 - [Mobile require-cycle init](mobile-require-cycle-init.md) + [TDZ cycle](mobile-module-tdz-cycle.md) — Metro require/import cycles make module-scope constants undefined or TDZ-crash the real Expo web build (tests pass); read shared constants lazily.
 - [HMR dual-context crash](hmr-context-split.md) — provider files must export ONLY components (Fast Refresh rule) or HMR splits the module into two contexts; auth context lives in a hook-only module + dev globalThis singleton.
-- [One-time data heals](one-time-data-heals.md) — prod data fixes ship as marker-guarded boot heals; monotonic stamp bump + context-scoped deletes or the poison resurrects.
-- [Data reset](one-time-data-purge.md) — server-driven per-scope reset epoch (POST /sync/reset): clears daily_sync + SSE reset frame + PUT epoch guard neutralize clients w/o racing sync; retired the marker-wipe recipe; web+mobile.
+- [One-time data heals](one-time-data-heals.md) + [data reset](one-time-data-purge.md) — marker-guarded boot heals (monotonic stamps or poison resurrects); factory reset = per-scope epoch via POST /sync/reset.
 - [Headless e2e fallback](headless-e2e-fallback.md) — when the runTest tester never reaches the app, self-drive headless Chromium (temp-dir puppeteer-core) against $REPLIT_DEV_DOMAIN; gotchas inside.
 - [First-load sync form heal](sync-first-load-form-heal.md) — fresh-device sync apply misses the live form (stale dayStateRef); heal effect on currentRunId with empty-over-populated + recent-edit guards.
 - [Seeded placeholder runs](seeded-placeholder-runs.md) — auto-created blank day placeholder is `seeded` + local-only (never pushed, dropped on receive) or fresh devices pile blank runs onto peers; clients must never hold 0 runs.
@@ -133,8 +129,7 @@
 - [Server ingredient catalog](ingredient-catalog.md) — factory-wide ingredients table w/ stable ids, recipe rows get optional ingredientId; hybrid alongside existing local lists; array-identity gotcha in hydration.
 - [Rendered verification & runTest cleanup](render-verify-and-runtest-cleanup.md) — when runTest is flaky, render real web components under vitest+jsdom (even from home.tsx) + parity-lock mobile; clean stray users runTest created before timing out.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
-- [Import format gotchas](spec-import-batch-vs-perpizza.md) — M&V + Cheese workbooks are per-BATCH lbs, premix is per-pizza (silently zeroes M&V); cheese scanner rejects noise headers.
-- [Import source-file semantics](import-source-file-semantics.md) — spec sheets are source of truth; order spec→dough/sauce→cheese/premix; premix per-pizza rows=mixes, rest=prep; cheese has sub-mixes.
+- [Import format gotchas](spec-import-batch-vs-perpizza.md) + [source semantics](import-source-file-semantics.md) — M&V/Cheese are per-BATCH lbs, premix per-pizza; order spec→dough/sauce→cheese/premix.
 - [Import order + dedup keys](import-order-dedup-keys.md) — spec-first is worst for dedup (AI match no-ops on empty pool); cheese dedup is EXACT name, mix/dough/sauce use LOOSE key; reorder/misspell drift now handled by name-match.
 - [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher (reorder/typo, ambiguity+digit guards) for all importer link passes; extra-word layer is review-only opt-in ("Spicy Cheese Mix" ≠ "Cheese Mix").
 - [Stick pep types](stick-pep-types.md) — spec importer stick applicator = pepperoni AND cheese sticks (both are `pepperonis` pep types, not cheese recipes); recognized in BOTH the parse prompt and STICK_PEP_NAME_RE/isStickPepOnlyCheeseRecipe.
@@ -157,4 +152,4 @@
 - [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.
 - [Spec-import chunk union](spec-import-chunk-union.md) — chunk merges union applicator lists (split blocks are complementary); file merges replace; same type at two weights = two stations, never dedupe.
 - [Import redirect aliases](import-redirect-aliases.md) — cheese/premix "use existing" picks share the context-free appType alias namespace; suggestion-only auto-apply, one-to-one claim guards.
-- [Profile autofill](profile-autofill-from-saved-sheets.md) — setup-editor auto-fill planner must mirror applySpecImport field semantics EXACTLY (no extra guards); form-only until Save Setup.
+- [Profile autofill](profile-autofill-from-saved-sheets.md) — planner must mirror applySpecImport EXACTLY, incl. the dough/sauce RECIPE tie loop (not just profile names); form-only until Save Setup.

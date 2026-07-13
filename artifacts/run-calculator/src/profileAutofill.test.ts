@@ -206,6 +206,122 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.mismatches).toEqual([]);
   });
 
+  it("fills dough name + doughball fields from a dough RECIPE with explicit targets (no profile block)", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [{
+          kind: "dough",
+          name: "Ultra Thin Dough",
+          rows: [{ ingredient: "Flour", lbs: 200 }],
+          targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+          doughballOz: 9.5,
+          doughBatchYield: 120,
+          doughballsPerTray: 24,
+        }],
+      })],
+      values(),
+    );
+    expect(p.matchedSheets).toBe(1);
+    const byField = new Map(p.fills.map(f => [f.field, f.specValue]));
+    expect(byField.get("doughRecipeName")).toBe("Ultra Thin Dough");
+    expect(byField.get("targetDoughballWeight")).toBe(9.5);
+    expect(byField.get("doughBatchYield")).toBe(120);
+    expect(byField.get("doughballsPerTray")).toBe(24);
+  });
+
+  it("fans a brand-only dough recipe out to the edited profile (apply-pool fallback)", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [{ kind: "dough", name: "House Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Aldo's" }],
+      })],
+      values(),
+    );
+    expect(p.fills.find(f => f.field === "doughRecipeName")?.specValue).toBe("House Dough");
+  });
+
+  it("re-links a dough recipe by loose name match against the current dough name", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [{
+          kind: "dough",
+          name: "ultra thin dough",
+          rows: [{ ingredient: "Flour", lbs: 100 }],
+          doughballOz: 9.5,
+        }],
+      })],
+      values({ doughRecipeName: "Ultra Thin Dough" } as Partial<FormValues>),
+    );
+    // Name already matches (loose key) → no name fill/mismatch, but the
+    // doughball weight it carries is offered.
+    expect(p.fills.find(f => f.field === "targetDoughballWeight")?.specValue).toBe(9.5);
+    expect(p.mismatches.find(m => m.field === "doughRecipeName")).toBeUndefined();
+  });
+
+  it("re-links via the SAME sheet's profile doughName when the form is blank (import ordering)", () => {
+    // The import's profile loop assigns doughName BEFORE the recipe tie runs,
+    // so an unscoped dough recipe whose name matches the sheet's own doughName
+    // must still reach this profile even though the form starts blank.
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile({ doughName: "Ultra Thin Dough" })],
+        recipes: [{
+          kind: "dough",
+          name: "ULTRA THIN  DOUGH", // loose-key equal, canonical spelling differs
+          rows: [{ ingredient: "Flour", lbs: 100 }],
+          doughballOz: 9,
+          doughBatchYield: 110,
+        }],
+      })],
+      values(),
+    );
+    const byField = new Map(p.fills.map(f => [f.field, f.specValue]));
+    expect(byField.get("doughRecipeName")).toBe("ULTRA THIN  DOUGH");
+    expect(byField.get("targetDoughballWeight")).toBe(9);
+    expect(byField.get("doughBatchYield")).toBe(110);
+  });
+
+  it("does not tie an unanchored dough recipe to unrelated profiles", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [{ kind: "dough", name: "Someone Else's Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Other Brand" }],
+      })],
+      values(),
+    );
+    expect(p.matchedSheets).toBe(0);
+    expect(p.fills).toEqual([]);
+  });
+
+  it("dough RECIPE name outranks the profile-level doughName within the same sheet", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile({ doughName: "Old Name" })],
+        recipes: [{
+          kind: "dough",
+          name: "Canonical Dough",
+          rows: [{ ingredient: "Flour", lbs: 100 }],
+          targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+        }],
+      })],
+      values(),
+    );
+    expect(p.fills.find(f => f.field === "doughRecipeName")?.specValue).toBe("Canonical Dough");
+  });
+
+  it("fills sauce name from a targeted sauce RECIPE", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [{
+          kind: "sauce",
+          name: "House Red Sauce",
+          rows: [{ ingredient: "Tomato", lbs: 50 }],
+          targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+        }],
+      })],
+      values(),
+    );
+    expect(p.fills.find(f => f.field === "frontlineRecipeName")?.specValue).toBe("House Red Sauce");
+  });
+
   it("derives pepCombinedTarget=false when two peps are named", () => {
     const p = plan(
       [sheet(1, 100, {

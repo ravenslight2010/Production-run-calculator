@@ -26,3 +26,16 @@ similar compare-against-import features, diff the logic against the
 applySpecImport profile loop in web storage.ts first; deviations need explicit
 user sign-off, not silent guards. Blank detection quirks: allergen default is
 the token "none", and non-zero schema defaults (pep batch 25) count as unset.
+
+**The import has TWO dough/sauce paths — mirror both.** Profile-level
+doughName/sauceName is only half the story: dough and sauce mostly arrive as
+RECIPES in the parsed data, tied to profiles by the import's recipe loop
+(recipeApplyTargets: explicit targets, brand anchors, same-brand fan-out over
+the apply pool; plus a name re-link against the profile's current recipe
+name). That tie also writes doughball weight / batch yield / doughballs per
+tray, runs AFTER the profile loop (so it overwrites — recipe-derived fields
+outrank profile-level names within a sheet), and the re-link must see the name
+the same sheet's profile loop would have just assigned. Missing this path was
+the "auto-fill didn't fill dough" bug. Note the relink key is
+specImportNameMatchKey directly (no cheese-name cleaning — "X Dough 9oz" does
+NOT loose-match "X Dough").
