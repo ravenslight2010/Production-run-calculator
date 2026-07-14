@@ -28,5 +28,18 @@ cards never activated and stray names polluted the dropdown. Approved fix
   queue that home.tsx retries on boot until a manager session succeeds.
 - "mix"/"cheese" must be allowlisted in every stray-mix-name filter or the
   generic types themselves get flagged as strays.
-- Live/scheduled RUN VALUES were intentionally NOT rewritten — run-form gates
-  match raw mix names case-insensitively, so old open runs keep working.
+- Live/scheduled RUN VALUES were intentionally NOT rewritten by v1 — run-form
+  gates match raw mix names case-insensitively, so old open runs kept working.
+- v2 pool-aware heal (`applyPoolAwareSlotHealIfNeeded`, marker
+  `run-calc-mix-slot-recat-v2`): the v1 word heuristic missed TYPE slots holding
+  exact server pool names without the word "mix" (e.g. "...Cheese Blend"), and
+  v1 skipped run values (the Type dropdown unions current values, so strays kept
+  showing). v2 must run AFTER the server cheese/mix pools load — skip WITHOUT
+  setting the marker while pools are empty — heals profiles (targeted write +
+  markProfileEdited) AND run values, and MONOTONICALLY bumps runValuesUpdated
+  stamps (never move a stamp backwards) before refresh + push.
+- "Phantom" link names (referenced only in local runs/profiles, in no server
+  pool) show in the applicator picker (it always includes the current pick) but
+  were unfindable elsewhere; the Cheese merge tab must union
+  `collectStaleCheeseLinkNames` over the merge surfaces so users can merge them
+  away — applyRecipeNameMerge already rewrites every link field.

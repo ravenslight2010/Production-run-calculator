@@ -138,3 +138,104 @@ export function isStrayMixName(name: string, realIngredients: Set<string>): bool
   if (GENUINE_MIX_INGREDIENT_NAMES.has(t)) return false;
   return /\bmix\b/.test(t);
 }
+
+// ── Pool-aware applicator-slot heal ──────────────────────────────────────────
+// Older spec imports (and hand edits) sometimes wrote a cheese/mix RECIPE name
+// straight into an applicator TYPE field (e.g. app2Type: "HT Standard Cheese
+// Mix"). The run form's cards gate on the generic types ("cheese" / "Mix") and
+// keep the recipe name in the app{n}CheeseRecipeName LINK field, so a raw name
+// in the TYPE field leaves the slot half-broken AND leaks the name into the
+// shared Type dropdown (it unions current values). The v1 migration
+// (applyMixSlotRecategorizeIfNeeded) healed this with a word heuristic only —
+// it ran at boot, BEFORE the server cheese/mix pools load, so names that don't
+// contain the standalone word "mix" (e.g. "Gyro Cheese Blend") slipped through,
+// and imports that landed after a device's one-time marker was set were never
+// re-checked. This pool-aware pass closes both gaps.
+
+const ciKey = (s: unknown): string => String(s ?? "").trim().toLowerCase();
+
+/** Case-insensitive name → canonical pool spelling. */
+export function buildPoolLookup(names: readonly string[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const n of names) {
+    const k = ciKey(n);
+    if (k && !m.has(k)) m.set(k, n.trim());
+  }
+  return m;
+}
+
+/**
+ * Heal the four applicator slots on a values/profile object:
+ *  - TYPE ci-matches a server CHEESE pool name  → type "cheese", canonical name
+ *    moved into the link field (only if the link is blank or ci-equal).
+ *  - TYPE ci-matches a server MIX pool name     → type "Mix", same link move.
+ *  - TYPE matches the stray word heuristic (standalone "mix" or "blend", not
+ *    allowlisted) → "cheese" when it contains "cheese"/"blend", else "Mix",
+ *    keeping the raw name as the link so it stays visible (and mergeable).
+ * Never touches a slot whose type is allowlisted (generic types, pep types,
+ * real ingredients). Returns the (possibly new) object plus a changed flag.
+ */
+export function healApplicatorSlotValues<T extends Record<string, unknown>>(
+  obj: T,
+  pools: {
+    cheese: Map<string, string>;
+    mixes: Map<string, string>;
+    allowlist: Set<string>;
+  },
+): { values: T; changed: boolean } {
+  let changed = false;
+  const out = { ...obj } as Record<string, unknown>;
+  for (const slot of [1, 2, 3, 4]) {
+    const typeField = `app${slot}Type`;
+    const linkField = `app${slot}CheeseRecipeName`;
+    const raw = String(out[typeField] ?? "").trim();
+    if (!raw) continue;
+    const key = ciKey(raw);
+    if (pools.allowlist.has(key)) continue;
+    let generic: string;
+    let canonical: string;
+    if (pools.cheese.has(key)) {
+      generic = "cheese";
+      canonical = pools.cheese.get(key)!;
+    } else if (pools.mixes.has(key)) {
+      generic = "Mix";
+      canonical = pools.mixes.get(key)!;
+    } else if (/\bmix\b/.test(key) || /\bblend\b/.test(key)) {
+      generic = /cheese|blend/i.test(raw) ? "cheese" : "Mix";
+      canonical = raw;
+    } else {
+      continue;
+    }
+    out[typeField] = generic;
+    const existing = String(out[linkField] ?? "").trim();
+    if (!existing || ciKey(existing) === key) out[linkField] = canonical;
+    changed = true;
+  }
+  return { values: out as T, changed };
+}
+
+/**
+ * Collect cheese/mix LINK names referenced by values objects (runs, profiles,
+ * templates, history) that match NO server pool name — "phantom" names that
+ * still show in the applicator picker (it always includes the current pick)
+ * but are otherwise unfindable: not in the Cheese Recipes list and, before
+ * this, not offered by the merge picker either. Returned in first-seen
+ * spelling, deduped case-insensitively, so the Cheese merge tab can offer
+ * them as merge sources.
+ */
+export function collectStaleCheeseLinkNames(
+  objects: readonly Record<string, unknown>[],
+  poolNamesCi: ReadonlySet<string>,
+): string[] {
+  const seen = new Map<string, string>();
+  for (const obj of objects) {
+    for (const slot of [1, 2, 3, 4]) {
+      const name = String(obj[`app${slot}CheeseRecipeName`] ?? "").trim();
+      if (!name) continue;
+      const key = ciKey(name);
+      if (poolNamesCi.has(key) || seen.has(key)) continue;
+      seen.set(key, name);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}

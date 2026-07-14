@@ -130,6 +130,7 @@ import {
   applyIngredientDedupeMigrationIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
   applyMixSlotRecategorizeIfNeeded,
+  applyPoolAwareSlotHealIfNeeded,
   loadPendingServerMixPushes,
   clearPendingServerMixPushes,
   applyMixCheeseOverlapDedupeIfNeeded,
@@ -283,6 +284,7 @@ import {
   RECIPE_NAME_FIELDS_BY_CATEGORY,
   countRecipeNameReferences,
   isStrayMixName,
+  collectStaleCheeseLinkNames,
 } from "../mergeRecipeNames";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
 import {
@@ -3207,6 +3209,31 @@ export default function Home() {
     [enabledCheeseRecipes],
   );
 
+  // One-time pool-aware applicator-slot heal (v2 of the mix-slot cleanup).
+  // Must wait for the server cheese/mix pools — the v1 pass ran at boot without
+  // them, which is why slots holding exact pool names (or names without the
+  // word "mix", e.g. "Gyro Cheese Blend") were never converted. Heals saved
+  // profiles AND per-run values, then refreshes the open form + advances edit
+  // stamps so the fix wins the sync lost-update guard on peers.
+  const slotHealRanRef = useRef(false);
+  useEffect(() => {
+    if (slotHealRanRef.current) return;
+    if (serverCheeseNames.length === 0 && serverMixNames.length === 0) return;
+    slotHealRanRef.current = true;
+    const affectedRunIds = applyPoolAwareSlotHealIfNeeded(serverCheeseNames, serverMixNames);
+    if (affectedRunIds.length > 0) {
+      const stamp = Date.now();
+      const upd = loadRunValuesUpdated();
+      // Monotonic bump: never move a stamp backwards (a pre-existing higher
+      // stamp — e.g. clock skew — would otherwise weaken lost-update guards).
+      for (const id of affectedRunIds) upd[id] = Math.max(upd[id] ?? 0, stamp - 1) + 1;
+      saveRunValuesUpdated(upd);
+      refreshAfterMerge();
+      schedulePush(dayStateRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverCheeseNames, serverMixNames]);
+
   // Dough & Sauce recipes are now server-backed factory-wide master-data (like
   // Cheese Recipes / Mixes): managers define them once, they are shared across
   // every signed-in device, and the run form's Dough / Sauce cards pick one by
@@ -4070,7 +4097,24 @@ export default function Home() {
         // appear in the app. A name that also lives in the user Mix list is a
         // mix, not a cheese recipe, so keep the Cheese tab mix-free.
         const mixNameSet = new Set(serverMixNames.map((n) => n.toLowerCase()));
-        return dedupSorted(serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())));
+        // ALSO offer "phantom" link names: cheese/mix names still referenced by
+        // a run, profile, template, or history entry that match NO pool name
+        // (e.g. a name whose pool row was merged/renamed while a device held a
+        // stale pick). The applicator picker always shows the current pick, so
+        // without this they were visible in the picker but unfindable here —
+        // the merge rewrites every link field, which is exactly how a user
+        // cleans one up.
+        const poolCi = new Set(
+          [...serverCheeseNames, ...serverMixNames].map((n) => n.trim().toLowerCase()),
+        );
+        let stale: string[] = [];
+        try {
+          stale = collectStaleCheeseLinkNames(collectMergeSurfaces().settingsObjects, poolCi);
+        } catch {}
+        return dedupSorted([
+          ...serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())),
+          ...stale,
+        ]);
       }
       case "brandflavor":
         return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));

@@ -72,6 +72,8 @@ import {
   mergeRecipeNameSettingsObject,
   foldPresetKeys,
   isStrayMixName,
+  buildPoolLookup,
+  healApplicatorSlotValues,
 } from "./mergeRecipeNames";
 import { genId, todayStr } from "./utils";
 import {
@@ -1955,6 +1957,106 @@ export function applyMixSlotRecategorizeIfNeeded(): void {
 
     localStorage.setItem(RECAT_MIX_SLOT_KEY, "1");
   } catch {}
+}
+
+const RECAT_MIX_SLOT_V2_KEY = "run-calc-mix-slot-recat-v2";
+
+/**
+ * Pool-aware follow-up to applyMixSlotRecategorizeIfNeeded (see the heal
+ * helpers in mergeRecipeNames.ts for the full story). The v1 pass ran at boot
+ * with a word heuristic only; this v2 pass runs once the SERVER cheese/mix
+ * pools have loaded, so a TYPE slot holding an exact pool name (regardless of
+ * wording, e.g. "Gyro Cheese Blend") is converted to the generic type with the
+ * CANONICAL pool spelling in the link field. Covers saved profiles (targeted
+ * dough-blob writes + edit stamps so the fix pushes to the server profile
+ * pool) and per-run values (v1 skipped runs; a stray type there leaks into the
+ * Type dropdown, which unions current values). Also drops pool names that
+ * leaked into the ingredientTypes dropdown list (with tombstones).
+ * Runs once per device, marker-guarded; skips (without setting the marker)
+ * until the pools have actually loaded. Returns the ids of runs whose stored
+ * values changed so the caller can refresh open forms + advance edit stamps.
+ */
+export function applyPoolAwareSlotHealIfNeeded(
+  serverCheeseNames: readonly string[],
+  serverMixNames: readonly string[],
+): string[] {
+  if (typeof localStorage === "undefined") return [];
+  if (localStorage.getItem(RECAT_MIX_SLOT_V2_KEY)) return [];
+  if (serverCheeseNames.length === 0 && serverMixNames.length === 0) return [];
+  const affectedRunIds: string[] = [];
+  try {
+    const pools = {
+      cheese: buildPoolLookup(serverCheeseNames),
+      mixes: buildPoolLookup(serverMixNames),
+      allowlist: new Set(
+        [
+          "mix",
+          "cheese",
+          ...DEFAULT_INGREDIENT_TYPES,
+          ...MIX_SEED.frontlineIngredients,
+          ...loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
+        ].map((n) => n.toLowerCase()),
+      ),
+    };
+
+    // ── Saved profiles (local mirror of the server profile pool) ──
+    const bf = loadBrandFlavors();
+    for (const [brand, flavors] of Object.entries(bf)) {
+      for (const flavor of flavors) {
+        const saved = loadProfile(brand, flavor);
+        if (!saved) continue;
+        const { values, changed } = healApplicatorSlotValues(
+          saved as unknown as Record<string, unknown>,
+          pools,
+        );
+        if (!changed) continue;
+        // Targeted dough-blob write (NOT saveProfile — the loaded blob has no
+        // crust fields, so saveProfile would clobber the crust profile).
+        try {
+          localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(values));
+          markProfileEdited(canonicalProfileKey(brand, flavor));
+        } catch {}
+      }
+    }
+
+    // ── Per-run values (v1 intentionally skipped these; the Type dropdown
+    //    unions current values, so a stray name here keeps showing) ──
+    const runPrefix = RUN_KEY("");
+    const runKeys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(runPrefix)) runKeys.push(k);
+    }
+    for (const k of runKeys) {
+      try {
+        const raw = localStorage.getItem(k) ?? "null";
+        const obj = JSON.parse(raw);
+        if (!obj || typeof obj !== "object") continue;
+        const { values, changed } = healApplicatorSlotValues(
+          obj as Record<string, unknown>,
+          pools,
+        );
+        if (!changed) continue;
+        localStorage.setItem(k, JSON.stringify(values));
+        affectedRunIds.push(k.slice(runPrefix.length));
+      } catch {}
+    }
+
+    // ── Pool names that leaked into the shared Type dropdown list ──
+    const ingredients = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+    const leaked = ingredients.filter(
+      (n) =>
+        !pools.allowlist.has(n.trim().toLowerCase()) &&
+        (pools.cheese.has(n.trim().toLowerCase()) || pools.mixes.has(n.trim().toLowerCase())),
+    );
+    if (leaked.length) {
+      saveList(INGREDIENT_TYPES_KEY, ingredients.filter((n) => !leaked.includes(n)));
+      for (const n of leaked) tombstoneDeleted("ingredientTypes", n);
+    }
+
+    localStorage.setItem(RECAT_MIX_SLOT_V2_KEY, "1");
+  } catch {}
+  return affectedRunIds;
 }
 
 const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
