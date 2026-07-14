@@ -108,8 +108,9 @@ describe("specImportRecipeDisplayKind", () => {
     expect(
       specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", forcedCategory: "mix", rows }),
     ).toBe("mix");
-    // No override: the user Mix list wins via the heuristic.
-    expect(specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", rows })).toBe("mix");
+    // No override: a cheese-mentioning name stays cheese even when a junk
+    // same-named entry sits in the user Mix list (crossover-poison guard).
+    expect(specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", rows })).toBe("cheese");
   });
 });
 
@@ -169,15 +170,15 @@ describe("applySpecImport mix routing", () => {
     expect(loadList(MIX_RECIPE_NAMES_KEY, [])).not.toContain("Aldo's Cheese Mix");
   });
 
-  it("routes a cheese-mentioning name to Mix when the user already keeps it in the Mix list", () => {
+  it("keeps a cheese-mentioning name as CHEESE even when a junk same-named entry sits in the Mix list", () => {
+    // A past misroute can leave a cheese blend duplicated into the Mixes pool;
+    // honoring that entry would flip the blend to "Mix" forever. The cheese
+    // word wins: the recipe lands under Cheese and ties onto the cheese slot.
     saveList(MIX_RECIPE_NAMES_KEY, ["Aldo's Cheese Mix"]);
     applySpecImport(importWithCheeseKindRecipe("Aldo's Cheese Mix"));
-    expect(loadList(MIX_RECIPE_NAMES_KEY, [])).toContain("Aldo's Cheese Mix");
-    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).not.toContain("Aldo's Cheese Mix");
-    // Mix routing via the user Mix list must also skip the cheese-slot tie.
+    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).toContain("Aldo's Cheese Mix");
     const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
-    expect(prof?.app1CheeseRecipeName ?? "").toBe("");
-    expect(prof?.app1CheeseRecipe ?? []).toEqual([]);
+    expect(prof?.app1CheeseRecipeName).toBe("Aldo's Cheese Mix");
   });
 
   it("clears the MIX deletion tombstone (not cheese) so sync can't strip the re-imported name", () => {

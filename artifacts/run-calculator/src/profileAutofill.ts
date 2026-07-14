@@ -162,6 +162,8 @@ function desiredFromProfile(
   source: string,
   current: FormValues,
   mixNamesLower: ReadonlySet<string>,
+  poolCheeseNames: ReadonlyArray<string>,
+  poolMixNames: ReadonlyArray<string>,
 ): { desired: Desired[]; namedPepCount: number } {
   const out: Desired[] = [];
   const cur = current as Record<string, unknown>;
@@ -197,12 +199,24 @@ function desiredFromProfile(
   // Applicators — identical resolution pipeline to the import: physical
   // station assignment first, then cheese-blend slots re-typed to "cheese",
   // then mix slots re-typed to "Mix", each carrying a recipe-name link.
-  const cheeseCandidateNames = data.recipes
-    .filter((r) => r.kind === "cheese" && !routesToMix(r, mixNamesLower))
-    .map((r) => r.name);
-  const mixCandidateNames = data.recipes
-    .filter((r) => r.kind === "cheese" && routesToMix(r, mixNamesLower))
-    .map((r) => r.name);
+  // Union the server pools into the candidates exactly like applySpecImport
+  // does: a spec sheet often names a blend the factory already has, with no
+  // recipe block in the same file — sheet-only candidates would leave the raw
+  // blend name as a phantom applicator type instead of a typed cheese/Mix
+  // slot linked to the pool. Pool cheese names are filtered against the mix
+  // name list (same reason as the import: shared preset namespace).
+  const cheeseCandidateNames = [
+    ...data.recipes
+      .filter((r) => r.kind === "cheese" && !routesToMix(r, mixNamesLower))
+      .map((r) => r.name),
+    ...poolCheeseNames.filter((n) => !mixNamesLower.has(n.trim().toLowerCase())),
+  ];
+  const mixCandidateNames = [
+    ...data.recipes
+      .filter((r) => r.kind === "cheese" && routesToMix(r, mixNamesLower))
+      .map((r) => r.name),
+    ...poolMixNames,
+  ];
   const { applicators: cheeseResolved, links: cheeseLinks } = resolveCheeseApplicatorSlots(
     assignApplicatorSlots(p.applicators ?? []),
     cheeseCandidateNames,
@@ -564,6 +578,16 @@ export function buildProfileAutofillPlan(opts: {
   const plan: ProfileAutofillPlan = { fills: [], mismatches: [], conflicts: [], matchedSheets: 0 };
   if (!b || !f) return plan;
 
+  // Server-pool names for the slot-resolver candidate union (see
+  // desiredFromProfile). Disabled cheese recipes are excluded — the run form
+  // can't hydrate them.
+  const poolCheeseNames = (opts.cheeseRecipes ?? [])
+    .filter((r) => r.enabled !== false && (r.name ?? "").trim())
+    .map((r) => r.name.trim());
+  const poolMixNames = (opts.mixes ?? [])
+    .filter((r) => (r.name ?? "").trim())
+    .map((r) => r.name.trim());
+
   const latest = latestSourceKeyIds(sheets);
   const ordered = sheets
     .filter((s) => latest.has(s.id))
@@ -589,7 +613,15 @@ export function buildProfileAutofillPlan(opts: {
     if (!p && recipeDesired.length === 0) continue;
     plan.matchedSheets += 1;
     const { desired, namedPepCount } = p
-      ? desiredFromProfile(p, sheet.data, sheet.label, current, mixNamesLower)
+      ? desiredFromProfile(
+          p,
+          sheet.data,
+          sheet.label,
+          current,
+          mixNamesLower,
+          poolCheeseNames,
+          poolMixNames,
+        )
       : { desired: [] as Desired[], namedPepCount: 0 };
     // Recipe-derived fields first: at import time the recipe tie runs AFTER
     // the profile loop and overwrites it, so within one sheet it wins.

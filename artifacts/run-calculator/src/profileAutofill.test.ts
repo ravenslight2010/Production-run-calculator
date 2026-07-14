@@ -155,6 +155,57 @@ describe("buildProfileAutofillPlan", () => {
     expect(byField.get("app1CheeseRecipeName")).toBe("White Fajita Mix");
   });
 
+  it("resolves a slot naming a SERVER-POOL cheese recipe the sheet does not re-declare (pool union)", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, {
+        profiles: [profile({ applicators: [{ type: "Lucia's Club Cheese Mix", ozPerPizza: 2 }] })],
+        recipes: [],
+      })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+      cheeseRecipes: [{ name: "Lucia's Club Cheese Mix", components: [{ lbs: 10 }] }],
+    });
+    const byField = new Map(p.fills.map(f => [f.field, f.specValue]));
+    expect(byField.get("app1Type")).toBe("cheese");
+    expect(byField.get("app1CheeseRecipeName")).toBe("Lucia's Club Cheese Mix");
+  });
+
+  it("resolves a slot naming a SERVER-POOL mix the sheet does not re-declare (pool union)", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, {
+        profiles: [profile({ applicators: [{ type: "Carribean Mix", ozPerPizza: 1.5 }] })],
+        recipes: [],
+      })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: new Set(["carribean mix"]),
+      mixes: [{ name: "Carribean Mix", batchSize: 0 }],
+    });
+    const byField = new Map(p.fills.map(f => [f.field, f.specValue]));
+    expect(byField.get("app1Type")).toBe("Mix");
+    expect(byField.get("app1CheeseRecipeName")).toBe("Carribean Mix");
+  });
+
+  it("a cheese-named recipe stays CHEESE even when a junk same-named mix-pool entry exists", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, {
+        profiles: [profile({ applicators: [{ type: "Lowe's Red Hot Cheese Mix", ozPerPizza: 2 }] })],
+        recipes: [{ kind: "cheese", name: "Lowe's Red Hot Cheese Mix", rows: [{ ingredient: "Jack", lbs: 1 }, { ingredient: "Seasoning", lbs: 0.1 }] }],
+      })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: new Set(["lowe's red hot cheese mix"]),
+      mixes: [{ name: "Lowe's Red Hot Cheese Mix", batchSize: 0 }],
+    });
+    const byField = new Map(p.fills.map(f => [f.field, f.specValue]));
+    expect(byField.get("app1Type")).toBe("cheese");
+    expect(byField.get("app1CheeseRecipeName")).toBe("Lowe's Red Hot Cheese Mix");
+  });
+
   it("only consults the LATEST snapshot per source file; newest wins per field", () => {
     const p = plan(
       [

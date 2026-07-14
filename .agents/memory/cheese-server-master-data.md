@@ -61,3 +61,12 @@ curated via the Cheese Mix Recipe Specs workbook or hand edits) and optional
 Rule: a name-keyed master-data pool whose POST accepts client-minted ids MUST enforce name uniqueness server-side — client-side "add if absent" dedupes against a stale pool snapshot, so multi-file imports and racing devices insert exact same-name rows the merge UI can't even show (identical names collapse).
 **Why:** cheese_recipes accumulated ×7/×5 exact-name dupes from a single multi-file import; POST deduped by id only.
 **How to apply:** in the write route, run read-check-insert in ONE transaction under a per-scope pg_advisory_xact_lock; skip NEW ids whose trimmed ci name already exists (existing ids may still rename/update). Heal deletes must be scoped by (id, scope) — the upsert key allows the same id in two scopes. Keeper rank for dedupe heals: lbs>0 components > more components > oldest.
+
+**Cheese-word routing rule:** a cheese-kind import recipe whose name mentions
+"cheese" NEVER routes to Mix — not even when a same-named entry sits in the
+Mixes pool. **Why:** a past misroute duplicated a cheese blend into Mixes; if
+pool membership outranks the name, that junk row flips the blend to Mix on
+every future import/auto-fill forever (self-reinforcing poison). An explicit
+review-time forcedCategory override still wins. A one-time server heal purges
+cheese-named mixes rows that duplicate a cheese_recipes row. The heuristic is
+duplicated in lib/spec-import AND the web storage apply path — change both.

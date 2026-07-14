@@ -294,6 +294,55 @@ async function runGenericMixPoisonPurge(): Promise<void> {
   });
 }
 
+// ── Cheese-named mix crossover purge ────────────────────────────────────────
+// Past imports misrouted cheese blends into the Mixes pool (e.g. "Lowe's Red
+// Hot Cheese Mix" landed as a premix row duplicating the cheese_recipes row).
+// Because the mix-routing heuristic used to honor pool membership over the
+// name, that junk row flipped every future import/auto-fill of the blend to
+// "Mix". The heuristic is fixed (a name mentioning "cheese" never routes to
+// mix); this heal removes the crossover rows that already landed: any mixes
+// row whose name mentions "cheese" AND has a same-named (ci, per scope)
+// cheese_recipes row. Mixes are referenced by NAME, so deleting simply lets
+// the applicator card resolve to the cheese recipe instead.
+
+const CHEESE_MIX_CROSSOVER_HEAL_ID = "cheese-named-mix-crossover-purge-v1";
+
+async function runCheeseMixCrossoverPurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CHEESE_MIX_CROSSOVER_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const cheeseRows = await tx
+      .select({ scope: cheeseRecipesTable.scope, name: cheeseRecipesTable.name })
+      .from(cheeseRecipesTable);
+    const cheeseKeys = new Set(
+      cheeseRows.map((r) => `${r.scope}\u0000${r.name.trim().toLowerCase()}`),
+    );
+
+    const mixes = await tx.select().from(mixesTable).for("update");
+    let deletedMixes = 0;
+    for (const m of mixes) {
+      const nameLower = (m.name ?? "").trim().toLowerCase();
+      if (!/cheese/.test(nameLower)) continue;
+      if (!cheeseKeys.has(`${m.scope}\u0000${nameLower}`)) continue;
+      const a = await tx
+        .delete(mixesTable)
+        .where(and(eq(mixesTable.id, m.id), eq(mixesTable.scope, m.scope)))
+        .returning({ id: mixesTable.id });
+      deletedMixes += a.length;
+    }
+
+    logger.info(
+      { heal: CHEESE_MIX_CROSSOVER_HEAL_ID, scanned: mixes.length, deletedMixes },
+      "Data heal applied",
+    );
+  });
+}
+
 // ── Cheese-recipe exact-name duplicate purge ────────────────────────────────
 // The cheese pool accumulated rows with the EXACT same name (per scope):
 // multi-file imports and racing devices deduped against a stale pool snapshot,
@@ -379,4 +428,5 @@ export async function runDataHeals(): Promise<void> {
   await runSpecAliasHygienePurge();
   await runCheeseDuplicateNamePurge();
   await runGenericMixPoisonPurge();
+  await runCheeseMixCrossoverPurge();
 }

@@ -52,3 +52,10 @@ the same sheet's profile loop would have just assigned. Missing this path was
 the "auto-fill didn't fill dough" bug. Note the relink key is
 specImportNameMatchKey directly (no cheese-name cleaning — "X Dough 9oz" does
 NOT loose-match "X Dough").
+
+**Pool-union candidates:** the planner's applicator slot resolver must union
+its recipe-name candidates from the sheet's OWN recipes PLUS the server cheese
+and mixes pools (cheese filtered against mix names), exactly like the import
+apply loop does. Sheets often reference blends they don't re-declare (they
+live only in the server pool); sheet-only candidates leave the raw type name
+as a phantom applicator type in the form.

@@ -565,7 +565,15 @@ export function extractEmbeddedApplicatorBlends(parsed: ParsedSpecImport): Parse
  * arrive as `kind: "cheese"`. A name is a mix when the user already keeps it in
  * their mix list (their categorization always wins) OR when it contains the
  * standalone word "mix" without mentioning cheese AND actually blends 2+
- * ingredients (a single-ingredient table is not a mix). Pure.
+ * ingredients (a single-ingredient table is not a mix).
+ *
+ * A name that mentions "cheese" is NEVER a mix, even when a same-named entry
+ * exists in the user's mix list: a past misroute (or a stray premix import)
+ * can leave a cheese blend duplicated into the Mixes pool, and honoring that
+ * junk row would flip every future import/auto-fill of the blend to "Mix"
+ * forever ("Lowe's Red Hot Cheese Mix" vs "Lowe's Red Hot Mix" confusion).
+ * An explicit review-time category override still wins (callers check
+ * `forcedCategory` before this heuristic). Pure.
  */
 export function specImportCheeseRecipeIsMix(
   name: string,
@@ -574,8 +582,9 @@ export function specImportCheeseRecipeIsMix(
 ): boolean {
   const t = name.trim().toLowerCase();
   if (!t) return false;
+  if (/cheese/i.test(t)) return false;
   if (userMixNamesLower.has(t)) return true;
-  return ingredientCount >= 2 && /\bmix\b/.test(t) && !/cheese/i.test(t);
+  return ingredientCount >= 2 && /\bmix\b/.test(t);
 }
 
 /**
