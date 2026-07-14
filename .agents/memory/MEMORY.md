@@ -69,8 +69,8 @@
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert no-op; 10-iteration cap; if capped, drive playwright-core + nix chromium yourself; /mobile/ path unusable; mobile scheduled is local-only.
 - [Shared AI memory](shared-ai-memory.md) — facility-knowledge store + per-user turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool.
 - [Proactive shift alerts](proactive-alerts.md) — /ai/proactive-alert returns ≤1 keyed nudge; client owns dedup/cooldown; poll hook must live in a persistent spot, not the assistant tab.
-- [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff plain-language Q&A grounded in day-state (reuses OptimizeInput/buildInput); requireAuth NOT requireRole; per-user conversation window; optimize stays manager-gated; web+mobile parity.
-- [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory "quality") + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write; web+mobile parity.
+- [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff Q&A grounded in day-state (reuses OptimizeInput); requireAuth NOT requireRole; per-user convo window; optimize stays manager-gated.
+- [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory) + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write.
 - [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
 - [AI recipe assistant](recipe-assistant.md) — staff /ai/recipe-assistant single-shot (no convo memory; NO userId to grounding); scale/sub/explain over real recipes; shared buildRecipeAssistContext verbatim; advisory-only; web+mobile parity.
 - [Voice ask input](voice-ask-input.md) + [output](voice-ask-output.md) — mic (Web Speech) + "speak answers" (SpeechSynthesis); hidden when unsupported; mobile guards Platform.OS==="web"; web+mobile parity.
@@ -79,7 +79,7 @@
 - [Additive push-force schema](additive-push-force-schema.md) — adding a col to a POPULATED table must be additive or push-force prompts/breaks: uniqueIndex not .unique()/composite-PK-with-new-col; keep int singleton PKs (not serial).
 - [Temp ingredient substitutions](temp-substitutions.md) — day-state overlay (swap/add/remove) for today's recipes; overlay BOTH totals + consumption keys (type fields by value); shared @workspace/inventory-math; web+mobile parity.
 - [Recipe apply/undo shared lib](recipe-apply-shared-lib.md) — recipe-suggestion validate/sanitize/apply/undo decision logic now in @workspace/recipe-apply; apps keep only resolveTargetId/readPrevRows/write glue; lib owns RECIPE_FIELD_IDS.
-- [Sandbox auto-refresh](sandbox-auto-refresh.md) — sandbox re-copies from live on stale login; server REPORTS staleness (sandbox_meta.copiedAt + 24h cutoff), client runs existing reset flow once/mount; banner shows copy time; web+mobile parity.
+- [Sandbox auto-refresh](sandbox-auto-refresh.md) — sandbox re-copies from live on stale login; server REPORTS staleness (copiedAt + 24h cutoff), client runs the existing reset flow once/mount; banner shows copy time.
 - [Multi-location inventory](multi-location-inventory.md) — null locationId === onsite; drawdown/consume/adjust onsite-only; pure transfer-needs math warns when offsite stock covers an onsite shortfall.
 - [Warehouse staging checklist](warehouse-staging-checklist.md) — per-run "What Each Run Needs" check-off in synced dayState.stagedItems keyed `${runId}::${label}__${unit}`; mirrors substitutions sync/reset; web+mobile parity.
 - [Freezer phase indicators](freezer-phase-indicators.md) — Run-tab auto-hiding "Freezer filling/emptying" banners; time-based phase detection gated on ppm>0 & freezerTime>0; running-only; web+mobile parity.
@@ -100,7 +100,7 @@
 - [AI data not in day-state](ai-data-not-in-day-state.md) — AI memory is server-side tables (not the synced blob); refresh/reset never deletes it; perceived "AI reset" = day-state clobber downstream (fixed) or by-design sandbox re-copy.
 - [Merge category tabs](merge-category-tabs.md) — 6-tab scoped merge picker; full-universe (AI suggest) vs scoped-universe (pickers) split; Brand/Flavor is its own merge path; mobile Mixes always empty, empty-state below tabs not early-return.
 - [Server empty-over-populated guard](server-empty-over-populated-guard.md) — /api/sync protectRunValues rejects all-default-over-populated; keep value + advance stamp to heal peers.
-- [Pep applicator combine + B slot](pep-applicator-combine.md) — web-only pep1Combined (default true, doubles sticks, hides app2) + per-app "B" pep type; EVERY DEFAULT-merge load path must call resolvePep1Combined or legacy 2-pep runs wrongly combine.
+- [Pep applicator combine + B slot](pep-applicator-combine.md) — web-only pep1Combined (default true, doubles sticks) + per-app "B" pep type; EVERY DEFAULT-merge load path must call resolvePep1Combined or legacy 2-pep runs wrongly combine.
 - [Import "reload" causes](web-form-button-submit-reload.md) — web import blanks page two ways: sandbox auto-reset on focus refetch, or dev-only Vite HMR reconnect reload aborting the import.
 - [Web brand palette](web-brand-palette.md) — web app unified on brand amber #FF9500; Tailwind v4 @theme remaps amber-* AND orange-* to one ramp (orange==amber by design); theme-color lives in 3 synced spots.
 - [Downtime trends + stall nudge](downtime-trends.md) — trends computed CLIENT-SIDE from synced history (no API); stall nudge off paceDelta w/ episode latch; auto-track blind spot accepted.
@@ -116,7 +116,7 @@
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [xlsx audit false positive](xlsx-audit-false-positive.md) — CDN-sourced xlsx is patched but still flagged since SheetJS abandoned the npm name; alias to npm:@e965/xlsx to clear scanners.
 - [Password-change session invalidation](password-change-session-invalidation.md) — invalidateUserSessions fences tokens by iat vs passwordChangedAt (same-second grace); approver privilege boundary via canManagePasswordResetFor.
-- [Mobile require-cycle init](mobile-require-cycle-init.md) + [TDZ cycle](mobile-module-tdz-cycle.md) — Metro require/import cycles make module-scope constants undefined or TDZ-crash the real Expo web build (tests pass); read shared constants lazily.
+- [Mobile require-cycle init](mobile-require-cycle-init.md) + [TDZ cycle](mobile-module-tdz-cycle.md) — Metro require cycles make module-scope constants undefined or TDZ-crash the real Expo web build (tests pass); read shared constants lazily.
 - [HMR dual-context crash](hmr-context-split.md) — provider files must export ONLY components (Fast Refresh rule) or HMR splits the module into two contexts; auth context lives in a hook-only module + dev globalThis singleton.
 - [One-time data heals](one-time-data-heals.md) + [data reset](one-time-data-purge.md) — marker-guarded boot heals (monotonic stamps or poison resurrects); factory reset = per-scope epoch via POST /sync/reset.
 - [Headless e2e fallback](headless-e2e-fallback.md) — when the runTest tester never reaches the app, self-drive headless Chromium (temp-dir puppeteer-core) against $REPLIT_DEV_DOMAIN; gotchas inside.
@@ -129,7 +129,7 @@
 - [Dual API workflows](dual-api-workflows.md) — browser hits the artifact API workflow (8080), not the 5000 duplicate; after pkill restart BOTH and verify via public domain, not localhost.
 - [Setup Profiles editor](setup-profiles-editor.md) — standalone brand/flavor setup editor via saveProfile/loadProfile, never touches run state; "Recipe Setup Needed" routes here not run-jump; web+mobile parity.
 - [Server ingredient catalog](ingredient-catalog.md) — factory-wide ingredients table w/ stable ids, recipe rows get optional ingredientId; hybrid alongside existing local lists; array-identity gotcha in hydration.
-- [Rendered verification & runTest cleanup](render-verify-and-runtest-cleanup.md) — when runTest is flaky, render real web components under vitest+jsdom (even from home.tsx) + parity-lock mobile; clean stray users runTest created before timing out.
+- [Rendered verification & runTest cleanup](render-verify-and-runtest-cleanup.md) — when runTest is flaky, render real web components under vitest+jsdom (even from home.tsx); clean stray users runTest created before timing out.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
 - [Import format gotchas](spec-import-batch-vs-perpizza.md) + [source semantics](import-source-file-semantics.md) — M&V/Cheese are per-BATCH lbs, premix per-pizza; order spec→dough/sauce→cheese/premix.
 - [Import order + dedup keys](import-order-dedup-keys.md) — spec-first is worst for dedup (AI match no-ops on empty pool); cheese dedup is EXACT name, mix/dough/sauce use LOOSE key; reorder/misspell drift now handled by name-match.
@@ -147,9 +147,9 @@
 - [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Learned ingredient batch weights](ingredient-batch-weights.md) — typed batch lbs follow the ingredient (server ci-store); learn only UI-visible fields, serialize saves, sauce branch checks rows lbs>0 not array truthiness.
 - [Mix applicator slots](mix-applicator-slots.md) — slot TYPE is generic "Mix"/"cheese", name lives in the CheeseRecipeName link; allowlist "mix"/"cheese" in stray filters; migration used targeted profile writes, not saveProfile.
-- [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; anything that rewrites a profile out-of-band (spec import) must reload the open form, and identity-change with no profile must reset to defaults.
+- [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; out-of-band profile rewrites (spec import) must reload the open form; identity-change w/o profile resets to defaults.
 - [Local→server name consolidation](local-to-server-name-consolidation.md) — one-time migration of legacy local name lists into server pools: reconcile leftovers (never drop), tombstone wipes, stamp re-pointed runs.
-- [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere (peps sit between stations 2 and 3); importer honors it via ParsedApplicator.slot + assignApplicatorSlots.
+- [Line station order](line-station-order.md) — App 1, App 2, PEPS, App 3, App 4 everywhere; import slots MANDATORY when pep rows exist (before pep=1/2, after=3/4); prompt changes bump SPEC_PARSE_VERSION.
 - [Name-first dough/sauce relink](spec-import-name-first-relink.md) — spec import assigns the dough/sauce NAME pre-recipe; later recipe import relinks by loose name; ghost guard + registry gotchas for tests.
 - [Alias-kind contract lockstep](alias-kind-contract-lockstep.md) — new lib enum values sent in API bodies must also land in openapi.yaml + codegen, or best-effort saves silently 400.
 - [Spec-import chunk union](spec-import-chunk-union.md) — chunk merges union applicator lists (split blocks are complementary); file merges replace; same type at two weights = two stations, never dedupe.

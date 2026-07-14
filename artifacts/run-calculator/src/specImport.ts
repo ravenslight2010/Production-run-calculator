@@ -695,8 +695,10 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * v2: duplicate-applicator prompt hardening (per-station entries, tolerance
  * values never emitted as a second applicator).
  * v3: dough sheets now parse "doughballs per tray" (doughballsPerTray).
+ * v4: applicator station slots are now mandatory whenever a profile has pep
+ * rows (before pep = 1/2, after pep = 3/4 in listed order).
  */
-export const SPEC_PARSE_VERSION = "3";
+export const SPEC_PARSE_VERSION = "4";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file

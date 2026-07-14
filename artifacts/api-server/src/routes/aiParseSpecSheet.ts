@@ -209,11 +209,17 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "a profile pepperoni. " +
     "APPLICATOR STATIONS: the physical line runs Applicator 1, Applicator 2, then " +
     "the pep/stick applicators, then Applicator 3, Applicator 4 — the pep " +
-    "applicators sit BETWEEN stations 2 and 3. When the sheet's layout or labels " +
-    "make an applicator's station discernible (an explicit station/applicator " +
-    "number, or a topping column/row that clearly comes AFTER the pepperoni/stick " +
-    "entries — meaning station 3 or 4), set that applicator's `slot` (1-4). Omit " +
-    "`slot` when the position is not discernible — never guess. " +
+    "applicators sit BETWEEN stations 2 and 3. The sheet's layout IS the line " +
+    "layout and must be preserved exactly: whenever a profile has pepperoni/stick " +
+    "entries, every applicator's position relative to those pep rows determines " +
+    "its station — applicators listed BEFORE the pep entries are stations 1 then " +
+    "2 (in listed order), applicators listed AFTER the pep entries are stations 3 " +
+    "then 4 (in listed order). Example: a sheet showing one applicator, then the " +
+    "pep rows, then one more applicator means slot 1 and slot 3 — NOT 1 and 2. " +
+    "Set `slot` (1-4) accordingly on every such applicator. An explicit " +
+    "station/applicator number on the sheet also sets `slot`. Only omit `slot` " +
+    "when the profile has no pep entries and no station labels, so the position " +
+    "truly is not discernible — never guess. " +
     "DUPLICATE APPLICATORS: a pizza can run the SAME topping or blend on TWO " +
     "different applicator stations at DIFFERENT per-pizza weights (e.g. the same " +
     "cheese mix applied under and over the toppings). When a profile's sheet lists " +
