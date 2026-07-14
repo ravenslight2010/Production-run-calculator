@@ -1126,6 +1126,58 @@ export interface SaveSpecSheetInput {
   data: SavedSpecSheetData;
 }
 
+/**
+ * The packaging values a shipping/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can't map).
+ */
+export interface ShippingGuidePatch {
+  shipper?: string;
+  circles?: string;
+  skidStacking?: string;
+  gripSheets?: string;
+  pizzasPerCase?: number;
+  casesPerSkid?: number;
+}
+
+export interface SavedShippingGuideRowEntry {
+  brand: string;
+  /** Flavors this row targets. Empty means it applies to every flavor of the brand. */
+  flavors?: string[];
+  patch: ShippingGuidePatch;
+}
+
+/**
+ * The reviewed shipping/palletizing-guide snapshot captured at import time.
+ */
+export interface SavedShippingGuideData {
+  rows: SavedShippingGuideRowEntry[];
+  [key: string]: unknown;
+ }
+
+export interface SavedShippingGuide {
+  id: number;
+  label: string;
+  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  sourceKey?: string | null;
+  /** SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots. */
+  sourceHash?: string | null;
+  /** Epoch milliseconds the snapshot was saved */
+  createdAt: number;
+  data: SavedShippingGuideData;
+}
+
+export interface SavedShippingGuideList {
+  shippingGuides: SavedShippingGuide[];
+}
+
+export interface SaveShippingGuideInput {
+  label: string;
+  /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct guide. */
+  sourceKey?: string;
+  /** Optional SHA-256 content fingerprint of the imported file bytes. */
+  sourceHash?: string;
+  data: SavedShippingGuideData;
+}
+
 export interface SpecReconcileApplicator {
   type: string;
   ozPerPizza: number;

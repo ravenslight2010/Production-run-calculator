@@ -417,6 +417,8 @@ import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
 import { prepareShippingImport, commitShippingImport, type ShippingImportPrepared } from "@/shippingImport";
 import type { ShippingPatch } from "@workspace/shipping-import";
+import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
+import { deriveSourceKey } from "@/savedSpecSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
 import CheeseRecipesManager from "@/components/CheeseRecipesManager";
 import CheeseImportDialog from "@/components/CheeseImportDialog";
@@ -8021,6 +8023,7 @@ export default function Home() {
   const premixImportGenRef = useRef(0);
   const cheeseImportGenRef = useRef(0);
   const shippingImportGenRef = useRef(0);
+  const shippingImportFileNameRef = useRef<string>("");
 
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
@@ -8320,6 +8323,7 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(file ? "shipping import: file selected" : "shipping import: picker canceled");
     if (!file) return;
+    shippingImportFileNameRef.current = file.name ?? "";
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
     const gen = ++shippingImportGenRef.current;
@@ -8349,6 +8353,20 @@ export default function Home() {
       // Profiles changed in storage — refresh derived dropdowns/profiles so
       // the packaging pickers and the current form pick the values up.
       reloadMasterData();
+      // Persist a durable snapshot of the reviewed guide so the Setup Profiles
+      // "Auto-Fill From Imports" panel can later cross-reference what this
+      // palletizing guide said against the spec sheets. Best-effort: the import
+      // itself already succeeded, so a failed snapshot must not surface as an
+      // import error.
+      const fileName = shippingImportFileNameRef.current.trim();
+      const sourceKey = deriveSourceKey(fileName ? [fileName] : []);
+      void saveShippingGuide(
+        buildShippingGuideLabel(rows.length, fileName),
+        { rows },
+        sourceKey,
+      ).catch(() => {
+        /* snapshot is advisory; import already applied */
+      });
       setShowShippingImport(false);
       setShippingImportPrepared(null);
       toast({

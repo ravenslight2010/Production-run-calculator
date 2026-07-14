@@ -2693,6 +2693,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/SavedSpecSheetList"
 
+  /shipping-guides:
+    get:
+      operationId: listShippingGuides
+      tags: [shippingImport]
+      summary: List saved shipping & palletizing guides (most recent first, up to two per file)
+      description: >-
+        Returns the saved shipping/palletizing-guide snapshots (the reviewed
+        brand + flavor + packaging rows captured when a guide was imported), most
+        recent first. At most two are kept per distinct file. Available to any
+        signed-in user.
+      responses:
+        "200":
+          description: All saved shipping guides
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedShippingGuideList"
+    post:
+      operationId: saveShippingGuide
+      tags: [shippingImport]
+      summary: Save a shipping-guide snapshot (keeps only the two most recent per file)
+      description: >-
+        Persists a snapshot of an imported shipping/palletizing guide so its
+        stated packaging values can later be cross-referenced against the current
+        recipes and spec sheets in the Setup Profiles auto-fill panel. After
+        insert, older snapshots beyond the two most recent per distinct file are
+        pruned. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveShippingGuideInput"
+      responses:
+        "200":
+          description: The full updated shipping-guide list after the save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedShippingGuideList"
+        "400":
+          description: Invalid input
+
+  /shipping-guides/{id}:
+    delete:
+      operationId: deleteShippingGuide
+      tags: [shippingImport]
+      summary: Delete a saved shipping guide by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The full updated shipping-guide list after the delete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedShippingGuideList"
+
   /premix-sheets:
     get:
       operationId: listPremixSheets
@@ -5084,6 +5146,116 @@ components:
             instead of re-running the AI. Omitted by older/mobile clients.
         data:
           $ref: "#/components/schemas/SavedSpecSheetData"
+
+    ShippingGuidePatch:
+      type: object
+      description: >-
+        The packaging values a shipping/palletizing guide stated for a brand
+        (all optional — the deterministic importer omits anything it can't map).
+      properties:
+        shipper:
+          type: string
+        circles:
+          type: string
+        skidStacking:
+          type: string
+        gripSheets:
+          type: string
+        pizzasPerCase:
+          type: number
+        casesPerSkid:
+          type: number
+
+    SavedShippingGuideRowEntry:
+      type: object
+      required:
+        - brand
+        - patch
+      properties:
+        brand:
+          type: string
+        flavors:
+          type: array
+          description: >-
+            Flavors this row targets. Empty means it applies to every flavor of
+            the brand.
+          items:
+            type: string
+        patch:
+          $ref: "#/components/schemas/ShippingGuidePatch"
+
+    SavedShippingGuideData:
+      type: object
+      description: The reviewed shipping/palletizing-guide snapshot captured at import time.
+      required:
+        - rows
+      additionalProperties: true
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedShippingGuideRowEntry"
+
+    SavedShippingGuide:
+      type: object
+      required:
+        - id
+        - label
+        - createdAt
+        - data
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        sourceKey:
+          type: string
+          nullable: true
+          description: >-
+            Stable per-file identity (normalized uploaded filename). Retention
+            keeps the two most recent snapshots per sourceKey. Null for legacy
+            snapshots.
+        sourceHash:
+          type: string
+          nullable: true
+          description: >-
+            SHA-256 content fingerprint of the imported file bytes. Null for
+            legacy snapshots.
+        createdAt:
+          type: number
+          description: Epoch milliseconds the snapshot was saved
+        data:
+          $ref: "#/components/schemas/SavedShippingGuideData"
+
+    SavedShippingGuideList:
+      type: object
+      required:
+        - shippingGuides
+      properties:
+        shippingGuides:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedShippingGuide"
+
+    SaveShippingGuideInput:
+      type: object
+      required:
+        - label
+        - data
+      properties:
+        label:
+          type: string
+        sourceKey:
+          type: string
+          description: >-
+            Optional stable per-file identity (normalized uploaded filename) so
+            retention keeps the two most recent versions of each distinct guide.
+        sourceHash:
+          type: string
+          description: >-
+            Optional SHA-256 content fingerprint of the imported file bytes.
+        data:
+          $ref: "#/components/schemas/SavedShippingGuideData"
 
     SpecReconcileApplicator:
       type: object

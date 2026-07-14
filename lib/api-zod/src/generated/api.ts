@@ -3001,6 +3001,116 @@ export const DeleteSpecSheetResponse = zod.object({
 
 
 /**
+ * Returns the saved shipping/palletizing-guide snapshots (the reviewed brand + flavor + packaging rows captured when a guide was imported), most recent first. At most two are kept per distinct file. Available to any signed-in user.
+ * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
+ */
+export const ListShippingGuidesResponse = zod.object({
+  "shippingGuides": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
+  "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.object({
+  "rows": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
+  "patch": zod.object({
+  "shipper": zod.string().optional(),
+  "circles": zod.string().optional(),
+  "skidStacking": zod.string().optional(),
+  "gripSheets": zod.string().optional(),
+  "pizzasPerCase": zod.number().optional(),
+  "casesPerSkid": zod.number().optional()
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}))
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
+}))
+})
+
+
+/**
+ * Persists a snapshot of an imported shipping/palletizing guide so its stated packaging values can later be cross-referenced against the current recipes and spec sheets in the Setup Profiles auto-fill panel. After insert, older snapshots beyond the two most recent per distinct file are pruned. Available to any signed-in user.
+ * @summary Save a shipping-guide snapshot (keeps only the two most recent per file)
+ */
+export const SaveShippingGuideBody = zod.object({
+  "label": zod.string(),
+  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct guide.'),
+  "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes.'),
+  "data": zod.object({
+  "rows": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
+  "patch": zod.object({
+  "shipper": zod.string().optional(),
+  "circles": zod.string().optional(),
+  "skidStacking": zod.string().optional(),
+  "gripSheets": zod.string().optional(),
+  "pizzasPerCase": zod.number().optional(),
+  "casesPerSkid": zod.number().optional()
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}))
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
+})
+
+export const SaveShippingGuideResponse = zod.object({
+  "shippingGuides": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
+  "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.object({
+  "rows": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
+  "patch": zod.object({
+  "shipper": zod.string().optional(),
+  "circles": zod.string().optional(),
+  "skidStacking": zod.string().optional(),
+  "gripSheets": zod.string().optional(),
+  "pizzasPerCase": zod.number().optional(),
+  "casesPerSkid": zod.number().optional()
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}))
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
+}))
+})
+
+
+/**
+ * @summary Delete a saved shipping guide by id
+ */
+export const DeleteShippingGuideParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteShippingGuideResponse = zod.object({
+  "shippingGuides": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
+  "sourceHash": zod.string().nullish().describe('SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.'),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.object({
+  "rows": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavors": zod.array(zod.string()).optional().describe('Flavors this row targets. Empty means it applies to every flavor of the brand.'),
+  "patch": zod.object({
+  "shipper": zod.string().optional(),
+  "circles": zod.string().optional(),
+  "skidStacking": zod.string().optional(),
+  "gripSheets": zod.string().optional(),
+  "pizzasPerCase": zod.number().optional(),
+  "casesPerSkid": zod.number().optional()
+}).describe('The packaging values a shipping\/palletizing guide stated for a brand (all optional — the deterministic importer omits anything it can\'t map).')
+}))
+}).describe('The reviewed shipping\/palletizing-guide snapshot captured at import time.')
+}))
+})
+
+
+/**
  * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
  * @summary List saved premix sheets (most recent first, up to two)
  */

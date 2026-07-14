@@ -11,10 +11,12 @@ import {
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
 import { fetchSavedSpecSheets } from "../savedSpecSheets";
+import { fetchSavedShippingGuides } from "../savedShippingGuides";
 import {
   buildProfileAutofillPlan,
   applyAutofillEntries,
   type AutofillEntry,
+  type AutofillConflict,
   type ProfileAutofillPlan,
 } from "../profileAutofill";
 import {
@@ -301,6 +303,9 @@ export default function SetupProfileEditor({
   } | null>(null);
   const [autofillBusy, setAutofillBusy] = useState(false);
   const [autofillError, setAutofillError] = useState("");
+  // Conflict fields the user has already resolved (picked a value or kept the
+  // current one) — hidden from the pending-conflicts list. Keyed by field.
+  const [resolvedConflicts, setResolvedConflicts] = useState<Set<string>>(new Set());
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -478,14 +483,30 @@ export default function SetupProfileEditor({
     setAutofillBusy(true);
     setAutofillError("");
     try {
-      const sheets = await fetchSavedSpecSheets();
+      const [sheets, savedGuides] = await Promise.all([
+        fetchSavedSpecSheets(),
+        fetchSavedShippingGuides().catch(() => []),
+      ]);
+      // Flatten each saved guide's nested `data.rows` up to the snapshot shape
+      // the plan builder expects (label/sourceKey/createdAt + rows).
+      const shippingGuides = savedGuides.map(g => ({
+        label: g.label,
+        sourceKey: g.sourceKey,
+        createdAt: g.createdAt,
+        rows: g.data?.rows ?? [],
+      }));
       const plan = buildProfileAutofillPlan({
         sheets,
         brand: b,
         flavor: f,
         current: form.getValues(),
         mixNamesLower: new Set(serverMixNames.map(n => n.toLowerCase())),
+        shippingGuides,
+        doughRecipes: doughRecipesList,
+        cheeseRecipes: cheeseRecipesList,
+        mixes,
       });
+      setResolvedConflicts(new Set());
       applyAutofillToForm(plan.fills, plan);
       setAutofill({ plan, applied: plan.fills, sheetsAvailable: sheets.length });
       if (plan.fills.length > 0) {
@@ -504,8 +525,30 @@ export default function SetupProfileEditor({
     setAutofill({ ...autofill, applied: [...autofill.applied, ...entries] });
   }
 
+  /**
+   * Resolve a source-vs-source conflict. Picking a candidate writes that value
+   * into the form (form-only until Save Setup, same as fills/mismatches);
+   * `value === null` keeps the current value untouched. Either way the conflict
+   * is marked resolved so it drops out of the pending list.
+   */
+  function resolveConflict(conflict: AutofillConflict, value: string | number | null) {
+    if (!autofill) return;
+    if (value !== null) {
+      applyAutofillToForm(
+        [{ field: conflict.field, label: conflict.label, specValue: value, source: "your pick" }],
+        autofill.plan,
+      );
+    }
+    setResolvedConflicts(prev => {
+      const next = new Set(prev);
+      next.add(conflict.field);
+      return next;
+    });
+  }
+
   const appliedFields = new Set((autofill?.applied ?? []).map(e => e.field));
   const pendingMismatches = (autofill?.plan.mismatches ?? []).filter(e => !appliedFields.has(e.field));
+  const pendingConflicts = (autofill?.plan.conflicts ?? []).filter(c => !resolvedConflicts.has(c.field));
 
   function applicatorTypeHandlers(app: ApplicatorNum) {
     const typeKey = `app${app}Type` as const;
@@ -668,7 +711,7 @@ export default function SetupProfileEditor({
                   <CardContent className="px-5 pb-4 space-y-3">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <p className="text-xs text-muted-foreground flex-1 min-w-[200px]">
-                        Fill blank fields from your latest imported spec sheets. Differences are listed for you to review — nothing changes without your OK, and nothing is saved until you press Save Setup.
+                        Fill blank fields from all your latest imports — spec sheets, the palletizing guide, and the dough, cheese &amp; mix recipes. Differences are listed for you to review, and when your imports disagree you pick which value to use. Nothing changes without your OK, and nothing is saved until you press Save Setup.
                       </p>
                       <Button type="button" size="sm" variant="outline" onClick={runAutofill} disabled={autofillBusy}>
                         <Sparkles className="w-3.5 h-3.5 mr-1.5" />
@@ -698,6 +741,53 @@ export default function SetupProfileEditor({
                               <Check className="w-3 h-3 text-primary shrink-0" />
                               <span className="text-muted-foreground">{e.label}:</span>
                               <span className="font-semibold">{String(e.specValue)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {pendingConflicts.length > 0 && autofill && (
+                      <div className="space-y-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-500">
+                          Your imports disagree — pick one ({pendingConflicts.length})
+                        </p>
+                        <ul className="space-y-1.5">
+                          {pendingConflicts.map(c => (
+                            <li key={c.field} className="text-xs rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-2 space-y-1.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold">{c.label}</span>
+                                {c.currentValue !== undefined && (
+                                  <span className="text-muted-foreground">
+                                    now <span className="font-semibold text-foreground">{String(c.currentValue)}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {c.candidates.map((cand, i) => (
+                                  <Button
+                                    key={`${c.field}-${i}`}
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2.5 text-xs"
+                                    onClick={() => resolveConflict(c, cand.value)}
+                                  >
+                                    <span className="font-semibold">{String(cand.value)}</span>
+                                    <span className="text-muted-foreground ml-1.5">({cand.source})</span>
+                                  </Button>
+                                ))}
+                                {c.currentValue !== undefined && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2.5 text-xs"
+                                    onClick={() => resolveConflict(c, null)}
+                                  >
+                                    Keep current
+                                  </Button>
+                                )}
+                              </div>
                             </li>
                           ))}
                         </ul>

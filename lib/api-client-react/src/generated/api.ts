@@ -144,9 +144,11 @@ import type {
   SavePremixSheetInput,
   SaveProductionRulesInput,
   SaveRunTemplatesInput,
+  SaveShippingGuideInput,
   SaveSpecImportAliasesInput,
   SaveSpecSheetInput,
   SavedPremixSheetList,
+  SavedShippingGuideList,
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
@@ -8356,6 +8358,226 @@ export const useDeleteSpecSheet = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteSpecSheetMutationOptions(options));
+    }
+
+export const getListShippingGuidesUrl = () => {
+
+
+
+
+  return `/api/shipping-guides`
+}
+
+/**
+ * Returns the saved shipping/palletizing-guide snapshots (the reviewed brand + flavor + packaging rows captured when a guide was imported), most recent first. At most two are kept per distinct file. Available to any signed-in user.
+ * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
+ */
+export const listShippingGuides = async ( options?: RequestInit): Promise<SavedShippingGuideList> => {
+
+  return customFetch<SavedShippingGuideList>(getListShippingGuidesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListShippingGuidesQueryKey = () => {
+    return [
+    `/api/shipping-guides`
+    ] as const;
+    }
+
+
+export const getListShippingGuidesQueryOptions = <TData = Awaited<ReturnType<typeof listShippingGuides>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListShippingGuidesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listShippingGuides>>> = ({ signal }) => listShippingGuides({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListShippingGuidesQueryResult = NonNullable<Awaited<ReturnType<typeof listShippingGuides>>>
+export type ListShippingGuidesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List saved shipping & palletizing guides (most recent first, up to two per file)
+ */
+
+export function useListShippingGuides<TData = Awaited<ReturnType<typeof listShippingGuides>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listShippingGuides>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListShippingGuidesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveShippingGuideUrl = () => {
+
+
+
+
+  return `/api/shipping-guides`
+}
+
+/**
+ * Persists a snapshot of an imported shipping/palletizing guide so its stated packaging values can later be cross-referenced against the current recipes and spec sheets in the Setup Profiles auto-fill panel. After insert, older snapshots beyond the two most recent per distinct file are pruned. Available to any signed-in user.
+ * @summary Save a shipping-guide snapshot (keeps only the two most recent per file)
+ */
+export const saveShippingGuide = async (saveShippingGuideInput: SaveShippingGuideInput, options?: RequestInit): Promise<SavedShippingGuideList> => {
+
+  return customFetch<SavedShippingGuideList>(getSaveShippingGuideUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveShippingGuideInput,)
+  }
+);}
+
+
+
+
+export const getSaveShippingGuideMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveShippingGuide>>, TError,{data: BodyType<SaveShippingGuideInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveShippingGuide>>, TError,{data: BodyType<SaveShippingGuideInput>}, TContext> => {
+
+const mutationKey = ['saveShippingGuide'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveShippingGuide>>, {data: BodyType<SaveShippingGuideInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveShippingGuide(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveShippingGuideMutationResult = NonNullable<Awaited<ReturnType<typeof saveShippingGuide>>>
+    export type SaveShippingGuideMutationBody = BodyType<SaveShippingGuideInput>
+    export type SaveShippingGuideMutationError = ErrorType<void>
+
+    /**
+ * @summary Save a shipping-guide snapshot (keeps only the two most recent per file)
+ */
+export const useSaveShippingGuide = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveShippingGuide>>, TError,{data: BodyType<SaveShippingGuideInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveShippingGuide>>,
+        TError,
+        {data: BodyType<SaveShippingGuideInput>},
+        TContext
+      > => {
+      return useMutation(getSaveShippingGuideMutationOptions(options));
+    }
+
+export const getDeleteShippingGuideUrl = (id: number,) => {
+
+
+
+
+  return `/api/shipping-guides/${id}`
+}
+
+/**
+ * @summary Delete a saved shipping guide by id
+ */
+export const deleteShippingGuide = async (id: number, options?: RequestInit): Promise<SavedShippingGuideList> => {
+
+  return customFetch<SavedShippingGuideList>(getDeleteShippingGuideUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteShippingGuideMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteShippingGuide>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteShippingGuide>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteShippingGuide'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteShippingGuide>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteShippingGuide(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteShippingGuideMutationResult = NonNullable<Awaited<ReturnType<typeof deleteShippingGuide>>>
+
+    export type DeleteShippingGuideMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a saved shipping guide by id
+ */
+export const useDeleteShippingGuide = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteShippingGuide>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteShippingGuide>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteShippingGuideMutationOptions(options));
     }
 
 export const getListPremixSheetsUrl = () => {

@@ -27,6 +27,19 @@ applySpecImport profile loop in web storage.ts first; deviations need explicit
 user sign-off, not silent guards. Blank detection quirks: allergen default is
 the token "none", and non-zero schema defaults (pep batch 25) count as unset.
 
+**Multi-source + conflicts.** The panel now gathers candidate values per field
+from SEVERAL saved sources — spec sheets, the dough pool, the cheese pool, the
+mixes pool, and a durable palletizing/shipping-guide snapshot (server pool
+`saved_shipping_guides`, mirror of saved spec sheets: scope-isolated, 2-most-
+recent-per-sourceKey prune, saved best-effort on shipping-guide import). When
+≥2 sources give DISTINCT values for one field it becomes a `conflict` (user
+picks); agreeing sources fill once; spec-vs-current disagreement stays a
+`mismatch`. Equality is field-aware (`valuesEqual`): numeric tolerance +
+normalized/loose-name string compare, so casing/whitespace/near-float noise
+never fabricates a conflict. Backward compat: with no new sources the plan is
+byte-for-byte the old spec-only behavior. **Nothing auto-applies** — conflicts
+and mismatches are form-only until Save Setup; only `fills` seed the form.
+
 **The import has TWO dough/sauce paths — mirror both.** Profile-level
 doughName/sauceName is only half the story: dough and sauce mostly arrive as
 RECIPES in the parsed data, tied to profiles by the import's recipe loop

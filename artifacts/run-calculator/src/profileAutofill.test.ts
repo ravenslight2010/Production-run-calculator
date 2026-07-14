@@ -341,6 +341,112 @@ describe("buildProfileAutofillPlan", () => {
   });
 });
 
+describe("buildProfileAutofillPlan — multi-source conflicts", () => {
+  function guide(
+    createdAt: number,
+    rows: Array<{ brand: string; flavors?: string[]; patch: Record<string, unknown> }>,
+    label = "Guide",
+  ) {
+    return { label, sourceKey: `guide-${createdAt}`, createdAt, rows } as never;
+  }
+
+  it("fills a packaging field from the palletizing guide when the spec is silent", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ dieType: "12in Round" })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+      shippingGuides: [guide(200, [{ brand: "Aldo's", patch: { pizzasPerCase: 16, casesPerSkid: 40 } }])],
+    });
+    const byField = new Map(p.fills.map(f => [f.field, f.specValue]));
+    expect(byField.get("pizzasPerCase")).toBe(16);
+    expect(byField.get("casesPerSkid")).toBe(40);
+    expect(p.conflicts).toEqual([]);
+  });
+
+  it("flags a conflict when spec and guide disagree on the same field, and lets the user pick", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ pizzasPerCase: 12 })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+      shippingGuides: [guide(200, [{ brand: "Aldo's", patch: { pizzasPerCase: 16 } }])],
+    });
+    // Not silently filled either way.
+    expect(p.fills.find(f => f.field === "pizzasPerCase")).toBeUndefined();
+    const conflict = p.conflicts.find(c => c.field === "pizzasPerCase");
+    expect(conflict).toBeDefined();
+    const vals = conflict!.candidates.map(c => c.value).sort();
+    expect(vals).toEqual([12, 16]);
+  });
+
+  it("agreeing sources do NOT create a conflict (fills once)", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ pizzasPerCase: 16 })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+      shippingGuides: [guide(200, [{ brand: "Aldo's", patch: { pizzasPerCase: 16 } }])],
+    });
+    expect(p.conflicts).toEqual([]);
+    expect(p.fills.find(f => f.field === "pizzasPerCase")?.specValue).toBe(16);
+  });
+
+  it("records the current value on a conflict when the field is already set", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ pizzasPerCase: 12 })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values({ pizzasPerCase: 20 }),
+      mixNamesLower: NO_MIXES,
+      shippingGuides: [guide(200, [{ brand: "Aldo's", patch: { pizzasPerCase: 16 } }])],
+    });
+    const conflict = p.conflicts.find(c => c.field === "pizzasPerCase");
+    expect(conflict?.currentValue).toBe(20);
+  });
+
+  it("stays backward-compatible: spec-only input yields no conflicts", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ dieType: "12in Round", pizzasPerCase: 12 })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+    });
+    expect(p.conflicts).toEqual([]);
+    expect(p.fills.map(f => f.field).sort()).toEqual(["dieType", "pizzasPerCase"]);
+  });
+
+  it("does NOT flag a conflict for near-equal numeric values across sources", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ sauceOzPerPizza: 4.5 })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+      shippingGuides: [guide(200, [{ brand: "Aldo's", patch: { sauceOzPerPizza: 4.5000001 } }])],
+    });
+    expect(p.conflicts.find(c => c.field === "sauceOzPerPizza")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "sauceOzPerPizza")?.specValue).toBe(4.5);
+  });
+
+  it("does NOT flag a conflict for casing/whitespace-only string differences across sources", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [sheet(1, 100, { profiles: [profile({ dieType: "12in Round" })] })],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+      shippingGuides: [guide(200, [{ brand: "Aldo's", patch: { dieType: "  12IN round " } }])],
+    });
+    expect(p.conflicts.find(c => c.field === "dieType")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "dieType")?.specValue).toBe("12in Round");
+  });
+});
+
 describe("applyAutofillEntries", () => {
   it("writes accepted entries and derives pep1Combined only when a pep type applies", () => {
     const start = values({ pep1Combined: true } as Partial<FormValues>);

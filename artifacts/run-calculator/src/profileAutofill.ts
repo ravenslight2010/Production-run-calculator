@@ -49,11 +49,37 @@ export type AutofillEntry = {
   source: string;
 };
 
+/** One value a source proposes for a conflicted field. */
+export type AutofillCandidate = {
+  /** The value this source states. */
+  value: string | number;
+  /** Which saved source proposed it ("Latest spec sheet", "Palletizing guide"…). */
+  source: string;
+};
+
+/**
+ * A field where two or more saved sources DISAGREE. Never auto-applied — the
+ * user picks which value (or keeps the current one) in the editor.
+ */
+export type AutofillConflict = {
+  /** FormValues key in dispute. */
+  field: string;
+  /** Human-readable field label. */
+  label: string;
+  kind: DesiredKind;
+  /** The current profile value, when it is already set (not blank/default). */
+  currentValue?: string | number;
+  /** Distinct values the sources propose (always two or more). */
+  candidates: AutofillCandidate[];
+};
+
 export type ProfileAutofillPlan = {
   /** Blank/default fields the spec can fill — safe to auto-apply to the form. */
   fills: AutofillEntry[];
   /** Fields whose current value differs from the spec — per-field review. */
   mismatches: AutofillEntry[];
+  /** Fields where saved sources disagree — the user picks which value to use. */
+  conflicts: AutofillConflict[];
   /** How many of the latest saved sheets mention this brand+flavor. */
   matchedSheets: number;
   /**
@@ -61,6 +87,51 @@ export type ProfileAutofillPlan = {
    * two = not). Applied only when a pep TYPE entry is actually accepted.
    */
   pepCombinedTarget?: boolean;
+};
+
+/** Minimal shape of a saved shipping/palletizing-guide snapshot (see savedShippingGuides.ts). */
+export type ShippingGuideSnapshot = {
+  label: string;
+  sourceKey?: string | null;
+  createdAt: number;
+  rows: ReadonlyArray<{
+    brand: string;
+    flavors?: string[];
+    patch: {
+      shipper?: string;
+      skidStacking?: string;
+      pizzasPerCase?: number;
+      casesPerSkid?: number;
+      circles?: string;
+      gripSheets?: string;
+    };
+  }>;
+};
+
+/** Minimal shape of a dough-pool recipe (server named-recipes, kind "dough"). */
+export type DoughPoolRecipe = {
+  name: string;
+  brand?: string;
+  flavors?: string[];
+  doughballWeightOz?: number | null;
+  enabled?: boolean;
+};
+
+/** Minimal shape of a cheese-pool recipe (server cheese recipes). */
+export type CheesePoolRecipe = {
+  name: string;
+  brand?: string;
+  flavors?: string[];
+  components?: ReadonlyArray<{ lbs?: number | null }>;
+  enabled?: boolean;
+};
+
+/** Minimal shape of a premix-pool recipe (server Mixes). */
+export type MixPoolRecipe = {
+  name: string;
+  brand?: string;
+  flavor?: string;
+  batchSize?: number | null;
 };
 
 type DesiredKind = "string" | "number" | "name";
@@ -291,6 +362,172 @@ function stringIsBlank(field: string, value: string): boolean {
   return field === "allergen" && t.toLowerCase() === "none";
 }
 
+/** Two proposed values are "the same" under the field's comparison rules. */
+function valuesEqual(a: string | number, b: string | number, kind: DesiredKind): boolean {
+  if (kind === "number") return Math.abs(Number(a) - Number(b)) <= 0.005;
+  return stringsEqual(String(a), String(b), kind);
+}
+
+function currentIsBlank(field: string, cur: unknown, kind: DesiredKind): boolean {
+  if (kind === "number") return numberIsBlank(field, Number(cur ?? 0));
+  return stringIsBlank(field, String(cur ?? ""));
+}
+
+/**
+ * Packaging fields a saved shipping/palletizing guide implies for this
+ * brand+flavor. Newest guide wins per FIELD (same rule as the spec sheets); a
+ * row with empty flavors applies to every flavor of the brand, and a
+ * flavor-specific row outranks a brand-wide one within the same guide. Only the
+ * fields the guide actually mapped to app packaging values are considered —
+ * `circles`/`gripSheets` have no FormValues home and are ignored.
+ */
+function desiredFromShipping(
+  guides: ReadonlyArray<ShippingGuideSnapshot>,
+  brand: string,
+  flavor: string,
+): Map<string, Desired> {
+  const b = brand.trim().toLowerCase();
+  const f = flavor.trim().toLowerCase();
+  const out = new Map<string, Desired>();
+  const ordered = [...guides].sort((x, y) => y.createdAt - x.createdAt);
+  for (const guide of ordered) {
+    const source = (guide.label ?? "").trim() || "Palletizing guide";
+    // Within one guide, prefer a flavor-specific row over a brand-wide one.
+    let brandWide: ShippingGuideSnapshot["rows"][number] | undefined;
+    let flavorRow: ShippingGuideSnapshot["rows"][number] | undefined;
+    for (const row of guide.rows ?? []) {
+      if ((row.brand ?? "").trim().toLowerCase() !== b) continue;
+      const flavors = (row.flavors ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean);
+      if (flavors.length === 0) {
+        if (!brandWide) brandWide = row;
+      } else if (flavors.includes(f)) {
+        if (!flavorRow) flavorRow = row;
+      }
+    }
+    const row = flavorRow ?? brandWide;
+    if (!row) continue;
+    const patch = row.patch ?? {};
+    const setStr = (field: string, label: string, v?: string) => {
+      const t = (v ?? "").trim();
+      if (t && !out.has(field)) out.set(field, { field, label, value: t, kind: "string", source });
+    };
+    const setNum = (field: string, label: string, v?: number) => {
+      if (v != null && v > 0 && !out.has(field)) {
+        out.set(field, { field, label, value: v, kind: "number", source });
+      }
+    };
+    setStr("shipper", "Shipper", patch.shipper);
+    setStr("skidStacking", "Skid Stacking", patch.skidStacking);
+    setNum("pizzasPerCase", "Pizzas Per Case", patch.pizzasPerCase);
+    setNum("casesPerSkid", "Cases Per Skid", patch.casesPerSkid);
+  }
+  return out;
+}
+
+/**
+ * Dough-pool fields for this brand+flavor. Prefers the pool recipe already
+ * linked (by loose name) to the profile's current/spec dough name, else the
+ * first enabled recipe reaching this brand+flavor. Offers the recipe name and,
+ * when the pool holds a real doughball weight (>0), that weight — the two
+ * scalars that overlap with what a spec sheet states.
+ */
+function desiredFromDoughPool(
+  recipes: ReadonlyArray<DoughPoolRecipe>,
+  brand: string,
+  flavor: string,
+  current: FormValues,
+  linkedName: string,
+): Map<string, Desired> {
+  const b = brand.trim().toLowerCase();
+  const f = flavor.trim().toLowerCase();
+  const out = new Map<string, Desired>();
+  const reaches = (r: DoughPoolRecipe): boolean => {
+    if ((r.brand ?? "").trim().toLowerCase() !== b) return false;
+    const flavors = (r.flavors ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean);
+    return flavors.length === 0 || flavors.includes(f);
+  };
+  const enabled = recipes.filter((r) => r.enabled !== false && (r.name ?? "").trim());
+  const candidates = enabled.filter(reaches);
+  if (candidates.length === 0) return out;
+  const wantKey = linkedName.trim() ? nameKey(linkedName) : "";
+  const chosen =
+    (wantKey && candidates.find((r) => nameKey(r.name) === wantKey)) || candidates[0];
+  const source = `Dough recipe (${chosen.name.trim()})`;
+  out.set("doughRecipeName", {
+    field: "doughRecipeName",
+    label: "Dough Recipe",
+    value: chosen.name.trim(),
+    kind: "name",
+    source,
+  });
+  const wt = Number(chosen.doughballWeightOz ?? 0);
+  if (wt > 0) {
+    out.set("targetDoughballWeight", {
+      field: "targetDoughballWeight",
+      label: "Doughball Weight (oz)",
+      value: wt,
+      kind: "number",
+      source,
+    });
+  }
+  return out;
+}
+
+/**
+ * Cheese/premix-pool batch weights, anchored to the applicator slot each recipe
+ * name is assigned to (by the spec sheet, else by the current profile). A cheese
+ * recipe's per-batch weight is the sum of its component lbs; a premix's is its
+ * stored batchSize. These cross-check the batch weight the spec sheet states for
+ * the same slot — the one scalar the pools and the sheet both carry.
+ */
+function desiredFromCheeseMixPools(
+  cheese: ReadonlyArray<CheesePoolRecipe>,
+  mixes: ReadonlyArray<MixPoolRecipe>,
+  current: FormValues,
+  specDecided: ReadonlyMap<string, Desired>,
+): { cheese: Map<string, Desired>; mix: Map<string, Desired> } {
+  const cheeseOut = new Map<string, Desired>();
+  const mixOut = new Map<string, Desired>();
+  const cur = current as Record<string, unknown>;
+  for (let slot = 1; slot <= 4; slot++) {
+    const nameField = `app${slot}CheeseRecipeName`;
+    const slotName = String(
+      specDecided.get(nameField)?.value ?? cur[nameField] ?? "",
+    ).trim();
+    if (!slotName) continue;
+    const key = nameKey(slotName);
+    if (!key) continue;
+    const batchField = `app${slot}BatchLbs`;
+    const label = `Applicator ${slot} Batch Weight (lbs)`;
+    const c = cheese.find((r) => (r.name ?? "").trim() && nameKey(r.name) === key);
+    if (c) {
+      const lbs = Math.round(
+        (c.components ?? []).reduce((s, comp) => s + Math.max(0, Number(comp.lbs ?? 0)), 0) * 10,
+      ) / 10;
+      if (lbs > 0) {
+        cheeseOut.set(batchField, {
+          field: batchField,
+          label,
+          value: lbs,
+          kind: "number",
+          source: `Cheese recipe (${c.name.trim()})`,
+        });
+      }
+    }
+    const m = mixes.find((r) => (r.name ?? "").trim() && nameKey(r.name) === key);
+    if (m && Number(m.batchSize ?? 0) > 0) {
+      mixOut.set(batchField, {
+        field: batchField,
+        label,
+        value: Number(m.batchSize),
+        kind: "number",
+        source: `Premix (${m.name.trim()})`,
+      });
+    }
+  }
+  return { cheese: cheeseOut, mix: mixOut };
+}
+
 /**
  * Compare one brand+flavor's current profile values against the LATEST saved
  * spec-sheet snapshots and plan what an auto-fill could do. Only the newest
@@ -312,11 +549,19 @@ export function buildProfileAutofillPlan(opts: {
   current: FormValues;
   /** Lower-cased mix-recipe names (server Mixes pool) for the mix-routing heuristic. */
   mixNamesLower: ReadonlySet<string>;
+  /** Saved palletizing/shipping-guide snapshots (packaging values). Optional. */
+  shippingGuides?: ReadonlyArray<ShippingGuideSnapshot>;
+  /** Server dough-recipe pool. Optional. */
+  doughRecipes?: ReadonlyArray<DoughPoolRecipe>;
+  /** Server cheese-recipe pool. Optional. */
+  cheeseRecipes?: ReadonlyArray<CheesePoolRecipe>;
+  /** Server Mixes (premix) pool. Optional. */
+  mixes?: ReadonlyArray<MixPoolRecipe>;
 }): ProfileAutofillPlan {
   const { sheets, brand, flavor, current, mixNamesLower } = opts;
   const b = brand.trim().toLowerCase();
   const f = flavor.trim().toLowerCase();
-  const plan: ProfileAutofillPlan = { fills: [], mismatches: [], matchedSheets: 0 };
+  const plan: ProfileAutofillPlan = { fills: [], mismatches: [], conflicts: [], matchedSheets: 0 };
   if (!b || !f) return plan;
 
   const latest = latestSourceKeyIds(sheets);
@@ -357,32 +602,103 @@ export function buildProfileAutofillPlan(opts: {
   }
 
   const cur = current as Record<string, unknown>;
-  for (const d of decided.values()) {
-    if (typeof d.value === "number") {
-      const curN = Number(cur[d.field] ?? 0);
-      const specN = d.value;
-      if (numberIsBlank(d.field, curN)) {
+
+  // Additional saved sources beyond the spec sheets. Each is its own group so
+  // that when a field appears in more than one group with DIFFERENT values it
+  // surfaces as a conflict for the user to resolve instead of one source
+  // silently winning. The spec group (`decided`) is the anchor for slot names.
+  const linkedDoughName = String(
+    decided.get("doughRecipeName")?.value ?? cur.doughRecipeName ?? "",
+  ).trim();
+  const shippingDecided = desiredFromShipping(opts.shippingGuides ?? [], brand, flavor);
+  const doughDecided = desiredFromDoughPool(
+    opts.doughRecipes ?? [],
+    brand,
+    flavor,
+    current,
+    linkedDoughName,
+  );
+  const { cheese: cheeseDecided, mix: mixDecided } = desiredFromCheeseMixPools(
+    opts.cheeseRecipes ?? [],
+    opts.mixes ?? [],
+    current,
+    decided,
+  );
+
+  // Priority order for which group's label is credited when a single agreed
+  // value is applied, and the deterministic order candidates are listed in.
+  const groups: ReadonlyArray<ReadonlyMap<string, Desired>> = [
+    decided,
+    doughDecided,
+    shippingDecided,
+    cheeseDecided,
+    mixDecided,
+  ];
+  const allFields: string[] = [];
+  const seenField = new Set<string>();
+  for (const g of groups) {
+    for (const field of g.keys()) {
+      if (!seenField.has(field)) {
+        seenField.add(field);
+        allFields.push(field);
+      }
+    }
+  }
+
+  for (const field of allFields) {
+    const entries: Desired[] = [];
+    for (const g of groups) {
+      const d = g.get(field);
+      if (d) entries.push(d);
+    }
+    if (entries.length === 0) continue;
+    const { kind, label } = entries[0];
+
+    // Distinct proposed values across all sources (first source per value wins
+    // the credit line).
+    const distinct: Desired[] = [];
+    for (const e of entries) {
+      if (!distinct.some((d) => valuesEqual(d.value, e.value, kind))) distinct.push(e);
+    }
+
+    // Sources disagree with EACH OTHER → conflict; the user picks.
+    if (distinct.length >= 2) {
+      const conflict: AutofillConflict = {
+        field,
+        label,
+        kind,
+        candidates: distinct.map((d) => ({ value: d.value, source: d.source })),
+      };
+      if (!currentIsBlank(field, cur[field], kind)) {
+        conflict.currentValue =
+          kind === "number" ? Number(cur[field] ?? 0) : String(cur[field] ?? "").trim();
+      }
+      plan.conflicts.push(conflict);
+      continue;
+    }
+
+    // A single agreed value → fill a blank field or flag a mismatch, exactly as
+    // the spec-only path always has.
+    const d = distinct[0];
+    if (kind === "number") {
+      const curN = Number(cur[field] ?? 0);
+      const specN = Number(d.value);
+      if (numberIsBlank(field, curN)) {
         if (Math.abs(curN - specN) > 0.005) {
-          plan.fills.push({ field: d.field, label: d.label, specValue: specN, source: d.source });
+          plan.fills.push({ field, label, specValue: specN, source: d.source });
         }
       } else if (Math.abs(curN - specN) > 0.005) {
-        plan.mismatches.push({
-          field: d.field,
-          label: d.label,
-          specValue: specN,
-          currentValue: curN,
-          source: d.source,
-        });
+        plan.mismatches.push({ field, label, specValue: specN, currentValue: curN, source: d.source });
       }
     } else {
-      const curS = String(cur[d.field] ?? "");
-      const specS = d.value;
-      if (stringIsBlank(d.field, curS)) {
-        plan.fills.push({ field: d.field, label: d.label, specValue: specS, source: d.source });
-      } else if (!stringsEqual(curS, specS, d.kind)) {
+      const curS = String(cur[field] ?? "");
+      const specS = String(d.value);
+      if (stringIsBlank(field, curS)) {
+        plan.fills.push({ field, label, specValue: specS, source: d.source });
+      } else if (!stringsEqual(curS, specS, kind)) {
         plan.mismatches.push({
-          field: d.field,
-          label: d.label,
+          field,
+          label,
           specValue: specS,
           currentValue: curS.trim(),
           source: d.source,
