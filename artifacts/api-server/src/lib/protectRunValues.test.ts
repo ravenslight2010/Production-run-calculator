@@ -287,3 +287,37 @@ describe("protectRunValues run-list lifecycle LWW (metaUpdatedAt)", () => {
     expect(out.map((r) => r.id)).toEqual(["r2"]);
   });
 });
+
+describe("protectRunValues delete/un-delete stamp preservation", () => {
+  const base = { dayState: { runs: [], resetAt: 0 }, runValues: {}, runValuesUpdatedAt: {} };
+  const ns = "flavor:lucia's craft";
+
+  it("keeps stored stamp maps when a stale push omits them entirely", () => {
+    const existing = { ...base, undeletedStamps: { [ns]: { "house special": 500 } }, deletedStamps: { [ns]: { cheese: 400 } } };
+    const incoming = { ...base }; // old bundle: no stamp fields at all
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.undeletedStamps).toEqual({ [ns]: { "house special": 500 } });
+    expect(out.deletedStamps).toEqual({ [ns]: { cheese: 400 } });
+  });
+
+  it("merges per-name by MAX across incoming and stored", () => {
+    const existing = { ...base, undeletedStamps: { [ns]: { "house special": 500, supreme: 900 } } };
+    const incoming = { ...base, undeletedStamps: { [ns]: { "house special": 800, "3 meat": 300 } } };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.undeletedStamps).toEqual({ [ns]: { "house special": 800, supreme: 900, "3 meat": 300 } });
+  });
+
+  it("carries stamp maps across a wholesale daily-reset adoption", () => {
+    const existing = { ...base, dayState: { runs: [], resetAt: 100 }, undeletedStamps: { [ns]: { "house special": 500 } } };
+    const incoming = { ...base, dayState: { runs: [], resetAt: 200 } }; // strictly-newer reset
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.undeletedStamps).toEqual({ [ns]: { "house special": 500 } });
+  });
+
+  it("ignores junk stamp values and omits empty maps", () => {
+    const incoming = { ...base, deletedStamps: { [ns]: { bad: "x", zero: 0 } } };
+    const out = protectRunValues(incoming, { ...base }) as Record<string, unknown>;
+    expect(out.deletedStamps).toBeUndefined();
+    expect(out.undeletedStamps).toBeUndefined();
+  });
+});

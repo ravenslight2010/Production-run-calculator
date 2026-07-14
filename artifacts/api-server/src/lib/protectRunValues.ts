@@ -189,6 +189,46 @@ function tombstonedRunIds(payload: Record<string, unknown>): Set<string> {
   return out;
 }
 
+// ── Delete/un-delete stamp maps (namespace → lowercased name → epoch ms) ─────
+// The web client arbitrates deletion tombstones with per-name LWW stamps
+// (`deletedStamps` / `undeletedStamps`): an un-delete stamped after the delete
+// keeps a deliberately re-added name visible even though the tombstone itself
+// is merged by pure union. The stored blob is otherwise adopted wholesale from
+// the last pusher, so a STALE client (an old bundle that doesn't know these
+// fields) would silently strip the stamps from the shared row and every peer
+// would re-hide the re-added names. Preserve them here: per-name MAX merge of
+// incoming and stored, and never let a payload that omits the maps delete them.
+function mergeStampMap(a: unknown, b: unknown): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const src of [a, b]) {
+    if (!isPlainObject(src)) continue;
+    for (const [ns, names] of Object.entries(src)) {
+      if (!isPlainObject(names)) continue;
+      const bucket = out[ns] ?? {};
+      for (const [name, ts] of Object.entries(names)) {
+        const n = asNumber(ts);
+        if (n > 0 && n > asNumber(bucket[name])) bucket[name] = n;
+      }
+      if (Object.keys(bucket).length > 0) out[ns] = bucket;
+    }
+  }
+  return out;
+}
+
+function withMergedStamps(
+  out: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  existing: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const del = mergeStampMap(incoming.deletedStamps, existing?.deletedStamps);
+  const undel = mergeStampMap(incoming.undeletedStamps, existing?.undeletedStamps);
+  if (Object.keys(del).length > 0) out.deletedStamps = del;
+  else delete out.deletedStamps; // scrub junk carried in by the incoming spread
+  if (Object.keys(undel).length > 0) out.undeletedStamps = undel;
+  else delete out.undeletedStamps;
+  return out;
+}
+
 /**
  * Merge `incoming` against the already-stored `existing` payload so that:
  *   - a run's stored VALUE only changes on a strictly-newer-stamped edit, and
@@ -220,7 +260,10 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   // the next comparison is sound (a genuine reset then clears on the next push).
   const exReset = asNumber(exDay?.resetAt);
   const inReset = asNumber(inDay?.resetAt);
-  if (exReset > 0 && inReset > exReset) return incoming;
+  // Even on a wholesale reset adoption, the delete/un-delete stamp maps are
+  // factory-wide master-data history, not day-state — carry them across so a
+  // reset (or a stale client's reset push) can't erase un-delete decisions.
+  if (exReset > 0 && inReset > exReset) return withMergedStamps({ ...incoming }, incoming, existing);
 
   const inVals = isPlainObject(incoming.runValues) ? incoming.runValues : {};
   const inUpd = isPlainObject(incoming.runValuesUpdatedAt) ? incoming.runValuesUpdatedAt : {};
@@ -320,5 +363,5 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
     runValuesUpdatedAt: outUpd,
   };
   if (outDay) out.dayState = outDay;
-  return out;
+  return withMergedStamps(out, incoming, existing);
 }

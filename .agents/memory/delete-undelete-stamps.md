@@ -11,5 +11,6 @@ description: Why deletedItems tombstones need per-name stamps so a deliberate re
 - `clearDeleted` must ALWAYS stamp the un-delete, even when this device holds no local tombstone (the tombstone may live only on server/peers).
 - `tombstoneDeleted` stamps on every call so a re-delete after an un-delete moves the stamp forward and wins again.
 - All consumers must go through `dropDeleted` (it applies the stamp compare internally) or replicate the compare — watch direct `deletedMap["ns"]` set builds in the receive path.
-- Server treats these payload fields as opaque; no server change needed.
+- The server must ALSO preserve the stamp maps at its sync-write chokepoint (per-name MAX merge, omission never deletes) — otherwise any device still running an old bundle pushes a payload without the fields and wipes them from the shared row for everyone. Confirmed in prod: a stale tab re-imported right after deploy and the stamps never landed.
+- After a deploy that changes sync payload shape, open tabs keep the OLD bundle — the user must hard-refresh before retrying the workflow that depends on the new fields.
 - `mergedAway` (merge tombstones) still lacks this mechanism — same resurrection risk applies if a merged-away name ever needs a deliberate re-add.
