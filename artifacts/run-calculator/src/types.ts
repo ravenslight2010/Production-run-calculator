@@ -374,6 +374,15 @@ export type SyncPayload = {
   // deleted item from a stale peer. Namespaced (unlike mergedAway) so deleting a
   // flavor "Pepperoni" never strips a pep-type "Pepperoni".
   deletedItems?: Record<string, string[]>;
+  // Per-name delete/un-delete stamps (namespace → lowercased name → epoch ms).
+  // The deletedItems union above means a deliberate RE-ADD (e.g. a spec import
+  // registering a flavor the user once deleted) is resurrected as "deleted" by
+  // the next sync pull. These stamps arbitrate: a name in deletedItems is only
+  // treated as deleted when its delete stamp is >= its un-delete stamp (legacy
+  // tombstones with no stamp count as 0, so any explicit un-delete wins, and a
+  // later re-delete wins again). Merged per-name by MAX on both push and receive.
+  deletedStamps?: Record<string, Record<string, number>>;
+  undeletedStamps?: Record<string, Record<string, number>>;
 };
 
 export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
@@ -424,6 +433,11 @@ export const MERGED_AWAY_KEY = "run-calc-merged-away";
 // Per-list deletion tombstones (see SyncPayload.deletedItems). Persisted + synced
 // so a user-deleted master-list item can't be resurrected by live-sync's union.
 export const DELETED_ITEMS_KEY = "run-calc-deleted-items";
+// Per-name delete/un-delete stamps (see SyncPayload.deletedStamps). Persisted +
+// synced so a deliberate re-add of a once-deleted name survives the tombstone
+// union instead of being stripped right back out by the next sync pull.
+export const DELETED_STAMPS_KEY = "run-calc-deleted-stamps";
+export const UNDELETED_STAMPS_KEY = "run-calc-undeleted-stamps";
 // Factory-specific defaults intentionally EMPTY since the 2026-07-03 full data
 // purge: the user re-imports their own spec sheets, so a fresh install starts
 // with no baked-in brands/ingredients/types. Generic app plumbing (stop

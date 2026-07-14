@@ -152,6 +152,11 @@ import {
   clearDeleted,
   unionDeletedItems,
   dropDeleted,
+  loadDeletedStamps,
+  loadUndeletedStamps,
+  saveDeletedStamps,
+  saveUndeletedStamps,
+  mergeStampMaps,
   flavorNamespace,
   captureMasterDataSnapshot,
   recordMasterDataChange,
@@ -5278,6 +5283,8 @@ export default function Home() {
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
         deletedItems: loadDeletedItems(),
+        deletedStamps: loadDeletedStamps(),
+        undeletedStamps: loadUndeletedStamps(),
       };
       const res = await fetch(`/api/sync/${scheduleEditorDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
         method: "PUT",
@@ -5521,13 +5528,25 @@ export default function Home() {
       // A plain delete removes an item locally, but the additive list-union below
       // would resurrect it from a stale peer. Union the synced per-list deletion
       // tombstones and strip each list's namespace from its merge so a delete sticks.
+      // Merge the per-name delete/un-delete stamps FIRST (per-name MAX) —
+      // dropDeleted below consults them so a deliberately re-added name (e.g.
+      // a spec import re-registering a once-deleted flavor) survives the
+      // tombstone union instead of being stripped right back out.
+      saveDeletedStamps(mergeStampMaps(loadDeletedStamps(), payload.deletedStamps));
+      saveUndeletedStamps(mergeStampMaps(loadUndeletedStamps(), payload.undeletedStamps));
       const deletedMap = unionDeletedItems(loadDeletedItems(), payload.deletedItems);
       // Runs are per-day: on a true daily reset (resetAt strictly forward) drop the
       // run tombstones — those ids can never match today's fresh runs and would
       // otherwise accumulate forever.
       if (remoteResetAt > localResetAt) delete deletedMap["runs"];
       saveDeletedItems(deletedMap);
-      const deletedBrandSet = new Set((deletedMap["brands"] ?? []).map(b => b.trim().toLowerCase()));
+      // Effective view: a brand whose un-delete stamp beats its delete stamp is
+      // NOT treated as deleted (dropDeleted applies the same rule internally).
+      const deletedBrandSet = new Set(
+        (deletedMap["brands"] ?? [])
+          .filter(b => dropDeleted([b], deletedMap, "brands").length === 0)
+          .map(b => b.trim().toLowerCase()),
+      );
       const deletedRunSet = new Set((deletedMap["runs"] ?? []).map(id => id.trim().toLowerCase()));
 
       // ── Day state (runs + shiftNotes + runToTime) ──
@@ -6291,6 +6310,8 @@ export default function Home() {
       cheeseRecipePresets: loadCheeseRecipePresets(),
       mergedAway: loadMergedAway(),
       deletedItems: loadDeletedItems(),
+      deletedStamps: loadDeletedStamps(),
+      undeletedStamps: loadUndeletedStamps(),
     };
   }
 
@@ -8575,6 +8596,8 @@ export default function Home() {
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
       deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
+      deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
+      undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
     };
     let ok = false;
     try {
@@ -8712,6 +8735,8 @@ export default function Home() {
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
         deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
+        deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
+        undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
       };
       let dayOk = false;
       try {

@@ -65,6 +65,7 @@
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Merge deny + change history](merge-deny-and-change-history.md) — factory-wide server-persisted denied merge pairs (filtered at shared glue) + LOCAL (unsynced) master-data undo trail w/ rollback-to-point; web+mobile parity.
 - [Merge](merge-tombstones.md) + [deletion tombstones](deletion-tombstones.md) + [die-type exclusion](die-types-merge-exclusion.md) — merges/deletes need synced tombstones or the union resurrects them; die types NOT mergeable.
+- [Delete/un-delete stamps](delete-undelete-stamps.md) — un-deleting needs synced per-name stamps (LWW) or the tombstone union re-hides a deliberately re-added name; mergedAway still lacks this.
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert no-op; 10-iteration cap; if capped, drive playwright-core + nix chromium yourself; /mobile/ path unusable; mobile scheduled is local-only.
 - [Shared AI memory](shared-ai-memory.md) — facility-knowledge store + per-user turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool.
 - [Proactive shift alerts](proactive-alerts.md) — /ai/proactive-alert returns ≤1 keyed nudge; client owns dedup/cooldown; poll hook must live in a persistent spot, not the assistant tab.

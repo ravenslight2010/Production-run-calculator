@@ -30,6 +30,8 @@ import {
   DEFAULT_INGREDIENT_TYPES,
   MERGED_AWAY_KEY,
   DELETED_ITEMS_KEY,
+  DELETED_STAMPS_KEY,
+  UNDELETED_STAMPS_KEY,
   PEP_TYPES_KEY,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
@@ -158,10 +160,70 @@ export function loadDeletedItems(): Record<string, string[]> {
 export function saveDeletedItems(map: Record<string, string[]>): void {
   try { localStorage.setItem(DELETED_ITEMS_KEY, JSON.stringify(map)); } catch {}
 }
+// ── Delete/un-delete stamps (namespace → lowercased name → epoch ms) ────────
+// The deletedItems tombstones sync via a pure union, so a deliberate RE-ADD of
+// a once-deleted name (e.g. a spec import registering a flavor) used to be
+// resurrected as "deleted" by the very next sync pull. These stamp maps sync
+// alongside the tombstones (merged per-name by MAX) and arbitrate: a name is
+// only effectively deleted when its delete stamp (legacy tombstones count 0)
+// is >= its un-delete stamp. A later re-delete stamps newer and wins again.
+type StampMap = Record<string, Record<string, number>>;
+function loadStampMap(key: string): StampMap {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as StampMap;
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch {}
+  return {};
+}
+export function loadDeletedStamps(): StampMap { return loadStampMap(DELETED_STAMPS_KEY); }
+export function loadUndeletedStamps(): StampMap { return loadStampMap(UNDELETED_STAMPS_KEY); }
+export function saveDeletedStamps(map: StampMap): void {
+  try { localStorage.setItem(DELETED_STAMPS_KEY, JSON.stringify(map)); } catch {}
+}
+export function saveUndeletedStamps(map: StampMap): void {
+  try { localStorage.setItem(UNDELETED_STAMPS_KEY, JSON.stringify(map)); } catch {}
+}
+function setStamp(key: string, namespace: string, nameLower: string, ts: number): void {
+  const map = loadStampMap(key);
+  const ns = map[namespace] ?? {};
+  if ((ns[nameLower] ?? 0) >= ts) return;
+  ns[nameLower] = ts;
+  map[namespace] = ns;
+  try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
+}
+/** Per-name MAX merge of two stamp maps (sync push + receive). */
+export function mergeStampMaps(a: StampMap, b: StampMap | undefined): StampMap {
+  const out: StampMap = {};
+  for (const [ns, names] of Object.entries(a)) out[ns] = { ...names };
+  if (b && typeof b === "object") {
+    for (const [ns, names] of Object.entries(b)) {
+      if (!names || typeof names !== "object") continue;
+      const cur = out[ns] ?? {};
+      for (const [n, ts] of Object.entries(names)) {
+        if (typeof ts !== "number") continue;
+        if ((cur[n] ?? 0) < ts) cur[n] = ts;
+      }
+      out[ns] = cur;
+    }
+  }
+  return out;
+}
+/** True when `nameLower`'s un-delete stamp beats its delete stamp. */
+function undeleteWins(namespace: string, nameLower: string, del: StampMap, undel: StampMap): boolean {
+  const u = undel[namespace]?.[nameLower] ?? 0;
+  if (u <= 0) return false;
+  return u > (del[namespace]?.[nameLower] ?? 0);
+}
 /** Record a deletion of `name` from the list `namespace`. */
 export function tombstoneDeleted(namespace: string, name: string): void {
   const v = name.trim().toLowerCase();
   if (!v) return;
+  // Stamp even when the tombstone already exists — a re-delete after an
+  // un-delete must move the delete stamp forward to win the stamp compare.
+  setStamp(DELETED_STAMPS_KEY, namespace, v, Date.now());
   const map = loadDeletedItems();
   const cur = map[namespace] ?? [];
   if (cur.includes(v)) return;
@@ -172,6 +234,10 @@ export function tombstoneDeleted(namespace: string, name: string): void {
 export function clearDeleted(namespace: string, name: string): void {
   const v = name.trim().toLowerCase();
   if (!v) return;
+  // Always stamp the un-delete — even when this device holds no local
+  // tombstone. The synced tombstone may live only on the server/peers, and
+  // without a stamp the next sync union resurrects it and strips the name.
+  setStamp(UNDELETED_STAMPS_KEY, namespace, v, Date.now());
   const map = loadDeletedItems();
   const cur = map[namespace];
   if (!cur || !cur.includes(v)) return;
@@ -197,12 +263,22 @@ export function unionDeletedItems(
   }
   return out;
 }
-/** Drop names tombstoned under `namespace` from a list (case-insensitive). */
+/**
+ * Drop names tombstoned under `namespace` from a list (case-insensitive).
+ * A name whose un-delete stamp beats its delete stamp is NOT dropped — a
+ * deliberate re-add (spec import, manual re-add) must survive the tombstone
+ * union that syncs from peers/server.
+ */
 export function dropDeleted(list: string[], map: Record<string, string[]>, namespace: string): string[] {
   const tomb = map[namespace];
   if (!tomb || tomb.length === 0) return list;
   const set = new Set(tomb.map((n) => n.trim().toLowerCase()));
-  return list.filter((n) => !set.has(n.trim().toLowerCase()));
+  const del = loadDeletedStamps();
+  const undel = loadUndeletedStamps();
+  return list.filter((n) => {
+    const v = n.trim().toLowerCase();
+    return !set.has(v) || undeleteWins(namespace, v, del, undel);
+  });
 }
 
 export function loadBrandFlavors(): Record<string, string[]> {
