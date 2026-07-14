@@ -4121,9 +4121,18 @@ export default function Home() {
           // swallow it silently either (a TDZ error hid here once).
           console.warn("cheese merge stale-name scan failed:", e);
         }
+        // The legacy local `cheeseRecipeNames` list still feeds one picker (the
+        // schedule editor's Advanced cheese-recipe select) and is synced
+        // factory-wide, so a legacy name lives on every device forever. Any of
+        // its entries that match NO pool name is a phantom too — offer it here
+        // (applyRecipeNameMerge already rewrites + tombstones that list).
+        const staleLocal = cheeseRecipeNames.filter(
+          (n) => n.trim() && !poolCi.has(n.trim().toLowerCase()),
+        );
         return dedupSorted([
           ...serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())),
           ...stale,
+          ...staleLocal,
         ]);
       }
       case "brandflavor":

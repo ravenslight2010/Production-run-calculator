@@ -32,7 +32,7 @@
 - [Frontline formula parity](frontline-formula-parity.md) — mobile computeCalc frontline = web (fractional batches, casesLeftToRun basis w/ double layer buffer); dough/timing intentionally use casesLeft.
 - [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave before profile loads; saveProfile guard + seed self-heal; no numeric-scan for real-data.
 - [Excel import/export + QuickBooks CSV](excel-import-export.md) — export totals must use one shared formula (not platform calc engines); import must merge full day payload (no clobber).
-- [Auth gating](clerk-auth-gating.md) — self-contained username+password (Clerk removed); web auths via httpOnly cookie, mobile threads bearer into client+SSE+REST; requireAuth gates all /api except /healthz + public /auth; first user→manager.
+- [Auth gating](clerk-auth-gating.md) — username+password (Clerk removed); web httpOnly cookie, mobile bearer; requireAuth gates /api except /healthz + /auth; first user→manager.
 - [Role gating](role-gating.md) — roles are DB rows (name+capabilities+builtin); requireCapability resolves caps from rolesTable (tests MUST seedRoles); 6 caps, escalation/last-manager guards; never gate /sync.
 - [Daily-reset auth boundary](daily-reset-auth-boundary.md) — stateless HMAC tokens force-expired at midnight via today's resetAt; client-pushed boundary, mobile forcedOutRef latch, reactive 401 bounce.
 - [AI optimize assistant](ai-optimize-assistant.md) — /ai/optimize reuses photo-intake plumbing; parity is in the shaped OptimizeInput; mobile has no "pause" stoppage type so counts all stoppages (same meaning as web's pause filter).
@@ -53,21 +53,21 @@
 - [AI merge suggestions + learned aliases](merge-suggest.md) — AI dedupe assist + factory-wide learned merge memory; cost-guard must sanitize body (blank padding bypasses count cap); web+mobile parity.
 - [Spec-sheet Excel importer](spec-import.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool (not cheese); mobile profileExists must mirror web profileObjHasRealData; web+mobile parity.
 - [Spec/recipe/mix Excel export](spec-export.md) — mirror of the importers; TWO workbooks (AI spec vs deterministic premix, never combine); pure @workspace/spec-export; pep-B slots omitted; web-only (parity paused).
-- [Learned-memory pattern](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) — server-persisted user-correction memory (requireAuth-only, ci-upsert, existence guard, best-effort); import aliases auto-apply with priority alias>AI>fuzzy.
+- [Learned-memory pattern](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) — server-persisted correction memory (ci-upsert, best-effort); aliases auto-apply, priority alias>AI>fuzzy.
 - [AI reviewer + corrections memory](ai-reviewer-and-corrections.md) — 2nd-pass reviewer AI (ok/warn/reject, advisory/fail-safe, strip id at wire) + factory-wide name-corrections pool written on merge/match/spec confirms; web+mobile.
 - [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.
 - [Import run merge](import-run-merge.md) — mergeImportRuns collapses same brand+flavor runs on a day (sum cases, join notes) post-resolution; verbatim web+mobile mirror.
 - [Import/schedule date default = today](import-schedule-date-default.md) — Excel import + future-day schedule editor default to & allow today (web min=today); AI Forecast intentionally stays tomorrow; keep web+mobile lockstep.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Mobile SelectField parity](mobile-select-field.md) — one bottom-sheet picker mirrors web's two selects; allowClear for die/pep, add/remove for recipe rows, no clear elsewhere.
-- [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded so skids/cases freeze; gate dough trays/batches decrement on front-of-line feed completion; full web+mobile parity (decrement on both).
+- [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded; gate dough trays/batches decrement on front-of-line feed completion; web+mobile.
 - [Multi-sheet schedule import](multi-sheet-schedule-import.md) — day-block planner auto-detected; today-or-later only; re-import overrides prior import per date (imported tag), keeps manual.
 - [Floor Mode parity](floor-mode.md) — idle big-numbers monitor on web+mobile; intentional diffs; drift+auto-dim; idle auto-open tab-focus-gated; on/off toggle is per-user server-side (/me) on web, mobile still local.
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Merge deny + change history](merge-deny-and-change-history.md) — factory-wide server-persisted denied merge pairs (filtered at shared glue) + LOCAL (unsynced) master-data undo trail w/ rollback-to-point; web+mobile parity.
-- [Merge](merge-tombstones.md) + [deletion tombstones](deletion-tombstones.md) + [die-type exclusion](die-types-merge-exclusion.md) — merges/deletes need synced tombstones or the additive union resurrects them; filter EVERY list; die types NOT mergeable.
+- [Merge](merge-tombstones.md) + [deletion tombstones](deletion-tombstones.md) + [die-type exclusion](die-types-merge-exclusion.md) — merges/deletes need synced tombstones or the union resurrects them; die types NOT mergeable.
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert no-op; 10-iteration cap; if capped, drive playwright-core + nix chromium yourself; /mobile/ path unusable; mobile scheduled is local-only.
-- [Shared AI memory](shared-ai-memory.md) — facility-knowledge store (domain/key/fact, factory-wide) + per-user conversation turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool; web+mobile parity.
+- [Shared AI memory](shared-ai-memory.md) — facility-knowledge store + per-user turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool.
 - [Proactive shift alerts](proactive-alerts.md) — /ai/proactive-alert returns ≤1 keyed nudge; client owns dedup/cooldown; poll hook must live in a persistent spot, not the assistant tab.
 - [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff plain-language Q&A grounded in day-state (reuses OptimizeInput/buildInput); requireAuth NOT requireRole; per-user conversation window; optimize stays manager-gated; web+mobile parity.
 - [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory "quality") + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write; web+mobile parity.
@@ -157,4 +157,5 @@
 - [Profile autofill](profile-autofill-from-saved-sheets.md) — planner must mirror applySpecImport EXACTLY, incl. the dough/sauce RECIPE tie loop (not just profile names); form-only until Save Setup.
 - [Brand-profile server pool](brand-profile-server-pool.md) — profiles are a server pool w/ per-profile LWW stamps (NOT in sync); marker keys under the blob prefix + snapshot-guard + orphan-purge gotchas.
 - [home.tsx render TDZ](home-render-tdz.md) — render-time (useMemo) calls into helpers must not read refs declared later in the file; empty catch{} hid the ReferenceError, only real-browser e2e caught it.
+- [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.
