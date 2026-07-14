@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, cheeseRecipesTable, type CheeseRecipeRow } from "@workspace/db";
 import { SaveCheeseRecipesBody, DeleteCheeseRecipesBody } from "@workspace/api-zod";
 import { normalizeCheeseRecipe, type CheeseRecipe } from "@workspace/cheese-recipes";
@@ -86,26 +86,56 @@ router.post(
     }
 
     try {
-      for (const recipe of byId.values()) {
-        const values = toDbValues(recipe);
-        await db
-          .insert(cheeseRecipesTable)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [cheeseRecipesTable.id, cheeseRecipesTable.scope],
-            set: {
-              name: values.name,
-              brand: values.brand,
-              flavors: values.flavors,
-              shredderSetting: values.shredderSetting,
-              cellulose: values.cellulose,
-              notes: values.notes,
-              components: values.components,
-              enabled: values.enabled,
-              updatedAt: values.updatedAt,
-            },
-          });
-      }
+      // Server-side name guard: a NEW id must not create a second recipe with a
+      // name that already exists in this scope (trimmed, case-insensitive).
+      // Clients dedupe against the pool snapshot they loaded, but multi-file
+      // imports and concurrent devices race that snapshot — this is what left
+      // exact same-name duplicate rows in the pool. Existing ids still update
+      // freely (rename/edit by id is the intended flow). Within the batch, the
+      // first NEW id for a name wins. The whole read-check-insert runs in one
+      // transaction under a per-scope advisory lock so two CONCURRENT requests
+      // can't both pass the pre-read and insert the same name — the second
+      // waits for the first to commit and then sees its names as taken.
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${"cheese-recipes:" + currentScope()}))`,
+        );
+        const existingRows = await tx
+          .select({ id: cheeseRecipesTable.id, name: cheeseRecipesTable.name })
+          .from(cheeseRecipesTable)
+          .where(eq(cheeseRecipesTable.scope, currentScope()));
+        const existingIds = new Set(existingRows.map((r) => r.id));
+        const takenNames = new Set(
+          existingRows.map((r) => r.name.trim().toLowerCase()),
+        );
+        for (const [id, recipe] of [...byId]) {
+          if (existingIds.has(id)) continue;
+          const nameKey = recipe.name.trim().toLowerCase();
+          if (takenNames.has(nameKey)) byId.delete(id);
+          else takenNames.add(nameKey);
+        }
+
+        for (const recipe of byId.values()) {
+          const values = toDbValues(recipe);
+          await tx
+            .insert(cheeseRecipesTable)
+            .values(values)
+            .onConflictDoUpdate({
+              target: [cheeseRecipesTable.id, cheeseRecipesTable.scope],
+              set: {
+                name: values.name,
+                brand: values.brand,
+                flavors: values.flavors,
+                shredderSetting: values.shredderSetting,
+                cellulose: values.cellulose,
+                notes: values.notes,
+                components: values.components,
+                enabled: values.enabled,
+                updatedAt: values.updatedAt,
+              },
+            });
+        }
+      });
       const items = await listAll();
       res.json({ items });
     } catch (err) {

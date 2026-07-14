@@ -6,6 +6,7 @@ import {
   specImportAliasesTable,
   aiCorrectionsTable,
   importAliasesTable,
+  cheeseRecipesTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import { sanitizeSpecAliases, type SpecImportAlias as SpecAliasEntry } from "@workspace/spec-import";
@@ -195,6 +196,81 @@ async function runSpecAliasHygienePurge(): Promise<void> {
   });
 }
 
+// ── Cheese-recipe exact-name duplicate purge ────────────────────────────────
+// The cheese pool accumulated rows with the EXACT same name (per scope):
+// multi-file imports and racing devices deduped against a stale pool snapshot,
+// and the POST route accepted any new id without a name check. The route now
+// rejects new-id duplicates; this heal removes the rows that already exist.
+// Everything links to cheese recipes by NAME (never id), so deleting the
+// losers is safe — pickers and applicator cards resolve to the survivor.
+// Keeper rank per (scope, trimmed ci name): a row with curated per-batch lbs
+// beats one without, then more components beats fewer, then oldest wins.
+
+const CHEESE_DUP_HEAL_ID = "cheese-recipe-name-dedupe-v1";
+
+async function runCheeseDuplicateNamePurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CHEESE_DUP_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(cheeseRecipesTable).for("update");
+
+    type Row = (typeof rows)[number];
+    const groups = new Map<string, Row[]>();
+    for (const row of rows) {
+      const key = `${row.scope}\u0000${row.name.trim().toLowerCase()}`;
+      const list = groups.get(key);
+      if (list) list.push(row);
+      else groups.set(key, [row]);
+    }
+
+    const rank = (r: Row): [number, number, number] => {
+      const components = r.components ?? [];
+      const hasLbs = components.some((c) => (c.lbs ?? 0) > 0) ? 1 : 0;
+      return [hasLbs, components.length, -r.createdAt.getTime()];
+    };
+
+    const dropRows: Row[] = [];
+    for (const list of groups.values()) {
+      if (list.length < 2) continue;
+      const sorted = [...list].sort((a, b) => {
+        const ra = rank(a);
+        const rb = rank(b);
+        for (let i = 0; i < ra.length; i++) {
+          if (ra[i] !== rb[i]) return rb[i] - ra[i];
+        }
+        return a.id.localeCompare(b.id);
+      });
+      for (const loser of sorted.slice(1)) dropRows.push(loser);
+    }
+
+    let deletedRows = 0;
+    for (const loser of dropRows) {
+      // Delete by (id, scope) — the upsert key allows the SAME id to exist in
+      // two scopes, and only the row in the loser's own scope is a duplicate.
+      const a = await tx
+        .delete(cheeseRecipesTable)
+        .where(
+          and(
+            eq(cheeseRecipesTable.id, loser.id),
+            eq(cheeseRecipesTable.scope, loser.scope),
+          ),
+        )
+        .returning({ id: cheeseRecipesTable.id });
+      deletedRows += a.length;
+    }
+
+    logger.info(
+      { heal: CHEESE_DUP_HEAL_ID, scanned: rows.length, deletedRows },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -203,4 +279,5 @@ async function runSpecAliasHygienePurge(): Promise<void> {
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
+  await runCheeseDuplicateNamePurge();
 }

@@ -56,3 +56,8 @@ curated via the Cheese Mix Recipe Specs workbook or hand edits) and optional
 - Applicator card hydration (`serverCheeseRowsByName`) falls back to oz values only when
   a recipe has NO component with lbs>0, so spec-created recipes still show their ratio.
 - Any new write path into cheese components must never copy oz values into `lbs`.
+
+## Duplicate-name protection (applies to any name-keyed server pool)
+Rule: a name-keyed master-data pool whose POST accepts client-minted ids MUST enforce name uniqueness server-side — client-side "add if absent" dedupes against a stale pool snapshot, so multi-file imports and racing devices insert exact same-name rows the merge UI can't even show (identical names collapse).
+**Why:** cheese_recipes accumulated ×7/×5 exact-name dupes from a single multi-file import; POST deduped by id only.
+**How to apply:** in the write route, run read-check-insert in ONE transaction under a per-scope pg_advisory_xact_lock; skip NEW ids whose trimmed ci name already exists (existing ids may still rename/update). Heal deletes must be scoped by (id, scope) — the upsert key allows the same id in two scopes. Keeper rank for dedupe heals: lbs>0 components > more components > oldest.
