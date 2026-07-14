@@ -2378,6 +2378,12 @@ export default function Home() {
       });
   }, [me]);
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
+  // Declared here (not with the other sync refs below) because render-time
+  // callers — e.g. the mergeUniverse memo via collectMergeSurfaces() — run
+  // before the sync-ref block and would hit a TDZ ReferenceError otherwise.
+  const dayStateRef = useRef(dayState);
+  // Keep dayStateRef current
+  useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
   // Latest current-run id, readable from the [] rollover effects without going
@@ -4110,7 +4116,11 @@ export default function Home() {
         let stale: string[] = [];
         try {
           stale = collectStaleCheeseLinkNames(collectMergeSurfaces().settingsObjects, poolCi);
-        } catch {}
+        } catch (e) {
+          // Never let a surface-scan failure blank the whole tab — but don't
+          // swallow it silently either (a TDZ error hid here once).
+          console.warn("cheese merge stale-name scan failed:", e);
+        }
         return dedupSorted([
           ...serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())),
           ...stale,
@@ -5365,7 +5375,6 @@ export default function Home() {
       return id;
     })()
   );
-  const dayStateRef = useRef(dayState);
   const lastLocalEditRef = useRef(0);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSyncApplyingRef = useRef(false);
@@ -5379,8 +5388,6 @@ export default function Home() {
   const lastSyncSigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
 
-  // Keep dayStateRef current
-  useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
   // Mirror today's substitution overlay into the shared-calc module so every
   // call site (calc useMemo, warehouse roll-up, consumeRun, schedule/history
   // totals) overlays it without threading it through each call. See

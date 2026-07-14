@@ -14,7 +14,7 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Autosave edit attribution](autosave-edit-attribution.md) — autosave must NEVER stamp an all-default/empty run; empty-over-populated clobbers the shared daily_sync row on every peer.
-- [Run-list loss protection](run-list-loss-protection.md) — server protectRunValues must additively union dayState.runs (not just values) + tombstone filter + resetAt wholesale escape hatch; upsertProtected retries on 23505 to close the first-write race.
+- [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
 - [Sync async crash safety](sync-async-crash-safety.md) — mobile sync serialize/deserialize run in async paths the ErrorBoundary can't catch; must be fail-safe (blank-screen crash, no fallback = async throw).
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
@@ -61,14 +61,14 @@
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Mobile SelectField parity](mobile-select-field.md) — one bottom-sheet picker mirrors web's two selects; allowClear for die/pep, add/remove for recipe rows, no clear elsewhere.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded so skids/cases freeze; gate dough trays/batches decrement on front-of-line feed completion; full web+mobile parity (decrement on both).
-- [Multi-sheet schedule import](multi-sheet-schedule-import.md) — day-block planner auto-detected; import today-or-later only; re-import overrides prior import per date (imported tag) keeping manual; web+mobile parity w/ intentional started/ended asymmetry.
+- [Multi-sheet schedule import](multi-sheet-schedule-import.md) — day-block planner auto-detected; today-or-later only; re-import overrides prior import per date (imported tag), keeps manual.
 - [Floor Mode parity](floor-mode.md) — idle big-numbers monitor on web+mobile; intentional diffs; drift+auto-dim; idle auto-open tab-focus-gated; on/off toggle is per-user server-side (/me) on web, mobile still local.
 - [Production Rules](production-rules.md) — factory-wide run rules, flexible=warn/strict=block-Start; server-persisted (NOT in sync), writes manager-only; field-map + seed gotchas inside.
 - [Merge deny + change history](merge-deny-and-change-history.md) — factory-wide server-persisted denied merge pairs (filtered at shared glue) + LOCAL (unsynced) master-data undo trail w/ rollback-to-point; web+mobile parity.
 - [Merge](merge-tombstones.md) + [deletion tombstones](deletion-tombstones.md) + [die-type exclusion](die-types-merge-exclusion.md) — merges/deletes need synced tombstones or the additive union resurrects them; filter EVERY list; die types NOT mergeable.
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert no-op; 10-iteration cap; if capped, drive playwright-core + nix chromium yourself; /mobile/ path unusable; mobile scheduled is local-only.
 - [Shared AI memory](shared-ai-memory.md) — facility-knowledge store (domain/key/fact, factory-wide) + per-user conversation turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool; web+mobile parity.
-- [Proactive shift alerts](proactive-alerts.md) — separate /ai/proactive-alert endpoint; server returns ≤1 keyed nudge, client owns dedup/cooldown; poll hook must live in persistent spot (home.tsx / (tabs)/_layout.tsx), not assistant tab; web+mobile parity.
+- [Proactive shift alerts](proactive-alerts.md) — /ai/proactive-alert returns ≤1 keyed nudge; client owns dedup/cooldown; poll hook must live in a persistent spot, not the assistant tab.
 - [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff plain-language Q&A grounded in day-state (reuses OptimizeInput/buildInput); requireAuth NOT requireRole; per-user conversation window; optimize stays manager-gated; web+mobile parity.
 - [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory "quality") + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write; web+mobile parity.
 - [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
@@ -156,4 +156,5 @@
 - [Import redirect aliases](import-redirect-aliases.md) — cheese/premix "use existing" picks share the context-free appType alias namespace; suggestion-only auto-apply, one-to-one claim guards.
 - [Profile autofill](profile-autofill-from-saved-sheets.md) — planner must mirror applySpecImport EXACTLY, incl. the dough/sauce RECIPE tie loop (not just profile names); form-only until Save Setup.
 - [Brand-profile server pool](brand-profile-server-pool.md) — profiles are a server pool w/ per-profile LWW stamps (NOT in sync); marker keys under the blob prefix + snapshot-guard + orphan-purge gotchas.
+- [home.tsx render TDZ](home-render-tdz.md) — render-time (useMemo) calls into helpers must not read refs declared later in the file; empty catch{} hid the ReferenceError, only real-browser e2e caught it.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.
