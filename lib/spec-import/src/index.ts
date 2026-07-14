@@ -1906,7 +1906,7 @@ const DIGIT_GUARDED_ALIAS_KINDS = new Set<string>(["brand", "flavor", "appType",
  * erases a blend's identity. (These crept into learned memory via early fuzzy
  * matching and caused cross-recipe mix-ups.)
  */
-function isGenericSlotTypeName(name: string): boolean {
+export function isGenericSlotTypeName(name: string): boolean {
   const key = specImportNameMatchKey(name);
   return key === "mix" || key === "cheese" || key === "mix cheese" || key === "cheese mix";
 }

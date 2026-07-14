@@ -7,9 +7,10 @@ import {
   aiCorrectionsTable,
   importAliasesTable,
   cheeseRecipesTable,
+  mixesTable,
 } from "@workspace/db";
 import { logger } from "./logger";
-import { sanitizeSpecAliases, type SpecImportAlias as SpecAliasEntry } from "@workspace/spec-import";
+import { sanitizeSpecAliases, isGenericSlotTypeName, type SpecImportAlias as SpecAliasEntry } from "@workspace/spec-import";
 import {
   POISONED_CHEESE_ALIAS_PAIRS,
   POISONED_FLAVOR_PAIR,
@@ -196,6 +197,103 @@ async function runSpecAliasHygienePurge(): Promise<void> {
   });
 }
 
+// ── Generic "Mix" poison purge (v2) ─────────────────────────────────────────
+// After the v1 hygiene purge ran, NEW poison accumulated: the review dialog's
+// link suggestions were built from the RAW alias list (unsanitized), so
+// learned rows like `appType: "<real blend name>" → "Mix"` were still applied
+// AND re-learned on every import. During imports on 2026-07-14 those rows
+// renamed several distinct blends to the literal name "Mix", the parse merged
+// the same-named recipes, and the commit created one garbage mix record named
+// "Mix" carrying every blend's ingredients. The client/server code paths are
+// fixed (suggestions sanitized, learn + save paths reject generic names);
+// this heal removes the damage that already landed:
+//   1. re-runs the alias sanitize purge (drops the new generic rows),
+//   2. purges generic-name pairs from the shared corrections pool,
+//   3. deletes mix records whose NAME is a generic slot-type name ("Mix"),
+//   4. deletes obviously-junk mix drafts (empty brand AND zero components —
+//      artifacts of failed early imports that clutter every picker).
+
+const GENERIC_MIX_POISON_HEAL_ID = "generic-mix-poison-purge-v2";
+
+async function runGenericMixPoisonPurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: GENERIC_MIX_POISON_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Re-run the alias sanitize purge (same logic as v1, fresh marker).
+    const rows = await tx.select().from(specImportAliasesTable).for("update");
+    const byScope = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const list = byScope.get(row.scope);
+      if (list) list.push(row);
+      else byScope.set(row.scope, [row]);
+    }
+    const dropIds: number[] = [];
+    for (const scopeRows of byScope.values()) {
+      const entries: SpecAliasEntry[] = scopeRows.map((r) => ({
+        kind: r.kind as SpecAliasEntry["kind"],
+        externalName: r.externalName,
+        canonicalName: r.canonicalName,
+        context: r.context,
+      }));
+      const kept = new Set(sanitizeSpecAliases(entries));
+      for (let i = 0; i < scopeRows.length; i++) {
+        if (!kept.has(entries[i])) dropIds.push(scopeRows[i].id);
+      }
+    }
+    let deletedAliases = 0;
+    for (const id of dropIds) {
+      const a = await tx
+        .delete(specImportAliasesTable)
+        .where(eq(specImportAliasesTable.id, id))
+        .returning({ id: specImportAliasesTable.id });
+      deletedAliases += a.length;
+    }
+
+    // 2) Purge generic-name pairs from the shared corrections pool ("item"
+    // domain — where appType learnings are mirrored). Either side generic.
+    const corrections = await tx
+      .select({ id: aiCorrectionsTable.id, fromText: aiCorrectionsTable.fromText, toText: aiCorrectionsTable.toText })
+      .from(aiCorrectionsTable)
+      .where(eq(aiCorrectionsTable.domain, "item"));
+    let deletedCorrections = 0;
+    for (const c of corrections) {
+      if (!isGenericSlotTypeName(c.fromText) && !isGenericSlotTypeName(c.toText)) continue;
+      const a = await tx
+        .delete(aiCorrectionsTable)
+        .where(eq(aiCorrectionsTable.id, c.id))
+        .returning({ id: aiCorrectionsTable.id });
+      deletedCorrections += a.length;
+    }
+
+    // 3+4) Delete garbage mix records: generic-named ones (the merged "Mix"
+    // record) and empty junk drafts (no brand AND no components). Everything
+    // references mixes by NAME, so removing a garbage record simply empties
+    // the applicator card for a fresh pick / clean re-import.
+    const mixes = await tx.select().from(mixesTable).for("update");
+    let deletedMixes = 0;
+    for (const m of mixes) {
+      const genericName = isGenericSlotTypeName(m.name);
+      const emptyJunk = (m.brand ?? "").trim() === "" && (m.components ?? []).length === 0;
+      if (!genericName && !emptyJunk) continue;
+      const a = await tx
+        .delete(mixesTable)
+        .where(and(eq(mixesTable.id, m.id), eq(mixesTable.scope, m.scope)))
+        .returning({ id: mixesTable.id });
+      deletedMixes += a.length;
+    }
+
+    logger.info(
+      { heal: GENERIC_MIX_POISON_HEAL_ID, deletedAliases, deletedCorrections, deletedMixes },
+      "Data heal applied",
+    );
+  });
+}
+
 // ── Cheese-recipe exact-name duplicate purge ────────────────────────────────
 // The cheese pool accumulated rows with the EXACT same name (per scope):
 // multi-file imports and racing devices deduped against a stale pool snapshot,
@@ -280,4 +378,5 @@ export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
   await runCheeseDuplicateNamePurge();
+  await runGenericMixPoisonPurge();
 }

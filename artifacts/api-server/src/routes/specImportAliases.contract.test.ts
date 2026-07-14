@@ -7,7 +7,7 @@
 // remembered (this actually happened with "recipeName").
 import { describe, it, expect } from "vitest";
 import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
-import { SPEC_ALIAS_KINDS } from "@workspace/spec-import";
+import { SPEC_ALIAS_KINDS, isGenericSlotTypeName } from "@workspace/spec-import";
 
 describe("spec-import alias kind contract lockstep", () => {
   it("accepts every SPEC_ALIAS_KINDS value in the generated request schema", () => {
@@ -37,5 +37,21 @@ describe("spec-import alias kind contract lockstep", () => {
 
   it("includes the recipeName kind used for dough/sauce 'Use existing' picks", () => {
     expect(SPEC_ALIAS_KINDS).toContain("recipeName");
+  });
+});
+
+// The POST route's generic-name backstop (drop appType rows with "Mix"/"cheese"
+// on either side) leans on this predicate — lock in that it recognizes the
+// exact poison shapes observed in production, and does NOT swallow real blends.
+describe("generic slot-type name predicate (server save backstop)", () => {
+  it("flags the generic slot-type names", () => {
+    for (const bad of ["Mix", " mix ", "CHEESE", "Cheese Mix", "mix cheese"]) {
+      expect(isGenericSlotTypeName(bad), `"${bad}" must be generic`).toBe(true);
+    }
+  });
+  it("does not flag real blend names", () => {
+    for (const ok of ["Sweet Chili Veggie Cheese Mix", "Lowe's Red Hot Chicken Mix", "5 Cheese Mix"]) {
+      expect(isGenericSlotTypeName(ok), `"${ok}" must NOT be generic`).toBe(false);
+    }
   });
 });

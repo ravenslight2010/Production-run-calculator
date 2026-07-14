@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
 import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
-import { SPEC_ALIAS_KINDS, specAliasKey, type SpecAliasKind } from "@workspace/spec-import";
+import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, type SpecAliasKind } from "@workspace/spec-import";
 
 const router: IRouter = Router();
 
@@ -71,6 +71,13 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
     if (!externalName || !canonicalName) continue;
     // A mapping that just restates the same name carries no information.
     if (externalName.toLowerCase() === canonicalName.toLowerCase()) continue;
+    // Server-side backstop for the blend-name namespace: a generic slot-type
+    // name ("Mix"/"cheese") on either side of an appType alias is poison — it
+    // renames every distinct blend onto one garbage record at the next import.
+    // Old/unfixed clients must not be able to write these.
+    if (kind === "appType" && (isGenericSlotTypeName(externalName) || isGenericSlotTypeName(canonicalName))) {
+      continue;
+    }
     incoming.push({ kind, externalName, canonicalName, context });
   }
 

@@ -572,11 +572,24 @@ export type CheeseNameAlias = {
 };
 
 /**
+ * Generic slot-card type names ("Mix"/"cheese") must never participate in a
+ * blend-name alias link: an alias FROM one would redirect every plain slot to
+ * a single blend, and an alias TO one links every blend onto a garbage pool
+ * record. Mirrors spec-import's isGenericSlotTypeName (kept local so this
+ * package stays dependency-free). Pure.
+ */
+function isGenericBlendName(name: string): boolean {
+  const key = nameKey(name);
+  return key === "mix" || key === "cheese" || key === "mix cheese" || key === "cheese mix";
+}
+
+/**
  * Build the alias link map `withCheeseLinks` consults: lowercased raw workbook
  * blend name → learned canonical name. Only context-free "appType" aliases (the
  * blend-name namespace shared with the spec importer's "Use existing recipe"
- * picks) participate; conflicting aliases (same external name, different
- * canonical names, ci) are dropped entirely rather than guessing. Pure.
+ * picks) participate; generic slot-type names are rejected on either side, and
+ * conflicting aliases (same external name, different canonical names, ci) are
+ * dropped entirely rather than guessing. Pure.
  */
 export function buildCheeseAliasLinkMap(
   aliases: ReadonlyArray<CheeseNameAlias>,
@@ -588,6 +601,7 @@ export function buildCheeseAliasLinkMap(
     const ext = (a.externalName ?? "").trim().toLowerCase();
     const canon = (a.canonicalName ?? "").trim();
     if (!ext || !canon) continue;
+    if (isGenericBlendName(ext) || isGenericBlendName(canon)) continue;
     const prior = map.get(ext);
     if (prior === undefined) map.set(ext, canon);
     else if (prior.toLowerCase() !== canon.toLowerCase()) conflicted.add(ext);

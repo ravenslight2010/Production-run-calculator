@@ -2810,3 +2810,20 @@ describe("embedded applicator blends (deterministic unpack)", () => {
     });
   });
 });
+
+// Regression: the review dialog's pre-selected "Use existing" picks come from
+// buildAliasLinkSuggestions (web glue). It must sanitize first — a poisoned
+// learned alias `<real blend name> → "Mix"` would otherwise pre-link every
+// blend to one garbage pool record and re-learn itself on every import.
+describe("buildAliasLinkSuggestions (web glue)", () => {
+  it("drops generic-name poison rows but keeps legit blend links", async () => {
+    const { buildAliasLinkSuggestions } = await import("./specImport");
+    const suggestions = buildAliasLinkSuggestions([
+      { kind: "appType", externalName: "Sweet Chili Veggie Cheese Mix", canonicalName: "Mix", context: null },
+      { kind: "appType", externalName: "Mix", canonicalName: "Lowe's Red Hot Chicken Mix", context: null },
+      { kind: "appType", externalName: "Shorthand Blend", canonicalName: "Real Blend Mix", context: null },
+    ]);
+    const values = Object.values(suggestions);
+    expect(values).toEqual(["Real Blend Mix"]);
+  });
+});

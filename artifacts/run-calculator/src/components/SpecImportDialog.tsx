@@ -10,6 +10,7 @@ import {
   collectSpecRenameAliases,
   mergeSpecAliases,
   cleanSpecCheeseRecipeName,
+  isGenericSlotTypeName,
   blendLinkSuggestionKey,
   recipeLinkSuggestionKey,
   repointProfileNamedRecipes,
@@ -413,6 +414,10 @@ export default function SpecImportDialog({
       if (!linked || !external) continue;
       if (external.toLowerCase() === linked.toLowerCase()) continue;
       if (r.kind === "cheese" || r.kind === "mix") {
+        // Never learn a generic slot-type name ("Mix"/"cheese") on either
+        // side: such an alias renames every blend to one garbage record on
+        // the next import (and the poison then re-learns itself on Apply).
+        if (isGenericSlotTypeName(external) || isGenericSlotTypeName(linked)) continue;
         // Two rows: the context-free one keeps the legacy factory-wide
         // fallback working, the brand-scoped one (context = brand) lets each
         // brand remember its OWN pick for a generic blend name instead of the
@@ -448,6 +453,8 @@ export default function SpecImportDialog({
       if (!external || !renamed) continue;
       if (external.toLowerCase() === renamed.toLowerCase()) continue;
       if (r.kind === "cheese" || r.kind === "mix") {
+        // Same generic-name guard as the link branch above.
+        if (isGenericSlotTypeName(external) || isGenericSlotTypeName(renamed)) continue;
         // Same dual-row scheme as the links above: context-free fallback +
         // brand-scoped row when the recipe carries a brand.
         out.push({ kind: "appType", externalName: external, canonicalName: renamed, context: null });

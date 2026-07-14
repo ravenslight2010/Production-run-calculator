@@ -536,6 +536,20 @@ describe("buildCheeseAliasLinkMap", () => {
     ]);
     expect(map.get("mix a")).toBe("Target 1");
   });
+
+  it("rejects generic slot-type names ('Mix'/'cheese') on either side", () => {
+    const map = buildCheeseAliasLinkMap([
+      // Poison shape observed in production: real blend name → literal "Mix".
+      { kind: "appType", externalName: "Sweet Chili Veggie Cheese Mix", canonicalName: "Mix", context: null },
+      { kind: "appType", externalName: "BBQ Chicken Cheese Mix", canonicalName: "cheese", context: null },
+      { kind: "appType", externalName: "Mix", canonicalName: "Lowe's Red Hot Chicken Mix", context: null },
+      { kind: "appType", externalName: "Cheese Mix", canonicalName: "Some Blend", context: null },
+      // A legit blend-to-blend link must survive.
+      { kind: "appType", externalName: "Shorthand Blend", canonicalName: "Real Blend Mix", context: null },
+    ]);
+    expect(map.size).toBe(1);
+    expect(map.get("shorthand blend")).toBe("Real Blend Mix");
+  });
 });
 
 describe("alias-driven link precedence", () => {

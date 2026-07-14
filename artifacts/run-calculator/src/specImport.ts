@@ -158,9 +158,13 @@ export type SpecImportPrepared = {
  * blend-name namespace) — the same pool the user's confirmed "Use existing"
  * picks are written back to on Apply.
  */
-function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<string, string> {
+export function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const a of aliases) {
+  // Sanitize FIRST: poisoned rows (generic "Mix"/"cheese" names, digit
+  // mismatches, cycles) must never become pre-selected "Use existing" picks —
+  // a generic-name suggestion links every blend to one garbage pool record
+  // AND gets re-learned on Apply, making the poison self-perpetuating.
+  for (const a of sanitizeSpecAliases(aliases)) {
     const canon = a.canonicalName.trim();
     if (a.kind === "appType") {
       const ext = a.externalName.trim().toLowerCase();
@@ -1232,9 +1236,14 @@ export async function commitSpecImport(
     }
   }
 
-  if (prepared.newAliases.length) {
+  // Final hygiene gate before persisting learned aliases: whatever path
+  // produced them (canonicalize tracking, review links/renames, match
+  // aliases), never save poisoned pairs — generic "Mix"/"cheese" names,
+  // digit mismatches, cycles. Applies to the corrections mirror too.
+  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
+  if (savableAliases.length) {
     try {
-      await saveSpecImportAliases(prepared.newAliases);
+      await saveSpecImportAliases(savableAliases);
     } catch {
       // Best-effort: the import already applied; learning is a bonus.
     }
@@ -1242,7 +1251,7 @@ export async function commitSpecImport(
     // (additive — alongside the spec-import aliases above) so every other
     // name-resolving AI helper honors it too.
     void saveAiCorrections(
-      prepared.newAliases.map((a) => ({
+      savableAliases.map((a) => ({
         domain: aliasKindToDomain(a.kind),
         fromText: a.externalName,
         toText: a.canonicalName,
