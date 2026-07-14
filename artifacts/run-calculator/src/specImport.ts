@@ -76,6 +76,8 @@ import {
   importProfileIsTombstoned,
   recipeNameIsTombstoned,
   applySpecImport,
+  isNameDeleted,
+  flavorNamespace,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import {
@@ -697,8 +699,12 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * v3: dough sheets now parse "doughballs per tray" (doughballsPerTray).
  * v4: applicator station slots are now mandatory whenever a profile has pep
  * rows (before pep = 1/2, after pep = 3/4 in listed order).
+ * v5: deleted brands/flavors are excluded from the match universe and stale
+ * aliases targeting deleted names are ignored — saved v4 parses have renamed
+ * sheets' flavors grounded onto deleted old names baked in, so they must not
+ * be reused.
  */
-export const SPEC_PARSE_VERSION = "4";
+export const SPEC_PARSE_VERSION = "5";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -814,6 +820,20 @@ async function loadSpecImportContext(): Promise<{
   } catch {
     aliases = [];
   }
+  // Drop aliases whose canonical target the user has since DELETED. Aliases
+  // outrank exact/fuzzy matching, so a stale learned rename (e.g.
+  // "HOUSE DLUX" → deleted "House Special") would silently pull a renamed
+  // sheet's flavor back onto a tombstoned name the user can no longer see.
+  aliases = aliases.filter((a) => {
+    if (a.kind === "brand") return !isNameDeleted("brands", a.canonicalName);
+    if (a.kind === "flavor") {
+      const brand = (a.context ?? "").trim();
+      if (!brand) return true;
+      if (isNameDeleted("brands", brand)) return false;
+      return !isNameDeleted(flavorNamespace(brand), a.canonicalName);
+    }
+    return true;
+  });
   return { known, aliases };
 }
 

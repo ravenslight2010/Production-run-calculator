@@ -269,6 +269,14 @@ export function unionDeletedItems(
  * deliberate re-add (spec import, manual re-add) must survive the tombstone
  * union that syncs from peers/server.
  */
+/** Single-name variant of dropDeleted: true when `name` is effectively deleted. */
+export function isNameDeleted(namespace: string, name: string): boolean {
+  const v = name.trim().toLowerCase();
+  if (!v) return false;
+  const tomb = loadDeletedItems()[namespace];
+  if (!tomb || !tomb.includes(v)) return false;
+  return !undeleteWins(namespace, v, loadDeletedStamps(), loadUndeletedStamps());
+}
 export function dropDeleted(list: string[], map: Record<string, string[]>, namespace: string): string[] {
   const tomb = map[namespace];
   if (!tomb || tomb.length === 0) return list;
@@ -2452,9 +2460,25 @@ export function loadSpecImportKnown(): {
   sauceRecipes: string[];
   cheeseRecipes: string[];
 } {
+  // Exclude names the user deliberately DELETED (tombstoned, un-delete stamp
+  // not winning) from the match universe. Leaving them in lets the alias/
+  // exact/fuzzy layers ground a renamed sheet's NEW flavor back onto a deleted
+  // old one ("4 Cheese Meltdown" → deleted "FOUR CHEESE MELTDOWN"), so the
+  // import lands under names the user can no longer see. An exact same-name
+  // re-import still works: the name simply imports as "new" and applySpecImport
+  // clears its tombstone.
+  const deletedMap = loadDeletedItems();
+  const flavorsByBrand: Record<string, string[]> = {};
+  for (const [brand, flavors] of Object.entries(loadBrandFlavors())) {
+    flavorsByBrand[brand] = dropDeleted(flavors ?? [], deletedMap, flavorNamespace(brand));
+  }
   return {
-    brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
-    flavorsByBrand: loadBrandFlavors(),
+    brands: dropDeleted(
+      loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
+      deletedMap,
+      "brands",
+    ),
+    flavorsByBrand,
     appTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
     pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES)
       .map(t => PEP_TYPE_RENAMES[t] ?? t)
