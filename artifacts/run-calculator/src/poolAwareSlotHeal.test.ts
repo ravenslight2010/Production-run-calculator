@@ -23,8 +23,6 @@ import {
 } from "./storage";
 import { PROFILE_KEY, INGREDIENT_TYPES_KEY, RUN_KEY } from "./types";
 
-const V2_MARKER = "run-calc-mix-slot-recat-v2";
-
 const CHEESE_POOL = ["HT Standard Cheese Mix", "Four Hands Gyro Cheese Blend", "Aldo's Cheese Mix"];
 const MIX_POOL = ["White Fajita Mix"];
 
@@ -109,17 +107,15 @@ describe("collectStaleCheeseLinkNames", () => {
 });
 
 describe("applyPoolAwareSlotHealIfNeeded", () => {
-  it("skips WITHOUT setting the marker while pools are empty, then heals once loaded", () => {
+  it("skips while pools are empty, then heals once loaded", () => {
     saveBrandFlavors({ Aldo: ["Pepperoni"] });
     localStorage.setItem(
       PROFILE_KEY("Aldo", "Pepperoni"),
       JSON.stringify({ app2Type: "HT Standard Cheese Mix" }),
     );
     expect(applyPoolAwareSlotHealIfNeeded([], [])).toEqual([]);
-    expect(localStorage.getItem(V2_MARKER)).toBeNull();
 
     applyPoolAwareSlotHealIfNeeded(CHEESE_POOL, MIX_POOL);
-    expect(localStorage.getItem(V2_MARKER)).toBe("1");
     const prof = (loadProfile("Aldo", "Pepperoni") ?? {}) as Record<string, unknown>;
     expect(prof.app2Type).toBe("cheese");
     expect(prof.app2CheeseRecipeName).toBe("HT Standard Cheese Mix");
@@ -145,9 +141,16 @@ describe("applyPoolAwareSlotHealIfNeeded", () => {
     expect(loadDeletedItems().ingredientTypes ?? []).toContain("ht standard cheese mix");
   });
 
-  it("is a one-time pass (marker set → second call no-ops)", () => {
+  it("is RECURRING — a leak that appears after an earlier pass still gets healed", () => {
     applyPoolAwareSlotHealIfNeeded(CHEESE_POOL, MIX_POOL);
     localStorage.setItem(RUN_KEY("late"), JSON.stringify({ app1Type: "HT Standard Cheese Mix" }));
+    expect(applyPoolAwareSlotHealIfNeeded(CHEESE_POOL, MIX_POOL)).toEqual(["late"]);
+    const vals = loadRunValues("late") as unknown as Record<string, unknown>;
+    expect(vals.app1Type).toBe("cheese");
+  });
+
+  it("does nothing on a converged device (idempotent, no writes needed)", () => {
+    localStorage.setItem(RUN_KEY("ok"), JSON.stringify({ app1Type: "cheese" }));
     expect(applyPoolAwareSlotHealIfNeeded(CHEESE_POOL, MIX_POOL)).toEqual([]);
   });
 });

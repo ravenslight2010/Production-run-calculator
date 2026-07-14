@@ -37,6 +37,20 @@ first RE-TYPE the matched slots to `"cheese"` before any mirroring can help.
 - The recipe-tie loop must place a blend's rows on EVERY cheese slot whose name
   matches (or is blank), falling back to `r.app`/slot-1 only when the profile has NO
   cheese applicator at all.
+- **Candidate names must include the EXISTING pool, not just this import's
+  recipes** (user report 2026-07-14: "cheeses in applicator type and not under
+  cheese"). A spec-only workbook names a blend the factory already has, with no
+  cheese recipe in the same file; without the pool union the resolver found no
+  candidate, the raw blend name stayed as the applicator type and leaked into
+  the shared Type dropdown. `applySpecImport` now unions
+  `loadCheeseRecipePresets()` keys (local mirror of the server pool) into the
+  cheese candidates — but MUST filter out Mix names first (mixes share the
+  cheese preset map; only the name lists differ) or mix slots get re-typed
+  "cheese" before the mix resolver runs. Mix candidates union the Mix name list
+  the same way. Backstop: `applyPoolAwareSlotHealIfNeeded` is now RECURRING
+  (marker removed) — it re-heals profiles/runs and sweeps leaked pool names out
+  of ingredientTypes every boot once pools load; idempotent, writes only on
+  change.
 - **AI blend naming is nondeterministic** ("… 1.75", "… (S & P)"). The prompt's
   EMBEDDED BLENDS rule now states: blend name = BASE only (no weight/number/flavor
   suffix), and one blend = one recipe even at different oz. `cleanSpecCheeseRecipeName`

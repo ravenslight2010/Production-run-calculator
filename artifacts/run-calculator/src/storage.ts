@@ -1959,12 +1959,10 @@ export function applyMixSlotRecategorizeIfNeeded(): void {
   } catch {}
 }
 
-const RECAT_MIX_SLOT_V2_KEY = "run-calc-mix-slot-recat-v2";
-
 /**
  * Pool-aware follow-up to applyMixSlotRecategorizeIfNeeded (see the heal
  * helpers in mergeRecipeNames.ts for the full story). The v1 pass ran at boot
- * with a word heuristic only; this v2 pass runs once the SERVER cheese/mix
+ * with a word heuristic only; this pass runs once the SERVER cheese/mix
  * pools have loaded, so a TYPE slot holding an exact pool name (regardless of
  * wording, e.g. "Gyro Cheese Blend") is converted to the generic type with the
  * CANONICAL pool spelling in the link field. Covers saved profiles (targeted
@@ -1972,16 +1970,19 @@ const RECAT_MIX_SLOT_V2_KEY = "run-calc-mix-slot-recat-v2";
  * pool) and per-run values (v1 skipped runs; a stray type there leaks into the
  * Type dropdown, which unions current values). Also drops pool names that
  * leaked into the ingredientTypes dropdown list (with tombstones).
- * Runs once per device, marker-guarded; skips (without setting the marker)
- * until the pools have actually loaded. Returns the ids of runs whose stored
- * values changed so the caller can refresh open forms + advance edit stamps.
+ * RECURRING (was one-shot behind "run-calc-mix-slot-recat-v2"): a spec import
+ * whose cheese blend had no matching recipe in the same file used to re-leak
+ * blend names AFTER the one-time marker was set, so the heal now runs on every
+ * boot once the pools load. It is idempotent and only writes when something
+ * actually changed, so a converged device does no writes. Skips until the
+ * pools have actually loaded. Returns the ids of runs whose stored values
+ * changed so the caller can refresh open forms + advance edit stamps.
  */
 export function applyPoolAwareSlotHealIfNeeded(
   serverCheeseNames: readonly string[],
   serverMixNames: readonly string[],
 ): string[] {
   if (typeof localStorage === "undefined") return [];
-  if (localStorage.getItem(RECAT_MIX_SLOT_V2_KEY)) return [];
   if (serverCheeseNames.length === 0 && serverMixNames.length === 0) return [];
   const affectedRunIds: string[] = [];
   try {
@@ -2053,8 +2054,6 @@ export function applyPoolAwareSlotHealIfNeeded(
       saveList(INGREDIENT_TYPES_KEY, ingredients.filter((n) => !leaked.includes(n)));
       for (const n of leaked) tombstoneDeleted("ingredientTypes", n);
     }
-
-    localStorage.setItem(RECAT_MIX_SLOT_V2_KEY, "1");
   } catch {}
   return affectedRunIds;
 }
@@ -2823,16 +2822,34 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
   // Every non-mix cheese-blend name the parse carries — used to detect which of
   // a profile's applicator slots are CHEESE (matched by loose key) so they render
   // the pick-only Cheese card instead of a raw blend name that never opens it.
-  const cheeseCandidateNames = parsed.recipes
-    .filter(r => r.kind === "cheese" && !routesToMix(r))
-    .map(r => r.name);
+  // ALSO union in the EXISTING cheese pool names (local mirror of the server
+  // cheese_recipes pool): a spec-only workbook often names a blend the factory
+  // already has, with no cheese recipe in the same file — without the pool the
+  // resolver finds no candidate, the raw blend name stays as the applicator
+  // type, and it leaks into the shared Type dropdown all over again.
+  // NOTE: mixes share the cheese preset map (only the NAME list differs), so
+  // the pool mirror's keys must be filtered against the Mix name list or mix
+  // slots would be re-typed "cheese" here before the mix resolver ever runs.
+  const mixNamesLowerNow = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.trim().toLowerCase()));
+  const cheeseCandidateNames = [
+    ...parsed.recipes
+      .filter(r => r.kind === "cheese" && !routesToMix(r))
+      .map(r => r.name),
+    ...Object.keys(loadCheeseRecipePresets()).filter(
+      (n) => !mixNamesLowerNow.has(n.toLowerCase()),
+    ),
+  ];
   // Every MIX-routed recipe name — the same treatment for mix applicator slots:
   // re-type them to the generic "Mix" and reference the pool recipe by name,
   // instead of leaking one raw ingredient-type entry per mix into the shared
   // Type dropdown (disconnected from the Mixes screen the recipe lives on).
-  const mixCandidateNames = parsed.recipes
-    .filter(r => r.kind === "cheese" && routesToMix(r))
-    .map(r => r.name);
+  // Same pool union as cheese, for the same reason.
+  const mixCandidateNames = [
+    ...parsed.recipes
+      .filter(r => r.kind === "cheese" && routesToMix(r))
+      .map(r => r.name),
+    ...loadList(MIX_RECIPE_NAMES_KEY, []),
+  ];
 
   for (const p of parsed.profiles) {
     const brand = p.brand.trim();

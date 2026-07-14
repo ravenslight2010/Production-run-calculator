@@ -9,8 +9,7 @@
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [sauceBarrelBreakdown signature](sauce-barrel-breakdown-signature.md) — same-named helper takes batches on web but LBS on mobile; pass calc.sauceLbs on mobile, don't copy web call sites.
-- [Cast-to-Screens](cast-screens.md) — web-only station displays via `?screen=` param; parity exception (no mobile equivalent).
-- [Web/mobile parity](web-mobile-parity.md) — run identity on Run screen, line config on Setup; commit-before-saveProfile ordering; single auto-load effect.
+- [Web/mobile parity](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) — run identity on Run screen, line config on Setup; commit-before-saveProfile; web-only `?screen=` station displays are a parity exception.
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Autosave edit attribution](autosave-edit-attribution.md) — autosave must NEVER stamp an all-default/empty run; empty-over-populated clobbers the shared daily_sync row on every peer.
@@ -79,7 +78,7 @@
 - [Additive push-force schema](additive-push-force-schema.md) — adding a col to a POPULATED table must be additive or push-force prompts/breaks: uniqueIndex not .unique()/composite-PK-with-new-col; keep int singleton PKs (not serial).
 - [Temp ingredient substitutions](temp-substitutions.md) — day-state overlay (swap/add/remove) for today's recipes; overlay BOTH totals + consumption keys (type fields by value); shared @workspace/inventory-math; web+mobile parity.
 - [Recipe apply/undo shared lib](recipe-apply-shared-lib.md) — recipe-suggestion validate/sanitize/apply/undo decision logic now in @workspace/recipe-apply; apps keep only resolveTargetId/readPrevRows/write glue; lib owns RECIPE_FIELD_IDS.
-- [Sandbox auto-refresh](sandbox-auto-refresh.md) — sandbox re-copies from live on stale login; server REPORTS staleness (copiedAt + 24h cutoff), client runs the existing reset flow once/mount; banner shows copy time.
+- [Sandbox scope isolation](sandbox-scope-isolation.md) + [auto-refresh](sandbox-auto-refresh.md) — sandboxAllowed() prod gate, requireLiveScope for global tables; sandbox re-copies from live on stale login (server reports staleness, client resets once/mount).
 - [Multi-location inventory](multi-location-inventory.md) — null locationId === onsite; drawdown/consume/adjust onsite-only; pure transfer-needs math warns when offsite stock covers an onsite shortfall.
 - [Warehouse staging checklist](warehouse-staging-checklist.md) — per-run "What Each Run Needs" check-off in synced dayState.stagedItems keyed `${runId}::${label}__${unit}`; mirrors substitutions sync/reset; web+mobile parity.
 - [Freezer phase indicators](freezer-phase-indicators.md) — Run-tab auto-hiding "Freezer filling/emptying" banners; time-based phase detection gated on ppm>0 & freezerTime>0; running-only; web+mobile parity.
@@ -112,7 +111,6 @@
 - [Spec-import scale harness](spec-import-scale-harness.md) — run BOTH committed real-AI harnesses after any model change; exporter cells bound for the AI prompt must wrap under PROMPT_MAX_CELL_CHARS or targets silently truncate.
 - [Spec alias hygiene](spec-alias-hygiene.md) — digit-mismatch/generic/cyclic learned aliases dropped at EVERY apply path; fuzzy matches never learned; poison rows purged via one-time heal.
 - [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.
-- [Sandbox scope isolation](sandbox-scope-isolation.md) — sandboxAllowed() prod gate; requireLiveScope for global no-scope tables (users/roles); everything else uses a real scope column + currentScope().
 - [Sign-up bootstrap hardening](signup-bootstrap-hardening.md) — access-code-gated sign-up (fails closed), auth rate limiting, and advisory-lock fix for the first-user-becomes-manager race.
 - [xlsx audit false positive](xlsx-audit-false-positive.md) — CDN-sourced xlsx is patched but still flagged since SheetJS abandoned the npm name; alias to npm:@e965/xlsx to clear scanners.
 - [Password-change session invalidation](password-change-session-invalidation.md) — invalidateUserSessions fences tokens by iat vs passwordChangedAt (same-second grace); approver privilege boundary via canManagePasswordResetFor.

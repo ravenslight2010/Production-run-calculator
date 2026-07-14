@@ -8,7 +8,8 @@
 // behavior when no slots are reported.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { applySpecImport, loadProfile } from "./storage";
+import { applySpecImport, loadProfile, saveList } from "./storage";
+import { MIX_RECIPE_NAMES_KEY } from "./types";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 
 beforeEach(() => {
@@ -73,5 +74,36 @@ describe("applySpecImport applicator slot assignment", () => {
     expect(prof.app3Type ?? "").toBe("");
     expect(prof.app4Type).toBe("Bacon");
     expect(prof.app4OzPerPizza).toBe(1.2);
+  });
+});
+
+// ── Cheese blend names must match the EXISTING pool, not just this import ──
+// A spec-only workbook often names a blend the factory already has, with no
+// cheese recipe in the same file. Without the pool union the resolver found no
+// candidate, the raw blend name stayed as the applicator type, and it leaked
+// into the shared Type dropdown (user report: "there are cheeses in applicator
+// type and not under cheese").
+describe("applySpecImport cheese applicator vs existing pool", () => {
+  it("re-types a blend-named applicator to 'cheese' when the blend exists only in the local pool mirror", () => {
+    localStorage.setItem(
+      "run-calc-cheese-recipe-presets",
+      JSON.stringify({ "Aldo's Cheese Mix": [{ ingredient: "Mozzarella", lbs: 100 }] }),
+    );
+    applySpecImport(parsedWith([{ type: "Aldo's Cheese Mix", ozPerPizza: 3.5 }]));
+    const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
+    expect(prof.app1Type).toBe("cheese");
+    expect(prof.app1CheeseRecipeName).toBe("Aldo's Cheese Mix");
+  });
+
+  it("does NOT re-type a MIX-named slot to cheese even though mixes share the cheese preset map (case/whitespace-insensitive filter)", () => {
+    localStorage.setItem(
+      "run-calc-cheese-recipe-presets",
+      JSON.stringify({ "White Fajita Mix": [{ ingredient: "Monterey Jack", lbs: 20 }] }),
+    );
+    // Stale/messy local list entry: extra whitespace + different case.
+    saveList(MIX_RECIPE_NAMES_KEY, ["  white fajita MIX  "]);
+    applySpecImport(parsedWith([{ type: "White Fajita Mix", ozPerPizza: 3 }]));
+    const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
+    expect(prof.app1Type).not.toBe("cheese");
   });
 });
