@@ -179,6 +179,7 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
+import FactoryResetCard from "../components/FactoryResetCard";
 import ProductionRulesManager from "../components/ProductionRulesManager";
 import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
 import CycleCountManager from "../components/CycleCountManager";
@@ -11563,6 +11564,7 @@ export default function Home() {
                   <div className="space-y-4">
                     <StaffRolesCard />
                     <RolesManager />
+                    {canManageStaff && <FactoryResetCard />}
                   </div>
                 )}
 

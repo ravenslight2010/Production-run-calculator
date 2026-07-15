@@ -76,3 +76,6 @@ sauce/cheese) and the wipe marker are now removed; the seed **data** files
 
 Auth is never touched by a reset (web httpOnly cookie, mobile bearer token);
 `users`/`roles`/`user_roles` are global-scope tables and are not in `daily_sync`.
+
+## Full purge endpoint (2026-07-15)
+A manager-only `POST /api/sync/purge-all` now does the FULL wipe (all master-data pools + day-state, keeps `users`/`roles`/`user_roles`/password resets/heal markers) in one transaction with the same epoch bump + SSE reset broadcast. Gotchas: scoped deletes must skip `ai_conversation_turns` (per-user, no scope column — wipe globally) and delete inventory tables child-first (ledger/lots before items) or FKs abort the transaction. UI lives in Manage Lists → Staff → Danger zone (typed RESET confirm).

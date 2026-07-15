@@ -1,5 +1,45 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, dailySyncTable, dataResetTable } from "@workspace/db";
+import {
+  db,
+  dailySyncTable,
+  dataResetTable,
+  brandProfilesTable,
+  cheeseRecipesTable,
+  doughRecipesTable,
+  sauceRecipesTable,
+  mixesTable,
+  ingredientsTable,
+  ingredientBatchWeightsTable,
+  importAliasesTable,
+  specImportAliasesTable,
+  photoAliasesTable,
+  mergeAliasesTable,
+  deniedMergesTable,
+  mergedAwayTable,
+  aiCorrectionsTable,
+  aiConversationTurnsTable,
+  facilityKnowledgeTable,
+  fillMissingValuesTable,
+  freezerPullItemsTable,
+  incidentsTable,
+  productionRulesTable,
+  runTemplatesTable,
+  savedSpecSheetsTable,
+  savedShippingGuidesTable,
+  savedPremixSheetsTable,
+  supervisorPinSettingsTable,
+  cycleCountSchedulesTable,
+  inventoryItemsTable,
+  inventoryLocationsTable,
+  inventoryLotsTable,
+  inventoryLedgerTable,
+  inventoryConsumedRunsTable,
+  inventorySettingsTable,
+  sandboxMetaTable,
+  productionRunsTable,
+  qualityChecksTable,
+  proactiveAlertSettingsTable,
+} from "@workspace/db";
 import { and, eq, gt, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues } from "../lib/protectRunValues";
@@ -357,6 +397,89 @@ router.post(
     const scope = currentScope();
     const epoch = await db.transaction(async (tx) => {
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
+      const [row] = await tx
+        .insert(dataResetTable)
+        .values({ scope, epoch: 1, resetAt: new Date() })
+        .onConflictDoUpdate({
+          target: dataResetTable.scope,
+          set: { epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() },
+        })
+        .returning();
+      return row?.epoch ?? 0;
+    });
+    broadcastReset(scope, epoch);
+    res.json({ ok: true, epoch });
+  },
+);
+
+// ── Full FACTORY purge (admin-only) ──────────────────────────────────────────
+// Wipes EVERYTHING except accounts: all day-state (like /sync/reset) PLUS every
+// server master-data pool — profiles, recipes (cheese/dough/sauce), mixes,
+// ingredients, learned aliases/corrections, AI memory, incidents, inventory,
+// production rules, templates, saved import sheets, settings. `users`/`roles`/
+// `user_roles` (and pending password-reset requests) are untouched. Scoped
+// tables are cleared for the CALLER's scope only; the few scope-less
+// operational tables (legacy saved runs, quality history, alert settings) are
+// cleared outright. The reset epoch is bumped and broadcast exactly like
+// /sync/reset, so every populated client wipes its local `run-calc*` copy and
+// reloads instead of re-uploading stale data.
+router.post(
+  "/sync/purge-all",
+  requireCapability("manage-staff"),
+  async (_req: Request, res: Response): Promise<void> => {
+    const scope = currentScope();
+    const scopedTables = [
+      dailySyncTable,
+      brandProfilesTable,
+      cheeseRecipesTable,
+      doughRecipesTable,
+      sauceRecipesTable,
+      mixesTable,
+      ingredientsTable,
+      ingredientBatchWeightsTable,
+      importAliasesTable,
+      specImportAliasesTable,
+      photoAliasesTable,
+      mergeAliasesTable,
+      deniedMergesTable,
+      mergedAwayTable,
+      aiCorrectionsTable,
+      facilityKnowledgeTable,
+      fillMissingValuesTable,
+      freezerPullItemsTable,
+      incidentsTable,
+      productionRulesTable,
+      runTemplatesTable,
+      savedSpecSheetsTable,
+      savedShippingGuidesTable,
+      savedPremixSheetsTable,
+      supervisorPinSettingsTable,
+      cycleCountSchedulesTable,
+      // Inventory tables child-first so FK constraints never block the wipe.
+      inventoryLedgerTable,
+      inventoryLotsTable,
+      inventoryConsumedRunsTable,
+      inventorySettingsTable,
+      inventoryItemsTable,
+      inventoryLocationsTable,
+    ] as const;
+    // sandbox_meta has no scope column — clearing it just forces the sandbox to
+    // re-copy from live next time, which is the correct post-purge behavior.
+    const globalTables = [
+      // Per-user AI chat history (keyed by userId, no scope column).
+      aiConversationTurnsTable,
+      sandboxMetaTable,
+      productionRunsTable,
+      qualityChecksTable,
+      proactiveAlertSettingsTable,
+    ] as const;
+    const epoch = await db.transaction(async (tx) => {
+      for (const t of scopedTables) {
+        await tx.execute(sql`DELETE FROM ${t} WHERE scope = ${scope}`);
+      }
+      for (const t of globalTables) {
+        await tx.execute(sql`DELETE FROM ${t}`);
+      }
       const [row] = await tx
         .insert(dataResetTable)
         .values({ scope, epoch: 1, resetAt: new Date() })

@@ -176,6 +176,71 @@ describe("POST /sync/reset", () => {
   });
 });
 
+describe("POST /sync/purge-all — full factory purge", () => {
+  async function seedMasterData() {
+    const dbMod = await import("@workspace/db");
+    // The shared beforeEach only truncates day-state/auth tables; clear these
+    // master-data tables here so seeds don't collide across tests.
+    await db.execute(
+      sql`TRUNCATE ${dbMod.cheeseRecipesTable}, ${dbMod.mixesTable}, ${dbMod.inventoryItemsTable}, ${dbMod.savedSpecSheetsTable} RESTART IDENTITY CASCADE`,
+    );
+    await db.insert(dbMod.cheeseRecipesTable).values({ id: "cr-1", name: "Test Blend", brand: "Acme", flavors: [], components: [] });
+    await db.insert(dbMod.mixesTable).values({ id: "mix-1", name: "Test Mix", ingredients: [] });
+    await db.insert(dbMod.inventoryItemsTable).values({ key: "flour", category: "dry", name: "Flour", unit: "lbs" });
+    await db.insert(dbMod.savedSpecSheetsTable).values({ label: "sheet.xlsx", data: {} });
+    return dbMod;
+  }
+
+  it("is manager-only (operator is forbidden, nothing deleted)", async () => {
+    const dbMod = await seedMasterData();
+    const res = await fetch(`${baseUrl}/api/sync/purge-all`, {
+      method: "POST",
+      headers: authHeaders(OPERATOR),
+    });
+    expect(res.status).toBe(403);
+    expect(await db.select().from(dbMod.cheeseRecipesTable)).toHaveLength(1);
+    expect(await db.select().from(dailySyncTable)).toHaveLength(3);
+  });
+
+  it("wipes day-state AND master data, bumps epoch, keeps accounts", async () => {
+    const dbMod = await seedMasterData();
+    const res = await fetch(`${baseUrl}/api/sync/purge-all`, {
+      method: "POST",
+      headers: authHeaders(MANAGER),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { ok: boolean; epoch: number }).toEqual({ ok: true, epoch: 1 });
+
+    expect(await db.select().from(dailySyncTable)).toHaveLength(0);
+    expect(await db.select().from(dbMod.cheeseRecipesTable)).toHaveLength(0);
+    expect(await db.select().from(dbMod.mixesTable)).toHaveLength(0);
+    expect(await db.select().from(dbMod.inventoryItemsTable)).toHaveLength(0);
+    expect(await db.select().from(dbMod.savedSpecSheetsTable)).toHaveLength(0);
+
+    // Accounts and roles survive.
+    expect(await db.select().from(usersTable)).toHaveLength(2);
+    const roleRows = await db.select().from(userRolesTable);
+    expect(roleRows).toHaveLength(2);
+
+    // Manager can still hit a protected endpoint afterwards (auth intact).
+    const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(MANAGER) });
+    expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1 });
+  });
+
+  it("stale pre-purge pushes are rejected by the epoch guard", async () => {
+    const purgeRes = await fetch(`${baseUrl}/api/sync/purge-all`, { method: "POST", headers: authHeaders(MANAGER) });
+    expect(purgeRes.status).toBe(200);
+    expect((await purgeRes.json()) as { epoch: number }).toMatchObject({ ok: true, epoch: 1 });
+    const res = await fetch(`${baseUrl}/api/sync/today?today=2030-08-01&epoch=0`, {
+      method: "PUT",
+      headers: { ...authHeaders(OPERATOR), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload: { dayState: { runs: [{ id: "r1" }] }, runValues: {} } }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { stale?: boolean }).toMatchObject({ stale: true, epoch: 1 });
+  });
+});
+
 describe("PUT epoch guard — the re-adoption race closer", () => {
   const DATE = "2030-07-01";
   function put(payload: unknown, epoch?: number) {
