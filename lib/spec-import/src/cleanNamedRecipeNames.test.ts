@@ -1,164 +1,96 @@
-import { describe, expect, it } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
-  cleanSpecDoughName,
-  cleanSpecSauceName,
+  cleanSpecNamedRecipeName,
   canonicalizeSpecImportNamedRecipeNames,
-  linkSpecImportNamedRecipesToExisting,
   type ParsedSpecImport,
 } from "./index";
 
-describe("cleanSpecSauceName", () => {
-  it("strips sourcing qualifiers", () => {
-    expect(cleanSpecSauceName("Aldo's Sauce (made in house)")).toBe(
-      "Aldo's Sauce",
-    );
-    expect(cleanSpecSauceName("BBQ Sauce (Legacy)")).toBe("BBQ Sauce");
-    expect(cleanSpecSauceName("Lucia's Sauce (Lucia's Recipe)")).toBe(
-      "Lucia's Sauce",
-    );
-    expect(cleanSpecSauceName("Marinara (UFI - Made in House)")).toBe(
-      "Marinara",
-    );
+describe("cleanSpecNamedRecipeName", () => {
+  it("unwraps 'Parbake crust (…)' and drops a trailing die qualifier", () => {
+    expect(cleanSpecNamedRecipeName("dough", 'Parbake crust (11" CRB recipe - 11" Dies)')).toBe('CRB recipe');
+    expect(cleanSpecNamedRecipeName("dough", "Par-baked crusts (Thin Crust – Round Dies)")).toBe("Thin Crust");
+    expect(cleanSpecNamedRecipeName("dough", "Parbake Crust (House Dough)")).toBe("House Dough");
   });
 
-  it("keeps qualifier when base would be generic", () => {
-    expect(cleanSpecSauceName("Sauce (Lucia Recipe)")).toBe(
-      "Sauce (Lucia Recipe)",
-    );
+  it("strips made-in-house style provenance parentheticals", () => {
+    expect(cleanSpecNamedRecipeName("sauce", "Aldo's Sauce (made in house)")).toBe("Aldo's Sauce");
+    expect(cleanSpecNamedRecipeName("sauce", "Red Sauce (In-House)")).toBe("Red Sauce");
+    expect(cleanSpecNamedRecipeName("dough", "Dough (house made) Classic")).toBe("Dough Classic");
   });
 
-  it("leaves non-qualifier parentheticals alone", () => {
-    expect(cleanSpecSauceName("Wing Sauce (Mild)")).toBe("Wing Sauce (Mild)");
-    expect(cleanSpecSauceName("Plain Sauce")).toBe("Plain Sauce");
-    expect(cleanSpecSauceName("")).toBe("");
-  });
-});
-
-describe("cleanSpecDoughName", () => {
-  it("unwraps parbake-crust wrapping, dropping die segment and size", () => {
-    expect(
-      cleanSpecDoughName('Parbake Crust (11" CRB recipe - 11" Dies)'),
-    ).toBe("CRB recipe");
-    expect(
-      cleanSpecDoughName("Parbake crust (Aldo's recipe - 12\" Dies)"),
-    ).toBe("Aldo's recipe");
-    expect(cleanSpecDoughName('Crust (7" CRB recipe - 7" Dies)')).toBe(
-      "CRB recipe",
-    );
+  it("strips other sourcing qualifiers (Legacy, Recipe, UFI)", () => {
+    expect(cleanSpecNamedRecipeName("sauce", "BBQ Sauce (Legacy)")).toBe("BBQ Sauce");
+    expect(cleanSpecNamedRecipeName("sauce", "Lucia's Sauce (Lucia's Recipe)")).toBe("Lucia's Sauce");
+    expect(cleanSpecNamedRecipeName("sauce", "Marinara (UFI - Made in House)")).toBe("Marinara");
   });
 
-  it("strips sourcing qualifiers on named doughs", () => {
-    expect(cleanSpecDoughName("Aldo's Dough (made in house)")).toBe(
-      "Aldo's Dough",
-    );
+  it("leaves ordinary names (and other parentheticals) alone", () => {
+    expect(cleanSpecNamedRecipeName("sauce", "Aldo's Sauce")).toBe("Aldo's Sauce");
+    expect(cleanSpecNamedRecipeName("sauce", "Sauce (Spicy)")).toBe("Sauce (Spicy)");
+    expect(cleanSpecNamedRecipeName("sauce", "Wing Sauce (Mild)")).toBe("Wing Sauce (Mild)");
+    expect(cleanSpecNamedRecipeName("sauce", "  Two   Spaces  ")).toBe("Two Spaces");
+    expect(cleanSpecNamedRecipeName("sauce", "")).toBe("");
   });
 
-  it("strips a trailing die segment on unwrapped names", () => {
-    expect(cleanSpecDoughName('Ultra Thin Dough - 16" Dies')).toBe(
-      "Ultra Thin Dough",
-    );
-  });
-
-  it("leaves real names alone", () => {
-    expect(cleanSpecDoughName("Ultra Thin Dough")).toBe("Ultra Thin Dough");
-    expect(cleanSpecDoughName("")).toBe("");
+  it("keeps the original when cleaning would leave nothing usable", () => {
+    expect(cleanSpecNamedRecipeName("sauce", "(made in house)")).toBe("(made in house)");
+    expect(cleanSpecNamedRecipeName("sauce", "Sauce (Lucia Recipe)")).toBe("Sauce (Lucia Recipe)");
   });
 });
-
-const base = (over: Partial<ParsedSpecImport>): ParsedSpecImport =>
-  ({ profiles: [], recipes: [], ...over }) as ParsedSpecImport;
 
 describe("canonicalizeSpecImportNamedRecipeNames", () => {
-  it("cleans dough/sauce recipe names and profile references in lockstep", () => {
-    const parsed = base({
+  const base: ParsedSpecImport = { profiles: [], recipes: [] };
+
+  it("cleans dough/sauce recipe names in lockstep with profile references", () => {
+    const parsed: ParsedSpecImport = {
+      ...base,
       recipes: [
-        {
-          kind: "dough",
-          name: 'Parbake Crust (11" CRB recipe - 11" Dies)',
-          rows: [],
-        } as any,
-        { kind: "sauce", name: "Aldo's Sauce (made in house)", rows: [] } as any,
-        { kind: "cheese", name: "Aldo's Cheese Mix 2.07", rows: [] } as any,
+        { kind: "dough", name: 'Parbake crust (11" CRB recipe - 11" Dies)', rows: [] },
+        { kind: "sauce", name: "Aldo's Sauce (made in house)", rows: [] },
       ],
       profiles: [
         {
           brand: "Aldo's",
           flavor: "Cheese",
-          doughName: 'Parbake Crust (11" CRB recipe - 11" Dies)',
+          doughName: 'Parbake crust (11" CRB recipe - 11" Dies)',
           sauceName: "Aldo's Sauce (made in house)",
-          applicators: [],
-          pepperonis: [],
-        } as any,
+        } as ParsedSpecImport["profiles"][number],
       ],
-    });
+    };
     const out = canonicalizeSpecImportNamedRecipeNames(parsed);
-    expect(out.recipes?.map((r) => r.name)).toEqual([
-      "CRB recipe",
-      "Aldo's Sauce",
-      "Aldo's Cheese Mix 2.07", // cheese untouched here
-    ]);
-    expect(out.profiles?.[0]?.doughName).toBe("CRB recipe");
-    expect(out.profiles?.[0]?.sauceName).toBe("Aldo's Sauce");
+    expect(out.recipes?.map((r) => r.name)).toEqual(['CRB recipe', "Aldo's Sauce"]);
+    expect(out.profiles?.[0].doughName).toBe('CRB recipe');
+    expect(out.profiles?.[0].sauceName).toBe("Aldo's Sauce");
   });
 
-  it("never rewrites a user-typed name and no-ops when clean", () => {
-    const parsed = base({
-      recipes: [
-        {
-          kind: "sauce",
-          name: "Aldo's Sauce (made in house)",
-          userNamed: true,
-          rows: [],
-        } as any,
-      ],
-    });
-    const out = canonicalizeSpecImportNamedRecipeNames(parsed);
-    expect(out.recipes?.[0]?.name).toBe("Aldo's Sauce (made in house)");
-    const clean = base({
-      recipes: [{ kind: "dough", name: "CRB recipe", rows: [] } as any],
-    });
-    expect(canonicalizeSpecImportNamedRecipeNames(clean)).toBe(clean);
-  });
-});
-
-describe("linkSpecImportNamedRecipesToExisting + cleanup", () => {
-  it("snaps a cleaned import onto a pool entry still saved under the raw name", () => {
-    const parsed = base({
-      recipes: [{ kind: "dough", name: "CRB recipe", rows: [] } as any],
+  it("cleans profile references even when the recipe wasn't parsed", () => {
+    const parsed: ParsedSpecImport = {
+      ...base,
       profiles: [
         {
           brand: "B",
           flavor: "F",
-          doughName: "CRB recipe",
-          applicators: [],
-          pepperonis: [],
-        } as any,
+          sauceName: "Red Sauce (made in house)",
+        } as ParsedSpecImport["profiles"][number],
       ],
-    });
-    const out = linkSpecImportNamedRecipesToExisting(parsed, "dough", [
-      'Parbake Crust (11" CRB recipe - 11" Dies)',
-    ]);
-    expect(out.recipes?.[0]?.name).toBe(
-      'Parbake Crust (11" CRB recipe - 11" Dies)',
-    );
-    expect(out.profiles?.[0]?.doughName).toBe(
-      'Parbake Crust (11" CRB recipe - 11" Dies)',
-    );
+    };
+    const out = canonicalizeSpecImportNamedRecipeNames(parsed);
+    expect(out.profiles?.[0].sauceName).toBe("Red Sauce");
   });
 
-  it("snaps a raw import onto a pool entry already renamed to the clean name", () => {
-    const parsed = base({
+  it("never rewrites user-typed names and returns the same object when nothing changes", () => {
+    const parsed: ParsedSpecImport = {
+      ...base,
       recipes: [
-        {
-          kind: "sauce",
-          name: "Aldo's Sauce (made in house)",
-          rows: [],
-        } as any,
+        { kind: "dough", name: "Dough (made in house)", rows: [], userNamed: true },
+        { kind: "cheese", name: "Cheese Mix (made in house)", rows: [] },
       ],
-    });
-    const out = linkSpecImportNamedRecipesToExisting(parsed, "sauce", [
-      "Aldo's Sauce",
-    ]);
-    expect(out.recipes?.[0]?.name).toBe("Aldo's Sauce");
+    };
+    const out = canonicalizeSpecImportNamedRecipeNames(parsed);
+    expect(out.recipes?.[0].name).toBe("Dough (made in house)");
+    expect(out.recipes?.[1].name).toBe("Cheese Mix (made in house)");
+
+    const clean: ParsedSpecImport = { ...base, recipes: [{ kind: "sauce", name: "Red Sauce", rows: [] }] };
+    expect(canonicalizeSpecImportNamedRecipeNames(clean)).toBe(clean);
   });
 });

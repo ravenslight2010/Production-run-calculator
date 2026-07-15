@@ -7467,6 +7467,13 @@ components:
           description: >-
             Ounces of this ingredient on one pizza (from spec sheets).
             Absent/0 = not recorded.
+        sharePct:
+          type: number
+          description: >-
+            This ingredient's share of the blend as a percent (0-100). A
+            flavor's per-ingredient oz/pizza is its cheese applicator target
+            oz times this share. Absent/0 = not recorded (derived from
+            ozPerPizza or lbs proportions instead).
 
     CheeseRecipe:
       type: object

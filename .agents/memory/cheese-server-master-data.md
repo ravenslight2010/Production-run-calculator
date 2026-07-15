@@ -70,3 +70,6 @@ every future import/auto-fill forever (self-reinforcing poison). An explicit
 review-time forcedCategory override still wins. A one-time server heal purges
 cheese-named mixes rows that duplicate a cheese_recipes row. The heuristic is
 duplicated in lib/spec-import AND the web storage apply path — change both.
+
+## Ratio (share) model
+Cheese blends are RATIOS, not fixed oz: per-ingredient oz/pizza = the flavor's cheese target oz × the ingredient's blend share (priority: explicit sharePct → ozPerPizza → lbs proportions). Rules to keep: share backfill must stay additive-only (never rewrite an existing sharePct), and run cards must prefer the SERVER pool's shares over hydrated-row lbs (fall back only on length mismatch). Any name-cleanup rule for imported dough/sauce names must live in ONE shared cleaner used by both the import pipeline and its server rename heal, or the two produce diverging names; renames must re-point brand_profiles + today/future daily_sync and record aliases so raw sheet names still link.

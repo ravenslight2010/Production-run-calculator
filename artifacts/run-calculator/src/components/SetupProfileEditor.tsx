@@ -608,6 +608,7 @@ export default function SetupProfileEditor({
             recipeMissing={((v[nameKey] as string) ?? "").trim() !== "" && !serverCheeseByName.has(((v[nameKey] as string) ?? "").trim().toLowerCase())}
             shredderSetting={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
             cellulose={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.cellulose ?? ""}
+            poolComponents={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.components}
             onRecipeNameChange={val => {
               form.setValue(nameKey, val, { shouldDirty: true });
               const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;

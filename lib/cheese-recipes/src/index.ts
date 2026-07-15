@@ -37,6 +37,15 @@ export interface CheeseComponent {
    * workbook importer owns `lbs`). Absent/0 = not recorded.
    */
   ozPerPizza?: number;
+  /**
+   * This ingredient's share of the blend as a PERCENT (0–100). The blend is a
+   * ratio: each flavor's actual per-ingredient oz/pizza is the flavor's cheese
+   * applicator target oz × this share, so one blend serves flavors with
+   * different cheese targets. Managers may enter it directly; absent/0 = not
+   * recorded (derive from ozPerPizza or lbs proportions instead — see
+   * cheeseComponentShares).
+   */
+  sharePct?: number;
 }
 
 // A single manager-defined cheese recipe. Flat shape (plus a components array)
@@ -94,8 +103,10 @@ export function normalizeCheeseComponent(input: unknown): CheeseComponent | null
   if (!ingredient) return null;
   const lbs = Math.max(0, coerceNum(raw.lbs, 0));
   const ozPerPizza = Math.max(0, coerceNum(raw.ozPerPizza, 0));
+  const sharePct = Math.max(0, coerceNum(raw.sharePct, 0));
   const out: CheeseComponent = { ingredient, lbs };
   if (ozPerPizza > 0) out.ozPerPizza = ozPerPizza;
+  if (sharePct > 0) out.sharePct = sharePct;
   return out;
 }
 
@@ -191,6 +202,78 @@ export function normalizeCheeseRecipes(input: unknown): CheeseRecipe[] {
 // Total pounds of one batch (sum of component pounds).
 export function cheeseRecipeTotalLbs(recipe: CheeseRecipe): number {
   return recipe.components.reduce((acc, c) => acc + c.lbs, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Blend shares (ratio model)
+// ---------------------------------------------------------------------------
+// A cheese blend is fundamentally a RATIO: each ingredient owns a share of the
+// mix, and a flavor's actual per-ingredient oz/pizza is that flavor's cheese
+// applicator target oz × the share. Shares come from (in priority order):
+//   1. explicit manager-entered `sharePct` values,
+//   2. the recorded per-pizza ounce proportions (`ozPerPizza`),
+//   3. the per-batch pound proportions (`lbs`).
+// Whichever source is used, the returned fractions are normalized to sum to 1
+// (or all zeros when the source has no usable numbers).
+
+/**
+ * Index-aligned blend-share FRACTIONS (0–1, summing to 1) for a component
+ * list, using the sharePct → ozPerPizza → lbs priority above. Pure.
+ */
+export function cheeseComponentShares(
+  components: ReadonlyArray<CheeseComponent>,
+): number[] {
+  const pick = (vals: number[]): number[] | null => {
+    const total = vals.reduce((s, v) => s + (v > 0 ? v : 0), 0);
+    if (!(total > 0)) return null;
+    return vals.map((v) => (v > 0 ? v / total : 0));
+  };
+  return (
+    pick(components.map((c) => Number(c.sharePct ?? 0))) ??
+    pick(components.map((c) => Number(c.ozPerPizza ?? 0))) ??
+    pick(components.map((c) => Number(c.lbs ?? 0))) ??
+    components.map(() => 0)
+  );
+}
+
+/**
+ * Per-ingredient oz on ONE PIZZA for a flavor whose cheese applicator target
+ * is `targetOzPerPizza`: target × each component's blend share. Index-aligned
+ * with `components`; rows sum to the target when shares exist. Pure.
+ */
+export function cheesePerFlavorComponentOz(
+  components: ReadonlyArray<CheeseComponent>,
+  targetOzPerPizza: number,
+): { rows: number[]; totalOz: number } {
+  const oz = Number.isFinite(targetOzPerPizza) ? Math.max(0, targetOzPerPizza) : 0;
+  const rows = cheeseComponentShares(components).map((s) => s * oz);
+  return { rows, totalOz: rows.reduce((s, v) => s + v, 0) };
+}
+
+/**
+ * One-time additive backfill: fill in `sharePct` (percent, 2dp) on components
+ * that don't have one yet, derived from the recipe's existing ozPerPizza or
+ * lbs proportions. Existing sharePct values are NEVER changed; recipes with no
+ * usable numbers are left alone. Returns ONLY the recipes that changed. Pure —
+ * used by the server data heal so old blends convert to the ratio model.
+ */
+export function backfillCheeseSharePcts(
+  recipes: ReadonlyArray<CheeseRecipe>,
+): CheeseRecipe[] {
+  const changed: CheeseRecipe[] = [];
+  for (const r of recipes) {
+    const shares = cheeseComponentShares(r.components);
+    let touched = false;
+    const components = r.components.map((c, i) => {
+      if ((c.sharePct ?? 0) > 0) return c;
+      const pct = Math.round(shares[i] * 10000) / 100;
+      if (!(pct > 0)) return c;
+      touched = true;
+      return { ...c, sharePct: pct };
+    });
+    if (touched) changed.push({ ...r, components });
+  }
+  return changed;
 }
 
 /**

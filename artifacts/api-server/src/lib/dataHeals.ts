@@ -8,9 +8,18 @@ import {
   importAliasesTable,
   cheeseRecipesTable,
   mixesTable,
+  doughRecipesTable,
+  sauceRecipesTable,
+  brandProfilesTable,
 } from "@workspace/db";
 import { logger } from "./logger";
-import { sanitizeSpecAliases, isGenericSlotTypeName, type SpecImportAlias as SpecAliasEntry } from "@workspace/spec-import";
+import {
+  sanitizeSpecAliases,
+  isGenericSlotTypeName,
+  cleanSpecNamedRecipeName,
+  type SpecImportAlias as SpecAliasEntry,
+} from "@workspace/spec-import";
+import { backfillCheeseSharePcts, normalizeCheeseRecipe } from "@workspace/cheese-recipes";
 import {
   POISONED_CHEESE_ALIAS_PAIRS,
   POISONED_FLAVOR_PAIR,
@@ -418,6 +427,234 @@ async function runCheeseDuplicateNamePurge(): Promise<void> {
   });
 }
 
+// ── Cheese blend share backfill ─────────────────────────────────────────────
+// Cheese blends moved to a RATIO model: each component carries `sharePct`
+// (its percent of the blend), and a flavor's per-ingredient oz/pizza is the
+// flavor's cheese applicator target oz × the share. This heal additively fills
+// sharePct on existing components (derived from ozPerPizza proportions, else
+// lbs proportions — see cheeseComponentShares in @workspace/cheese-recipes).
+// Existing sharePct values, lbs, and ozPerPizza are never changed, so the heal
+// is purely additive and safe to run on any pool state.
+
+const CHEESE_SHARE_BACKFILL_HEAL_ID = "cheese-share-backfill-v1";
+
+async function runCheeseShareBackfill(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CHEESE_SHARE_BACKFILL_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(cheeseRecipesTable).for("update");
+    let updatedRows = 0;
+    for (const row of rows) {
+      const recipe = normalizeCheeseRecipe(row);
+      if (!recipe) continue;
+      const [changed] = backfillCheeseSharePcts([recipe]);
+      if (!changed) continue;
+      await tx
+        .update(cheeseRecipesTable)
+        .set({ components: changed.components, updatedAt: new Date() })
+        .where(
+          and(
+            eq(cheeseRecipesTable.id, row.id),
+            eq(cheeseRecipesTable.scope, row.scope),
+          ),
+        );
+      updatedRows++;
+    }
+
+    logger.info(
+      { heal: CHEESE_SHARE_BACKFILL_HEAL_ID, scanned: rows.length, updatedRows },
+      "Data heal applied",
+    );
+  });
+}
+
+// ── Dough/sauce recipe name cleanup ─────────────────────────────────────────
+// Past spec imports created dough/sauce pool entries with spec-sheet packaging
+// noise baked into the name: "(made in house)" provenance qualifiers and
+// "Parbake crust (X - … Dies)" wrapping. The import pipeline now strips these
+// (cleanSpecNamedRecipeName); this heal renames the pool entries that already
+// landed, re-points every reference (brand_profiles doughRecipeName /
+// frontlineRecipeName + today-and-future daily_sync runValues), and records
+// import aliases so a re-import of the raw sheet name still links. Renames
+// that would collide with an existing same-scope name are skipped (the link
+// pass will snap future imports onto the survivor instead).
+
+const NAMED_RECIPE_NAME_CLEANUP_HEAL_ID = "named-recipe-name-cleanup-v1";
+// Only rewrite today-and-future day rows; past days are history.
+const NAME_CLEANUP_FROM_DATE = "2026-07-15";
+
+async function runNamedRecipeNameCleanup(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: NAMED_RECIPE_NAME_CLEANUP_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // scope → kind → oldNameLower → newName
+    const renames = new Map<string, { dough: Map<string, string>; sauce: Map<string, string> }>();
+    const scopeRenames = (scope: string) => {
+      let r = renames.get(scope);
+      if (!r) {
+        r = { dough: new Map(), sauce: new Map() };
+        renames.set(scope, r);
+      }
+      return r;
+    };
+
+    let renamedRows = 0;
+    for (const kind of ["dough", "sauce"] as const) {
+      const table = kind === "dough" ? doughRecipesTable : sauceRecipesTable;
+      const rows = await tx.select().from(table).for("update");
+      // Existing-name sets per scope for collision checks (kept up to date as
+      // renames land so two rows can't both rename onto the same clean name).
+      const namesByScope = new Map<string, Set<string>>();
+      for (const row of rows) {
+        let set = namesByScope.get(row.scope);
+        if (!set) {
+          set = new Set();
+          namesByScope.set(row.scope, set);
+        }
+        set.add(row.name.trim().toLowerCase());
+      }
+      for (const row of rows) {
+        const oldName = row.name.trim();
+        const newName = cleanSpecNamedRecipeName(kind, oldName);
+        if (!newName || newName === oldName) continue;
+        const set = namesByScope.get(row.scope)!;
+        // Collision with a DIFFERENT existing row (ci): skip the rename.
+        if (
+          newName.toLowerCase() !== oldName.toLowerCase() &&
+          set.has(newName.toLowerCase())
+        ) {
+          continue;
+        }
+        await tx
+          .update(table)
+          .set({ name: newName, updatedAt: new Date() })
+          .where(and(eq(table.id, row.id), eq(table.scope, row.scope)));
+        set.delete(oldName.toLowerCase());
+        set.add(newName.toLowerCase());
+        scopeRenames(row.scope)[kind].set(oldName.toLowerCase(), newName);
+        renamedRows++;
+
+        // Remember the raw sheet name as a learned alias so a future import
+        // of the uncleaned label still snaps to the renamed pool entry (the
+        // "recipeName" kind, context = the recipe kind — the same namespace
+        // the review's "use existing" picks write to).
+        await tx.insert(specImportAliasesTable).values({
+          scope: row.scope,
+          kind: "recipeName",
+          externalName: oldName,
+          canonicalName: newName,
+          context: kind,
+        });
+      }
+    }
+
+    // Re-point brand profiles (values.doughRecipeName / frontlineRecipeName).
+    let repointedProfiles = 0;
+    if (renamedRows > 0) {
+      const profiles = await tx.select().from(brandProfilesTable).for("update");
+      for (const p of profiles) {
+        const r = renames.get(p.scope);
+        if (!r) continue;
+        const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+        let changed = false;
+        const dough = String(values.doughRecipeName ?? "").trim();
+        const dTo = dough ? r.dough.get(dough.toLowerCase()) : undefined;
+        if (dTo && dTo !== dough) {
+          values.doughRecipeName = dTo;
+          changed = true;
+        }
+        const sauce = String(values.frontlineRecipeName ?? "").trim();
+        const sTo = sauce ? r.sauce.get(sauce.toLowerCase()) : undefined;
+        if (sTo && sTo !== sauce) {
+          values.frontlineRecipeName = sTo;
+          changed = true;
+        }
+        if (!changed) continue;
+        // Advance the client LWW stamp so devices holding the old name can't
+        // clobber the rename back with a stale re-publish.
+        const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+        await tx
+          .update(brandProfilesTable)
+          .set({ values, updatedAtMs: stamp })
+          .where(
+            and(
+              eq(brandProfilesTable.key, p.key),
+              eq(brandProfilesTable.scope, p.scope),
+            ),
+          );
+        repointedProfiles++;
+      }
+    }
+
+    // Re-point today-and-future day-state run values (runValues[runId]
+    // .doughRecipeName / .frontlineRecipeName) so open runs keep their link.
+    let repointedDays = 0;
+    if (renamedRows > 0) {
+      const days = await tx
+        .select()
+        .from(dailySyncTable)
+        .where(gte(dailySyncTable.date, NAME_CLEANUP_FROM_DATE))
+        .for("update");
+      for (const day of days) {
+        const r = renames.get(day.scope);
+        if (!r) continue;
+        const data = day.data as Record<string, unknown> | null;
+        const runValues = data?.runValues as
+          | Record<string, Record<string, unknown>>
+          | undefined;
+        if (!runValues || typeof runValues !== "object") continue;
+        let changed = false;
+        for (const vals of Object.values(runValues)) {
+          if (!vals || typeof vals !== "object") continue;
+          const dough = String(vals.doughRecipeName ?? "").trim();
+          const dTo = dough ? r.dough.get(dough.toLowerCase()) : undefined;
+          if (dTo && dTo !== dough) {
+            vals.doughRecipeName = dTo;
+            changed = true;
+          }
+          const sauce = String(vals.frontlineRecipeName ?? "").trim();
+          const sTo = sauce ? r.sauce.get(sauce.toLowerCase()) : undefined;
+          if (sTo && sTo !== sauce) {
+            vals.frontlineRecipeName = sTo;
+            changed = true;
+          }
+        }
+        if (!changed) continue;
+        await tx
+          .update(dailySyncTable)
+          .set({ data: { ...data }, updatedAt: new Date() })
+          .where(
+            and(
+              eq(dailySyncTable.date, day.date),
+              eq(dailySyncTable.scope, day.scope),
+            ),
+          );
+        repointedDays++;
+      }
+    }
+
+    logger.info(
+      {
+        heal: NAMED_RECIPE_NAME_CLEANUP_HEAL_ID,
+        renamedRows,
+        repointedProfiles,
+        repointedDays,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -429,4 +666,6 @@ export async function runDataHeals(): Promise<void> {
   await runCheeseDuplicateNamePurge();
   await runGenericMixPoisonPurge();
   await runCheeseMixCrossoverPurge();
+  await runCheeseShareBackfill();
+  await runNamedRecipeNameCleanup();
 }

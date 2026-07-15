@@ -4,6 +4,9 @@ import {
   normalizeCheeseRecipes,
   normalizeCheeseComponent,
   cheeseRecipeTotalLbs,
+  cheeseComponentShares,
+  cheesePerFlavorComponentOz,
+  backfillCheeseSharePcts,
   addCheeseRecipesIfAbsent,
   addCheeseRecipesIfAbsentByName,
   specCheeseDraftToRecipe,
@@ -454,5 +457,101 @@ describe("repointCheeseRecipeIngredients", () => {
     expect(repointCheeseRecipeIngredients(recipes, ["Cheddar"], "Cheddar Cheese")).toEqual([]);
     expect(repointCheeseRecipeIngredients(recipes, ["Mozz"], "   ")).toEqual([]);
     expect(repointCheeseRecipeIngredients(recipes, ["Mozz"], "Mozz")).toEqual([]);
+  });
+});
+
+describe("cheeseComponentShares", () => {
+  it("prefers explicit sharePct over ozPerPizza and lbs", () => {
+    const shares = cheeseComponentShares([
+      { ingredient: "Mozz", lbs: 100, ozPerPizza: 1, sharePct: 75 },
+      { ingredient: "Cheddar", lbs: 1, ozPerPizza: 9, sharePct: 25 },
+    ]);
+    expect(shares).toEqual([0.75, 0.25]);
+  });
+
+  it("falls back to ozPerPizza proportions, then lbs proportions", () => {
+    expect(
+      cheeseComponentShares([
+        { ingredient: "Mozz", lbs: 1, ozPerPizza: 3 },
+        { ingredient: "Cheddar", lbs: 99, ozPerPizza: 1 },
+      ]),
+    ).toEqual([0.75, 0.25]);
+    expect(
+      cheeseComponentShares([
+        { ingredient: "Mozz", lbs: 30 },
+        { ingredient: "Cheddar", lbs: 10 },
+      ]),
+    ).toEqual([0.75, 0.25]);
+  });
+
+  it("normalizes odd sharePct totals and returns zeros with no usable numbers", () => {
+    const shares = cheeseComponentShares([
+      { ingredient: "A", lbs: 0, sharePct: 60 },
+      { ingredient: "B", lbs: 0, sharePct: 20 },
+    ]);
+    expect(shares[0]).toBeCloseTo(0.75);
+    expect(shares[1]).toBeCloseTo(0.25);
+    expect(cheeseComponentShares([{ ingredient: "A", lbs: 0 }])).toEqual([0]);
+  });
+});
+
+describe("cheesePerFlavorComponentOz", () => {
+  it("splits the flavor's target oz by blend share and sums back to it", () => {
+    const { rows, totalOz } = cheesePerFlavorComponentOz(
+      [
+        { ingredient: "Mozz", lbs: 0, sharePct: 75 },
+        { ingredient: "Cheddar", lbs: 0, sharePct: 25 },
+      ],
+      4,
+    );
+    expect(rows).toEqual([3, 1]);
+    expect(totalOz).toBe(4);
+  });
+
+  it("clamps a bad target to 0", () => {
+    expect(cheesePerFlavorComponentOz([{ ingredient: "A", lbs: 1 }], -2).totalOz).toBe(0);
+    expect(cheesePerFlavorComponentOz([{ ingredient: "A", lbs: 1 }], NaN).totalOz).toBe(0);
+  });
+});
+
+describe("backfillCheeseSharePcts", () => {
+  const base = {
+    id: "r1",
+    name: "Blend",
+    brand: "Acme",
+    flavors: [],
+    shredderSetting: "",
+    cellulose: "",
+    notes: "",
+    enabled: true,
+  };
+
+  it("fills sharePct from ozPerPizza proportions where absent (2dp)", () => {
+    const [changed] = backfillCheeseSharePcts([
+      { ...base, components: [
+        { ingredient: "Mozz", lbs: 0, ozPerPizza: 2 },
+        { ingredient: "Cheddar", lbs: 0, ozPerPizza: 1 },
+      ] },
+    ]);
+    expect(changed.components.map((c) => c.sharePct)).toEqual([66.67, 33.33]);
+  });
+
+  it("never rewrites an existing sharePct and skips recipes with no numbers", () => {
+    const withPct = { ...base, id: "a", components: [
+      { ingredient: "Mozz", lbs: 10, sharePct: 50 },
+      { ingredient: "Cheddar", lbs: 10, sharePct: 50 },
+    ] };
+    const empty = { ...base, id: "b", components: [{ ingredient: "X", lbs: 0 }] };
+    expect(backfillCheeseSharePcts([withPct, empty])).toEqual([]);
+  });
+
+  it("returns only the changed recipes", () => {
+    const out = backfillCheeseSharePcts([
+      { ...base, id: "a", components: [{ ingredient: "Mozz", lbs: 10, sharePct: 100 }] },
+      { ...base, id: "b", components: [{ ingredient: "Mozz", lbs: 10 }, { ingredient: "Ched", lbs: 30 }] },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("b");
+    expect(out[0].components.map((c) => c.sharePct)).toEqual([25, 75]);
   });
 });

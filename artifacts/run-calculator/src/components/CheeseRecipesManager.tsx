@@ -16,10 +16,11 @@ import {
   cheeseRecipeMatchesQuery,
   groupCheeseRecipesByBrand,
   renameCheeseRecipesBrand,
+  cheeseComponentShares,
+  cheesePerFlavorComponentOz,
   type CheeseRecipe,
   type CheeseComponent,
 } from "@workspace/cheese-recipes";
-import { computeCheesePerPizzaOz } from "@workspace/inventory-math";
 import { useCheeseRecipes } from "../hooks/useCheeseRecipes";
 import { saveCheeseRecipes, deleteCheeseRecipes } from "../cheeseRecipes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
@@ -420,12 +421,28 @@ function CheeseRecipeEditor({
 
   const flavorOptions = brandFlavors[draft.brand] ?? [];
   const totalLbs = draft.components.reduce((s, c) => s + (Number(c.lbs) || 0), 0);
-  // Per-flavor cheese target weights from the saved profiles: each covered
-  // flavor's applicator Oz/Pizza. The per-ingredient oz/pizza shown in the
-  // preview is that target split by each ingredient's share of the batch
-  // pounds — the same math the run "Cheese" cards use (computeCheesePerPizzaOz),
-  // so what the manager previews here is exactly what operators see on a run.
+  // Each ingredient's share of the blend (fractions summing to 1) — explicit
+  // sharePct first, then ozPerPizza proportions, then lbs proportions. Drives
+  // the Share % column's derived placeholder and the per-flavor preview.
+  const shares = useMemo(() => cheeseComponentShares(draft.components), [draft.components]);
+
+  // Per-flavor cheese target weights from the saved profiles (via the
+  // getFlavorTargets prop wired by the page): each covered flavor's cheese
+  // applicator Oz/Pizza. The per-ingredient oz/pizza shown in the preview is
+  // that target split by each ingredient's blend share — the same math the run
+  // "Cheese" cards use (cheesePerFlavorComponentOz), so what the manager
+  // previews here is exactly what operators see on a run.
   const flavorTargets = getFlavorTargets ? getFlavorTargets(draft) : [];
+
+  const flavorPreview = useMemo(
+    () =>
+      flavorTargets.map((ft) => ({
+        flavor: ft.flavor,
+        targetOz: ft.oz,
+        rows: cheesePerFlavorComponentOz(draft.components, ft.oz).rows,
+      })),
+    [draft.components, flavorTargets],
+  );
 
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 p-2.5 space-y-2">
@@ -552,7 +569,7 @@ function CheeseRecipeEditor({
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <p className="text-[11px] font-semibold text-muted-foreground">
-            Ingredients (lbs per batch · share of blend)
+            Ingredients (lbs per batch · share % of blend)
           </p>
           {totalLbs > 0 && (
             <span className="text-[11px] text-muted-foreground font-mono">
@@ -591,14 +608,27 @@ function CheeseRecipeEditor({
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
                 <span className="text-[11px] text-muted-foreground">lbs</span>
-                <span
-                  title="This ingredient's share of the blend (its pounds ÷ the batch total). Per-pizza ounces are computed per flavor: share × that flavor's cheese target weight."
-                  className="w-14 text-right text-[11px] font-mono text-muted-foreground"
-                >
-                  {totalLbs > 0
-                    ? `${(((Number(c.lbs) || 0) / totalLbs) * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
-                    : "—"}
-                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={
+                    c.sharePct != null && c.sharePct > 0
+                      ? c.sharePct
+                      : Math.round((shares[idx] ?? 0) * 1000) / 10 || ""
+                  }
+                  onChange={(e) =>
+                    patchComponent(idx, {
+                      sharePct: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    })
+                  }
+                  onBlur={() => commit()}
+                  disabled={disabled}
+                  title="This ingredient's share of the blend (%). A flavor's per-ingredient oz/pizza = its cheese target oz × this share."
+                  className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground">%</span>
                 <button
                   type="button"
                   onClick={() => removeComponent(idx)}
@@ -627,52 +657,25 @@ function CheeseRecipeEditor({
         </button>
       </div>
 
-      {/* Per-flavor oz/pizza preview: each covered flavor's cheese target
-          weight (from its saved profile) split across ingredients by their
-          blend share — the exact numbers the run "Cheese" cards show. */}
-      {totalLbs > 0 && draft.components.length > 0 && flavorTargets.length > 0 && (
-        <div className="space-y-1 rounded-md border border-border/40 bg-background/40 p-2">
+      {/* Per-flavor preview: target oz × share for each covered flavor */}
+      {flavorPreview.length > 0 && (
+        <div className="space-y-1.5 rounded-md border border-border/40 bg-background/40 p-2">
           <p className="text-[11px] font-semibold text-muted-foreground">
-            Oz per pizza by flavor (target weight × blend share)
+            Per-flavor oz/pizza preview (cheese target × share)
           </p>
-          <div className="overflow-x-auto">
-            <table className="text-[11px] font-mono">
-              <thead>
-                <tr className="text-muted-foreground">
-                  <th className="text-left pr-3 font-normal">Flavor</th>
-                  <th className="text-right pr-3 font-normal">Target</th>
-                  {draft.components.map((c, i) => (
-                    <th key={i} className="text-right pr-3 font-normal max-w-[8rem] truncate">
-                      {c.ingredient || "—"}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {flavorTargets.map((ft) => {
-                  const per = computeCheesePerPizzaOz(
-                    draft.components.map((c) => ({ ingredient: c.ingredient, lbs: Number(c.lbs) || 0 })),
-                    ft.oz,
-                  );
-                  return (
-                    <tr key={ft.flavor}>
-                      <td className="pr-3 text-foreground">{ft.flavor}</td>
-                      <td className="text-right pr-3">{ft.oz.toLocaleString(undefined, { maximumFractionDigits: 2 })} oz</td>
-                      {per.rows.map((oz, i) => (
-                        <td key={i} className="text-right pr-3">
-                          {oz.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-[10px] text-muted-foreground">
-            Targets come from each flavor's saved setup (its cheese applicator's
-            Oz/Pizza). Flavors without a saved target aren't listed.
-          </p>
+          {flavorPreview.map((f) => (
+            <div key={f.flavor} className="text-[11px]">
+              <span className="font-semibold">{f.flavor}</span>
+              <span className="text-muted-foreground"> — target {f.targetOz.toLocaleString(undefined, { maximumFractionDigits: 2 })} oz: </span>
+              <span className="font-mono text-muted-foreground">
+                {draft.components
+                  .map((c, i) => ({ ingredient: c.ingredient.trim(), oz: f.rows[i] ?? 0 }))
+                  .filter((r) => r.ingredient)
+                  .map((r) => `${r.ingredient} ${r.oz.toLocaleString(undefined, { maximumFractionDigits: 2 })} oz`)
+                  .join(" · ")}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>

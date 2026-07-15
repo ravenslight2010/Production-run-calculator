@@ -432,8 +432,9 @@ import CheeseRecipesManager from "@/components/CheeseRecipesManager";
 import CheeseImportDialog from "@/components/CheeseImportDialog";
 import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
-import type { CheeseRecipe } from "@workspace/cheese-recipes";
+import type { CheeseRecipe, CheeseComponent } from "@workspace/cheese-recipes";
 import {
+  cheesePerFlavorComponentOz,
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
   repointCheeseRecipeIngredients,
@@ -989,6 +990,7 @@ export function CheesePickCard({
   onRecipeNameChange,
   embedded,
   recipeMissing,
+  poolComponents,
 }: {
   label: string;
   batches: number;
@@ -996,6 +998,11 @@ export function CheesePickCard({
   // "Oz / Pizza" column so its total lines up with what the operator entered.
   ozPerPizza: number;
   recipe: RecipeRow[];
+  // The picked recipe's components from the server cheese pool, when known.
+  // Carries each ingredient's blend share (sharePct / ozPerPizza / lbs
+  // priority — see @workspace/cheese-recipes), so the per-ingredient Oz/Pizza
+  // column is target oz × share even when the hydrated rows only hold lbs.
+  poolComponents?: CheeseComponent[];
   recipeName: string;
   recipeNameOptions: string[];
   shredderSetting: string;
@@ -1013,10 +1020,17 @@ export function CheesePickCard({
   // run's existing batch count so these numbers can never drift from the batch
   // and total-lbs figures on the card. Shared with mobile via @workspace/inventory-math.
   const pull = computeCheesePull(recipe, batches);
-  // Per-pizza ounces of each component: the applicator's Oz/Pizza split across
-  // ingredients by their share of the batch pounds, so the column total equals
-  // the operator's set Oz/Pizza. Shared with mobile via @workspace/inventory-math.
-  const perPizzaOz = computeCheesePerPizzaOz(recipe, ozPerPizza);
+  // Per-pizza ounces of each component: the applicator's target Oz/Pizza split
+  // across ingredients by each one's SHARE of the blend, so the column total
+  // equals the operator's set Oz/Pizza. When the server pool recipe is known
+  // its components drive the shares (explicit sharePct first, then ozPerPizza,
+  // then lbs proportions — @workspace/cheese-recipes); otherwise fall back to
+  // the hydrated rows' lbs proportions (@workspace/inventory-math).
+  const namedPool = (poolComponents ?? []).filter(c => c.ingredient.trim());
+  const perPizzaOz =
+    namedPool.length > 0 && namedPool.length === recipe.length
+      ? cheesePerFlavorComponentOz(namedPool, ozPerPizza)
+      : computeCheesePerPizzaOz(recipe, ozPerPizza);
   // Always include the currently-picked name so a recipe assigned to another
   // brand/flavor (or since disabled) still shows instead of silently clearing.
   const options =
@@ -15760,6 +15774,7 @@ export default function Home() {
                           recipeMissing={(v.app1CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app1CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
+                          poolComponents={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.components}
                           onRecipeNameChange={val => {
                             form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
                             const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
@@ -15825,6 +15840,7 @@ export default function Home() {
                           recipeMissing={(v.app2CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app2CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
+                          poolComponents={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.components}
                           onRecipeNameChange={val => {
                             form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
                             const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
@@ -16067,6 +16083,7 @@ export default function Home() {
                           recipeMissing={(v.app3CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app3CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
+                          poolComponents={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.components}
                           onRecipeNameChange={val => {
                             form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
                             const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
@@ -16132,6 +16149,7 @@ export default function Home() {
                           recipeMissing={(v.app4CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app4CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
+                          poolComponents={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.components}
                           onRecipeNameChange={val => {
                             form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
                             const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;

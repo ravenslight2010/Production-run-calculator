@@ -630,9 +630,10 @@ async function linkParsed(
   // key (case/punctuation/spacing) so an import links to what the user already
   // has instead of creating a disconnected duplicate. Mirrors mobile (parity).
   working = linkSpecImportDieTypesToExisting(working, known.dieTypes ?? []);
-  // Clean dough/sauce names ("Parbake Crust (11" CRB recipe - 11" Dies)" →
-  // "CRB recipe", "Aldo's Sauce (made in house)" → "Aldo's Sauce") BEFORE the
-  // snap-to-existing pass so the cleaned names are what gets linked/deduped.
+  // Strip spec-sheet packaging noise off dough/sauce names — "(made in house)"
+  // qualifiers and "Parbake crust (… Dies)" wrapping — BEFORE the link pass so
+  // the cleaned generic name is what snaps onto the existing pool. Recipes and
+  // the profiles referencing them are renamed in lockstep.
   working = canonicalizeSpecImportNamedRecipeNames(working);
   working = linkSpecImportNamedRecipesToExisting(working, "dough", known.doughRecipes ?? []);
   working = linkSpecImportNamedRecipesToExisting(working, "sauce", known.sauceRecipes ?? []);
