@@ -27,6 +27,7 @@ import {
   resolveMixApplicatorSlots,
   specImportCheeseRecipeIsMix,
   specImportNameMatchKey,
+  specImportNamedRecipeNamesEqual,
   cleanSpecCheeseRecipeName,
   recipeApplyTargets,
   type ParsedProfile,
@@ -323,7 +324,9 @@ function desiredFromDoughSauceRecipes(
       recipeApplyTargets(r, pool).some(
         (t) => t.brand.trim().toLowerCase() === b && t.flavor.trim().toLowerCase() === f,
       ) ||
-      (!!rKey && !!curName && specImportNameMatchKey(curName) === rKey);
+      // Mirror the import's typo/possessive-tolerant name re-link (see the
+      // relink pass in storage.ts — "Aldo's Sauce" vs "ALDO PIZZA SAUCE").
+      (!!rKey && !!curName && specImportNamedRecipeNamesEqual(curName, rName));
     if (!targeted) continue;
     if (r.kind === "dough") {
       set("doughRecipeName", "Dough Recipe", rName, "name");

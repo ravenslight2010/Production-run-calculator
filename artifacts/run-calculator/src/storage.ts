@@ -89,7 +89,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -3119,7 +3119,7 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     // yet); when the actual recipe arrives later, every product pointing at
     // that name gets its rows/weights (and the canonical spelling) attached
     // without the sheet having to restate the brand/flavor targets.
-    const targets = [...recipeApplyTargets(r, applyProfilePool)];
+    let targets = [...recipeApplyTargets(r, applyProfilePool)];
     if (r.kind === "dough" || r.kind === "sauce") {
       const nameField = r.kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
       const rNameKey = specImportNameMatchKey(r.name);
@@ -3132,12 +3132,49 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
             const saved = loadProfile(brand, flavor);
             if (!saved) continue;
             const nm = String((saved as Record<string, unknown>)[nameField] ?? "").trim();
-            if (!nm || specImportNameMatchKey(nm) !== rNameKey) continue;
+            // Typo/possessive-tolerant: the spec sheet may say "Aldo's Sauce"
+            // while the sauce procedure names "ALDO PIZZA SAUCE" — one loose-key
+            // character apart, and a strict compare left the profile pointing at
+            // a name no recipe would ever carry.
+            if (!nm || !specImportNamedRecipeNamesEqual(nm, r.name)) continue;
             seen.add(key);
             targets.push({ brand, flavor });
           }
         }
       }
+      // Dough/sauce procedure sheets list which customers use the recipe — but
+      // that must never CREATE brands. Untouched, those "targets" registered
+      // whole new brand/flavor entries in the shared registry (a dough batch
+      // import once minted 4 stray brands) whose profiles then failed the
+      // ghost-profile guard anyway. Tie only onto brand/flavors that already
+      // exist (registry walk above, this import's own profiles, or an existing
+      // registry entry under a possessive-tolerant brand match).
+      // Canonicalize to the EXISTING spelling too — a target that only
+      // loose-matches ("Aldo" vs registry "Aldo's") must tie onto the saved
+      // brand/flavor, not mint a near-duplicate brand key from its raw text.
+      const known = new Map<string, { brand: string; flavor: string }>();
+      const note = (brand: string, flavor: string): void => {
+        const b = brand.trim();
+        const f = flavor.trim();
+        if (!b || !f) return;
+        const key = `${specImportBrandMatchKey(b)}\u0000${f.toLowerCase()}`;
+        if (!known.has(key)) known.set(key, { brand: b, flavor: f });
+      };
+      for (const [brand, flavors] of Object.entries(loadBrandFlavors())) {
+        for (const flavor of flavors ?? []) note(brand, flavor);
+      }
+      for (const p of parsed.profiles) note(p.brand, p.flavor);
+      const canonTargets: typeof targets = [];
+      const canonSeen = new Set<string>();
+      for (const t of targets) {
+        const canon = known.get(`${specImportBrandMatchKey(t.brand)}\u0000${t.flavor.trim().toLowerCase()}`);
+        if (!canon) continue;
+        const key = `${canon.brand.toLowerCase()}\u0000${canon.flavor.toLowerCase()}`;
+        if (canonSeen.has(key)) continue;
+        canonSeen.add(key);
+        canonTargets.push(canon);
+      }
+      targets = canonTargets;
     }
     for (const { brand, flavor } of targets) {
       if (isMixRecipe) {

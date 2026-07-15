@@ -838,3 +838,20 @@ FULL unpruned parse or the next diff mis-compares. pep1Combined is only derived
 when the import carries pep slots so pruned re-imports keep the user's setting.
 **Why:** re-importing a sheet used to wholesale-overwrite, clobbering manual
 edits made since the last import.
+
+## Possessive/near-dup tolerance in ties & relinks (2026-07-15)
+
+Sheets constantly flip between the possessive and bare form of a customer name
+("Aldo's" brand vs "ALDO PIZZA SAUCE" procedure). Strict compares silently broke
+imports in prod. Rules now in force:
+- **Brand anchors compare via `specImportBrandMatchKey`** (loose key + per-token
+  trailing-s fold) — used by `recipeApplyTargets` fan-out and the web tie loop.
+  Recipe/ingredient NAMES keep the plain loose key (plurals can be meaningful).
+- **Dough/sauce name relinks use `specImportNamedRecipeNamesEqual`** (loose-key
+  equal OR near-dup matcher) — a possessive flip is exactly 1 edit after
+  apostrophes fold, which strict equality misses.
+- **Dough/sauce procedure targets must NEVER create brands.** The tie loop
+  filters targets to already-known brand+flavors AND canonicalizes them onto
+  the existing registry spelling (a loose match must not mint "Aldo" beside
+  "Aldo's"). A dough workbook once minted 4 junk brands in prod this way.
+- profileAutofill's planner must mirror any change here exactly.

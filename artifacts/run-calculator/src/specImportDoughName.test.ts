@@ -182,4 +182,112 @@ describe("later dough recipe import re-links by name", () => {
     expect(prof?.frontlineRecipeName).toBe("Hot Buffalo Sauce");
     expect(prof?.frontlineRecipe).toEqual(SAUCE_ROWS);
   });
+
+  it("re-links across a possessive flip: profile says \"Aldo's Sauce\", recipe is \"ALDO PIZZA SAUCE\"", () => {
+    // Real prod failure: the spec sheet named the sauce with the possessive
+    // brand form while the sauce procedure workbook dropped it — one loose-key
+    // character apart ("aldos sauce" vs "aldo sauce"), so a strict compare
+    // never relinked and profiles kept an empty frontlineRecipe forever.
+    saveBrandFlavors({ ...loadBrandFlavors(), "Aldo's": ["Cheese"] });
+    saveProfile("Aldo's", "Cheese", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+      frontlineRecipeName: "Aldo's Sauce",
+    });
+    const SAUCE_ROWS = [{ ingredient: "Tomato", lbs: 30 }];
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "sauce",
+          name: "ALDO PIZZA SAUCE",
+          brand: "",
+          flavor: "",
+          rows: SAUCE_ROWS,
+        },
+      ],
+    } as unknown as ParsedSpecImport);
+    const prof = loadProfile("Aldo's", "Cheese");
+    expect(prof?.frontlineRecipeName).toBe("ALDO PIZZA SAUCE");
+    expect(prof?.frontlineRecipe).toEqual(SAUCE_ROWS);
+  });
+
+  it("fans a recipe with bare brand \"Aldo\" onto profiles saved under brand \"Aldo's\"", () => {
+    saveBrandFlavors({ ...loadBrandFlavors(), "Aldo's": ["Pepperoni"] });
+    saveProfile("Aldo's", "Pepperoni", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+    });
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Aldo Dough",
+          brand: "Aldo",
+          flavor: "",
+          rows: DOUGH_ROWS,
+        },
+      ],
+    } as unknown as ParsedSpecImport);
+    const prof = loadProfile("Aldo's", "Pepperoni");
+    expect(prof?.doughRecipeName).toBe("Aldo Dough");
+    expect(prof?.doughRecipe).toEqual(DOUGH_ROWS);
+  });
+
+  it("dough/sauce sheet targets never CREATE brands — unknown customer names are skipped", () => {
+    // Real prod failure: a dough procedure workbook listed customer/flavor
+    // pairs (LUCIA'S CRAFT, FSD 7'', Hannaford...) and the tie loop minted
+    // them all as new brands in the shared registry.
+    saveBrandFlavors({ ...loadBrandFlavors(), "Aldo's": ["Pepperoni"] });
+    saveProfile("Aldo's", "Pepperoni", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+    });
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Shared Dough",
+          brand: "Aldo's",
+          flavor: "Pepperoni",
+          targets: [
+            { brand: "LUCIA'S CRAFT", flavor: "BACON CHEESEBURGER" },
+            { brand: "Hannaford", flavor: "Cheese" },
+          ],
+          rows: DOUGH_ROWS,
+        },
+      ],
+    } as unknown as ParsedSpecImport);
+    const brands = Object.keys(loadBrandFlavors());
+    expect(brands).not.toContain("LUCIA'S CRAFT");
+    expect(brands).not.toContain("Hannaford");
+    // The known brand+flavor still got the tie.
+    expect(loadProfile("Aldo's", "Pepperoni")?.doughRecipe).toEqual(DOUGH_ROWS);
+  });
+
+  it("canonicalizes a loose-matching target onto the EXISTING brand spelling (no near-dup brand minted)", () => {
+    // A target of "Aldo"/"Pepperoni" loose-matches the saved "Aldo's" brand —
+    // it must tie onto "Aldo's"/"Pepperoni", not register a new "Aldo" brand.
+    saveBrandFlavors({ ...loadBrandFlavors(), "Aldo's": ["Pepperoni"] });
+    saveProfile("Aldo's", "Pepperoni", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+    });
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Shared Dough",
+          brand: "Aldo",
+          flavor: "Pepperoni",
+          rows: DOUGH_ROWS,
+        },
+      ],
+    } as unknown as ParsedSpecImport);
+    expect(Object.keys(loadBrandFlavors())).not.toContain("Aldo");
+    expect(loadProfile("Aldo's", "Pepperoni")?.doughRecipe).toEqual(DOUGH_ROWS);
+  });
 });

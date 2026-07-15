@@ -775,6 +775,43 @@ export function specImportNameMatchKey(name: string): string {
 }
 
 /**
+ * Loose BRAND comparison key: the shared loose name key with a possessive /
+ * plural fold — each token of 3+ chars drops one trailing "s" so "Aldo's"
+ * (→ "aldos"), "Aldos" and "Aldo" all key to "aldo". Sheets constantly flip
+ * between the possessive and bare form of a customer name ("ALDO PIZZA SAUCE"
+ * on the sauce procedure vs the "Aldo's" brand on the spec sheet), and a
+ * strict compare forked the tie: the recipe never fanned onto the brand's
+ * profiles. Only for BRAND anchors — recipe/ingredient names keep the plain
+ * key, where a plural can be meaningful.
+ */
+export function specImportBrandMatchKey(brand: string): string {
+  const key = specImportNameMatchKey(brand);
+  if (!key) return "";
+  return key
+    .split(" ")
+    .map((t) => (t.length >= 3 && /[a-z]s$/.test(t) ? t.slice(0, -1) : t))
+    .join(" ");
+}
+
+/**
+ * Typo/possessive-tolerant equality for two dough/sauce recipe NAME references
+ * (a profile's assigned name vs an imported recipe's name). Loose keys equal,
+ * OR they near-dup match under the shared layered matcher (token reorder /
+ * single typo with its digit + length guards) — which is exactly what a
+ * possessive flip costs after apostrophes fold ("Aldo's Sauce" → "aldos sauce"
+ * vs "ALDO PIZZA SAUCE" → "aldo sauce", edit distance 1). Strict-equality
+ * relinks left the profile pointing at a name that no recipe would ever carry.
+ * Pure.
+ */
+export function specImportNamedRecipeNamesEqual(a: string, b: string): boolean {
+  const ka = specImportNameMatchKey(a);
+  const kb = specImportNameMatchKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  return buildNearDupNameMatcher([a], { keyOf: specImportNameMatchKey })(b) !== null;
+}
+
+/**
  * Build a loose-key → EXACT existing-name map for a "link to existing" pass, with
  * an AMBIGUITY GUARD: if two genuinely DIFFERENT saved names collapse to the same
  * loose key (e.g. a facility deliberately keeps both "Cheese Mix" AND "Standard
@@ -1655,12 +1692,14 @@ export function recipeApplyTargets(
   // flavor-qualifier matches when the name names a flavor), appending only
   // profiles not already covered by an explicit (or prior-anchor) target.
   const fanBrand = (brand: string): void => {
-    const wantBrand = brand.trim().toLowerCase();
+    // Possessive-tolerant brand compare — a sauce/dough procedure that says
+    // "ALDO" must still fan onto profiles saved under the "Aldo's" brand.
+    const wantBrand = specImportBrandMatchKey(brand);
     if (!wantBrand) return;
     const sameBrand = profiles.filter((p) => {
       const pb = p.brand.trim();
       const pf = p.flavor.trim();
-      return !!pb && !!pf && pb.toLowerCase() === wantBrand;
+      return !!pb && !!pf && specImportBrandMatchKey(pb) === wantBrand;
     });
     let fanTo = sameBrand;
     const qual = nameQualifierTokens(brand);
