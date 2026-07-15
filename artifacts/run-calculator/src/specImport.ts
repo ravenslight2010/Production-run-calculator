@@ -21,6 +21,7 @@ import {
   collectSpecImportCheeseRecipes,
   applySpecImportBlendNameAliases,
   canonicalizeSpecImportCheeseRecipeNames,
+  canonicalizeSpecImportNamedRecipeNames,
   cleanSpecCheeseRecipeName,
   dedupeSpecImportCheeseRecipes,
   sanitizeSpecAliases,
@@ -629,6 +630,10 @@ async function linkParsed(
   // key (case/punctuation/spacing) so an import links to what the user already
   // has instead of creating a disconnected duplicate. Mirrors mobile (parity).
   working = linkSpecImportDieTypesToExisting(working, known.dieTypes ?? []);
+  // Clean dough/sauce names ("Parbake Crust (11" CRB recipe - 11" Dies)" →
+  // "CRB recipe", "Aldo's Sauce (made in house)" → "Aldo's Sauce") BEFORE the
+  // snap-to-existing pass so the cleaned names are what gets linked/deduped.
+  working = canonicalizeSpecImportNamedRecipeNames(working);
   working = linkSpecImportNamedRecipesToExisting(working, "dough", known.doughRecipes ?? []);
   working = linkSpecImportNamedRecipesToExisting(working, "sauce", known.sauceRecipes ?? []);
   return { parsed: working, matchAliases: [...aliasByKey.values()] };
@@ -787,7 +792,9 @@ function buildReusedPrepared(
   );
   const parsed = dedupeSpecImportCheeseRecipes(
     applySpecImportBlendNameAliases(
-      canonicalizeSpecImportCheeseRecipeNames(kept),
+      canonicalizeSpecImportCheeseRecipeNames(
+        canonicalizeSpecImportNamedRecipeNames(kept),
+      ),
       aliases,
     ),
   );

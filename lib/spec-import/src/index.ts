@@ -879,11 +879,25 @@ export function linkSpecImportNamedRecipesToExisting(
   const match = buildNearDupNameMatcher(existingNames, {
     keyOf: specImportNameMatchKey,
   });
+  // Cleanup-aware supplement: a pool entry saved under a RAW sheet name
+  // ("Parbake Crust (11" CRB recipe - 11" Dies)") should still catch a cleaned
+  // import ("CRB recipe") and vice versa, so cleanup never breaks dedupe.
+  const byCleanKey = new Map<string, string>();
+  for (const ex of existingNames) {
+    const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, ex));
+    if (key && !byCleanKey.has(key)) byCleanKey.set(key, ex);
+  }
+  const matchCleaned = (nm: string): string | null => {
+    const direct = match(nm);
+    if (direct) return direct;
+    const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, nm));
+    return (key && byCleanKey.get(key)) || null;
+  };
   let changed = false;
   const recipes = (parsed.recipes ?? []).map((r) => {
     const name = (r.name ?? "").trim();
     if (r.kind !== kind || !name) return r;
-    const existing = match(name);
+    const existing = matchCleaned(name);
     if (!existing || existing === name) return r;
     changed = true;
     return { ...r, name: existing };
@@ -898,7 +912,7 @@ export function linkSpecImportNamedRecipesToExisting(
       .filter(Boolean),
   );
   const matchProfileName = (nm: string): string | null => {
-    const full = match(nm);
+    const full = matchCleaned(nm);
     if (full) return full;
     if (importedKindKeys.has(specImportNameMatchKey(nm))) return null;
     for (const cand of parentheticalNameCandidates(nm)) {
@@ -1050,6 +1064,148 @@ export function canonicalizeSpecImportCheeseRecipeNames(
     return { ...r, name: cleaned };
   });
   return changed ? { ...parsed, recipes } : parsed;
+}
+
+// ---------------------------------------------------------------------------
+// Dough / sauce recipe-name cleanup
+// ---------------------------------------------------------------------------
+
+// Parenthetical qualifiers a spec sheet tacks onto a dough/sauce name that
+// describe HOW the recipe is sourced rather than WHICH recipe it is:
+// "(made in house)", "(Legacy)", "(UFI - Made in House)", "(Lucia's Recipe)".
+// Stripping them yields the clean pool name ("Aldo's Sauce (made in house)" →
+// "Aldo's Sauce"). A parenthetical that names a DIFFERENT product ("(Mild)")
+// is left alone — only these qualifier shapes are dropped.
+const NAMED_RECIPE_QUALIFIER_PAREN_RE =
+  /^\s*(?:legacy|made[\s-]*in[\s-]*house|in[\s-]*house|house[\s-]*made|home[\s-]*made|ready[\s-]*made|bought|purchased|[^()]*\brecipes?\b[^()]*|[^()]*\bmade[\s-]*in[\s-]*house[^()]*)\s*$/i;
+
+// Leading pizza-size token on a recipe name segment: `11"`, `7”`, `12 in`,
+// `12-inch`, `16in.` — sizes belong to the die/profile, not the recipe name.
+const LEADING_SIZE_TOKEN_RE =
+  /^\d+(?:[.,]\d+)?\s*(?:"|\u201d|''|\u2033|-?\s*in(?:ch(?:es)?)?\b\.?)\s*/i;
+
+// Generic wrapper words that mean "this cell is the crust/dough column label,
+// the real recipe name is in the parenthetical": "Parbake Crust (…)".
+const GENERIC_CRUST_BASE_RE =
+  /^(?:par[\s-]*baked?\s+)?(?:pizza\s+)?(?:crusts?|doughs?|shells?)$/i;
+
+function stripQualifierParens(name: string): string {
+  let out = name;
+  for (const m of name.matchAll(/\(([^)]*)\)/g)) {
+    if (NAMED_RECIPE_QUALIFIER_PAREN_RE.test(m[1] ?? "")) {
+      out = out.replace(m[0], " ");
+    }
+  }
+  return out.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Clean an imported SAUCE name: drop sourcing-qualifier parentheticals like
+ * "(made in house)" / "(Legacy)" / "(… Recipe)" so the pool entry reads as the
+ * plain sauce name. Only strips when the remaining base still carries a
+ * distinctive word (not just "sauce"), so a generic "Sauce (Lucia Recipe)"
+ * keeps its qualifier rather than collapsing to a meaningless "Sauce". Pure.
+ */
+export function cleanSpecSauceName(name: string): string {
+  const raw = (name ?? "").replace(/\s+/g, " ").trim();
+  if (!raw || !raw.includes("(")) return raw;
+  const stripped = stripQualifierParens(raw);
+  if (!stripped || stripped === raw) return raw;
+  // Base must keep a distinctive token beyond generic sauce words.
+  const distinctive = stripped
+    .split(/\s+/)
+    .some((w) => /[a-z]/i.test(w) && !/^(?:sauce|sauces|pizza|the|a|an)$/i.test(w));
+  return distinctive ? stripped : raw;
+}
+
+/**
+ * Clean an imported DOUGH/CRUST name. Two shapes are handled:
+ *  1. "Parbake Crust (11" CRB recipe - 11" Dies)" — a generic crust label with
+ *     the real recipe name inside the parenthetical: the paren contents win,
+ *     the "- … Dies" die segment is dropped, and a leading size token (`11"`)
+ *     is removed (sizes live on the die type, not the recipe) → "CRB recipe".
+ *  2. "Aldo's Dough (made in house)" — sourcing qualifiers are stripped like
+ *     sauce names.
+ * Falls back to the original whenever cleaning would leave no letters. Pure.
+ */
+export function cleanSpecDoughName(name: string): string {
+  const raw = (name ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return raw;
+  const parens = [...raw.matchAll(/\(([^)]*)\)/g)];
+  if (parens.length) {
+    const base = raw.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    if (GENERIC_CRUST_BASE_RE.test(base)) {
+      // Unwrap: recipe name lives in the (first letter-bearing) parenthetical.
+      for (const m of parens) {
+        const inner = (m[1] ?? "").trim();
+        if (!/[a-z]/i.test(inner)) continue;
+        const segs = inner
+          .split(/\s*[-\u2013\u2014]\s*/)
+          .map((s) => s.trim())
+          .filter((s) => s && !/\bdies?\b/i.test(s) && /[a-z]/i.test(s));
+        let cleaned = segs.join(" - ").replace(LEADING_SIZE_TOKEN_RE, "").trim();
+        cleaned = cleaned.replace(/\s+/g, " ").trim();
+        if (cleaned && /[a-z]/i.test(cleaned)) return cleaned;
+      }
+      return raw;
+    }
+  }
+  // Not a generic-crust wrapper: strip sourcing qualifiers + a trailing
+  // "- 11" Dies" style die segment.
+  let out = stripQualifierParens(raw);
+  out = out
+    .replace(/\s*[-\u2013\u2014]\s*[^-\u2013\u2014]*\bdies?\b[^-\u2013\u2014]*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return out && /[a-z]/i.test(out) ? out : raw;
+}
+
+/** The dough/sauce name cleaner for a kind (shared by canonicalize + link). */
+export function cleanSpecNamedRecipeName(
+  kind: "dough" | "sauce",
+  name: string,
+): string {
+  return kind === "dough" ? cleanSpecDoughName(name) : cleanSpecSauceName(name);
+}
+
+/**
+ * Canonicalize imported DOUGH and SAUCE recipe names (and the profile
+ * `doughName` / `sauceName` fields that reference them, cleaned identically so
+ * the tie survives) via cleanSpecDoughName / cleanSpecSauceName. Runs BEFORE
+ * the snap-to-existing link pass so cleaned names are what gets matched against
+ * the pool. Never rewrites a user-typed (userNamed) recipe name. Pure +
+ * non-mutating — returns the SAME object when nothing changes.
+ */
+export function canonicalizeSpecImportNamedRecipeNames(
+  parsed: ParsedSpecImport,
+): ParsedSpecImport {
+  let changed = false;
+  const recipes = (parsed.recipes ?? []).map((r) => {
+    if (r.kind !== "dough" && r.kind !== "sauce") return r;
+    if (r.userNamed) return r;
+    const name = (r.name ?? "").trim();
+    if (!name) return r;
+    const cleaned = cleanSpecNamedRecipeName(r.kind, name);
+    if (!cleaned || cleaned === name) return r;
+    changed = true;
+    return { ...r, name: cleaned };
+  });
+  const profiles = (parsed.profiles ?? []).map((p) => {
+    let next = p;
+    const dough = (p.doughName ?? "").trim();
+    if (dough) {
+      const cleaned = cleanSpecDoughName(dough);
+      if (cleaned && cleaned !== dough) next = { ...next, doughName: cleaned };
+    }
+    const sauce = (p.sauceName ?? "").trim();
+    if (sauce) {
+      const cleaned = cleanSpecSauceName(sauce);
+      if (cleaned && cleaned !== sauce) next = { ...next, sauceName: cleaned };
+    }
+    if (next !== p) changed = true;
+    return next;
+  });
+  return changed ? { ...parsed, recipes, profiles } : parsed;
 }
 
 /**

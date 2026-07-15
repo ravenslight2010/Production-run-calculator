@@ -55,6 +55,11 @@ export default function CheeseImportDialog({
   // Manual "use existing recipe instead" picks: key → existing pool recipe id.
   // A manual pick overrides the suggested link (and is remembered on confirm).
   const [redirects, setRedirects] = useState<Map<string, string>>(new Map());
+  // Rename-before-create: key → new name typed by the manager. Only applies
+  // when the row is NOT redirected to an existing recipe (a redirect keeps the
+  // target's name). The sheet's original name is remembered as an alias so
+  // re-imports still match the renamed recipe.
+  const [renames, setRenames] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (prepared) {
@@ -64,11 +69,13 @@ export default function CheeseImportDialog({
         new Set(prepared.candidates.filter((c) => c.linkTo).map((c) => c.recipe.id)),
       );
       setRedirects(new Map());
+      setRenames(new Map());
     } else {
       setItems([]);
       setSelected(new Set());
       setLinkOn(new Set());
       setRedirects(new Map());
+      setRenames(new Map());
     }
   }, [prepared]);
 
@@ -102,12 +109,29 @@ export default function CheeseImportDialog({
       return next;
     });
 
+  const setRename = (key: string, name: string) =>
+    setRenames((prev) => {
+      const next = new Map(prev);
+      if (name) next.set(key, name);
+      else next.delete(key);
+      return next;
+    });
+
   const poolById = new Map((prepared?.existingPool ?? []).map((p) => [p.id, p]));
 
   /** The manual redirect target for a row, if a valid pick is set. */
   const redirectTargetOf = (key: string) => {
     const id = redirects.get(key);
     return id ? poolById.get(id) : undefined;
+  };
+
+  /** The manager's rename for a row, if any (trimmed, non-empty, actually different). */
+  const renameOf = (it: Item): string | null => {
+    if (redirectTargetOf(it.key)) return null; // redirect keeps the target's name
+    const typed = (renames.get(it.key) ?? "").trim();
+    if (!typed) return null;
+    if (typed.toLowerCase() === it.candidate.recipe.name.trim().toLowerCase()) return null;
+    return typed;
   };
 
   /** Final recipe a row resolves to (manual redirect wins over suggested link). */
@@ -119,7 +143,9 @@ export default function CheeseImportDialog({
         true,
       );
     }
-    return resolveCheeseCandidate(it.candidate, linkOn.has(it.key));
+    const resolved = resolveCheeseCandidate(it.candidate, linkOn.has(it.key));
+    const rename = renameOf(it);
+    return rename ? { ...resolved, name: rename } : resolved;
   };
 
   // Two included rows resolving to the SAME saved recipe would collide in the
@@ -135,19 +161,37 @@ export default function CheeseImportDialog({
     .filter(([, n]) => n > 1)
     .map(([id]) => poolById.get(id)?.name ?? id);
 
+  // A rename that matches a DIFFERENT existing pool recipe's name would create
+  // a confusing same-named duplicate — the right move there is the "Use
+  // existing recipe" pick, so block Apply and say so.
+  const renameCollisions: string[] = [];
+  {
+    const finalNameCounts = new Map<string, number>();
+    for (const it of included) {
+      const name = resolveItem(it).name.trim().toLowerCase();
+      if (name) finalNameCounts.set(name, (finalNameCounts.get(name) ?? 0) + 1);
+    }
+    for (const it of included) {
+      const rename = renameOf(it);
+      if (!rename) continue;
+      const lc = rename.toLowerCase();
+      const resolvedId = resolveItem(it).id;
+      const poolClash = (prepared?.existingPool ?? []).some(
+        (p) => p.id !== resolvedId && p.name.trim().toLowerCase() === lc,
+      );
+      if (poolClash || (finalNameCounts.get(lc) ?? 0) > 1) renameCollisions.push(rename);
+    }
+  }
+
   const confirm = () => {
-    if (duplicateTargets.length > 0) return;
+    if (duplicateTargets.length > 0 || renameCollisions.length > 0) return;
     const newAliases: SpecImportAlias[] = [];
     const seen = new Set<string>();
-    for (const it of included) {
-      const target = redirectTargetOf(it.key);
-      if (!target) continue;
-      const external = it.candidate.recipe.name.trim();
-      const canonical = target.name.trim();
-      if (!external || !canonical) continue;
-      if (external.toLowerCase() === canonical.toLowerCase()) continue;
+    const addAlias = (external: string, canonical: string) => {
+      if (!external || !canonical) return;
+      if (external.toLowerCase() === canonical.toLowerCase()) return;
       const dedupeKey = external.toLowerCase();
-      if (seen.has(dedupeKey)) continue;
+      if (seen.has(dedupeKey)) return;
       seen.add(dedupeKey);
       newAliases.push({
         kind: "appType",
@@ -155,6 +199,17 @@ export default function CheeseImportDialog({
         canonicalName: canonical,
         context: null,
       });
+    };
+    for (const it of included) {
+      const target = redirectTargetOf(it.key);
+      if (target) {
+        addAlias(it.candidate.recipe.name.trim(), target.name.trim());
+        continue;
+      }
+      // Rename-before-create: remember the sheet's original name as an alias
+      // for the new name so a re-import links instead of duplicating.
+      const rename = renameOf(it);
+      if (rename) addAlias(it.candidate.recipe.name.trim(), rename);
     }
     onConfirm(included.map(resolveItem), newAliases);
   };
@@ -221,6 +276,12 @@ export default function CheeseImportDialog({
 
           {!loading && !error && prepared && (
             <>
+              <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/40 p-2">
+                Tip: for the best matching, import in this order — dough &amp;
+                sauce recipes first, then spec sheets, then cheese and premix
+                sheets. That way each import can link to what's already saved
+                instead of creating duplicates.
+              </p>
               <p className="text-sm text-muted-foreground">
                 Review each cheese recipe below. Uncheck any you don't want.
                 Checked recipes marked{" "}
@@ -338,6 +399,25 @@ export default function CheeseImportDialog({
                                 </label>
                               </div>
                             )}
+                            {!redirectTarget && isSel && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <label
+                                  className="text-xs text-muted-foreground"
+                                  htmlFor={`cheese-rename-${it.key}`}
+                                >
+                                  Save as:
+                                </label>
+                                <input
+                                  id={`cheese-rename-${it.key}`}
+                                  type="text"
+                                  value={renames.get(it.key) ?? ""}
+                                  onChange={(e) => setRename(it.key, e.target.value)}
+                                  placeholder={r.name}
+                                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                                  data-testid={`cheese-rename-${it.key}`}
+                                />
+                              </div>
+                            )}
                             {prepared.existingPool.length > 0 && (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <label
@@ -433,6 +513,25 @@ export default function CheeseImportDialog({
                 </div>
               )}
 
+              {renameCollisions.length > 0 && (
+                <div
+                  className="rounded-md border border-destructive/60 bg-destructive/10 p-3"
+                  data-testid="cheese-rename-collision-warning"
+                >
+                  <div className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      A "Save as" name is already taken
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-destructive/90">
+                    {renameCollisions.map((n) => `"${n}"`).join(", ")} matches an
+                    existing recipe (or another row here). Pick it under "Use
+                    existing recipe" instead, or choose a different name.
+                  </p>
+                </div>
+              )}
+
               {prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
                   <div className="flex items-center gap-2 text-amber-600">
@@ -471,7 +570,8 @@ export default function CheeseImportDialog({
               !prepared ||
               nothing ||
               selectedCount === 0 ||
-              duplicateTargets.length > 0
+              duplicateTargets.length > 0 ||
+              renameCollisions.length > 0
             }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >

@@ -419,7 +419,7 @@ import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import { mergeSpecAliases, namedRecipeTagFromParsed, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
+import { mergeSpecAliases, namedRecipeTagFromParsed, cleanSpecNamedRecipeName, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
@@ -445,6 +445,7 @@ import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
+import { saveSpecImportAliases } from "@/specImportAliases";
 
 import {
   Form,
@@ -3505,6 +3506,103 @@ export default function Home() {
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { doughSauceMigratedRef.current = false; });
   }, [canManageInventory, pushLocalDoughSauceToServer]);
+
+  // One-time name cleanup: rename existing server dough/sauce pool entries that
+  // still carry spec-sheet formatting noise (sourcing qualifiers like
+  // "(made in house)", parbake-crust wrapping with die/size segments) to their
+  // clean names, then re-point every local reference (profiles, runs,
+  // templates, history, presets — via applyRecipeNameMerge, which also
+  // tombstones the old names so the sync union can't resurrect them) and learn
+  // old→new aliases so future imports of the same sheets snap straight to the
+  // renamed entries. Collisions (clean name already taken by another pool
+  // entry) are skipped — that's a real merge decision for the manager, not a
+  // rename. Manager-only, marker-guarded, re-armed on failure.
+  const nameCleanupRef = useRef(false);
+  useEffect(() => {
+    if (nameCleanupRef.current || !canManageInventory) return;
+    const MARKER = "run-calc-dough-sauce-name-cleanup-v1";
+    try {
+      if (localStorage.getItem(MARKER)) { nameCleanupRef.current = true; return; }
+    } catch {}
+    nameCleanupRef.current = true;
+    (async () => {
+      const affectedRunIds: string[] = [];
+      const aliasesToSave: SpecImportAlias[] = [];
+      let renamedAny = false;
+      for (const kind of ["dough", "sauce"] as const) {
+        // Crash/retry safety: the intended old→new map is persisted BEFORE the
+        // server write. If a previous attempt renamed the server pool but died
+        // before re-pointing local references (marker re-armed), the pool no
+        // longer yields those old names — this pending map is the only way to
+        // still repair the stranded local references on retry.
+        const PENDING_KEY = `${MARKER}-pending-${kind}`;
+        let pending: Record<string, string> = {};
+        try {
+          pending = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "{}") as Record<string, string>;
+        } catch {}
+        const pool = await fetchNamedRecipes(kind);
+        const taken = new Set(pool.map((r) => r.name.trim().toLowerCase()));
+        const map: Record<string, string> = { ...pending };
+        const changed: NamedRecipe[] = [];
+        for (const r of pool) {
+          const clean = cleanSpecNamedRecipeName(kind, r.name);
+          if (!clean || clean === r.name) continue;
+          const key = clean.trim().toLowerCase();
+          // Same name modulo trim/case: rename in place, no re-pointing needed
+          // beyond the exact-string surfaces applyRecipeNameMerge covers.
+          if (taken.has(key) && key !== r.name.trim().toLowerCase()) continue;
+          taken.add(key);
+          map[r.name] = clean;
+          changed.push({ ...r, name: clean });
+        }
+        if (Object.keys(map).length === 0) continue;
+        try { localStorage.setItem(PENDING_KEY, JSON.stringify(map)); } catch {}
+        if (changed.length > 0) {
+          // Server pool first (the endpoint saves the batch in ONE
+          // transaction): if this write fails (offline / lost role) we abort
+          // before touching local references, and the marker re-arms.
+          const saved = await saveNamedRecipes(kind, changed);
+          cycleCountQc.setQueryData(
+            [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
+            saved,
+          );
+        }
+        affectedRunIds.push(...applyRecipeNameMerge(kind, map));
+        try { localStorage.removeItem(PENDING_KEY); } catch {}
+        for (const [oldName, newName] of Object.entries(map)) {
+          // "recipeName" is the dough/sauce use-existing link namespace; the
+          // kind rides in `context` so a dough alias never fires on a sauce row.
+          aliasesToSave.push({ kind: "recipeName", externalName: oldName, canonicalName: newName, context: kind });
+        }
+        renamedAny = true;
+      }
+      if (!renamedAny) return;
+      // Advance edit stamps on re-pointed runs so the push below wins the
+      // per-run lost-update guard (mirrors the manual merge flow).
+      if (affectedRunIds.length > 0) {
+        const stamp = Date.now();
+        const upd = loadRunValuesUpdated();
+        for (const id of affectedRunIds) upd[id] = stamp;
+        saveRunValuesUpdated(upd);
+      }
+      refreshAfterMerge();
+      try {
+        await saveSpecImportAliases(aliasesToSave);
+      } catch {}
+      try {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {}
+    })()
+      .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
+      .catch(() => { nameCleanupRef.current = false; });
+  }, [canManageInventory, cycleCountQc]);
 
   // Best-effort follow-through for the one-time mix-slot cleanup migration:
   // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
@@ -11542,6 +11640,41 @@ export default function Home() {
                     <CheeseRecipesManager
                       brands={brands}
                       brandFlavors={brandFlavors}
+                      getFlavorTargets={(recipe) => {
+                        // Per-flavor cheese target weights for the editor's
+                        // "oz per pizza by flavor" preview. Coverage mirrors
+                        // the run cards' pool matching: the recipe's brand +
+                        // its flavors (empty flavors = every flavor of that
+                        // brand, the "All Varieties" catch-all). The target is
+                        // the saved profile's cheese applicator Oz/Pizza —
+                        // preferring the slot linked to THIS recipe by name,
+                        // falling back to the profile's single cheese slot.
+                        const brand = recipe.brand.trim();
+                        if (!brand) return [];
+                        const flavors = recipe.flavors.length > 0
+                          ? recipe.flavors
+                          : (brandFlavors[brand] ?? []);
+                        const nameLc = recipe.name.trim().toLowerCase();
+                        const out: { flavor: string; oz: number }[] = [];
+                        for (const flavor of flavors) {
+                          const p = loadProfile(brand, flavor);
+                          if (!p) continue;
+                          const vals = p as unknown as Record<string, unknown>;
+                          let linkedOz = 0;
+                          let cheeseOz = 0;
+                          let cheeseSlots = 0;
+                          for (const n of [1, 2, 3, 4]) {
+                            const slotName = String(vals[`app${n}CheeseRecipeName`] ?? "").trim().toLowerCase();
+                            const type = String(vals[`app${n}Type`] ?? "").trim().toLowerCase();
+                            const oz = Number(vals[`app${n}OzPerPizza`] ?? 0) || 0;
+                            if (nameLc && slotName === nameLc && oz > 0) linkedOz = oz;
+                            if (type === "cheese" && oz > 0) { cheeseSlots++; cheeseOz = oz; }
+                          }
+                          const oz = linkedOz > 0 ? linkedOz : cheeseSlots === 1 ? cheeseOz : 0;
+                          if (oz > 0) out.push({ flavor, oz });
+                        }
+                        return out;
+                      }}
                       ingredientSuggestions={[
                         ...cheeseIngredients,
                         ...doughIngredients,

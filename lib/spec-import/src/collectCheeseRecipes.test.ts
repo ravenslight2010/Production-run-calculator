@@ -67,11 +67,22 @@ describe("collectSpecImportCheeseRecipes", () => {
   });
 
   it("skips names already in the user Mix list", () => {
+    // Note: a name that mentions "cheese" is deliberately NEVER routed to
+    // Mixes even when the mix list has it (see specImportCheeseRecipeIsMix),
+    // so this uses a non-cheese name.
+    const drafts = collectSpecImportCheeseRecipes(
+      parsed([cheeseRecipe({ name: "Fajita Blend" })]),
+      new Set(["fajita blend"]),
+    );
+    expect(drafts).toHaveLength(0);
+  });
+
+  it("keeps a cheese-named recipe even when the mix list has the same name", () => {
     const drafts = collectSpecImportCheeseRecipes(
       parsed([cheeseRecipe({ name: "Cheese Blend" })]),
       new Set(["cheese blend"]),
     );
-    expect(drafts).toHaveLength(0);
+    expect(drafts).toHaveLength(1);
   });
 
   it("ignores non-cheese kinds, empty names, and rowless recipes", () => {

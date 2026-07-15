@@ -185,7 +185,7 @@ describe("POST /sync/purge-all — full factory purge", () => {
       sql`TRUNCATE ${dbMod.cheeseRecipesTable}, ${dbMod.mixesTable}, ${dbMod.inventoryItemsTable}, ${dbMod.savedSpecSheetsTable} RESTART IDENTITY CASCADE`,
     );
     await db.insert(dbMod.cheeseRecipesTable).values({ id: "cr-1", name: "Test Blend", brand: "Acme", flavors: [], components: [] });
-    await db.insert(dbMod.mixesTable).values({ id: "mix-1", name: "Test Mix", ingredients: [] });
+    await db.insert(dbMod.mixesTable).values({ id: "mix-1", name: "Test Mix", components: [] });
     await db.insert(dbMod.inventoryItemsTable).values({ key: "flour", category: "dry", name: "Flour", unit: "lbs" });
     await db.insert(dbMod.savedSpecSheetsTable).values({ label: "sheet.xlsx", data: {} });
     return dbMod;

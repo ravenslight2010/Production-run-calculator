@@ -82,24 +82,30 @@ router.post(
     }
 
     try {
-      for (const recipe of byId.values()) {
-        const values = toDbValues(recipe);
-        await db
-          .insert(sauceRecipesTable)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [sauceRecipesTable.id, sauceRecipesTable.scope],
-            set: {
-              name: values.name,
-              notes: values.notes,
-              components: values.components,
-              enabled: values.enabled,
-              brand: values.brand,
-              flavors: values.flavors,
-              updatedAt: values.updatedAt,
-            },
-          });
-      }
+      // One transaction for the whole batch: a mid-loop failure must not
+      // commit some rows and drop the rest (clients rename in batches and
+      // re-point local references only after this endpoint succeeds — a
+      // partial commit would strand references to half-renamed names).
+      await db.transaction(async (tx) => {
+        for (const recipe of byId.values()) {
+          const values = toDbValues(recipe);
+          await tx
+            .insert(sauceRecipesTable)
+            .values(values)
+            .onConflictDoUpdate({
+              target: [sauceRecipesTable.id, sauceRecipesTable.scope],
+              set: {
+                name: values.name,
+                notes: values.notes,
+                components: values.components,
+                enabled: values.enabled,
+                brand: values.brand,
+                flavors: values.flavors,
+                updatedAt: values.updatedAt,
+              },
+            });
+        }
+      });
       const items = await listAll();
       res.json({ items });
     } catch (err) {
