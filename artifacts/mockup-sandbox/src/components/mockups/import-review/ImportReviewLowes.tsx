@@ -35,7 +35,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "CALIFORNIAN", die: '11" Dies', target: 15.4, range: "15.15 – 15.65",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: '11" CRB recipe', oz: 6.7 },
+      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: "CRB", oz: 6.7 },
       { kind: "topping", raw: "Applicator - California Mix", clean: "California Mix", oz: 4,
         components: [c("FR Tomatoes Diced", 2.15), c("FR Red Pepper Strips", 1.25), c("FR Red Onions Strips", 0.6)] },
       { kind: "cheese", raw: "Applicator - Lowe's California Cheese Mix", clean: "Lowe's California Cheese Mix", oz: 4.7,
@@ -45,7 +45,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "GRILLED VEGETABLE", die: '11" Dies', target: 14.9, range: "14.65 – 15.15",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: '11" CRB recipe', oz: 6.7 },
+      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: "CRB", oz: 6.7 },
       { kind: "topping", raw: "Applicator - Grilled Vegetable Mix", clean: "Grilled Vegetable Mix", oz: 4,
         components: [c("FR Tomatoes Diced", 2.02), c("Zucchini", 0.71), c("Squash", 0.71), c("Red Onion Diced", 0.4), c("Frozen FR Garlic", 0.1), c("Frozen Thyme", 0.03), c("Sea Salt", 0.03)] },
       { kind: "cheese", raw: "Applicator - Lowe's Grilled Vegetable Cheese Mix", clean: "Lowe's Grilled Vegetable Cheese Mix", oz: 4.2,
@@ -55,7 +55,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "PEPPERONI", die: '11" Dies', target: 15.45, range: "15.2 – 15.7",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: '11" CRB recipe', oz: 6.7 },
+      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: "CRB", oz: 6.7 },
       { kind: "sauce", raw: "Lucia's Sauce (Lucia's Recipe)", clean: "Lucia's Sauce", oz: 3 },
       { kind: "cheese", raw: "Applicator - Lowe's Pepperoni Cheese Mix", clean: "Lowe's Pepperoni Cheese Mix", oz: 2.5,
         components: [c("Part Skim Mozzarella", 1.56), c("Provolone", 0.94)] },
@@ -67,7 +67,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "FIVE CHEESE", die: '11" Dies', target: 15.2, range: "14.95 – 15.45",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: '11" CRB recipe', oz: 6.7 },
+      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: "CRB", oz: 6.7 },
       { kind: "sauce", raw: "Lucia's Sauce (Lucia's Recipe)", clean: "Lucia's Sauce", oz: 3.5 },
       { kind: "cheese", raw: "Applicator - Lowe's/Hannaford 5Cheese Mix (×2 stations)", clean: "Lowe's/Hannaford 5 Cheese Mix — 2 stations @ 2.5 oz", oz: 5,
         components: [c("Whole Milk Mozzarella", 1.97), c("White Cheddar", 0.49), c("Three Cheese Blend", 0.04), c("5 Cheese Spice Blend", 0.005)] },
@@ -76,7 +76,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "BBQ CHICKEN", die: '11" Dies', target: 14.55, range: "14.30 – 14.80",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: '11" CRB recipe', oz: 6.7 },
+      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: "CRB", oz: 6.7 },
       { kind: "sauce", raw: "BBQ Sauce (Legacy)", clean: "BBQ Sauce", oz: 2.25 },
       { kind: "topping", raw: "Applicator - Diced Chicken (C&F / House of Raeford)", clean: "Diced Chicken", oz: 2 },
       { kind: "topping", raw: "Applicator - Red Onion Diced", clean: "Red Onion Diced", oz: 0.5 },
@@ -87,7 +87,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "WHITE SPINACH", die: '11" Dies', target: 13.8, range: "13.55 – 14.05",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: '11" CRB recipe', oz: 6.7 },
+      { kind: "dough", raw: 'Parbake Crust (11" CRB recipe - 11" Dies)', clean: "CRB", oz: 6.7 },
       { kind: "sauce", raw: "Alfredo Sauce Recipe (UFI - Made in House)", clean: "Alfredo Sauce", oz: 2 },
       { kind: "topping", raw: "Applicator - Part Skim Mozzarella", clean: "Part Skim Mozzarella", oz: 2 },
       { kind: "cheese", raw: "Applicator - Lowe's Spinach Cheese Mix", clean: "Lowe's Spinach Cheese Mix", oz: 3.1,
@@ -97,7 +97,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "SPINACH & MUSHROOM", die: '11" Dies', allergen: "EGG", target: 26, range: "25.75 – 26.25",
     items: [
-      { kind: "dough", raw: 'Parbake crust (Heavier CRB Recipe - 11" Dies)', clean: "Heavier CRB Recipe", oz: 12 },
+      { kind: "dough", raw: 'Parbake crust (Heavier CRB Recipe - 11" Dies)', clean: "Heavier CRB", oz: 12 },
       { kind: "sauce", raw: "Sauce (Lucia Recipe)", clean: "Lucia's Sauce", oz: 5 },
       { kind: "cheese", raw: "Applicator - Lowe's Spinach Mushroom Cheese Mix (station 1)", clean: "Lowe's Spinach Mushroom Cheese Mix — station 1", oz: 3,
         components: [c("Part Skim Milk Mozzarella", 1.5), c("White Cheddar", 1.5)] },
@@ -111,7 +111,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "RED HOT CHICKEN", die: "Argus Dies", target: 24.26, range: "24.01 – 24.51",
     items: [
-      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley recipe", oz: 13 },
+      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley", oz: 13 },
       { kind: "sauce", raw: "Sauce (Four Hands Red Hot Recipe)", clean: "Four Hands Red Hot Sauce", oz: 3 },
       { kind: "topping", raw: "Applicator - 4hands Red Hot Chicken Mix", clean: "4 Hands Red Hot Chicken Mix", oz: 2.5,
         components: [c("Diced Chicken", 2.43), c("Vienna Red Hot Sauce", 0.07)] },
@@ -124,7 +124,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "MARGHERITA", die: '11" Dies', target: 21.85, range: "21.6 – 22.1",
     items: [
-      { kind: "dough", raw: 'Parbake crust (Margherita Dough Recipe - 11" Dies)', clean: "Margherita Dough Recipe", oz: 10 },
+      { kind: "dough", raw: 'Parbake crust (Margherita Dough Recipe - 11" Dies)', clean: "Margherita Dough", oz: 10 },
       { kind: "sauce", raw: "Sauce (Lucia Recipe)", clean: "Lucia's Sauce", oz: 5 },
       { kind: "cheese", raw: "Applicator - Margherita Cheese Mix (×2 stations)", clean: "Margherita Cheese Mix — 2 stations @ 2.55 oz", oz: 5.1,
         components: [c("Whole Milk Mozzarella", 2.5), c("IQF Basil", 0.05)] },
@@ -134,7 +134,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "CARIBBEAN", die: '11" Dies', allergen: "SOY", target: 25.15, range: "24.9 – 25.4",
     items: [
-      { kind: "dough", raw: 'Parbake Crust (CRB Heavy Plus recipe - 11" Dies)', clean: "CRB Heavy Plus recipe", oz: 11 },
+      { kind: "dough", raw: 'Parbake Crust (CRB Heavy Plus recipe - 11" Dies)', clean: "CRB Heavy Plus", oz: 11 },
       { kind: "sauce", raw: "Sweet n Sour Sauce (Legacy)", clean: "Sweet n Sour Sauce", oz: 4.25 },
       { kind: "topping", raw: "Applicator - Diced Chicken", clean: "Diced Chicken", oz: 3 },
       { kind: "topping", raw: "Applicator - Pineapple", clean: "Pineapple", oz: 0.75 },
@@ -147,7 +147,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "MEAT LOVERS", die: "Argus Dies", target: 23.55, range: "23.3 – 23.8",
     items: [
-      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley recipe", oz: 13 },
+      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley", oz: 13 },
       { kind: "sauce", raw: "Sauce (Lucia's Recipe)", clean: "Lucia's Sauce", oz: 4 },
       { kind: "topping", raw: "Applicator - Natural Italian Sausage (C&F)", clean: "Natural Italian Sausage", oz: 1.5 },
       { kind: "topping", raw: "Applicator - Mozzarella Part Skim (station 1)", clean: "Part Skim Mozzarella — station 1", oz: 1.25 },
@@ -159,7 +159,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "SUPREME", die: "Argus Dies", target: 23.45, range: "23.20 – 23.70",
     items: [
-      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley recipe", oz: 13 },
+      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley", oz: 13 },
       { kind: "sauce", raw: "Sauce (Lucia's Recipe)", clean: "Lucia's Sauce", oz: 4 },
       { kind: "topping", raw: "Applicator - Natural Italian Sausage (C&F)", clean: "Natural Italian Sausage", oz: 1 },
       { kind: "topping", raw: "Applicator - Mozzarella Part Skim (station 1)", clean: "Part Skim Mozzarella — station 1", oz: 1.25 },
@@ -172,7 +172,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "BUFFALO CHICKEN", die: "Argus Dies", allergen: "EGG", target: 22.7, range: "22.45 – 22.95",
     items: [
-      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley recipe", oz: 13 },
+      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley", oz: 13 },
       { kind: "sauce", raw: "Buffalo Ranch Sauce (Legacy)", clean: "Buffalo Ranch Sauce", oz: 3 },
       { kind: "topping", raw: "Applicator - Diced Chicken", clean: "Diced Chicken", oz: 2 },
       { kind: "topping", raw: "Applicator - Diced Celery", clean: "Diced Celery", oz: 0.7 },
@@ -182,7 +182,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "CHICKEN BACON RANCH", die: "Argus Dies", allergen: "EGG", target: 24.9, range: "24.65 – 25.15",
     items: [
-      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley recipe", oz: 13 },
+      { kind: "dough", raw: "Parbake crust (Thick Malted Barley recipe - Argus Dies)", clean: "Thick Malted Barley", oz: 13 },
       { kind: "sauce", raw: "Ranch Sauce (Legacy)", clean: "Ranch Sauce", oz: 3.25 },
       { kind: "topping", raw: "Applicator - Diced Chicken", clean: "Diced Chicken", oz: 2.5 },
       { kind: "topping", raw: "Applicator - Lowe's Chicken Bacon Ranch Mix", clean: "Lowe's Chicken Bacon Ranch Mix", oz: 2.15,
@@ -194,7 +194,7 @@ const FLAVORS: Flavor[] = [
   {
     name: "BACON CHEESEBURGER", die: "Argus Dies", allergen: "EGG", target: 24.8, range: "24.55 – 25.05",
     items: [
-      { kind: "dough", raw: "Parbake Crust (Lowe's French Fry recipe - Argus Dies)", clean: "Lowe's French Fry recipe", oz: 14 },
+      { kind: "dough", raw: "Parbake Crust (Lowe's French Fry recipe - Argus Dies)", clean: "Lowe's French Fry", oz: 14 },
       { kind: "sauce", raw: "Cheeseburger Sauce (Legacy)", clean: "Cheeseburger Sauce", oz: 3.5 },
       { kind: "topping", raw: "Applicator - Beef Topping (Burke 40029)", clean: "Beef Topping", oz: 2 },
       { kind: "topping", raw: "Applicator - Lowe's Cheeseburger Mix", clean: "Lowe's Cheeseburger Mix", oz: 1.3,
@@ -258,7 +258,11 @@ export function ImportReviewLowes() {
           <ul className="space-y-1 text-sm text-gray-700">
             <li>
               <span className="font-mono text-gray-400 line-through">Parbake Crust (11&Prime; CRB recipe - 11&Prime; Dies)</span>{" "}
-              → <b>11&Prime; CRB recipe</b> <span className="text-gray-500">(die size kept separately: 11&Prime; Dies)</span>
+              → <b>CRB</b> <span className="text-gray-500">(size dropped; die kept separately: 11&Prime; Dies)</span>
+            </li>
+            <li>
+              Each dough links to your existing dough recipe — <b>doughball weight and trays come from
+              the recipe</b>, not the spec sheet.
             </li>
             <li>
               <span className="font-mono text-gray-400 line-through">Lucia's Sauce (Lucia's Recipe)</span> → <b>Lucia's Sauce</b>
@@ -329,6 +333,16 @@ export function ImportReviewLowes() {
                           {it.raw !== it.clean && (
                             <div className="mt-1 text-xs text-gray-400">
                               from: <span className="font-mono line-through">{it.raw}</span>
+                            </div>
+                          )}
+                          {it.kind === "dough" && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-blue-100 bg-blue-50/70 px-2 py-1.5 text-xs text-blue-800">
+                              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                                LINKED TO DOUGH RECIPE
+                              </span>
+                              <span>
+                                Lowe's on <b>{it.clean}</b> → doughball weight &amp; trays pulled from that recipe
+                              </span>
                             </div>
                           )}
                           {it.components && (
