@@ -1284,6 +1284,13 @@ function RecipeRow({
   // "it didn't import" miss the user reported.
   const targets = recipeApplyTargets(candidate, editedProfiles);
   const attachesToNothing = item.include && !linked && !issue && targets.length === 0;
+  // Dough & sauce are SHARED library recipes — one recipe serves many
+  // brand/flavors, and a recipe imported before its spec sheets attaches
+  // automatically later (the spec sheet names the dough/sauce and the profile
+  // hydrates from the library by name). Never pressure the user to pick a
+  // brand/flavor for them; the attach editor stays available but optional.
+  const isSharedLibraryKind = item.kind === "dough" || item.kind === "sauce";
+  const needsAttachWarning = attachesToNothing && !isSharedLibraryKind;
   // Brand chosen but no flavor yet → the recipe currently attaches to EVERY flavor
   // of that brand. Keep the brand+flavor editor on screen in this state so the
   // flavor field doesn't vanish the instant a brand is typed (which silently left
@@ -1428,12 +1435,18 @@ function RecipeRow({
           {showAttachEditor && (
             <div
               className={`mt-2 rounded-md border p-2 ${
-                attachesToNothing
+                needsAttachWarning
                   ? "border-amber-400/60 bg-amber-500/10"
                   : "border-border bg-muted/40"
               }`}
             >
-              {attachesToNothing ? (
+              {attachesToNothing && isSharedLibraryKind ? (
+                <div className="text-xs font-medium text-foreground">
+                  Saved to your {item.kind === "dough" ? "dough" : "sauce"} library.
+                  It attaches automatically to any product whose spec sheet names it —
+                  you can also set a brand & flavor below to attach it now.
+                </div>
+              ) : needsAttachWarning ? (
                 <div className="text-xs font-medium text-amber-700">
                   Won't show on any product yet — set the brand & flavor it belongs to.
                 </div>
@@ -1470,7 +1483,7 @@ function RecipeRow({
               </div>
               <p
                 className={`mt-1 text-[11px] ${
-                  attachesToNothing ? "text-amber-700/80" : "text-muted-foreground"
+                  needsAttachWarning ? "text-amber-700/80" : "text-muted-foreground"
                 }`}
               >
                 Enter both, or set just a brand to attach to every matching product in
