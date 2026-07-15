@@ -266,7 +266,7 @@ export function ImportReviewLowes() {
             </li>
             <li>
               <span className="font-mono text-gray-400 line-through">Lucia's Sauce (Lucia's Recipe)</span> → <b>Lucia's Sauce</b>
-              <span className="text-gray-500"> · "(Legacy)" and "(Made in House)" suffixes dropped from all sauces</span>
+              <span className="text-gray-500"> · the "(…Recipe)" part tells us which sauce recipe to link; the oz per pizza comes from the spec</span>
             </li>
             <li>
               Vendor codes like <span className="font-mono text-gray-400">(Hormel - 24878)</span>,{" "}
@@ -333,6 +333,16 @@ export function ImportReviewLowes() {
                           {it.raw !== it.clean && (
                             <div className="mt-1 text-xs text-gray-400">
                               from: <span className="font-mono line-through">{it.raw}</span>
+                            </div>
+                          )}
+                          {it.kind === "sauce" && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-red-100 bg-red-50/60 px-2 py-1.5 text-xs text-red-800">
+                              <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                                LINKED TO SAUCE RECIPE
+                              </span>
+                              <span>
+                                <b>{it.clean}</b> recipe linked · <b>{it.oz} oz</b> per pizza comes from this spec
+                              </span>
                             </div>
                           )}
                           {it.kind === "dough" && (
