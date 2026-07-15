@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   CheckCircle2,
+  Pencil,
+  Link2,
   Wand2,
   ChevronDown,
   ChevronUp,
@@ -248,6 +250,43 @@ export function ImportReviewLowes() {
           </div>
         </div>
 
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Import order
+          </div>
+          <div className="flex flex-col gap-3 md:flex-row md:items-stretch">
+            <div className="flex-1 rounded-md border border-green-200 bg-green-50/60 p-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-600 text-[11px] font-bold text-white">1</span>
+                <span className="text-sm font-semibold text-gray-900">Dough &amp; Sauce recipes</span>
+                <CheckCircle2 className="ml-auto h-4 w-4 text-green-500" />
+              </div>
+              <p className="mt-1 text-xs text-gray-600">
+                Upload these first so the spec sheet has recipes to link to (doughball weight, trays, sauce recipes).
+              </p>
+            </div>
+            <div className="flex-1 rounded-md border-2 p-3" style={{ borderColor: AMBER, backgroundColor: "#FF950010" }}>
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ backgroundColor: AMBER }}>2</span>
+                <span className="text-sm font-semibold text-gray-900">Spec sheet</span>
+                <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">YOU ARE HERE</span>
+              </div>
+              <p className="mt-1 text-xs text-gray-600">
+                Creates flavors and names the cheese mixes &amp; premixes. Rename them below before they're created.
+              </p>
+            </div>
+            <div className="flex-1 rounded-md border border-gray-200 bg-gray-50 p-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-400 text-[11px] font-bold text-white">3</span>
+                <span className="text-sm font-semibold text-gray-700">Cheese mix &amp; Premix sheets</span>
+              </div>
+              <p className="mt-1 text-xs text-gray-600">
+                Their recipes auto-link by name to the ones this spec created — rename here and they'll still match.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
           <div className="mb-1 flex items-center gap-2">
             <Wand2 className="h-4 w-4" style={{ color: AMBER }} />
@@ -352,6 +391,21 @@ export function ImportReviewLowes() {
                               </span>
                               <span>
                                 Lowe's on <b>{it.clean}</b> → doughball weight &amp; trays pulled from that recipe
+                              </span>
+                            </div>
+                          )}
+                          {it.kind === "cheese" && it.components && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs text-amber-900">
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                                WILL CREATE CHEESE RECIPE
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 font-medium text-gray-900">
+                                {it.clean.split(" — ")[0]}
+                                <Pencil className="h-3 w-3 text-gray-400" />
+                              </span>
+                              <span className="text-amber-700">rename before it's created</span>
+                              <span className="ml-auto inline-flex items-center gap-1 text-amber-700">
+                                <Link2 className="h-3 w-3" /> cheese sheet will link to this name
                               </span>
                             </div>
                           )}
