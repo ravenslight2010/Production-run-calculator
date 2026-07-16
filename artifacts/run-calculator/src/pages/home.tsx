@@ -8484,7 +8484,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles } =
+      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles, appliedParsed } =
         await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
@@ -8535,7 +8535,11 @@ export default function Home() {
         // dough recipe's weight/per-tray under that label so the family recipe
         // carries ALL variants, not just the last one to write.
         const doughVariants = new Map<string, DoughballVariant[]>();
-        for (const r of editedParsed.recipes) {
+        // Read the APPLIED parse, not the review parse: on a reused-parse
+        // import the dough family collapse happens at commit-time relink, so
+        // only appliedParsed carries the collapsed family names + variant
+        // labels the pool push must fold together.
+        for (const r of appliedParsed.recipes) {
           if (r.referenceOnly) continue;
           if (r.kind !== "dough" && r.kind !== "sauce") continue;
           const name = r.name.trim();
@@ -8555,7 +8559,7 @@ export default function Home() {
               doughVariants.set(key, list);
             }
           }
-          const tag = namedRecipeTagFromParsed(r, editedParsed.profiles);
+          const tag = namedRecipeTagFromParsed(r, appliedParsed.profiles);
           if (!tag) continue;
           (r.kind === "dough" ? doughTags : sauceTags).set(name.toLowerCase(), tag);
         }

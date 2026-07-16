@@ -1087,6 +1087,30 @@ export function linkSpecImportCheeseToExisting(
 }
 
 /**
+ * Derive the dough FAMILY name from an imported workbook's file name: a dough
+ * mixing-procedure workbook is named after its family ("CRB Dough Mixing
+ * Procedure - 38.xlsx" → "CRB Dough"). Used as the collapse anchor when the
+ * import's dough recipes carry only customer labels and the pool has no base
+ * recipe to snap onto (fresh factory / pool cleared before re-import). Returns
+ * null when the file name doesn't identify a family (no "dough" token, or no
+ * distinctive token before it — a plain "Dough Mixing Procedure" file names no
+ * family). Pure.
+ */
+export function specImportDoughFamilyHintFromFileName(
+  fileName: string,
+): string | null {
+  const base = (fileName ?? "").replace(/\.[a-z0-9]+$/i, "").trim();
+  const m = /^(.*?\bdough\b)/i.exec(base);
+  if (!m) return null;
+  const hint = m[1].replace(/[\s\-_·,;:]+$/g, "").trim();
+  // Require a distinctive token besides the generic word "dough" itself —
+  // a file named just "Dough Mixing Procedure" carries no family identity.
+  const tokens = hint.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+  return hint;
+}
+
+/**
  * Snap imported DOUGH or SAUCE recipe names onto the factory's EXISTING recipe
  * pool of that kind, exactly like linkSpecImportCheeseToExisting does for cheese.
  *
@@ -1119,6 +1143,7 @@ export function linkSpecImportNamedRecipesToExisting(
   parsed: ParsedSpecImport,
   kind: "dough" | "sauce",
   existingNames: ReadonlyArray<string>,
+  opts?: { doughFamilyHint?: string | null },
 ): ParsedSpecImport {
   const match = buildNearDupNameMatcher(existingNames, {
     keyOf: specImportNameMatchKey,
@@ -1198,6 +1223,35 @@ export function linkSpecImportNamedRecipesToExisting(
       if (prior === undefined) targetBySig.set(sig, name);
       else if (prior !== null && prior.toLowerCase() !== name.toLowerCase()) {
         targetBySig.set(sig, null);
+      }
+    }
+    // ANCHORLESS collapse: when the pool has NO base recipe at all (fresh
+    // factory, or the user cleared the pool before re-importing), a dough
+    // mixing workbook still parses into one row-identical sibling group per
+    // mixing table — but the group has no pool anchor and every customer row
+    // used to be minted as its own standalone recipe. If the caller supplies
+    // a family hint derived from the workbook FILE name ("CRB Dough Mixing
+    // Procedure - 38.xlsx" → "CRB Dough"), and EXACTLY ONE unanchored
+    // row-identical group of 2+ dough recipes exists in this import, collapse
+    // that group onto the hint (pool spelling when the hint loose-matches an
+    // existing name). Two or more unanchored groups = two mixing tables — one
+    // hint can't name both families, so leave everything alone.
+    const hintRaw = (opts?.doughFamilyHint ?? "").trim();
+    if (hintRaw) {
+      const hintTarget = matchCleaned(hintRaw) ?? hintRaw;
+      const groupSizes = new Map<string, number>();
+      for (const r of recipes) {
+        if (r.kind !== kind) continue;
+        if (!(r.name ?? "").trim()) continue;
+        const sig = rowSig(r);
+        if (!sig) continue;
+        groupSizes.set(sig, (groupSizes.get(sig) ?? 0) + 1);
+      }
+      const unanchored = [...groupSizes.entries()].filter(
+        ([sig, n]) => n >= 2 && targetBySig.get(sig) === undefined,
+      );
+      if (unanchored.length === 1) {
+        targetBySig.set(unanchored[0]![0], hintTarget);
       }
     }
     for (let i = 0; i < recipes.length; i++) {

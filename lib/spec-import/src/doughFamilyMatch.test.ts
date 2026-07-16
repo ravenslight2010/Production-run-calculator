@@ -2,8 +2,29 @@ import { describe, it, expect } from "vitest";
 import {
   findSpecImportDoughFamilyMatch,
   linkSpecImportNamedRecipesToExisting,
+  specImportDoughFamilyHintFromFileName,
   type ParsedSpecImport,
 } from "./index";
+
+describe("specImportDoughFamilyHintFromFileName", () => {
+  it("derives the family from a mixing-procedure workbook name", () => {
+    expect(
+      specImportDoughFamilyHintFromFileName("CRB Dough Mixing Procedure - 38.xlsx"),
+    ).toBe("CRB Dough");
+  });
+
+  it("trims trailing separators and works without an extension", () => {
+    expect(specImportDoughFamilyHintFromFileName("Malted Barley Dough - v2")).toBe(
+      "Malted Barley Dough",
+    );
+  });
+
+  it("returns null when 'dough' is absent or has no distinctive token before it", () => {
+    expect(specImportDoughFamilyHintFromFileName("Pizza Spec Sheet.xlsx")).toBeNull();
+    expect(specImportDoughFamilyHintFromFileName("Dough Mixing Procedure.xlsx")).toBeNull();
+    expect(specImportDoughFamilyHintFromFileName("")).toBeNull();
+  });
+});
 
 describe("findSpecImportDoughFamilyMatch", () => {
   const pool = ["CRB Dough", "Malted Barley Dough", "Margherita Dough"];
@@ -124,6 +145,124 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     ]);
     // The profile's dough reference follows the collapse.
     expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
+  });
+
+  it("collapses an ANCHORLESS row-identical group onto the file-name family hint (empty pool)", () => {
+    // Pool cleared / fresh factory: no sibling matches an existing recipe, so
+    // there is no anchor — the hint derived from the workbook file name names
+    // the family instead. Every customer row becomes a variant, none standalone.
+    const rows = [
+      { ingredient: "Flour", lbs: 100 },
+      { ingredient: "Water", lbs: 60 },
+    ];
+    const parsed = {
+      profiles: [
+        {
+          brand: "Basha's",
+          flavor: "Cheese",
+          dieType: "11in",
+          applicators: [],
+          doughName: "Basha's Original",
+        },
+      ],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows, doughballOz: 9.6 },
+        { kind: "dough", name: "Basha's Original", rows, doughballOz: 8.6 },
+        { kind: "dough", name: "Lucia's New & Improved", rows, doughballOz: 8.25 },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", [], {
+      doughFamilyHint: specImportDoughFamilyHintFromFileName(
+        "CRB Dough Mixing Procedure - 38.xlsx",
+      ),
+    });
+    expect(linked.recipes?.map((r) => r.name)).toEqual([
+      "CRB Dough",
+      "CRB Dough",
+      "CRB Dough",
+    ]);
+    expect(linked.recipes?.map((r) => r.variantLabel)).toEqual([
+      "Costco CRB",
+      "Basha's Original",
+      "Lucia's New & Improved",
+    ]);
+    expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
+  });
+
+  it("anchorless hint collapse uses the POOL spelling when the hint loose-matches an existing name", () => {
+    const rows = [{ ingredient: "Flour", lbs: 100 }];
+    const parsed = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows },
+        { kind: "dough", name: "Basha's Original", rows },
+      ],
+    } as unknown as ParsedSpecImport;
+    // Pool holds an unrelated-rows recipe whose NAME loose-matches the hint —
+    // siblings still collapse (names snap to the pool spelling) even though no
+    // sibling matched the pool by name.
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB DOUGH"], {
+      doughFamilyHint: "CRB Dough",
+    });
+    expect(linked.recipes?.map((r) => r.name)).toEqual(["CRB DOUGH", "CRB DOUGH"]);
+  });
+
+  it("does NOT hint-collapse when TWO unanchored row-identical groups exist (two mixing tables)", () => {
+    const rowsA = [{ ingredient: "Flour", lbs: 100 }];
+    const rowsB = [{ ingredient: "Semolina", lbs: 50 }];
+    const parsed = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows: rowsA },
+        { kind: "dough", name: "Basha's Original", rows: rowsA },
+        { kind: "dough", name: "Lucia's", rows: rowsB },
+        { kind: "dough", name: "Roma's", rows: rowsB },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", [], {
+      doughFamilyHint: "CRB Dough",
+    });
+    expect(linked.recipes?.map((r) => r.name)).toEqual([
+      "Costco CRB",
+      "Basha's Original",
+      "Lucia's",
+      "Roma's",
+    ]);
+  });
+
+  it("does NOT hint-collapse a lone dough recipe (group of one)", () => {
+    const parsed = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows: [{ ingredient: "Flour", lbs: 100 }] },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", [], {
+      doughFamilyHint: "CRB Dough",
+    });
+    expect(linked.recipes?.[0]?.name).toBe("Costco CRB");
+  });
+
+  it("anchored collapse WINS over the hint when a sibling matches the pool", () => {
+    const rows = [{ ingredient: "Flour", lbs: 100 }];
+    const parsed = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Malted Barley Dough", rows },
+        { kind: "dough", name: "Basha's Original", rows },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(
+      parsed,
+      "dough",
+      ["Malted Barley Dough"],
+      { doughFamilyHint: "CRB Dough" },
+    );
+    // The group IS anchored (a sibling matched the pool) — hint never applies.
+    expect(linked.recipes?.map((r) => r.name)).toEqual([
+      "Malted Barley Dough",
+      "Malted Barley Dough",
+    ]);
   });
 
   it("leaves siblings alone when the row-identical group matched TWO different pool recipes", () => {

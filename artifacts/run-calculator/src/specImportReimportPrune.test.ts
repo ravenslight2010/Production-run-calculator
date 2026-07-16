@@ -87,6 +87,16 @@ vi.mock("./matchImport", () => ({
   },
 }));
 vi.mock("./aiCorrections", () => ({ saveAiCorrections: async () => {} }));
+const { fetchNamedRecipesSpy } = vi.hoisted(() => ({
+  fetchNamedRecipesSpy: vi.fn(async () => {
+    throw new Error("no pool in tests");
+  }),
+}));
+vi.mock("./namedRecipes", () => ({
+  fetchNamedRecipes: fetchNamedRecipesSpy,
+  saveNamedRecipes: async () => {},
+  addNamedRecipesToServerIfAbsent: async () => {},
+}));
 vi.mock("./cheeseRecipes", () => ({
   fetchCheeseRecipes: async () => [] as CheeseRecipe[],
   saveCheeseRecipes: async (items: CheeseRecipe[]) => items,
@@ -115,6 +125,8 @@ beforeEach(() => {
   saveSheetSpy.mockClear();
   fetchSheetsSpy.mockReset();
   fetchSheetsSpy.mockResolvedValue([]);
+  fetchNamedRecipesSpy.mockReset();
+  fetchNamedRecipesSpy.mockRejectedValue(new Error("no pool in tests"));
 });
 
 describe("commitSpecImport re-import prune wiring", () => {
@@ -245,6 +257,109 @@ describe("commitSpecImport re-import prune wiring", () => {
     expect(applied.profiles[0].dieType).toBe("12 inch");
     expect(applied.profiles[0].applicators).toHaveLength(1);
     expect(applied.recipes[0].referenceOnly).toBeUndefined();
+  });
+
+  it("re-applies a collapsed dough family when the pool was emptied since the last import (reused parse, unchanged sheet)", async () => {
+    // The exact prod recovery path: a dough workbook was imported once (12
+    // customer-named row-identical dough recipes saved in the snapshot), the
+    // user deleted the junk pool recipes, then re-imported the SAME file. The
+    // prune sees everything unchanged and demotes it — but the pool is empty,
+    // so the commit-time relink's file-name family collapse must still apply
+    // ONE family recipe with per-customer variants.
+    const doughRows = [{ ingredient: "Flour", lbs: 100 }];
+    const doughParse: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        fixtureRecipe({ kind: "dough", name: "Costco", rows: doughRows }),
+        fixtureRecipe({ kind: "dough", name: "Basha's", rows: doughRows }),
+        fixtureRecipe({ kind: "dough", name: "Aldi Original", rows: doughRows }),
+      ],
+    };
+    const names = ["CRB Dough Mixing Procedure - 38.xlsx"];
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(doughParse, "crb dough mixing procedure - 38", 100),
+    ]);
+    // Pool fetch SUCCEEDS and is EMPTY (user deleted the junk recipes).
+    fetchNamedRecipesSpy.mockResolvedValue([]);
+
+    await commitSpecImport(preparedOf(doughParse, names));
+
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    const dough = applied.recipes.filter((r) => r.kind === "dough");
+    expect(dough).toHaveLength(3);
+    for (const r of dough) {
+      expect(r.name).toBe("CRB Dough");
+      expect(r.referenceOnly).toBeUndefined(); // promoted back, not demoted
+    }
+    expect(new Set(dough.map((r) => r.variantLabel))).toEqual(
+      new Set(["Costco", "Basha's", "Aldi Original"]),
+    );
+  });
+
+  it("preserves distinct variant labels for loose-equal original names (index-based adoption)", async () => {
+    // "Basha's" and "Bashas" share the same loose name-match key; a key-based
+    // rename map would overwrite one with the other. Index-based adoption
+    // must keep both variant labels distinct.
+    const doughRows = [{ ingredient: "Flour", lbs: 100 }];
+    const doughParse: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        fixtureRecipe({ kind: "dough", name: "Basha's", rows: doughRows }),
+        fixtureRecipe({ kind: "dough", name: "Bashas", rows: doughRows }),
+        fixtureRecipe({ kind: "dough", name: "Costco", rows: doughRows }),
+      ],
+    };
+    const names = ["CRB Dough Mixing Procedure - 38.xlsx"];
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(doughParse, "crb dough mixing procedure - 38", 100),
+    ]);
+    fetchNamedRecipesSpy.mockResolvedValue([]);
+
+    await commitSpecImport(preparedOf(doughParse, names));
+
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    const dough = applied.recipes.filter((r) => r.kind === "dough");
+    expect(dough).toHaveLength(3);
+    expect(new Set(dough.map((r) => r.variantLabel))).toEqual(
+      new Set(["Basha's", "Bashas", "Costco"]),
+    );
+  });
+
+  it("re-applies an unchanged sauce recipe when it was deleted from the pool (promotion symmetry)", async () => {
+    const parse = fixtureParse(); // sauce "House Marinara"
+    fetchSheetsSpy.mockResolvedValue([sheetOf(fixtureParse(), "specs", 100)]);
+    fetchNamedRecipesSpy.mockResolvedValue([]); // pool emptied
+
+    await commitSpecImport(preparedOf(parse, ["specs.xlsx"]));
+
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    const sauce = applied.recipes.find((r) => r.name === "House Marinara");
+    expect(sauce?.referenceOnly).toBeUndefined(); // promoted, not demoted
+  });
+
+  it("keeps the prune demotion when the (collapsed) dough family still exists in the pool", async () => {
+    const doughRows = [{ ingredient: "Flour", lbs: 100 }];
+    const doughParse: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        fixtureRecipe({ kind: "dough", name: "Costco", rows: doughRows }),
+        fixtureRecipe({ kind: "dough", name: "Basha's", rows: doughRows }),
+      ],
+    };
+    const names = ["CRB Dough Mixing Procedure - 38.xlsx"];
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(doughParse, "crb dough mixing procedure - 38", 100),
+    ]);
+    fetchNamedRecipesSpy.mockResolvedValue([
+      { name: "CRB Dough", components: [{ ingredient: "Flour", lbs: 100 }] },
+    ]);
+
+    await commitSpecImport(preparedOf(doughParse, names));
+
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    const dough = applied.recipes.filter((r) => r.kind === "dough");
+    // Unchanged sheet + intact pool → stays demoted (manual edits survive).
+    for (const r of dough) expect(r.referenceOnly).toBe(true);
   });
 
   it("applies the full parse when the snapshot fetch fails (best-effort)", async () => {

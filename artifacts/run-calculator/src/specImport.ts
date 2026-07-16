@@ -28,6 +28,7 @@ import {
   pickAlias,
   linkSpecImportCheeseToExisting,
   linkSpecImportNamedRecipesToExisting,
+  specImportDoughFamilyHintFromFileName,
   linkSpecImportDieTypesToExisting,
   crossFillSpecImport,
   fillSpecCheeseTargetsFromProfiles,
@@ -56,6 +57,7 @@ import {
   type ExtraNameMatches,
   type NameMatch,
   type ParsedProfile,
+  type ParsedRecipe,
   type ParsedRecipeTarget,
   type ParsedSpecImport,
   type ScopedNameMatch,
@@ -506,6 +508,7 @@ async function parseWorkbookCore(
 async function linkParsed(
   parsed: ParsedSpecImport,
   known: ReturnType<typeof loadSpecImportKnown>,
+  sourceNames?: ReadonlyArray<string>,
 ): Promise<{ parsed: ParsedSpecImport; matchAliases: SpecImportAlias[] }> {
   let working = parsed;
   const aliasByKey = new Map<string, SpecImportAlias>();
@@ -652,7 +655,9 @@ async function linkParsed(
   } catch {
     // Best-effort (offline) — local names still match.
   }
-  working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse);
+  working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse, {
+    doughFamilyHint: doughFamilyHintFromSourceNames(sourceNames),
+  });
   // Sauce matches against the server pool too — the family recipe ("Lucia
   // Pizza Sauce") a variant reference ("Lucia's Sauce") must snap onto may
   // exist only in the pool, not in the local preset list.
@@ -665,6 +670,142 @@ async function linkParsed(
   }
   working = linkSpecImportNamedRecipesToExisting(working, "sauce", sauceUniverse);
   return { parsed: working, matchAliases: [...aliasByKey.values()] };
+}
+
+/**
+ * First dough family hint derivable from this import's workbook file names
+ * ("CRB Dough Mixing Procedure - 38.xlsx" → "CRB Dough"). Anchors the dough
+ * sibling collapse when the pool has no base recipe to snap onto.
+ */
+function doughFamilyHintFromSourceNames(
+  sourceNames?: ReadonlyArray<string>,
+): string | null {
+  for (const n of sourceNames ?? []) {
+    const hint = specImportDoughFamilyHintFromFileName(n);
+    if (hint) return hint;
+  }
+  return null;
+}
+
+/**
+ * Carry the FULL-parse relink's dough/sauce renames onto the (pruned) parse
+ * about to be applied. The relink must see the whole parse (the family
+ * collapse needs the complete row-identical sibling group), but the prune
+ * must compare ORIGINAL names against the snapshot — so the renames are
+ * computed on the full parse and adopted here per recipe BY INDEX (the prune
+ * maps recipes in place — same length and order — so index identity is exact
+ * and immune to loose-key collisions between near-identical original names)
+ * and per profile (doughName/sauceName by brand+flavor). Pure.
+ */
+function adoptRelinkedNames(
+  prunedParsed: ParsedSpecImport,
+  original: ParsedSpecImport,
+  relinked: ParsedSpecImport,
+): ParsedSpecImport {
+  if (relinked === original) return prunedParsed;
+  const origRecipes = original.recipes ?? [];
+  const relRecipes = relinked.recipes ?? [];
+  const prunedRecipes = prunedParsed.recipes ?? [];
+  const profileFields = new Map<string, { doughName?: string; sauceName?: string }>();
+  for (const p of relinked.profiles ?? []) {
+    profileFields.set(
+      `${(p.brand ?? "").trim().toLowerCase()}\u0000${(p.flavor ?? "").trim().toLowerCase()}`,
+      { doughName: p.doughName, sauceName: p.sauceName },
+    );
+  }
+  let changed = false;
+  const recipes = prunedRecipes.map((r, i) => {
+    // Index alignment sanity: the prune never reorders/removes recipes, but
+    // fail safe if the arrays ever diverge.
+    if (prunedRecipes.length !== origRecipes.length || origRecipes.length !== relRecipes.length) {
+      return r;
+    }
+    const o = origRecipes[i];
+    const rel = relRecipes[i];
+    if (!o || !rel || r.kind !== rel.kind) return r;
+    const name = (r.name ?? "").trim();
+    const oName = (o.name ?? "").trim();
+    const relName = (rel.name ?? "").trim();
+    // Only adopt when the pruned recipe still carries the original name this
+    // slot had — otherwise leave it alone.
+    if (!name || !relName || name !== oName || relName === name) return r;
+    changed = true;
+    return r.variantLabel
+      ? { ...r, name: relName }
+      : { ...r, name: relName, variantLabel: rel.variantLabel ?? name };
+  });
+  const profiles = (prunedParsed.profiles ?? []).map((p) => {
+    const rel = profileFields.get(
+      `${(p.brand ?? "").trim().toLowerCase()}\u0000${(p.flavor ?? "").trim().toLowerCase()}`,
+    );
+    if (!rel) return p;
+    let out = p;
+    if (p.doughName?.trim() && rel.doughName && rel.doughName !== p.doughName) {
+      out = { ...out, doughName: rel.doughName };
+      changed = true;
+    }
+    if (p.sauceName?.trim() && rel.sauceName && rel.sauceName !== p.sauceName) {
+      out = { ...out, sauceName: rel.sauceName };
+      changed = true;
+    }
+    return out;
+  });
+  return changed ? { ...prunedParsed, recipes, profiles } : prunedParsed;
+}
+
+/**
+ * Re-add dough/sauce recipes the re-import prune stripped as "unchanged"
+ * when their (relinked) name is MISSING from the live server pool: the user
+ * deleted the pool recipe since the last import, and an unchanged sheet must
+ * still be able to recreate it (delete-the-junk-then-re-import recovery).
+ * Identity is kind + loose name + variant label so every variant of a
+ * collapsed family rides along. Pools that could not be fetched (offline)
+ * keep the prune's decision untouched. Pure.
+ */
+function readdPoolMissingRecipes(
+  prunedParsed: ParsedSpecImport,
+  relinked: ParsedSpecImport,
+  poolNamesByKind: { dough?: string[]; sauce?: string[] },
+): ParsedSpecImport {
+  const keyOf = (r: { kind: string; name?: string; variantLabel?: string }) =>
+    `${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}\u0000${(r.variantLabel ?? "").trim().toLowerCase()}`;
+  const relinkedByKey = new Map<string, ParsedRecipe>();
+  for (const r of relinked.recipes ?? []) {
+    if ((r.kind === "dough" || r.kind === "sauce") && !r.referenceOnly) {
+      relinkedByKey.set(keyOf(r), r);
+    }
+  }
+  const poolMissing = (kind: "dough" | "sauce", name: string): boolean => {
+    const poolNames = poolNamesByKind[kind];
+    if (!poolNames || !name) return false;
+    return !poolNames.some((n) => specImportNamedRecipeNamesEqual(n, name));
+  };
+  let changed = false;
+  // Promote: the prune demotes unchanged recipes to referenceOnly (it does
+  // not remove them). A demoted dough/sauce recipe whose name is gone from
+  // the pool must be applied again — swap in the full relinked counterpart.
+  const recipes = (prunedParsed.recipes ?? []).map((r) => {
+    if (r.kind !== "dough" && r.kind !== "sauce") return r;
+    if (!r.referenceOnly) return r;
+    const name = (r.name ?? "").trim();
+    if (!poolMissing(r.kind, name)) return r;
+    const full = relinkedByKey.get(keyOf(r));
+    if (!full) return r;
+    changed = true;
+    return full;
+  });
+  // Re-add: safety net for any pool-missing recipe absent from the pruned
+  // parse entirely.
+  const present = new Set(recipes.map(keyOf));
+  const extras = [...relinkedByKey.values()].filter((r) => {
+    const name = (r.name ?? "").trim();
+    if (!name || present.has(keyOf(r))) return false;
+    return poolMissing(r.kind as "dough" | "sauce", name);
+  });
+  if (extras.length) changed = true;
+  return changed
+    ? { ...prunedParsed, recipes: [...recipes, ...extras] }
+    : prunedParsed;
 }
 
 /** Stable dedupe key for a learned alias (kind + external name + optional context). */
@@ -917,7 +1058,11 @@ export async function prepareSpecImport(
     await parseWorkbookCore(grids, known, aliases);
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed: linked, matchAliases } = await linkParsed(rawParsed, known);
+  const { parsed: linked, matchAliases } = await linkParsed(
+    rawParsed,
+    known,
+    name ? [name] : [],
+  );
 
   // Respect the user's prior merges/deletions: an import must not resurrect a
   // brand/flavor or recipe name they tombstoned. Skipped items are surfaced (not
@@ -1037,7 +1182,7 @@ export async function prepareSpecImportMulti(
 
   const merged = mergeParsedSpecImports(parsedList);
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed: linked, matchAliases } = await linkParsed(merged, known);
+  const { parsed: linked, matchAliases } = await linkParsed(merged, known, names);
 
   // Respect prior merges/deletions (see prepareSpecImport).
   const { kept, skipped } = partitionTombstonedParse(
@@ -1123,6 +1268,14 @@ export async function commitSpecImport(
   placeholderRecipesAdded: number;
   /** Brand+flavor profiles this import wrote — see applySpecImport. */
   touchedProfiles: Array<{ brand: string; flavor: string }>;
+  /**
+   * The parse that was actually APPLIED: prune + commit-time pool relink
+   * (dough family collapse included) applied on top of the review-edited
+   * parse. Post-commit collects (dough variant labels, "who it goes to"
+   * tags) must read THIS, not the review parse — on a reused-parse import
+   * the collapse only happens here.
+   */
+  appliedParsed: ParsedSpecImport;
 }> {
   // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
   // "…1.75") to one clean name up front, so the profile applicator fields and the
@@ -1147,6 +1300,50 @@ export async function commitSpecImport(
     // Best-effort — apply with imported names if the pool is unavailable.
   }
 
+  // Commit-time dough/sauce relink against the LIVE server pool. Prepare's
+  // link pass is best-effort (its pool fetch may have failed offline), so a
+  // profile could still carry a variant dough name ("CRB Heavy Plus recipe")
+  // whose base family recipe ("CRB Dough") exists in the pool. Re-snapping
+  // here keeps the apply and the placeholder suppression below consistent —
+  // otherwise suppression could strand a profile pointing at a name with no
+  // backing recipe anywhere.
+  // The fetched pools are also handed to applySpecImport below: it snaps
+  // spec names onto pool spellings (no phantom dropdown names) and hydrates
+  // profile recipe rows from the pool when this device has no local preset.
+  // The relink runs over the FULL parse BEFORE the prune: the dough family
+  // collapse needs the whole row-identical sibling group to fire (a pruned
+  // remnant of one row can't collapse), and reused-parse imports skip
+  // linkParsed entirely — the file-name family hint here is their only shot,
+  // or a re-import onto an emptied pool mints one recipe per customer row.
+  const livePools: {
+    dough?: SpecImportServerPoolRecipe[];
+    sauce?: SpecImportServerPoolRecipe[];
+  } = {};
+  const poolNamesByKind: { dough?: string[]; sauce?: string[] } = {};
+  let fullRelinked = prepared.parsed;
+  for (const kind of ["dough", "sauce"] as const) {
+    try {
+      const livePool = await fetchNamedRecipes(kind);
+      livePools[kind] = livePool.map((r) => ({
+        name: r.name,
+        components: (r.components ?? []).map((c) => ({ ingredient: c.ingredient, lbs: c.lbs })),
+        doughballWeightOz: r.doughballWeightOz,
+        doughballsPerTray: r.doughballsPerTray,
+      }));
+      poolNamesByKind[kind] = livePool.map((r) => r.name);
+      fullRelinked = linkSpecImportNamedRecipesToExisting(
+        fullRelinked,
+        kind,
+        poolNamesByKind[kind]!,
+        kind === "dough"
+          ? { doughFamilyHint: doughFamilyHintFromSourceNames(prepared.sourceNames) }
+          : undefined,
+      );
+    } catch {
+      // Best-effort (offline) — prepare's link result stands.
+    }
+  }
+
   // Re-import prune: compare against the snapshot(s) saved by PREVIOUS imports
   // of this same file and strip everything the spec didn't change, so manual
   // edits made since the last import survive a re-import. Only what actually
@@ -1159,7 +1356,15 @@ export async function commitSpecImport(
   // FULL parse (never the pruned one) so the next re-import compares against
   // the complete previous state. Best-effort: if snapshots can't be fetched,
   // apply the full parse (previous behavior).
+  // Prune on the ORIGINAL (pre-relink) names so parse and snapshot keys line
+  // up — snapshots store the raw parse. Then carry the full-parse relink's
+  // renames onto whatever survived, and re-add any dough/sauce recipe the
+  // prune stripped as "unchanged" whose (relinked) name no longer exists in
+  // the live pool: "unchanged since last import" must never suppress
+  // re-creating a recipe the user has since deleted from the pool (the
+  // delete-the-junk-then-re-import recovery path depends on this).
   let applyParsed = prepared.parsed;
+  let pruned = false;
   try {
     const sourceKey = deriveSourceKey(prepared.sourceNames ?? []);
     if (sourceKey) {
@@ -1168,43 +1373,15 @@ export async function commitSpecImport(
       if (candidates.length > 0) {
         const previous = mergePruneSnapshots(candidates.map((s) => s.data));
         applyParsed = pruneSpecImportAgainstSnapshot(prepared.parsed, previous).parsed;
+        pruned = true;
       }
     }
   } catch {
     // Best-effort — a failed snapshot fetch must never block the import.
   }
-
-  // Commit-time dough relink against the LIVE server pool. Prepare's link
-  // pass is best-effort (its pool fetch may have failed offline), so a
-  // profile could still carry a variant dough name ("CRB Heavy Plus recipe")
-  // whose base family recipe ("CRB Dough") exists in the pool. Re-snapping
-  // here keeps the apply and the placeholder suppression below consistent —
-  // otherwise suppression could strand a profile pointing at a name with no
-  // backing recipe anywhere.
-  // The fetched pools are also handed to applySpecImport below: it snaps
-  // spec names onto pool spellings (no phantom dropdown names) and hydrates
-  // profile recipe rows from the pool when this device has no local preset.
-  const livePools: {
-    dough?: SpecImportServerPoolRecipe[];
-    sauce?: SpecImportServerPoolRecipe[];
-  } = {};
-  for (const kind of ["dough", "sauce"] as const) {
-    try {
-      const livePool = await fetchNamedRecipes(kind);
-      livePools[kind] = livePool.map((r) => ({
-        name: r.name,
-        components: (r.components ?? []).map((c) => ({ ingredient: c.ingredient, lbs: c.lbs })),
-        doughballWeightOz: r.doughballWeightOz,
-        doughballsPerTray: r.doughballsPerTray,
-      }));
-      applyParsed = linkSpecImportNamedRecipesToExisting(
-        applyParsed,
-        kind,
-        livePool.map((r) => r.name),
-      );
-    } catch {
-      // Best-effort (offline) — prepare's link result stands.
-    }
+  applyParsed = adoptRelinkedNames(applyParsed, prepared.parsed, fullRelinked);
+  if (pruned) {
+    applyParsed = readdPoolMissingRecipes(applyParsed, fullRelinked, poolNamesByKind);
   }
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
@@ -1421,5 +1598,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles };
+  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles, appliedParsed: applyParsed };
 }
