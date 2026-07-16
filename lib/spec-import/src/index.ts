@@ -959,6 +959,34 @@ export function findSpecImportDoughFamilyMatch(
   return best && !ambiguous ? best.name : null;
 }
 
+/**
+ * Do two dough ingredient-row lists describe DIFFERENT formulas? True only
+ * when BOTH sides carry rows and their ingredient-name sets differ — a
+ * variant of a family shares the family's mixing table verbatim, so a recipe
+ * whose ingredients differ ("cream of tartar + sodium bicarbonate" vs
+ * "baking powder + dough conditioner") is a different recipe, never a
+ * variant, no matter how similar the names are ("Masa Dough (Lowes Natural)"
+ * vs "Masa Dough"). Either side empty = no evidence of conflict (a rows-less
+ * placeholder or a pure name reference may still fold). Pure.
+ */
+export function specImportDoughFormulasConflict(
+  a?: ReadonlyArray<{ ingredient?: string | null }>,
+  b?: ReadonlyArray<{ ingredient?: string | null }>,
+): boolean {
+  const keysOf = (rows?: ReadonlyArray<{ ingredient?: string | null }>) =>
+    new Set(
+      (rows ?? [])
+        .map((r) => specImportNameMatchKey(String(r?.ingredient ?? "")))
+        .filter(Boolean),
+    );
+  const ka = keysOf(a);
+  const kb = keysOf(b);
+  if (!ka.size || !kb.size) return false;
+  if (ka.size !== kb.size) return true;
+  for (const k of ka) if (!kb.has(k)) return true;
+  return false;
+}
+
 // Generic sauce words carrying no identity of their own for family matching.
 // ("pizza" is already dropped by the loose key's filler set, listed for
 // clarity.) Deliberately NOT reused for dough — the two lists differ.
@@ -1108,10 +1136,20 @@ export function linkSpecImportCheeseToExisting(
 export function specImportDoughFamilyHintFromFileName(
   fileName: string,
 ): string | null {
-  const base = (fileName ?? "").replace(/\.[a-z0-9]+$/i, "").trim();
-  const m = /^(.*?\bdough\b)/i.exec(base);
+  const base = (fileName ?? "")
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/_+/g, " ")
+    .trim();
+  // Prefer the FULL prefix before a "Mixing Procedure" suffix: a workbook can
+  // be named after a QUALIFIED family ("Masa Dough, Natural, (Lowe's) Mixing
+  // Procedure - 04") that is a different formula from plain "Masa Dough" —
+  // cutting at the first "dough" token collapsed both files onto one hint and
+  // combined two distinct families. Fall back to the up-to-"dough" prefix when
+  // the file name carries no "Mixing Procedure" marker.
+  const mp = /^(.*\bdough\b.*?)[\s\-–—_·,;:]+mixing\s+procedure\b/i.exec(base);
+  const m = mp ?? /^(.*?\bdough\b)/i.exec(base);
   if (!m) return null;
-  const hint = m[1].replace(/[\s\-_·,;:]+$/g, "").trim();
+  const hint = m[1]!.replace(/[\s\-_·,;:]+$/g, "").trim();
   // Require a distinctive token besides the generic word "dough" itself —
   // a file named just "Dough Mixing Procedure" carries no family identity.
   const tokens = hint.split(/\s+/).filter(Boolean);
@@ -1152,11 +1190,31 @@ export function linkSpecImportNamedRecipesToExisting(
   parsed: ParsedSpecImport,
   kind: "dough" | "sauce",
   existingNames: ReadonlyArray<string>,
-  opts?: { doughFamilyHint?: string | null },
+  opts?: {
+    doughFamilyHint?: string | null;
+    /**
+     * Existing pool recipes WITH their ingredient rows (when available). Used
+     * by the dough family fallback only: an imported dough recipe that carries
+     * its OWN rows must not fold onto a pool recipe whose ingredients differ —
+     * that's a different formula, not a variant of the family.
+     */
+    existingRecipes?: ReadonlyArray<{
+      name: string;
+      rows?: ReadonlyArray<{ ingredient?: string | null }>;
+    }>;
+  },
 ): ParsedSpecImport {
   const match = buildNearDupNameMatcher(existingNames, {
     keyOf: specImportNameMatchKey,
   });
+  const poolRowsByKey = new Map<
+    string,
+    ReadonlyArray<{ ingredient?: string | null }>
+  >();
+  for (const er of opts?.existingRecipes ?? []) {
+    const key = specImportNameMatchKey(er.name ?? "");
+    if (key && !poolRowsByKey.has(key)) poolRowsByKey.set(key, er.rows ?? []);
+  }
   // Cleanup-aware supplement: a pool entry saved under a RAW sheet name
   // ("Parbake Crust (11" CRB recipe - 11" Dies)") should still catch a cleaned
   // import ("CRB recipe") and vice versa, so cleanup never breaks dedupe.
@@ -1182,9 +1240,26 @@ export function linkSpecImportNamedRecipesToExisting(
     // intact (both land on the base name via importedKindKeys below) and lets
     // the variant's doughball weight / rows ride into the family instead of
     // being stranded under a name the pool guard would drop.
-    const existing =
-      matchCleaned(name) ??
-      findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
+    let existing = matchCleaned(name);
+    if (!existing) {
+      const family = findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
+      // Formula guard (dough only): a recipe carrying its OWN ingredient rows
+      // never folds onto a pool recipe whose ingredients differ — same-family
+      // NAMES over different formulas ("Masa Dough (Lowes Natural)" vs "Masa
+      // Dough") are distinct recipes, not variants.
+      if (
+        family &&
+        !(
+          kind === "dough" &&
+          specImportDoughFormulasConflict(
+            r.rows,
+            poolRowsByKey.get(specImportNameMatchKey(family)),
+          )
+        )
+      ) {
+        existing = family;
+      }
+    }
     if (!existing || existing === name) return r;
     changed = true;
     // Dough only: keep the variant's ORIGINAL sheet name as its label so the

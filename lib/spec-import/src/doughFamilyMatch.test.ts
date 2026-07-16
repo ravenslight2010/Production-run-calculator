@@ -19,6 +19,28 @@ describe("specImportDoughFamilyHintFromFileName", () => {
     );
   });
 
+  it("keeps the FULL qualified family name before the Mixing Procedure suffix", () => {
+    // "Masa Dough, Natural, (Lowe's)" is a DIFFERENT formula from plain
+    // "Masa Dough" — cutting at the first "dough" token gave both files the
+    // same hint and combined the two families.
+    expect(
+      specImportDoughFamilyHintFromFileName(
+        "Masa Dough, Natural, (Lowe's) Mixing Procedure - 04.xlsx",
+      ),
+    ).toBe("Masa Dough, Natural, (Lowe's)");
+    expect(
+      specImportDoughFamilyHintFromFileName("Masa Dough Mixing Procedure - 12.xlsx"),
+    ).toBe("Masa Dough");
+  });
+
+  it("normalizes underscores in attached-asset style file names", () => {
+    expect(
+      specImportDoughFamilyHintFromFileName(
+        "Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04.xlsx",
+      ),
+    ).toBe("Masa Dough, Natural, (Lowe's)");
+  });
+
   it("returns null when 'dough' is absent or has no distinctive token before it", () => {
     expect(specImportDoughFamilyHintFromFileName("Pizza Spec Sheet.xlsx")).toBeNull();
     expect(specImportDoughFamilyHintFromFileName("Dough Mixing Procedure.xlsx")).toBeNull();
@@ -293,6 +315,65 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     } as unknown as ParsedSpecImport;
     const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB Dough"]);
     expect(linked.recipes?.[1]?.name).toBe("Basha's Original");
+  });
+
+  it("does NOT family-fold a dough recipe whose ingredients CONFLICT with the pool recipe", () => {
+    // "Masa Dough (Lowes Natural)" name-matches the "Masa Dough" family by
+    // token subset, but it is a DIFFERENT formula (cream of tartar + sodium
+    // bicarbonate vs baking powder + dough conditioner) — it must stay its
+    // own recipe, never become a variant.
+    const parsed = {
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Masa Dough (Lowes Natural)",
+          rows: [
+            { ingredient: "ADM Wheat Flour", lbs: 200 },
+            { ingredient: "Cream of Tartar", lbs: 3.75 },
+            { ingredient: "Sodium Bicarbonate", lbs: 2.5 },
+          ],
+        },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["Masa Dough"], {
+      existingRecipes: [
+        {
+          name: "Masa Dough",
+          rows: [
+            { ingredient: "ADM Wheat Flour" },
+            { ingredient: "Baking Powder" },
+            { ingredient: "Dough Conditioner UFI-U1420" },
+          ],
+        },
+      ],
+    });
+    expect(linked.recipes?.[0]?.name).toBe("Masa Dough (Lowes Natural)");
+    expect(linked.recipes?.[0]?.variantLabel).toBeUndefined();
+  });
+
+  it("still family-folds when the pool recipe's rows MATCH or are absent", () => {
+    const rows = [
+      { ingredient: "Flour", lbs: 100 },
+      { ingredient: "Water", lbs: 60 },
+    ];
+    const mk = () =>
+      ({
+        profiles: [],
+        recipes: [{ kind: "dough", name: "CRB Heavy Plus recipe", rows }],
+      }) as unknown as ParsedSpecImport;
+    // Matching ingredient sets → variant fold as before.
+    const matched = linkSpecImportNamedRecipesToExisting(mk(), "dough", ["CRB Dough"], {
+      existingRecipes: [
+        { name: "CRB Dough", rows: [{ ingredient: "Water" }, { ingredient: "Flour" }] },
+      ],
+    });
+    expect(matched.recipes?.[0]?.name).toBe("CRB Dough");
+    // Pool recipe rows unknown/empty (placeholder) → no evidence of conflict.
+    const noRows = linkSpecImportNamedRecipesToExisting(mk(), "dough", ["CRB Dough"], {
+      existingRecipes: [{ name: "CRB Dough", rows: [] }],
+    });
+    expect(noRows.recipes?.[0]?.name).toBe("CRB Dough");
   });
 
   it("does not family-collapse sauce names", () => {

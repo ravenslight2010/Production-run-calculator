@@ -24,7 +24,10 @@ import {
   type NamedRecipe,
   type NamedRecipeTag,
 } from "@workspace/named-recipes";
-import { findSpecImportNamedRecipeFamilyMatch } from "@workspace/spec-import";
+import {
+  findSpecImportNamedRecipeFamilyMatch,
+  specImportDoughFormulasConflict,
+} from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
 
 export type NamedRecipeKind = "dough" | "sauce";
@@ -97,6 +100,22 @@ export async function addNamedRecipesToServerIfAbsent(
     if (family === null) {
       filtered.push(c);
       continue;
+    }
+    // Formula guard (dough only): a candidate carrying its OWN components must
+    // never be dropped onto a family recipe whose ingredients differ — a
+    // family-looking NAME over a different formula ("Masa Dough (Lowes
+    // Natural)" vs "Masa Dough") is its own recipe, not a variant.
+    if (kind === "dough") {
+      const familyEntry = existing.find((r) => r.name === family);
+      if (
+        specImportDoughFormulasConflict(
+          (c.components ?? []).map((x) => ({ ingredient: x.ingredient })),
+          (familyEntry?.components ?? []).map((x) => ({ ingredient: x.ingredient })),
+        )
+      ) {
+        filtered.push(c);
+        continue;
+      }
     }
     const familyKey = family.trim().toLowerCase();
     const candKey = (c.name ?? "").trim().toLowerCase();

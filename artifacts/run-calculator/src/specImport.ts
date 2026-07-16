@@ -649,14 +649,23 @@ async function linkParsed(
   // server-backed master data now, and the base family recipe ("CRB Dough")
   // the variant names must collapse onto may exist only in the pool.
   let doughUniverse = known.doughRecipes ?? [];
+  let doughPoolRecipes: Array<{
+    name: string;
+    rows?: Array<{ ingredient?: string | null }>;
+  }> = [];
   try {
     const pool = await fetchNamedRecipes("dough");
     doughUniverse = [...new Set([...doughUniverse, ...pool.map((r) => r.name)])];
+    doughPoolRecipes = pool.map((r) => ({
+      name: r.name,
+      rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+    }));
   } catch {
     // Best-effort (offline) — local names still match.
   }
   working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse, {
     doughFamilyHint: doughFamilyHintFromSourceNames(sourceNames),
+    existingRecipes: doughPoolRecipes,
   });
   // Sauce matches against the server pool too — the family recipe ("Lucia
   // Pizza Sauce") a variant reference ("Lucia's Sauce") must snap onto may
@@ -1202,8 +1211,17 @@ export async function prepareSpecImportMulti(
   // runs in linkParsed/commit but only when all files agree on one hint.
   if (parsedList.length > 1) {
     let doughPoolNames: string[] = [];
+    let doughPoolRecipes: Array<{
+      name: string;
+      rows?: Array<{ ingredient?: string | null }>;
+    }> = [];
     try {
-      doughPoolNames = (await fetchNamedRecipes("dough")).map((r) => r.name);
+      const pool = await fetchNamedRecipes("dough");
+      doughPoolNames = pool.map((r) => r.name);
+      doughPoolRecipes = pool.map((r) => ({
+        name: r.name,
+        rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+      }));
     } catch {
       // Best-effort (offline) — collapse still anchors on the hint itself.
     }
@@ -1217,7 +1235,7 @@ export async function prepareSpecImportMulti(
         canonicalizeSpecImportNamedRecipeNames(parsedList[i]),
         "dough",
         doughUniverse,
-        { doughFamilyHint: hint },
+        { doughFamilyHint: hint, existingRecipes: doughPoolRecipes },
       );
     }
   }
@@ -1378,7 +1396,13 @@ export async function commitSpecImport(
         kind,
         poolNamesByKind[kind]!,
         kind === "dough"
-          ? { doughFamilyHint: doughFamilyHintFromSourceNames(prepared.sourceNames) }
+          ? {
+              doughFamilyHint: doughFamilyHintFromSourceNames(prepared.sourceNames),
+              existingRecipes: livePools[kind]!.map((r) => ({
+                name: r.name,
+                rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+              })),
+            }
           : undefined,
       );
     } catch {

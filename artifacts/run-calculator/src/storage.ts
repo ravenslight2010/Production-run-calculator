@@ -2863,11 +2863,26 @@ export function applySpecImport(
   // "CRB Dough"). Registering the raw spec name while suppression
   // family-matched it is exactly how phantom dropdown names were minted —
   // a name in the option list that no recipe anywhere backs.
+  // A name backed by a recipe CARRIED BY THIS IMPORT must never family-snap
+  // onto a pool recipe — the import brings its own (possibly different)
+  // formula under that name ("Masa Dough (Lowes Natural)" next to the pool's
+  // "Masa Dough"), and the link passes upstream already decided it stays
+  // separate. Snapping here would re-point references at the wrong recipe.
+  const importedRecipeKeys: Record<"dough" | "sauce", Set<string>> = {
+    dough: new Set<string>(),
+    sauce: new Set<string>(),
+  };
+  for (const r of parsed.recipes ?? []) {
+    if (r.kind !== "dough" && r.kind !== "sauce") continue;
+    const k = specImportNameMatchKey(r.name ?? "");
+    if (k) importedRecipeKeys[r.kind].add(k);
+  }
   const snapToPoolName = (kind: "dough" | "sauce", name: string): string => {
     const t = name.trim();
     if (!t) return t;
     const exact = poolEntryFor(kind, t);
     if (exact) return exact.name;
+    if (importedRecipeKeys[kind].has(specImportNameMatchKey(t))) return t;
     const family = findSpecImportNamedRecipeFamilyMatch(
       kind,
       t,
