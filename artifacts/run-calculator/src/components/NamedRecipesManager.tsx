@@ -206,11 +206,13 @@ export default function NamedRecipesManager({
                           </span>
                         )}
                         {recipe.brand && (
-                          <span className="ml-5 sm:ml-0 max-w-full min-w-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary truncate sm:max-w-[14rem]">
-                            {recipe.brand}
-                            {recipe.flavors.length > 0
-                              ? ` — ${recipe.flavors.join(", ")}`
-                              : " — all varieties"}
+                          <span className="basis-full sm:basis-auto min-w-0 flex ml-5 sm:ml-0">
+                            <span className="max-w-full min-w-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary truncate sm:max-w-[14rem]">
+                              {recipe.brand}
+                              {recipe.flavors.length > 0
+                                ? ` — ${recipe.flavors.join(", ")}`
+                                : " — all varieties"}
+                            </span>
                           </span>
                         )}
                       </button>

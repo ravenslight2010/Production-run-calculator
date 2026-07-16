@@ -295,7 +295,7 @@ export default function MixesManager({
                                   </span>
                                 )}
                                 {mix.flavor && (
-                                  <span className="ml-5 sm:ml-0 max-w-full min-w-0 text-[11px] text-muted-foreground truncate sm:max-w-[14rem]">
+                                  <span className="basis-full sm:basis-auto ml-5 sm:ml-0 max-w-full min-w-0 text-[11px] text-muted-foreground truncate sm:max-w-[14rem]">
                                     {mix.flavor}
                                   </span>
                                 )}
