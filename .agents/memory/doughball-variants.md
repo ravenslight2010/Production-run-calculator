@@ -6,6 +6,7 @@ description: One dough family recipe carries all variants' doughball weight/per-
 One pool dough recipe per FAMILY carries every variant's doughball numbers as `doughballVariants` (label + weightOz + perTray) instead of minting per-variant recipes.
 
 Rules:
+- The parse prompt must demand ONE dough recipe per yield-table ROW: the model otherwise groups customers with matching weights into combined labels ("Hannaford, Lowe's, & SMD CRB") and drops the rest as "a subset". Any prompt change here bumps SPEC_PARSE_VERSION.
 - Merging is additive by label (ci): new labels append, existing labels' values are UPDATED by an incoming re-import (a re-import states the current spec), never removed.
 - Auto-match at dough pick is conservative: exactly 1 variant, or the die size's number token appears in EXACTLY one label; anything ambiguous → null and the run form shows a manual pick banner.
 - Variant values win over the recipe-level doughballWeightOz/doughballsPerTray, but ALL fill paths (pick handler, self-heals, manual pick) stay blank-fill-only — never overwrite an operator-typed value (per-flavor invariant).

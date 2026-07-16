@@ -271,6 +271,13 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "row serves). Never collapse named variants into one recipe or drop a " +
     "variant name — a profile's `doughName` may reference the variant (e.g. " +
     "'CRB Heavy Plus') and must find a recipe with that exact name. " +
+    "EMIT EVERY ROW: output ONE dough recipe per ROW of the doughball/yield " +
+    "table — if the table lists 12 rows, emit 12 dough recipes. NEVER merge " +
+    "several rows/customers into one recipe with a combined label (e.g. do NOT " +
+    "turn separate 'Hannaford', 'Lowe's', and 'SMD' rows into one " +
+    "'Hannaford, Lowe's, & SMD' recipe), even when their weights or per-tray " +
+    "counts are identical — keep each row's own label verbatim. Extracting " +
+    "only a subset of the rows is ALWAYS wrong. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap fields: `ozPerPizza`/`sauceOzPerPizza` are " +

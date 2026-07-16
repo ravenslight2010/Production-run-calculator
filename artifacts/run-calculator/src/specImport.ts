@@ -750,8 +750,12 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * generated Zod (doughballOz / variantLabel / targets lost), so v8 snapshots
  * poison exact-file reuse — dough variants never reach the pool. The save
  * schema is free-form now; old stripped snapshots must not be reused.
+ * v10: parse prompt now forbids grouping doughball/yield-table rows — v9
+ * parses merged several customers' rows into combined variants (e.g.
+ * "Hannaford, Lowe's, & SMD CRB") and dropped the rest, so only a subset of
+ * variants reached the pool; those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "9";
+export const SPEC_PARSE_VERSION = "10";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
