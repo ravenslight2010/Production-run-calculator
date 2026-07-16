@@ -277,7 +277,12 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "turn separate 'Hannaford', 'Lowe's', and 'SMD' rows into one " +
     "'Hannaford, Lowe's, & SMD' recipe), even when their weights or per-tray " +
     "counts are identical — keep each row's own label verbatim. Extracting " +
-    "only a subset of the rows is ALWAYS wrong. " +
+    "only a subset of the rows is ALWAYS wrong. NEVER return a 'sample', " +
+    "'representative', or abbreviated extraction of ANY table — not for yield " +
+    "tables, ingredient tables, or spec grids: enumerate EVERY row exhaustively " +
+    "even when the output gets long or repetitive. If your `note` would say you " +
+    "sampled, summarized, or omitted rows for brevity, that output is wrong — go " +
+    "back and emit the complete list instead. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap fields: `ozPerPizza`/`sauceOzPerPizza` are " +

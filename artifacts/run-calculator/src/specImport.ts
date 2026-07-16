@@ -754,8 +754,12 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * parses merged several customers' rows into combined variants (e.g.
  * "Hannaford, Lowe's, & SMD CRB") and dropped the rest, so only a subset of
  * variants reached the pool; those parses must not be reused.
+ * v11: parse prompt now explicitly forbids "sample"/representative/abbreviated
+ * extractions of any table — a production v10 parse returned an "extracted
+ * sample of yield rows" (4 of 19 dough variants); such parses must not be
+ * reused.
  */
-export const SPEC_PARSE_VERSION = "10";
+export const SPEC_PARSE_VERSION = "11";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
