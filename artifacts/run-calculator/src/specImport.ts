@@ -677,14 +677,22 @@ async function linkParsed(
  * ("CRB Dough Mixing Procedure - 38.xlsx" → "CRB Dough"). Anchors the dough
  * sibling collapse when the pool has no base recipe to snap onto.
  */
-function doughFamilyHintFromSourceNames(
+export function doughFamilyHintFromSourceNames(
   sourceNames?: ReadonlyArray<string>,
 ): string | null {
+  // A hint only anchors the collapse when it is UNAMBIGUOUS: if two files in
+  // the batch carry DIFFERENT family hints ("Aldo's Dough Mixing…" + "Brand
+  // Dough Mixing…"), the first file's hint must never be applied to the whole
+  // merged parse — it would rename the OTHER file's recipe group onto the
+  // wrong family. Multi-file batches handle per-file hints before merging.
+  let hint: string | null = null;
   for (const n of sourceNames ?? []) {
-    const hint = specImportDoughFamilyHintFromFileName(n);
-    if (hint) return hint;
+    const h = specImportDoughFamilyHintFromFileName(n);
+    if (!h) continue;
+    if (hint === null) hint = h;
+    else if (h.trim().toLowerCase() !== hint.trim().toLowerCase()) return null;
   }
-  return null;
+  return hint;
 }
 
 /**
@@ -900,7 +908,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * sample of yield rows" (4 of 19 dough variants); such parses must not be
  * reused.
  */
-export const SPEC_PARSE_VERSION = "11";
+export const SPEC_PARSE_VERSION = "12";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1137,6 +1145,10 @@ export async function prepareSpecImportMulti(
   }
 
   const parsedList: ParsedSpecImport[] = [];
+  // File label per successful parse (index-aligned with parsedList, which
+  // skips failed files) — the per-file dough family collapse below needs to
+  // know WHICH file each parse came from.
+  const parsedLabels: string[] = [];
   const allResolved: ParseCore["resolved"] = [];
   const flagged: SpecFlaggedItem[] = [];
   const errors: string[] = [];
@@ -1157,6 +1169,7 @@ export async function prepareSpecImportMulti(
       const grids = await readWorkbookGrids(buffers[i]);
       const core = await parseWorkbookCore(grids, known, aliases);
       parsedList.push(core.parsed);
+      parsedLabels.push(label);
       allResolved.push(...core.resolved);
       flagged.push(...core.flagged);
       totalDropped += core.droppedRows;
@@ -1178,6 +1191,35 @@ export async function prepareSpecImportMulti(
 
   if (parsedList.length === 0) {
     throw new Error(errors.length ? errors.join("\n") : "Nothing to import.");
+  }
+
+  // Per-file dough family collapse: each dough mixing workbook's row-identical
+  // sibling group must collapse onto ITS OWN file-name hint BEFORE the parses
+  // merge. Done on the merged parse, the batch-level hint (first file's) would
+  // rename ANOTHER file's recipe group onto the wrong family — importing
+  // "Aldo's Dough Mixing…" + "Brand Dough Mixing…" together put Brand &
+  // Corky's variants under "Aldo's Dough". The merged-parse hint pass still
+  // runs in linkParsed/commit but only when all files agree on one hint.
+  if (parsedList.length > 1) {
+    let doughPoolNames: string[] = [];
+    try {
+      doughPoolNames = (await fetchNamedRecipes("dough")).map((r) => r.name);
+    } catch {
+      // Best-effort (offline) — collapse still anchors on the hint itself.
+    }
+    const doughUniverse = [...new Set([...(known.doughRecipes ?? []), ...doughPoolNames])];
+    for (let i = 0; i < parsedList.length; i++) {
+      const hint = specImportDoughFamilyHintFromFileName(parsedLabels[i]);
+      if (!hint) continue;
+      // Same name-cleanup + relink the merged pass performs, scoped to this
+      // file's parse with this FILE's hint (both passes are idempotent).
+      parsedList[i] = linkSpecImportNamedRecipesToExisting(
+        canonicalizeSpecImportNamedRecipeNames(parsedList[i]),
+        "dough",
+        doughUniverse,
+        { doughFamilyHint: hint },
+      );
+    }
   }
 
   const merged = mergeParsedSpecImports(parsedList);

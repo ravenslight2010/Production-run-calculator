@@ -40,6 +40,7 @@ import {
   type SpecMatchKnown,
   type CanonicalResult,
 } from "@workspace/spec-import";
+import { doughFamilyHintFromSourceNames } from "./specImport";
 
 describe("specAliasKey", () => {
   it("is case-insensitive and trims", () => {
@@ -1898,6 +1899,96 @@ describe("mergeParsedSpecImports", () => {
     expect(merged.note).toBeUndefined();
     expect(merged.profiles).toEqual([]);
     expect(merged.recipes).toEqual([]);
+  });
+
+  // A per-file family collapse renames a sibling group onto ONE family name,
+  // keeping each variant's original name as its variantLabel. The batch merge
+  // must NOT dedupe those by kind|name — each is a distinct doughball-chart
+  // entry and losing one silently drops a variant's weight/per-tray.
+  it("keeps same-named dough recipes with DIFFERENT variant labels separate", () => {
+    const rows = [{ ingredient: "Flour", lbs: 200 }];
+    const a = {
+      profiles: [],
+      recipes: [
+        { kind: "dough" as const, name: "Brand Dough", rows, variantLabel: 'BRAND 7" DOUGH' },
+        { kind: "dough" as const, name: "Brand Dough", rows, variantLabel: 'BRAND 12" DOUGH' },
+        { kind: "dough" as const, name: "Brand Dough", rows, variantLabel: "CORKY'S 7\" DOUGH" },
+      ],
+    };
+    const b = {
+      profiles: [],
+      recipes: [{ kind: "dough" as const, name: "Aldo's Dough", rows }],
+    };
+    const merged = mergeParsedSpecImports([a, b]);
+    expect(merged.recipes).toHaveLength(4);
+    expect(merged.recipes.filter((r) => r.name === "Brand Dough")).toHaveLength(3);
+  });
+
+  it("keeps a labeled and an unlabeled same-named recipe separate", () => {
+    // A label-less duplicate is a different chart entry than a labeled variant
+    // — merging would drop one side's weight/per-tray; apply unions them.
+    const merged = mergeParsedSpecImports([
+      { profiles: [], recipes: [{ kind: "dough" as const, name: "Brand Dough", rows: [] }] },
+      {
+        profiles: [],
+        recipes: [
+          { kind: "dough" as const, name: "Brand Dough", rows: [], variantLabel: 'BRAND 7" DOUGH' },
+        ],
+      },
+    ]);
+    expect(merged.recipes).toHaveLength(2);
+  });
+
+  it("still dedupes same-named recipes when variant labels MATCH", () => {
+    const mk = (lbs: number) => ({
+      kind: "dough" as const,
+      name: "Brand Dough",
+      rows: [{ ingredient: "Flour", lbs }],
+      variantLabel: 'brand 7" dough',
+    });
+    const merged = mergeParsedSpecImports([
+      { profiles: [], recipes: [mk(1)] },
+      { profiles: [], recipes: [{ ...mk(2), variantLabel: 'BRAND 7" DOUGH' }] },
+    ]);
+    expect(merged.recipes).toHaveLength(1);
+    expect(merged.recipes[0]?.rows[0]?.lbs).toBe(2);
+  });
+});
+
+// Batch-level hint safety: importing TWO different dough mixing workbooks at
+// once must not let the FIRST file's family hint rename the other file's
+// recipe group ("Aldo's Dough Mixing…" + "Brand Dough Mixing…" put Brand &
+// Corky's variants under "Aldo's Dough"). The batch hint only stands when
+// every hint-bearing file agrees.
+describe("doughFamilyHintFromSourceNames", () => {
+  it("returns the hint when only one file carries one", () => {
+    expect(
+      doughFamilyHintFromSourceNames(["CRB Dough Mixing Procedure - 38.xlsx", "Pizza Specs.xlsx"]),
+    ).toBe("CRB Dough");
+  });
+
+  it("returns the shared hint when several files agree (case-insensitive)", () => {
+    expect(
+      doughFamilyHintFromSourceNames([
+        "CRB Dough Mixing Procedure - 38.xlsx",
+        "crb dough Mixing Procedure - 39.xlsx",
+      ]),
+    ).toBe("CRB Dough");
+  });
+
+  it("returns null when two files carry DIFFERENT family hints", () => {
+    expect(
+      doughFamilyHintFromSourceNames([
+        "Aldo's Dough Mixing Procedure - 09.xlsx",
+        "Brand Dough Mixing Procedure - 08.xlsx",
+      ]),
+    ).toBeNull();
+  });
+
+  it("returns null when no file carries a hint", () => {
+    expect(doughFamilyHintFromSourceNames(["Pizza Specs.xlsx"])).toBeNull();
+    expect(doughFamilyHintFromSourceNames([])).toBeNull();
+    expect(doughFamilyHintFromSourceNames(undefined)).toBeNull();
   });
 });
 

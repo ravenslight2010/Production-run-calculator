@@ -423,7 +423,16 @@ export function mergeParsedSpecImports(
     }
     for (const r of item.recipes) {
       const nm = r.name.trim().toLowerCase();
-      const key = nm ? `${r.kind}|${nm}` : `${r.kind}|__anon${anon++}`;
+      // Same-named recipes carrying DIFFERENT variant labels are distinct
+      // doughball-chart entries of one dough family (the per-file family
+      // collapse renames a sibling group onto one family name, keeping each
+      // variant's original name as its label) — merging them would silently
+      // drop all but one variant's weight/per-tray. Keep them separate; the
+      // apply step unions same-named recipes' variants into the family.
+      const vlab = (r.variantLabel ?? "").trim().toLowerCase();
+      const key = nm
+        ? `${r.kind}|${nm}${vlab ? `|v:${vlab}` : ""}`
+        : `${r.kind}|__anon${anon++}`;
       const prev = recipeMap.get(key);
       recipeMap.set(key, prev ? mergeRecipePair(prev, r) : r);
     }
