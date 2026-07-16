@@ -30,6 +30,7 @@ import {
   linkSpecImportNamedRecipesToExisting,
   linkSpecImportDieTypesToExisting,
   crossFillSpecImport,
+  fillSpecCheeseTargetsFromProfiles,
   findOverflowColumnRows,
   findTruncatedCells,
   extractEmbeddedApplicatorBlends,
@@ -46,6 +47,7 @@ import {
   resolveRetriedParsePass,
   shouldRetryParsePass,
   specImportNameMatchKey,
+  specImportNamedRecipeNamesEqual,
   splitGridsForPrompt,
   summarizeSpecImport,
   updateRecipePoolComponents,
@@ -79,6 +81,7 @@ import {
   applySpecImport,
   isNameDeleted,
   flavorNamespace,
+  type SpecImportRecipePlaceholder,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import {
@@ -96,13 +99,15 @@ import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
-import { fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
+import { fetchNamedRecipes, saveNamedRecipes, addNamedRecipesToServerIfAbsent } from "./namedRecipes";
+import { namedRecipeFromDraft, type NamedRecipe as PoolNamedRecipe } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
-import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
+import { addSpecMixesIfAbsent, fillSpecMixTags, type Mix } from "@workspace/mixes";
 import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
   applyCheeseOzPerPizza,
+  fillCheeseRecipeTags,
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
 import type { ReviewVerdict } from "@workspace/ai-review";
@@ -714,7 +719,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * sheets' flavors grounded onto deleted old names baked in, so they must not
  * be reused.
  */
-export const SPEC_PARSE_VERSION = "5";
+export const SPEC_PARSE_VERSION = "6";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1070,6 +1075,12 @@ export async function commitSpecImport(
    * to them AND checked "update it with this sheet" in the review.
    */
   recipesUpdated: number;
+  /**
+   * Empty-components dough/sauce placeholder recipes added to the server pool
+   * for profile-named recipes with no backing recipe anywhere (so the name is
+   * visible under Manage Lists → Dough/Sauce Recipes).
+   */
+  placeholderRecipesAdded: number;
   /** Brand+flavor profiles this import wrote — see applySpecImport. */
   touchedProfiles: Array<{ brand: string; flavor: string }>;
 }> {
@@ -1123,7 +1134,63 @@ export async function commitSpecImport(
     // Best-effort — a failed snapshot fetch must never block the import.
   }
 
-  const touchedProfiles = applySpecImport(applyParsed);
+  const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
+  const touchedProfiles = applySpecImport(applyParsed, applyOut);
+
+  // For the SERVER-POOL collects below only: backfill "who it goes to"
+  // brand/flavor targets onto cheese-kind recipes that arrived unscoped, from
+  // the profiles whose applicator grid references them by name. Without this,
+  // sheets that express the tie only through the applicator grid produce
+  // Cheese Recipes / Mixes pool entries with no customer tag. The local apply
+  // above intentionally uses the untouched parse (its own slot-matching pass
+  // already ties recipes to profiles).
+  const scopedParsed = fillSpecCheeseTargetsFromProfiles(applyParsed);
+
+  // Spec-named dough/sauce with no backing recipe anywhere: create an
+  // empty-components placeholder in the server pool so the name is visible
+  // (and editable) under Manage Lists → Dough/Sauce Recipes instead of living
+  // only on the profile. Tagged "who it goes to" from the referencing
+  // profiles when they all share one brand. Loose near-dup guard against the
+  // existing pool: if a pool entry already loose-matches the name, the
+  // profile relink pass should have (or will) snap onto it — never mint a
+  // near-duplicate placeholder. Best-effort, manager-gated server-side.
+  let placeholderRecipesAdded = 0;
+  for (const kind of ["dough", "sauce"] as const) {
+    const cands = (applyOut.recipePlaceholders ?? []).filter((c) => c.kind === kind);
+    if (!cands.length) continue;
+    try {
+      const pool = await fetchNamedRecipes(kind);
+      // Group per recipe name: union flavors; multi-brand names stay untagged.
+      const byName = new Map<string, { name: string; brands: Set<string>; flavors: string[] }>();
+      for (const c of cands) {
+        if (pool.some((r) => specImportNamedRecipeNamesEqual(r.name, c.name))) continue;
+        const key = c.name.trim().toLowerCase();
+        const g = byName.get(key) ?? { name: c.name.trim(), brands: new Set<string>(), flavors: [] };
+        if (c.brand.trim()) g.brands.add(c.brand.trim());
+        const fl = c.flavor.trim();
+        if (fl && !g.flavors.some((f) => f.toLowerCase() === fl.toLowerCase())) g.flavors.push(fl);
+        byName.set(key, g);
+      }
+      const drafts = [...byName.values()]
+        .map((g) => {
+          const singleBrand = g.brands.size === 1 ? [...g.brands][0] : undefined;
+          return namedRecipeFromDraft({
+            name: g.name,
+            components: [],
+            idPrefix: kind,
+            brand: singleBrand,
+            flavors: singleBrand ? g.flavors : [],
+          });
+        })
+        .filter((r): r is PoolNamedRecipe => r != null);
+      if (drafts.length) {
+        const { added } = await addNamedRecipesToServerIfAbsent(kind, drafts);
+        placeholderRecipesAdded += added;
+      }
+    } catch {
+      // Best-effort (non-manager 403, offline) — import applied.
+    }
+  }
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
   // appear on the Mixes screen alongside premix-imported ones. Manager-gated on
@@ -1137,13 +1204,17 @@ export async function commitSpecImport(
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
-    const candidates = collectSpecImportMixes(applyParsed, userMixNamesLower)
+    const candidates = collectSpecImportMixes(scopedParsed, userMixNamesLower)
       .map((d) => specMixDraftToMix(d))
       .filter((m): m is Mix => m != null);
     if (candidates.length) {
       const { merged, added } = addSpecMixesIfAbsent(existingMixes, candidates);
-      if (added > 0) {
-        await saveMixes(merged);
+      // Backfill product tags onto already-saved UNBRANDED mixes this sheet
+      // scopes (e.g. a prior import saved them with no customer) — a mix that
+      // already has a brand is never re-scoped.
+      const tagRes = fillSpecMixTags(merged, candidates);
+      if (added > 0 || tagRes.tagged > 0) {
+        await saveMixes(tagRes.next);
         mixesAdded = added;
       }
     }
@@ -1182,7 +1253,7 @@ export async function commitSpecImport(
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
-    const drafts = collectSpecImportCheeseRecipes(applyParsed, userMixNamesLower);
+    const drafts = collectSpecImportCheeseRecipes(scopedParsed, userMixNamesLower);
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
       .filter((r): r is CheeseRecipe => r != null);
@@ -1195,8 +1266,12 @@ export async function commitSpecImport(
       // so a spec import can never corrupt curated batch pounds. Recipes just
       // added above are unchanged (their oz values already match the drafts).
       const ozRes = applyCheeseOzPerPizza(merged, drafts);
-      if (added > 0 || ozRes.updated > 0) {
-        await saveCheeseRecipes(ozRes.next);
+      // Backfill customer tags onto already-saved UNBRANDED pool recipes this
+      // sheet scopes (e.g. a prior import saved them with no customer) — a
+      // recipe that already has a brand is never re-scoped.
+      const tagRes = fillCheeseRecipeTags(ozRes.next, drafts);
+      if (added > 0 || ozRes.updated > 0 || tagRes.tagged > 0) {
+        await saveCheeseRecipes(tagRes.next);
         cheeseRecipesAdded = added;
         cheeseOzUpdated = ozRes.updated;
       }
@@ -1267,5 +1342,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, touchedProfiles };
+  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles };
 }

@@ -336,6 +336,35 @@ export function addSpecMixesIfAbsent(
   return { merged, added };
 }
 
+/**
+ * Backfill product tags onto existing mixes that have NO brand yet, from
+ * spec-import candidates matched by the shared loose mix name key. Only fully
+ * unbranded mixes are touched (a mix already scoped to a product is never
+ * re-scoped), and only from a candidate that actually carries a brand. Pure.
+ * Returns the next list plus how many mixes were tagged.
+ */
+export function fillSpecMixTags(
+  existing: ReadonlyArray<Mix>,
+  candidates: ReadonlyArray<{ name: string; brand: string; flavor: string }>,
+): { next: Mix[]; tagged: number } {
+  const byKey = new Map<string, { brand: string; flavor: string }>();
+  for (const c of candidates) {
+    const key = mixNameMatchKey(c.name);
+    const brand = c.brand.trim();
+    if (!key || !brand || byKey.has(key)) continue;
+    byKey.set(key, { brand, flavor: c.flavor.trim() });
+  }
+  let tagged = 0;
+  const next = existing.map((m) => {
+    if (m.brand.trim()) return m;
+    const c = byKey.get(mixNameMatchKey(m.name));
+    if (!c) return m;
+    tagged++;
+    return { ...m, brand: c.brand, flavor: c.flavor };
+  });
+  return { next, tagged };
+}
+
 // ---------------------------------------------------------------------------
 // Plan building
 // ---------------------------------------------------------------------------

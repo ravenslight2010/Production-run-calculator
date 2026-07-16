@@ -8298,7 +8298,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, touchedProfiles } =
+      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles } =
         await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
@@ -8365,7 +8365,7 @@ export default function Home() {
       // (dough/sauce ONLY), those pickers must refetch too.
       if (cheeseRecipesAdded > 0 || cheeseOzUpdated > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
-      if (recipesUpdated > 0) {
+      if (recipesUpdated > 0 || placeholderRecipesAdded > 0) {
         void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
         void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
       }

@@ -2795,7 +2795,22 @@ export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayK
  * brand/flavor/type/ingredient/recipe name becomes selectable. Best-effort and
  * fail-safe: a malformed entry is skipped rather than aborting the whole import.
  */
-export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string; flavor: string }> {
+// A dough/sauce recipe NAME a spec sheet put onto a profile with no actual
+// mixing recipe anywhere to back it (no recipe in the import, no local preset).
+// Without a pool entry the name is invisible under Manage Lists → Dough/Sauce
+// Recipes, so the caller creates an empty-components placeholder in the server
+// pool (see commitSpecImport) that the manager fills in later.
+export type SpecImportRecipePlaceholder = {
+  kind: "dough" | "sauce";
+  name: string;
+  brand: string;
+  flavor: string;
+};
+
+export function applySpecImport(
+  parsed: ParsedSpecImport,
+  out?: { recipePlaceholders?: SpecImportRecipePlaceholder[] },
+): Array<{ brand: string; flavor: string }> {
   if (typeof localStorage === "undefined") return [];
 
   // ── Un-tombstone anything the user chose to re-include ──
@@ -2910,6 +2925,10 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
   // the post-loop cheese-mirror pass revisits each to fill any cheese applicator
   // left blank by a single-blend spec.
   const touchedProfiles = new Map<string, { brand: string; flavor: string }>();
+  // Spec-named dough/sauce with no backing recipe anywhere — candidates for the
+  // caller's empty-placeholder pool push (filtered against this import's
+  // recipes and the local presets at the end of this function).
+  const placeholderCandidates: SpecImportRecipePlaceholder[] = [];
   const markTouched = (brand: string, flavor: string): void => {
     if (!brand || !flavor) return;
     touchedProfiles.set(`${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`, { brand, flavor });
@@ -2990,6 +3009,7 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
       profileSauceNames.push(specSauceName);
       clearDeleted("frontlineRecipeNames", specSauceName);
       clearMergedAway(specSauceName);
+      placeholderCandidates.push({ kind: "sauce", name: specSauceName, brand, flavor });
     }
     const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     if (specSauceName && !hasMixedSauce && !(values.frontlineRecipeName ?? "").trim()) {
@@ -3009,6 +3029,7 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
       profileDoughNames.push(specDoughName);
       clearDeleted("doughRecipeNames", specDoughName);
       clearMergedAway(specDoughName);
+      placeholderCandidates.push({ kind: "dough", name: specDoughName, brand, flavor });
     }
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     if (specDoughName && !hasMixedDough && !(values.doughRecipeName ?? "").trim()) {
@@ -3290,6 +3311,27 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
   }
   if (newPepTypes.length) {
     saveList(PEP_TYPES_KEY, mergeListInsensitive(loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES), newPepTypes));
+  }
+
+  // Spec-named dough/sauce with NO backing recipe: not in this import (any
+  // non-reference recipe of the kind that loose-matches counts, even one this
+  // apply skipped for having no rows) and not among the local presets. These
+  // are reported to the caller, which creates empty-components placeholder
+  // entries in the server pool so the names show up under Manage Lists →
+  // Dough/Sauce Recipes instead of existing only on the profile.
+  if (out && placeholderCandidates.length) {
+    const doughPresetKeys = Object.keys(loadDoughRecipePresets());
+    const saucePresetKeys = Object.keys(loadFrontlineRecipePresets());
+    const backed = (c: SpecImportRecipePlaceholder): boolean => {
+      for (const r of parsed.recipes) {
+        if (r.referenceOnly) continue;
+        if (r.kind !== c.kind) continue;
+        if (specImportNamedRecipeNamesEqual(r.name, c.name)) return true;
+      }
+      const presets = c.kind === "dough" ? doughPresetKeys : saucePresetKeys;
+      return presets.some((k) => specImportNamedRecipeNamesEqual(k, c.name));
+    };
+    out.recipePlaceholders = placeholderCandidates.filter((c) => !backed(c));
   }
 
   // Every brand+flavor profile this import wrote (spec fields and/or recipe

@@ -603,6 +603,58 @@ export function specImportRecipeIsMix(
 }
 
 /**
+ * Backfill "who it goes to" targets onto cheese-kind recipes that arrived with
+ * NO brand/flavor targets at all, by scanning the import's own profiles for
+ * applicator slots that reference the recipe by name (either the applicator
+ * TYPE cell naming the blend, or a per-slot recipe-name link left by the
+ * embedded-blend extraction). Many workbooks express the tie only through the
+ * applicator grid — the recipe block itself names nobody — which previously
+ * left the Cheese Recipes / Mixes pool entries unbranded ("no customer").
+ * Recipes that already carry any target are untouched (the sheet's own scoping
+ * always wins). Pure; run AFTER merge + blend extraction, BEFORE the collect
+ * passes.
+ */
+export function fillSpecCheeseTargetsFromProfiles(parsed: ParsedSpecImport): ParsedSpecImport {
+  const cheese = (parsed.recipes ?? []).filter(
+    (r) => r.kind === "cheese" && !r.referenceOnly && (r.name ?? "").trim(),
+  );
+  const unscoped = cheese.filter((r) => recipeTargets(r).length === 0);
+  if (unscoped.length === 0) return parsed;
+  const keyOf = (nm: string): string => specImportNameMatchKey(cleanSpecCheeseRecipeName(nm));
+  const byKey = new Map<string, ParsedRecipe>();
+  for (const r of unscoped) {
+    const k = keyOf(r.name);
+    if (k && !byKey.has(k)) byKey.set(k, r);
+  }
+  if (byKey.size === 0) return parsed;
+  const found = new Map<ParsedRecipe, ParsedRecipeTarget[]>();
+  for (const p of parsed.profiles ?? []) {
+    const brand = (p.brand ?? "").trim();
+    const flavor = (p.flavor ?? "").trim();
+    if (!brand || !flavor) continue;
+    for (const a of p.applicators ?? []) {
+      const k = keyOf(a.type ?? "");
+      if (!k) continue;
+      const rec = byKey.get(k);
+      if (!rec) continue;
+      const list = found.get(rec) ?? [];
+      if (!list.some((t) => t.brand.toLowerCase() === brand.toLowerCase() && t.flavor.toLowerCase() === flavor.toLowerCase())) {
+        list.push({ brand, flavor });
+      }
+      found.set(rec, list);
+    }
+  }
+  if (found.size === 0) return parsed;
+  return {
+    ...parsed,
+    recipes: (parsed.recipes ?? []).map((r) => {
+      const targets = found.get(r);
+      return targets ? { ...r, targets: [...(r.targets ?? []), ...targets] } : r;
+    }),
+  };
+}
+
+/**
  * A mix detected in a parsed spec import, ready to be turned into a server Mix.
  * A spec sheet only expresses a mix's ingredient NAMES (its batch blend, in
  * ambiguous ratio units) — never a reliable per-pizza ounce amount or batch

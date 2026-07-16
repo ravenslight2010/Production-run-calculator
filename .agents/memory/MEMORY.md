@@ -155,4 +155,5 @@
 - [home.tsx render TDZ](home-render-tdz.md) — render-time (useMemo) calls into helpers must not read refs declared later in the file; empty catch{} hid the ReferenceError, only real-browser e2e caught it.
 - [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Batch upsert atomicity](batch-upsert-transaction.md) — batch master-data POSTs need ONE db.transaction; client heals persist the rename map pre-write or a partial failure strands local refs forever.
+- [Spec-import brand backfill](spec-import-brand-backfill.md) — unscoped parses get customer tags from the applicator grid (collect-only), unbranded pool rows heal on re-import, curated brands never re-scoped.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.

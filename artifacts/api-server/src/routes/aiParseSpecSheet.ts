@@ -251,6 +251,26 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "flavor, or any other suffix to distinguish copies, and never emit two recipes " +
     "for one blend. NEVER leave the raw composition text inside an applicator " +
     "`type` — the type must be that same short reusable base name. " +
+    "NAMED BLENDS ON APPLICATORS: an applicator `type` of just a generic word " +
+    "like 'Mix', 'Blend', 'Cheese Mix', or 'Topping' is almost always WRONG — " +
+    "the workbook nearly always names the specific blend somewhere: in the " +
+    "applicator cell itself, in a nearby row/column or legend, or as the heading " +
+    "of the matching blend recipe table elsewhere in the workbook (match by the " +
+    "listed ingredients/amounts when several tables exist). Hunt for that name " +
+    "and use it as the applicator `type` VERBATIM, spelled exactly like the " +
+    "recipe's `name`, so the app can link the applicator to its recipe. Only " +
+    "fall back to a generic type when the workbook truly never names the blend " +
+    "anywhere. " +
+    "NAMED DOUGH VARIANTS: a dough sheet's doughball/yield table sometimes lists " +
+    "NAMED dough variants (e.g. rows or columns labeled 'Heavy', 'Heavy Plus', " +
+    "'Light') with their own doughball weights or per-tray counts, all sharing " +
+    "ONE mixing table. Emit ONE dough recipe PER NAMED VARIANT: each named for " +
+    "the variant (e.g. \"<Brand> Heavy Plus\"), each carrying the SAME ingredient " +
+    "rows, and each with its OWN `doughballOz`/`doughballsPerTray`/" +
+    "`doughBatchYield` and its own `targets` (the customers/products that yield " +
+    "row serves). Never collapse named variants into one recipe or drop a " +
+    "variant name — a profile's `doughName` may reference the variant (e.g. " +
+    "'CRB Heavy Plus') and must find a recipe with that exact name. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap fields: `ozPerPizza`/`sauceOzPerPizza` are " +

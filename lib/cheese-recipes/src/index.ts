@@ -369,6 +369,44 @@ export function addCheeseRecipesIfAbsentByName(
 }
 
 /**
+ * Backfill customer tags onto existing cheese recipes that have NO brand yet,
+ * from spec-import drafts matched by trimmed case-insensitive name. Only fully
+ * unbranded recipes are touched (a recipe already scoped to a customer is
+ * never re-scoped), and only from a draft that actually carries a brand.
+ * Flavors are copied only when the recipe has none (an empty flavors list on a
+ * BRANDED recipe means "All Varieties" — deliberate, never overwritten).
+ * Pure. Returns the next list plus how many recipes were tagged.
+ */
+export function fillCheeseRecipeTags(
+  existing: ReadonlyArray<CheeseRecipe>,
+  drafts: ReadonlyArray<{ name: string; brand: string; flavors: ReadonlyArray<string> }>,
+): { next: CheeseRecipe[]; tagged: number } {
+  const byName = new Map<string, { brand: string; flavors: string[] }>();
+  for (const d of drafts) {
+    const key = d.name.trim().toLowerCase();
+    const brand = d.brand.trim();
+    if (!key || !brand || byName.has(key)) continue;
+    byName.set(key, {
+      brand,
+      flavors: d.flavors.map((f) => f.trim()).filter(Boolean),
+    });
+  }
+  let tagged = 0;
+  const next = existing.map((r) => {
+    if (r.brand.trim()) return r;
+    const d = byName.get(r.name.trim().toLowerCase());
+    if (!d) return r;
+    tagged++;
+    return {
+      ...r,
+      brand: d.brand,
+      flavors: r.flavors.length ? r.flavors : d.flavors,
+    };
+  });
+  return { next, tagged };
+}
+
+/**
  * Write spec-sheet PER-PIZZA OUNCES onto existing cheese recipes' components —
  * the `ozPerPizza` column ONLY. Per-batch `lbs` is never touched (that column
  * belongs to managers and the cheese workbook importer), so a spec import can
