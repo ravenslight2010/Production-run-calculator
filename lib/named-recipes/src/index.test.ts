@@ -12,6 +12,10 @@ import {
   fillNamedRecipeTags,
   fillNamedRecipeDoughballWeights,
   fillNamedRecipeDoughballsPerTray,
+  normalizeDoughballVariants,
+  mergeNamedRecipeDoughballVariants,
+  matchDoughballVariant,
+  type DoughballVariant,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "./index";
@@ -28,6 +32,7 @@ function makeNamed(over: Partial<NamedRecipe> = {}): NamedRecipe {
     ...(over.scope !== undefined ? { scope: over.scope } : {}),
     ...(over.doughballWeightOz !== undefined ? { doughballWeightOz: over.doughballWeightOz } : {}),
     ...(over.doughballsPerTray !== undefined ? { doughballsPerTray: over.doughballsPerTray } : {}),
+    ...(over.doughballVariants !== undefined ? { doughballVariants: over.doughballVariants } : {}),
   };
 }
 
@@ -476,5 +481,105 @@ describe("fillNamedRecipeDoughballsPerTray", () => {
       fillNamedRecipeDoughballsPerTray(pool, new Map([["  ", 5], ["crb dough", 0], ["crb dough", NaN]])),
     ).toEqual([]);
     expect(fillNamedRecipeDoughballsPerTray(pool, {})).toEqual([]);
+  });
+});
+
+describe("normalizeDoughballVariants", () => {
+  it("drops blank labels and rows with neither number, coerces types", () => {
+    expect(normalizeDoughballVariants(null)).toEqual([]);
+    expect(normalizeDoughballVariants("nope")).toEqual([]);
+    expect(
+      normalizeDoughballVariants([
+        { label: "  ", weightOz: 10 },
+        { label: "No Numbers" },
+        { label: "No Numbers 2", weightOz: 0, perTray: 0 },
+        null,
+        { label: ' 11" CRB ', weightOz: "10.5", perTray: "24.6" },
+      ]),
+    ).toEqual([{ label: '11" CRB', weightOz: 10.5, perTray: 25 }]);
+  });
+
+  it("collapses duplicate labels (ci): first occurrence's set fields win, later fill gaps", () => {
+    expect(
+      normalizeDoughballVariants([
+        { label: "CRB Heavy", weightOz: 10 },
+        { label: "crb heavy", weightOz: 12, perTray: 20 },
+      ]),
+    ).toEqual([{ label: "CRB Heavy", weightOz: 10, perTray: 20 }]);
+  });
+});
+
+describe("mergeNamedRecipeDoughballVariants", () => {
+  it("appends new labels, updates existing labels' values, returns only changed, pure", () => {
+    const pool = [
+      makeNamed({ id: "d1", name: "CRB Dough", doughballVariants: [{ label: '11" CRB', weightOz: 10 }] }),
+      makeNamed({ id: "d2", name: "Thin Dough", doughballVariants: [{ label: "Thin", weightOz: 8 }] }),
+      makeNamed({ id: "d3", name: "Other Dough" }),
+    ];
+    const changed = mergeNamedRecipeDoughballVariants(
+      pool,
+      new Map<string, DoughballVariant[]>([
+        ["crb dough", [{ label: '11" crb', weightOz: 11, perTray: 24 }, { label: '14" CRB', weightOz: 16 }]],
+        ["thin dough", [{ label: "Thin", weightOz: 8 }]], // identical → no change
+      ]),
+    );
+    expect(changed.map((r) => r.id)).toEqual(["d1"]);
+    expect(changed[0].doughballVariants).toEqual([
+      { label: '11" CRB', weightOz: 11, perTray: 24 },
+      { label: '14" CRB', weightOz: 16 },
+    ]);
+    // pure — pool untouched
+    expect(pool[0].doughballVariants).toEqual([{ label: '11" CRB', weightOz: 10 }]);
+  });
+
+  it("seeds variants onto a recipe that had none and never removes existing ones", () => {
+    const pool = [makeNamed({ id: "d1", name: "CRB Dough", doughballVariants: [{ label: "Legacy", perTray: 18 }] })];
+    const changed = mergeNamedRecipeDoughballVariants(
+      pool,
+      new Map([["crb dough", [{ label: "New", weightOz: 9 }]]]),
+    );
+    expect(changed[0].doughballVariants).toEqual([
+      { label: "Legacy", perTray: 18 },
+      { label: "New", weightOz: 9 },
+    ]);
+  });
+});
+
+describe("matchDoughballVariant", () => {
+  const variants: DoughballVariant[] = [
+    { label: '11" CRB', weightOz: 10, perTray: 24 },
+    { label: '14" CRB', weightOz: 16, perTray: 15 },
+  ];
+
+  it("returns the only variant regardless of die type", () => {
+    expect(matchDoughballVariant([{ label: "Solo", weightOz: 9 }], { dieType: "" }))
+      .toEqual({ label: "Solo", weightOz: 9 });
+  });
+
+  it("matches when the die size number appears in exactly one label", () => {
+    expect(matchDoughballVariant(variants, { dieType: "11 inch" })?.label).toBe('11" CRB');
+    expect(matchDoughballVariant(variants, { dieType: '14"' })?.label).toBe('14" CRB');
+  });
+
+  it("returns null when ambiguous, no die number, or no label carries the number", () => {
+    expect(matchDoughballVariant(variants, { dieType: "round" })).toBeNull();
+    expect(matchDoughballVariant(variants, { dieType: "12 inch" })).toBeNull();
+    expect(
+      matchDoughballVariant(
+        [{ label: '11" A', weightOz: 1 }, { label: '11" B', weightOz: 2 }],
+        { dieType: "11" },
+      ),
+    ).toBeNull();
+    expect(matchDoughballVariant(undefined, { dieType: "11" })).toBeNull();
+    expect(matchDoughballVariant([], { dieType: "11" })).toBeNull();
+  });
+
+  it("does not treat a substring digit as a match (11 vs 114)", () => {
+    expect(
+      matchDoughballVariant(
+        [{ label: "114mm die", weightOz: 5 }, { label: "other", perTray: 3 }],
+        { dieType: "11 inch" },
+      ),
+    ).toBeNull();
   });
 });

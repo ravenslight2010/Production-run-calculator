@@ -54,6 +54,7 @@ export * from './deleteProductionRulesInput';
 export * from './deleteRunTemplatesInput';
 export * from './deniedMerge';
 export * from './deniedMergeList';
+export * from './doughballVariant';
 export * from './facilityKnowledge';
 export * from './facilityKnowledgeList';
 export * from './fillMissingContextItem';

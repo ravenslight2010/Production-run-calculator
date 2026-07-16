@@ -446,7 +446,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
 import { saveSpecImportAliases } from "@/specImportAliases";
 
 import {
@@ -3306,6 +3306,20 @@ export default function Home() {
     }
     return map;
   }, [doughRecipesList]);
+  // Pool per-VARIANT doughball numbers by name — one dough family recipe
+  // carries every variant's weight/per-tray; the run form auto-matches one
+  // (die size in the label, or the only variant) and offers a manual pick
+  // when it can't tell.
+  const serverDoughVariantsByName = useMemo(() => {
+    const map = new Map<string, DoughballVariant[]>();
+    for (const r of doughRecipesList) {
+      if (r.enabled === false) continue;
+      const key = r.name.trim().toLowerCase();
+      const variants = normalizeDoughballVariants(r.doughballVariants);
+      if (key && variants.length > 0) map.set(key, variants);
+    }
+    return map;
+  }, [doughRecipesList]);
   const serverSauceRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of sauceRecipesList) {
@@ -3358,6 +3372,22 @@ export default function Home() {
     return recipeRowsEqual(v.frontlineRecipe ?? [], poolRows) ? null : { name };
   })();
   const [promotingRecipeKind, setPromotingRecipeKind] = useState<null | "dough" | "sauce">(null);
+  // Manual doughball-variant pick: set when a picked dough family recipe has
+  // several variants and none auto-matched (weight left blank). The operator
+  // picks one; blank-fill only, same invariant as the auto path.
+  const [doughVariantPick, setDoughVariantPick] = useState<{ recipeName: string; variants: DoughballVariant[] } | null>(null);
+  // Drop a stale prompt: the form moved to a different recipe (run switch,
+  // sync, profile load) or the weight got filled some other way (typed, die
+  // change resolved it via the self-heal) — a leftover prompt would apply the
+  // WRONG family's numbers.
+  useEffect(() => {
+    if (!doughVariantPick) return;
+    const name = (v.doughRecipeName ?? "").trim().toLowerCase();
+    const stale =
+      name !== doughVariantPick.recipeName.trim().toLowerCase() ||
+      (Number(v.targetDoughballWeight) || 0) > 0;
+    if (stale) setDoughVariantPick(null);
+  }, [doughVariantPick, v.doughRecipeName, v.targetDoughballWeight]);
   // Run-form dropdown options: the server pool names unioned with any locally
   // known recipe names (backward compat for names still only in the synced
   // list), sorted for a stable browse order.
@@ -3485,6 +3515,9 @@ export default function Home() {
     /** Learned doughballs-per-tray by lowercased dough name (spec import) —
      * backfills unset pool values; local presets don't carry per-tray. */
     doughTrays?: ReadonlyMap<string, number>;
+    /** Learned per-VARIANT doughball numbers by lowercased FAMILY dough name
+     * (spec import) — merged additively into the pool recipe's variants list. */
+    doughVariants?: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>;
   }): Promise<number> => {
     const tagFor = (map: ReadonlyMap<string, NamedRecipeTag> | undefined, name: string) =>
       map?.get(name.trim().toLowerCase());
@@ -3510,8 +3543,8 @@ export default function Home() {
       })
       .filter((r): r is NamedRecipe => r !== null);
     const [d, s] = await Promise.all([
-      doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0 || (tags?.doughTrays?.size ?? 0) > 0
-        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays)
+      doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0 || (tags?.doughTrays?.size ?? 0) > 0 || (tags?.doughVariants?.size ?? 0) > 0
+        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays, tags?.doughVariants)
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
       sauceDrafts.length || (tags?.sauce?.size ?? 0) > 0
         ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce)
@@ -6271,14 +6304,17 @@ export default function Home() {
   // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
   // doughball weight, while the form still sits at 0 oz, adopts the pool
   // weight (profiles hydrated before the pool carried weights stay broken
-  // otherwise). Never overrides a non-zero value the operator typed.
+  // otherwise). Never overrides a non-zero value the operator typed. The
+  // family recipe's VARIANT list wins over the recipe-level value when a
+  // variant auto-matches (die size in the label, or the only variant).
   useEffect(() => {
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
     if ((Number(v.targetDoughballWeight) || 0) > 0) return;
-    const ballOz = serverDoughWeightByName.get(name) ?? 0;
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const ballOz = matched?.weightOz ?? serverDoughWeightByName.get(name) ?? 0;
     if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
-  }, [v.doughRecipeName, v.targetDoughballWeight, serverDoughWeightByName, form]);
+  }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, serverDoughWeightByName, serverDoughVariantsByName, form]);
 
   // Same self-heal for doughballs-per-tray: a form linked to a pool dough
   // recipe that knows its per-tray count, while the form still sits at 0,
@@ -6287,9 +6323,10 @@ export default function Home() {
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
     if ((Number(v.doughballsPerTray) || 0) > 0) return;
-    const perTray = serverDoughTrayByName.get(name) ?? 0;
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const perTray = matched?.perTray ?? serverDoughTrayByName.get(name) ?? 0;
     if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
-  }, [v.doughRecipeName, v.doughballsPerTray, serverDoughTrayByName, form]);
+  }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, serverDoughTrayByName, serverDoughVariantsByName, form]);
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
@@ -8492,6 +8529,12 @@ export default function Home() {
         const doughTags = new Map<string, NamedRecipeTag>();
         const sauceTags = new Map<string, NamedRecipeTag>();
         const doughTrays = new Map<string, number>();
+        // Per-VARIANT doughball numbers by FAMILY recipe name: the family snap
+        // collapses variant names ("11\" CRB recipe") onto one pool recipe but
+        // stamps each with its original name (variantLabel) — collect every
+        // dough recipe's weight/per-tray under that label so the family recipe
+        // carries ALL variants, not just the last one to write.
+        const doughVariants = new Map<string, DoughballVariant[]>();
         for (const r of editedParsed.recipes) {
           if (r.referenceOnly) continue;
           if (r.kind !== "dough" && r.kind !== "sauce") continue;
@@ -8500,11 +8543,23 @@ export default function Home() {
           if (r.kind === "dough" && (r.doughballsPerTray ?? 0) > 0) {
             doughTrays.set(name.toLowerCase(), r.doughballsPerTray!);
           }
+          if (r.kind === "dough") {
+            const label = (r.variantLabel ?? r.name).trim();
+            const v: DoughballVariant = { label };
+            if ((r.doughballOz ?? 0) > 0) v.weightOz = r.doughballOz;
+            if ((r.doughballsPerTray ?? 0) > 0) v.perTray = Math.round(r.doughballsPerTray!);
+            if (label && (v.weightOz !== undefined || v.perTray !== undefined)) {
+              const key = name.toLowerCase();
+              const list = doughVariants.get(key) ?? [];
+              list.push(v);
+              doughVariants.set(key, list);
+            }
+          }
           const tag = namedRecipeTagFromParsed(r, editedParsed.profiles);
           if (!tag) continue;
           (r.kind === "dough" ? doughTags : sauceTags).set(name.toLowerCase(), tag);
         }
-        void pushLocalDoughSauceToServer({ dough: doughTags, sauce: sauceTags, doughTrays }).catch(() => {});
+        void pushLocalDoughSauceToServer({ dough: doughTags, sauce: sauceTags, doughTrays, doughVariants }).catch(() => {});
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
@@ -15773,6 +15828,9 @@ export default function Home() {
                     onRemoveRecipeName={removeDoughRecipeName}
                     onRecipeNameChange={val => {
                       form.setValue("doughRecipeName", val, { shouldDirty: true });
+                      // Any recipe change invalidates a pending variant prompt —
+                      // it is re-armed below only if the NEW pick is ambiguous.
+                      setDoughVariantPick(null);
                       if (val.trim()) {
                         const key = val.trim().toLowerCase();
                         const poolRows = serverDoughRowsByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.rows;
@@ -15784,11 +15842,23 @@ export default function Home() {
                         }
                         // Weight/per-tray are per-flavor (one dough family, many
                         // flavor specs) — the pool value only fills a blank field,
-                        // never overwrites the flavor's own value.
-                        const ballOz = serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
-                        if (ballOz > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
-                        const perTray = serverDoughTrayByName.get(key) ?? 0;
+                        // never overwrites the flavor's own value. The family
+                        // recipe's VARIANT list wins over the recipe-level value:
+                        // auto-match by die size (or the only variant), else fall
+                        // back and offer a manual variant pick below.
+                        const variants = serverDoughVariantsByName.get(key) ?? [];
+                        const matched = matchDoughballVariant(variants, { dieType: String(form.getValues("dieType") ?? "") });
+                        const ballOz = matched?.weightOz ?? serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
+                        const weightBlank = !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0);
+                        if (ballOz > 0 && weightBlank) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
+                        const perTray = matched?.perTray ?? serverDoughTrayByName.get(key) ?? 0;
                         if (perTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
+                        // Manual backup: several variants, none auto-matched and
+                        // the weight was blank — let the operator pick which
+                        // variant this run uses.
+                        if (!matched && variants.length > 1 && weightBlank) {
+                          setDoughVariantPick({ recipeName: val.trim(), variants });
+                        }
                       }
                     }}
                   />
@@ -15809,6 +15879,46 @@ export default function Home() {
                           {promotingRecipeKind === "dough" ? "Updating…" : "Update shared recipe"}
                         </Button>
                       )}
+                    </div>
+                  )}
+                  {doughVariantPick && (
+                    <div className="flex flex-col gap-1.5 -mt-3 px-1" data-testid="dough-variant-pick">
+                      <div className="flex items-center gap-2 text-xs text-amber-500">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>"{doughVariantPick.recipeName}" covers several doughball variants — pick the one this run uses:</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {doughVariantPick.variants.map((variant) => (
+                          <Button
+                            key={variant.label}
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[11px]"
+                            data-testid={`button-dough-variant-${variant.label}`}
+                            onClick={() => {
+                              // Blank-fill only — same invariant as the auto path.
+                              if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
+                              if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
+                              setDoughVariantPick(null);
+                            }}
+                          >
+                            {variant.label}
+                            {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
+                            {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                          </Button>
+                        ))}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[11px] text-muted-foreground"
+                          onClick={() => setDoughVariantPick(null)}
+                          data-testid="button-dough-variant-dismiss"
+                        >
+                          Not now
+                        </Button>
+                      </div>
                     </div>
                   )}
                   <Card className="bg-card/50 border-border/50 shadow-md">

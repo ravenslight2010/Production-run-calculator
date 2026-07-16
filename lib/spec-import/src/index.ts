@@ -123,6 +123,14 @@ export type ParsedRecipe = {
   doughBatchYield?: number;
   /** Dough only: how many doughballs fit on one tray, when the sheet states it. */
   doughballsPerTray?: number;
+  /**
+   * Dough only: the variant's ORIGINAL sheet name, set when the family snap
+   * (linkSpecImportNamedRecipesToExisting) renames this recipe onto its base
+   * pool recipe ("11\" CRB recipe" → "CRB Dough"). Lets the apply/push path
+   * record this variant's doughball weight/per-tray in the family recipe's
+   * doughballVariants list under a recognizable label instead of losing it.
+   */
+  variantLabel?: string;
   /** Cheese only: applicator slot (1-4) the recipe should tie to. */
   app?: number;
   /**
@@ -1145,6 +1153,12 @@ export function linkSpecImportNamedRecipesToExisting(
       findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
     if (!existing || existing === name) return r;
     changed = true;
+    // Dough only: keep the variant's ORIGINAL sheet name as its label so the
+    // family recipe's doughballVariants list can carry this variant's
+    // weight/per-tray under a recognizable name after the rename.
+    if (kind === "dough" && !r.variantLabel) {
+      return { ...r, name: existing, variantLabel: name };
+    }
     return { ...r, name: existing };
   });
   // Loose keys of every recipe of this kind CARRIED BY THIS IMPORT (post-snap):

@@ -45,6 +45,13 @@ export const doughRecipesTable = pgTable(
     // How many doughballs fit on one tray (spec sheet "doughballs per tray");
     // 0 = unknown. ADDITIVE with a default so the change is push-force-safe.
     doughballsPerTray: doublePrecision("doughballs_per_tray").notNull().default(0),
+    // Per-VARIANT doughball weight/per-tray list for the one family recipe
+    // (label = variant's original sheet name). [] = none known. ADDITIVE with
+    // a default so the change is push-force-safe on the populated table.
+    doughballVariants: jsonb("doughball_variants")
+      .notNull()
+      .default([])
+      .$type<{ label: string; weightOz?: number; perTray?: number }[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

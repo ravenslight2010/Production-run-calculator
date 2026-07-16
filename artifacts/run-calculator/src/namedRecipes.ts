@@ -19,6 +19,8 @@ import {
   fillNamedRecipeTags,
   fillNamedRecipeDoughballWeights,
   fillNamedRecipeDoughballsPerTray,
+  mergeNamedRecipeDoughballVariants,
+  type DoughballVariant,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "@workspace/named-recipes";
@@ -75,6 +77,7 @@ export async function addNamedRecipesToServerIfAbsent(
   tagsByName?: ReadonlyMap<string, NamedRecipeTag>,
   weightsByName?: ReadonlyMap<string, number>,
   traysByName?: ReadonlyMap<string, number>,
+  variantsByName?: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>,
 ): Promise<{ added: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
   // Family guard — the last line of defense for EVERY pool write path (spec
@@ -130,13 +133,30 @@ export async function addNamedRecipesToServerIfAbsent(
     kind === "dough" && remappedTrays.size > 0
       ? fillNamedRecipeDoughballsPerTray(afterWeights, remappedTrays)
       : [];
-  if (added === 0 && tagged.length === 0 && weighted.length === 0 && trayed.length === 0)
+  const afterTrays =
+    trayed.length > 0
+      ? afterWeights.map((r) => trayed.find((t) => t.id === r.id) ?? r)
+      : afterWeights;
+  // Dough only: additively merge learned per-VARIANT doughball numbers
+  // ("11\" CRB" → weight/tray) into the family recipe's variants list — for
+  // NEW drafts too (a first import mints the family recipe and its variants
+  // together), so overlay the existing-chain onto the merged list first.
+  const existingChainById = new Map(afterTrays.map((r) => [r.id, r]));
+  const mergedCurrent = merged.map((r) => existingChainById.get(r.id) ?? r);
+  const varied =
+    kind === "dough" && (variantsByName?.size ?? 0) > 0
+      ? mergeNamedRecipeDoughballVariants(mergedCurrent, variantsByName!)
+      : [];
+  if (
+    added === 0 &&
+    tagged.length === 0 &&
+    weighted.length === 0 &&
+    trayed.length === 0 &&
+    varied.length === 0
+  )
     return { added: 0, items: existing };
-  const changedById = new Map<string, NamedRecipe>();
-  for (const r of tagged) changedById.set(r.id, r);
-  for (const r of weighted) changedById.set(r.id, r);
-  for (const r of trayed) changedById.set(r.id, r);
-  const toSave = merged.map((r) => changedById.get(r.id) ?? r);
+  const variedById = new Map(varied.map((r) => [r.id, r]));
+  const toSave = mergedCurrent.map((r) => variedById.get(r.id) ?? r);
   const items = await saveNamedRecipes(kind, toSave);
   return { added, items };
 }

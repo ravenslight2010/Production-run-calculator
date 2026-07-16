@@ -7632,6 +7632,33 @@ components:
             sheet states it per recipe). 0/absent = unknown. Picking a dough
             recipe hydrates the run form's Doughballs Per Tray from this.
             Sauce recipes never set it.
+        doughballVariants:
+          type: array
+          description: >-
+            Dough recipes only — per-variant doughball weights / per-tray
+            counts this one family recipe covers (one recipe per dough family;
+            label = the variant's original sheet name). Merged additively by
+            label on re-import. Sauce recipes never set it.
+          items:
+            $ref: "#/components/schemas/DoughballVariant"
+
+    DoughballVariant:
+      type: object
+      description: >-
+        One dough family variant's doughball numbers. label is the variant's
+        original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent =
+        unknown.
+      required:
+        - label
+      properties:
+        label:
+          type: string
+        weightOz:
+          type: number
+          description: Target doughball weight in ounces; 0/absent = unknown.
+        perTray:
+          type: number
+          description: Doughballs per tray; 0/absent = unknown.
 
     NamedRecipeList:
       type: object

@@ -64,6 +64,22 @@ export interface NamedRecipe {
   // Tray; the spec sheet states it per RECIPE, so it must travel with the
   // recipe, not just the profiles an import happened to touch.
   doughballsPerTray?: number;
+  // DOUGH only: the per-VARIANT doughball weights / per-tray counts this one
+  // family recipe covers. A spec import collapses variant names ("11\" CRB",
+  // "CRB Heavy Plus") onto ONE family recipe (one recipe per dough family) —
+  // this list keeps every variant's numbers instead of losing all but one.
+  // label = the variant's original sheet name. Additive: re-imports merge by
+  // label (ci), never dropping variants. Empty/absent = no variants known.
+  doughballVariants?: DoughballVariant[];
+}
+
+/** One dough family variant's doughball numbers (label = original sheet name). */
+export interface DoughballVariant {
+  label: string;
+  /** Target doughball weight in oz; 0/absent = unknown. */
+  weightOz?: number;
+  /** Doughballs per tray; 0/absent = unknown. */
+  perTray?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,8 +163,125 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
   if (ballOz > 0) recipe.doughballWeightOz = ballOz;
   const perTray = Math.round(coerceNum(raw.doughballsPerTray, 0));
   if (perTray > 0) recipe.doughballsPerTray = perTray;
+  const variants = normalizeDoughballVariants(raw.doughballVariants);
+  if (variants.length > 0) recipe.doughballVariants = variants;
   if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
   return recipe;
+}
+
+/**
+ * Coerce a raw doughball variants value into a clean list: blank labels and
+ * variants with neither a positive weight nor per-tray are dropped; duplicate
+ * labels (ci) collapse onto the first occurrence (its set fields win, later
+ * duplicates only fill gaps). Pure.
+ */
+export function normalizeDoughballVariants(input: unknown): DoughballVariant[] {
+  if (!Array.isArray(input)) return [];
+  const out: DoughballVariant[] = [];
+  const byKey = new Map<string, number>();
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const rec = raw as Record<string, unknown>;
+    const label = coerceStr(rec.label);
+    if (!label) continue;
+    const weightOz = coerceNum(rec.weightOz, 0);
+    const perTray = Math.round(coerceNum(rec.perTray, 0));
+    const v: DoughballVariant = { label };
+    if (weightOz > 0) v.weightOz = weightOz;
+    if (perTray > 0) v.perTray = perTray;
+    if (v.weightOz === undefined && v.perTray === undefined) continue;
+    const key = label.toLowerCase();
+    const at = byKey.get(key);
+    if (at === undefined) {
+      byKey.set(key, out.length);
+      out.push(v);
+      continue;
+    }
+    const keep = out[at];
+    out[at] = {
+      ...keep,
+      ...(keep.weightOz === undefined && v.weightOz !== undefined ? { weightOz: v.weightOz } : {}),
+      ...(keep.perTray === undefined && v.perTray !== undefined ? { perTray: v.perTray } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * Additively merge learned variants onto EXISTING pool dough recipes by recipe
+ * NAME (ci). Per recipe: variants are merged by label (ci) — new labels append,
+ * an existing label's UNSET fields are filled and set fields are updated to
+ * the incoming value (a re-import states the variant's current spec numbers).
+ * Variants are never removed. Returns ONLY the recipes that changed. Pure —
+ * mirrors fillNamedRecipeDoughballWeights.
+ */
+export function mergeNamedRecipeDoughballVariants(
+  recipes: ReadonlyArray<NamedRecipe>,
+  variantsByName: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>,
+): NamedRecipe[] {
+  const changed: NamedRecipe[] = [];
+  for (const r of recipes) {
+    const incoming = normalizeDoughballVariants(
+      variantsByName.get(r.name.trim().toLowerCase()) as unknown,
+    );
+    if (incoming.length === 0) continue;
+    const merged = [...normalizeDoughballVariants(r.doughballVariants)];
+    const byKey = new Map<string, number>(
+      merged.map((v, i) => [v.label.toLowerCase(), i]),
+    );
+    let touched = false;
+    for (const v of incoming) {
+      const at = byKey.get(v.label.toLowerCase());
+      if (at === undefined) {
+        byKey.set(v.label.toLowerCase(), merged.length);
+        merged.push(v);
+        touched = true;
+        continue;
+      }
+      const keep = merged[at];
+      const next: DoughballVariant = {
+        ...keep,
+        ...(v.weightOz !== undefined ? { weightOz: v.weightOz } : {}),
+        ...(v.perTray !== undefined ? { perTray: v.perTray } : {}),
+      };
+      if (
+        next.weightOz !== keep.weightOz ||
+        next.perTray !== keep.perTray
+      ) {
+        merged[at] = next;
+        touched = true;
+      }
+    }
+    if (touched) changed.push({ ...r, doughballVariants: merged });
+  }
+  return changed;
+}
+
+/**
+ * Pick the dough family variant that best matches a product, for auto-filling
+ * a blank run form. Deterministic and conservative:
+ * 1. exactly ONE variant → that variant;
+ * 2. the die size's leading number (e.g. `11` from `11 inch`) appears as the
+ *    size number in EXACTLY ONE variant label ("11\" CRB") → that variant;
+ * 3. otherwise null — the caller should offer a manual pick.
+ */
+export function matchDoughballVariant(
+  variants: ReadonlyArray<DoughballVariant> | undefined,
+  opts: { dieType?: string },
+): DoughballVariant | null {
+  const list = normalizeDoughballVariants(variants as unknown);
+  if (list.length === 0) return null;
+  if (list.length === 1) return list[0];
+  const dieNum = (() => {
+    const m = /(\d+(?:\.\d+)?)/.exec(opts.dieType ?? "");
+    return m ? m[1] : "";
+  })();
+  if (!dieNum) return null;
+  const hits = list.filter((v) => {
+    const nums: string[] = v.label.match(/\d+(?:\.\d+)?/g) ?? [];
+    return nums.includes(dieNum);
+  });
+  return hits.length === 1 ? hits[0] : null;
 }
 
 // Normalize a list, dropping malformed entries and collapsing duplicate ids onto

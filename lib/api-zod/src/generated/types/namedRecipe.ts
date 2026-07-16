@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DoughballVariant } from './doughballVariant';
 import type { NamedRecipeComponent } from './namedRecipeComponent';
 
 /**
@@ -28,4 +29,6 @@ export interface NamedRecipe {
   doughballWeightOz?: number;
   /** Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form's Doughballs Per Tray from this. Sauce recipes never set it. */
   doughballsPerTray?: number;
+  /** Dough recipes only — per-variant doughball weights / per-tray counts this one family recipe covers (one recipe per dough family; label = the variant's original sheet name). Merged additively by label on re-import. Sauce recipes never set it. */
+  doughballVariants?: DoughballVariant[];
 }

@@ -15,6 +15,7 @@ import {
   namedRecipeMatchesQuery,
   sortNamedRecipesByName,
   namedRecipeTotalLbs,
+  type DoughballVariant,
   type NamedRecipe,
   type NamedRecipeComponent,
 } from "@workspace/named-recipes";
@@ -316,6 +317,31 @@ function NamedRecipeEditor({
     }));
   }
 
+  function patchVariant(idx: number, p: Partial<DoughballVariant>) {
+    setDraft((d) => ({
+      ...d,
+      doughballVariants: (d.doughballVariants ?? []).map((variant, i) =>
+        i === idx ? { ...variant, ...p } : variant,
+      ),
+    }));
+  }
+
+  function addVariant() {
+    setDraft((d) => ({
+      ...d,
+      doughballVariants: [...(d.doughballVariants ?? []), { label: "" }],
+    }));
+  }
+
+  function removeVariant(idx: number) {
+    const next = {
+      ...draft,
+      doughballVariants: (draft.doughballVariants ?? []).filter((_, i) => i !== idx),
+    };
+    setDraft(next);
+    commit(next);
+  }
+
   function removeComponent(idx: number) {
     const next = {
       ...draft,
@@ -428,6 +454,90 @@ function NamedRecipeEditor({
           ))}
         </datalist>
       </div>
+
+      {/* Dough only: per-variant doughball numbers this family recipe covers.
+          A spec import fills these automatically (label = the variant's sheet
+          name); managers can correct or add them here. Blank labels or rows
+          with neither number are dropped on save. */}
+      {kind === "dough" && (
+        <div className="space-y-1.5" data-testid={`dough-variants-${draft.id}`}>
+          <p className="text-[11px] font-semibold text-muted-foreground">
+            Doughball variants (weight oz / per tray)
+          </p>
+          {(draft.doughballVariants ?? []).length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              No variants yet — imports add them automatically.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {(draft.doughballVariants ?? []).map((variant, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={variant.label}
+                    onChange={(e) => patchVariant(idx, { label: e.target.value })}
+                    onBlur={() => commit()}
+                    disabled={disabled}
+                    placeholder={'Variant (e.g. 11" CRB)…'}
+                    className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={variant.weightOz ?? ""}
+                    onChange={(e) =>
+                      patchVariant(idx, {
+                        weightOz: Math.max(0, Number(e.target.value) || 0) || undefined,
+                      })
+                    }
+                    onBlur={() => commit()}
+                    disabled={disabled}
+                    placeholder="oz"
+                    title="Doughball weight (oz)"
+                    className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                  />
+                  <span className="text-[11px] text-muted-foreground">oz</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={variant.perTray ?? ""}
+                    onChange={(e) =>
+                      patchVariant(idx, {
+                        perTray: Math.max(0, Math.round(Number(e.target.value) || 0)) || undefined,
+                      })
+                    }
+                    onBlur={() => commit()}
+                    disabled={disabled}
+                    placeholder="tray"
+                    title="Doughballs per tray"
+                    className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                  />
+                  <span className="text-[11px] text-muted-foreground">/tray</span>
+                  <button
+                    type="button"
+                    onClick={() => removeVariant(idx)}
+                    disabled={disabled}
+                    title="Remove variant"
+                    className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={addVariant}
+            disabled={disabled}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-border/60 bg-muted/30 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <Plus className="w-3 h-3" /> Add variant
+          </button>
+        </div>
+      )}
 
       {/* Components */}
       <div className="space-y-1.5">
