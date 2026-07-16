@@ -3023,6 +3023,18 @@ export function applySpecImport(
     if (specSauceName && !hasMixedSauce && !(values.frontlineRecipeName ?? "").trim()) {
       values.frontlineRecipeName = specSauceName;
     }
+    // The sheet may name a sauce whose recipe already exists in the library
+    // (server pool mirror) without carrying the recipe itself — the recipe-tie
+    // loop below only runs for recipes THIS import carries, so hydrate the
+    // rows from the existing library here or the profile shows the name with
+    // an empty recipe until the user reselects it. Never clobbers mixed rows.
+    {
+      const flName = (values.frontlineRecipeName ?? "").trim();
+      if (flName && !(values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0)) {
+        const rows = existingRecipeRowsForImport("sauce", flName);
+        if (rows.length) values.frontlineRecipe = rows.map(r => ({ ...r }));
+      }
+    }
     // Named dough/crust from the spec sheet (e.g. "Ultra Thin Dough"): the
     // sheet names the dough but this workbook carries no dough mixing recipe —
     // record the TYPE now so the product is assigned its dough from day one,
@@ -3042,6 +3054,22 @@ export function applySpecImport(
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     if (specDoughName && !hasMixedDough && !(values.doughRecipeName ?? "").trim()) {
       values.doughRecipeName = specDoughName;
+    }
+    // Same library hydration for dough: an assigned dough name whose recipe
+    // already exists gets its rows (and the doughball weight, when the profile
+    // has none) attached now instead of waiting for a reselect.
+    {
+      const dName = (values.doughRecipeName ?? "").trim();
+      if (dName && !(values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0)) {
+        const rows = existingRecipeRowsForImport("dough", dName);
+        if (rows.length) values.doughRecipe = rows.map(r => ({ ...r }));
+        const presets = loadDoughRecipePresets();
+        const pKey = Object.keys(presets).find(k => k.trim().toLowerCase() === dName.toLowerCase());
+        const w = pKey ? Number(presets[pKey]?.doughballWeightOz ?? 0) : 0;
+        if (w > 0 && !(Number(values.targetDoughballWeight ?? 0) > 0)) {
+          values.targetDoughballWeight = w;
+        }
+      }
     }
     // Detect cheese applicator slots and re-type them to the literal "cheese"
     // (the run form's pick-only Cheese card gates on that exactly); the blend
