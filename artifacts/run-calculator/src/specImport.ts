@@ -916,8 +916,13 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * extractions of any table — a production v10 parse returned an "extracted
  * sample of yield rows" (4 of 19 dough variants); such parses must not be
  * reused.
+ * v12→v13: parse prompt now handles product-code-only block headers (e.g.
+ * "BRAND PIZZAS | MR12CH14"): the code becomes the flavor verbatim. v12
+ * parses invented the same descriptive flavor (e.g. "Cheese") for every code
+ * block, collapsing distinct products into one profile; those parses must not
+ * be reused.
  */
-export const SPEC_PARSE_VERSION = "12";
+export const SPEC_PARSE_VERSION = "13";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file

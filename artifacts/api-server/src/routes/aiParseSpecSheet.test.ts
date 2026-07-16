@@ -50,6 +50,18 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
     const { system } = buildParseSpecSheetPrompt(input());
     expect(system).toContain("recipe brand/flavor and `targets` the same way");
   });
+
+  // Regression guard: blocks identified only by an item/product code (e.g.
+  // "BRAND PIZZAS | MR12CH14") must keep the code VERBATIM as the flavor —
+  // inventing a descriptive flavor ("Cheese") for every code block collapsed
+  // distinct products into one profile so the second overwrote the first.
+  it("keeps product-code block headers distinct via a verbatim code flavor", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("PRODUCT-CODE HEADERS");
+    expect(system).toContain("use the code VERBATIM as the `flavor`");
+    expect(system).toContain("do NOT append the code to the brand");
+    expect(system).toContain("NEVER give two different code blocks the same invented flavor");
+  });
 });
 
 // Regression guard for the standalone-procedure rule. A sheet that is one whole

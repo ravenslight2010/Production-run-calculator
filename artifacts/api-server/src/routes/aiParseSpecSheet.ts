@@ -120,7 +120,14 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "put the size or the product line in the flavor. So a 7in pepperoni Lowes pizza " +
     "is brand='Lowes 7in', flavor='Pepperoni', NOT brand='Lowes', flavor='7in " +
     "Pepperoni'. Apply this same brand rule to recipe brand/flavor and `targets` the " +
-    "same way. Spreadsheets are messy: merged " +
+    "same way. PRODUCT-CODE HEADERS: some sheets identify each spec block only by " +
+    "an item/product CODE next to the brand (e.g. 'BRAND PIZZAS | MR12CH14' and " +
+    "'BRAND PIZZAS | MR07CH24'). The code is what distinguishes the products, so " +
+    "use the code VERBATIM as the `flavor` (e.g. flavor 'MR12CH14') — do NOT " +
+    "invent a descriptive flavor from the code's letters (never turn 'CH' into " +
+    "'Cheese'), do NOT append the code to the brand, and NEVER give two " +
+    "different code blocks the same invented flavor or they will overwrite each " +
+    "other. Spreadsheets are messy: merged " +
     "headers, abbreviations, varied layouts, blanks. Infer the structure. When a " +
     "name closely matches one of the provided KNOWN canonical names, RETURN THE " +
     "KNOWN NAME VERBATIM (so existing profiles/recipes are updated, not " +
