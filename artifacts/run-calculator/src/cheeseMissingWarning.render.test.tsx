@@ -39,7 +39,7 @@ describe("CheesePickCard — missing-cheese warning render", () => {
       />,
     );
     expect(
-      screen.getByText(/No matching cheese recipe found for/i),
+      screen.getByText(/isn't in Cheese Recipes/i),
     ).toBeTruthy();
     expect(screen.getAllByText(/Ghost Blend/).length).toBeGreaterThan(0);
     // The confusing "no ingredients yet" dead-end must NOT show in its place.

@@ -1067,10 +1067,34 @@ export default function SetupProfileEditor({
                   <div className="flex flex-col gap-1.5 -mt-3 px-1" data-testid="profile-dough-variant-pick">
                     <div className="flex items-center gap-2 text-xs text-amber-500">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>"{doughVariantPick.recipeName}" covers several doughball variants — pick the one this profile uses:</span>
+                      <span><span className="font-semibold">"{doughVariantPick.recipeName}"</span> — pick this profile's doughball variant:</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {doughVariantPick.variants.map((variant) => (
+                      {doughVariantPick.variants.length > 5 ? (
+                        <select
+                          className="h-8 w-full sm:max-w-xs px-2 rounded bg-muted/40 border border-amber-500/40 text-xs outline-none focus:border-primary/60"
+                          defaultValue=""
+                          data-testid="select-profile-dough-variant"
+                          onChange={e => {
+                            const variant = doughVariantPick.variants.find(x => x.label === e.target.value);
+                            if (!variant) return;
+                            // Blank-fill only — same invariant as the auto path.
+                            if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
+                            if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
+                            setDoughVariantPick(null);
+                          }}
+                        >
+                          <option value="" disabled>Pick a variant…</option>
+                          {doughVariantPick.variants.map(variant => (
+                            <option key={variant.label} value={variant.label}>
+                              {variant.label}
+                              {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
+                              {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                      doughVariantPick.variants.map((variant) => (
                         <Button
                           key={variant.label}
                           type="button"
@@ -1089,7 +1113,8 @@ export default function SetupProfileEditor({
                           {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
                           {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
                         </Button>
-                      ))}
+                      ))
+                      )}
                       <Button
                         type="button"
                         size="sm"

@@ -890,7 +890,7 @@ function CheeseRecipeCard({
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
-    <div className="flex-1 max-w-xs">
+    <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
       <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
     </div>
   );
@@ -945,7 +945,7 @@ function CheeseRecipeCard({
     return (
       <>
         <Separator className="my-3 opacity-30" />
-        <div className="flex items-center gap-2 justify-between mb-2">
+        <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
@@ -960,7 +960,7 @@ function CheeseRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center gap-3 justify-between">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
@@ -1040,7 +1040,7 @@ export function CheesePickCard({
       : recipeNameOptions;
 
   const recipeSelector = (
-    <div className="flex-1 max-w-xs">
+    <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
       <select
         value={recipeName}
         onChange={e => onRecipeNameChange(e.target.value)}
@@ -1061,7 +1061,7 @@ export function CheesePickCard({
         <div className="flex items-start gap-2 mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
-            No matching cheese recipe found for “{recipeName.trim()}”. Pick a real blend from the dropdown above, or a manager can add it under Manage Lists → Cheese Recipes.
+            <span className="font-semibold text-amber-200">“{recipeName.trim()}”</span> isn't in Cheese Recipes — pick a blend above, or a manager can add it in Manage Lists.
           </span>
         </div>
       )}
@@ -1119,7 +1119,7 @@ export function CheesePickCard({
     return (
       <>
         <Separator className="my-3 opacity-30" />
-        <div className="flex items-center gap-2 justify-between mb-2">
+        <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
@@ -1134,7 +1134,7 @@ export function CheesePickCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center gap-3 justify-between">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
@@ -1193,7 +1193,7 @@ export function MixRecipeCard({
   const body = (
     <>
       {recipeNameOptions && onRecipeNameChange && (
-        <div className="flex-1 max-w-xs mb-3">
+        <div className="w-full sm:max-w-xs mb-3">
           <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
         </div>
       )}
@@ -1322,11 +1322,11 @@ export function DoughRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-orange-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center gap-3 justify-between">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
             Dough Recipe
           </CardTitle>
-          <div className="flex-1 max-w-xs">
+          <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
             <IngredientSelect
               value={recipeName}
               onChange={onRecipeNameChange}
@@ -1494,7 +1494,7 @@ export function FrontlineRecipeCard({
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
-    <div className="flex-1 max-w-xs">
+    <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
       <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
     </div>
   );
@@ -1543,7 +1543,7 @@ export function FrontlineRecipeCard({
     return (
       <>
         <Separator className="my-3 opacity-30" />
-        <div className="flex items-center gap-2 justify-between mb-2">
+        <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</span>
           {recipeSelector}
           <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
@@ -1557,7 +1557,7 @@ export function FrontlineRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-red-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center gap-3 justify-between">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</CardTitle>
           {recipeSelector}
           <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
@@ -15865,7 +15865,7 @@ export default function Home() {
                   {doughPoolDrift && (
                     <div className="flex flex-wrap items-center gap-2 -mt-3 px-1 text-xs text-amber-500" data-testid="dough-pool-drift">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Differs from the shared recipe "{doughPoolDrift.name}" — this change applies to this run only.</span>
+                      <span><span className="font-semibold">"{doughPoolDrift.name}"</span> — edited for this run only.</span>
                       {canManageInventory && (
                         <Button
                           type="button"
@@ -15885,29 +15885,54 @@ export default function Home() {
                     <div className="flex flex-col gap-1.5 -mt-3 px-1" data-testid="dough-variant-pick">
                       <div className="flex items-center gap-2 text-xs text-amber-500">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                        <span>"{doughVariantPick.recipeName}" covers several doughball variants — pick the one this run uses:</span>
+                        <span><span className="font-semibold">"{doughVariantPick.recipeName}"</span> — pick this run's doughball variant:</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {doughVariantPick.variants.map((variant) => (
-                          <Button
-                            key={variant.label}
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-[11px]"
-                            data-testid={`button-dough-variant-${variant.label}`}
-                            onClick={() => {
+                        {doughVariantPick.variants.length > 5 ? (
+                          <select
+                            className="h-8 w-full sm:max-w-xs px-2 rounded bg-muted/40 border border-amber-500/40 text-xs outline-none focus:border-primary/60"
+                            defaultValue=""
+                            data-testid="select-dough-variant"
+                            onChange={e => {
+                              const variant = doughVariantPick.variants.find(x => x.label === e.target.value);
+                              if (!variant) return;
                               // Blank-fill only — same invariant as the auto path.
                               if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
                               if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
                               setDoughVariantPick(null);
                             }}
                           >
-                            {variant.label}
-                            {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
-                            {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
-                          </Button>
-                        ))}
+                            <option value="" disabled>Pick a variant…</option>
+                            {doughVariantPick.variants.map(variant => (
+                              <option key={variant.label} value={variant.label}>
+                                {variant.label}
+                                {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
+                                {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          doughVariantPick.variants.map((variant) => (
+                            <Button
+                              key={variant.label}
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px]"
+                              data-testid={`button-dough-variant-${variant.label}`}
+                              onClick={() => {
+                                // Blank-fill only — same invariant as the auto path.
+                                if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
+                                if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
+                                setDoughVariantPick(null);
+                              }}
+                            >
+                              {variant.label}
+                              {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
+                              {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                            </Button>
+                          ))
+                        )}
                         <Button
                           type="button"
                           size="sm"
@@ -15992,7 +16017,7 @@ export default function Home() {
                       {saucePoolDrift && (
                         <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-amber-500" data-testid="sauce-pool-drift">
                           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span>Differs from the shared recipe "{saucePoolDrift.name}" — this change applies to this run only.</span>
+                          <span><span className="font-semibold">"{saucePoolDrift.name}"</span> — edited for this run only.</span>
                           {canManageInventory && (
                             <Button
                               type="button"

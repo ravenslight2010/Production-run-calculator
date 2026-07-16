@@ -1205,7 +1205,7 @@ export default function ConfigureScreen() {
                         ]}
                       >
                         <Text style={[styles.cheeseWarnText, { color: colors.warning }]}>
-                          {`No matching cheese recipe found for “${recipeName.trim()}”. Pick a real blend from the dropdown above, or a manager can add it under Manage Lists → Cheese Recipes.`}
+                          {`“${recipeName.trim()}” isn't in Cheese Recipes — pick a blend above, or a manager can add it in Manage Lists.`}
                         </Text>
                       </View>
                     ) : (

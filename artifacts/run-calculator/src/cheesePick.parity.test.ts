@@ -462,12 +462,17 @@ describe("missing-cheese warning parity: web and mobile stay in lockstep", () =>
   it("shows the identical user-facing warning sentence on both platforms", () => {
     const grab = (src: string) => {
       const m = src.match(
-        /No matching cheese recipe found for[\s\S]*?Manage Lists → Cheese Recipes\./,
+        /“[\s\S]{0,120}?isn't in Cheese Recipes[\s\S]*?Manage Lists\./,
       );
       if (!m) throw new Error("warning sentence not found");
-      // Normalize the JSX `{expr}` vs template-literal `${expr}` interpolation
-      // and all whitespace, so only the human-visible copy is compared.
-      return m[0].replace(/\$\{/g, "{").replace(/\s+/g, " ").trim();
+      // Normalize the JSX `{expr}` vs template-literal `${expr}` interpolation,
+      // strip JSX span tags, and collapse whitespace, so only the
+      // human-visible copy is compared.
+      return m[0]
+        .replace(/\$\{/g, "{")
+        .replace(/<\/?span[^>]*>/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
     };
     expect(grab(mobile)).toBe(grab(web));
   });
