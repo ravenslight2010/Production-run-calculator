@@ -48,6 +48,7 @@ import {
   shouldRetryParsePass,
   specImportNameMatchKey,
   specImportNamedRecipeNamesEqual,
+  findSpecImportDoughFamilyMatch,
   splitGridsForPrompt,
   summarizeSpecImport,
   updateRecipePoolComponents,
@@ -640,7 +641,17 @@ async function linkParsed(
   // the cleaned generic name is what snaps onto the existing pool. Recipes and
   // the profiles referencing them are renamed in lockstep.
   working = canonicalizeSpecImportNamedRecipeNames(working);
-  working = linkSpecImportNamedRecipesToExisting(working, "dough", known.doughRecipes ?? []);
+  // Dough matches against local presets UNIONED with the server pool: dough is
+  // server-backed master data now, and the base family recipe ("CRB Dough")
+  // the variant names must collapse onto may exist only in the pool.
+  let doughUniverse = known.doughRecipes ?? [];
+  try {
+    const pool = await fetchNamedRecipes("dough");
+    doughUniverse = [...new Set([...doughUniverse, ...pool.map((r) => r.name)])];
+  } catch {
+    // Best-effort (offline) — local names still match.
+  }
+  working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse);
   working = linkSpecImportNamedRecipesToExisting(working, "sauce", known.sauceRecipes ?? []);
   return { parsed: working, matchAliases: [...aliasByKey.values()] };
 }
@@ -1134,6 +1145,24 @@ export async function commitSpecImport(
     // Best-effort — a failed snapshot fetch must never block the import.
   }
 
+  // Commit-time dough relink against the LIVE server pool. Prepare's link
+  // pass is best-effort (its pool fetch may have failed offline), so a
+  // profile could still carry a variant dough name ("CRB Heavy Plus recipe")
+  // whose base family recipe ("CRB Dough") exists in the pool. Re-snapping
+  // here keeps the apply and the placeholder suppression below consistent —
+  // otherwise suppression could strand a profile pointing at a name with no
+  // backing recipe anywhere.
+  try {
+    const livePool = await fetchNamedRecipes("dough");
+    applyParsed = linkSpecImportNamedRecipesToExisting(
+      applyParsed,
+      "dough",
+      livePool.map((r) => r.name),
+    );
+  } catch {
+    // Best-effort (offline) — prepare's link result stands.
+  }
+
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
   const touchedProfiles = applySpecImport(applyParsed, applyOut);
 
@@ -1162,8 +1191,14 @@ export async function commitSpecImport(
       const pool = await fetchNamedRecipes(kind);
       // Group per recipe name: union flavors; multi-brand names stay untagged.
       const byName = new Map<string, { name: string; brands: Set<string>; flavors: string[] }>();
+      const poolNames = pool.map((r) => r.name);
       for (const c of cands) {
         if (pool.some((r) => specImportNamedRecipeNamesEqual(r.name, c.name))) continue;
+        // Dough variant of an existing base recipe ("CRB Heavy Plus" when the
+        // pool already has "CRB Dough"): never mint a placeholder — the link
+        // pass snapped the profile onto the base recipe (one recipe per dough
+        // family; qualifiers only locate the doughball weight row).
+        if (kind === "dough" && findSpecImportDoughFamilyMatch(c.name, poolNames)) continue;
         const key = c.name.trim().toLowerCase();
         const g = byName.get(key) ?? { name: c.name.trim(), brands: new Set<string>(), flavors: [] };
         if (c.brand.trim()) g.brands.add(c.brand.trim());

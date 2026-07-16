@@ -863,6 +863,82 @@ export function specImportNamedRecipeNamesEqual(a: string, b: string): boolean {
   return buildNearDupNameMatcher([a], { keyOf: specImportNameMatchKey })(b) !== null;
 }
 
+// Generic dough words carrying no identity of their own: a pool recipe whose
+// loose key is ONLY these tokens ("Dough", "Pizza Crust") never family-matches
+// anything, and they are ignored when deciding which pool recipe a variant
+// name belongs to.
+const DOUGH_FAMILY_GENERIC_TOKENS = new Set([
+  "dough",
+  "doughs",
+  "crust",
+  "crusts",
+  "shell",
+  "shells",
+  "recipe",
+  "recipes",
+  "mix",
+  "mixing",
+  "procedure",
+]);
+
+// Unit words on a pool dough name ("12 in barley") — generic. Digit tokens
+// are deliberately KEPT distinctive: a pool name that carries a number ("CRB
+// 2 Dough") only family-matches a variant that repeats it (digit guard).
+const DOUGH_UNIT_TOKEN_RE = /^(?:in|inch|inches)$/;
+
+function doughFamilyDistinctiveTokens(name: string): string[] {
+  return specImportNameMatchKey(name)
+    .split(" ")
+    .filter(
+      (t) =>
+        t &&
+        !DOUGH_FAMILY_GENERIC_TOKENS.has(t) &&
+        !DOUGH_UNIT_TOKEN_RE.test(t),
+    );
+}
+
+/**
+ * Match a variant-qualified DOUGH name onto its base ("family") recipe in the
+ * existing pool. The factory keeps ONE recipe per dough family — one mixing
+ * procedure ("CRB Dough", "Malted Barley Dough") serves many spec-sheet
+ * variants ("11\" CRB", "CRB Heavy Plus recipe", "Thick Malted Barley") whose
+ * qualifier words only locate the doughball weight row on the procedure sheet,
+ * NOT a different recipe. A pool recipe matches when every one of its
+ * distinctive tokens (loose key minus generic dough/size words) appears among
+ * the variant name's tokens: "CRB Dough" → {crb} ⊆ {11, crb} ✓.
+ *
+ * Guards: a pool name with no distinctive tokens ("Dough") never matches; the
+ * most-specific match (most distinctive tokens) wins; a tie between two
+ * DIFFERENT pool names is ambiguous and matches nothing. Dough-only by design —
+ * sauce names ("Sweet n Sour Sauce" vs "Sour Sauce") make subset matching
+ * unsafe. Pure.
+ */
+export function findSpecImportDoughFamilyMatch(
+  name: string,
+  existingNames: ReadonlyArray<string>,
+): string | null {
+  const nameTokens = new Set(specImportNameMatchKey(name).split(" ").filter(Boolean));
+  if (!nameTokens.size) return null;
+  let best: { name: string; key: string; count: number } | null = null;
+  let ambiguous = false;
+  for (const ex of existingNames) {
+    const exName = (ex ?? "").trim();
+    if (!exName) continue;
+    const distinctive = doughFamilyDistinctiveTokens(exName);
+    if (!distinctive.length) continue;
+    if (!distinctive.every((t) => nameTokens.has(t))) continue;
+    const key = specImportNameMatchKey(exName);
+    if (best && key === best.key) continue; // same recipe saved twice
+    if (!best || distinctive.length > best.count) {
+      best = { name: exName, key, count: distinctive.length };
+      ambiguous = false;
+    } else if (distinctive.length === best.count) {
+      ambiguous = true;
+    }
+  }
+  return best && !ambiguous ? best.name : null;
+}
+
 /**
  * Build a loose-key → EXACT existing-name map for a "link to existing" pass, with
  * an AMBIGUITY GUARD: if two genuinely DIFFERENT saved names collapse to the same
@@ -1007,6 +1083,14 @@ export function linkSpecImportNamedRecipesToExisting(
     for (const cand of parentheticalNameCandidates(nm)) {
       const m = match(cand);
       if (m) return m;
+    }
+    // Dough-only family fallback: a variant-qualified name ("CRB Heavy Plus
+    // recipe") snaps onto its base pool recipe ("CRB Dough") — the factory
+    // keeps ONE recipe per dough family; the qualifiers only locate the
+    // doughball weight on the mixing-procedure sheet.
+    if (kind === "dough") {
+      const fam = findSpecImportDoughFamilyMatch(nm, existingNames);
+      if (fam) return fam;
     }
     return null;
   };

@@ -17,23 +17,19 @@
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
 - [Sync async crash safety](sync-async-crash-safety.md) — mobile sync serialize/deserialize run in async paths the ErrorBoundary can't catch; must be fail-safe (blank-screen crash, no fallback = async throw).
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
-- [Android keyboard avoidance](android-keyboard-avoidance.md) — never use KeyboardAvoidingView behavior="height" on Android (keyboard dismisses while typing); use behavior undefined, let adjustResize handle it.
+- [Android keyboard avoidance](android-keyboard-avoidance.md) + [RN font weights](rn-custom-font-weights.md) — never KeyboardAvoidingView behavior="height" on Android; RN ignores fontWeight for custom fonts, use the weighted fontFamily variant.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
 - [Post-merge setup](post-merge-setup.md) — post-merge.sh must use `db push-force` (plain push hangs on TTY rename prompt) + generous timeout (~70s real runtime).
 - [Ingredient merge](ingredient-merge.md) — user-driven merge of ingredient names across web+mobile+server; inventory-first-or-abort invariant; recipe rows renamed not combined.
 - [Photo stock intake](photo-stock-intake.md) — AI photo→identify (read-only /inventory/identify-photo) then user-confirmed commit through EXISTING restock path; web+mobile parity.
-- [Inventory settings & concurrency](inventory-settings-concurrency.md) — expiry lead time is a global server-persisted setting (not a constant); drawDown needs FOR UPDATE row locks; clients use raw fetch by design.
-- [Inventory consume idempotency](inventory-consume-idempotency.md) — marker even at 0-consume, transactional claim+drawdown; EVERY run-finalization path must consume; keys identical web+mobile.
+- [Inventory concurrency](inventory-settings-concurrency.md) + [consume idempotency](inventory-consume-idempotency.md) — drawDown needs FOR UPDATE locks; marker even at 0-consume; EVERY run-finalization path must consume; keys identical web+mobile.
 - [Packaging settings](packaging-settings.md) — 6 single-select + numeric `cartonsPerCase`; `cartoned` (default yes) gates warehouse roll-up (circles/pizza, shippers/case, cartons=pizzas÷cartonsPerCase ceil) & Cartoned/Labeled badge.
 - [Sync body-parser limit](sync-body-limit.md) — API json limit raised to 10mb; day-state payload embeds full per-run recipes, outgrew default 100kb → 413 broke all sync + scheduled saves.
-- [RN custom font weights](rn-custom-font-weights.md) — RN ignores fontWeight for custom fonts; set fontFamily to the loaded weighted variant (FONTS map), numerics use mono.
 - [Frontline formula parity](frontline-formula-parity.md) — mobile computeCalc frontline = web (fractional batches, casesLeftToRun basis w/ double layer buffer); dough/timing intentionally use casesLeft.
 - [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave before profile loads; saveProfile guard + seed self-heal; no numeric-scan for real-data.
 - [Excel import/export + QuickBooks CSV](excel-import-export.md) — export totals must use one shared formula (not platform calc engines); import must merge full day payload (no clobber).
-- [Auth gating](clerk-auth-gating.md) — username+password (Clerk removed); web httpOnly cookie, mobile bearer; requireAuth gates /api except /healthz + /auth; first user→manager.
-- [Role gating](role-gating.md) — roles are DB rows (name+capabilities+builtin); requireCapability resolves caps from rolesTable (tests MUST seedRoles); 6 caps, escalation/last-manager guards; never gate /sync.
-- [Daily-reset auth boundary](daily-reset-auth-boundary.md) — stateless HMAC tokens force-expired at midnight via today's resetAt; client-pushed boundary, mobile forcedOutRef latch, reactive 401 bounce.
+- [Auth gating](clerk-auth-gating.md) + [roles](role-gating.md) + [daily-reset boundary](daily-reset-auth-boundary.md) — cookie/bearer auth, requireAuth everywhere but /healthz+/auth; roles are DB rows (tests MUST seedRoles, never gate /sync); tokens force-expire at local midnight via resetAt.
 - [AI optimize assistant](ai-optimize-assistant.md) — /ai/optimize reuses photo-intake plumbing; parity is in the shaped OptimizeInput; mobile has no "pause" stoppage type so counts all stoppages (same meaning as web's pause filter).
 - [Password reset relay](password-reset-relay.md) — manager approves & relays one-time code; enumeration-safe; /auth/* exempt from 401 bounce; manager nav badge in reset-request-nav-badge.md.
 - [Isolated DB predates migrations](isolated-db-may-predate-migrations.md) — task env Postgres may lag Drizzle schema (no users table, Clerk-era user_roles); verify \d before building.
@@ -67,8 +63,7 @@
 - [Merge](merge-tombstones.md) + [deletion tombstones](deletion-tombstones.md) + [die-type exclusion](die-types-merge-exclusion.md) + [un-delete stamps](delete-undelete-stamps.md) — merges/deletes need synced tombstones or the union resurrects them; un-deleting needs per-name LWW stamps or the union re-hides the re-add (mergedAway still lacks this); die types NOT mergeable.
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert no-op; 10-iteration cap; if capped, drive playwright-core + nix chromium yourself; /mobile/ path unusable; mobile scheduled is local-only.
 - [Shared AI memory](shared-ai-memory.md) — facility-knowledge store + per-user turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool.
-- [Proactive shift alerts](proactive-alerts.md) — /ai/proactive-alert returns ≤1 keyed nudge; client owns dedup/cooldown; poll hook must live in a persistent spot, not the assistant tab.
-- [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff Q&A grounded in day-state (reuses OptimizeInput); requireAuth NOT requireRole; per-user convo window; optimize stays manager-gated.
+- [Proactive shift alerts](proactive-alerts.md) + [ask-the-day chat](ask-the-day-chat.md) — ≤1 keyed nudge, client dedup, poll hook in a persistent spot; all-staff Q&A requireAuth NOT requireRole, optimize stays manager-gated.
 - [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory) + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write.
 - [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
 - [AI recipe assistant](recipe-assistant.md) — staff /ai/recipe-assistant single-shot (no convo memory; NO userId to grounding); scale/sub/explain over real recipes; shared buildRecipeAssistContext verbatim; advisory-only; web+mobile parity.
@@ -89,8 +84,7 @@
 - [Spec-import hash reuse](spec-import-hash-reuse.md) + [prune matching](saved-spec-snapshot-prune.md) — re-imports reuse saved parses; bump SPEC_PARSE_VERSION on prompt/pipeline fixes or stale parses resurrect.
 - [Premix sheet import](premix-import.md) — premix .xlsx → Mixes (deterministic parse lib, AI name-only matcher); per-mix include/exclude review; invalidate `["mixes"]` after commit; web+mobile parity.
 - [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
-- [Freezer-pull notification](freezer-pull.md) — warehouse "Pull Out Freezer for [date]" cards; manager-tagged items w/ per-item daysEarly; factory-wide master-data (NOT synced); GET authed-only, writes manage-inventory; web+mobile parity.
-- [Low-stock reorder list](reorder-list.md) — advisory "Reorder Now" warehouse card; flags on-hand≤reorderThreshold(>0) minus SCHEDULED-run demand; math in @workspace/inventory-math; read-only; web+mobile parity.
+- [Freezer-pull](freezer-pull.md) + [reorder list](reorder-list.md) — warehouse cards: manager-tagged pull-early items (master-data, NOT synced, writes manage-inventory); advisory reorder flags on-hand≤threshold minus scheduled demand (read-only).
 - [Scheduled recipe-setup warning](scheduled-recipe-check.md) + [move runs](schedule-move.md) — manager card flags runs missing a profile; per-run move MUST key on run id, not list index.
 - [Server templates + supervisor PIN](server-templates-supervisor-pin.md) — facility-wide server source of truth; empty PIN ("")="no gate"; gotchas in topic file; web+mobile parity.
 - [Scheduled-day client date](scheduled-day-client-date.md) — ALL sync endpoints must key on client `?today=` not server UTC, or evening live pushes clobber scheduled rows; SSE date-scoped too.
@@ -156,4 +150,5 @@
 - [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Batch upsert atomicity](batch-upsert-transaction.md) — batch master-data POSTs need ONE db.transaction; client heals persist the rename map pre-write or a partial failure strands local refs forever.
 - [Spec-import brand backfill](spec-import-brand-backfill.md) — unscoped parses get customer tags from the applicator grid (collect-only), unbranded pool rows heal on re-import, curated brands never re-scoped.
+- [Dough family collapse](dough-family-collapse.md) — ONE recipe per dough family; spec variant names ("CRB Heavy Plus") snap onto the base pool recipe, never minted as placeholders; dough-only matcher.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.
