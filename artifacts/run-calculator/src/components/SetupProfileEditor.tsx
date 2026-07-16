@@ -41,7 +41,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Settings, Package, Save, X, Sparkles, Check } from "lucide-react";
+import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle } from "lucide-react";
+import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -306,13 +307,16 @@ export default function SetupProfileEditor({
   // Conflict fields the user has already resolved (picked a value or kept the
   // current one) — hidden from the pending-conflicts list. Keyed by field.
   const [resolvedConflicts, setResolvedConflicts] = useState<Set<string>>(new Set());
+  // Manual doughball-variant pick (same invariant as the run form): set when the
+  // picked dough family recipe has several variants and none auto-matched while
+  // the weight was blank. Blank-fill only — never overwrites a typed value.
+  const [doughVariantPick, setDoughVariantPick] = useState<{ recipeName: string; variants: DoughballVariant[] } | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: DEFAULT_VALUES,
   });
   const v = form.watch();
-
   const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
   const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
@@ -369,6 +373,54 @@ export default function SetupProfileEditor({
     }
     return map;
   }, [doughRecipesList]);
+  // Doughball variants per family recipe (label + weight/per-tray), mirroring
+  // the run form: the profile's dough pick auto-fills variant numbers when the
+  // die size resolves the variant, and offers a manual pick when ambiguous.
+  const serverDoughVariantsByName = useMemo(() => {
+    const map = new Map<string, DoughballVariant[]>();
+    for (const r of doughRecipesList) {
+      if (r.enabled === false) continue;
+      const variants = normalizeDoughballVariants(r.doughballVariants);
+      const key = r.name.trim().toLowerCase();
+      if (key && variants.length > 0) map.set(key, variants);
+    }
+    return map;
+  }, [doughRecipesList]);
+  // Drop a stale variant prompt: the form moved to another recipe (profile
+  // load/reset) or the weight got filled some other way — a leftover prompt
+  // would apply the WRONG family's numbers.
+  useEffect(() => {
+    if (!doughVariantPick) return;
+    const name = (v.doughRecipeName ?? "").trim().toLowerCase();
+    const stale =
+      name !== doughVariantPick.recipeName.trim().toLowerCase() ||
+      (Number(v.targetDoughballWeight) || 0) > 0;
+    if (stale) setDoughVariantPick(null);
+  }, [doughVariantPick, v.doughRecipeName, v.targetDoughballWeight]);
+  // Self-heal (mirrors the run form): a profile pointing at a pool dough
+  // recipe that knows its doughball weight / per-tray, while the field still
+  // sits at 0, adopts the pool value — variant match first (die size may have
+  // been set AFTER the recipe pick), recipe-level fallback. Never overrides a
+  // non-zero value the manager typed. Filling the weight also clears a pending
+  // manual prompt via the stale-clear effect above.
+  useEffect(() => {
+    const name = v.doughRecipeName?.trim().toLowerCase();
+    if (!name) return;
+    if ((Number(v.targetDoughballWeight) || 0) > 0) return;
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === name);
+    const ballOz = matched?.weightOz ?? rec?.doughballWeightOz ?? 0;
+    if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
+  }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, doughRecipesList, serverDoughVariantsByName, form]);
+  useEffect(() => {
+    const name = v.doughRecipeName?.trim().toLowerCase();
+    if (!name) return;
+    if ((Number(v.doughballsPerTray) || 0) > 0) return;
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === name);
+    const perTray = matched?.perTray ?? rec?.doughballsPerTray ?? 0;
+    if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
+  }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, doughRecipesList, serverDoughVariantsByName, form]);
   const serverSauceRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of sauceRecipesList) {
@@ -985,12 +1037,72 @@ export default function SetupProfileEditor({
                   onRemoveRecipeName={onRemoveDoughRecipeName}
                   onRecipeNameChange={val => {
                     form.setValue("doughRecipeName", val, { shouldDirty: true });
+                    // Any recipe change invalidates a pending variant prompt —
+                    // it is re-armed below only if the NEW pick is ambiguous.
+                    setDoughVariantPick(null);
                     if (val.trim()) {
-                      const rows = serverDoughRowsByName.get(val.trim().toLowerCase());
-                      if (rows) { form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows); }
+                      const key = val.trim().toLowerCase();
+                      const rows = serverDoughRowsByName.get(key);
+                      if (rows) { form.setValue("doughRecipe", rows.map(r => ({ ...r })), { shouldDirty: true }); replaceDough(rows.map(r => ({ ...r }))); }
+                      // Variant-aware blank-fill (mirrors the run form): the
+                      // family recipe's variant list wins over recipe-level
+                      // numbers; auto-match by die size (or the only variant),
+                      // else offer a manual pick below. Never overwrites a
+                      // value already typed into the profile.
+                      const variants = serverDoughVariantsByName.get(key) ?? [];
+                      const matched = matchDoughballVariant(variants, { dieType: String(form.getValues("dieType") ?? "") });
+                      const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === key);
+                      const ballOz = matched?.weightOz ?? rec?.doughballWeightOz ?? 0;
+                      const weightBlank = !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0);
+                      if (ballOz > 0 && weightBlank) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
+                      const perTray = matched?.perTray ?? rec?.doughballsPerTray ?? 0;
+                      if (perTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
+                      if (!matched && variants.length > 1 && weightBlank) {
+                        setDoughVariantPick({ recipeName: val.trim(), variants });
+                      }
                     }
                   }}
                 />
+                {doughVariantPick && (
+                  <div className="flex flex-col gap-1.5 -mt-3 px-1" data-testid="profile-dough-variant-pick">
+                    <div className="flex items-center gap-2 text-xs text-amber-500">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>"{doughVariantPick.recipeName}" covers several doughball variants — pick the one this profile uses:</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {doughVariantPick.variants.map((variant) => (
+                        <Button
+                          key={variant.label}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          data-testid={`button-profile-dough-variant-${variant.label}`}
+                          onClick={() => {
+                            // Blank-fill only — same invariant as the auto path.
+                            if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
+                            if ((variant.perTray ?? 0) > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
+                            setDoughVariantPick(null);
+                          }}
+                        >
+                          {variant.label}
+                          {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
+                          {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                        </Button>
+                      ))}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-[11px] text-muted-foreground"
+                        onClick={() => setDoughVariantPick(null)}
+                        data-testid="button-profile-dough-variant-dismiss"
+                      >
+                        Not now
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <Card className="bg-card/50 border-border/50 shadow-md">
                   <button type="button" onClick={() => setSauceWeightsOpen(o => !o)} className="w-full text-left">

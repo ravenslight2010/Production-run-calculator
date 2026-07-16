@@ -12,4 +12,6 @@ Rules:
 
 **Why:** spec sheets share one dough recipe across many die sizes; per-variant recipe copies drifted and cluttered pickers.
 
+Consumers: the run form AND the Setup Profiles editor both do variant match at dough pick, PLUS dieType-keyed self-heal effects (die size may be set AFTER the recipe pick — a pick-time-only match misses it).
+
 **How to apply:** any new consumer of dough weight/per-tray should call `matchDoughballVariant` first, fall back to recipe-level, and keep blank-fill-only. Gotcha: a pending manual-pick prompt MUST be cleared whenever the recipe name changes or the weight fills by another path, or the operator can apply the previous family's numbers to the wrong run.
