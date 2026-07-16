@@ -652,7 +652,17 @@ async function linkParsed(
     // Best-effort (offline) — local names still match.
   }
   working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse);
-  working = linkSpecImportNamedRecipesToExisting(working, "sauce", known.sauceRecipes ?? []);
+  // Sauce matches against the server pool too — the family recipe ("Lucia
+  // Pizza Sauce") a variant reference ("Lucia's Sauce") must snap onto may
+  // exist only in the pool, not in the local preset list.
+  let sauceUniverse = known.sauceRecipes ?? [];
+  try {
+    const pool = await fetchNamedRecipes("sauce");
+    sauceUniverse = [...new Set([...sauceUniverse, ...pool.map((r) => r.name)])];
+  } catch {
+    // Best-effort (offline) — local names still match.
+  }
+  working = linkSpecImportNamedRecipesToExisting(working, "sauce", sauceUniverse);
   return { parsed: working, matchAliases: [...aliasByKey.values()] };
 }
 
@@ -729,8 +739,11 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * aliases targeting deleted names are ignored — saved v4 parses have renamed
  * sheets' flavors grounded onto deleted old names baked in, so they must not
  * be reused.
+ * v7: cheese-kind recipe rows are exempt from the oz→lbs conversion (their
+ * lbs field carries per-pizza OUNCES by contract) — v6 parses baked in ÷16'd
+ * mix/cheese amounts, so they must not be reused.
  */
-export const SPEC_PARSE_VERSION = "6";
+export const SPEC_PARSE_VERSION = "7";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1152,15 +1165,17 @@ export async function commitSpecImport(
   // here keeps the apply and the placeholder suppression below consistent —
   // otherwise suppression could strand a profile pointing at a name with no
   // backing recipe anywhere.
-  try {
-    const livePool = await fetchNamedRecipes("dough");
-    applyParsed = linkSpecImportNamedRecipesToExisting(
-      applyParsed,
-      "dough",
-      livePool.map((r) => r.name),
-    );
-  } catch {
-    // Best-effort (offline) — prepare's link result stands.
+  for (const kind of ["dough", "sauce"] as const) {
+    try {
+      const livePool = await fetchNamedRecipes(kind);
+      applyParsed = linkSpecImportNamedRecipesToExisting(
+        applyParsed,
+        kind,
+        livePool.map((r) => r.name),
+      );
+    } catch {
+      // Best-effort (offline) — prepare's link result stands.
+    }
   }
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};

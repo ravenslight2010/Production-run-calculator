@@ -509,14 +509,12 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     },
   );
 
-  // ---- KEEP: the near-dup matcher (@workspace/name-match) now folds word
-  // reorders and single typos, but its extra-word layer stays OFF in this
-  // silent auto-link path: an extra word is often a MEANINGFUL qualifier
-  // ("Spicy House Sauce" is not "House Sauce"), so it still forks a parallel
-  // pool entry the manager can merge by hand.
+  // ---- KEEP (sauce only): the near-dup matcher's extra-word layer stays OFF
+  // in this silent auto-link path: an extra word is often a MEANINGFUL
+  // qualifier ("Spicy House Sauce" is not "House Sauce"), so a sauce with an
+  // extra distinctive token still forks a parallel pool entry the manager can
+  // merge by hand (the sauce family matcher requires token-set EQUALITY).
   const keepCases: Array<[string, string, "dough" | "sauce"]> = [
-    // Extra distinguishing word ("Craft") — not filler.
-    ["House Dough", "House Craft Dough", "dough"],
     // Sauce: extra word.
     ["House Marinara", "House Craft Marinara", "sauce"],
   ];
@@ -535,6 +533,22 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     },
   );
 
+  // ---- COLLAPSE (dough): one recipe per dough FAMILY — a variant-qualified
+  // dough name ("House Craft Dough") whose tokens are a superset of an
+  // existing family recipe's distinctive tokens folds onto the base recipe;
+  // qualifiers only locate the doughball weight row, they never fork a
+  // parallel dough entry.
+  it("collapses a variant-qualified dough onto its base family recipe", () => {
+    const { linkedName, added, poolNames } = importAgainstPool(
+      "House Dough",
+      "House Craft Dough",
+      "dough",
+    );
+    expect(linkedName).toBe("House Dough");
+    expect(added).toBe(0);
+    expect(poolNames).toEqual(["House Dough"]);
+  });
+
   // ---- "Applicator - " prefix boundary.
   // cleanSpecCheeseRecipeName strips this label for CHEESE recipes, but the
   // dough/sauce link pass keys on specImportNameMatchKey with NO applicator
@@ -551,20 +565,30 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     );
   });
 
-  it.each([
-    ["House Dough", "Applicator - House Dough", "dough"],
-    ["House Marinara", "Applicator - House Marinara", "sauce"],
-  ] as Array<[string, string, "dough" | "sauce"]>)(
-    "does NOT collapse %j vs %j (%s): applicator prefix forks a parallel entry",
-    (existingName, importedName, kind) => {
-      const { linkedName, added, poolNames } = importAgainstPool(
-        existingName,
-        importedName,
-        kind,
-      );
-      expect(linkedName).toBe(importedName);
-      expect(added).toBe(1);
-      expect(poolNames).toEqual([existingName, importedName]);
-    },
-  );
+  // Sauce: the stray "applicator" token makes the token sets UNEQUAL, so the
+  // sauce family matcher (set equality) does not snap — forks a parallel
+  // entry. Dough: the prefixed name's tokens are a SUPERSET of the base
+  // family's distinctive tokens, so the dough family matcher folds it onto
+  // the base recipe — the gap pinned above is closed for dough.
+  it("does NOT collapse the applicator prefix for sauce: forks a parallel entry", () => {
+    const { linkedName, added, poolNames } = importAgainstPool(
+      "House Marinara",
+      "Applicator - House Marinara",
+      "sauce",
+    );
+    expect(linkedName).toBe("Applicator - House Marinara");
+    expect(added).toBe(1);
+    expect(poolNames).toEqual(["House Marinara", "Applicator - House Marinara"]);
+  });
+
+  it("collapses the applicator prefix for dough via the family matcher", () => {
+    const { linkedName, added, poolNames } = importAgainstPool(
+      "House Dough",
+      "Applicator - House Dough",
+      "dough",
+    );
+    expect(linkedName).toBe("House Dough");
+    expect(added).toBe(0);
+    expect(poolNames).toEqual(["House Dough"]);
+  });
 });

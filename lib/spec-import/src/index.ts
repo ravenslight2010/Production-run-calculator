@@ -1133,14 +1133,16 @@ export function linkSpecImportNamedRecipesToExisting(
   const recipes = (parsed.recipes ?? []).map((r) => {
     const name = (r.name ?? "").trim();
     if (r.kind !== kind || !name) return r;
-    // Sauce-only: family fallback applies to the RECIPES too — an imported
-    // "Lucia Recipe" sauce with rows should UPDATE the existing family recipe
-    // ("Lucia Pizza Sauce"), never fork a duplicate next to it. Dough recipes
-    // deliberately keep a variant name they arrive under (the profile tie to
-    // an incoming recipe must survive; see importedKindKeys below).
+    // Family fallback applies to the RECIPES too — an imported "Lucia Recipe"
+    // sauce (or an "11\" CRB recipe" dough) with rows should fold into the
+    // existing family recipe ("Lucia Pizza Sauce" / "CRB Dough"), never fork a
+    // duplicate next to it. Snapping the RECIPE keeps the profile↔recipe tie
+    // intact (both land on the base name via importedKindKeys below) and lets
+    // the variant's doughball weight / rows ride into the family instead of
+    // being stranded under a name the pool guard would drop.
     const existing =
       matchCleaned(name) ??
-      (kind === "sauce" ? findSpecImportSauceFamilyMatch(name, existingNames) : null);
+      findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
     if (!existing || existing === name) return r;
     changed = true;
     return { ...r, name: existing };
@@ -3962,7 +3964,11 @@ export function sanitizeParsedSpecImport(
     const rowsAreLbs =
       unitRaw === "lb" || unitRaw === "lb." || unitRaw === "lbs" || unitRaw === "lbs." ||
       unitRaw === "pound" || unitRaw === "pounds";
-    const rowsAreOz = !rowsAreLbs;
+    // Cheese-kind rows are EXEMPT from the conversion: by long-standing
+    // contract their `lbs` field carries per-pizza OUNCES verbatim (see
+    // SpecCheeseRecipeDraft) — converting them ÷16 corrupted mix/cheese
+    // per-pizza amounts (1.5 oz became 0.094).
+    const rowsAreOz = !rowsAreLbs && kind !== "cheese";
     for (const row of rawRows.slice(0, lim.maxRecipeRows)) {
       if (!row || typeof row !== "object") continue;
       const ro = row as Record<string, unknown>;

@@ -71,7 +71,8 @@ describe("specImportCheeseRecipeIsMix", () => {
   it("keeps cheese-mentioning and non-mix names as cheese", () => {
     expect(specImportCheeseRecipeIsMix("Aldo's Cheese Mix", none, 3)).toBe(false);
     expect(specImportCheeseRecipeIsMix("Cheese Blend", none, 3)).toBe(false);
-    expect(specImportCheeseRecipeIsMix("Premixed Blend", none, 3)).toBe(false);
+    // "blend" (like "mix") marks a multi-ingredient non-cheese name as a mix.
+    expect(specImportCheeseRecipeIsMix("Premixed Blend", none, 3)).toBe(true);
     expect(specImportCheeseRecipeIsMix("", none, 3)).toBe(false);
   });
   it("does NOT make a mix out of a single-ingredient recipe, whatever its label", () => {

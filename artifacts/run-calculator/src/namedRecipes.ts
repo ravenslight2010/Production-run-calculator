@@ -82,10 +82,23 @@ export async function addNamedRecipesToServerIfAbsent(
   // link passes normally catch these; this guard catches anything that slips
   // through (e.g. stale local presets pushed wholesale).
   const existingNames = existing.map((r) => r.name);
-  const filtered = candidates.filter(
-    (c) =>
-      findSpecImportNamedRecipeFamilyMatch(kind, c.name ?? "", existingNames) === null,
-  );
+  const filtered: NamedRecipe[] = [];
+  // A dropped variant's learned doughball weight must not be stranded — remap
+  // it onto the family recipe it collapsed into (fills only unset weights).
+  const remappedWeights = new Map<string, number>(weightsByName ?? []);
+  for (const c of candidates) {
+    const family = findSpecImportNamedRecipeFamilyMatch(kind, c.name ?? "", existingNames);
+    if (family === null) {
+      filtered.push(c);
+      continue;
+    }
+    const familyKey = family.trim().toLowerCase();
+    const candKey = (c.name ?? "").trim().toLowerCase();
+    const oz = c.doughballWeightOz ?? weightsByName?.get(candKey) ?? 0;
+    if (kind === "dough" && oz > 0 && !remappedWeights.has(familyKey)) {
+      remappedWeights.set(familyKey, oz);
+    }
+  }
   const { merged, added } = addNamedRecipesIfAbsentByName(existing, filtered);
   const tagged =
     tagsByName && tagsByName.size > 0
@@ -94,12 +107,12 @@ export async function addNamedRecipesToServerIfAbsent(
   // Dough only: backfill learned doughball weights onto EXISTING pool recipes
   // whose weight is still unset (never overriding a manager's explicit value).
   const weighted =
-    kind === "dough" && weightsByName && weightsByName.size > 0
+    kind === "dough" && remappedWeights.size > 0
       ? fillNamedRecipeDoughballWeights(
           tagged.length > 0
             ? existing.map((r) => tagged.find((t) => t.id === r.id) ?? r)
             : existing,
-          weightsByName,
+          remappedWeights,
         )
       : [];
   if (added === 0 && tagged.length === 0 && weighted.length === 0)

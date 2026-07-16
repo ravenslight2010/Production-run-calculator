@@ -2767,7 +2767,7 @@ export function specImportCheeseRecipeIsMix(
   if (!t) return false;
   if (/cheese/i.test(t)) return false;
   if (userMixNamesLower.has(t)) return true;
-  return ingredientCount >= 2 && /\bmix\b/.test(t);
+  return ingredientCount >= 2 && /\b(mix|blend)\b/.test(t);
 }
 
 /** Kind shown in the import review UI: the three parse kinds plus "mix". */
@@ -2784,6 +2784,9 @@ export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayK
   if (r.kind !== "cheese") return r.kind;
   if (r.forcedCategory === "mix") return "mix";
   if (r.forcedCategory === "cheese") return "cheese";
+  // A user-typed rename never re-categorizes: the word heuristic is unreliable
+  // on a name the user chose ("My Special Blend 2" is still a cheese recipe).
+  if (r.userNamed) return "cheese";
   const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
   return specImportCheeseRecipeIsMix(r.name ?? "", userMixNamesLower, r.rows?.length ?? 0)
     ? "mix"
@@ -2839,6 +2842,9 @@ export function applySpecImport(
     // dialog's category selector) always wins over the name heuristic.
     if (r.forcedCategory === "mix") return true;
     if (r.forcedCategory === "cheese") return false;
+    // A user-typed rename never re-categorizes (heuristic is unreliable on a
+    // chosen name) — mirrors specImportRecipeDisplayKind.
+    if (r.userNamed) return false;
     return specImportCheeseRecipeIsMix(r.name, userMixNamesLower, r.rows.length);
   };
 

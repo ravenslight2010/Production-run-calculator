@@ -68,7 +68,13 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
   });
 
-  it("keeps the variant name when THIS import carries a dough recipe under it", () => {
+  it("snaps BOTH the recipe and the profile onto the base when THIS import carries a variant dough recipe", () => {
+    // One recipe per dough family: an incoming variant recipe folds into the
+    // existing base recipe (its rows/doughball weight ride along) and the
+    // profile tie survives because both land on the base name. Keeping the
+    // variant name stranded the recipe payload (pool guard dropped it) and
+    // broke the profile↔recipe tie when the profile snapped but the recipe
+    // did not.
     const withRecipe = {
       ...base,
       recipes: [
@@ -76,7 +82,8 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
       ],
     } as unknown as ParsedSpecImport;
     const linked = linkSpecImportNamedRecipesToExisting(withRecipe, "dough", ["CRB Dough"]);
-    expect(linked.profiles?.[0]?.doughName).toBe("CRB Heavy Plus recipe");
+    expect(linked.recipes?.[0]?.name).toBe("CRB Dough");
+    expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
   });
 
   it("does not family-collapse sauce names", () => {
