@@ -18,6 +18,7 @@ import {
   addNamedRecipesIfAbsentByName,
   fillNamedRecipeTags,
   fillNamedRecipeDoughballWeights,
+  fillNamedRecipeDoughballsPerTray,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "@workspace/named-recipes";
@@ -73,6 +74,7 @@ export async function addNamedRecipesToServerIfAbsent(
   candidates: NamedRecipe[],
   tagsByName?: ReadonlyMap<string, NamedRecipeTag>,
   weightsByName?: ReadonlyMap<string, number>,
+  traysByName?: ReadonlyMap<string, number>,
 ): Promise<{ added: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
   // Family guard — the last line of defense for EVERY pool write path (spec
@@ -86,6 +88,7 @@ export async function addNamedRecipesToServerIfAbsent(
   // A dropped variant's learned doughball weight must not be stranded — remap
   // it onto the family recipe it collapsed into (fills only unset weights).
   const remappedWeights = new Map<string, number>(weightsByName ?? []);
+  const remappedTrays = new Map<string, number>(traysByName ?? []);
   for (const c of candidates) {
     const family = findSpecImportNamedRecipeFamilyMatch(kind, c.name ?? "", existingNames);
     if (family === null) {
@@ -98,6 +101,10 @@ export async function addNamedRecipesToServerIfAbsent(
     if (kind === "dough" && oz > 0 && !remappedWeights.has(familyKey)) {
       remappedWeights.set(familyKey, oz);
     }
+    const perTray = c.doughballsPerTray ?? traysByName?.get(candKey) ?? 0;
+    if (kind === "dough" && perTray > 0 && !remappedTrays.has(familyKey)) {
+      remappedTrays.set(familyKey, perTray);
+    }
   }
   const { merged, added } = addNamedRecipesIfAbsentByName(existing, filtered);
   const tagged =
@@ -106,20 +113,29 @@ export async function addNamedRecipesToServerIfAbsent(
       : [];
   // Dough only: backfill learned doughball weights onto EXISTING pool recipes
   // whose weight is still unset (never overriding a manager's explicit value).
+  const afterTags =
+    tagged.length > 0
+      ? existing.map((r) => tagged.find((t) => t.id === r.id) ?? r)
+      : existing;
   const weighted =
     kind === "dough" && remappedWeights.size > 0
-      ? fillNamedRecipeDoughballWeights(
-          tagged.length > 0
-            ? existing.map((r) => tagged.find((t) => t.id === r.id) ?? r)
-            : existing,
-          remappedWeights,
-        )
+      ? fillNamedRecipeDoughballWeights(afterTags, remappedWeights)
       : [];
-  if (added === 0 && tagged.length === 0 && weighted.length === 0)
+  // Dough only: same unset-only backfill for learned doughballs-per-tray.
+  const afterWeights =
+    weighted.length > 0
+      ? afterTags.map((r) => weighted.find((w) => w.id === r.id) ?? r)
+      : afterTags;
+  const trayed =
+    kind === "dough" && remappedTrays.size > 0
+      ? fillNamedRecipeDoughballsPerTray(afterWeights, remappedTrays)
+      : [];
+  if (added === 0 && tagged.length === 0 && weighted.length === 0 && trayed.length === 0)
     return { added: 0, items: existing };
   const changedById = new Map<string, NamedRecipe>();
   for (const r of tagged) changedById.set(r.id, r);
   for (const r of weighted) changedById.set(r.id, r);
+  for (const r of trayed) changedById.set(r.id, r);
   const toSave = merged.map((r) => changedById.get(r.id) ?? r);
   const items = await saveNamedRecipes(kind, toSave);
   return { added, items };

@@ -2554,6 +2554,8 @@ export interface NamedRecipe {
   flavors?: string[];
   /** Dough recipes only — target weight of one doughball in ounces (the spec sheet's "target ball weight"). 0/absent = unknown. Picking a dough recipe hydrates the run form's Target Doughball Weight from this. Sauce recipes never set it. */
   doughballWeightOz?: number;
+  /** Dough recipes only — how many doughballs fit on one tray (the spec sheet states it per recipe). 0/absent = unknown. Picking a dough recipe hydrates the run form's Doughballs Per Tray from this. Sauce recipes never set it. */
+  doughballsPerTray?: number;
 }
 
 export interface NamedRecipeList {

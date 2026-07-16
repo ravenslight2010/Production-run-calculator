@@ -11,6 +11,7 @@ import {
   planNameConsolidation,
   fillNamedRecipeTags,
   fillNamedRecipeDoughballWeights,
+  fillNamedRecipeDoughballsPerTray,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "./index";
@@ -26,6 +27,7 @@ function makeNamed(over: Partial<NamedRecipe> = {}): NamedRecipe {
     flavors: over.flavors ?? [],
     ...(over.scope !== undefined ? { scope: over.scope } : {}),
     ...(over.doughballWeightOz !== undefined ? { doughballWeightOz: over.doughballWeightOz } : {}),
+    ...(over.doughballsPerTray !== undefined ? { doughballsPerTray: over.doughballsPerTray } : {}),
   };
 }
 
@@ -445,5 +447,34 @@ describe("fillNamedRecipeDoughballWeights", () => {
       fillNamedRecipeDoughballWeights(pool, new Map([["  ", 5], ["crb dough", 0], ["crb dough", NaN]])),
     ).toEqual([]);
     expect(fillNamedRecipeDoughballWeights(pool, {})).toEqual([]);
+  });
+});
+
+describe("fillNamedRecipeDoughballsPerTray", () => {
+  it("backfills only unset per-tray counts by ci name, rounds, returns only changed, pure", () => {
+    const pool = [
+      makeNamed({ id: "d1", name: "CRB Dough" }),
+      makeNamed({ id: "d2", name: "Thin Dough", doughballsPerTray: 12 }),
+      makeNamed({ id: "d3", name: "Other Dough" }),
+    ];
+    const changed = fillNamedRecipeDoughballsPerTray(
+      pool,
+      new Map([
+        ["crb dough", 15.4],
+        ["thin dough", 20], // must NOT override the manager's 12
+      ]),
+    );
+    expect(changed.map((r) => r.id)).toEqual(["d1"]);
+    expect(changed[0].doughballsPerTray).toBe(15);
+    expect(pool[0].doughballsPerTray).toBeUndefined(); // pure
+    expect(pool[1].doughballsPerTray).toBe(12);
+  });
+
+  it("ignores blank names and non-positive/non-finite counts", () => {
+    const pool = [makeNamed({ id: "d1", name: "CRB Dough" })];
+    expect(
+      fillNamedRecipeDoughballsPerTray(pool, new Map([["  ", 5], ["crb dough", 0], ["crb dough", NaN]])),
+    ).toEqual([]);
+    expect(fillNamedRecipeDoughballsPerTray(pool, {})).toEqual([]);
   });
 });

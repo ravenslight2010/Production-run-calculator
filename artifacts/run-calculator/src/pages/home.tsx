@@ -3294,6 +3294,18 @@ export default function Home() {
     }
     return map;
   }, [doughRecipesList]);
+  // Pool doughballs-per-tray by name — hydrates the run form's Doughballs Per
+  // Tray when a dough recipe is picked (0/absent = unknown).
+  const serverDoughTrayByName = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of doughRecipesList) {
+      if (r.enabled === false) continue;
+      const key = r.name.trim().toLowerCase();
+      const n = r.doughballsPerTray ?? 0;
+      if (key && n > 0) map.set(key, n);
+    }
+    return map;
+  }, [doughRecipesList]);
   const serverSauceRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of sauceRecipesList) {
@@ -3335,7 +3347,9 @@ export default function Home() {
     const rowsDiffer = !recipeRowsEqual(v.doughRecipe ?? [], poolRows);
     const formW = Number(v.targetDoughballWeight ?? 0);
     const weightDiffers = formW > 0 && formW !== (serverDoughWeightByName.get(key) ?? 0);
-    return rowsDiffer || weightDiffers ? { name } : null;
+    const formTray = Number(v.doughballsPerTray ?? 0);
+    const trayDiffers = formTray > 0 && formTray !== (serverDoughTrayByName.get(key) ?? 0);
+    return rowsDiffer || weightDiffers || trayDiffers ? { name } : null;
   })();
   const saucePoolDrift = (() => {
     const name = (v.frontlineRecipeName ?? "").trim();
@@ -3469,6 +3483,9 @@ export default function Home() {
   const pushLocalDoughSauceToServer = useCallback(async (tags?: {
     dough?: ReadonlyMap<string, NamedRecipeTag>;
     sauce?: ReadonlyMap<string, NamedRecipeTag>;
+    /** Learned doughballs-per-tray by lowercased dough name (spec import) —
+     * backfills unset pool values; local presets don't carry per-tray. */
+    doughTrays?: ReadonlyMap<string, number>;
   }): Promise<number> => {
     const tagFor = (map: ReadonlyMap<string, NamedRecipeTag> | undefined, name: string) =>
       map?.get(name.trim().toLowerCase());
@@ -3494,8 +3511,8 @@ export default function Home() {
       })
       .filter((r): r is NamedRecipe => r !== null);
     const [d, s] = await Promise.all([
-      doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0
-        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights)
+      doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0 || (tags?.doughTrays?.size ?? 0) > 0
+        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays)
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
       sauceDrafts.length || (tags?.sauce?.size ?? 0) > 0
         ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce)
@@ -3687,6 +3704,10 @@ export default function Home() {
               const w = Number(entry.doughballWeightOz ?? 0);
               if (w > 0 && !(Number(rec.targetDoughballWeight ?? 0) > 0)) {
                 rec.targetDoughballWeight = w;
+              }
+              const perTray = Number(entry.doughballsPerTray ?? 0);
+              if (perTray > 0 && !(Number(rec.doughballsPerTray ?? 0) > 0)) {
+                rec.doughballsPerTray = perTray;
               }
             }
             saveProfile(brand, flavor, saved);
@@ -6260,6 +6281,17 @@ export default function Home() {
     if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
   }, [v.doughRecipeName, v.targetDoughballWeight, serverDoughWeightByName, form]);
 
+  // Same self-heal for doughballs-per-tray: a form linked to a pool dough
+  // recipe that knows its per-tray count, while the form still sits at 0,
+  // adopts the pool value. Never overrides a non-zero operator-typed count.
+  useEffect(() => {
+    const name = v.doughRecipeName?.trim().toLowerCase();
+    if (!name) return;
+    if ((Number(v.doughballsPerTray) || 0) > 0) return;
+    const perTray = serverDoughTrayByName.get(name) ?? 0;
+    if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
+  }, [v.doughRecipeName, v.doughballsPerTray, serverDoughTrayByName, form]);
+
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
     const name = v.frontlineRecipeName?.trim();
@@ -6694,8 +6726,14 @@ export default function Home() {
       if (!key) continue;
       const rows = normalizeRecipeRowsForCompare(r.components);
       const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
-      snap.set(key, JSON.stringify({ rows, weight }));
-      byKey.set(key, { name: r.name, rows, ...(weight > 0 ? { doughballWeightOz: weight } : {}) });
+      const perTray = kind === "dough" ? Number(r.doughballsPerTray ?? 0) : 0;
+      snap.set(key, JSON.stringify({ rows, weight, perTray }));
+      byKey.set(key, {
+        name: r.name,
+        rows,
+        ...(weight > 0 ? { doughballWeightOz: weight } : {}),
+        ...(perTray > 0 ? { doughballsPerTray: perTray } : {}),
+      });
     }
     const prev = namedPoolSnapRef.current[kind];
     namedPoolSnapRef.current[kind] = snap;
@@ -6726,6 +6764,11 @@ export default function Home() {
       const wantW = hit.doughballWeightOz ?? 0;
       if (kind === "dough" && wantW > 0 && Number(form.getValues("targetDoughballWeight") ?? 0) !== wantW) {
         form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
+        formUpdated = true;
+      }
+      const wantTray = hit.doughballsPerTray ?? 0;
+      if (kind === "dough" && wantTray > 0 && Number(form.getValues("doughballsPerTray") ?? 0) !== wantTray) {
+        form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
         formUpdated = true;
       }
     }
@@ -6765,6 +6808,8 @@ export default function Home() {
     if (kind === "dough") {
       const w = Number(vals.targetDoughballWeight ?? 0);
       if (w > 0) next.doughballWeightOz = w;
+      const perTray = Number(vals.doughballsPerTray ?? 0);
+      if (perTray > 0) next.doughballsPerTray = perTray;
     }
     setPromotingRecipeKind(kind);
     try {
@@ -8441,16 +8486,20 @@ export default function Home() {
       if (importedRecipes && canManageInventory) {
         const doughTags = new Map<string, NamedRecipeTag>();
         const sauceTags = new Map<string, NamedRecipeTag>();
+        const doughTrays = new Map<string, number>();
         for (const r of editedParsed.recipes) {
           if (r.referenceOnly) continue;
           if (r.kind !== "dough" && r.kind !== "sauce") continue;
           const name = r.name.trim();
           if (!name) continue;
+          if (r.kind === "dough" && (r.doughballsPerTray ?? 0) > 0) {
+            doughTrays.set(name.toLowerCase(), r.doughballsPerTray!);
+          }
           const tag = namedRecipeTagFromParsed(r, editedParsed.profiles);
           if (!tag) continue;
           (r.kind === "dough" ? doughTags : sauceTags).set(name.toLowerCase(), tag);
         }
-        void pushLocalDoughSauceToServer({ dough: doughTags, sauce: sauceTags }).catch(() => {});
+        void pushLocalDoughSauceToServer({ dough: doughTags, sauce: sauceTags, doughTrays }).catch(() => {});
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
@@ -15730,6 +15779,8 @@ export default function Home() {
                         }
                         const ballOz = serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
                         if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
+                        const perTray = serverDoughTrayByName.get(key) ?? 0;
+                        if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
                       }
                     }}
                   />

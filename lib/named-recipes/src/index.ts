@@ -58,6 +58,12 @@ export interface NamedRecipe {
   // Target Doughball Weight — without it every pool-hydrated dough run sat at
   // 0 oz and the batch-yield math silently died.
   doughballWeightOz?: number;
+  // DOUGH only: how many doughballs fit on one tray. 0/absent = unknown.
+  // Stored on the pool (like doughballWeightOz) so picking a dough recipe —
+  // or a pool-hydrated import/heal — can fill the run form's Doughballs Per
+  // Tray; the spec sheet states it per RECIPE, so it must travel with the
+  // recipe, not just the profiles an import happened to touch.
+  doughballsPerTray?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +145,8 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
   };
   const ballOz = coerceNum(raw.doughballWeightOz, 0);
   if (ballOz > 0) recipe.doughballWeightOz = ballOz;
+  const perTray = Math.round(coerceNum(raw.doughballsPerTray, 0));
+  if (perTray > 0) recipe.doughballsPerTray = perTray;
   if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
   return recipe;
 }
@@ -242,6 +250,7 @@ export function namedRecipeFromDraft(draft: {
   brand?: string;
   flavors?: ReadonlyArray<string>;
   doughballWeightOz?: number;
+  doughballsPerTray?: number;
 }): NamedRecipe | null {
   const name = draft.name.trim();
   if (!name) return null;
@@ -259,6 +268,7 @@ export function namedRecipeFromDraft(draft: {
     brand: draft.brand ?? "",
     flavors: draft.flavors ?? [],
     doughballWeightOz: draft.doughballWeightOz,
+    doughballsPerTray: draft.doughballsPerTray,
   });
 }
 
@@ -354,6 +364,40 @@ export function fillNamedRecipeDoughballWeights(
     if (oz === undefined) continue;
     if ((r.doughballWeightOz ?? 0) > 0) continue;
     changed.push({ ...r, doughballWeightOz: oz });
+  }
+  return changed;
+}
+
+/**
+ * Backfill doughballs-per-tray onto EXISTING pool dough recipes from what a
+ * spec import just learned, without ever fighting a manager's explicit value:
+ * only recipes whose per-tray count is unset/0 adopt the learned count.
+ * Matching is by recipe NAME (case-insensitive). Returns ONLY the recipes that
+ * changed so the caller can save just those. Pure — mirrors
+ * fillNamedRecipeDoughballWeights.
+ */
+export function fillNamedRecipeDoughballsPerTray(
+  recipes: ReadonlyArray<NamedRecipe>,
+  traysByName: ReadonlyMap<string, number> | Record<string, number>,
+): NamedRecipe[] {
+  const trays = new Map<string, number>();
+  const entries =
+    traysByName instanceof Map
+      ? traysByName.entries()
+      : Object.entries(traysByName);
+  for (const [name, count] of entries) {
+    const key = (name ?? "").trim().toLowerCase();
+    const n = Math.round(count);
+    if (!key || !Number.isFinite(n) || n <= 0) continue;
+    trays.set(key, n);
+  }
+  if (trays.size === 0) return [];
+  const changed: NamedRecipe[] = [];
+  for (const r of recipes) {
+    const n = trays.get(r.name.trim().toLowerCase());
+    if (n === undefined) continue;
+    if ((r.doughballsPerTray ?? 0) > 0) continue;
+    changed.push({ ...r, doughballsPerTray: n });
   }
   return changed;
 }

@@ -42,6 +42,9 @@ export const doughRecipesTable = pgTable(
     // weight"); 0 = unknown. ADDITIVE with a default so the change is
     // push-force-safe on the populated table.
     doughballWeightOz: doublePrecision("doughball_weight_oz").notNull().default(0),
+    // How many doughballs fit on one tray (spec sheet "doughballs per tray");
+    // 0 = unknown. ADDITIVE with a default so the change is push-force-safe.
+    doughballsPerTray: doublePrecision("doughballs_per_tray").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

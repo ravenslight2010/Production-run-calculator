@@ -1183,6 +1183,7 @@ export async function commitSpecImport(
         name: r.name,
         components: (r.components ?? []).map((c) => ({ ingredient: c.ingredient, lbs: c.lbs })),
         doughballWeightOz: r.doughballWeightOz,
+        doughballsPerTray: r.doughballsPerTray,
       }));
       applyParsed = linkSpecImportNamedRecipesToExisting(
         applyParsed,

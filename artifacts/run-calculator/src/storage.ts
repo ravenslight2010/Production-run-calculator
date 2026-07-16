@@ -756,6 +756,8 @@ export interface NamedRecipePoolPatch {
   rows: { ingredient: string; lbs: number }[];
   /** Dough only: target doughball weight in oz (> 0 = known). */
   doughballWeightOz?: number;
+  /** Dough only: doughballs per tray (> 0 = known). */
+  doughballsPerTray?: number;
 }
 
 /**
@@ -805,9 +807,13 @@ export function refreshProfilesFromNamedRecipes(
       const wantWeight = kind === "dough" ? patch.doughballWeightOz ?? 0 : 0;
       const weightDiffers =
         wantWeight > 0 && Number(obj.targetDoughballWeight ?? 0) !== wantWeight;
-      if (!rowsDiffer && !weightDiffers) continue;
+      const wantTray = kind === "dough" ? patch.doughballsPerTray ?? 0 : 0;
+      const trayDiffers =
+        wantTray > 0 && Number(obj.doughballsPerTray ?? 0) !== wantTray;
+      if (!rowsDiffer && !weightDiffers && !trayDiffers) continue;
       if (rowsDiffer) obj[rowsField] = patch.rows.map((r) => ({ ...r }));
       if (weightDiffers) obj.targetDoughballWeight = wantWeight;
+      if (trayDiffers) obj.doughballsPerTray = wantTray;
       localStorage.setItem(k, JSON.stringify(obj));
       markProfileEdited(k.slice(prefix.length));
       const rest = k.slice(prefix.length);
@@ -2822,6 +2828,7 @@ export type SpecImportServerPoolRecipe = {
   name: string;
   components: RecipeRow[];
   doughballWeightOz?: number;
+  doughballsPerTray?: number;
 };
 
 export function applySpecImport(
@@ -3126,6 +3133,12 @@ export function applySpecImport(
           : Number(poolEntryFor("dough", dName)?.doughballWeightOz ?? 0);
         if (w > 0 && !(Number(values.targetDoughballWeight ?? 0) > 0)) {
           values.targetDoughballWeight = w;
+        }
+        // Same pool hydration for doughballs-per-tray (local presets don't
+        // carry it — it lives only on the server pool recipe).
+        const perTray = Number(poolEntryFor("dough", dName)?.doughballsPerTray ?? 0);
+        if (perTray > 0 && !(Number(values.doughballsPerTray ?? 0) > 0)) {
+          values.doughballsPerTray = perTray;
         }
       }
     }

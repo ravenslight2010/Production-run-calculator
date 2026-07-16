@@ -1,6 +1,6 @@
 ---
-name: Doughball weight on server dough pool
-description: doughballWeightOz travels with the server dough recipe pool; import wins over blank, never clobbers a manager-typed positive weight.
+name: Doughball weight + per-tray on server dough pool
+description: doughballWeightOz AND doughballsPerTray travel with the server dough recipe pool; import wins over blank, never clobbers a manager-typed positive value.
 ---
 
 # Doughball weight in the server dough pool
@@ -15,3 +15,5 @@ Flow: spec import writes the weight into the dough preset → web push to server
 - Backfill NEVER overrides an existing positive weight (manager-typed wins); it only fills unset/0. Keep that invariant in any new write path.
 - The 0-sentinel in the DB means "unset" — treat 0 as absent everywhere (API mapping, normalize, form self-heal guard).
 - Deferred: a full round-trip regression test (import → server save → fresh fetch → dough pick hydrates form) is not yet written; unit coverage exists in the named-recipes lib.
+
+**doughballsPerTray mirrors this exactly** (int > 0, `doughballs_per_tray` col, `fillNamedRecipeDoughballsPerTray`, `traysByName` 5th param, `tags.doughTrays` on the push path). Backfill order is sequential tags → weights → trays with family-guard remap; any NEW per-recipe scalar added to the pool must follow the same pattern at ALL the weight call sites (pick hydration, pool-change snapshot fan-out, drift check, promote, self-heal, phantom-name heal, spec-import commit + applySpecImport hydration) — miss one and devices drift.

@@ -28,6 +28,7 @@ function toApiItem(row: DoughRecipeRow): NamedRecipe {
     flavors: row.flavors ?? [],
   };
   if ((row.doughballWeightOz ?? 0) > 0) item.doughballWeightOz = row.doughballWeightOz;
+  if ((row.doughballsPerTray ?? 0) > 0) item.doughballsPerTray = row.doughballsPerTray;
   return item;
 }
 
@@ -42,6 +43,7 @@ function toDbValues(item: NamedRecipe) {
     brand: item.brand ?? "",
     flavors: item.flavors ?? [],
     doughballWeightOz: item.doughballWeightOz ?? 0,
+    doughballsPerTray: item.doughballsPerTray ?? 0,
     updatedAt: new Date(),
   };
 }
@@ -105,6 +107,7 @@ router.post(
                 brand: values.brand,
                 flavors: values.flavors,
                 doughballWeightOz: values.doughballWeightOz,
+                doughballsPerTray: values.doughballsPerTray,
                 updatedAt: values.updatedAt,
               },
             });
