@@ -270,7 +270,7 @@ export default function MixesManager({
                               <button
                                 type="button"
                                 onClick={() => toggleMix(mix.id)}
-                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left border ${
+                                className={`w-full flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 rounded-md text-left border ${
                                   expanded
                                     ? "border-primary/50 bg-primary/10"
                                     : "border-transparent hover:bg-muted/40"
@@ -281,23 +281,22 @@ export default function MixesManager({
                                 ) : (
                                   <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
                                 )}
-                                <span className="text-xs font-medium truncate">
+                                <span className="flex-1 min-w-0 text-xs font-medium truncate">
                                   {mix.name || "Unnamed mix"}
                                 </span>
-                                {mix.flavor && (
-                                  <span className="text-[11px] text-muted-foreground truncate">
-                                    {mix.flavor}
-                                  </span>
-                                )}
-                                <span className="flex-1" />
                                 {!mix.enabled && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
                                     Off
                                   </span>
                                 )}
                                 {mix.batchSize > 0 && (
                                   <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                                     {mix.batchSize} lbs
+                                  </span>
+                                )}
+                                {mix.flavor && (
+                                  <span className="ml-5 sm:ml-0 max-w-full min-w-0 text-[11px] text-muted-foreground truncate sm:max-w-[14rem]">
+                                    {mix.flavor}
                                   </span>
                                 )}
                               </button>

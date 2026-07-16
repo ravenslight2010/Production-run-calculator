@@ -181,7 +181,7 @@ export default function NamedRecipesManager({
                       <button
                         type="button"
                         onClick={() => toggleRecipe(recipe.id)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left border ${
+                        className={`w-full flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 rounded-md text-left border ${
                           expanded
                             ? "border-primary/50 bg-primary/10"
                             : "border-border/60 hover:bg-muted/40"
@@ -192,26 +192,25 @@ export default function NamedRecipesManager({
                         ) : (
                           <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
                         )}
-                        <span className="text-xs font-medium truncate">
+                        <span className="flex-1 min-w-0 text-xs font-medium truncate">
                           {recipe.name || "Unnamed recipe"}
                         </span>
-                        {recipe.brand && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary truncate max-w-[12rem] shrink-0">
-                            {recipe.brand}
-                            {recipe.flavors.length > 0
-                              ? ` — ${recipe.flavors.join(", ")}`
-                              : " — all varieties"}
-                          </span>
-                        )}
-                        <span className="flex-1" />
                         {!recipe.enabled && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
                             Off
                           </span>
                         )}
                         {recipe.components.length > 0 && (
                           <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                             {recipe.components.length} ing
+                          </span>
+                        )}
+                        {recipe.brand && (
+                          <span className="ml-5 sm:ml-0 max-w-full min-w-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary truncate sm:max-w-[14rem]">
+                            {recipe.brand}
+                            {recipe.flavors.length > 0
+                              ? ` — ${recipe.flavors.join(", ")}`
+                              : " — all varieties"}
                           </span>
                         )}
                       </button>
