@@ -21,6 +21,7 @@ import {
   type NamedRecipe,
   type NamedRecipeTag,
 } from "@workspace/named-recipes";
+import { findSpecImportNamedRecipeFamilyMatch } from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
 
 export type NamedRecipeKind = "dough" | "sauce";
@@ -74,7 +75,18 @@ export async function addNamedRecipesToServerIfAbsent(
   weightsByName?: ReadonlyMap<string, number>,
 ): Promise<{ added: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
-  const { merged, added } = addNamedRecipesIfAbsentByName(existing, candidates);
+  // Family guard — the last line of defense for EVERY pool write path (spec
+  // import, local→server migration/push): a candidate whose name is only a
+  // variant of an existing pool recipe ("Thick CRB recipe" vs "CRB Dough",
+  // "Lucia's" vs "Lucia Pizza Sauce") must NEVER mint a duplicate. Import-side
+  // link passes normally catch these; this guard catches anything that slips
+  // through (e.g. stale local presets pushed wholesale).
+  const existingNames = existing.map((r) => r.name);
+  const filtered = candidates.filter(
+    (c) =>
+      findSpecImportNamedRecipeFamilyMatch(kind, c.name ?? "", existingNames) === null,
+  );
+  const { merged, added } = addNamedRecipesIfAbsentByName(existing, filtered);
   const tagged =
     tagsByName && tagsByName.size > 0
       ? fillNamedRecipeTags(existing, tagsByName)

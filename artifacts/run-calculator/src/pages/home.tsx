@@ -23,6 +23,7 @@ import {
   RETIRED_PEP_TYPES,
   INGREDIENT_RENAMES,
   DIE_TYPE_RENAMES,
+  canonicalDieTypeName,
   DEFAULT_DIE_TYPES,
   CIRCLES_KEY,
   DEFAULT_CIRCLES,
@@ -5902,7 +5903,7 @@ export default function Home() {
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
         .filter(t => !RETIRED_PEP_TYPES.includes(t));
       mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
-      const cleanedRemoteDie = (payload.dieTypes ?? []).map(t => DIE_TYPE_RENAMES[t] ?? t);
+      const cleanedRemoteDie = (payload.dieTypes ?? []).map(t => canonicalDieTypeName(t));
       mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, cleanedRemoteDie, setDieTypes, "dieTypes", false);
       // Editable packaging lists: same non-merge-aware union as die types.
       mergeList(CIRCLES_KEY, DEFAULT_CIRCLES, payload.circles, setCircles, "circles", false);

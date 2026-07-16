@@ -584,7 +584,10 @@ export function specImportCheeseRecipeIsMix(
   if (!t) return false;
   if (/cheese/i.test(t)) return false;
   if (userMixNamesLower.has(t)) return true;
-  return ingredientCount >= 2 && /\bmix\b/.test(t);
+  // "Blend" counts the same as "Mix": sheets name pre-blended topping mixes
+  // either way ("White Fajita Mix", "Red Fajita Blend") — a cheese-less
+  // multi-ingredient blend belongs on the Mixes screen, not in Cheese.
+  return ingredientCount >= 2 && /\b(?:mix|blend)\b/.test(t);
 }
 
 /**
@@ -939,6 +942,71 @@ export function findSpecImportDoughFamilyMatch(
   return best && !ambiguous ? best.name : null;
 }
 
+// Generic sauce words carrying no identity of their own for family matching.
+// ("pizza" is already dropped by the loose key's filler set, listed for
+// clarity.) Deliberately NOT reused for dough — the two lists differ.
+const SAUCE_FAMILY_GENERIC_TOKENS = new Set([
+  "sauce",
+  "sauces",
+  "recipe",
+  "recipes",
+  "pizza",
+  "frontline",
+]);
+
+// Distinctive-token SET key for a sauce name: loose key minus generic sauce
+// words, each token possessive/plural-folded (trailing "s" on 3+ chars, same
+// rule as specImportBrandMatchKey — "Lucia's" → "lucia"), deduped + sorted.
+function sauceFamilyKey(name: string): string {
+  const toks = specImportNameMatchKey(name)
+    .split(" ")
+    .filter((t) => t && !SAUCE_FAMILY_GENERIC_TOKENS.has(t))
+    .map((t) => (t.length >= 3 && /[a-z]s$/.test(t) ? t.slice(0, -1) : t));
+  return [...new Set(toks)].sort().join(" ");
+}
+
+/**
+ * Match a SAUCE name reference onto an existing pool recipe when their
+ * distinctive token sets are EXACTLY equal after dropping generic sauce words
+ * and folding possessives: "Lucia Recipe" / "Lucia's" → "Lucia Pizza Sauce"
+ * (all key to {lucia}). Unlike the dough matcher this requires set EQUALITY,
+ * never a subset — "Sweet n Sour Sauce" must NOT collapse onto "Sour Sauce".
+ * A name with no distinctive tokens ("Pizza Sauce") never matches; two
+ * DIFFERENT pool names sharing the key are ambiguous and match nothing. Pure.
+ */
+export function findSpecImportSauceFamilyMatch(
+  name: string,
+  existingNames: ReadonlyArray<string>,
+): string | null {
+  const key = sauceFamilyKey(name);
+  if (!key) return null;
+  let found: string | null = null;
+  for (const ex of existingNames) {
+    const exName = (ex ?? "").trim();
+    if (!exName || sauceFamilyKey(exName) !== key) continue;
+    if (found && specImportNameMatchKey(found) !== specImportNameMatchKey(exName)) {
+      return null; // two different pool recipes claim the key — ambiguous
+    }
+    found = found ?? exName;
+  }
+  return found;
+}
+
+/**
+ * Kind-aware family fallback shared by every dough/sauce "link to existing"
+ * pass: dough uses subset matching (one recipe per dough family), sauce uses
+ * strict distinctive-set equality. Pure.
+ */
+export function findSpecImportNamedRecipeFamilyMatch(
+  kind: "dough" | "sauce",
+  name: string,
+  existingNames: ReadonlyArray<string>,
+): string | null {
+  return kind === "dough"
+    ? findSpecImportDoughFamilyMatch(name, existingNames)
+    : findSpecImportSauceFamilyMatch(name, existingNames);
+}
+
 /**
  * Build a loose-key → EXACT existing-name map for a "link to existing" pass, with
  * an AMBIGUITY GUARD: if two genuinely DIFFERENT saved names collapse to the same
@@ -948,13 +1016,16 @@ export function findSpecImportDoughFamilyMatch(
  * for the user to resolve. (Duplicate saved entries of the SAME name, ci, are not
  * a conflict.) First distinct name otherwise wins. Pure.
  */
-function buildLinkKeyMap(names: ReadonlyArray<string>): Map<string, string> {
+function buildLinkKeyMap(
+  names: ReadonlyArray<string>,
+  keyOf: (name: string) => string = specImportNameMatchKey,
+): Map<string, string> {
   const byKey = new Map<string, string>();
   const ambiguous = new Set<string>();
   for (const n of names) {
     const name = (n ?? "").trim();
     if (!name) continue;
-    const key = specImportNameMatchKey(name);
+    const key = keyOf(name);
     if (!key) continue;
     const prior = byKey.get(key);
     if (prior === undefined) byKey.set(key, name);
@@ -1062,7 +1133,14 @@ export function linkSpecImportNamedRecipesToExisting(
   const recipes = (parsed.recipes ?? []).map((r) => {
     const name = (r.name ?? "").trim();
     if (r.kind !== kind || !name) return r;
-    const existing = matchCleaned(name);
+    // Sauce-only: family fallback applies to the RECIPES too — an imported
+    // "Lucia Recipe" sauce with rows should UPDATE the existing family recipe
+    // ("Lucia Pizza Sauce"), never fork a duplicate next to it. Dough recipes
+    // deliberately keep a variant name they arrive under (the profile tie to
+    // an incoming recipe must survive; see importedKindKeys below).
+    const existing =
+      matchCleaned(name) ??
+      (kind === "sauce" ? findSpecImportSauceFamilyMatch(name, existingNames) : null);
     if (!existing || existing === name) return r;
     changed = true;
     return { ...r, name: existing };
@@ -1084,15 +1162,11 @@ export function linkSpecImportNamedRecipesToExisting(
       const m = match(cand);
       if (m) return m;
     }
-    // Dough-only family fallback: a variant-qualified name ("CRB Heavy Plus
-    // recipe") snaps onto its base pool recipe ("CRB Dough") — the factory
-    // keeps ONE recipe per dough family; the qualifiers only locate the
-    // doughball weight on the mixing-procedure sheet.
-    if (kind === "dough") {
-      const fam = findSpecImportDoughFamilyMatch(nm, existingNames);
-      if (fam) return fam;
-    }
-    return null;
+    // Family fallback: a variant-qualified dough name ("CRB Heavy Plus
+    // recipe") snaps onto its base pool recipe ("CRB Dough") — one recipe per
+    // dough family; a sauce reference ("Lucia Recipe") snaps onto the pool
+    // recipe with the identical distinctive-token set ("Lucia Pizza Sauce").
+    return findSpecImportNamedRecipeFamilyMatch(kind, nm, existingNames);
   };
   let profiles = parsed.profiles;
   {
@@ -1148,17 +1222,26 @@ export function parentheticalNameCandidates(name: string): string[] {
  * Only rewrites when a loose match exists; the first known name wins on a tie.
  * Pure and non-mutating — returns the SAME object when nothing changes.
  */
+export function specImportDieTypeMatchKey(die: string): string {
+  const key = specImportNameMatchKey(die);
+  if (!key) return "";
+  // "Dies"/"Die" is generic on a die-type name — sheets write `11" Dies`
+  // where the picklist keeps `11"`. Drop it unless the name is ONLY that word.
+  const kept = key.split(" ").filter((t) => t !== "die" && t !== "dies");
+  return kept.length ? kept.join(" ") : key;
+}
+
 export function linkSpecImportDieTypesToExisting(
   parsed: ParsedSpecImport,
   existingDieTypes: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const byKey = buildLinkKeyMap(existingDieTypes);
+  const byKey = buildLinkKeyMap(existingDieTypes, specImportDieTypeMatchKey);
   if (byKey.size === 0) return parsed;
   let changed = false;
   const profiles = (parsed.profiles ?? []).map((p) => {
     const die = (p.dieType ?? "").trim();
     if (!die) return p;
-    const existing = byKey.get(specImportNameMatchKey(die));
+    const existing = byKey.get(specImportDieTypeMatchKey(die));
     if (!existing || existing === die) return p;
     changed = true;
     return { ...p, dieType: existing };

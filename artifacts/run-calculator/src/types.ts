@@ -507,7 +507,17 @@ export const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
 export const DIE_TYPE_RENAMES: Record<string, string> = {
   "11": '11"',
   '11" dies': '11"',
+  '12': '12"',
+  '12" dies': '12"',
 };
+// Case-insensitive rename lookup: sheets write '11" Dies' / '11" dies' / '11"'
+// for the same physical die; the map keys are lowercase, so always fold case
+// before looking up. Returns the canonical name (or the input unchanged).
+export function canonicalDieTypeName(name: string): string {
+  const t = (name ?? "").trim();
+  if (!t) return t;
+  return DIE_TYPE_RENAMES[t.toLowerCase()] ?? DIE_TYPE_RENAMES[t] ?? t;
+}
 
 export const DIE_TYPES_KEY = "run-calc-die-types";
 export const DEFAULT_DIE_TYPES: string[] = [];

@@ -37,6 +37,7 @@ import {
   PEP_TYPE_RENAMES,
   INGREDIENT_RENAMES,
   DIE_TYPE_RENAMES,
+  canonicalDieTypeName,
   RETIRED_PEP_TYPES,
   CHEESE_INGREDIENTS_KEY,
   DEFAULT_CHEESE_INGREDIENTS,
@@ -328,8 +329,9 @@ function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
   // Fold variant die-type spellings (e.g. "11" / "11" dies" → "11"") so a saved
   // run/profile still matches the single canonical option in the picker.
   const die = o.dieType;
-  if (typeof die === "string" && DIE_TYPE_RENAMES[die]) {
-    (o as Record<string, unknown>).dieType = DIE_TYPE_RENAMES[die];
+  if (typeof die === "string") {
+    const canon = canonicalDieTypeName(die);
+    if (canon !== die) (o as Record<string, unknown>).dieType = canon;
   }
   normalizePackagingFields(o);
   normalizeIngredientFields(o);
@@ -2614,7 +2616,7 @@ export function healDieTypesFromProfiles(extra: string[] = []): string[] {
   const seen = new Set<string>();
   const canon: string[] = [];
   for (const name of raw) {
-    const renamed = DIE_TYPE_RENAMES[name] ?? name;
+    const renamed = canonicalDieTypeName(name);
     const lower = renamed.toLowerCase();
     if (seen.has(lower)) continue;
     seen.add(lower);
