@@ -122,6 +122,90 @@ describe("applySpecImport library-row hydration for named dough/sauce", () => {
     expect(prof?.targetDoughballWeight).toBe(11);
   });
 
+  it("hydrates rows from the SERVER pool when this device has no local preset", () => {
+    applySpecImport(importWithSauce("Lucia Pizza Sauce"), undefined, {
+      sauce: [
+        {
+          name: "Lucia Pizza Sauce",
+          components: [
+            { ingredient: "Tomato Paste", lbs: 30 },
+            { ingredient: "Water", lbs: 20 },
+          ],
+        },
+      ],
+    });
+    const prof = loadProfile("Corner Booth", "BBQ CHICKEN");
+    expect(prof?.frontlineRecipeName).toBe("Lucia Pizza Sauce");
+    expect(prof?.frontlineRecipe).toEqual([
+      { ingredient: "Tomato Paste", lbs: 30 },
+      { ingredient: "Water", lbs: 20 },
+    ]);
+  });
+
+  it("hydrates dough rows + doughball weight from the server pool", () => {
+    applySpecImport(
+      {
+        profiles: [
+          {
+            brand: "Corner Booth",
+            flavor: "BBQ CHICKEN",
+            doughName: "CRB Dough",
+            sauceOzPerPizza: 4,
+            applicators: [{ type: "Chicken", ozPerPizza: 3 }],
+            pepperonis: [],
+          },
+        ],
+        recipes: [],
+      },
+      undefined,
+      {
+        dough: [
+          {
+            name: "CRB Dough",
+            components: [{ ingredient: "Flour", lbs: 100 }],
+            doughballWeightOz: 19,
+          },
+        ],
+      },
+    );
+    const prof = loadProfile("Corner Booth", "BBQ CHICKEN");
+    expect(prof?.doughRecipeName).toBe("CRB Dough");
+    expect(prof?.doughRecipe).toEqual([{ ingredient: "Flour", lbs: 100 }]);
+    expect(prof?.targetDoughballWeight).toBe(19);
+  });
+
+  it("snaps a variant spec dough name onto the pool family spelling (no phantom option)", () => {
+    applySpecImport(
+      {
+        profiles: [
+          {
+            brand: "Corner Booth",
+            flavor: "BBQ CHICKEN",
+            doughName: '11" CRB recipe',
+            sauceOzPerPizza: 4,
+            applicators: [{ type: "Chicken", ozPerPizza: 3 }],
+            pepperonis: [],
+          },
+        ],
+        recipes: [],
+      },
+      undefined,
+      {
+        dough: [
+          {
+            name: "CRB Dough",
+            components: [{ ingredient: "Flour", lbs: 100 }],
+            doughballWeightOz: 19,
+          },
+        ],
+      },
+    );
+    const prof = loadProfile("Corner Booth", "BBQ CHICKEN");
+    expect(prof?.doughRecipeName).toBe("CRB Dough");
+    expect(prof?.doughRecipe).toEqual([{ ingredient: "Flour", lbs: 100 }]);
+    expect(loadList("run-calc-dough-recipe-names", [])).not.toContain('11" CRB recipe');
+  });
+
   it("does not clobber a profile's existing mixed sauce rows with library rows", () => {
     saveProfile("Corner Booth", "BBQ CHICKEN", {
       ...DEFAULT_VALUES,

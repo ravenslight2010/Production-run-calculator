@@ -90,7 +90,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -2812,11 +2812,59 @@ export type SpecImportRecipePlaceholder = {
   flavor: string;
 };
 
+/**
+ * A dough/sauce recipe from the SERVER pool, passed into applySpecImport by
+ * the commit glue (which fetched the live pools for its relink/placeholder
+ * passes anyway). Shape mirrors @workspace/named-recipes' NamedRecipe fields
+ * used here, kept structural so storage.ts stays free of that dependency.
+ */
+export type SpecImportServerPoolRecipe = {
+  name: string;
+  components: RecipeRow[];
+  doughballWeightOz?: number;
+};
+
 export function applySpecImport(
   parsed: ParsedSpecImport,
   out?: { recipePlaceholders?: SpecImportRecipePlaceholder[] },
+  serverPools?: {
+    dough?: SpecImportServerPoolRecipe[];
+    sauce?: SpecImportServerPoolRecipe[];
+  },
 ): Array<{ brand: string; flavor: string }> {
   if (typeof localStorage === "undefined") return [];
+
+  // ── Server-pool lookups (dough/sauce master-data lives server-side) ──
+  // Local presets only mirror recipes this device saved; a profile can point
+  // at a pool recipe (e.g. "CRB Dough") this device has never touched. The
+  // commit glue passes the freshly fetched pools so name snapping and row
+  // hydration below see the same universe the placeholder suppression does.
+  // Best-effort: when the pools are absent (offline / test), everything falls
+  // back to local-preset behavior.
+  const poolFor = (kind: "dough" | "sauce"): SpecImportServerPoolRecipe[] =>
+    (kind === "dough" ? serverPools?.dough : serverPools?.sauce) ?? [];
+  const poolEntryFor = (
+    kind: "dough" | "sauce",
+    name: string,
+  ): SpecImportServerPoolRecipe | undefined =>
+    poolFor(kind).find((r) => specImportNamedRecipeNamesEqual(r.name, name));
+  // Snap a spec-named dough/sauce onto the EXISTING pool spelling: exact
+  // (loose-equal) match first, then the family match ("11\" CRB recipe" →
+  // "CRB Dough"). Registering the raw spec name while suppression
+  // family-matched it is exactly how phantom dropdown names were minted —
+  // a name in the option list that no recipe anywhere backs.
+  const snapToPoolName = (kind: "dough" | "sauce", name: string): string => {
+    const t = name.trim();
+    if (!t) return t;
+    const exact = poolEntryFor(kind, t);
+    if (exact) return exact.name;
+    const family = findSpecImportNamedRecipeFamilyMatch(
+      kind,
+      t,
+      poolFor(kind).map((r) => r.name),
+    );
+    return family ?? t;
+  };
 
   // ── Un-tombstone anything the user chose to re-include ──
   // A profile/recipe reaching apply was explicitly kept in the review. If it had
@@ -3005,7 +3053,7 @@ export function applySpecImport(
     // pull it as-is by name. Never clobber an existing mixed sauce recipe or a
     // name the user already set; a sauce-recipe tie later in this import still
     // overwrites (correctly) via the recipe apply loop below.
-    const specSauceName = (p.sauceName ?? "").trim();
+    const specSauceName = snapToPoolName("sauce", (p.sauceName ?? "").trim());
     if (specSauceName) {
       // Register the bought/ready-made sauce name as a selectable Sauce Recipe
       // option regardless of whether this profile keeps it — otherwise the name
@@ -3031,8 +3079,12 @@ export function applySpecImport(
     {
       const flName = (values.frontlineRecipeName ?? "").trim();
       if (flName && !(values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0)) {
+        // Local presets first, then the server pool — this device may never
+        // have saved the pool recipe locally (pool is factory master-data).
         const rows = existingRecipeRowsForImport("sauce", flName);
-        if (rows.length) values.frontlineRecipe = rows.map(r => ({ ...r }));
+        const poolRows = rows.length ? [] : (poolEntryFor("sauce", flName)?.components ?? []);
+        const src = rows.length ? rows : poolRows;
+        if (src.length) values.frontlineRecipe = src.map(r => ({ ...r }));
       }
     }
     // Named dough/crust from the spec sheet (e.g. "Ultra Thin Dough"): the
@@ -3041,7 +3093,7 @@ export function applySpecImport(
     // and a later dough-recipe import re-links rows/weights onto every profile
     // pointing at this name (see the name-match pass in the tie loop below).
     // Never clobber an existing dough recipe or a name the user already set.
-    const specDoughName = (p.doughName ?? "").trim();
+    const specDoughName = snapToPoolName("dough", (p.doughName ?? "").trim());
     if (specDoughName) {
       // Register the name as a selectable Dough Recipe option regardless of
       // whether this profile keeps it, and clear any delete/merge tombstone so
@@ -3061,11 +3113,17 @@ export function applySpecImport(
     {
       const dName = (values.doughRecipeName ?? "").trim();
       if (dName && !(values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0)) {
+        // Local presets first, then the server pool — this device may never
+        // have saved the pool recipe locally (pool is factory master-data).
         const rows = existingRecipeRowsForImport("dough", dName);
-        if (rows.length) values.doughRecipe = rows.map(r => ({ ...r }));
+        const poolEntry = rows.length ? undefined : poolEntryFor("dough", dName);
+        const src = rows.length ? rows : (poolEntry?.components ?? []);
+        if (src.length) values.doughRecipe = src.map(r => ({ ...r }));
         const presets = loadDoughRecipePresets();
         const pKey = Object.keys(presets).find(k => k.trim().toLowerCase() === dName.toLowerCase());
-        const w = pKey ? Number(presets[pKey]?.doughballWeightOz ?? 0) : 0;
+        const w = pKey
+          ? Number(presets[pKey]?.doughballWeightOz ?? 0)
+          : Number(poolEntryFor("dough", dName)?.doughballWeightOz ?? 0);
         if (w > 0 && !(Number(values.targetDoughballWeight ?? 0) > 0)) {
           values.targetDoughballWeight = w;
         }

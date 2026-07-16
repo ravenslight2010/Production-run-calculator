@@ -83,6 +83,7 @@ import {
   isNameDeleted,
   flavorNamespace,
   type SpecImportRecipePlaceholder,
+  type SpecImportServerPoolRecipe,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import {
@@ -1168,9 +1169,21 @@ export async function commitSpecImport(
   // here keeps the apply and the placeholder suppression below consistent —
   // otherwise suppression could strand a profile pointing at a name with no
   // backing recipe anywhere.
+  // The fetched pools are also handed to applySpecImport below: it snaps
+  // spec names onto pool spellings (no phantom dropdown names) and hydrates
+  // profile recipe rows from the pool when this device has no local preset.
+  const livePools: {
+    dough?: SpecImportServerPoolRecipe[];
+    sauce?: SpecImportServerPoolRecipe[];
+  } = {};
   for (const kind of ["dough", "sauce"] as const) {
     try {
       const livePool = await fetchNamedRecipes(kind);
+      livePools[kind] = livePool.map((r) => ({
+        name: r.name,
+        components: (r.components ?? []).map((c) => ({ ingredient: c.ingredient, lbs: c.lbs })),
+        doughballWeightOz: r.doughballWeightOz,
+      }));
       applyParsed = linkSpecImportNamedRecipesToExisting(
         applyParsed,
         kind,
@@ -1182,7 +1195,7 @@ export async function commitSpecImport(
   }
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
-  const touchedProfiles = applySpecImport(applyParsed, applyOut);
+  const touchedProfiles = applySpecImport(applyParsed, applyOut, livePools);
 
   // For the SERVER-POOL collects below only: backfill "who it goes to"
   // brand/flavor targets onto cheese-kind recipes that arrived unscoped, from

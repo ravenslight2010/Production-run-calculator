@@ -420,7 +420,7 @@ import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import { mergeSpecAliases, namedRecipeTagFromParsed, cleanSpecNamedRecipeName, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
+import { mergeSpecAliases, namedRecipeTagFromParsed, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
@@ -3618,6 +3618,104 @@ export default function Home() {
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { nameCleanupRef.current = false; });
   }, [canManageInventory, cycleCountQc]);
+
+  // One-time phantom-name heal: a dough/sauce name in the synced option list
+  // that NO recipe anywhere backs (no server-pool entry, no local preset
+  // rows) but that family-matches an existing pool recipe (e.g. a stray
+  // "11\" CRB recipe" next to the pool's "CRB Dough") was minted by earlier
+  // spec imports registering the raw spec name while placeholder suppression
+  // family-matched it. Merge each onto its pool family name — re-points
+  // profiles/runs and tombstones the old name so the sync union can't
+  // resurrect it. Manager-only, marker-guarded, re-armed on failure.
+  const phantomNameHealRef = useRef(false);
+  useEffect(() => {
+    if (phantomNameHealRef.current || !canManageInventory) return;
+    const MARKER = "run-calc-dough-sauce-phantom-names-heal-v1";
+    try {
+      if (localStorage.getItem(MARKER)) { phantomNameHealRef.current = true; return; }
+    } catch {}
+    phantomNameHealRef.current = true;
+    (async () => {
+      const affectedRunIds: string[] = [];
+      let mergedAny = false;
+      for (const kind of ["dough", "sauce"] as const) {
+        const pool = await fetchNamedRecipes(kind);
+        const poolNames = pool.map((r) => r.name);
+        const listKey = kind === "dough" ? DOUGH_RECIPE_NAMES_KEY : FRONTLINE_RECIPE_NAMES_KEY;
+        const names = loadList(listKey, []);
+        const presets = kind === "dough" ? loadDoughRecipePresets() : loadFrontlineRecipePresets();
+        const hasPresetRows = (n: string): boolean => {
+          const key = Object.keys(presets).find((k) => k.trim().toLowerCase() === n.trim().toLowerCase());
+          if (!key) return false;
+          const p = presets[key] as { rows?: unknown[] } | unknown[] | undefined;
+          const rows = Array.isArray(p) ? p : (p?.rows ?? []);
+          return rows.length > 0;
+        };
+        const map: Record<string, string> = {};
+        for (const n of names) {
+          const t = (n ?? "").trim();
+          if (!t) continue;
+          // Backed by the pool (loose-equal) or by local preset rows: keep.
+          if (poolNames.some((p) => specImportNamedRecipeNamesEqual(p, t))) continue;
+          if (hasPresetRows(t)) continue;
+          const family = findSpecImportNamedRecipeFamilyMatch(kind, t, poolNames);
+          if (family) map[t] = family;
+        }
+        if (Object.keys(map).length !== 0) {
+          affectedRunIds.push(...applyRecipeNameMerge(kind, map));
+          mergedAny = true;
+        }
+        // Hydrate saved profiles that point at this pool recipe by name but
+        // carry NO ingredient rows (imported before pool hydration existed —
+        // a re-import of the unchanged sheet is pruned, so it can't repair
+        // them). Fills only empty recipes; never touches rows with lbs > 0.
+        const nameField = kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
+        const rowsField = kind === "dough" ? "doughRecipe" : "frontlineRecipe";
+        for (const [brand, flavors] of Object.entries(loadBrandFlavors())) {
+          for (const flavor of flavors ?? []) {
+            const saved = loadProfile(brand, flavor);
+            if (!saved) continue;
+            const rec = saved as Record<string, unknown>;
+            const nm = String(rec[nameField] ?? "").trim();
+            if (!nm) continue;
+            const rows = (rec[rowsField] as Array<{ lbs?: unknown }> | undefined) ?? [];
+            if (rows.some((r) => Number(r?.lbs ?? 0) > 0)) continue;
+            const entry = pool.find((r) => specImportNamedRecipeNamesEqual(r.name, nm));
+            if (!entry || (entry.components ?? []).length === 0) continue;
+            rec[rowsField] = entry.components.map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+            if (kind === "dough") {
+              const w = Number(entry.doughballWeightOz ?? 0);
+              if (w > 0 && !(Number(rec.targetDoughballWeight ?? 0) > 0)) {
+                rec.targetDoughballWeight = w;
+              }
+            }
+            saveProfile(brand, flavor, saved);
+            mergedAny = true;
+          }
+        }
+      }
+      if (!mergedAny) return;
+      if (affectedRunIds.length > 0) {
+        const stamp = Date.now();
+        const upd = loadRunValuesUpdated();
+        for (const id of affectedRunIds) upd[id] = stamp;
+        saveRunValuesUpdated(upd);
+      }
+      refreshAfterMerge();
+      try {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {}
+    })()
+      .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
+      .catch(() => { phantomNameHealRef.current = false; });
+  }, [canManageInventory]);
 
   // Best-effort follow-through for the one-time mix-slot cleanup migration:
   // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
