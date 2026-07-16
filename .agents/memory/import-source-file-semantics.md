@@ -12,7 +12,7 @@ The user's mental model of how their upload files link together, and the improve
 - Desired import order: **1) spec sheets first → 2) dough & sauce → 3) cheese workbook & premix LAST**, so the messy abbreviated names in step 3 can be matched back to names the spec sheets already established (instead of creating mismatched duplicates).
 
 ## Per-file facts
-- **Dough sheet**: lists every pizza + the dough weight for it, so it already knows where it goes — but only for pizzas that exist in the spec sheet.
+- **Dough sheet ("… Dough Mixing Procedure" workbooks, e.g. CRB / Malted Barley)**: ALL real dough recipes come from these — spec sheets only name the dough. One workbook = ONE shared ingredient recipe (LBS column, maybe multi-batch "2 Bag/4 Bag/5 Bag" columns) used by MANY named dough variants. Variants are header lines of the form `Variant Name: flavor, flavor…` (e.g. "Lowe's CRB: Californian, Pepperoni…", "Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean", "Lowe's Thick Barley (Argus): Buffalo, Meat Lovers…"). Spec-sheet dough names ("CRB Heavy Plus recipe", "Thick Malted Barley recipe") map to those variant lines by loose name. Bottom of sheet: per-variant-group doughball table (OZ / LBS / YIELD / PER TRAY). Also contains numbered mixing-step text and revision stamps — not ingredients.
 - **Sauce sheet**: has no pizza list; spec sheets still reference the sauce by name, so sauce ties back purely by name.
 - **Premix sheet** (per-pizza AND per-batch columns):
   - **PER-PIZZA rows ≈ 98% match the spec sheet → these are the real MIXES.**
