@@ -3311,6 +3311,38 @@ export function buildProfileDoughGrounding(
   return buildNameGroundingCtx(grounding.sourceText, grounding.knownRecipeNames?.dough);
 }
 
+/**
+ * Deterministic dough-name backstop from the SHEET ITSELF: scan the grounding
+ * source cells for generic-crust wrapper cells ("Parbake crust (CRB Recipe -
+ * 12\" Dies)") whose parenthetical names a real dough, cleaned via
+ * cleanSpecDoughName. The parse model has been seen extracting the die size
+ * from such a row while omitting `doughName` entirely, silently leaving every
+ * profile with no dough selected. Returns the single distinct cleaned name when
+ * the whole sheet unambiguously names ONE dough this way; returns "" when the
+ * sheet names none or several (never guesses between candidates). Pure.
+ */
+export function extractSheetCrustDoughName(
+  ctx: ProfileFlavorGroundingCtx | undefined,
+): string {
+  if (!ctx) return "";
+  const found = new Map<string, string>();
+  for (const cell of ctx.cells) {
+    const original = cell.original;
+    if (!/\(/.test(original)) continue;
+    const base = original
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!GENERIC_CRUST_BASE_RE.test(base)) continue;
+    const cleaned = cleanSpecDoughName(original);
+    if (!cleaned || cleaned === original) continue;
+    if (!/[a-z]/i.test(cleaned) || isGenericDoughName(cleaned)) continue;
+    const key = cleaned.toLowerCase();
+    if (!found.has(key)) found.set(key, cleaned);
+  }
+  return found.size === 1 ? [...found.values()][0] : "";
+}
+
 export type ProfileFlavorGroundResult =
   | { kind: "grounded" }
   | { kind: "snapped"; flavor: string }
@@ -3727,6 +3759,7 @@ export function sanitizeParsedSpecImport(
   const brandCtx = buildProfileBrandGrounding(grounding);
   const sauceCtx = buildProfileSauceGrounding(grounding);
   const doughCtx = buildProfileDoughGrounding(grounding);
+  const sheetCrustDoughName = extractSheetCrustDoughName(doughCtx);
   const groundingWarnings: SpecImportWarning[] = [];
 
   // Shared brand grounding backstop, used for PROFILE brands and RECIPE brand
@@ -3920,6 +3953,13 @@ export function sanitizeParsedSpecImport(
         }
       }
       profile.doughName = grounded;
+    }
+    if (!profile.doughName && sheetCrustDoughName) {
+      // Deterministic backstop: the parse model omitted `doughName` but the
+      // sheet's crust row unambiguously names exactly one dough (e.g. "Parbake
+      // crust (CRB Recipe - 12\" Dies)"). Backfill so profiles don't land with
+      // no dough selected.
+      profile.doughName = clampName(sheetCrustDoughName, lim.maxNameChars) || undefined;
     }
     // Allergen the sheet names for this product. Free-form so a NEW allergen
     // beyond egg/soy survives; "none"-style spellings and blanks are dropped

@@ -152,3 +152,4 @@
 - [Spec-import brand backfill](spec-import-brand-backfill.md) — unscoped parses get customer tags from the applicator grid (collect-only), unbranded pool rows heal on re-import, curated brands never re-scoped.
 - [Dough family collapse](dough-family-collapse.md) — ONE recipe per dough family; spec variant names ("CRB Heavy Plus") snap onto the base pool recipe, never minted as placeholders; dough-only matcher.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.
+- [Crust dough-name backstop](crust-dough-name-backstop.md) — AI can omit doughName from "Crust (X Recipe - dies)" rows; deterministic single-candidate backfill + library-row hydration on name-only imports.

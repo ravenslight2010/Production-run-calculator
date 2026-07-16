@@ -298,6 +298,9 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "'Ultra Thin Dough', a 'Dough'/'Crust' row or column naming one), capture that name " +
     "as the profile's `doughName` — even when this workbook carries no dough mixing " +
     "recipe, the name lets the app link the product to its dough recipe imported later. " +
+    "A crust row often embeds the dough name in a parenthetical — e.g. " +
+    "'Parbake Crust (CRB Recipe - 12\" Dies)' names the dough 'CRB Recipe' (the die " +
+    "size segment is not part of the name) — capture such names, do not treat them as generic. " +
     "Omit `doughName` when the sheet just says a generic 'dough'/'crust' without naming one. " +
     "This is read-only; the user reviews and can edit a summary before anything is saved.";
 

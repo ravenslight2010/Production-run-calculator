@@ -742,8 +742,11 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * v7: cheese-kind recipe rows are exempt from the oz→lbs conversion (their
  * lbs field carries per-pizza OUNCES by contract) — v6 parses baked in ÷16'd
  * mix/cheese amounts, so they must not be reused.
+ * v8: parse prompt now calls out parenthesized crust-row dough names
+ * ("Parbake Crust (CRB Recipe - 12\" Dies)") — v7 parses omitted `doughName`
+ * on such sheets, leaving profiles with no dough selected.
  */
-export const SPEC_PARSE_VERSION = "7";
+export const SPEC_PARSE_VERSION = "8";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
