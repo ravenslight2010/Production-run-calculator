@@ -6,14 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { SavedSpecSheetDataProfilesItem } from './savedSpecSheetDataProfilesItem';
-import type { SpecReconcileRecipe } from './specReconcileRecipe';
+import type { SavedSpecSheetDataRecipesItem } from './savedSpecSheetDataRecipesItem';
 
 /**
  * The canonicalized ParsedSpecImport snapshot captured at import time.
  */
 export interface SavedSpecSheetData {
   profiles?: SavedSpecSheetDataProfilesItem[];
-  recipes?: SpecReconcileRecipe[];
+  /** Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse. */
+  recipes?: SavedSpecSheetDataRecipesItem[];
   note?: string;
   [key: string]: unknown;
  }

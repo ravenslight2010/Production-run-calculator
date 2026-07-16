@@ -2963,14 +2963,7 @@ export const ListSpecSheetsResponse = zod.object({
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.object({
-  "kind": zod.enum(['dough', 'sauce', 'cheese']),
-  "name": zod.string(),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number()
-}))
-}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 }))
@@ -2987,14 +2980,7 @@ export const SaveSpecSheetBody = zod.object({
   "sourceHash": zod.string().optional().describe('Optional SHA-256 content fingerprint of the imported file bytes so a re-import of the exact same file can reuse this snapshot\'s parse instead of re-running the AI. Omitted by older\/mobile clients.'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.object({
-  "kind": zod.enum(['dough', 'sauce', 'cheese']),
-  "name": zod.string(),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number()
-}))
-}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 })
@@ -3008,14 +2994,7 @@ export const SaveSpecSheetResponse = zod.object({
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.object({
-  "kind": zod.enum(['dough', 'sauce', 'cheese']),
-  "name": zod.string(),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number()
-}))
-}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 }))
@@ -3038,14 +3017,7 @@ export const DeleteSpecSheetResponse = zod.object({
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
-  "recipes": zod.array(zod.object({
-  "kind": zod.enum(['dough', 'sauce', 'cheese']),
-  "name": zod.string(),
-  "rows": zod.array(zod.object({
-  "ingredient": zod.string(),
-  "lbs": zod.number()
-}))
-}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "recipes": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz \/ variantLabel \/ targets from snapshots and poisoned exact-file parse reuse.'),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
 }))

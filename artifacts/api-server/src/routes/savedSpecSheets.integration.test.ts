@@ -170,6 +170,31 @@ describe("saved-spec-sheets routes", () => {
     expect(sheets[0]?.data).toEqual(specData("12in dough"));
   });
 
+  it("preserves rich recipe fields (doughballOz, variantLabel, targets) on save — never strips to kind/name/rows", async () => {
+    // Regression: the generated Zod for a typed recipe object stripped every
+    // field except kind/name/rows, so snapshots lost doughball weights and
+    // variant labels — and exact-file parse reuse silently dropped dough
+    // variants on re-import. The save schema is free-form by contract.
+    const rich = {
+      note: "variants",
+      recipes: [
+        {
+          kind: "dough",
+          name: "CRB Dough",
+          rows: [{ ingredient: "FLOUR", lbs: 200 }],
+          doughballOz: 13,
+          doughballsPerTray: 12,
+          variantLabel: '11" CRB Recipe',
+          targets: [{ brand: "CRB", flavor: "Pepperoni" }],
+        },
+      ],
+    };
+    await save("rich sheet", rich);
+    const sheets = await list();
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0]?.data).toEqual(rich);
+  });
+
   it("keeps only the two most recent snapshots (newest first), pruning older ones", async () => {
     await save("first", specData("a"));
     await save("second", specData("b"));

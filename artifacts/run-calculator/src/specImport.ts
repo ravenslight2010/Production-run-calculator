@@ -746,8 +746,12 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * v8: parse prompt now calls out parenthesized crust-row dough names
  * ("Parbake Crust (CRB Recipe - 12\" Dies)") — v7 parses omitted `doughName`
  * on such sheets, leaving profiles with no dough selected.
+ * v9: saved-snapshot recipes were stripped to kind/name/rows by the server's
+ * generated Zod (doughballOz / variantLabel / targets lost), so v8 snapshots
+ * poison exact-file reuse — dough variants never reach the pool. The save
+ * schema is free-form now; old stripped snapshots must not be reused.
  */
-export const SPEC_PARSE_VERSION = "8";
+export const SPEC_PARSE_VERSION = "9";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file

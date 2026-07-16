@@ -15,3 +15,4 @@ description: Re-importing a byte-identical spec file must reuse the saved snapsh
 - Multi-file: hash BEFORE the parse loop — it releases buffers as it goes.
 - Server accepts only `^[0-9a-f]{64}$` for `sourceHash`; anything else is stored null (legacy/malformed never qualify for reuse).
 - Mobile clients don't send a hash yet; their snapshots simply aren't reusable (fine while parity is paused).
+- The snapshot SAVE contract must be free-form: generated Zod for a typed recipe object STRIPS unknown keys even with `additionalProperties: true` in the spec (Orval emits plain `zod.object`, no passthrough). v8 snapshots lost doughballOz/variantLabel/targets, so reuse silently dropped dough variants on re-import (v9 bump). Any field the reuse path needs must survive the save schema — keep `SavedSpecSheetData.recipes` items as bare `type: object, additionalProperties: true`, never a typed $ref.

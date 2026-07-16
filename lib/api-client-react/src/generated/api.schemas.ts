@@ -1091,12 +1091,15 @@ export interface SpecReconcileRecipe {
 
 export type SavedSpecSheetDataProfilesItem = { [key: string]: unknown };
 
+export type SavedSpecSheetDataRecipesItem = { [key: string]: unknown };
+
 /**
  * The canonicalized ParsedSpecImport snapshot captured at import time.
  */
 export interface SavedSpecSheetData {
   profiles?: SavedSpecSheetDataProfilesItem[];
-  recipes?: SpecReconcileRecipe[];
+  /** Full ParsedSpecImport recipe objects. Deliberately free-form (NOT SpecReconcileRecipe): the generated Zod for a typed object strips unknown keys, which silently dropped doughballOz / variantLabel / targets from snapshots and poisoned exact-file parse reuse. */
+  recipes?: SavedSpecSheetDataRecipesItem[];
   note?: string;
   [key: string]: unknown;
  }

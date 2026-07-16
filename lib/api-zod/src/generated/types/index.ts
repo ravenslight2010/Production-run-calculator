@@ -259,6 +259,7 @@ export * from './savedShippingGuideRowEntry';
 export * from './savedSpecSheet';
 export * from './savedSpecSheetData';
 export * from './savedSpecSheetDataProfilesItem';
+export * from './savedSpecSheetDataRecipesItem';
 export * from './savedSpecSheetList';
 export * from './saveFacilityKnowledgeInput';
 export * from './saveFillMissingValuesInput';

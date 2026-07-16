@@ -5077,8 +5077,14 @@ components:
             additionalProperties: true
         recipes:
           type: array
+          description: >-
+            Full ParsedSpecImport recipe objects. Deliberately free-form (NOT
+            SpecReconcileRecipe): the generated Zod for a typed object strips
+            unknown keys, which silently dropped doughballOz / variantLabel /
+            targets from snapshots and poisoned exact-file parse reuse.
           items:
-            $ref: "#/components/schemas/SpecReconcileRecipe"
+            type: object
+            additionalProperties: true
         note:
           type: string
 
