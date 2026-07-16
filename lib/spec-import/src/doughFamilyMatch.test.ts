@@ -86,6 +86,76 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
   });
 
+  it("collapses row-identical dough siblings onto the family a sibling matched (customer-only labels)", () => {
+    // One mixing table = one family: a yield row named ONLY after the customer
+    // ("Basha's Original") shares no token with "CRB Dough", but it carries the
+    // exact same ingredient rows as a sibling that DID match — it must become a
+    // variant of the same family, never a standalone dough recipe.
+    const rows = [
+      { ingredient: "Flour", lbs: 100 },
+      { ingredient: "Water", lbs: 60 },
+    ];
+    const parsed = {
+      profiles: [
+        {
+          brand: "Basha's",
+          flavor: "Cheese",
+          dieType: "11in",
+          applicators: [],
+          doughName: "Basha's Original",
+        },
+      ],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows, doughballOz: 9.6 },
+        { kind: "dough", name: "Basha's Original", rows, doughballOz: 8.6 },
+        { kind: "dough", name: "Lucia's New & Improved", rows, doughballOz: 8.25 },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB Dough"]);
+    expect(linked.recipes?.map((r) => r.name)).toEqual([
+      "CRB Dough",
+      "CRB Dough",
+      "CRB Dough",
+    ]);
+    expect(linked.recipes?.map((r) => r.variantLabel)).toEqual([
+      "Costco CRB",
+      "Basha's Original",
+      "Lucia's New & Improved",
+    ]);
+    // The profile's dough reference follows the collapse.
+    expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
+  });
+
+  it("leaves siblings alone when the row-identical group matched TWO different pool recipes", () => {
+    const rows = [{ ingredient: "Flour", lbs: 100 }];
+    const parsed = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows },
+        { kind: "dough", name: "Malted Barley Special", rows },
+        { kind: "dough", name: "Basha's Original", rows },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", [
+      "CRB Dough",
+      "Malted Barley Dough",
+    ]);
+    // Ambiguous group: the unmatched sibling keeps its own name.
+    expect(linked.recipes?.[2]?.name).toBe("Basha's Original");
+  });
+
+  it("does not collapse dough recipes with DIFFERENT ingredient rows", () => {
+    const parsed = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Costco CRB", rows: [{ ingredient: "Flour", lbs: 100 }] },
+        { kind: "dough", name: "Basha's Original", rows: [{ ingredient: "Semolina", lbs: 50 }] },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB Dough"]);
+    expect(linked.recipes?.[1]?.name).toBe("Basha's Original");
+  });
+
   it("does not family-collapse sauce names", () => {
     const sauceParsed = {
       profiles: [

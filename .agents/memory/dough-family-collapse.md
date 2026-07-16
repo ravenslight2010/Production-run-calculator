@@ -9,6 +9,7 @@ The factory keeps ONE dough recipe per family ("CRB Dough", "Malted Barley Dough
 
 **How to apply:**
 - `findSpecImportDoughFamilyMatch(name, existingNames)` in `@workspace/spec-import`: pool recipe matches when its distinctive tokens (loose key minus generic dough words + unit words; DIGITS stay distinctive) are a subset of the variant name's tokens. Most-specific wins; cross-family ambiguity → null. Dough-only — unsafe for sauce ("Sweet n Sour" vs "Sour").
+- Sibling collapse (customer-only labels): dough recipes in ONE import sharing an identical ingredient-row signature came from one mixing table; if any sibling matched exactly ONE pool recipe, the token-less siblings ("Basha's Original") follow it as variants (original name → variantLabel), and profile doughName refs follow via a recorded rename map. Two matched targets in a group = ambiguous, no-op.
 - Wired as last fallback in `linkSpecImportNamedRecipesToExisting` for BOTH profiles and RECIPES: an incoming variant dough recipe snaps onto the base name too, so the profile↔recipe tie survives and its rows/doughball weight fold into the family instead of being stranded under a name the pool guard drops.
 - Web commit path: re-runs the dough relink against the LIVE server pool before `applySpecImport` (prepare's pool fetch is best-effort), and the placeholder loop skips dough candidates that family-match the pool — keeps suppression and profile names consistent, no stranded references.
 - Web prepare: dough link universe = local presets ∪ server pool.

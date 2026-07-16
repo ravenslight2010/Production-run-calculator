@@ -1161,6 +1161,61 @@ export function linkSpecImportNamedRecipesToExisting(
     }
     return { ...r, name: existing };
   });
+  // DOUGH SIBLING COLLAPSE: dough recipes in ONE import that share identical
+  // ingredient rows came from ONE mixing table — they are variants of the same
+  // family even when a variant's label carries no family token (a yield row
+  // named only after the customer, "Basha's Original", shares nothing with
+  // "CRB Dough" so the name matchers above can't catch it). If the members of
+  // such a row-identical group resolved onto exactly ONE existing pool recipe,
+  // the unmatched siblings follow it as variants (original name kept as the
+  // variantLabel) instead of forking new standalone dough recipes. Two matched
+  // targets in one group is ambiguous — leave the group alone. Renames are
+  // recorded so profile doughName references follow (a profile can't re-derive
+  // a signature-based match by name).
+  const collapsedRenames = new Map<string, string>();
+  if (kind === "dough") {
+    const existingKeys = new Set(
+      existingNames.map((n) => specImportNameMatchKey(n ?? "")).filter(Boolean),
+    );
+    const rowSig = (r: (typeof recipes)[number]): string | null => {
+      const rows = r.rows ?? [];
+      if (!rows.length) return null;
+      return JSON.stringify(
+        rows.map((row) => [
+          specImportNameMatchKey(String(row.ingredient ?? "")),
+          row.lbs ?? null,
+        ]),
+      );
+    };
+    const targetBySig = new Map<string, string | null>(); // null = ambiguous
+    for (const r of recipes) {
+      if (r.kind !== kind) continue;
+      const name = (r.name ?? "").trim();
+      if (!name || !existingKeys.has(specImportNameMatchKey(name))) continue;
+      const sig = rowSig(r);
+      if (!sig) continue;
+      const prior = targetBySig.get(sig);
+      if (prior === undefined) targetBySig.set(sig, name);
+      else if (prior !== null && prior.toLowerCase() !== name.toLowerCase()) {
+        targetBySig.set(sig, null);
+      }
+    }
+    for (let i = 0; i < recipes.length; i++) {
+      const r = recipes[i]!;
+      if (r.kind !== kind) continue;
+      const name = (r.name ?? "").trim();
+      if (!name || existingKeys.has(specImportNameMatchKey(name))) continue;
+      const sig = rowSig(r);
+      const target = sig ? targetBySig.get(sig) : undefined;
+      if (!target || target === name) continue;
+      changed = true;
+      const key = specImportNameMatchKey(name);
+      if (key && !collapsedRenames.has(key)) collapsedRenames.set(key, target);
+      recipes[i] = r.variantLabel
+        ? { ...r, name: target }
+        : { ...r, name: target, variantLabel: name };
+    }
+  }
   // Loose keys of every recipe of this kind CARRIED BY THIS IMPORT (post-snap):
   // a profile whose name matches one of these keeps its name so the tie to the
   // incoming recipe survives.
@@ -1173,6 +1228,8 @@ export function linkSpecImportNamedRecipesToExisting(
   const matchProfileName = (nm: string): string | null => {
     const full = matchCleaned(nm);
     if (full) return full;
+    const collapsed = collapsedRenames.get(specImportNameMatchKey(nm));
+    if (collapsed) return collapsed;
     if (importedKindKeys.has(specImportNameMatchKey(nm))) return null;
     for (const cand of parentheticalNameCandidates(nm)) {
       const m = match(cand);
