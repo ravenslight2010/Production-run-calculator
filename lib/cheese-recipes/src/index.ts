@@ -393,14 +393,14 @@ export function fillCheeseRecipeTags(
   }
   let tagged = 0;
   const next = existing.map((r) => {
-    if (r.brand.trim()) return r;
+    if ((r.brand ?? "").trim()) return r;
     const d = byName.get(r.name.trim().toLowerCase());
     if (!d) return r;
     tagged++;
     return {
       ...r,
       brand: d.brand,
-      flavors: r.flavors.length ? r.flavors : d.flavors,
+      flavors: (r.flavors ?? []).length ? r.flavors : d.flavors,
     };
   });
   return { next, tagged };

@@ -123,8 +123,10 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     });
   });
 
-  it("suppresses the 'won't show on any product' nudge for a reused recipe", () => {
-    // A recipe with no brand/flavor attaches to nothing, so the nudge shows...
+  it("suppresses the shared-library attach note for a reused recipe", () => {
+    // A dough recipe with no brand/flavor is a shared-library save: it shows
+    // the neutral "saved to your library" note (dough/sauce attach by name
+    // later, so there is no scary "won't show" nudge for them)...
     const recipe: ParsedRecipe = {
       kind: "dough",
       name: "Sheet Dough",
@@ -132,13 +134,13 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     };
     renderDialog(makePrepared(recipe, []), () => {});
 
-    expect(screen.getByText(/Won't show on any product yet/)).toBeTruthy();
+    expect(screen.getByText(/Saved to your dough library/)).toBeTruthy();
 
-    // ...but once the user reuses an existing recipe, the nudge disappears.
+    // ...but once the user reuses an existing recipe, the note disappears.
     fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
       target: { value: "House Dough" },
     });
-    expect(screen.queryByText(/Won't show on any product yet/)).toBeNull();
+    expect(screen.queryByText(/Saved to your dough library/)).toBeNull();
   });
 
   it("keeps the flavor selector visible after a brand is chosen (does not vanish + attach to all)", () => {
@@ -160,8 +162,9 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
       () => {},
     );
 
-    // Starts in the "attaches to nothing" state with the flavor field visible.
-    expect(screen.getByText(/Won't show on any product yet/)).toBeTruthy();
+    // Starts in the "attaches to nothing" state (neutral library note for
+    // dough — dough/sauce attach by name later) with the flavor field visible.
+    expect(screen.getByText(/Saved to your dough library/)).toBeTruthy();
     expect(screen.getByTestId("spec-recipe-flavor-rk0")).toBeTruthy();
 
     // Type just a brand — it now matches all flavors of that brand.

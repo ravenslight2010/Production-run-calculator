@@ -356,7 +356,7 @@ export function fillSpecMixTags(
   }
   let tagged = 0;
   const next = existing.map((m) => {
-    if (m.brand.trim()) return m;
+    if ((m.brand ?? "").trim()) return m;
     const c = byKey.get(mixNameMatchKey(m.name));
     if (!c) return m;
     tagged++;
