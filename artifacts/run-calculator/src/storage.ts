@@ -804,12 +804,15 @@ export function refreshProfilesFromNamedRecipes(
         ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
         : [];
       const rowsDiffer = !recipeRowsEqual(curRows, patch.rows);
+      // Doughball weight + per-tray are PER-FLAVOR values (one dough family
+      // serves many flavors with different specs), so the pool value is
+      // backfill-only: fill a blank profile, never overwrite a set value.
       const wantWeight = kind === "dough" ? patch.doughballWeightOz ?? 0 : 0;
       const weightDiffers =
-        wantWeight > 0 && Number(obj.targetDoughballWeight ?? 0) !== wantWeight;
+        wantWeight > 0 && !(Number(obj.targetDoughballWeight ?? 0) > 0);
       const wantTray = kind === "dough" ? patch.doughballsPerTray ?? 0 : 0;
       const trayDiffers =
-        wantTray > 0 && Number(obj.doughballsPerTray ?? 0) !== wantTray;
+        wantTray > 0 && !(Number(obj.doughballsPerTray ?? 0) > 0);
       if (!rowsDiffer && !weightDiffers && !trayDiffers) continue;
       if (rowsDiffer) obj[rowsField] = patch.rows.map((r) => ({ ...r }));
       if (weightDiffers) obj.targetDoughballWeight = wantWeight;
@@ -3248,6 +3251,13 @@ export function applySpecImport(
     // that name gets its rows/weights (and the canonical spelling) attached
     // without the sheet having to restate the brand/flavor targets.
     let targets = [...recipeApplyTargets(r, applyProfilePool)];
+    // Profiles tied on by the NAME re-link below (rather than the recipe's own
+    // explicit spec targets). One dough family serves many flavors with
+    // DIFFERENT doughball weights / per-tray counts, and a re-import can carry
+    // several same-named family variants — a name-relinked profile must only
+    // have those values backfilled when blank, never overwritten by whichever
+    // variant happens to be processed last.
+    const nameRelinked = new Set<string>();
     if (r.kind === "dough" || r.kind === "sauce") {
       const nameField = r.kind === "dough" ? "doughRecipeName" : "frontlineRecipeName";
       const rNameKey = specImportNameMatchKey(r.name);
@@ -3266,6 +3276,7 @@ export function applySpecImport(
             // a name no recipe would ever carry.
             if (!nm || !specImportNamedRecipeNamesEqual(nm, r.name)) continue;
             seen.add(key);
+            nameRelinked.add(key);
             targets.push({ brand, flavor });
           }
         }
@@ -3340,11 +3351,22 @@ export function applySpecImport(
       if (r.kind === "dough") {
         values.doughRecipeName = r.name;
         values.doughRecipe = rows;
-        if (r.doughballOz != null) values.targetDoughballWeight = r.doughballOz;
+        // Weight/per-tray are PER-FLAVOR: only this recipe's own explicit spec
+        // targets take its values verbatim; a profile tied on by the name
+        // re-link keeps its existing values (backfill blank fields only).
+        const relinked = nameRelinked.has(`${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`);
+        if (r.doughballOz != null && (!relinked || !(Number(values.targetDoughballWeight ?? 0) > 0))) {
+          values.targetDoughballWeight = r.doughballOz;
+        }
         // Crusts-per-batch yield — fallback only; when the dough rows + doughball
         // weight are both present the run form derives the yield and zeroes this.
         if (r.doughBatchYield != null && r.doughBatchYield > 0) values.doughBatchYield = r.doughBatchYield;
-        if (r.doughballsPerTray != null && r.doughballsPerTray > 0) values.doughballsPerTray = r.doughballsPerTray;
+        if (
+          r.doughballsPerTray != null && r.doughballsPerTray > 0 &&
+          (!relinked || !(Number(values.doughballsPerTray ?? 0) > 0))
+        ) {
+          values.doughballsPerTray = r.doughballsPerTray;
+        }
       } else if (r.kind === "sauce") {
         values.frontlineRecipeName = r.name;
         values.frontlineRecipe = rows;

@@ -3344,12 +3344,11 @@ export default function Home() {
     const key = name.toLowerCase();
     const poolRows = serverDoughRowsByName.get(key);
     if (!poolRows) return null;
+    // Drift is ROWS-only: doughball weight + per-tray are per-flavor values
+    // (one dough family serves many flavors with different specs), so a form
+    // value differing from the pool's backfill copy is normal, not drift.
     const rowsDiffer = !recipeRowsEqual(v.doughRecipe ?? [], poolRows);
-    const formW = Number(v.targetDoughballWeight ?? 0);
-    const weightDiffers = formW > 0 && formW !== (serverDoughWeightByName.get(key) ?? 0);
-    const formTray = Number(v.doughballsPerTray ?? 0);
-    const trayDiffers = formTray > 0 && formTray !== (serverDoughTrayByName.get(key) ?? 0);
-    return rowsDiffer || weightDiffers || trayDiffers ? { name } : null;
+    return rowsDiffer ? { name } : null;
   })();
   const saucePoolDrift = (() => {
     const name = (v.frontlineRecipeName ?? "").trim();
@@ -6761,13 +6760,15 @@ export default function Home() {
         }
         formUpdated = true;
       }
+      // Weight/per-tray are per-flavor — pool values only fill a blank form,
+      // never overwrite a value the profile/operator already set.
       const wantW = hit.doughballWeightOz ?? 0;
-      if (kind === "dough" && wantW > 0 && Number(form.getValues("targetDoughballWeight") ?? 0) !== wantW) {
+      if (kind === "dough" && wantW > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) {
         form.setValue("targetDoughballWeight", wantW, { shouldDirty: true });
         formUpdated = true;
       }
       const wantTray = hit.doughballsPerTray ?? 0;
-      if (kind === "dough" && wantTray > 0 && Number(form.getValues("doughballsPerTray") ?? 0) !== wantTray) {
+      if (kind === "dough" && wantTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) {
         form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
         formUpdated = true;
       }
@@ -6806,10 +6807,14 @@ export default function Home() {
     const rows = normalizeRecipeRowsForCompare((kind === "dough" ? vals.doughRecipe : vals.frontlineRecipe) ?? []);
     const next: NamedRecipe = { ...target, components: rows };
     if (kind === "dough") {
+      // Weight/per-tray are per-flavor; the pool copy is backfill-only. Only
+      // seed it when the pool recipe has none — never replace it with this
+      // flavor's value (that would fan the wrong number out to other flavors'
+      // blank profiles).
       const w = Number(vals.targetDoughballWeight ?? 0);
-      if (w > 0) next.doughballWeightOz = w;
+      if (w > 0 && !(Number(target.doughballWeightOz ?? 0) > 0)) next.doughballWeightOz = w;
       const perTray = Number(vals.doughballsPerTray ?? 0);
-      if (perTray > 0) next.doughballsPerTray = perTray;
+      if (perTray > 0 && !(Number(target.doughballsPerTray ?? 0) > 0)) next.doughballsPerTray = perTray;
     }
     setPromotingRecipeKind(kind);
     try {
@@ -15777,10 +15782,13 @@ export default function Home() {
                           const rows = poolRows.map((row) => ({ ...row }));
                           form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows);
                         }
+                        // Weight/per-tray are per-flavor (one dough family, many
+                        // flavor specs) — the pool value only fills a blank field,
+                        // never overwrites the flavor's own value.
                         const ballOz = serverDoughWeightByName.get(key) ?? loadDoughRecipePresets()[val.trim()]?.doughballWeightOz ?? 0;
-                        if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
+                        if (ballOz > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
                         const perTray = serverDoughTrayByName.get(key) ?? 0;
-                        if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
+                        if (perTray > 0 && !(Number(form.getValues("doughballsPerTray") ?? 0) > 0)) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
                       }
                     }}
                   />

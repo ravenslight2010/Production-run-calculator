@@ -135,6 +135,83 @@ describe("later dough recipe import re-links by name", () => {
     }
   });
 
+  it("re-link NEVER overwrites a profile's existing doughball weight / per-tray (per-flavor values)", () => {
+    // Real prod failure: 5 dough spec variants collapsed onto one family name
+    // ("CRB Dough"); the re-link tied EVERY CRB profile onto each variant and
+    // the last variant's weight/per-tray clobbered all flavors' per-flavor
+    // values. Relinked profiles must be backfill-only.
+    saveBrandFlavors({ ...loadBrandFlavors(), Lowes: ["Pepperoni"] });
+    saveProfile("Lowes", "Pepperoni", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+      doughRecipeName: "Ultra Thin Dough",
+      targetDoughballWeight: 9,
+      doughballsPerTray: 30,
+    });
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Ultra Thin Dough",
+          brand: "Silverline",
+          flavor: "",
+          rows: DOUGH_ROWS,
+          doughballOz: 12,
+          doughballsPerTray: 24,
+        },
+      ],
+    } as unknown as ParsedSpecImport);
+    const prof = loadProfile("Lowes", "Pepperoni");
+    // Rows still attach; per-flavor numbers survive.
+    expect(prof?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(prof?.targetDoughballWeight).toBe(9);
+    expect(prof?.doughballsPerTray).toBe(30);
+  });
+
+  it("multiple same-named collapsed variants: each EXPLICIT target keeps its own variant's weight/per-tray", () => {
+    saveBrandFlavors({
+      ...loadBrandFlavors(),
+      CRB: ["Cheese", "Pepperoni"],
+    });
+    for (const flavor of ["Cheese", "Pepperoni"]) {
+      saveProfile("CRB", flavor, {
+        ...DEFAULT_VALUES,
+        dieType: "12 inch",
+        doughRecipeName: "CRB Dough",
+      });
+    }
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "CRB Dough",
+          brand: "CRB",
+          flavor: "Cheese",
+          rows: DOUGH_ROWS,
+          doughballOz: 10,
+          doughballsPerTray: 20,
+        },
+        {
+          kind: "dough",
+          name: "CRB Dough",
+          brand: "CRB",
+          flavor: "Pepperoni",
+          rows: DOUGH_ROWS,
+          doughballOz: 14,
+          doughballsPerTray: 16,
+        },
+      ],
+    } as unknown as ParsedSpecImport);
+    const cheese = loadProfile("CRB", "Cheese");
+    const pep = loadProfile("CRB", "Pepperoni");
+    expect(cheese?.targetDoughballWeight).toBe(10);
+    expect(cheese?.doughballsPerTray).toBe(20);
+    expect(pep?.targetDoughballWeight).toBe(14);
+    expect(pep?.doughballsPerTray).toBe(16);
+  });
+
   it("does not touch saved profiles pointing at a DIFFERENT dough name", () => {
     saveBrandFlavors({ ...loadBrandFlavors(), Lowes: ["Cheese"] });
     saveProfile("Lowes", "Cheese", {
