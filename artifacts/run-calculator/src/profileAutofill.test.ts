@@ -331,6 +331,75 @@ describe("buildProfileAutofillPlan", () => {
     expect(byField.get("doughBatchYield")).toBe(110);
   });
 
+  it("name-relinked variant rows never overwrite a non-blank doughball weight (last-variant-wins bug)", () => {
+    // A dough mixing sheet carries many same-named family variant rows. Only
+    // the row anchored to THIS brand may state the weight verbatim; rows tied
+    // on only by the name re-link are blank-fill-only — otherwise whichever
+    // variant is processed last (e.g. Lowe's 7 Inch, 5.7 oz) is offered as a
+    // bogus mismatch on a Corner Booth 8.25 oz profile.
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [
+          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Aldo's", doughballOz: 8.25, doughballsPerTray: 24 },
+          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Other Brand", doughballOz: 5.7, doughballsPerTray: 24 },
+        ],
+      })],
+      values({ doughRecipeName: "CRB Dough", targetDoughballWeight: 8.25 } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "targetDoughballWeight")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "targetDoughballWeight")).toBeUndefined();
+  });
+
+  it("an anchored variant row still overwrites an earlier relinked backfill (import ordering)", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [
+          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Other Brand", doughballOz: 5.7 },
+          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Aldo's", doughballOz: 8.25 },
+        ],
+      })],
+      values({ doughRecipeName: "CRB Dough" } as Partial<FormValues>),
+    );
+    expect(p.fills.find(f => f.field === "targetDoughballWeight")?.specValue).toBe(8.25);
+  });
+
+  it("dough-pool weight is variant-aware: ambiguous variants offer no weight, a die match offers its variant", () => {
+    const doughRecipes = [{
+      name: "CRB Dough",
+      brand: "Aldo's",
+      flavors: [],
+      doughballWeightOz: 13,
+      doughballVariants: [
+        { label: "Corner Booth", weightOz: 8.25, perTray: 24 },
+        { label: "Lowe's 7 Inch", weightOz: 5.7, perTray: 24 },
+        { label: "Hannaford", weightOz: 7.6, perTray: 24 },
+      ],
+    }];
+    // Die "12" matches no variant label → ambiguous → the recipe-level 13 oz
+    // must NOT surface as a mismatch against the profile's 8.25.
+    const ambiguous = buildProfileAutofillPlan({
+      sheets: [],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values({ doughRecipeName: "CRB Dough", dieType: '12"', targetDoughballWeight: 8.25 } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+      doughRecipes,
+    });
+    expect(ambiguous.mismatches.find(m => m.field === "targetDoughballWeight")).toBeUndefined();
+    expect(ambiguous.fills.find(f => f.field === "targetDoughballWeight")).toBeUndefined();
+    // Die "7" matches exactly one label → that variant's weight is offered.
+    const matched = buildProfileAutofillPlan({
+      sheets: [],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values({ doughRecipeName: "CRB Dough", dieType: '7"' } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+      doughRecipes,
+    });
+    expect(matched.fills.find(f => f.field === "targetDoughballWeight")?.specValue).toBe(5.7);
+    expect(matched.fills.find(f => f.field === "doughballsPerTray")?.specValue).toBe(24);
+  });
+
   it("does not tie an unanchored dough recipe to unrelated profiles", () => {
     const p = plan(
       [sheet(1, 100, {

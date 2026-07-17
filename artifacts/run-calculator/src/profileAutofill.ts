@@ -34,6 +34,7 @@ import {
   type ParsedRecipe,
   type ParsedSpecImport,
 } from "@workspace/spec-import";
+import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 import { latestSourceKeyIds } from "./savedSpecSheets";
 
@@ -115,6 +116,7 @@ export type DoughPoolRecipe = {
   brand?: string;
   flavors?: string[];
   doughballWeightOz?: number | null;
+  doughballVariants?: unknown;
   enabled?: boolean;
 };
 
@@ -320,25 +322,42 @@ function desiredFromDoughSauceRecipes(
     const nameField = r.kind === "dough" ? ("doughRecipeName" as const) : ("frontlineRecipeName" as const);
     const rKey = specImportNameMatchKey(rName);
     const curName = effectiveName(nameField);
-    const targeted =
-      recipeApplyTargets(r, pool).some(
-        (t) => t.brand.trim().toLowerCase() === b && t.flavor.trim().toLowerCase() === f,
-      ) ||
-      // Mirror the import's typo/possessive-tolerant name re-link (see the
-      // relink pass in storage.ts — "Aldo's Sauce" vs "ALDO PIZZA SAUCE").
-      (!!rKey && !!curName && specImportNamedRecipeNamesEqual(curName, rName));
-    if (!targeted) continue;
+    // The import distinguishes HOW a recipe ties on: its own explicit spec
+    // targets / brand anchors take doughball values verbatim, while a profile
+    // tied on only by the NAME re-link is blank-fill-only for weight/per-tray
+    // (one dough family serves many flavors with DIFFERENT doughball weights,
+    // and a sheet can carry several same-named variant rows — without this
+    // split, whichever variant is processed last wins, e.g. a Corner Booth
+    // profile offered the Lowe's 7 Inch 5.7 oz instead of its own 8.25).
+    const anchored = recipeApplyTargets(r, pool).some(
+      (t) => t.brand.trim().toLowerCase() === b && t.flavor.trim().toLowerCase() === f,
+    );
+    // Mirror the import's typo/possessive-tolerant name re-link (see the
+    // relink pass in storage.ts — "Aldo's Sauce" vs "ALDO PIZZA SAUCE").
+    const relinkOnly =
+      !anchored && !!rKey && !!curName && specImportNamedRecipeNamesEqual(curName, rName);
+    if (!anchored && !relinkOnly) continue;
+    // Effective value at tie time, mirroring the import's sequential apply:
+    // an earlier recipe in this same sheet may have already written the field.
+    const effectiveNum = (field: string): number => {
+      const prior = byField.get(field);
+      return prior ? Number(prior.value) : Number(cur[field] ?? 0);
+    };
     if (r.kind === "dough") {
       set("doughRecipeName", "Dough Recipe", rName, "name");
       // Import parity: storage writes targetDoughballWeight whenever the sheet
-      // states doughballOz at all (`!= null`), including an explicit 0.
-      if (r.doughballOz != null) {
+      // states doughballOz at all (`!= null`), including an explicit 0 — but a
+      // name-relinked tie only backfills when the value is still blank.
+      if (r.doughballOz != null && (anchored || !(effectiveNum("targetDoughballWeight") > 0))) {
         set("targetDoughballWeight", "Doughball Weight (oz)", r.doughballOz, "number");
       }
       if (r.doughBatchYield != null && r.doughBatchYield > 0) {
         set("doughBatchYield", "Dough Batch Yield (crusts)", r.doughBatchYield, "number");
       }
-      if (r.doughballsPerTray != null && r.doughballsPerTray > 0) {
+      if (
+        r.doughballsPerTray != null && r.doughballsPerTray > 0 &&
+        (anchored || !(effectiveNum("doughballsPerTray") > 0))
+      ) {
         set("doughballsPerTray", "Doughballs Per Tray", r.doughballsPerTray, "number");
       }
     } else {
@@ -454,6 +473,7 @@ function desiredFromDoughPool(
   flavor: string,
   current: FormValues,
   linkedName: string,
+  effectiveDieType: string,
 ): Map<string, Desired> {
   const b = brand.trim().toLowerCase();
   const f = flavor.trim().toLowerCase();
@@ -477,12 +497,33 @@ function desiredFromDoughPool(
     kind: "name",
     source,
   });
-  const wt = Number(chosen.doughballWeightOz ?? 0);
+  // Variant-aware weight, mirroring the run form / profile editor: a family
+  // recipe's variant list wins over the recipe-level number (die-size match,
+  // or the only variant). With several variants and no die match the weight
+  // is AMBIGUOUS — offer nothing rather than the recipe-level fallback, which
+  // belongs to no particular customer (e.g. CRB Dough's 13 oz would surface
+  // as a bogus mismatch on an 8.25 oz Corner Booth profile).
+  const variants = normalizeDoughballVariants(chosen.doughballVariants);
+  const matched = matchDoughballVariant(variants, { dieType: effectiveDieType });
+  const wt = matched
+    ? Number(matched.weightOz ?? 0)
+    : variants.length > 1
+      ? 0
+      : Number(chosen.doughballWeightOz ?? 0);
   if (wt > 0) {
     out.set("targetDoughballWeight", {
       field: "targetDoughballWeight",
       label: "Doughball Weight (oz)",
       value: wt,
+      kind: "number",
+      source,
+    });
+  }
+  if (matched && (matched.perTray ?? 0) > 0) {
+    out.set("doughballsPerTray", {
+      field: "doughballsPerTray",
+      label: "Doughballs Per Tray",
+      value: matched.perTray!,
       kind: "number",
       source,
     });
@@ -652,6 +693,9 @@ export function buildProfileAutofillPlan(opts: {
     flavor,
     current,
     linkedDoughName,
+    // Effective die type for the variant match: the form's value, else the die
+    // type the latest sheet states (a blank form should still match variants).
+    String(cur.dieType ?? "").trim() || String(decided.get("dieType")?.value ?? "").trim(),
   );
   const { cheese: cheeseDecided, mix: mixDecided } = desiredFromCheeseMixPools(
     opts.cheeseRecipes ?? [],

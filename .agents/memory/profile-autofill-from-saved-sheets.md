@@ -40,6 +40,16 @@ never fabricates a conflict. Backward compat: with no new sources the plan is
 byte-for-byte the old spec-only behavior. **Nothing auto-applies** — conflicts
 and mismatches are form-only until Save Setup; only `fills` seed the form.
 
+**Relink ties are blank-fill-only for doughball fields.** The import's
+`nameRelinked` guard means a dough recipe tied on ONLY by the name re-link
+backfills weight/per-tray when blank, never overwrites — a dough mixing sheet
+carries many same-named family variant rows, and without the split the LAST
+variant row wins (Corner Booth profile offered Lowe's 7 Inch 5.7 oz instead of
+its own 8.25). The planner mirrors this: anchored ties write verbatim,
+relink-only ties check the effective sequential value. The dough-POOL source is
+variant-aware too: die-match/single variant wins; multiple variants with no die
+match = ambiguous → offer NO weight (never the recipe-level number).
+
 **The import has TWO dough/sauce paths — mirror both.** Profile-level
 doughName/sauceName is only half the story: dough and sauce mostly arrive as
 RECIPES in the parsed data, tied to profiles by the import's recipe loop
