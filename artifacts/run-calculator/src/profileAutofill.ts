@@ -351,7 +351,10 @@ function desiredFromDoughSauceRecipes(
       if (r.doughballOz != null && (anchored || !(effectiveNum("targetDoughballWeight") > 0))) {
         set("targetDoughballWeight", "Doughball Weight (oz)", r.doughballOz, "number");
       }
-      if (r.doughBatchYield != null && r.doughBatchYield > 0) {
+      if (
+        r.doughBatchYield != null && r.doughBatchYield > 0 &&
+        (anchored || !(effectiveNum("doughBatchYield") > 0))
+      ) {
         set("doughBatchYield", "Dough Batch Yield (crusts)", r.doughBatchYield, "number");
       }
       if (

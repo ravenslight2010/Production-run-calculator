@@ -340,14 +340,16 @@ describe("buildProfileAutofillPlan", () => {
     const p = plan(
       [sheet(1, 100, {
         recipes: [
-          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Aldo's", doughballOz: 8.25, doughballsPerTray: 24 },
-          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Other Brand", doughballOz: 5.7, doughballsPerTray: 24 },
+          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Aldo's", doughballOz: 8.25, doughBatchYield: 620, doughballsPerTray: 24 },
+          { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Other Brand", doughballOz: 5.7, doughBatchYield: 898, doughballsPerTray: 24 },
         ],
       })],
-      values({ doughRecipeName: "CRB Dough", targetDoughballWeight: 8.25 } as Partial<FormValues>),
+      values({ doughRecipeName: "CRB Dough", targetDoughballWeight: 8.25, doughBatchYield: 620 } as Partial<FormValues>),
     );
-    expect(p.mismatches.find(m => m.field === "targetDoughballWeight")).toBeUndefined();
-    expect(p.fills.find(f => f.field === "targetDoughballWeight")).toBeUndefined();
+    for (const field of ["targetDoughballWeight", "doughBatchYield"] as const) {
+      expect(p.mismatches.find(m => m.field === field)).toBeUndefined();
+      expect(p.fills.find(f => f.field === field)).toBeUndefined();
+    }
   });
 
   it("an anchored variant row still overwrites an earlier relinked backfill (import ordering)", () => {

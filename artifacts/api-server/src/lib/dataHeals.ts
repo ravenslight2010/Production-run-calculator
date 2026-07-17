@@ -655,6 +655,70 @@ async function runNamedRecipeNameCleanup(): Promise<void> {
   });
 }
 
+// ── Dough batch yield de-poison ─────────────────────────────────────────────
+// Dough mixing sheets carry many same-named family variant rows (one per
+// customer); before the import learned to treat name-relinked ties as
+// blank-fill-only, the LAST variant row's doughBatchYield clobbered every
+// profile linked to that dough family (e.g. all CRB Dough profiles stored the
+// Lowe's 7 Inch 898 yield). The stored yield is a FALLBACK only — the run form
+// derives the true yield from the dough rows' total lbs ÷ doughball weight and
+// auto-zeroes the field when both are present. This heal applies that same
+// rule to stored profiles: when a profile has real dough rows (lbs > 0) and a
+// doughball weight (> 0), zero its stored doughBatchYield so every surface
+// derives instead of showing the poisoned number.
+
+const DOUGH_YIELD_DEPOISON_HEAL_ID = "dough-batch-yield-depoison-v1";
+
+function doughRowsHaveLbs(rows: unknown): boolean {
+  if (!Array.isArray(rows)) return false;
+  return rows.some(
+    (r) =>
+      r &&
+      typeof r === "object" &&
+      Number((r as Record<string, unknown>).lbs ?? 0) > 0,
+  );
+}
+
+async function runDoughYieldDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: DOUGH_YIELD_DEPOISON_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let updated = 0;
+    for (const p of profiles) {
+      const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+      const yieldVal = Number(values.doughBatchYield ?? 0);
+      if (!(yieldVal > 0)) continue;
+      if (!(Number(values.targetDoughballWeight ?? 0) > 0)) continue;
+      if (!doughRowsHaveLbs(values.doughRecipe)) continue;
+      values.doughBatchYield = 0;
+      // Advance the client LWW stamp so a device still holding the poisoned
+      // yield can't re-publish it over the heal with a stale stamp.
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      updated++;
+    }
+
+    logger.info(
+      { heal: DOUGH_YIELD_DEPOISON_HEAL_ID, scanned: profiles.length, updated },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -668,4 +732,5 @@ export async function runDataHeals(): Promise<void> {
   await runCheeseMixCrossoverPurge();
   await runCheeseShareBackfill();
   await runNamedRecipeNameCleanup();
+  await runDoughYieldDepoison();
 }

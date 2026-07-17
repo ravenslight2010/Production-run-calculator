@@ -3375,7 +3375,13 @@ export function applySpecImport(
         }
         // Crusts-per-batch yield — fallback only; when the dough rows + doughball
         // weight are both present the run form derives the yield and zeroes this.
-        if (r.doughBatchYield != null && r.doughBatchYield > 0) values.doughBatchYield = r.doughBatchYield;
+        // Per-variant like weight/per-tray: relinked ties backfill blanks only.
+        if (
+          r.doughBatchYield != null && r.doughBatchYield > 0 &&
+          (!relinked || !(Number(values.doughBatchYield ?? 0) > 0))
+        ) {
+          values.doughBatchYield = r.doughBatchYield;
+        }
         if (
           r.doughballsPerTray != null && r.doughballsPerTray > 0 &&
           (!relinked || !(Number(values.doughballsPerTray ?? 0) > 0))

@@ -40,9 +40,10 @@ never fabricates a conflict. Backward compat: with no new sources the plan is
 byte-for-byte the old spec-only behavior. **Nothing auto-applies** — conflicts
 and mismatches are form-only until Save Setup; only `fills` seed the form.
 
-**Relink ties are blank-fill-only for doughball fields.** The import's
-`nameRelinked` guard means a dough recipe tied on ONLY by the name re-link
-backfills weight/per-tray when blank, never overwrites — a dough mixing sheet
+**Relink ties are blank-fill-only for ALL per-variant doughball fields** —
+weight, per-tray, AND batch yield (yield differs per variant too; it was the
+missed field in the second bug report). A dough recipe tied on ONLY by the
+name re-link backfills these when blank, never overwrites — a dough mixing sheet
 carries many same-named family variant rows, and without the split the LAST
 variant row wins (Corner Booth profile offered Lowe's 7 Inch 5.7 oz instead of
 its own 8.25). The planner mirrors this: anchored ties write verbatim,
