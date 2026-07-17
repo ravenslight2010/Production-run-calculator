@@ -17,8 +17,10 @@ import {
   sanitizeSpecAliases,
   isGenericSlotTypeName,
   cleanSpecNamedRecipeName,
+  specImportNamedRecipeNamesEqual,
   type SpecImportAlias as SpecAliasEntry,
 } from "@workspace/spec-import";
+import { normalizeDoughballVariants } from "@workspace/named-recipes";
 import { backfillCheeseSharePcts, normalizeCheeseRecipe } from "@workspace/cheese-recipes";
 import {
   POISONED_CHEESE_ALIAS_PAIRS,
@@ -719,6 +721,101 @@ async function runDoughYieldDepoison(): Promise<void> {
   });
 }
 
+// ── Heal 9: de-poison recipe-level doughball weights on family-dough profiles ──
+// A dough FAMILY recipe (e.g. "CRB Dough") carries per-customer variants; its
+// recipe-level doughball weight/per-tray belong to no particular customer.
+// Before pool hydration became variant-aware, a spec import that carried only
+// the dough NAME blank-backfilled the recipe-level numbers into profiles
+// (e.g. 13 oz onto profiles whose real variant is 7.6 oz). Poison signature:
+// the stored value equals the recipe-level number, the recipe has MULTIPLE
+// variants, and NO variant carries that value. Heal = clear it (blank), so
+// the form / Auto-Fill re-fills the correct variant instead of us guessing.
+
+const DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID = "dough-family-weight-depoison-v1";
+
+async function runDoughFamilyWeightDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const doughs = await tx.select().from(doughRecipesTable);
+    // Family recipes only: multiple variants → recipe-level numbers ambiguous.
+    const families = doughs
+      .map((d) => ({
+        scope: d.scope,
+        name: d.name,
+        weightOz: Number(d.doughballWeightOz ?? 0),
+        perTray: Number(d.doughballsPerTray ?? 0),
+        variants: normalizeDoughballVariants(d.doughballVariants),
+      }))
+      .filter((d) => d.variants.length > 1);
+    if (families.length === 0) {
+      logger.info(
+        { heal: DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID, updated: 0 },
+        "Data heal applied (no family dough recipes)",
+      );
+      return;
+    }
+
+    const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let updated = 0;
+    for (const p of profiles) {
+      const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+      const dName = String(values.doughRecipeName ?? "").trim();
+      if (!dName) continue;
+      const fam = families.find(
+        (d) =>
+          d.scope === p.scope &&
+          specImportNamedRecipeNamesEqual(d.name, dName),
+      );
+      if (!fam) continue;
+      let changed = false;
+      const wt = Number(values.targetDoughballWeight ?? 0);
+      if (
+        wt > 0 &&
+        near(wt, fam.weightOz) &&
+        !fam.variants.some((v) => near(Number(v.weightOz ?? 0), wt))
+      ) {
+        values.targetDoughballWeight = 0;
+        changed = true;
+      }
+      const pt = Number(values.doughballsPerTray ?? 0);
+      if (
+        pt > 0 &&
+        pt === fam.perTray &&
+        !fam.variants.some((v) => Number(v.perTray ?? 0) === pt)
+      ) {
+        values.doughballsPerTray = 0;
+        changed = true;
+      }
+      if (!changed) continue;
+      // Advance the client LWW stamp so a device still holding the poisoned
+      // number can't re-publish it over the heal with a stale stamp.
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      updated++;
+    }
+
+    logger.info(
+      { heal: DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID, scanned: profiles.length, updated },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -733,4 +830,5 @@ export async function runDataHeals(): Promise<void> {
   await runCheeseShareBackfill();
   await runNamedRecipeNameCleanup();
   await runDoughYieldDepoison();
+  await runDoughFamilyWeightDepoison();
 }

@@ -463,6 +463,46 @@ describe("buildProfileAutofillPlan", () => {
   });
 });
 
+describe("buildProfileAutofillPlan — same-named dough variant rows (relink-only)", () => {
+  // A dough mixing sheet carries one CRB Dough row per customer (no targets);
+  // a profile linked by NAME alone must get the row matching its own doughball
+  // weight — not whichever variant row comes first in sheet order.
+  const variantRows = [
+    { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], doughballOz: 9.6, doughballsPerTray: 20 },
+    { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], doughballOz: 7.6, doughballsPerTray: 18 },
+    { kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], doughballOz: 8.25, doughballsPerTray: 24 },
+  ];
+
+  it("offers per-tray from the row whose weight matches the profile's weight", () => {
+    const p = plan(
+      [sheet(1, 100, { recipes: variantRows } as Partial<ParsedSpecImport>)],
+      values({ doughRecipeName: "CRB Dough", targetDoughballWeight: 8.25 } as Partial<FormValues>),
+    );
+    expect(p.fills.find(f => f.field === "doughballsPerTray")?.specValue).toBe(24);
+    expect(p.mismatches.find(m => m.field === "doughballsPerTray")).toBeUndefined();
+  });
+
+  it("offers NO doughball numbers when the profile's weight is unknown (ambiguous)", () => {
+    const p = plan(
+      [sheet(1, 100, { recipes: variantRows } as Partial<ParsedSpecImport>)],
+      values({ doughRecipeName: "CRB Dough" } as Partial<FormValues>),
+    );
+    expect(p.fills.find(f => f.field === "doughballsPerTray")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "targetDoughballWeight")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "doughballsPerTray")).toBeUndefined();
+  });
+
+  it("keeps the single-row relink backfill behavior (unambiguous)", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        recipes: [{ kind: "dough", name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 100 }], doughballOz: 9.5, doughballsPerTray: 22 }],
+      } as Partial<ParsedSpecImport>)],
+      values({ doughRecipeName: "CRB Dough" } as Partial<FormValues>),
+    );
+    expect(p.fills.find(f => f.field === "doughballsPerTray")?.specValue).toBe(22);
+  });
+});
+
 describe("buildProfileAutofillPlan — die type equivalence", () => {
   it("does not flag a mismatch when the sheet writes '12\" Dies' and the profile holds '12\"'", () => {
     const s = sheet(1, 100, {

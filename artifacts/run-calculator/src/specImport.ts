@@ -1394,6 +1394,7 @@ export async function commitSpecImport(
         components: (r.components ?? []).map((c) => ({ ingredient: c.ingredient, lbs: c.lbs })),
         doughballWeightOz: r.doughballWeightOz,
         doughballsPerTray: r.doughballsPerTray,
+        doughballVariants: r.doughballVariants,
       }));
       poolNamesByKind[kind] = livePool.map((r) => r.name);
       fullRelinked = linkSpecImportNamedRecipesToExisting(

@@ -91,6 +91,7 @@ import {
   findOrBuildIngredient,
 } from "./ingredients";
 import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -2832,6 +2833,8 @@ export type SpecImportServerPoolRecipe = {
   components: RecipeRow[];
   doughballWeightOz?: number;
   doughballsPerTray?: number;
+  /** Dough only: per-customer variant list (label/weightOz/perTray). */
+  doughballVariants?: unknown;
 };
 
 export function applySpecImport(
@@ -3146,15 +3149,32 @@ export function applySpecImport(
         if (src.length) values.doughRecipe = src.map(r => ({ ...r }));
         const presets = loadDoughRecipePresets();
         const pKey = Object.keys(presets).find(k => k.trim().toLowerCase() === dName.toLowerCase());
+        // Variant-aware pool numbers: a family recipe (CRB Dough) carries a
+        // per-customer variant list, and its recipe-level weight/per-tray
+        // belong to no particular customer. With multiple variants, only a
+        // die-size match may pick one (mirrors the run form / Auto-Fill
+        // planner); no match = hydrate nothing rather than a bogus number.
+        const poolDough = poolEntryFor("dough", dName);
+        const poolVariants = normalizeDoughballVariants(poolDough?.doughballVariants);
+        const poolMatched = matchDoughballVariant(poolVariants, { dieType: values.dieType ?? "" });
+        const poolWeight = poolMatched
+          ? Number(poolMatched.weightOz ?? 0)
+          : poolVariants.length > 1
+            ? 0
+            : Number(poolDough?.doughballWeightOz ?? 0);
         const w = pKey
           ? Number(presets[pKey]?.doughballWeightOz ?? 0)
-          : Number(poolEntryFor("dough", dName)?.doughballWeightOz ?? 0);
+          : poolWeight;
         if (w > 0 && !(Number(values.targetDoughballWeight ?? 0) > 0)) {
           values.targetDoughballWeight = w;
         }
         // Same pool hydration for doughballs-per-tray (local presets don't
         // carry it — it lives only on the server pool recipe).
-        const perTray = Number(poolEntryFor("dough", dName)?.doughballsPerTray ?? 0);
+        const perTray = poolMatched
+          ? Number(poolMatched.perTray ?? 0)
+          : poolVariants.length > 1
+            ? 0
+            : Number(poolDough?.doughballsPerTray ?? 0);
         if (perTray > 0 && !(Number(values.doughballsPerTray ?? 0) > 0)) {
           values.doughballsPerTray = perTray;
         }
@@ -3255,6 +3275,15 @@ export function applySpecImport(
       (flavors ?? []).map(flavor => ({ brand, flavor, applicators: [], pepperonis: [] })),
     ),
   ];
+  // A dough mixing sheet can carry MANY same-named per-customer variant rows.
+  // Count them so a name-relinked tie can tell "the one CRB Dough row" apart
+  // from "18 ambiguous variant rows" (see the weight-match guard below).
+  const doughNameCounts = new Map<string, number>();
+  for (const r of parsed.recipes) {
+    if (r.kind !== "dough") continue;
+    const k = specImportNameMatchKey((r.name ?? "").trim());
+    if (k) doughNameCounts.set(k, (doughNameCounts.get(k) ?? 0) + 1);
+  }
   for (const r of parsed.recipes) {
     // A cheese-kind recipe routed to the MIXES category (user's review pick or
     // the name heuristic) is factory master-data on the Mixes screen — it must
@@ -3384,6 +3413,24 @@ export function applySpecImport(
         // targets take its values verbatim; a profile tied on by the name
         // re-link keeps its existing values (backfill blank fields only).
         const relinked = nameRelinked.has(`${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`);
+        // Relink-only tie onto a sheet with MULTIPLE same-named variant rows:
+        // the doughball numbers are per-customer and ambiguous — blank-backfill
+        // would let whichever variant row is processed FIRST win (e.g. Costco's
+        // 20/tray written onto a Corner Booth 24/tray profile). Only the row
+        // whose doughball weight equals the profile's known weight may
+        // contribute; with no known weight, write no doughball numbers at all.
+        const variantAmbiguous =
+          relinked &&
+          (doughNameCounts.get(specImportNameMatchKey((r.name ?? "").trim())) ?? 0) > 1;
+        if (variantAmbiguous) {
+          const wt = Number(values.targetDoughballWeight ?? 0);
+          const rowMatches =
+            wt > 0 && r.doughballOz != null && Math.abs(Number(r.doughballOz) - wt) <= 0.005;
+          if (!rowMatches) {
+            saveProfile(brand, flavor, values);
+            continue;
+          }
+        }
         if (r.doughballOz != null && (!relinked || !(Number(values.targetDoughballWeight ?? 0) > 0))) {
           values.targetDoughballWeight = r.doughballOz;
         }

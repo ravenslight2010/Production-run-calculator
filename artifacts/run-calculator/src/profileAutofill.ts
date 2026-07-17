@@ -329,6 +329,15 @@ function desiredFromDoughSauceRecipes(
   const set = (field: string, label: string, value: string | number, kind: DesiredKind) => {
     byField.set(field, { field, label, value, kind, source });
   };
+  // A dough mixing sheet carries MANY same-named variant rows (one per
+  // customer). Count them so a name-relinked tie can tell "the one CRB Dough
+  // row" apart from "18 ambiguous variant rows".
+  const doughNameCounts = new Map<string, number>();
+  for (const r of recipes) {
+    if (r.kind !== "dough") continue;
+    const k = specImportNameMatchKey((r.name ?? "").trim());
+    if (k) doughNameCounts.set(k, (doughNameCounts.get(k) ?? 0) + 1);
+  }
   for (const r of recipes) {
     if (r.kind !== "dough" && r.kind !== "sauce") continue;
     const rName = (r.name ?? "").trim();
@@ -359,6 +368,19 @@ function desiredFromDoughSauceRecipes(
     };
     if (r.kind === "dough") {
       set("doughRecipeName", "Dough Recipe", rName, "name");
+      // Relink-only tie onto a sheet with MULTIPLE same-named variant rows:
+      // the rows are per-customer variants and this profile matches by name
+      // alone, so the doughball numbers are ambiguous — the first row in
+      // sheet order would win (e.g. Costco's 20/tray offered to a Corner
+      // Booth 24/tray profile). Only the row whose doughball weight equals
+      // the profile's known weight is "ours"; with no known weight, offer
+      // no doughball numbers at all.
+      if (relinkOnly && (doughNameCounts.get(rKey) ?? 0) > 1) {
+        const wt = effectiveNum("targetDoughballWeight");
+        const rowMatches =
+          wt > 0 && r.doughballOz != null && Math.abs(Number(r.doughballOz) - wt) <= 0.005;
+        if (!rowMatches) continue;
+      }
       // Import parity: storage writes targetDoughballWeight whenever the sheet
       // states doughballOz at all (`!= null`), including an explicit 0 — but a
       // name-relinked tie only backfills when the value is still blank.

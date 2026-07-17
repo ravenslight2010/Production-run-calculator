@@ -169,6 +169,85 @@ describe("later dough recipe import re-links by name", () => {
     expect(prof?.doughballsPerTray).toBe(30);
   });
 
+  it("ambiguous same-named variant rows: a NAME-only relink backfills only the weight-matching variant's numbers", () => {
+    // Real prod failure #2: a dough mixing sheet carried 18 same-named
+    // targetless "CRB Dough" rows (one per customer). Name-relinked profiles
+    // blank-backfilled from whichever row hit first (Costco 9.6oz/20-tray) —
+    // Corner Booth (8.25oz/24) was offered 20 per tray.
+    saveBrandFlavors({ ...loadBrandFlavors(), CRB: ["Cheese", "Pepperoni"] });
+    saveProfile("CRB", "Cheese", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+      doughRecipeName: "CRB Dough",
+      targetDoughballWeight: 8.25, // per-tray blank — must fill from the 8.25 row
+    });
+    saveProfile("CRB", "Pepperoni", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+      doughRecipeName: "CRB Dough",
+      // No weight at all — ambiguous → NO doughball backfill, rows still attach.
+    });
+    applySpecImport({
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "CRB Dough", rows: DOUGH_ROWS, doughballOz: 9.6, doughballsPerTray: 20 },
+        { kind: "dough", name: "CRB Dough", rows: DOUGH_ROWS, doughballOz: 8.25, doughballsPerTray: 24 },
+      ],
+    } as unknown as ParsedSpecImport);
+    const cheese = loadProfile("CRB", "Cheese");
+    expect(cheese?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(cheese?.targetDoughballWeight).toBe(8.25);
+    expect(cheese?.doughballsPerTray).toBe(24);
+    const pep = loadProfile("CRB", "Pepperoni");
+    expect(pep?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(pep?.doughRecipeName).toBe("CRB Dough");
+    expect(pep?.targetDoughballWeight ?? 0).toBe(0);
+    expect(pep?.doughballsPerTray ?? 0).toBe(0);
+  });
+
+  it("pool hydration with a multi-variant family recipe: die match picks the variant, no match hydrates nothing", () => {
+    // The profile loop hydrates weight/per-tray from the SERVER pool when the
+    // parse carries only the dough NAME. A family recipe's recipe-level
+    // numbers belong to no customer — only a die-size variant match may fill.
+    const pool = {
+      dough: [{
+        name: "CRB Dough",
+        components: DOUGH_ROWS,
+        doughballWeightOz: 13,
+        doughballsPerTray: 16,
+        doughballVariants: [
+          { label: `11" CRB Recipe`, weightOz: 10, perTray: 24 },
+          { label: `14" CRB Recipe`, weightOz: 16, perTray: 18 },
+        ],
+      }],
+    };
+    applySpecImport({
+      profiles: [
+        { brand: "Matched", flavor: "Cheese", dieType: `14" Round`, doughName: "CRB Dough", applicators: [{ type: "Cheese", ozPerPizza: 3 }], pepperonis: [] },
+        { brand: "Unmatched", flavor: "Cheese", dieType: "Square", doughName: "CRB Dough", applicators: [{ type: "Cheese", ozPerPizza: 3 }], pepperonis: [] },
+      ],
+      recipes: [],
+    } as unknown as ParsedSpecImport, undefined, pool);
+    const matched = loadProfile("Matched", "Cheese");
+    expect(matched?.targetDoughballWeight).toBe(16);
+    expect(matched?.doughballsPerTray).toBe(18);
+    const unmatched = loadProfile("Unmatched", "Cheese");
+    expect(unmatched?.targetDoughballWeight ?? 0).toBe(0);
+    expect(unmatched?.doughballsPerTray ?? 0).toBe(0);
+    // Single-variant-free pool recipes keep the old recipe-level hydration.
+    applySpecImport({
+      profiles: [
+        { brand: "Plain", flavor: "Cheese", dieType: "12 inch", doughName: "House Dough", applicators: [{ type: "Cheese", ozPerPizza: 3 }], pepperonis: [] },
+      ],
+      recipes: [],
+    } as unknown as ParsedSpecImport, undefined, {
+      dough: [{ name: "House Dough", components: DOUGH_ROWS, doughballWeightOz: 12, doughballsPerTray: 22 }],
+    });
+    const plain = loadProfile("Plain", "Cheese");
+    expect(plain?.targetDoughballWeight).toBe(12);
+    expect(plain?.doughballsPerTray).toBe(22);
+  });
+
   it("multiple same-named collapsed variants: each EXPLICIT target keeps its own variant's weight/per-tray", () => {
     saveBrandFlavors({
       ...loadBrandFlavors(),

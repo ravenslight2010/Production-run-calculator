@@ -17,4 +17,6 @@ Consumers: the run form AND the Setup Profiles editor both do variant match at d
 
 Exception: the Setup Profiles editor has a persistent variant SWITCHER (shown when the picked dough recipe has 2+ variants) where an EXPLICIT user pick overwrites weight/per-tray — but a variant field of 0 means "not recorded" and never clobbers a real profile value.
 
+Ambiguity guards (same-named targetless variant ROWS in a parse, and multi-variant POOL recipes): a name-only relink or pool hydration must never take a doughball number it can't attribute — planner/apply only accept a row whose weight matches the profile's known weight (±0.005); pool hydration only fills via a die-type variant match; multi-variant + no match = fill NOTHING (recipe-level numbers belong to no customer). A recipe-level value (e.g. 13oz) can ALSO be a legit variant's value — a de-poison heal must require "no variant carries it" before clearing.
+
 **How to apply:** any new consumer of dough weight/per-tray should call `matchDoughballVariant` first, fall back to recipe-level, and keep blank-fill-only. Gotcha: a pending manual-pick prompt MUST be cleared whenever the recipe name changes or the weight fills by another path, or the operator can apply the previous family's numbers to the wrong run.
