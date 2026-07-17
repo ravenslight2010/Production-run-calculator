@@ -30,7 +30,7 @@ function makeForm(initial: Record<string, number>) {
   };
 }
 
-const baseCalc = { ppm: 100, perTray: 60, perBatch: 600, traysNeeded: 30, batchesNeeded: 2, pressDone: false };
+const baseCalc = { ppm: 100, perTray: 60, perBatch: 600, traysNeeded: 30, batchesNeeded: 2, pressDone: false, casesInFreezer: 0 };
 
 function makeV(overrides: Partial<Record<string, number>> = {}) {
   return {

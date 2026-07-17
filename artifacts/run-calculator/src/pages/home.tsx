@@ -9849,6 +9849,9 @@ export default function Home() {
   const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs } = useAutoTrack({
     runId: currentRunId,
     runStatus,
+    // Freezer-drain window: case/skid auto-track keeps ticking for freezerTime
+    // after End Run (packaging is still casing what's in the tunnel).
+    endedAt: currentRun?.endedAt ?? null,
     nowTime,
     elapsedBatchSec,
     calc,

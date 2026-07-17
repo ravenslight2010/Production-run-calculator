@@ -18,6 +18,14 @@ interface AutoTrackCalc {
    * the NEXT run's dough.
    */
   pressDone: boolean;
+  /**
+   * Live freezer-tunnel contents in cases (the pure computeCasesInFreezer
+   * model). During the post-End freezer drain this is the ONLY source of
+   * case-tick increments: cased count grows exactly by what EXITED the tunnel
+   * since the last tick, so product moves from "in freezer" to "done" without
+   * double-counting and the count can never exceed what was pressed.
+   */
+  casesInFreezer: number;
 }
 
 /**
@@ -53,6 +61,13 @@ interface AutoTrackValues {
 interface AutoTrackParams {
   runId: string;
   runStatus: RunStatus;
+  /**
+   * Wall-clock ms when the run was ended (null while pending/running/paused).
+   * Drives the freezer-drain window: for freezerTime minutes after endedAt the
+   * case/skid counters keep ticking (packaging is still casing what's in the
+   * tunnel) while dough tray/batch tracking stays stopped.
+   */
+  endedAt?: number | null;
   nowTime: Date;
   elapsedBatchSec: number;
   calc: AutoTrackCalc;
@@ -139,6 +154,7 @@ function clampPeriodMs(ms: number): number {
 export function useAutoTrack({
   runId,
   runStatus,
+  endedAt = null,
   nowTime,
   elapsedBatchSec,
   calc,
@@ -179,10 +195,30 @@ export function useAutoTrack({
   // never types their dough counts sees trays/batches sit at 0 the whole run.
   const traySeededRef = useRef<boolean>(false);
   const batchSeededRef = useRef<boolean>(false);
+  // Freezer-tunnel contents (whole cases) at the last case tick. During the
+  // post-End drain window the case counter advances by EXACTLY what exited the
+  // tunnel since the last tick (prev - now, never negative), so the count can
+  // never run past what was actually pressed and stops on its own when the
+  // tunnel is empty. -1 = not baselined yet: a device that opens mid-drain
+  // baselines on its first tick instead of back-filling a catch-up jump.
+  const drainFreezerRef = useRef<number>(-1);
+
+  // Freezer-drain window: after End Run, packaging keeps casing product for as
+  // long as the tunnel takes to empty. Case/skid auto-track keeps ticking
+  // through this window; dough tray/batch tracking stays stopped (the dough
+  // crew is on the next run). A run ended longer than freezerTime ago is fully
+  // stopped — a page opened later must never tick it.
+  const drainMs = Number(v.freezerTime) * 60000;
+  const drainActive =
+    runStatus === "ended" &&
+    typeof endedAt === "number" &&
+    endedAt > 0 &&
+    drainMs > 0 &&
+    nowTime.getTime() < endedAt + drainMs;
 
   const autoTrackSuggestion = useMemo(() => {
     const ok =
-      (runStatus === "running" || runStatus === "paused") &&
+      (runStatus === "running" || runStatus === "paused" || drainActive) &&
       calc.ppm > 0 &&
       v.casesPerSkid > 0 &&
       v.pizzasPerCase > 0;
@@ -212,6 +248,7 @@ export function useAutoTrack({
     };
   }, [
     runStatus,
+    drainActive,
     calc.ppm,
     calc.perTray,
     calc.perBatch,
@@ -234,6 +271,7 @@ export function useAutoTrack({
     traysRemainderRef.current = 0;
     traySeededRef.current = false;
     batchSeededRef.current = false;
+    drainFreezerRef.current = -1;
   }, []);
 
   // Cancel the wait until every counter's next tick (used by "Resume now" and
@@ -257,12 +295,16 @@ export function useAutoTrack({
   // again on the next second — double-decrementing trays and freezing
   // slow-depleting batches whose per-tick consumption is < 1 unit.
 
-  // Reset bookkeeping when the run stops so the next run starts fresh.
+  // Reset bookkeeping when the run stops so the next run starts fresh. An
+  // ended run KEEPS its baselines while the freezer-drain window is open (the
+  // case counter is still ticking product out of the tunnel); the reset fires
+  // once the drain finishes (drainActive flips false) or immediately when
+  // there is no drain window at all.
   useEffect(() => {
-    if (runStatus === "pending" || runStatus === "ended") {
+    if (runStatus === "pending" || (runStatus === "ended" && !drainActive)) {
       resetBookkeeping();
     }
-  }, [runStatus, resetBookkeeping]);
+  }, [runStatus, drainActive, resetBookkeeping]);
 
   // Re-baseline when the active run changes (switching runs / first mount) so the
   // incremental delta is never computed against another run's numbers, and a run
@@ -280,7 +322,7 @@ export function useAutoTrack({
 
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
-    if (disabled || !autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
+    if (disabled || !autoTrackProgress || !(runStatus === "running" || drainActive) || !autoTrackSuggestion) return;
 
     const nowMs = nowTime.getTime();
     // While the manual-edit suppression window is open, keep baselines current
@@ -302,13 +344,37 @@ export function useAutoTrack({
       const expectedCases = autoTrackSuggestion.expectedCases;
       caseNextDueMsRef.current = nowMs + casePeriodMs;
       lastExpectedCasesRef.current = expectedRaw;
+      // Freezer baseline advances on EVERY case tick (even suppressed / while
+      // running) so the drain delta is always measured from the latest tunnel
+      // state — a suppression window expiring or the running→ended transition
+      // never causes a catch-up jump.
+      const prevFreezer = drainFreezerRef.current;
+      drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
 
       if (!suppressed) {
         const cps = v.casesPerSkid;
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
           (Number(form.getValues("casesOnCurrentSkid")) || 0);
-        if (prevExpected < 0) {
+        if (drainActive) {
+          // Post-End drain: the line is stopped, so time-based expected output
+          // is meaningless — the ONLY product still becoming "done" is what
+          // exits the freezer tunnel. Advance by exactly the tunnel's drop
+          // since the last tick (never negative), still capped at the run
+          // target. A fresh device (prevFreezer < 0) just baselines: no
+          // back-fill jump when a page opens mid-drain.
+          const exited = prevFreezer >= 0
+            ? Math.max(0, prevFreezer - drainFreezerRef.current)
+            : 0;
+          if (exited > 0) {
+            const target = curTotal + exited;
+            const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
+            if (newTotal !== curTotal) {
+              form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
+              form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+            }
+          }
+        } else if (prevExpected < 0) {
           // First tick after a (re)start/switch: seed the absolute count only when
           // there is no progress yet. If progress already exists (reload / switching
           // into a run that's already going / a prior manual entry), just baseline so
@@ -350,8 +416,9 @@ export function useAutoTrack({
     // has a dough DEFICIT (calc.traysNeeded > 0 — i.e. staged dough does not
     // yet cover everything left to run). Once the deficit is closed the press
     // is done and the counter only counts down; whatever is left at the end
-    // carries over to the next run. ──
-    if (calc.perTray > 0 && calc.ppm > 0) {
+    // carries over to the next run. Dough tracking NEVER runs for an ended run
+    // (drain phase is case/skid-only — the dough crew is on the next run). ──
+    if (runStatus === "running" && calc.perTray > 0 && calc.ppm > 0) {
       const trayPeriodMs = clampPeriodMs((calc.perTray / calc.ppm) * 60000);
       let delta = 0;
       let traySeededThisTick = false;
@@ -417,8 +484,9 @@ export function useAutoTrack({
 
     // ── Batches: +1 when the mixer finishes a batch (one per full batch-time,
     // while the run still has a batch deficit), down once per full batch
-    // consumed (quarter-batch ticks with fractional remainder carry). ──
-    if (calc.perBatch > 0 && calc.ppm > 0) {
+    // consumed (quarter-batch ticks with fractional remainder carry).
+    // Never for an ended run — drain phase is case/skid-only. ──
+    if (runStatus === "running" && calc.perBatch > 0 && calc.ppm > 0) {
       // Line demand: how often the LINE eats a whole batch's worth of balls.
       const lineBatchMs = (calc.perBatch / calc.ppm) * 60000;
       // Drain can never be faster than the hopper converts a batch into balls
