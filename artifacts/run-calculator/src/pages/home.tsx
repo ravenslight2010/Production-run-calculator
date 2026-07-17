@@ -9441,10 +9441,14 @@ export default function Home() {
   }, [batchWeightCandidatesSig]);
 
   const calc = useMemo(() => {
+    // Round to 2 decimals at the source so every surface that shows PPM raw
+    // never renders float noise like 38.400000000000006.
     const ppm =
-      doughSubTab === "crusts"
-        ? v.approxLineSpeed
-        : ve.crustsPerCycle * ve.cycleSpeed * v.speedAdjustment;
+      Math.round(
+        (doughSubTab === "crusts"
+          ? v.approxLineSpeed
+          : ve.crustsPerCycle * ve.cycleSpeed * v.speedAdjustment) * 100,
+      ) / 100;
 
     const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
 
