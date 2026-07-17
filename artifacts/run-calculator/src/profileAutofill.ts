@@ -27,6 +27,7 @@ import {
   resolveMixApplicatorSlots,
   specImportCheeseRecipeIsMix,
   specImportNameMatchKey,
+  specImportBrandMatchKey,
   specImportNamedRecipeNamesEqual,
   specImportDieTypeMatchKey,
   cleanSpecCheeseRecipeName,
@@ -304,7 +305,6 @@ function desiredFromDoughSauceRecipes(
   sheetProfile?: ParsedProfile,
 ): Desired[] {
   const recipes = Array.isArray(data?.recipes) ? data.recipes : [];
-  const b = brand.trim().toLowerCase();
   const f = flavor.trim().toLowerCase();
   const cur = current as Record<string, unknown>;
   // The import's profile loop runs BEFORE the recipe tie, so by relink time
@@ -353,7 +353,7 @@ function desiredFromDoughSauceRecipes(
     // split, whichever variant is processed last wins, e.g. a Corner Booth
     // profile offered the Lowe's 7 Inch 5.7 oz instead of its own 8.25).
     const anchored = recipeApplyTargets(r, pool).some(
-      (t) => t.brand.trim().toLowerCase() === b && t.flavor.trim().toLowerCase() === f,
+      (t) => brandsEqual(t.brand, brand) && t.flavor.trim().toLowerCase() === f,
     );
     // Mirror the import's typo/possessive-tolerant name re-link (see the
     // relink pass in storage.ts — "Aldo's Sauce" vs "ALDO PIZZA SAUCE").
@@ -408,6 +408,22 @@ function desiredFromDoughSauceRecipes(
 
 function nameKey(v: string): string {
   return specImportNameMatchKey(cleanSpecCheeseRecipeName(v));
+}
+
+/**
+ * Possessive/punctuation-tolerant BRAND equality for matching saved-sheet rows
+ * onto the open profile: exact lowercase first, then the import's shared loose
+ * brand key so a parse typo (`Aldo"s` for `Aldo's`) still matches — a strict
+ * compare left such a row invisible to Auto-Fill even though the import's own
+ * fan-out passes would have matched it.
+ */
+function brandsEqual(a: string, b: string): boolean {
+  const al = a.trim().toLowerCase();
+  const bl = b.trim().toLowerCase();
+  if (al === bl) return true;
+  const ka = specImportBrandMatchKey(a);
+  const kb = specImportBrandMatchKey(b);
+  return !!ka && !!kb && ka === kb;
 }
 
 function stringsEqual(a: string, b: string, kind: DesiredKind, field?: string): boolean {
@@ -686,9 +702,16 @@ export function buildProfileAutofillPlan(opts: {
   const decided = new Map<string, Desired>();
   for (const sheet of ordered) {
     const profiles = Array.isArray(sheet.data?.profiles) ? sheet.data.profiles : [];
-    const p = profiles.find(
-      (pp) => (pp.brand ?? "").trim().toLowerCase() === b && (pp.flavor ?? "").trim().toLowerCase() === f,
-    );
+    // Exact brand+flavor first; fall back to the loose brand key so a saved
+    // parse row stored under a punctuation-typo brand (`Aldo"s`) still feeds
+    // the real profile (`Aldo's`). Exact wins when both exist on one sheet.
+    const p =
+      profiles.find(
+        (pp) => (pp.brand ?? "").trim().toLowerCase() === b && (pp.flavor ?? "").trim().toLowerCase() === f,
+      ) ??
+      profiles.find(
+        (pp) => brandsEqual(pp.brand ?? "", brand) && (pp.flavor ?? "").trim().toLowerCase() === f,
+      );
     // Dough/sauce recipes tie onto profiles independently of the sheet's
     // profile blocks (a dough workbook usually has none), so scan them even
     // when this sheet has no matching profile.

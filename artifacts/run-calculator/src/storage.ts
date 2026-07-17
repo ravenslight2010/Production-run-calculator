@@ -2894,6 +2894,35 @@ export function applySpecImport(
     return family ?? t;
   };
 
+  // ── Canonicalize parsed profile brands onto EXISTING brand spellings ──
+  // A saved parse can carry a punctuation-typo brand (`Aldo"s` for the real
+  // `Aldo's`) — the sanitizer now snaps these at parse time, but sheets saved
+  // BEFORE that fix (and re-applied via the saved-sheet/hash-reuse path) still
+  // hold the typo. Snap each profile brand onto the registry brand that shares
+  // its loose brand key, so re-applying an old parse updates the real profile
+  // instead of minting a near-duplicate brand. New brands (no key match) are
+  // kept verbatim.
+  {
+    const knownByKey = new Map<string, string>();
+    for (const b of Object.keys(loadBrandFlavors())) {
+      const key = specImportBrandMatchKey(b);
+      if (key && !knownByKey.has(key)) knownByKey.set(key, b);
+    }
+    const canonBrand = (raw: string): string => {
+      const t = (raw ?? "").trim();
+      if (!t) return t;
+      const hit = knownByKey.get(specImportBrandMatchKey(t));
+      return hit && hit.toLowerCase() !== t.toLowerCase() ? hit : t;
+    };
+    parsed = {
+      ...parsed,
+      profiles: (parsed.profiles ?? []).map((p) => {
+        const brand = canonBrand(p.brand);
+        return brand === p.brand ? p : { ...p, brand };
+      }),
+    };
+  }
+
   // ── Un-tombstone anything the user chose to re-include ──
   // A profile/recipe reaching apply was explicitly kept in the review. If it had
   // been merged or deleted away, clear its tombstones so the reintroduction is

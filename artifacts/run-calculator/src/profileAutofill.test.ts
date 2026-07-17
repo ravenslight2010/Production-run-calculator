@@ -98,6 +98,61 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.pepCombinedTarget).toBe(true); // single named pep → combined
   });
 
+  it('matches a saved-sheet row stored under a punctuation-typo brand (Aldo"s → Aldo\'s)', () => {
+    // Regression: an AI parse minted brand `Aldo"s` (straight double-quote)
+    // for one flavor row; the strict brand compare made Auto-Fill skip it, so
+    // the real Aldo's profile never got its sauce oz.
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({ brand: 'Aldo"s', flavor: "SAUSAGE", sauceOzPerPizza: 4, sauceName: "Aldo Pizza Sauce" })],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "SAUSAGE",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+    });
+    expect(p.matchedSheets).toBe(1);
+    const byField = new Map(p.fills.map(f => [f.field, f]));
+    expect(byField.get("sauceOzPerPizza")?.specValue).toBe(4);
+    expect(byField.get("frontlineRecipeName")?.specValue).toBe("Aldo Pizza Sauce");
+  });
+
+  it("prefers an exact brand row over a loose-key sibling on the same sheet", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [
+            profile({ brand: 'Aldo"s', flavor: "SAUSAGE", sauceOzPerPizza: 9 }),
+            profile({ brand: "Aldo's", flavor: "SAUSAGE", sauceOzPerPizza: 4 }),
+          ],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "SAUSAGE",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+    });
+    const fill = p.fills.find(f => f.field === "sauceOzPerPizza");
+    expect(fill?.specValue).toBe(4);
+  });
+
+  it("does NOT match a genuinely different brand", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({ brand: "Corner Booth", flavor: "SAUSAGE", sauceOzPerPizza: 7 })],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "SAUSAGE",
+      current: values(),
+      mixNamesLower: NO_MIXES,
+    });
+    expect(p.fills.find(f => f.field === "sauceOzPerPizza")).toBeUndefined();
+  });
+
   it("uses the loose name key so a weight-suffixed blend is NOT a mismatch", () => {
     const p = plan(
       [sheet(1, 100, {

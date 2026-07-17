@@ -835,7 +835,11 @@ const SPEC_IMPORT_FILLER_TOKENS = new Set(["standard", "regular", "pizza"]);
 export function specImportNameMatchKey(name: string): string {
   const base = (name ?? "")
     .toLowerCase()
-    .replace(/['’`]/g, "")
+    // A double-quote BETWEEN letters is a mistyped apostrophe (`Aldo"s`), not
+    // an inch mark — fold it like an apostrophe so `Aldo"s` == "Aldo's".
+    // Letter-bounded on purpose: `12"` / `12"x16"` keep their current keys.
+    .replace(/([a-z])["“”](?=[a-z])/g, "$1")
+    .replace(/['’‘`]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
   if (!base) return "";
@@ -3978,7 +3982,28 @@ export function sanitizeParsedSpecImport(
   // snapped) brand plus warning MESSAGES: the caller keys each message to the
   // brand+flavor row it will actually appear under (profiles key to the FINAL
   // brand+flavor after BOTH groundings; recipes have no flavor row).
+  // Loose-key snap onto a KNOWN brand: a punctuation typo in the parse
+  // (`Aldo"s` for the real `Aldo's`) keys identically under the shared brand
+  // match key but would otherwise mint a whole separate brand — the cell
+  // grounding can't catch it because the typo's word tokens still appear in
+  // the source. First key wins on the (never-observed) chance two known
+  // brands share a key. Independent of sourceText, so it also runs when no
+  // grounding text was provided.
+  const knownBrandByKey = new Map<string, string>();
+  for (const kb of grounding.knownBrands ?? []) {
+    const trimmed = (kb ?? "").trim();
+    const key = specImportBrandMatchKey(trimmed);
+    if (key && !knownBrandByKey.has(key)) knownBrandByKey.set(key, trimmed);
+  }
   const groundBrandName = (brand: string): { brand: string; messages: string[] } => {
+    const keySnap = knownBrandByKey.get(specImportBrandMatchKey(brand));
+    if (keySnap && keySnap !== brand.trim()) {
+      const snapped = clampName(keySnap, lim.maxNameChars);
+      if (snapped && snapped.toLowerCase() !== brand.trim().toLowerCase()) {
+        return { brand: snapped, messages: [`Corrected brand "${brand}" to "${snapped}".`] };
+      }
+      if (snapped) return { brand: snapped, messages: [] };
+    }
     if (!brandCtx) return { brand, messages: [] };
     const g = groundProfileBrand(brand, brandCtx);
     if (g.kind === "snapped") {
