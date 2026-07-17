@@ -1128,6 +1128,52 @@ export default function SetupProfileEditor({
                     </div>
                   </div>
                 )}
+                {(() => {
+                  // Persistent variant switcher: when the picked dough family
+                  // recipe carries several doughball variants, the wrong one
+                  // may have been auto-applied (or picked by mistake). Unlike
+                  // the blank-fill paths above, an EXPLICIT pick here
+                  // overwrites the profile's doughball weight / per-tray.
+                  if (doughVariantPick) return null;
+                  const key = (v.doughRecipeName ?? "").trim().toLowerCase();
+                  const variants = key ? (serverDoughVariantsByName.get(key) ?? []) : [];
+                  if (variants.length < 2) return null;
+                  return (
+                    <div className="flex flex-col gap-1 -mt-3 px-1" data-testid="profile-dough-variant-switch">
+                      <label className="text-[11px] text-muted-foreground">
+                        Doughball variant (switch if the wrong one was used):
+                      </label>
+                      <select
+                        className="h-8 w-full sm:max-w-xs px-2 rounded bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60"
+                        value=""
+                        data-testid="select-profile-dough-variant-switch"
+                        onChange={e => {
+                          const variant = variants.find(x => x.label === e.target.value);
+                          if (!variant) return;
+                          // Explicit user pick — overwrite, not blank-fill.
+                          // A variant field of 0 means "not recorded on the
+                          // doughball chart" (0 = unset across the dough pool),
+                          // so an unset variant field never clobbers a real
+                          // value already in the profile.
+                          if ((variant.weightOz ?? 0) > 0) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
+                          if ((variant.perTray ?? 0) > 0) form.setValue("doughballsPerTray", variant.perTray!, { shouldDirty: true });
+                          toast({ title: `Doughball variant "${variant.label}" applied` });
+                        }}
+                      >
+                        <option value="" disabled>
+                          {`Switch variant… (current: ${Number(v.targetDoughballWeight ?? 0) > 0 ? `${v.targetDoughballWeight} oz` : "not set"}${Number(v.doughballsPerTray ?? 0) > 0 ? ` / ${v.doughballsPerTray} per tray` : ""})`}
+                        </option>
+                        {variants.map(variant => (
+                          <option key={variant.label} value={variant.label}>
+                            {variant.label}
+                            {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
+                            {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
 
                 <Card className="bg-card/50 border-border/50 shadow-md">
                   <button type="button" onClick={() => setSauceWeightsOpen(o => !o)} className="w-full text-left">

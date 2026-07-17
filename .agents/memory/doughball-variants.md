@@ -15,4 +15,6 @@ Rules:
 
 Consumers: the run form AND the Setup Profiles editor both do variant match at dough pick, PLUS dieType-keyed self-heal effects (die size may be set AFTER the recipe pick — a pick-time-only match misses it).
 
+Exception: the Setup Profiles editor has a persistent variant SWITCHER (shown when the picked dough recipe has 2+ variants) where an EXPLICIT user pick overwrites weight/per-tray — but a variant field of 0 means "not recorded" and never clobbers a real profile value.
+
 **How to apply:** any new consumer of dough weight/per-tray should call `matchDoughballVariant` first, fall back to recipe-level, and keep blank-fill-only. Gotcha: a pending manual-pick prompt MUST be cleared whenever the recipe name changes or the weight fills by another path, or the operator can apply the previous family's numbers to the wrong run.
