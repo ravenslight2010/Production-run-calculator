@@ -463,6 +463,25 @@ describe("buildProfileAutofillPlan", () => {
   });
 });
 
+describe("buildProfileAutofillPlan — die type equivalence", () => {
+  it("does not flag a mismatch when the sheet writes '12\" Dies' and the profile holds '12\"'", () => {
+    const s = sheet(1, 100, {
+      profiles: [profile({ dieType: '12" Dies' })],
+    } as Partial<ParsedSpecImport>);
+    const p = plan([s], values({ dieType: '12"' } as Partial<FormValues>));
+    expect(p.mismatches.find((m) => m.field === "dieType")).toBeUndefined();
+    expect(p.fills.find((f) => f.field === "dieType")).toBeUndefined();
+  });
+
+  it("still flags genuinely different die types", () => {
+    const s = sheet(1, 100, {
+      profiles: [profile({ dieType: '11" Dies' })],
+    } as Partial<ParsedSpecImport>);
+    const p = plan([s], values({ dieType: '12"' } as Partial<FormValues>));
+    expect(p.mismatches.find((m) => m.field === "dieType")?.specValue).toBe('11" Dies');
+  });
+});
+
 describe("buildProfileAutofillPlan — profile-link applicator candidates", () => {
   it("does not flag a Type mismatch when the profile's generic Mix slot links the sheet's raw name", () => {
     // Sheet names the applicator by raw mix name; the mix exists in NEITHER

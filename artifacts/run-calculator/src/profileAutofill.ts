@@ -28,6 +28,7 @@ import {
   specImportCheeseRecipeIsMix,
   specImportNameMatchKey,
   specImportNamedRecipeNamesEqual,
+  specImportDieTypeMatchKey,
   cleanSpecCheeseRecipeName,
   recipeApplyTargets,
   type ParsedProfile,
@@ -387,10 +388,17 @@ function nameKey(v: string): string {
   return specImportNameMatchKey(cleanSpecCheeseRecipeName(v));
 }
 
-function stringsEqual(a: string, b: string, kind: DesiredKind): boolean {
+function stringsEqual(a: string, b: string, kind: DesiredKind, field?: string): boolean {
   if (kind === "name") {
     const ka = nameKey(a);
     const kb = nameKey(b);
+    if (ka && kb) return ka === kb;
+  }
+  // Die types compare by the import's die key so '12"' == '12" Dies' — sheets
+  // append the generic "Dies" word; a raw compare flags a false mismatch.
+  if (field === "dieType") {
+    const ka = specImportDieTypeMatchKey(a);
+    const kb = specImportDieTypeMatchKey(b);
     if (ka && kb) return ka === kb;
   }
   return a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -415,9 +423,9 @@ function stringIsBlank(field: string, value: string): boolean {
 }
 
 /** Two proposed values are "the same" under the field's comparison rules. */
-function valuesEqual(a: string | number, b: string | number, kind: DesiredKind): boolean {
+function valuesEqual(a: string | number, b: string | number, kind: DesiredKind, field?: string): boolean {
   if (kind === "number") return Math.abs(Number(a) - Number(b)) <= 0.005;
-  return stringsEqual(String(a), String(b), kind);
+  return stringsEqual(String(a), String(b), kind, field);
 }
 
 function currentIsBlank(field: string, cur: unknown, kind: DesiredKind): boolean {
@@ -753,7 +761,7 @@ export function buildProfileAutofillPlan(opts: {
     // the credit line).
     const distinct: Desired[] = [];
     for (const e of entries) {
-      if (!distinct.some((d) => valuesEqual(d.value, e.value, kind))) distinct.push(e);
+      if (!distinct.some((d) => valuesEqual(d.value, e.value, kind, field))) distinct.push(e);
     }
 
     // Sources disagree with EACH OTHER → conflict; the user picks.
@@ -790,7 +798,7 @@ export function buildProfileAutofillPlan(opts: {
       const specS = String(d.value);
       if (stringIsBlank(field, curS)) {
         plan.fills.push({ field, label, specValue: specS, source: d.source });
-      } else if (!stringsEqual(curS, specS, kind)) {
+      } else if (!stringsEqual(curS, specS, kind, field)) {
         plan.mismatches.push({
           field,
           label,
