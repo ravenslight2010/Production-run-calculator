@@ -28,6 +28,12 @@ cards never activated and stray names polluted the dropdown. Approved fix
   queue that home.tsx retries on boot until a manager session succeeds.
 - "mix"/"cheese" must be allowlisted in every stray-mix-name filter or the
   generic types themselves get flagged as strays.
+- Resolver candidates must ALSO union the CURRENT profile's generic-typed slot
+  links (app{n}Type mix/cheese + non-blank link): a link name that exists in
+  neither the sheet nor the pools ("Hot Giardiniera Mix") otherwise finds no
+  match — re-import clobbers the type back to the raw name and the Auto-Fill
+  planner flags a false Type mismatch. Fixed in both applySpecImport and
+  profileAutofill (2026-07-17).
 - Live/scheduled RUN VALUES were intentionally NOT rewritten by v1 — run-form
   gates match raw mix names case-insensitively, so old open runs kept working.
 - v2 pool-aware heal (`applyPoolAwareSlotHealIfNeeded`, marker

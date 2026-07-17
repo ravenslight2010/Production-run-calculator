@@ -3168,15 +3168,29 @@ export function applySpecImport(
     // report an explicit slot when the sheet's layout shows a topping belongs
     // AFTER the pep applicators, i.e. on App 3/4); holes come back as
     // empty-type entries that the loop below skips.
+    // The profile itself may already hold a generic-typed slot whose linked
+    // recipe name exists in NEITHER this sheet NOR the pools (e.g. a mix the
+    // factory never defined as a Mixes recipe — "Hot Giardiniera Mix"). Those
+    // links must count as candidates too, or a re-import finds no match and
+    // clobbers the generic "Mix"/"cheese" type back to the raw sheet name.
+    const profileLinkCandidates = (kind: "cheese" | "mix"): string[] => {
+      const out: string[] = [];
+      for (let slot = 1; slot <= 4; slot++) {
+        const t = String((values as Record<string, unknown>)[`app${slot}Type`] ?? "").trim().toLowerCase();
+        const link = String((values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] ?? "").trim();
+        if (link && t === kind) out.push(link);
+      }
+      return out;
+    };
     const { applicators: cheeseResolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
       assignApplicatorSlots(p.applicators),
-      cheeseCandidateNames,
+      [...cheeseCandidateNames, ...profileLinkCandidates("cheese")],
     );
     // Mix slots re-type to the literal "Mix" (the run form's Mix card + Mixes
     // pool picker); the recipe name is linked below just like cheese.
     const { applicators: resolvedApps, links: mixLinks } = resolveMixApplicatorSlots(
       cheeseResolvedApps,
-      mixCandidateNames,
+      [...mixCandidateNames, ...profileLinkCandidates("mix")],
     );
     resolvedApps.forEach((a, i) => {
       const slot = i + 1;

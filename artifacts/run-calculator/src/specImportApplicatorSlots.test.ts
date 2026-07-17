@@ -8,7 +8,7 @@
 // behavior when no slots are reported.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { applySpecImport, loadProfile, saveList } from "./storage";
+import { applySpecImport, loadProfile, saveList, saveProfile } from "./storage";
 import { MIX_RECIPE_NAMES_KEY } from "./types";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 
@@ -105,5 +105,25 @@ describe("applySpecImport cheese applicator vs existing pool", () => {
     applySpecImport(parsedWith([{ type: "White Fajita Mix", ozPerPizza: 3 }]));
     const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
     expect(prof.app1Type).not.toBe("cheese");
+  });
+});
+
+// ── Profile's own generic-typed links count as resolver candidates ──
+// A mix the factory never defined as a Mixes recipe (e.g. "Hot Giardiniera
+// Mix") can exist ONLY as a profile's slot link. A re-import whose sheet names
+// the applicator by that raw name must keep the generic "Mix" type + link,
+// not clobber the type back to the raw sheet name (user report: Auto-Fill
+// flagged "now Mix · import says Hot Giardiniera Mix").
+describe("applySpecImport profile-link candidates", () => {
+  it("keeps a generic Mix slot when the sheet's raw name matches only the profile's own link", () => {
+    saveProfile("Corner Booth", "SUPREME", {
+      app1Type: "Mix",
+      app1CheeseRecipeName: "Hot Giardiniera Mix",
+      app1OzPerPizza: 1.75,
+    } as never);
+    applySpecImport(parsedWith([{ type: "Hot Giardiniera Mix", ozPerPizza: 1.75 }]));
+    const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
+    expect(prof.app1Type).toBe("Mix");
+    expect(prof.app1CheeseRecipeName).toBe("Hot Giardiniera Mix");
   });
 });

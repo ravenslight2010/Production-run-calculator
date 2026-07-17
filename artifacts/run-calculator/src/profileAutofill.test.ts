@@ -463,6 +463,43 @@ describe("buildProfileAutofillPlan", () => {
   });
 });
 
+describe("buildProfileAutofillPlan — profile-link applicator candidates", () => {
+  it("does not flag a Type mismatch when the profile's generic Mix slot links the sheet's raw name", () => {
+    // Sheet names the applicator by raw mix name; the mix exists in NEITHER
+    // the sheet's recipes NOR the pools — only as this profile's link.
+    const s = sheet(1, 100, {
+      profiles: [
+        profile({
+          applicators: [{ type: "Hot Giardiniera Mix", ozPerPizza: 1.75 }],
+        }),
+      ],
+    } as Partial<ParsedSpecImport>);
+    const cur = values({
+      app1Type: "Mix",
+      app1CheeseRecipeName: "Hot Giardiniera Mix",
+      app1OzPerPizza: 1.75,
+    } as Partial<FormValues>);
+    const p = plan([s], cur);
+    const typeMismatch = p.mismatches.find((m) => m.field === "app1Type");
+    expect(typeMismatch).toBeUndefined();
+    const typeFill = p.fills.find((f) => f.field === "app1Type");
+    expect(typeFill).toBeUndefined();
+  });
+
+  it("still offers the raw name when no profile link matches", () => {
+    const s = sheet(1, 100, {
+      profiles: [
+        profile({
+          applicators: [{ type: "Hot Giardiniera Mix", ozPerPizza: 1.75 }],
+        }),
+      ],
+    } as Partial<ParsedSpecImport>);
+    const p = plan([s], values());
+    const fill = p.fills.find((f) => f.field === "app1Type");
+    expect(fill?.specValue).toBe("Hot Giardiniera Mix");
+  });
+});
+
 describe("buildProfileAutofillPlan — multi-source conflicts", () => {
   function guide(
     createdAt: number,

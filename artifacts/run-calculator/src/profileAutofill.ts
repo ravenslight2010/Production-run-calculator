@@ -220,13 +220,26 @@ function desiredFromProfile(
       .map((r) => r.name),
     ...poolMixNames,
   ];
+  // Mirror the import's profile-link candidates: a generic-typed slot on the
+  // CURRENT profile may link a recipe that exists in neither this sheet nor
+  // the pools (e.g. "Hot Giardiniera Mix"); without it the resolver finds no
+  // match and the planner flags a false Type mismatch (raw name vs "Mix").
+  const profileLinkCandidates = (kind: "cheese" | "mix"): string[] => {
+    const out: string[] = [];
+    for (let slot = 1; slot <= 4; slot++) {
+      const t = String(cur[`app${slot}Type`] ?? "").trim().toLowerCase();
+      const link = String(cur[`app${slot}CheeseRecipeName`] ?? "").trim();
+      if (link && t === kind) out.push(link);
+    }
+    return out;
+  };
   const { applicators: cheeseResolved, links: cheeseLinks } = resolveCheeseApplicatorSlots(
     assignApplicatorSlots(p.applicators ?? []),
-    cheeseCandidateNames,
+    [...cheeseCandidateNames, ...profileLinkCandidates("cheese")],
   );
   const { applicators: resolvedApps, links: mixLinks } = resolveMixApplicatorSlots(
     cheeseResolved,
-    mixCandidateNames,
+    [...mixCandidateNames, ...profileLinkCandidates("mix")],
   );
   resolvedApps.forEach((a, i) => {
     const slot = i + 1;
