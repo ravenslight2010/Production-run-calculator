@@ -215,6 +215,7 @@ import {
 } from "@workspace/mixes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { fetchMixes, saveMixes, deleteMixes } from "@/mixes";
+import { createSwipeState, updateSwipeAxis, resolveSwipe, isSwipeExcludedTarget, type SwipeState as SwipeGestureState } from "@/swipeGesture";
 import {
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
@@ -3826,7 +3827,10 @@ export default function Home() {
   const [resumeDialog, setResumeDialog] = useState(false);
   const savedFlashRef = useRef<HTMLSpanElement>(null);
   const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const swipeTouchStart = useRef<{ x: number; y: number } | null>(null);
+  const swipeState = useRef<SwipeGestureState | null>(null);
+  const [swipeCue, setSwipeCue] = useState<"prev" | "next" | null>(null);
+  const swipeCueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (swipeCueTimer.current) clearTimeout(swipeCueTimer.current); }, []);
 
   // ── Role / Access ──────────────────────────────────────────────────────────
   const [role, setRole] = useState<"operator" | "supervisor">("operator");
@@ -10583,20 +10587,28 @@ export default function Home() {
   return (
     <div
       className="min-h-screen bg-background text-foreground p-4 md:p-6 pb-20 font-sans"
-      onTouchStart={e => { swipeTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }}
+      onTouchStart={e => {
+        // Swipes starting on inputs/buttons/horizontal scrollers never switch runs
+        if (isSwipeExcludedTarget(e.target)) { swipeState.current = null; return; }
+        swipeState.current = createSwipeState(e.touches[0].clientX, e.touches[0].clientY, e.timeStamp);
+      }}
+      onTouchMove={e => {
+        // Lock the gesture's axis early from the initial move direction
+        if (swipeState.current) swipeState.current = updateSwipeAxis(swipeState.current, e.touches[0].clientX, e.touches[0].clientY);
+      }}
       onTouchEnd={e => {
-        if (!swipeTouchStart.current) return;
-        const dx = e.changedTouches[0].clientX - swipeTouchStart.current.x;
-        const dy = e.changedTouches[0].clientY - swipeTouchStart.current.y;
-        swipeTouchStart.current = null;
-        // Only register clear horizontal swipes: long enough, mostly horizontal, and not a scroll
-        if (Math.abs(dx) < 60) return;           // must travel at least 60px horizontally
-        if (Math.abs(dy) > 30) return;            // any notable vertical movement → it's a scroll
-        if (Math.abs(dx) < Math.abs(dy) * 3) return; // must be 3× more horizontal than vertical
-        // Don't swipe if user is interacting with an input
-        if ((e.target as HTMLElement).closest("input, textarea, select, button")) return;
-        if (dx < 0) { if (dayState.currentIndex < dayState.runs.length - 1) switchToRun(dayState.currentIndex + 1); }
-        else { if (dayState.currentIndex > 0) switchToRun(dayState.currentIndex - 1); }
+        const s = swipeState.current;
+        swipeState.current = null;
+        if (!s) return;
+        const dir = resolveSwipe(s, e.changedTouches[0].clientX, e.changedTouches[0].clientY, e.timeStamp);
+        if (!dir) return;
+        const newIndex = dir === "next" ? dayState.currentIndex + 1 : dayState.currentIndex - 1;
+        if (newIndex < 0 || newIndex >= dayState.runs.length) return;
+        switchToRun(newIndex);
+        // Brief visual cue on the run dots/name so operators know the swipe landed
+        setSwipeCue(dir);
+        if (swipeCueTimer.current) clearTimeout(swipeCueTimer.current);
+        swipeCueTimer.current = setTimeout(() => setSwipeCue(null), 450);
       }}
     >
       {/* ── Alerts & Floor Mode settings (per-user, follows the account) ── */}
@@ -13444,7 +13456,7 @@ export default function Home() {
                     key={i}
                     type="button"
                     onClick={() => switchToRun(i)}
-                    className={`rounded-full transition-all ${i === dayState.currentIndex ? "w-4 h-2 bg-primary" : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                    className={`rounded-full transition-all ${i === dayState.currentIndex ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
                   />
                 ))}
               </div>
