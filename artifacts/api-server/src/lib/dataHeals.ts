@@ -869,6 +869,95 @@ async function runDoughFamilyWeightDepoison(): Promise<void> {
   });
 }
 
+// ── SMD Pep Cheese Mix lost-data restore ────────────────────────────────────
+// Merging "SMD Pepperoni Cheese Mix" into "SMD Pep Cheese Mix" (a spec-import
+// stub with all-zero lbs) deleted the real batch data from the pool: the
+// recipe-name merge flow re-pointed names and deleted the source recipe
+// without ever copying its data. The merge path now backfills before deleting
+// (backfill*FromMergedSources); this heal restores the known lost values onto
+// the surviving "SMD Pep Cheese Mix" — ONLY if its component lbs are still all
+// zero (a manager may have re-entered them since). Rows are matched loosely by
+// ingredient name; the survivor's own row naming (e.g. "Diced Pepperoni") is
+// kept. Cellulose 0.3 lbs is appended if the recipe has no cellulose row, and
+// cellulose "0.83" / shredder "#1" are set only when blank.
+
+const SMD_PEP_CHEESE_RESTORE_HEAL_ID = "smd-pep-cheese-mix-restore-v1";
+
+// Loose row matching: a row whose loose ingredient key contains the pattern.
+function looseKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const SMD_LOST_ROWS: Array<{ match: (key: string) => boolean; lbs: number }> = [
+  { match: (k) => k.includes("mozz"), lbs: 20 },
+  { match: (k) => k.includes("provolone"), lbs: 8 },
+  { match: (k) => k.includes("pepperoni"), lbs: 8 },
+  { match: (k) => k.includes("romano"), lbs: 2.5 },
+];
+
+async function runSmdPepCheeseRestore(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: SMD_PEP_CHEESE_RESTORE_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(cheeseRecipesTable).for("update");
+    let updatedRows = 0;
+    for (const row of rows) {
+      if (row.name.trim().toLowerCase() !== "smd pep cheese mix") continue;
+      const recipe = normalizeCheeseRecipe(row);
+      if (!recipe) continue;
+      // Only heal a recipe still carrying the damage: every component's lbs 0.
+      if (recipe.components.some((c) => c.lbs > 0)) continue;
+
+      let changed = false;
+      const components = recipe.components.map((c) => ({ ...c }));
+      const claimedIdx = new Set<number>();
+      for (const lost of SMD_LOST_ROWS) {
+        const idx = components.findIndex(
+          (c, i) => !claimedIdx.has(i) && lost.match(looseKey(c.ingredient)),
+        );
+        if (idx === -1) continue;
+        claimedIdx.add(idx);
+        if (!(components[idx].lbs > 0)) {
+          components[idx].lbs = lost.lbs;
+          changed = true;
+        }
+      }
+      if (!components.some((c) => looseKey(c.ingredient).includes("cellulose"))) {
+        components.push({ ingredient: "Cellulose", lbs: 0.3 });
+        changed = true;
+      }
+      const cellulose = recipe.cellulose.trim() ? recipe.cellulose : "0.83";
+      const shredderSetting = recipe.shredderSetting.trim()
+        ? recipe.shredderSetting
+        : "#1";
+      if (cellulose !== recipe.cellulose || shredderSetting !== recipe.shredderSetting) {
+        changed = true;
+      }
+      if (!changed) continue;
+      await tx
+        .update(cheeseRecipesTable)
+        .set({ components, cellulose, shredderSetting, updatedAt: new Date() })
+        .where(
+          and(
+            eq(cheeseRecipesTable.id, row.id),
+            eq(cheeseRecipesTable.scope, row.scope),
+          ),
+        );
+      updatedRows++;
+    }
+
+    logger.info(
+      { heal: SMD_PEP_CHEESE_RESTORE_HEAL_ID, scanned: rows.length, updatedRows },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -885,4 +974,5 @@ export async function runDataHeals(): Promise<void> {
   await runNamedRecipeNameCleanup();
   await runDoughYieldDepoison();
   await runDoughFamilyWeightDepoison();
+  await runSmdPepCheeseRestore();
 }

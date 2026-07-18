@@ -670,6 +670,105 @@ export function repointCheeseRecipeIngredients(
 }
 
 // ---------------------------------------------------------------------------
+// Merge backfill (recipe-name merges must carry data)
+// ---------------------------------------------------------------------------
+
+// Loose ingredient-name key used to line up component rows between a merge's
+// target and source recipes: lowercase, split on non-alphanumerics, tokens
+// SORTED then joined — so "Cow's Romano" matches "Cows Romano" and
+// "Pepperoni, Diced" matches "Diced Pepperoni" (word reorder folds).
+function looseIngredientKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['\u2019]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => (t.length >= 4 ? t.replace(/s$/, "") : t))
+    .sort()
+    .join("");
+}
+
+/**
+ * Backfill a merge TARGET cheese recipe from the recipes being merged away,
+ * BEFORE the sources are deleted from the server pool. Blank-fill-only: real
+ * data already on the target is never clobbered — the source only fills gaps.
+ * - Component rows are matched by loose ingredient name; a matched target row
+ *   gets lbs / ozPerPizza / sharePct filled only where it has none, and
+ *   source-only rows (e.g. Cellulose) are appended.
+ * - shredderSetting / cellulose / notes fill only when blank on the target.
+ * - brand (+ flavors) are adopted only when the target has NO brand; a branded
+ *   target's empty flavors list means "All Varieties" and is left alone.
+ * Sources are folded in order (earlier sources win ties among themselves).
+ * Returns the enriched recipe, or null when nothing changed. Pure.
+ */
+export function backfillCheeseRecipeFromMergedSources(
+  target: CheeseRecipe,
+  sources: ReadonlyArray<CheeseRecipe>,
+): CheeseRecipe | null {
+  let changed = false;
+  let next: CheeseRecipe = {
+    ...target,
+    components: target.components.map((c) => ({ ...c })),
+    flavors: [...target.flavors],
+  };
+  for (const src of sources) {
+    // Field-level blank fills.
+    if (!next.shredderSetting.trim() && src.shredderSetting.trim()) {
+      next.shredderSetting = src.shredderSetting;
+      changed = true;
+    }
+    if (!next.cellulose.trim() && src.cellulose.trim()) {
+      next.cellulose = src.cellulose;
+      changed = true;
+    }
+    if (!next.notes.trim() && src.notes.trim()) {
+      next.notes = src.notes;
+      changed = true;
+    }
+    if (!next.brand.trim() && src.brand.trim()) {
+      next.brand = src.brand;
+      if (next.flavors.length === 0 && src.flavors.length > 0) {
+        next.flavors = [...src.flavors];
+      }
+      changed = true;
+    }
+    // Component rows: fill matched rows' blank numbers, append missing rows.
+    const byKey = new Map<string, CheeseComponent>();
+    for (const c of next.components) {
+      const key = looseIngredientKey(c.ingredient);
+      if (key && !byKey.has(key)) byKey.set(key, c);
+    }
+    for (const sc of src.components) {
+      const key = looseIngredientKey(sc.ingredient);
+      if (!key) continue;
+      const tc = byKey.get(key);
+      if (!tc) {
+        const added: CheeseComponent = { ingredient: sc.ingredient, lbs: sc.lbs };
+        if ((sc.ozPerPizza ?? 0) > 0) added.ozPerPizza = sc.ozPerPizza;
+        if ((sc.sharePct ?? 0) > 0) added.sharePct = sc.sharePct;
+        next.components.push(added);
+        byKey.set(key, added);
+        changed = true;
+        continue;
+      }
+      if (!(tc.lbs > 0) && sc.lbs > 0) {
+        tc.lbs = sc.lbs;
+        changed = true;
+      }
+      if (!((tc.ozPerPizza ?? 0) > 0) && (sc.ozPerPizza ?? 0) > 0) {
+        tc.ozPerPizza = sc.ozPerPizza;
+        changed = true;
+      }
+      if (!((tc.sharePct ?? 0) > 0) && (sc.sharePct ?? 0) > 0) {
+        tc.sharePct = sc.sharePct;
+        changed = true;
+      }
+    }
+  }
+  return changed ? next : null;
+}
+
+// ---------------------------------------------------------------------------
 // List browsing (search + brand grouping for the settings UI)
 // ---------------------------------------------------------------------------
 

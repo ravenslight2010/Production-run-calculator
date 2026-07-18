@@ -284,6 +284,106 @@ export function matchDoughballVariant(
   return hits.length === 1 ? hits[0] : null;
 }
 
+// Loose ingredient-name key for lining up component rows in a merge backfill:
+// lowercase, split on non-alphanumerics, tokens sorted then joined (word
+// reorder like "Pepperoni, Diced" vs "Diced Pepperoni" folds).
+function looseMergeIngredientKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['\u2019]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => (t.length >= 4 ? t.replace(/s$/, "") : t))
+    .sort()
+    .join("");
+}
+
+/**
+ * Backfill a merge TARGET dough/sauce recipe from the recipes being merged
+ * away, BEFORE the sources are deleted from the server pool. Blank-fill-only:
+ * real data on the target is never clobbered — sources only fill gaps.
+ * Component rows are matched by loose ingredient name (lbs filled only where
+ * the target has none; source-only rows appended); notes fill only when blank;
+ * brand (+ flavors) are adopted only when the target has NO brand (a branded
+ * recipe's empty flavors list means "all varieties" and is left alone);
+ * doughballWeightOz / doughballsPerTray fill only when unset; doughball
+ * variants merge additively by label (target's variants win). Sources fold in
+ * order. Returns the enriched recipe, or null when nothing changed. Pure.
+ */
+export function backfillNamedRecipeFromMergedSources(
+  target: NamedRecipe,
+  sources: ReadonlyArray<NamedRecipe>,
+): NamedRecipe | null {
+  let changed = false;
+  const next: NamedRecipe = {
+    ...target,
+    components: target.components.map((c) => ({ ...c })),
+    flavors: [...target.flavors],
+    doughballVariants: target.doughballVariants
+      ? target.doughballVariants.map((v) => ({ ...v }))
+      : undefined,
+  };
+  for (const src of sources) {
+    if (!next.notes.trim() && src.notes.trim()) {
+      next.notes = src.notes;
+      changed = true;
+    }
+    if (!next.brand.trim() && src.brand.trim()) {
+      next.brand = src.brand;
+      if (next.flavors.length === 0 && src.flavors.length > 0) {
+        next.flavors = [...src.flavors];
+      }
+      changed = true;
+    }
+    if (!((next.doughballWeightOz ?? 0) > 0) && (src.doughballWeightOz ?? 0) > 0) {
+      next.doughballWeightOz = src.doughballWeightOz;
+      changed = true;
+    }
+    if (!((next.doughballsPerTray ?? 0) > 0) && (src.doughballsPerTray ?? 0) > 0) {
+      next.doughballsPerTray = src.doughballsPerTray;
+      changed = true;
+    }
+    if ((src.doughballVariants ?? []).length > 0) {
+      const have = new Set(
+        (next.doughballVariants ?? []).map((v) => v.label.trim().toLowerCase()),
+      );
+      for (const v of src.doughballVariants ?? []) {
+        const key = v.label.trim().toLowerCase();
+        if (!key || have.has(key)) continue;
+        have.add(key);
+        next.doughballVariants = [...(next.doughballVariants ?? []), { ...v }];
+        changed = true;
+      }
+    }
+    const byKey = new Map<string, NamedRecipeComponent>();
+    for (const c of next.components) {
+      const key = looseMergeIngredientKey(c.ingredient);
+      if (key && !byKey.has(key)) byKey.set(key, c);
+    }
+    for (const sc of src.components) {
+      const key = looseMergeIngredientKey(sc.ingredient);
+      if (!key) continue;
+      const tc = byKey.get(key);
+      if (!tc) {
+        const added: NamedRecipeComponent = { ingredient: sc.ingredient, lbs: sc.lbs };
+        next.components.push(added);
+        byKey.set(key, added);
+        changed = true;
+        continue;
+      }
+      if (!(tc.lbs > 0) && sc.lbs > 0) {
+        tc.lbs = sc.lbs;
+        changed = true;
+      }
+    }
+  }
+  if (!changed) return null;
+  if (!next.doughballVariants || next.doughballVariants.length === 0) {
+    delete next.doughballVariants;
+  }
+  return next;
+}
+
 // Normalize a list, dropping malformed entries and collapsing duplicate ids onto
 // the last-seen entry.
 export function normalizeNamedRecipes(input: unknown): NamedRecipe[] {

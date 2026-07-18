@@ -210,6 +210,7 @@ import {
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
   repointMixIngredients,
+  backfillMixFromMergedSources,
   addSpecMixesIfAbsent,
   type Mix,
 } from "@workspace/mixes";
@@ -440,6 +441,7 @@ import {
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
   repointCheeseRecipeIngredients,
+  backfillCheeseRecipeFromMergedSources,
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
 } from "@workspace/cheese-recipes";
@@ -447,7 +449,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
 import { saveSpecImportAliases } from "@/specImportAliases";
 
 import {
@@ -5237,33 +5239,66 @@ export default function Home() {
             .filter((s) => s && s !== tgtLc),
         );
         if (sourceNamesLc.size > 0) {
+          // Before deleting the merged-away recipes, backfill the TARGET's
+          // blank/zero/missing fields from them (blank-fill-only — real data
+          // already on the target always wins). Without this, merging a real
+          // recipe into a spec-import stub silently deleted the real batch
+          // data from the factory-wide pool. The enriched target is SAVED
+          // first; only then are the sources deleted, so a failed save keeps
+          // the sources (and their data) alive.
           if (category === "cheese") {
             const pool = await fetchCheeseRecipes();
-            const ids = pool
-              .filter((r) => sourceNamesLc.has(r.name.trim().toLowerCase()))
-              .map((r) => r.id);
+            const targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
+            const sourceRows = pool.filter((r) =>
+              sourceNamesLc.has(r.name.trim().toLowerCase()),
+            );
+            if (targetRow && sourceRows.length > 0) {
+              const enriched = backfillCheeseRecipeFromMergedSources(targetRow, sourceRows);
+              if (enriched) await saveCheeseRecipes([enriched]);
+            }
+            const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
               cycleCountQc.setQueryData(["cheeseRecipes"], await deleteCheeseRecipes(ids));
+            } else if (targetRow) {
+              cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
             }
           } else if (category === "mixes") {
             const pool = await fetchMixes();
-            const ids = pool
-              .filter((m) => sourceNamesLc.has(m.name.trim().toLowerCase()))
-              .map((m) => m.id);
+            const targetRow = pool.find((m) => m.name.trim().toLowerCase() === tgtLc);
+            const sourceRows = pool.filter((m) =>
+              sourceNamesLc.has(m.name.trim().toLowerCase()),
+            );
+            if (targetRow && sourceRows.length > 0) {
+              const enriched = backfillMixFromMergedSources(targetRow, sourceRows);
+              if (enriched) await saveMixes([enriched]);
+            }
+            const ids = sourceRows.map((m) => m.id);
             if (ids.length > 0) {
               cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids));
+            } else if (targetRow) {
+              cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
             }
           } else {
             // dough | sauce — their own named-recipe pools.
             const pool = await fetchNamedRecipes(category);
-            const ids = pool
-              .filter((r) => sourceNamesLc.has(r.name.trim().toLowerCase()))
-              .map((r) => r.id);
+            const targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
+            const sourceRows = pool.filter((r) =>
+              sourceNamesLc.has(r.name.trim().toLowerCase()),
+            );
+            if (targetRow && sourceRows.length > 0) {
+              const enriched = backfillNamedRecipeFromMergedSources(targetRow, sourceRows);
+              if (enriched) await saveNamedRecipes(category, [enriched]);
+            }
+            const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
               cycleCountQc.setQueryData(
                 [category === "dough" ? "doughRecipes" : "sauceRecipes"],
                 await deleteNamedRecipes(category, ids),
               );
+            } else if (targetRow) {
+              cycleCountQc.invalidateQueries({
+                queryKey: [category === "dough" ? "doughRecipes" : "sauceRecipes"],
+              });
             }
           }
         }

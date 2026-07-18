@@ -295,6 +295,94 @@ export function repointMixIngredients(
   return changed;
 }
 
+// Loose ingredient-name key for lining up component rows in a merge backfill:
+// lowercase, split on non-alphanumerics, tokens sorted then joined (word
+// reorder like "Pepperoni, Diced" vs "Diced Pepperoni" folds).
+function looseMergeIngredientKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['\u2019]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => (t.length >= 4 ? t.replace(/s$/, "") : t))
+    .sort()
+    .join("");
+}
+
+/**
+ * Backfill a merge TARGET mix from the mixes being merged away, BEFORE the
+ * sources are deleted from the server pool. Blank-fill-only: real data on the
+ * target is never clobbered — sources only fill gaps. Component rows are
+ * matched by loose ingredient name (perPizza / perBatchLbs filled only where
+ * the target has none; source-only rows appended); brand / flavor / notes fill
+ * only when blank; batchSize / daysEarly / amountAlreadyMade fill only when 0.
+ * Sources fold in order. Returns the enriched mix, or null when nothing
+ * changed. Pure.
+ */
+export function backfillMixFromMergedSources(
+  target: Mix,
+  sources: ReadonlyArray<Mix>,
+): Mix | null {
+  let changed = false;
+  const next: Mix = {
+    ...target,
+    components: target.components.map((c) => ({ ...c })),
+  };
+  for (const src of sources) {
+    if (!next.brand.trim() && src.brand.trim()) {
+      next.brand = src.brand;
+      changed = true;
+    }
+    if (!next.flavor.trim() && src.flavor.trim()) {
+      next.flavor = src.flavor;
+      changed = true;
+    }
+    if (!(next.batchSize > 0) && src.batchSize > 0) {
+      next.batchSize = src.batchSize;
+      changed = true;
+    }
+    if (!(next.daysEarly > 0) && src.daysEarly > 0) {
+      next.daysEarly = src.daysEarly;
+      changed = true;
+    }
+    if (!(next.amountAlreadyMade > 0) && src.amountAlreadyMade > 0) {
+      next.amountAlreadyMade = src.amountAlreadyMade;
+      changed = true;
+    }
+    if (!(next.notes ?? "").trim() && (src.notes ?? "").trim()) {
+      next.notes = src.notes;
+      changed = true;
+    }
+    const byKey = new Map<string, MixComponent>();
+    for (const c of next.components) {
+      const key = looseMergeIngredientKey(c.ingredient);
+      if (key && !byKey.has(key)) byKey.set(key, c);
+    }
+    for (const sc of src.components) {
+      const key = looseMergeIngredientKey(sc.ingredient);
+      if (!key) continue;
+      const tc = byKey.get(key);
+      if (!tc) {
+        const added: MixComponent = { ingredient: sc.ingredient, perPizza: sc.perPizza };
+        if ((sc.perBatchLbs ?? 0) > 0) added.perBatchLbs = sc.perBatchLbs;
+        next.components.push(added);
+        byKey.set(key, added);
+        changed = true;
+        continue;
+      }
+      if (!(tc.perPizza > 0) && sc.perPizza > 0) {
+        tc.perPizza = sc.perPizza;
+        changed = true;
+      }
+      if (!((tc.perBatchLbs ?? 0) > 0) && (sc.perBatchLbs ?? 0) > 0) {
+        tc.perBatchLbs = sc.perBatchLbs;
+        changed = true;
+      }
+    }
+  }
+  return changed ? next : null;
+}
+
 /**
  * Add spec-import-detected mixes to the existing list, skipping any whose name
  * already exists (case-insensitive). A spec sheet can only supply a mix's

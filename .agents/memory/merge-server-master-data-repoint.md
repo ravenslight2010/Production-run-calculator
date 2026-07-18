@@ -28,6 +28,16 @@ Web+mobile parity.
 case-insensitively (no-op). So a "merge" whose source already matches the target
 spelling correctly produces zero changes — this is right, not a bug.
 
+**Recipe-NAME merges must carry data:** merging recipes inside the four
+server-backed pools (cheese/mixes/dough/sauce) deletes the source rows — so the
+apply path must BACKFILL the target from the sources first (blank-fill-only,
+target's real data never clobbered) via `backfill*FromMergedSources` in each
+lib, save the enriched target, THEN delete sources. Component rows match by a
+loose key (lowercase, apostrophes stripped, tokens plural-folded + sorted, so
+"Pepperoni, Diced" == "Diced Pepperoni"). Without this, merging a real recipe
+into a spec-import stub silently lost the real batch data (SMD incident; healed
+by `smd-pep-cheese-mix-restore-v1`).
+
 **Why:** the merge path was designed as a "soft" re-point of local state; nobody
 extended it to the newer server-backed pools. Any future server-backed pool that
 keys on brand/flavor must be added to the merge re-point, or it silently drifts.
