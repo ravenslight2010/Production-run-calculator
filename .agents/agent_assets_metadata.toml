@@ -1,8 +1,13 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "18MIO8--IrFdcR33-o4tE"
 uri = "file://artifacts/run-calculator-mobile/assets/images/icon.png"
 type = "image"
 title = "pizza-run-calculator-icon"
+
+[[outputs]]
+id = "k2_SMMJCh7lzNEC9dfbdc"
+uri = "file://attached_assets/source-library/AUDIT-REPORT-2026-07-18.md"
+type = "text"
+title = "Full Audit: Source Workbooks vs Live App (July 18, 2026)"

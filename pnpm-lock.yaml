@@ -1326,12 +1326,33 @@ importers:
 
   scripts:
     dependencies:
+      '@workspace/cheese-import':
+        specifier: workspace:*
+        version: link:../lib/cheese-import
+      '@workspace/name-match':
+        specifier: workspace:*
+        version: link:../lib/name-match
+      '@workspace/named-recipes':
+        specifier: workspace:*
+        version: link:../lib/named-recipes
+      '@workspace/premix-import':
+        specifier: workspace:*
+        version: link:../lib/premix-import
+      '@workspace/shipping-import':
+        specifier: workspace:*
+        version: link:../lib/shipping-import
       '@workspace/spec-export':
         specifier: workspace:*
         version: link:../lib/spec-export
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../lib/spec-import
+      '@workspace/spec-reconcile':
+        specifier: workspace:*
+        version: link:../lib/spec-reconcile
+      xlsx:
+        specifier: npm:@e965/xlsx@^0.20.3
+        version: '@e965/xlsx@0.20.3'
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
