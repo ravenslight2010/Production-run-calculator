@@ -94,6 +94,11 @@ export const formSchema = z.object({
   // Only meaningful when cartoned === "labeled": top / bottom / both.
   labelPosition: z.string().default(""),
   cartonsPerCase: z.coerce.number().min(0).default(0),
+  // Only meaningful when cartoned === "labeled": labelsPerRoll for a single
+  // top/bottom label position, the top/bottom pair when position is "both".
+  labelsPerRoll: z.coerce.number().min(0).default(0),
+  topLabelsPerRoll: z.coerce.number().min(0).default(0),
+  bottomLabelsPerRoll: z.coerce.number().min(0).default(0),
   circles: z.string().default("none"),
   shipper: z.string().default(""),
   skidStacking: z.string().default(""),
@@ -199,6 +204,9 @@ export const DEFAULT_VALUES: FormValues = {
   cartoned: "cartoned",
   labelPosition: "",
   cartonsPerCase: 0,
+  labelsPerRoll: 0,
+  topLabelsPerRoll: 0,
+  bottomLabelsPerRoll: 0,
   circles: "none",
   shipper: "",
   skidStacking: "",

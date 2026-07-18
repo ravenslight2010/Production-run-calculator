@@ -986,6 +986,26 @@ export default function SetupProfileEditor({
                         onSelect={val => form.setValue("labelPosition", val, { shouldDirty: true })}
                       />
                     )}
+                    {/* Quantity field(s) matching the selected Packaging Type. */}
+                    {(() => {
+                      const typeVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
+                      const posVal = ((v.labelPosition as string) ?? "").trim().toLowerCase();
+                      if (typeVal === "cartoned" || typeVal === "yes") {
+                        return <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />;
+                      }
+                      if (typeVal === "labeled" && (posVal === "top" || posVal === "bottom")) {
+                        return <NumField control={form.control} name="labelsPerRoll" label="Labels Per Roll" step="1" />;
+                      }
+                      if (typeVal === "labeled" && posVal === "both") {
+                        return (
+                          <div className="grid grid-cols-2 gap-3">
+                            <NumField control={form.control} name="topLabelsPerRoll" label="Top Labels Per Roll" step="1" />
+                            <NumField control={form.control} name="bottomLabelsPerRoll" label="Bottom Labels Per Roll" step="1" />
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                     <EditableChipList
                       label="Circles"
                       options={circles}
@@ -1024,7 +1044,6 @@ export default function SetupProfileEditor({
                       value={(v.slipSheets as string) ?? ""}
                       onSelect={val => form.setValue("slipSheets", val, { shouldDirty: true })}
                     />
-                    <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />
                   </div>
                 </details>
 

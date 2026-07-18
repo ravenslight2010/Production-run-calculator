@@ -14008,15 +14008,60 @@ export default function Home() {
                               </div>
                             </div>
                           )}
+                          {/* Quantity field(s) matching the selected Packaging Type,
+                              shown right under the Packaging Type / Label Position
+                              selectors. Hidden values stay in storage so toggling
+                              back doesn't lose numbers. */}
+                          {f.name === "cartoned" && (() => {
+                            const typeVal = cur.trim().toLowerCase();
+                            const posVal = ((v.labelPosition as string) ?? "").trim().toLowerCase();
+                            if (isCartonedValue(typeVal)) {
+                              return (
+                                <div className="mt-3">
+                                  <NumField
+                                    control={form.control}
+                                    name="cartonsPerCase"
+                                    label="Cartons Per Case"
+                                    step="1"
+                                  />
+                                </div>
+                              );
+                            }
+                            if (typeVal === "labeled" && (posVal === "top" || posVal === "bottom")) {
+                              return (
+                                <div className="mt-3">
+                                  <NumField
+                                    control={form.control}
+                                    name="labelsPerRoll"
+                                    label="Labels Per Roll"
+                                    step="1"
+                                  />
+                                </div>
+                              );
+                            }
+                            if (typeVal === "labeled" && posVal === "both") {
+                              return (
+                                <div className="mt-3 grid grid-cols-2 gap-3">
+                                  <NumField
+                                    control={form.control}
+                                    name="topLabelsPerRoll"
+                                    label="Top Labels Per Roll"
+                                    step="1"
+                                  />
+                                  <NumField
+                                    control={form.control}
+                                    name="bottomLabelsPerRoll"
+                                    label="Bottom Labels Per Roll"
+                                    step="1"
+                                  />
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       );
                     })}
-                    <NumField
-                      control={form.control}
-                      name="cartonsPerCase"
-                      label="Cartons Per Case"
-                      step="1"
-                    />
                   </div>
                 </details>
               </TabsContent>
@@ -14456,6 +14501,35 @@ export default function Home() {
                           </span>
                         </div>
                       )}
+                      {/* Labels-per-roll readouts — only when Labeled and a value is set. */}
+                      {((v.cartoned as string) ?? "").trim().toLowerCase() === "labeled" && (() => {
+                        const pos = ((v.labelPosition as string) ?? "").trim().toLowerCase();
+                        const single = Number(v.labelsPerRoll) || 0;
+                        const top = Number(v.topLabelsPerRoll) || 0;
+                        const bottom = Number(v.bottomLabelsPerRoll) || 0;
+                        return (
+                          <>
+                            {(pos === "top" || pos === "bottom") && single > 0 && (
+                              <div className="flex flex-col">
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Labels/Roll</span>
+                                <span className="text-sm font-mono font-bold text-foreground">{fmtNum(single, 0)}</span>
+                              </div>
+                            )}
+                            {pos === "both" && top > 0 && (
+                              <div className="flex flex-col">
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Top Labels/Roll</span>
+                                <span className="text-sm font-mono font-bold text-foreground">{fmtNum(top, 0)}</span>
+                              </div>
+                            )}
+                            {pos === "both" && bottom > 0 && (
+                              <div className="flex flex-col">
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Bottom Labels/Roll</span>
+                                <span className="text-sm font-mono font-bold text-foreground">{fmtNum(bottom, 0)}</span>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                       {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
                         const val = ((v[f.name] as string) ?? "").trim();
                         return (
