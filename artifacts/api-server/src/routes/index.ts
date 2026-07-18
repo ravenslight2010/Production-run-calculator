@@ -31,6 +31,7 @@ import brandProfilesRouter from "./brandProfiles";
 import cycleCountSchedulesRouter from "./cycleCountSchedules";
 import runTemplatesRouter from "./runTemplates";
 import supervisorPinRouter from "./supervisorPin";
+import dieTypesRouter from "./dieTypes";
 import sandboxRouter from "./sandbox";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
@@ -86,6 +87,7 @@ router.use(brandProfilesRouter);
 router.use(cycleCountSchedulesRouter);
 router.use(runTemplatesRouter);
 router.use(supervisorPinRouter);
+router.use(dieTypesRouter);
 router.use(sandboxRouter);
 
 export default router;

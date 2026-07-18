@@ -33,6 +33,8 @@ tags:
     description: Facility-wide saved run-setup templates
   - name: supervisorPin
     description: Facility-wide supervisor PIN setting
+  - name: dieTypes
+    description: Factory-wide die-type master list
 paths:
   /healthz:
     get:
@@ -1810,6 +1812,73 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+
+  /die-types:
+    get:
+      operationId: listDieTypes
+      tags: [dieTypes]
+      summary: List factory-wide die types
+      description: >-
+        Returns every factory-wide die type (the selectable Die Type master
+        list). These are shared master-data (not part of the per-day sync
+        payload), so they survive factory data resets and fresh devices. Any
+        signed-in user can read and write them — the list is a shared
+        convenience edited from the run form pickers, like run templates.
+      responses:
+        "200":
+          description: All die types
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DieTypeList"
+    post:
+      operationId: saveDieTypes
+      tags: [dieTypes]
+      summary: Create or update die types
+      description: >-
+        Upserts a batch of die types by name. Names are trimmed and folded to
+        their canonical id case-insensitively; malformed/empty names are
+        dropped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDieTypesInput"
+      responses:
+        "200":
+          description: The full updated die-type list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DieTypeList"
+        "400":
+          description: Invalid input
+
+  /die-types/delete:
+    post:
+      operationId: deleteDieTypes
+      tags: [dieTypes]
+      summary: Delete die types by name
+      description: >-
+        Removes a batch of die types by name (case-insensitive). Deletions are
+        deliberate user actions and are honored factory-wide — clients keep
+        their own deletion tombstones so a removed die is never resurrected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteDieTypesInput"
+      responses:
+        "200":
+          description: The full updated die-type list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DieTypeList"
+        "400":
+          description: Invalid input
 
   /run-templates:
     get:
@@ -7187,6 +7256,39 @@ components:
         ids:
           type: array
           description: The ids of the freezer-pull items to delete
+          items:
+            type: string
+
+    DieTypeList:
+      type: object
+      description: The full factory-wide die-type master list (display names).
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          items:
+            type: string
+
+    SaveDieTypesInput:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: Die-type display names to create or update
+          items:
+            type: string
+
+    DeleteDieTypesInput:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: Die-type names to delete (matched case-insensitively)
           items:
             type: string
 

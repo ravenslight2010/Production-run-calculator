@@ -2102,6 +2102,41 @@ export const DeleteFreezerPullItemsResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
+ * @summary List factory-wide die types
+ */
+export const ListDieTypesResponse = zod.object({
+  "names": zod.array(zod.string())
+}).describe('The full factory-wide die-type master list (display names).')
+
+
+/**
+ * Upserts a batch of die types by name. Names are trimmed and folded to their canonical id case-insensitively; malformed/empty names are dropped.
+ * @summary Create or update die types
+ */
+export const SaveDieTypesBody = zod.object({
+  "names": zod.array(zod.string()).describe('Die-type display names to create or update')
+})
+
+export const SaveDieTypesResponse = zod.object({
+  "names": zod.array(zod.string())
+}).describe('The full factory-wide die-type master list (display names).')
+
+
+/**
+ * Removes a batch of die types by name (case-insensitive). Deletions are deliberate user actions and are honored factory-wide — clients keep their own deletion tombstones so a removed die is never resurrected.
+ * @summary Delete die types by name
+ */
+export const DeleteDieTypesBody = zod.object({
+  "names": zod.array(zod.string()).describe('Die-type names to delete (matched case-insensitively)')
+})
+
+export const DeleteDieTypesResponse = zod.object({
+  "names": zod.array(zod.string())
+}).describe('The full factory-wide die-type master list (display names).')
+
+
+/**
  * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
  * @summary List facility-wide run templates
  */

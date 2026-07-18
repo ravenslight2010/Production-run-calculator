@@ -45,6 +45,7 @@ import type {
   DeleteBrandProfilesInput,
   DeleteCheeseRecipesInput,
   DeleteCycleCountSchedulesInput,
+  DeleteDieTypesInput,
   DeleteFreezerPullItemsInput,
   DeleteIngredientsInput,
   DeleteMixesInput,
@@ -52,6 +53,7 @@ import type {
   DeleteProductionRulesInput,
   DeleteRunTemplatesInput,
   DeniedMergeList,
+  DieTypeList,
   FacilityKnowledgeList,
   FillMissingInput,
   FillMissingResult,
@@ -130,6 +132,7 @@ import type {
   SaveCheeseRecipesInput,
   SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
+  SaveDieTypesInput,
   SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
   SaveFreezerPullItemsInput,
@@ -5467,6 +5470,228 @@ export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
+    }
+
+export const getListDieTypesUrl = () => {
+
+
+
+
+  return `/api/die-types`
+}
+
+/**
+ * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
+ * @summary List factory-wide die types
+ */
+export const listDieTypes = async ( options?: RequestInit): Promise<DieTypeList> => {
+
+  return customFetch<DieTypeList>(getListDieTypesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDieTypesQueryKey = () => {
+    return [
+    `/api/die-types`
+    ] as const;
+    }
+
+
+export const getListDieTypesQueryOptions = <TData = Awaited<ReturnType<typeof listDieTypes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDieTypesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDieTypes>>> = ({ signal }) => listDieTypes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDieTypesQueryResult = NonNullable<Awaited<ReturnType<typeof listDieTypes>>>
+export type ListDieTypesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List factory-wide die types
+ */
+
+export function useListDieTypes<TData = Awaited<ReturnType<typeof listDieTypes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDieTypes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDieTypesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveDieTypesUrl = () => {
+
+
+
+
+  return `/api/die-types`
+}
+
+/**
+ * Upserts a batch of die types by name. Names are trimmed and folded to their canonical id case-insensitively; malformed/empty names are dropped.
+ * @summary Create or update die types
+ */
+export const saveDieTypes = async (saveDieTypesInput: SaveDieTypesInput, options?: RequestInit): Promise<DieTypeList> => {
+
+  return customFetch<DieTypeList>(getSaveDieTypesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveDieTypesInput,)
+  }
+);}
+
+
+
+
+export const getSaveDieTypesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDieTypes>>, TError,{data: BodyType<SaveDieTypesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveDieTypes>>, TError,{data: BodyType<SaveDieTypesInput>}, TContext> => {
+
+const mutationKey = ['saveDieTypes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveDieTypes>>, {data: BodyType<SaveDieTypesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveDieTypes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveDieTypesMutationResult = NonNullable<Awaited<ReturnType<typeof saveDieTypes>>>
+    export type SaveDieTypesMutationBody = BodyType<SaveDieTypesInput>
+    export type SaveDieTypesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update die types
+ */
+export const useSaveDieTypes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDieTypes>>, TError,{data: BodyType<SaveDieTypesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveDieTypes>>,
+        TError,
+        {data: BodyType<SaveDieTypesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveDieTypesMutationOptions(options));
+    }
+
+export const getDeleteDieTypesUrl = () => {
+
+
+
+
+  return `/api/die-types/delete`
+}
+
+/**
+ * Removes a batch of die types by name (case-insensitive). Deletions are deliberate user actions and are honored factory-wide — clients keep their own deletion tombstones so a removed die is never resurrected.
+ * @summary Delete die types by name
+ */
+export const deleteDieTypes = async (deleteDieTypesInput: DeleteDieTypesInput, options?: RequestInit): Promise<DieTypeList> => {
+
+  return customFetch<DieTypeList>(getDeleteDieTypesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteDieTypesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteDieTypesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDieTypes>>, TError,{data: BodyType<DeleteDieTypesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDieTypes>>, TError,{data: BodyType<DeleteDieTypesInput>}, TContext> => {
+
+const mutationKey = ['deleteDieTypes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDieTypes>>, {data: BodyType<DeleteDieTypesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteDieTypes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDieTypesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDieTypes>>>
+    export type DeleteDieTypesMutationBody = BodyType<DeleteDieTypesInput>
+    export type DeleteDieTypesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete die types by name
+ */
+export const useDeleteDieTypes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDieTypes>>, TError,{data: BodyType<DeleteDieTypesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDieTypes>>,
+        TError,
+        {data: BodyType<DeleteDieTypesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteDieTypesMutationOptions(options));
     }
 
 export const getListRunTemplatesUrl = () => {

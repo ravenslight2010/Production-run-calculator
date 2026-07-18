@@ -72,6 +72,20 @@ for both `{rows}` and `RecipeRow[]` shapes; mix rows live in the cheese preset m
 Mobile recipe presets stay **local** (not synced) and `renameRecipePreset` already
 moves the key, so no tombstone is needed there.
 
+**2026-07 web update — die types are now a factory-wide SERVER pool** (`die_types`
+table, `/api/die-types`, NOT in the day-state sync blob). Web no longer merges
+`payload.dieTypes` on sync receive (a stale peer would resurrect factory-deleted
+dies); the payload still carries the list for mobile, which hasn't migrated
+(parity paused). Web reconciles on load: local tombstones always win, local
+spelling wins over server spelling, local-only names are pushed up (first
+successful push = one-time migration, marker-gated; afterwards only
+profile-referenced names are healed locally so stale caches can't re-push
+deletions). Rename pushes new + deletes old on the server, EXCEPT case-only
+renames (server id is the lowercased name — deleting the old spelling would
+delete the new row too). Picking a die also blank-fills line-setting defaults
+(7"/11"/12"/Argus map in web `dieDefaults.ts`) — only fields still at their
+untouched `DEFAULT_VALUES` (speedAdjustment's untouched value is 1.0, not 0).
+
 **Known remaining mobile gap (deferred):** the ingredient-merge *apply* path in
 mobile `RunContext` still rewrites `dieTypes` via the merge map; web excludes die
 types from that rewrite. Unrelated to variant consolidation (that uses the rename

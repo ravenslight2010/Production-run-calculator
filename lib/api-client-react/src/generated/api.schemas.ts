@@ -2336,6 +2336,23 @@ export interface DeleteFreezerPullItemsInput {
 }
 
 /**
+ * The full factory-wide die-type master list (display names).
+ */
+export interface DieTypeList {
+  names: string[];
+}
+
+export interface SaveDieTypesInput {
+  /** Die-type display names to create or update */
+  names: string[];
+}
+
+export interface DeleteDieTypesInput {
+  /** Die-type names to delete (matched case-insensitively) */
+  names: string[];
+}
+
+/**
  * Run configuration (cross-platform wire shape; opaque to the server)
  */
 export type RunTemplateValues = { [key: string]: unknown };

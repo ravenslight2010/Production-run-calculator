@@ -2643,14 +2643,13 @@ export function existingDieTypesForImport(): string[] {
  * "dieTypes") so a die the user removed is never resurrected. `extra` lets callers
  * fold in die types found on live runs. Mirrors mobile, which unions imported die
  * types into its master list. Returns the effective master list.
+ *
+ * `scanProfileDieTypes` is the raw profile scan (no de-dupe); the server-pool
+ * reconcile also uses it so a die a profile still names is always offered by
+ * the picker even after the pool became server-backed.
  */
-export function healDieTypesFromProfiles(extra: string[] = []): string[] {
-  const stored = loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES);
+export function scanProfileDieTypes(): string[] {
   const raw: string[] = [];
-  for (const name of [...stored, ...extra]) {
-    const t = (name ?? "").trim();
-    if (t) raw.push(t);
-  }
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -2670,6 +2669,17 @@ export function healDieTypesFromProfiles(extra: string[] = []): string[] {
   } catch {
     // localStorage unavailable (SSR / privacy mode) — nothing to heal from.
   }
+  return raw;
+}
+
+export function healDieTypesFromProfiles(extra: string[] = []): string[] {
+  const stored = loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES);
+  const raw: string[] = [];
+  for (const name of [...stored, ...extra]) {
+    const t = (name ?? "").trim();
+    if (t) raw.push(t);
+  }
+  raw.push(...scanProfileDieTypes());
   // Fold variant spellings onto their canonical die name, then de-dupe
   // case-insensitively (keep the first spelling seen).
   const seen = new Set<string>();

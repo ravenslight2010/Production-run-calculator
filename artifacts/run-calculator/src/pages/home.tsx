@@ -22,8 +22,6 @@ import {
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
   INGREDIENT_RENAMES,
-  DIE_TYPE_RENAMES,
-  canonicalDieTypeName,
   DEFAULT_DIE_TYPES,
   CIRCLES_KEY,
   DEFAULT_CIRCLES,
@@ -170,12 +168,21 @@ import {
   existingRecipeNamesForImport,
   specImportCheeseRecipeIsMix,
   healDieTypesFromProfiles,
+  scanProfileDieTypes,
   healPackagingFromProfiles,
   normalizePackagingFields,
   rewriteDieTypeInProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
+import { resolveDieLineDefaults } from "../dieDefaults";
+import {
+  fetchServerDieTypes,
+  pushDieTypesToServer,
+  deleteDieTypesOnServer,
+  reconcileDieTypes,
+  DIE_TYPES_SERVER_MIGRATED_KEY,
+} from "../dieTypesServer";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
@@ -2623,6 +2630,41 @@ export default function Home() {
 
   const [dieTypes, setDieTypes] = useState<string[]>(() => healDieTypesFromProfiles());
 
+  // Die types are a factory-wide SERVER pool (NOT in the day-state sync blob),
+  // so they survive a factory data reset, a cleared browser, and a fresh device.
+  // On load: fetch the server list, reconcile it with the local cache/profile
+  // heal (honoring local deletion tombstones so a removed die never comes back),
+  // and push any local-only names up. The first successful push doubles as the
+  // one-time migration of the legacy local list (marker below); afterwards only
+  // profile-referenced dies are healed locally so a die deleted on another
+  // device isn't resurrected from this device's stale cache.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const serverNames = await fetchServerDieTypes();
+        if (cancelled) return;
+        const migrated = localStorage.getItem(DIE_TYPES_SERVER_MIGRATED_KEY) === "1";
+        const localNames = migrated ? scanProfileDieTypes() : healDieTypesFromProfiles();
+        const deletedMap = loadDeletedItems();
+        const { effective, toPush } = reconcileDieTypes(
+          serverNames,
+          localNames,
+          n => dropDeleted([n], deletedMap, "dieTypes").length === 0,
+        );
+        setDieTypes(effective);
+        saveList(DIE_TYPES_KEY, effective);
+        const ok = toPush.length > 0 ? await pushDieTypesToServer(toPush) : true;
+        if (ok && !migrated) localStorage.setItem(DIE_TYPES_SERVER_MIGRATED_KEY, "1");
+      } catch {
+        // Offline / server unreachable — the local cached list keeps working.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function addDieType(name: string) {
     const trimmed = name.trim();
     if (!trimmed || dieTypes.includes(trimmed)) return;
@@ -2631,6 +2673,7 @@ export default function Home() {
     saveList(DIE_TYPES_KEY, updated);
     clearMergedAwayBoth(trimmed);
     clearDeleted("dieTypes", trimmed);
+    void pushDieTypesToServer([trimmed]);
     schedulePush(dayStateRef.current);
   }
 
@@ -2640,6 +2683,7 @@ export default function Home() {
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
     tombstoneDeleted("dieTypes", name);
+    void deleteDieTypesOnServer([name]);
     schedulePush(dayStateRef.current);
   }
 
@@ -6094,9 +6138,12 @@ export default function Home() {
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
         .filter(t => !RETIRED_PEP_TYPES.includes(t));
       mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
-      const cleanedRemoteDie = (payload.dieTypes ?? []).map(t => canonicalDieTypeName(t));
-      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, cleanedRemoteDie, setDieTypes, "dieTypes", false);
-      // Editable packaging lists: same non-merge-aware union as die types.
+      // Die types deliberately NOT merged from the day-state sync payload any
+      // more: they are a factory-wide server pool now (see the reconcile effect
+      // near addDieType). Unioning a stale peer's list here would resurrect
+      // dies deleted factory-wide. The payload still CARRIES dieTypes for the
+      // mobile app, which hasn't migrated yet (parity paused).
+      // Editable packaging lists: non-merge-aware union.
       mergeList(CIRCLES_KEY, DEFAULT_CIRCLES, payload.circles, setCircles, "circles", false);
       mergeList(SHIPPER_KEY, DEFAULT_SHIPPERS, payload.shipper, setShipper, "shipper", false);
       mergeList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, payload.skidStacking, setSkidStacking, "skidStacking", false);
@@ -7484,6 +7531,14 @@ export default function Home() {
     // Rewrite saved profiles too, else healDieTypesFromProfiles re-adds the old
     // name from a stale profile and recreates the duplicate.
     rewriteDieTypeInProfiles(oldName, trimmed);
+    // Server pool: register the new spelling, then drop the old row — unless
+    // the rename only changes case (same canonical id server-side), where the
+    // upsert already replaced the display name and a delete would remove both.
+    void pushDieTypesToServer([trimmed]).then(ok => {
+      if (ok && oldName.trim().toLowerCase() !== trimmed.toLowerCase()) {
+        void deleteDieTypesOnServer([oldName]);
+      }
+    });
     lastLocalEditRef.current = now;
     schedulePush(ds);
   }
@@ -13615,7 +13670,19 @@ export default function Home() {
                             <button
                               key={dt}
                               type="button"
-                              onClick={() => form.setValue("dieType", v.dieType === dt ? "" : dt, { shouldDirty: true })}
+                              onClick={() => {
+                                const selecting = v.dieType !== dt;
+                                form.setValue("dieType", selecting ? dt : "", { shouldDirty: true });
+                                if (selecting) {
+                                  // Pre-fill the line settings for this die size —
+                                  // blank-fill only, never overwriting a value the
+                                  // user already changed (see dieDefaults.ts).
+                                  const fills = resolveDieLineDefaults(dt, form.getValues());
+                                  for (const [k, val] of Object.entries(fills)) {
+                                    form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
+                                  }
+                                }
+                              }}
                               className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
                                 v.dieType === dt
                                   ? "bg-primary text-primary-foreground border-primary"

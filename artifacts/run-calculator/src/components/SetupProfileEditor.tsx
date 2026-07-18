@@ -10,6 +10,7 @@ import {
   LABEL_POSITION_OPTIONS,
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
+import { resolveDieLineDefaults } from "../dieDefaults";
 import { fetchSavedSpecSheets } from "../savedSpecSheets";
 import { fetchSavedShippingGuides } from "../savedShippingGuides";
 import {
@@ -893,7 +894,17 @@ export default function SetupProfileEditor({
                         label="Die Type"
                         options={dieTypes}
                         value={v.dieType ?? ""}
-                        onSelect={val => form.setValue("dieType", val, { shouldDirty: true })}
+                        onSelect={val => {
+                          form.setValue("dieType", val, { shouldDirty: true });
+                          if (val) {
+                            // Pre-fill line settings for this die size — blank-fill
+                            // only, never overwriting a hand-set value (dieDefaults.ts).
+                            const fills = resolveDieLineDefaults(val, form.getValues());
+                            for (const [k, fv] of Object.entries(fills)) {
+                              form.setValue(k as keyof typeof fills, fv, { shouldDirty: true });
+                            }
+                          }
+                        }}
                         onAdd={onAddDieType}
                       />
                     )}
