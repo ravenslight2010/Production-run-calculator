@@ -98,6 +98,23 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.pepCombinedTarget).toBe(true); // single named pep → combined
   });
 
+  it("does not flag a mismatch when the type differs only by the neutral 'milk' descriptor", () => {
+    // Regression: profile says "Whole Mozzarella", sheet says "Whole Milk
+    // Mozzarella" — same product, the descriptor fold must treat them equal
+    // instead of nagging "now Whole Mozzarella · import says Whole Milk
+    // Mozzarella".
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile({
+          applicators: [{ type: "Whole Milk Mozzarella", ozPerPizza: 0, batchLbs: 0 }],
+        })],
+      })],
+      values({ app1Type: "Whole Mozzarella" } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "app1Type")).toBeUndefined();
+  });
+
   it('matches a saved-sheet row stored under a punctuation-typo brand (Aldo"s → Aldo\'s)', () => {
     // Regression: an AI parse minted brand `Aldo"s` (straight double-quote)
     // for one flavor row; the strict brand compare made Auto-Fill skip it, so

@@ -30,6 +30,7 @@ import {
   specImportBrandMatchKey,
   specImportNamedRecipeNamesEqual,
   specImportDieTypeMatchKey,
+  specImportTypeNameFoldKey,
   cleanSpecCheeseRecipeName,
   recipeApplyTargets,
   type ParsedProfile,
@@ -436,6 +437,15 @@ function stringsEqual(a: string, b: string, kind: DesiredKind, field?: string): 
     const ka = nameKey(a);
     const kb = nameKey(b);
     if (ka && kb) return ka === kb;
+  }
+  // Applicator/pepperoni TYPE names compare by the import's neutral-descriptor
+  // fold key so "Whole Milk Mozzarella" == "Whole Mozzarella" — the sheet's
+  // dairy descriptor is not a different product; a raw compare flags a false
+  // mismatch ("now Whole Mozzarella · import says Whole Milk Mozzarella").
+  if (field && /^(?:app[1-4]|pep[12])Type$/.test(field)) {
+    const ka = specImportTypeNameFoldKey(a);
+    const kb = specImportTypeNameFoldKey(b);
+    if (ka && kb && ka === kb) return true;
   }
   // Die types compare by the import's die key so '12"' == '12" Dies' — sheets
   // append the generic "Dies" word; a raw compare flags a false mismatch.

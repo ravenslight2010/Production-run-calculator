@@ -2716,6 +2716,26 @@ function levenshtein(a: string, b: string): number {
   return prev[bl];
 }
 
+// Descriptor tokens that don't change WHICH applicator/pepperoni type a name
+// refers to — "Whole Milk Mozzarella" IS "Whole Mozzarella" (whole-milk is the
+// dairy spec, not a different product). Deliberately tiny: "cheese" is NOT
+// here (cheese sticks vs pepperoni sticks are different pep types, and blend
+// names like "Cheese Mix" must never fold toward "Mix").
+const NEUTRAL_TYPE_EXTRA_TOKENS = new Set(["milk"]);
+
+/**
+ * Loose match key for applicator/pepperoni TYPE names that additionally drops
+ * neutral dairy-descriptor tokens ("milk"), so "Whole Milk Mozzarella" and
+ * "Whole Mozzarella" produce the same key. Falls back to the plain match key
+ * when folding would empty the name. Pure.
+ */
+export function specImportTypeNameFoldKey(name: string): string {
+  const key = specImportNameMatchKey(name);
+  if (!key) return "";
+  const kept = key.split(" ").filter((t) => !NEUTRAL_TYPE_EXTRA_TOKENS.has(t));
+  return kept.length ? kept.join(" ") : key;
+}
+
 export type CanonicalSource = "alias" | "exact" | "fuzzy" | "new";
 
 export type CanonicalResult = {
@@ -2752,6 +2772,25 @@ export function canonicalize(
   const lower = externalName.toLowerCase();
   const exact = known.find((k) => k.trim().toLowerCase() === lower);
   if (exact) return { value: exact, source: "exact", externalName };
+
+  // Neutral-descriptor fold for TYPE names only: "Whole Milk Mozzarella"
+  // snaps to a known "Whole Mozzarella" (and vice versa) because "milk" is a
+  // dairy descriptor, not a different product. Unique-target guard: if two
+  // distinct known names fold to the same key, skip (ambiguity → fall
+  // through). Counted as an exact match so the mapping is learned as an
+  // alias (deterministic fold — re-learning is harmless and speeds re-imports).
+  if (kind === "appType" || kind === "pepType") {
+    const fk = specImportTypeNameFoldKey(externalName);
+    if (fk) {
+      const hits: string[] = [];
+      for (const k of known) {
+        if (specImportTypeNameFoldKey(k) === fk && !hits.includes(k)) hits.push(k);
+      }
+      if (hits.length === 1) {
+        return { value: hits[0], source: "exact", externalName };
+      }
+    }
+  }
 
   // Fuzzy layer guards — a close edit distance alone is NOT enough:
   //   • digit signatures must agree (`Lowe's 7"` is a DIFFERENT brand from

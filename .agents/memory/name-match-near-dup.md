@@ -35,3 +35,8 @@ intentionally keep the conservative exact-key map only.
 Cheese wiring detail worth keeping: the cheese fallback is brand-scoped (matcher
 built per brand key) and uses `cheeseLinkKey` (abbreviation-expanded) as `keyOf`,
 so "Mozz"/"Mozzarella" style drift still folds before the layers run.
+
+## Neutral-descriptor fold for TYPE names (2026-07-18)
+- Applicator/pep TYPE names get one more layer in spec-import `canonicalize` (appType/pepType kinds only): tokens in `NEUTRAL_TYPE_EXTRA_TOKENS` ({"milk"}) are dropped from the loose key (`specImportTypeNameFoldKey`), so "Whole Milk Mozzarella" snaps to a known "Whole Mozzarella" (unique-target guard; counted as exact so the alias is learned). Auto-Fill's mismatch compare uses the same fold key.
+- **Why:** "milk" is a dairy spec, not a different product; but "cheese" must NEVER fold (cheese sticks ≠ pepperoni sticks, "Cheese Mix" ≠ "Mix").
+- **How to apply:** expand the set only for descriptors that can't distinguish products; keep the fold out of brand/flavor/ingredient kinds.
