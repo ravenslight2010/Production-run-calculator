@@ -29,6 +29,7 @@ import {
   specImportDoughFormulasConflict,
 } from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
+import { captureIngredientNamesToCatalog } from "./ingredients";
 
 export type NamedRecipeKind = "dough" | "sauce";
 
@@ -61,6 +62,12 @@ export async function saveNamedRecipes(
   });
   if (!res.ok) throw new Error(`Save ${kind} recipes failed (${res.status})`);
   const data = (await res.json()) as { items: unknown };
+  // Fire-and-forget: newly typed component names join the factory-wide
+  // ingredient catalog so every suggestion list sees them.
+  void captureIngredientNamesToCatalog(
+    items.flatMap((r) => (r.components ?? []).map((c) => c.ingredient)),
+    kind === "dough" ? "dough" : "frontline",
+  );
   return normalizeNamedRecipes(data.items);
 }
 

@@ -237,6 +237,10 @@ export interface SetupProfileEditorProps {
   frontlineRecipeNames: string[];
   onAddFrontlineRecipeName: (name: string) => void;
   onRemoveFrontlineRecipeName: (name: string) => void;
+  // Unified ingredient universe (catalog + every server pool's recipe rows +
+  // all local lists). When provided it backs every ingredient-name suggestion
+  // list in this editor; falls back to the per-category lists when absent.
+  ingredientUniverse?: string[];
 }
 
 /**
@@ -292,6 +296,7 @@ export default function SetupProfileEditor({
   frontlineRecipeNames,
   onAddFrontlineRecipeName,
   onRemoveFrontlineRecipeName,
+  ingredientUniverse,
 }: SetupProfileEditorProps) {
   const [brand, setBrand] = useState(initialBrand ?? "");
   const [flavor, setFlavor] = useState(initialFlavor ?? "");
@@ -695,7 +700,7 @@ export default function SetupProfileEditor({
             recipe={recipe}
             fieldPrefix={recipeKey}
             register={form.register}
-            ingredientOptions={serverMixIngredients}
+            ingredientOptions={ingredientUniverse ?? serverMixIngredients}
             onSetIngredient={(idx, val) => form.setValue(`${recipeKey}.${idx}.ingredient`, val, { shouldDirty: true })}
             onAppend={() => appendCheeseByApp[app]({ ingredient: "", lbs: 0 })}
             onRemove={removeCheeseByApp[app]}
@@ -1078,7 +1083,7 @@ export default function SetupProfileEditor({
                   register={form.register}
                   targetWeight={Number(v.targetDoughballWeight ?? 0)}
                   doughBatchYield={Number(v.doughBatchYield)}
-                  ingredientOptions={doughIngredients}
+                  ingredientOptions={ingredientUniverse ?? doughIngredients}
                   onAddIngredient={onAddDoughIngredient}
                   onRemoveIngredient={onRemoveDoughIngredient}
                   onSetIngredient={(idx, val) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
@@ -1273,7 +1278,7 @@ export default function SetupProfileEditor({
                           fields={frontlineFields}
                           recipe={v.frontlineRecipe ?? []}
                           register={form.register}
-                          ingredientOptions={frontlineIngredients}
+                          ingredientOptions={ingredientUniverse ?? frontlineIngredients}
                           onAddIngredient={onAddFrontlineIngredient}
                           onRemoveIngredient={onRemoveFrontlineIngredient}
                           onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}

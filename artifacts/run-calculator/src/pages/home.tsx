@@ -211,7 +211,7 @@ import {
   mergeIngredientsRemote,
   findOrBuildIngredient,
 } from "../ingredients";
-import type { IngredientCategory } from "@workspace/ingredient-catalog";
+import { buildIngredientUniverse, type IngredientCategory } from "@workspace/ingredient-catalog";
 import {
   buildMixPlan,
   repointMixesForBrandMerge,
@@ -3263,10 +3263,6 @@ export default function Home() {
     () => [...new Set(mixes.map((m) => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [mixes],
   );
-  const serverMixIngredients = useMemo(
-    () => [...new Set(mixes.flatMap((m) => (m.components ?? []).map((c) => c.ingredient.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b)),
-    [mixes],
-  );
   // Factory-wide cheese recipes (server master-data, like Mixes but a SEPARATE
   // pool). The per-run applicator "Cheese" cards pick one of these and hydrate
   // their rows from it — cheese presets are no longer stored per-device in the
@@ -3415,6 +3411,36 @@ export default function Home() {
   const serverSauceNames = useMemo(
     () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
     [sauceRecipesList],
+  );
+  // ── Unified ingredient universe ──
+  // ONE factory-wide suggestion list: every ingredient used anywhere — the
+  // server ingredient catalog, every recipe row in every server pool (mixes,
+  // cheese recipes, dough, sauce), and the legacy local master lists — deduped
+  // case-insensitively and sorted. Backs every ingredient-name input (mix /
+  // dough / sauce / cheese editors, run-form recipe rows) and the Merge
+  // screen's Ingredients tab, so building a new mix from an existing recipe
+  // always suggests the shared ingredients. Read-only by construction — the
+  // builder never writes or normalizes stored data.
+  const unifiedIngredientUniverse = useMemo(
+    () =>
+      buildIngredientUniverse({
+        catalog: ingredientCatalog,
+        recipeRows: [
+          ...mixes.map((m) => m.components ?? []),
+          ...cheeseRecipesList.map((r) => r.components ?? []),
+          ...doughRecipesList.map((r) => r.components ?? []),
+          ...sauceRecipesList.map((r) => r.components ?? []),
+        ],
+        nameLists: [
+          ingredientTypes,
+          cheeseIngredients,
+          doughIngredients,
+          frontlineIngredients,
+          mixIngredients,
+          pepTypes,
+        ],
+      }),
+    [ingredientCatalog, mixes, cheeseRecipesList, doughRecipesList, sauceRecipesList, ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes],
   );
   // ── Unified setup editing: drift vs the linked shared dough/sauce recipe ──
   // When the open form's dough/sauce rows (or dough target weight) were hand-
@@ -4421,15 +4447,11 @@ export default function Home() {
   // duplicates ACROSS categories (an imported recipe ingredient can duplicate a
   // standalone one). Brands/flavors are excluded (they have their own merge path).
   const mergeFullUniverse = useMemo(
-    () => dedupSorted([
-      ...ingredientTypes,
-      ...cheeseIngredients,
-      ...doughIngredients,
-      ...frontlineIngredients,
-      ...mixIngredients,
-      ...pepTypes,
-    ]),
-    [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes],
+    // The unified universe already unions every local master list PLUS the
+    // server ingredient catalog and every server recipe pool's rows, so any
+    // ingredient used anywhere is mergeable here.
+    () => dedupSorted(unifiedIngredientUniverse),
+    [unifiedIngredientUniverse],
   );
 
   // The names the manual source/target pickers offer, scoped to the selected
@@ -4524,14 +4546,18 @@ export default function Home() {
           ),
         );
         return dedupSorted(
-          [...ingredientTypes, ...pepTypes].filter(
+          // The unified universe (catalog + every server pool's recipe rows +
+          // all local lists) so every ingredient used anywhere is mergeable —
+          // still minus recipe names and stray mix names (same filters as
+          // before the universe expanded).
+          unifiedIngredientUniverse.filter(
             (n) => !recipeNameSet.has(n.toLowerCase()) && !isStrayMixName(n, realIngredientAllowlist),
           ),
         );
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, serverDoughNames, serverSauceNames, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, unifiedIngredientUniverse, serverDoughNames, serverSauceNames, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions]);
 
   // Recipe categories are merged by recipe NAME (not ingredient name).
   const isRecipeNameCategory =
@@ -11457,7 +11483,7 @@ export default function Home() {
                     {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
                       <NamedRecipesManager
                         kind={manageCategory === "dough" ? "dough" : "sauce"}
-                        ingredientSuggestions={manageCategory === "dough" ? doughIngredients : frontlineIngredients}
+                        ingredientSuggestions={unifiedIngredientUniverse}
                         brands={brands}
                         brandFlavors={brandFlavors}
                       />
@@ -11982,14 +12008,7 @@ export default function Home() {
                     <MixesManager
                       brands={brands}
                       brandFlavors={brandFlavors}
-                      ingredientSuggestions={[
-                        ...doughIngredients,
-                        ...frontlineIngredients,
-                        ...cheeseIngredients,
-                        ...mixIngredients,
-                        ...ingredientTypes,
-                        ...pepTypes,
-                      ]}
+                      ingredientSuggestions={unifiedIngredientUniverse}
                     />
                     <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} />
                     <MixAssistChat />
@@ -12064,14 +12083,7 @@ export default function Home() {
                         }
                         return { targets, skipped };
                       }}
-                      ingredientSuggestions={[
-                        ...cheeseIngredients,
-                        ...doughIngredients,
-                        ...frontlineIngredients,
-                        ...mixIngredients,
-                        ...ingredientTypes,
-                        ...pepTypes,
-                      ]}
+                      ingredientSuggestions={unifiedIngredientUniverse}
                     />
                   </div>
                 )}
@@ -16082,7 +16094,7 @@ export default function Home() {
                     register={form.register}
                     targetWeight={Number(v.targetDoughballWeight ?? 0)}
                     doughBatchYield={Number(v.doughBatchYield)}
-                    ingredientOptions={doughIngredients}
+                    ingredientOptions={unifiedIngredientUniverse}
                     onAddIngredient={addDoughIngredient}
                     onRemoveIngredient={removeDoughIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
@@ -16261,7 +16273,7 @@ export default function Home() {
                           fields={frontlineFields}
                           recipe={v.frontlineRecipe ?? []}
                           register={form.register}
-                          ingredientOptions={frontlineIngredients}
+                          ingredientOptions={unifiedIngredientUniverse}
                           onAddIngredient={addFrontlineIngredient}
                           onRemoveIngredient={removeFrontlineIngredient}
                           onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
@@ -16353,7 +16365,7 @@ export default function Home() {
                           recipe={v.app1CheeseRecipe ?? []}
                           fieldPrefix="app1CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={serverMixIngredients}
+                          ingredientOptions={unifiedIngredientUniverse}
                           onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese1}
@@ -16419,7 +16431,7 @@ export default function Home() {
                           recipe={v.app2CheeseRecipe ?? []}
                           fieldPrefix="app2CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={serverMixIngredients}
+                          ingredientOptions={unifiedIngredientUniverse}
                           onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese2}
@@ -16662,7 +16674,7 @@ export default function Home() {
                           recipe={v.app3CheeseRecipe ?? []}
                           fieldPrefix="app3CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={serverMixIngredients}
+                          ingredientOptions={unifiedIngredientUniverse}
                           onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese3}
@@ -16728,7 +16740,7 @@ export default function Home() {
                           recipe={v.app4CheeseRecipe ?? []}
                           fieldPrefix="app4CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={serverMixIngredients}
+                          ingredientOptions={unifiedIngredientUniverse}
                           onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese4}
@@ -18215,6 +18227,7 @@ export default function Home() {
           frontlineRecipeNames={frontlineRecipeNames}
           onAddFrontlineRecipeName={addFrontlineRecipeName}
           onRemoveFrontlineRecipeName={removeFrontlineRecipeName}
+          ingredientUniverse={unifiedIngredientUniverse}
         />
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}

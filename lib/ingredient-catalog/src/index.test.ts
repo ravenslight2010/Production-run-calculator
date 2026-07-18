@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildIngredientUniverse,
   buildIngredientIndex,
   coerceLbs,
   hydrateRecipeRows,
@@ -228,5 +229,68 @@ describe("coerceLbs", () => {
     expect(coerceLbs("abc")).toBe(0);
     expect(coerceLbs(undefined)).toBe(0);
     expect(coerceLbs(null)).toBe(0);
+  });
+});
+
+describe("buildIngredientUniverse", () => {
+  it("returns empty for no sources", () => {
+    expect(buildIngredientUniverse({})).toEqual([]);
+  });
+
+  it("unions catalog, recipe rows, and name lists", () => {
+    const result = buildIngredientUniverse({
+      catalog: [mkIngredient({ id: "a", name: "Mozzarella" })],
+      recipeRows: [
+        [{ ingredient: "Flour" }, { ingredient: "Water" }],
+        [{ ingredient: "Tomato Paste" }],
+      ],
+      nameLists: [["Pepperoni"], ["Salt"]],
+    });
+    expect(result).toEqual([
+      "Flour",
+      "Mozzarella",
+      "Pepperoni",
+      "Salt",
+      "Tomato Paste",
+      "Water",
+    ]);
+  });
+
+  it("dedupes case-insensitively keeping the first casing seen", () => {
+    const result = buildIngredientUniverse({
+      catalog: [mkIngredient({ id: "a", name: "Diced Onion" })],
+      recipeRows: [[{ ingredient: "diced onion" }]],
+      nameLists: [["DICED ONION"]],
+    });
+    expect(result).toEqual(["Diced Onion"]);
+  });
+
+  it("skips disabled and merged-away catalog entries", () => {
+    const result = buildIngredientUniverse({
+      catalog: [
+        mkIngredient({ id: "a", name: "Live" }),
+        mkIngredient({ id: "b", name: "Gone", enabled: false }),
+        mkIngredient({ id: "c", name: "Merged", mergedInto: "a" }),
+      ],
+    });
+    expect(result).toEqual(["Live"]);
+  });
+
+  it("trims names and drops blanks", () => {
+    const result = buildIngredientUniverse({
+      recipeRows: [[{ ingredient: "  Basil  " }, { ingredient: "   " }]],
+      nameLists: [["", "Basil"]],
+    });
+    expect(result).toEqual(["Basil"]);
+  });
+
+  it("never mutates its inputs", () => {
+    const catalog = [mkIngredient({ id: "a", name: "Mozzarella" })];
+    const rows = [[{ ingredient: "Flour" }]];
+    const lists = [["Salt"]];
+    buildIngredientUniverse({ catalog, recipeRows: rows, nameLists: lists });
+    expect(catalog[0].name).toBe("Mozzarella");
+    expect(rows).toEqual([[{ ingredient: "Flour" }]]);
+    expect(lists).toEqual([["Salt"]]);
   });
 });

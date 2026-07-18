@@ -12,6 +12,7 @@
 
 import { normalizeMixes, type Mix } from "@workspace/mixes";
 import { inventoryClientId } from "./inventoryShared";
+import { captureIngredientNamesToCatalog } from "./ingredients";
 
 export async function fetchMixes(): Promise<Mix[]> {
   const res = await fetch("/api/mixes", {
@@ -33,6 +34,12 @@ export async function saveMixes(items: Mix[]): Promise<Mix[]> {
   });
   if (!res.ok) throw new Error(`Save mixes failed (${res.status})`);
   const data = (await res.json()) as { items: unknown };
+  // Fire-and-forget: any ingredient name newly typed into a mix row joins the
+  // factory-wide catalog so it appears in every ingredient suggestion list.
+  void captureIngredientNamesToCatalog(
+    items.flatMap((m) => (m.components ?? []).map((c) => c.ingredient)),
+    "mix",
+  );
   return normalizeMixes(data.items);
 }
 

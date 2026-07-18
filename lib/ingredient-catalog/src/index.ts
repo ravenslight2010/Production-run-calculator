@@ -199,3 +199,52 @@ export function pickerNamesForCategory(
 export function coerceLbs(value: unknown): number {
   return Math.max(0, coerceNum(value, 0));
 }
+
+// ---------------------------------------------------------------------------
+// Unified ingredient universe (Task: unified ingredient list everywhere)
+// ---------------------------------------------------------------------------
+
+// Everything that can contribute ingredient NAMES to the one factory-wide
+// universe: the server catalog itself, recipe rows from every server pool
+// (dough / sauce / cheese / mixes), and the legacy local master lists. The
+// builder is strictly READ-ONLY — it unions and dedupes names for display in
+// pickers/suggestions/merge, and never writes or normalizes stored data.
+export interface IngredientUniverseSources {
+  // Server ingredient catalog entries. Disabled or merged-away entries are
+  // skipped (their live target is already in the catalog under its own name).
+  catalog?: Ingredient[];
+  // Recipe rows from any pool/editor — anything with an `ingredient` name.
+  // Grouped as arrays-of-arrays so callers can pass each pool's component
+  // lists straight through without flattening first.
+  recipeRows?: ReadonlyArray<ReadonlyArray<{ ingredient: string }>>;
+  // Plain name lists (legacy local master lists, pep types, …).
+  nameLists?: ReadonlyArray<ReadonlyArray<string>>;
+}
+
+// Union every source into one flat, case-insensitively deduped (first casing
+// seen wins), alphabetically sorted name list.
+export function buildIngredientUniverse(
+  sources: IngredientUniverseSources,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (raw: string) => {
+    const name = (raw ?? "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(name);
+  };
+  for (const item of sources.catalog ?? []) {
+    if (!item.enabled || item.mergedInto) continue;
+    add(item.name);
+  }
+  for (const rows of sources.recipeRows ?? []) {
+    for (const row of rows) add(row.ingredient);
+  }
+  for (const list of sources.nameLists ?? []) {
+    for (const name of list) add(name);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}

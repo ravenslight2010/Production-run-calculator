@@ -104,3 +104,46 @@ export function findOrBuildIngredient(
     enabled: true,
   };
 }
+
+// Best-effort "make sure these names exist in the factory-wide catalog" —
+// called after a recipe pool save (mixes / cheese / dough / sauce) so any
+// ingredient name newly typed into a recipe row joins the unified universe and
+// shows up as a suggestion on every device. Case-insensitive: names already in
+// the catalog (under any casing, including disabled/merged entries — those
+// resolve on their own) are skipped, so this never duplicates or rewrites an
+// existing entry. Swallows every failure by design: the POST is manager-gated
+// server-side (manage-inventory), so a non-manager or offline device simply
+// no-ops — the pool save it piggybacks on has already succeeded.
+export async function captureIngredientNamesToCatalog(
+  names: string[],
+  category: IngredientCategory,
+): Promise<void> {
+  try {
+    const wanted = new Map<string, string>();
+    for (const raw of names) {
+      const name = (raw ?? "").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!wanted.has(key)) wanted.set(key, name);
+    }
+    if (wanted.size === 0) return;
+    const existing = await fetchIngredients();
+    const known = new Set(existing.map((i) => i.name.trim().toLowerCase()));
+    const additions: Ingredient[] = [];
+    for (const [key, name] of wanted) {
+      if (known.has(key)) continue;
+      additions.push({
+        id: `ing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        categories: [category],
+        mergedInto: null,
+        enabled: true,
+      });
+    }
+    if (additions.length === 0) return;
+    await saveIngredients(additions);
+  } catch {
+    // Best-effort: offline / not a manager / server hiccup — the universe
+    // self-heals next time this recipe pool is saved by a manager.
+  }
+}

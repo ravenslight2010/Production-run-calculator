@@ -17,6 +17,7 @@ import {
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
 import { inventoryClientId } from "./inventoryShared";
+import { captureIngredientNamesToCatalog } from "./ingredients";
 
 export async function fetchCheeseRecipes(): Promise<CheeseRecipe[]> {
   const res = await fetch("/api/cheese-recipes", {
@@ -38,6 +39,12 @@ export async function saveCheeseRecipes(items: CheeseRecipe[]): Promise<CheeseRe
   });
   if (!res.ok) throw new Error(`Save cheese recipes failed (${res.status})`);
   const data = (await res.json()) as { items: unknown };
+  // Fire-and-forget: newly typed component names join the factory-wide
+  // ingredient catalog so every suggestion list sees them.
+  void captureIngredientNamesToCatalog(
+    items.flatMap((r) => (r.components ?? []).map((c) => c.ingredient)),
+    "cheese",
+  );
   return normalizeCheeseRecipes(data.items);
 }
 
