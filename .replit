@@ -175,7 +175,7 @@ integrations = ["github:1.0.0", "javascript_openai_ai_integrations:2.0.0", "java
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 180000
+timeoutMs = 300000
 
 [[ports]]
 localPort = 5000
