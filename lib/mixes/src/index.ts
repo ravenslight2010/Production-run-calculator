@@ -425,6 +425,68 @@ export function addSpecMixesIfAbsent(
 }
 
 /**
+ * Convert a cheese-pool recipe into a Mix (the manager "Move to Mixes" action
+ * for blends the spec importer misfiled under Cheese — e.g. a meat/gravy blend
+ * with no cheese in it). Mix components are PER-PIZZA OUNCES, so only the
+ * cheese components' `ozPerPizza` values carry over (spec-import cheese drafts
+ * hold their amounts there with lbs=0, making this conversion unit-safe);
+ * per-BATCH `lbs` never carries into a Mix — callers should warn first when
+ * any component has lbs > 0 (see cheeseComponentsHaveBatchLbs). Brand, notes
+ * and enabled state carry over; a Mix has a single flavor, so the first flavor
+ * becomes the mix's flavor and any extra flavors are preserved in the notes.
+ * The id is minted in its own namespace so it can never collide with an
+ * existing mix id. Structural input (no dep on @workspace/cheese-recipes).
+ * Pure.
+ */
+export function mixFromCheeseRecipe(recipe: {
+  id: string;
+  name: string;
+  brand: string;
+  flavors: ReadonlyArray<string>;
+  notes?: string;
+  components: ReadonlyArray<{
+    ingredient: string;
+    lbs?: number;
+    ozPerPizza?: number;
+  }>;
+  enabled?: boolean;
+}): Mix | null {
+  const name = recipe.name.trim();
+  if (!name) return null;
+  const flavors = recipe.flavors.map((f) => f.trim()).filter(Boolean);
+  const noteParts: string[] = [];
+  if ((recipe.notes ?? "").trim()) noteParts.push((recipe.notes ?? "").trim());
+  if (flavors.length > 1) {
+    noteParts.push(`Also used on: ${flavors.slice(1).join(", ")}`);
+  }
+  return normalizeMix({
+    id: `mix:from-cheese:${recipe.id}`,
+    name,
+    brand: recipe.brand,
+    flavor: flavors[0] ?? "",
+    batchSize: 0,
+    daysEarly: 0,
+    amountAlreadyMade: 0,
+    notes: noteParts.join(" — "),
+    components: recipe.components.map((c) => ({
+      ingredient: c.ingredient,
+      perPizza: c.ozPerPizza ?? 0,
+    })),
+    enabled: recipe.enabled !== false,
+  });
+}
+
+/**
+ * Whether any component carries per-BATCH pounds — data that canNOT carry into
+ * a Mix (mixes are per-pizza oz). Used to warn before "Move to Mixes". Pure.
+ */
+export function cheeseComponentsHaveBatchLbs(
+  components: ReadonlyArray<{ lbs?: number }>,
+): boolean {
+  return components.some((c) => (c.lbs ?? 0) > 0);
+}
+
+/**
  * Backfill product tags onto existing mixes that have NO brand yet, from
  * spec-import candidates matched by the shared loose mix name key. Only fully
  * unbranded mixes are touched (a mix already scoped to a product is never

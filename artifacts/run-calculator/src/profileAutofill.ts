@@ -153,7 +153,12 @@ function routesToMix(r: ParsedRecipe, mixNamesLower: ReadonlySet<string>): boole
   if (r.kind !== "cheese") return false;
   if (r.forcedCategory === "mix") return true;
   if (r.forcedCategory === "cheese") return false;
-  return specImportCheeseRecipeIsMix(r.name, mixNamesLower, r.rows.length);
+  return specImportCheeseRecipeIsMix(
+    r.name,
+    mixNamesLower,
+    r.rows.length,
+    r.rows.map((row) => row.ingredient ?? ""),
+  );
 }
 
 function hasRealRows(rows: unknown): boolean {

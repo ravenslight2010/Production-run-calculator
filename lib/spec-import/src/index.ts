@@ -591,11 +591,30 @@ export function extractEmbeddedApplicatorBlends(parsed: ParsedSpecImport): Parse
  * forever ("Lowe's Red Hot Cheese Mix" vs "Lowe's Red Hot Mix" confusion).
  * An explicit review-time category override still wins (callers check
  * `forcedCategory` before this heuristic). Pure.
+ *
+ * When the caller can supply the blend's COMPONENT ingredient names, a
+ * multi-ingredient blend with NO cheese-ish ingredient anywhere in it also
+ * defaults to Mix even without a "mix"/"blend" word in its name ("Italian
+ * Beef & Gravy" = Italian Beef + Gravy is a topping mix, not cheese). This is
+ * only a DEFAULT — the review-dialog category pick (forcedCategory) remains
+ * authoritative upstream.
  */
+// Ingredient names that mark a component as cheese(-adjacent). Cellulose is
+// the anti-caking agent cheese blends carry, so it counts. Word-bounded so
+// "blue" doesn't match "Blueberry".
+const CHEESEISH_INGREDIENT_RE =
+  /\b(?:cheese|mozz|mozzarella|provolone|cheddar|parm|parmesan|romano|asiago|fontina|feta|ricotta|gouda|muenster|monterey|jack|brick|gorgonzola|pecorino|queso|cotija|oaxaca|asadero|havarti|swiss|curd|cellulose)\b/i;
+
+/** Whether an ingredient name looks like a cheese(-adjacent) component. Pure. */
+export function specImportIngredientLooksCheesy(name: string): boolean {
+  return CHEESEISH_INGREDIENT_RE.test(name);
+}
+
 export function specImportCheeseRecipeIsMix(
   name: string,
   userMixNamesLower: ReadonlySet<string>,
   ingredientCount: number,
+  componentNames?: ReadonlyArray<string>,
 ): boolean {
   const t = name.trim().toLowerCase();
   if (!t) return false;
@@ -604,7 +623,16 @@ export function specImportCheeseRecipeIsMix(
   // "Blend" counts the same as "Mix": sheets name pre-blended topping mixes
   // either way ("White Fajita Mix", "Red Fajita Blend") — a cheese-less
   // multi-ingredient blend belongs on the Mixes screen, not in Cheese.
-  return ingredientCount >= 2 && /\b(?:mix|blend)\b/.test(t);
+  if (ingredientCount >= 2 && /\b(?:mix|blend)\b/.test(t)) return true;
+  // No mix/blend word, but the components themselves say "not cheese": a
+  // multi-ingredient blend with no cheese-ish ingredient defaults to Mix.
+  if (componentNames && ingredientCount >= 2) {
+    const named = componentNames.map((n) => n.trim()).filter(Boolean);
+    if (named.length >= 2 && !named.some(specImportIngredientLooksCheesy)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -619,7 +647,12 @@ export function specImportRecipeIsMix(
   if (r.kind !== "cheese") return false;
   if (r.forcedCategory === "mix") return true;
   if (r.forcedCategory === "cheese") return false;
-  return specImportCheeseRecipeIsMix(r.name ?? "", userMixNamesLower, r.rows?.length ?? 0);
+  return specImportCheeseRecipeIsMix(
+    r.name ?? "",
+    userMixNamesLower,
+    r.rows?.length ?? 0,
+    (r.rows ?? []).map((row) => row.ingredient ?? ""),
+  );
 }
 
 /**

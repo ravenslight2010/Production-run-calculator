@@ -84,6 +84,21 @@ describe("specImportCheeseRecipeIsMix", () => {
     expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes, 2)).toBe(true);
     expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes, 1)).toBe(true);
   });
+  it("defaults a multi-ingredient blend with NO cheese-ish component to mix (no mix/blend word needed)", () => {
+    expect(
+      specImportCheeseRecipeIsMix("Italian Beef & Gravy", none, 2, ["Italian Beef", "Gravy"]),
+    ).toBe(true);
+    // Any cheese-ish component keeps it under Cheese.
+    expect(
+      specImportCheeseRecipeIsMix("Gyro Topping", none, 2, ["Gyro Meat", "Feta"]),
+    ).toBe(false);
+    // A cheese-mentioning NAME still never routes to mix.
+    expect(
+      specImportCheeseRecipeIsMix("Cheese Topping", none, 2, ["Beef", "Gravy"]),
+    ).toBe(false);
+    // Without component names the old behavior is unchanged.
+    expect(specImportCheeseRecipeIsMix("Italian Beef & Gravy", none, 2)).toBe(false);
+  });
 });
 
 describe("specImportRecipeDisplayKind", () => {
@@ -112,6 +127,45 @@ describe("specImportRecipeDisplayKind", () => {
     // No override: a cheese-mentioning name stays cheese even when a junk
     // same-named entry sits in the user Mix list (crossover-poison guard).
     expect(specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", rows })).toBe("cheese");
+  });
+
+  it("defaults a cheese-kind blend with no cheese-ish component to mix, keeping override + userNamed guards", () => {
+    const meatRows = [
+      { ingredient: "Italian Beef", lbs: 0 },
+      { ingredient: "Gravy", lbs: 0 },
+    ];
+    expect(
+      specImportRecipeDisplayKind({ kind: "cheese", name: "Italian Beef & Gravy", rows: meatRows }),
+    ).toBe("mix");
+    // Review-time override stays authoritative.
+    expect(
+      specImportRecipeDisplayKind({
+        kind: "cheese",
+        name: "Italian Beef & Gravy",
+        forcedCategory: "cheese",
+        rows: meatRows,
+      }),
+    ).toBe("cheese");
+    // A user-typed rename never re-categorizes.
+    expect(
+      specImportRecipeDisplayKind({
+        kind: "cheese",
+        name: "Italian Beef & Gravy",
+        userNamed: true,
+        rows: meatRows,
+      }),
+    ).toBe("cheese");
+    // Cheese-ish components keep it cheese.
+    expect(
+      specImportRecipeDisplayKind({
+        kind: "cheese",
+        name: "Gyro Topping",
+        rows: [
+          { ingredient: "Gyro Meat", lbs: 0 },
+          { ingredient: "Feta", lbs: 0 },
+        ],
+      }),
+    ).toBe("cheese");
   });
 });
 

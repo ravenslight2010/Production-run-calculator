@@ -11,7 +11,12 @@ import {
   ChevronDown,
   ChevronRight,
   Pencil,
+  ArrowRightLeft,
 } from "lucide-react";
+import {
+  mixFromCheeseRecipe,
+  cheeseComponentsHaveBatchLbs,
+} from "@workspace/mixes";
 import {
   normalizeCheeseRecipe,
   cheeseRecipeMatchesQuery,
@@ -24,6 +29,8 @@ import {
 } from "@workspace/cheese-recipes";
 import { useCheeseRecipes } from "../hooks/useCheeseRecipes";
 import { saveCheeseRecipes, deleteCheeseRecipes } from "../cheeseRecipes";
+import { fetchMixes, saveMixes } from "../mixes";
+import { relinkCheeseSlotsToMixInProfiles } from "../storage";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
 // Decimal-friendly numeric input: keeps the in-progress text locally while
@@ -186,7 +193,41 @@ export default function CheeseRecipesManager({
       setError("Could not delete the cheese recipe. Check your connection and try again."),
   });
 
-  const busy = saveMutation.isPending || deleteMutation.isPending;
+  // Move a misfiled non-cheese blend to the Mixes pool: create the Mix FIRST
+  // (a failed save keeps the cheese row alive), then delete the cheese row,
+  // then re-type any profile applicator slots linked to it ("cheese" → "Mix" —
+  // the link name field is shared, see mix-applicator-slots). If a same-named
+  // mix already exists (case-insensitive), keep it — the name link keeps
+  // working — and only remove the cheese row.
+  const moveMutation = useMutation({
+    mutationFn: async (recipe: CheeseRecipe) => {
+      const nameLc = recipe.name.trim().toLowerCase();
+      const existing = await fetchMixes();
+      const already = existing.some(
+        (m) => m.name.trim().toLowerCase() === nameLc,
+      );
+      if (!already) {
+        const mix = mixFromCheeseRecipe(recipe);
+        if (!mix) throw new Error("Cheese recipe has no name");
+        await saveMixes([mix]);
+      }
+      const remaining = await deleteCheeseRecipes([recipe.id]);
+      relinkCheeseSlotsToMixInProfiles(recipe.name);
+      return remaining;
+    },
+    onSuccess: (remaining) => {
+      qc.setQueryData(["cheeseRecipes"], remaining);
+      qc.invalidateQueries({ queryKey: ["mixes"] });
+      setError(null);
+    },
+    onError: () =>
+      setError(
+        "Could not move the recipe to Mixes. Check your connection and try again.",
+      ),
+  });
+
+  const busy =
+    saveMutation.isPending || deleteMutation.isPending || moveMutation.isPending;
 
   // Rename a whole customer group (or merge it into another group when the
   // new name matches an existing customer — grouping is case-insensitive).
@@ -376,6 +417,7 @@ export default function CheeseRecipesManager({
                                   getFlavorTargets={getFlavorTargets}
                                   onChange={(next) => saveMutation.mutate([next])}
                                   onDelete={() => deleteMutation.mutate([recipe.id])}
+                                  onMoveToMixes={() => moveMutation.mutate(recipe)}
                                 />
                               )}
                             </div>
@@ -414,6 +456,7 @@ function CheeseRecipeEditor({
   getFlavorTargets,
   onChange,
   onDelete,
+  onMoveToMixes,
 }: {
   recipe: CheeseRecipe;
   disabled: boolean;
@@ -423,6 +466,7 @@ function CheeseRecipeEditor({
   getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorCoverage;
   onChange: (recipe: CheeseRecipe) => void;
   onDelete: () => void;
+  onMoveToMixes?: () => void;
 }) {
   const [draft, setDraft] = useState<CheeseRecipe>(recipe);
   // Flavors edit as a comma-separated string so managers can type freely; it's
@@ -530,6 +574,42 @@ function CheeseRecipeEditor({
           />
           On
         </label>
+        {onMoveToMixes && (
+          <ConfirmDeleteButton
+            onConfirm={onMoveToMixes}
+            title="Move this recipe to Mixes?"
+            confirmLabel="Move to Mixes"
+            description={
+              <>
+                Use this when a blend was filed under Cheese by mistake (it isn't
+                a cheese blend). It becomes a Mix — keeping its customer, flavors
+                and notes — and is removed from Cheese Recipes for everyone.
+                Profiles linked to it switch their applicator slot to "Mix"
+                automatically.
+                {cheeseComponentsHaveBatchLbs(recipe.components) && (
+                  <>
+                    {" "}
+                    <span className="font-semibold">
+                      Warning: this recipe has per-batch pounds, which do NOT
+                      carry into a Mix
+                    </span>{" "}
+                    (mixes use per-pizza ounces). Note them down first if you
+                    need them.
+                  </>
+                )}
+              </>
+            }
+          >
+            <button
+              type="button"
+              disabled={disabled}
+              title="Move to Mixes (for blends misfiled under Cheese)"
+              className="flex items-center gap-1 px-1.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" /> Move to Mixes
+            </button>
+          </ConfirmDeleteButton>
+        )}
         <ConfirmDeleteButton
           onConfirm={onDelete}
           title="Delete this cheese recipe?"

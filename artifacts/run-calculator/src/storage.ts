@@ -2154,6 +2154,55 @@ export function applyPoolAwareSlotHealIfNeeded(
   return affectedRunIds;
 }
 
+/**
+ * Re-type profile applicator slots after a cheese recipe is MOVED to Mixes
+ * (the manager "Move to Mixes" action): every saved profile slot name-linked
+ * to the moved recipe (app{n}CheeseRecipeName, case-insensitive) whose type is
+ * "cheese" becomes the generic "Mix" type — the link name stays put, since Mix
+ * slots use the same CheeseRecipeName link field (see mix-applicator-slots).
+ * Also covers legacy slots whose TYPE cell holds the recipe name itself.
+ * Targeted dough-blob writes + edit stamps (NOT saveProfile — the loaded blob
+ * has no crust fields, so saveProfile would clobber the crust profile),
+ * mirroring applyPoolAwareSlotHealIfNeeded. Returns how many profiles changed.
+ */
+export function relinkCheeseSlotsToMixInProfiles(recipeName: string): number {
+  if (typeof localStorage === "undefined") return 0;
+  const nameLc = recipeName.trim().toLowerCase();
+  if (!nameLc) return 0;
+  let relinked = 0;
+  try {
+    const bf = loadBrandFlavors();
+    for (const [brand, flavors] of Object.entries(bf)) {
+      for (const flavor of flavors) {
+        const saved = loadProfile(brand, flavor);
+        if (!saved) continue;
+        const vals = saved as unknown as Record<string, unknown>;
+        let changed = false;
+        for (const n of [1, 2, 3, 4]) {
+          const link = String(vals[`app${n}CheeseRecipeName`] ?? "").trim().toLowerCase();
+          const type = String(vals[`app${n}Type`] ?? "").trim().toLowerCase();
+          if (link === nameLc && type === "cheese") {
+            vals[`app${n}Type`] = "Mix";
+            changed = true;
+          } else if (type === nameLc) {
+            // Legacy slot: the recipe name sits in the TYPE cell directly.
+            vals[`app${n}Type`] = "Mix";
+            if (!link) vals[`app${n}CheeseRecipeName`] = recipeName.trim();
+            changed = true;
+          }
+        }
+        if (!changed) continue;
+        try {
+          localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(vals));
+          markProfileEdited(canonicalProfileKey(brand, flavor));
+          relinked++;
+        } catch {}
+      }
+    }
+  } catch {}
+  return relinked;
+}
+
 const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
 
 // ── Server-driven data reset (replaces the old one-time local-wipe marker) ────
@@ -2768,16 +2817,35 @@ function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaul
  * applicator-slot profile tie — is identical for both categories, so only the
  * NAME list (and its tombstone namespace) differs.
  */
+// Ingredient names that mark a component as cheese(-adjacent). Cellulose is
+// the anti-caking agent cheese blends carry, so it counts. Word-bounded so
+// "blue" doesn't match "Blueberry". Mirrors @workspace/spec-import's copy —
+// the heuristic is deliberately duplicated (this apply path must work
+// offline/test without the lib's parse machinery); change BOTH together.
+const CHEESEISH_INGREDIENT_RE =
+  /\b(?:cheese|mozz|mozzarella|provolone|cheddar|parm|parmesan|romano|asiago|fontina|feta|ricotta|gouda|muenster|monterey|jack|brick|gorgonzola|pecorino|queso|cotija|oaxaca|asadero|havarti|swiss|curd|cellulose)\b/i;
+
 export function specImportCheeseRecipeIsMix(
   name: string,
   userMixNamesLower: ReadonlySet<string>,
   ingredientCount: number,
+  componentNames?: ReadonlyArray<string>,
 ): boolean {
   const t = name.trim().toLowerCase();
   if (!t) return false;
   if (/cheese/i.test(t)) return false;
   if (userMixNamesLower.has(t)) return true;
-  return ingredientCount >= 2 && /\b(mix|blend)\b/.test(t);
+  if (ingredientCount >= 2 && /\b(mix|blend)\b/.test(t)) return true;
+  // No mix/blend word, but the components themselves say "not cheese": a
+  // multi-ingredient blend with no cheese-ish ingredient defaults to Mix
+  // ("Italian Beef & Gravy"). Default only — forcedCategory wins upstream.
+  if (componentNames && ingredientCount >= 2) {
+    const named = componentNames.map((n) => n.trim()).filter(Boolean);
+    if (named.length >= 2 && !named.some((n) => CHEESEISH_INGREDIENT_RE.test(n))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Kind shown in the import review UI: the three parse kinds plus "mix". */
@@ -2798,7 +2866,12 @@ export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayK
   // on a name the user chose ("My Special Blend 2" is still a cheese recipe).
   if (r.userNamed) return "cheese";
   const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
-  return specImportCheeseRecipeIsMix(r.name ?? "", userMixNamesLower, r.rows?.length ?? 0)
+  return specImportCheeseRecipeIsMix(
+    r.name ?? "",
+    userMixNamesLower,
+    r.rows?.length ?? 0,
+    (r.rows ?? []).map((row) => row.ingredient ?? ""),
+  )
     ? "mix"
     : "cheese";
 }
@@ -2950,7 +3023,12 @@ export function applySpecImport(
     // A user-typed rename never re-categorizes (heuristic is unreliable on a
     // chosen name) — mirrors specImportRecipeDisplayKind.
     if (r.userNamed) return false;
-    return specImportCheeseRecipeIsMix(r.name, userMixNamesLower, r.rows.length);
+    return specImportCheeseRecipeIsMix(
+      r.name,
+      userMixNamesLower,
+      r.rows.length,
+      r.rows.map((row) => row.ingredient ?? ""),
+    );
   };
 
   for (const r of parsed.recipes) {
