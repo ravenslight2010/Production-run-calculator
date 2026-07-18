@@ -32,6 +32,12 @@ import {
   POISONED_FLAVOR_BRAND_CONTEXT,
   healCheesePicksInPayload,
 } from "./cheesePickHeal";
+import {
+  healSeaSaltComponents,
+  SEA_SALT_DOUGH_TARGETS,
+  SEA_SALT_SAUCE_TARGETS,
+  SEA_SALT_MIX_TARGETS,
+} from "./seaSaltHeal";
 
 // One-time data heals, applied at boot (best-effort, after listen — like
 // seedRoles). Each heal claims its marker row in data_heals FIRST, inside the
@@ -958,6 +964,120 @@ async function runSmdPepCheeseRestore(): Promise<void> {
   });
 }
 
+// ── Sea Salt is not Salt (2026-07-18) ────────────────────────────────────────
+// A 2026-07-16 import confirm learned "SEA SALT" → "SALT" factory-wide
+// (spec_import_aliases kind doughIngredient + mirrored ai_corrections domain
+// ingredient). They are DIFFERENT ingredients. This heal:
+//   1. deletes the learned alias + correction rows (matched by normalized
+//      name pair across ALL ingredient kinds and ALL scopes — ids differ per
+//      environment, and sandbox copies must not survive either);
+//   2. renames poisoned pool rows back to "Sea Salt" where the SOURCE sheet
+//      says Sea Salt and the stored amount matches the sheet (or is a stub 0)
+//      — see seaSaltHeal.ts for the grounding rules.
+// Re-learning is permanently blocked by the modifier-drop (token-subset)
+// guard now enforced in sanitizeSpecAliases, applyNameMatches, and both
+// server POST routes — that guard IS the never-learn set for this pair.
+
+const SEA_SALT_HEAL_ID = "sea-salt-alias-undo-v1";
+
+const INGREDIENT_ALIAS_KINDS_SQL = ["cheeseIngredient", "doughIngredient", "sauceIngredient"];
+
+async function runSeaSaltAliasUndo(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: SEA_SALT_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Kill the learned rules (match by normalized pair, not raw id).
+    let deletedRows = 0;
+    for (const kind of INGREDIENT_ALIAS_KINDS_SQL) {
+      const a = await tx
+        .delete(specImportAliasesTable)
+        .where(
+          and(
+            eq(specImportAliasesTable.kind, kind),
+            eq(sql`lower(trim(${specImportAliasesTable.externalName}))`, "sea salt"),
+            eq(sql`lower(trim(${specImportAliasesTable.canonicalName}))`, "salt"),
+          ),
+        )
+        .returning({ id: specImportAliasesTable.id });
+      deletedRows += a.length;
+    }
+    const b = await tx
+      .delete(aiCorrectionsTable)
+      .where(
+        and(
+          eq(aiCorrectionsTable.domain, "ingredient"),
+          eq(sql`lower(trim(${aiCorrectionsTable.fromText}))`, "sea salt"),
+          eq(sql`lower(trim(${aiCorrectionsTable.toText}))`, "salt"),
+        ),
+      )
+      .returning({ id: aiCorrectionsTable.id });
+    deletedRows += b.length;
+
+    // 2) Rename poisoned pool rows back to "Sea Salt" (all scopes; sandbox
+    // copies carry the same poison). Component shapes: dough/sauce rows are
+    // { ingredient, lbs }, mix rows are { ingredient, perPizza }.
+    let renamedRecipes = 0;
+
+    const doughRows = await tx.select().from(doughRecipesTable).for("update");
+    for (const row of doughRows) {
+      const comps = Array.isArray(row.components)
+        ? row.components
+        : [];
+      const healed = healSeaSaltComponents(row.name, comps, SEA_SALT_DOUGH_TARGETS, (c) =>
+        typeof c.lbs === "number" ? c.lbs : 0,
+      );
+      if (!healed) continue;
+      await tx
+        .update(doughRecipesTable)
+        .set({ components: healed, updatedAt: new Date() })
+        .where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, row.scope)));
+      renamedRecipes++;
+    }
+
+    const sauceRows = await tx.select().from(sauceRecipesTable).for("update");
+    for (const row of sauceRows) {
+      const comps = Array.isArray(row.components)
+        ? row.components
+        : [];
+      const healed = healSeaSaltComponents(row.name, comps, SEA_SALT_SAUCE_TARGETS, (c) =>
+        typeof c.lbs === "number" ? c.lbs : 0,
+      );
+      if (!healed) continue;
+      await tx
+        .update(sauceRecipesTable)
+        .set({ components: healed, updatedAt: new Date() })
+        .where(and(eq(sauceRecipesTable.id, row.id), eq(sauceRecipesTable.scope, row.scope)));
+      renamedRecipes++;
+    }
+
+    const mixRows = await tx.select().from(mixesTable).for("update");
+    for (const row of mixRows) {
+      const comps = Array.isArray(row.components)
+        ? row.components
+        : [];
+      const healed = healSeaSaltComponents(row.name, comps, SEA_SALT_MIX_TARGETS, (c) =>
+        typeof c.perPizza === "number" ? c.perPizza : 0,
+      );
+      if (!healed) continue;
+      await tx
+        .update(mixesTable)
+        .set({ components: healed, updatedAt: new Date() })
+        .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+      renamedRecipes++;
+    }
+
+    logger.info(
+      { heal: SEA_SALT_HEAL_ID, deletedRows, renamedRecipes },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -975,4 +1095,5 @@ export async function runDataHeals(): Promise<void> {
   await runDoughYieldDepoison();
   await runDoughFamilyWeightDepoison();
   await runSmdPepCheeseRestore();
+  await runSeaSaltAliasUndo();
 }

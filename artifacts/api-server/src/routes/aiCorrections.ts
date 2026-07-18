@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db, aiCorrectionsTable, type AiCorrectionRow } from "@workspace/db";
 import { SaveAiCorrectionsBody } from "@workspace/api-zod";
 import { correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@workspace/ai-memory";
+import { isModifierDropNamePair } from "@workspace/spec-import";
 import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
@@ -57,6 +58,11 @@ router.post("/ai-corrections", async (req: Request, res: Response) => {
     if (!domain || !fromText || !toText) continue;
     // A mapping that just restates the same name carries no information.
     if (fromText.toLowerCase() === toText.toLowerCase()) continue;
+    // Backstop mirroring the spec-import-aliases route: an INGREDIENT
+    // correction that drops a distinguishing modifier word ("Sea Salt" →
+    // "Salt") names a different ingredient and would bias every
+    // name-resolving AI prompt factory-wide. Never accept these silently.
+    if (domain === "ingredient" && isModifierDropNamePair(fromText, toText)) continue;
     incoming.push({ domain, fromText, toText });
   }
 

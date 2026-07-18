@@ -2582,6 +2582,33 @@ export function isGenericSlotTypeName(name: string): boolean {
   return key === "mix" || key === "cheese" || key === "mix cheese" || key === "cheese mix";
 }
 
+/** Ingredient alias kinds guarded against modifier-dropping renames. */
+const INGREDIENT_ALIAS_KINDS = new Set<string>([
+  "cheeseIngredient",
+  "doughIngredient",
+  "sauceIngredient",
+]);
+
+/**
+ * True when one name's token set is a PROPER subset of the other's — i.e. the
+ * rename drops (or adds) a whole distinguishing modifier word rather than
+ * fixing a spelling. "Sea Salt" → "Salt" drops "Sea"; those are DIFFERENT
+ * ingredients, not spellings of one. A pure typo alters a token instead of
+ * removing one, so legitimate typo aliases ("Slat" → "Salt") never trip this.
+ * Token comparison uses the loose match key (case/punctuation folded, filler
+ * words dropped). Names whose loose keys are EQUAL are not subset pairs.
+ */
+export function isModifierDropNamePair(a: string, b: string): boolean {
+  const ta = new Set(specImportNameMatchKey(a).split(" ").filter(Boolean));
+  const tb = new Set(specImportNameMatchKey(b).split(" ").filter(Boolean));
+  const properSubset = (x: Set<string>, y: Set<string>): boolean => {
+    if (x.size === 0 || x.size >= y.size) return false;
+    for (const t of x) if (!y.has(t)) return false;
+    return true;
+  };
+  return properSubset(ta, tb) || properSubset(tb, ta);
+}
+
 /**
  * Hygiene filter for learned spec-import aliases, applied before EVERY use:
  *   1. drops appType aliases with a generic slot-type name ("Mix"/"cheese") on
@@ -2589,10 +2616,18 @@ export function isGenericSlotTypeName(name: string): boolean {
  *   2. drops brand/flavor/appType/pepType aliases whose external and canonical
  *      digit signatures differ (a 7" name must never be renamed to a plain or
  *      an 11" one — those are different products, not spellings);
- *   3. finally drops cyclic/chained aliases (dropConflictingSpecAliases).
+ *   3. drops INGREDIENT-kind aliases that drop a distinguishing modifier word
+ *      (token subset — "Sea Salt" → "Salt"): those are different ingredients,
+ *      and ingredient aliases are learned/applied automatically with no user
+ *      review step, so such pairs must never rename silently
+ *      (see isModifierDropNamePair);
+ *   4. finally drops cyclic/chained aliases (dropConflictingSpecAliases).
  * recipeName and ingredient kinds are exempt from the digit rule on purpose:
  * a user deliberately picking pool recipe "CRB DOUGH" for the sheet's
- * `7" CRB recipe` is a legitimate digit-dropping rename. Pure.
+ * `7" CRB recipe` is a legitimate digit-dropping rename. brand/flavor/appType/
+ * recipeName kinds are exempt from the subset rule because their renames come
+ * from explicit user review (renames and "use existing" link picks — e.g.
+ * "Cheeseburger Cheese Mix" → "Cheeseburger Mix" is a deliberate pick). Pure.
  */
 export function sanitizeSpecAliases(
   aliases: ReadonlyArray<SpecImportAlias>,
@@ -2605,6 +2640,9 @@ export function sanitizeSpecAliases(
       if (specNameDigitSignature(a.externalName) !== specNameDigitSignature(a.canonicalName)) {
         return false;
       }
+    }
+    if (INGREDIENT_ALIAS_KINDS.has(a.kind) && isModifierDropNamePair(a.externalName, a.canonicalName)) {
+      return false;
     }
     return true;
   });
@@ -4573,6 +4611,10 @@ export function applyNameMatches(
     const cand = (m.candidate ?? "").trim();
     const match = (m.match ?? "").trim();
     if (!cand || !match) continue;
+    // AI ingredient matches apply with no user review step — a match that
+    // drops a distinguishing modifier word ("Sea Salt" → "Salt") means a
+    // DIFFERENT ingredient and must never auto-rename recipe rows.
+    if (isModifierDropNamePair(cand, match)) continue;
     ingMap.set(ingKey(m.kind, cand), match);
   }
   const appMap = new Map<string, string>();
@@ -4653,6 +4695,9 @@ export function applyNameMatches(
     const cand = (m.candidate ?? "").trim();
     const match = (m.match ?? "").trim();
     if (!cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    // Never LEARN a modifier-dropping ingredient pair either (mirror of the
+    // apply guard above; sanitizeSpecAliases would drop it at save anyway).
+    if (isModifierDropNamePair(cand, match)) continue;
     const kind = recipeKindToIngredientAliasKind(m.kind);
     aliasByKey.set(specAliasKey(kind, cand, null), {
       kind,

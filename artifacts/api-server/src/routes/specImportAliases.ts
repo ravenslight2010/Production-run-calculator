@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
 import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
-import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, type SpecAliasKind } from "@workspace/spec-import";
+import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, type SpecAliasKind } from "@workspace/spec-import";
 
 const router: IRouter = Router();
 
@@ -76,6 +76,16 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
     // renames every distinct blend onto one garbage record at the next import.
     // Old/unfixed clients must not be able to write these.
     if (kind === "appType" && (isGenericSlotTypeName(externalName) || isGenericSlotTypeName(canonicalName))) {
+      continue;
+    }
+    // Server-side backstop for ingredient aliases: a pair that drops a
+    // distinguishing modifier word ("Sea Salt" → "Salt") names a DIFFERENT
+    // ingredient, and ingredient aliases auto-apply with no review step.
+    // Old/unfixed clients must not be able to write these.
+    if (
+      (kind === "cheeseIngredient" || kind === "doughIngredient" || kind === "sauceIngredient") &&
+      isModifierDropNamePair(externalName, canonicalName)
+    ) {
       continue;
     }
     incoming.push({ kind, externalName, canonicalName, context });
