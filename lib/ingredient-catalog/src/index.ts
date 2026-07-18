@@ -219,6 +219,12 @@ export interface IngredientUniverseSources {
   recipeRows?: ReadonlyArray<ReadonlyArray<{ ingredient: string }>>;
   // Plain name lists (legacy local master lists, pep types, …).
   nameLists?: ReadonlyArray<ReadonlyArray<string>>;
+  // Names to exclude from EVERY source, matched case-insensitively
+  // (trim + lowercase). Used for merged-away tombstones: right after an
+  // ingredient merge the client's catalog copy / pool rows can briefly still
+  // carry the old name, and this filter keeps it from resurfacing in the
+  // universe until the refetch lands.
+  excludeNames?: ReadonlyArray<string>;
 }
 
 // Union every source into one flat, case-insensitively deduped (first casing
@@ -228,10 +234,16 @@ export function buildIngredientUniverse(
 ): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  const excluded = new Set<string>();
+  for (const raw of sources.excludeNames ?? []) {
+    const key = (raw ?? "").trim().toLowerCase();
+    if (key) excluded.add(key);
+  }
   const add = (raw: string) => {
     const name = (raw ?? "").trim();
     if (!name) return;
     const key = name.toLowerCase();
+    if (excluded.has(key)) return;
     if (seen.has(key)) return;
     seen.add(key);
     out.push(name);

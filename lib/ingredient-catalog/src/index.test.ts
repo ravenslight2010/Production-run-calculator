@@ -284,6 +284,40 @@ describe("buildIngredientUniverse", () => {
     expect(result).toEqual(["Basil"]);
   });
 
+  it("excludes tombstoned names from every source, case-insensitively", () => {
+    const result = buildIngredientUniverse({
+      catalog: [
+        mkIngredient({ id: "a", name: "Mozzarella" }),
+        mkIngredient({ id: "b", name: "Mozz" }),
+      ],
+      recipeRows: [[{ ingredient: "mozz" }, { ingredient: "Flour" }]],
+      nameLists: [["MOZZ", "Salt"]],
+      excludeNames: ["  mozz  "],
+    });
+    expect(result).toEqual(["Flour", "Mozzarella", "Salt"]);
+  });
+
+  it("ignores blank exclude entries", () => {
+    const result = buildIngredientUniverse({
+      nameLists: [["Basil"]],
+      excludeNames: ["", "   "],
+    });
+    expect(result).toEqual(["Basil"]);
+  });
+
+  it("excludes a stale catalog entry still marked enabled (stale client copy)", () => {
+    // Right after a merge the client's catalog copy can still show the source
+    // as enabled with no mergedInto — the tombstone filter must win anyway.
+    const result = buildIngredientUniverse({
+      catalog: [
+        mkIngredient({ id: "a", name: "Mozzarella" }),
+        mkIngredient({ id: "b", name: "Mozz", enabled: true, mergedInto: null }),
+      ],
+      excludeNames: ["Mozz"],
+    });
+    expect(result).toEqual(["Mozzarella"]);
+  });
+
   it("never mutates its inputs", () => {
     const catalog = [mkIngredient({ id: "a", name: "Mozzarella" })];
     const rows = [[{ ingredient: "Flour" }]];

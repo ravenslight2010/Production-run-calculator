@@ -82,6 +82,46 @@ export async function mergeIngredientsRemote(
   return normalizeIngredients(data.items);
 }
 
+// Mirror a confirmed manual ingredient merge (source NAMES -> one target NAME)
+// into the server catalog: create the target entry if the catalog doesn't know
+// it yet, then merge every source the catalog knows about into it. Sources with
+// no catalog entry have nothing to merge server-side. `onCatalog` receives the
+// authoritative post-write catalog after EVERY successful server write so the
+// caller can seed its query cache immediately (no waiting out the poll
+// interval); IO is injectable for tests. Throws on failure — the caller decides
+// whether that's fatal (home.tsx treats it as best-effort).
+export async function mergeCatalogEntriesByName(
+  catalog: Ingredient[],
+  sourceNames: string[],
+  targetName: string,
+  onCatalog: (items: Ingredient[]) => void,
+  io: {
+    save: typeof saveIngredients;
+    merge: typeof mergeIngredientsRemote;
+  } = { save: saveIngredients, merge: mergeIngredientsRemote },
+): Promise<void> {
+  let target = catalog.find(
+    (i) => i.name.trim().toLowerCase() === targetName.trim().toLowerCase(),
+  );
+  if (!target) {
+    const built = findOrBuildIngredient(targetName, "general", catalog);
+    const saved = await io.save([built]);
+    onCatalog(saved);
+    target = saved.find((i) => i.id === built.id) ?? built;
+  }
+  const targetId = target.id;
+  const sourceIds = sourceNames
+    .map(
+      (name) =>
+        catalog.find((i) => i.name.trim().toLowerCase() === name.trim().toLowerCase())?.id,
+    )
+    .filter((id): id is string => !!id && id !== targetId);
+  if (sourceIds.length > 0) {
+    const merged = await io.merge(sourceIds, targetId);
+    onCatalog(merged);
+  }
+}
+
 // Idempotent "get id for name in category, creating it if it doesn't exist
 // yet" — used to seed the catalog from local option lists and to backfill an
 // id when a legacy recipe row only has a name. Case-insensitive match.

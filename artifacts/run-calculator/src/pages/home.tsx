@@ -209,6 +209,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   deleteIngredients as deleteIngredientsRemote,
   mergeIngredientsRemote,
+  mergeCatalogEntriesByName,
   findOrBuildIngredient,
 } from "../ingredients";
 import { buildIngredientUniverse, type IngredientCategory } from "@workspace/ingredient-catalog";
@@ -2525,11 +2526,20 @@ export default function Home() {
     [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
   );
 
+  // React mirror of the local mergedAway tombstone (localStorage). The unified
+  // ingredient universe filters through it so a merged-away name vanishes from
+  // every suggestion list/Merge tab IMMEDIATELY after a merge, even while the
+  // ingredient-catalog query copy or a server pool row is briefly stale. Kept
+  // in step wherever the stored tombstone changes (merge apply, sync receive,
+  // durable-tombstone load, explicit re-add).
+  const [mergedAwayTomb, setMergedAwayTomb] = useState<string[]>(() => loadMergedAway());
+
   // Re-adding a previously merged-away name must resurrect it everywhere: clear
   // it from the LOCAL tombstone AND the DURABLE factory-wide one, otherwise the
   // load-time/sync prune would strip it right back out on the next device.
   function clearMergedAwayBoth(name: string) {
     clearMergedAway(name);
+    setMergedAwayTomb(loadMergedAway());
     void deleteMergedAwayNames([name]).catch(() => {});
   }
 
@@ -2603,22 +2613,14 @@ export default function Home() {
   // referenced by id, so no recipe row depends on the merge propagating there.
   async function mergeCatalogEntries(sourceNames: string[], targetName: string): Promise<void> {
     try {
-      let target = ingredientCatalog.find(
-        (i) => i.name.trim().toLowerCase() === targetName.trim().toLowerCase(),
+      // The save/merge endpoints return the full post-write catalog — seed the
+      // ["ingredients"] query cache with it so the unified universe drops the
+      // merged-away names immediately instead of waiting out the 60s poll,
+      // then invalidate as a backstop refetch.
+      await mergeCatalogEntriesByName(ingredientCatalog, sourceNames, targetName, (items) =>
+        cycleCountQc.setQueryData(["ingredients"], items),
       );
-      if (!target) {
-        const built = findOrBuildIngredient(targetName, "general", ingredientCatalog);
-        const saved = await saveIngredientsRemote([built]);
-        target = saved.find((i) => i.id === built.id) ?? built;
-      }
-      const sourceIds = sourceNames
-        .map(
-          (name) =>
-            ingredientCatalog.find((i) => i.name.trim().toLowerCase() === name.trim().toLowerCase())
-              ?.id,
-        )
-        .filter((id): id is string => !!id && id !== target!.id);
-      if (sourceIds.length > 0) await mergeIngredientsRemote(sourceIds, target.id);
+      void cycleCountQc.invalidateQueries({ queryKey: ["ingredients"] });
     } catch {
       // Best-effort: the local merge above already succeeded; the catalog will
       // self-heal next time these names are touched.
@@ -2963,6 +2965,7 @@ export default function Home() {
   // to storage and silently undo the merge.
   function refreshAfterMerge() {
     reloadMasterData();
+    setMergedAwayTomb(loadMergedAway());
     setTemplates(loadTemplates());
     setHistory(loadHistory());
     const ds = loadDayState();
@@ -3440,8 +3443,12 @@ export default function Home() {
           mixIngredients,
           pepTypes,
         ],
+        // Merged-away tombstones: keeps a just-merged source name out of the
+        // universe even while the catalog query copy or a server pool row is
+        // still stale (they refetch/re-point asynchronously after the merge).
+        excludeNames: mergedAwayTomb,
       }),
-    [ingredientCatalog, mixes, cheeseRecipesList, doughRecipesList, sauceRecipesList, ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes],
+    [ingredientCatalog, mixes, cheeseRecipesList, doughRecipesList, sauceRecipesList, ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes, mergedAwayTomb],
   );
   // ── Unified setup editing: drift vs the linked shared dough/sauce recipe ──
   // When the open form's dough/sauce rows (or dough target weight) were hand-
@@ -5937,6 +5944,7 @@ export default function Home() {
       // set and strip those names from every list merge so a merge sticks.
       const mergedTomb = [...new Set([...loadMergedAway(), ...(payload.mergedAway ?? [])])];
       saveMergedAway(mergedTomb);
+      setMergedAwayTomb(mergedTomb);
       const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
 
       // ── Deletion tombstones (union remote+local, per list namespace) ──
@@ -6410,6 +6418,7 @@ export default function Home() {
       if (cancelled || remoteNames.length === 0) return;
       const mergedTomb = [...new Set([...loadMergedAway(), ...remoteNames])];
       saveMergedAway(mergedTomb);
+      setMergedAwayTomb(mergedTomb);
       const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
       const prune = (
         key: string,
