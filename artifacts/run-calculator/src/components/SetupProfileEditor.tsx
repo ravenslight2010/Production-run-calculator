@@ -10,7 +10,7 @@ import {
   LABEL_POSITION_OPTIONS,
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
-import { resolveDieLineDefaults, resolveCrustLineDefaults } from "../dieDefaults";
+import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { fetchSavedSpecSheets } from "../savedSpecSheets";
 import { fetchSavedShippingGuides } from "../savedShippingGuides";
@@ -920,9 +920,10 @@ export default function SetupProfileEditor({
                         onSelect={val => {
                           form.setValue("dieType", val, { shouldDirty: true });
                           if (val) {
-                            // Pre-fill line settings for this die size — blank-fill
-                            // only, never overwriting a hand-set value (dieDefaults.ts).
-                            const fills = resolveDieLineDefaults(val, form.getValues(), dieLineDefaultOverrides);
+                            // Pre-fill line settings for this die size. Switch-aware:
+                            // blank fields and another die's auto-filled defaults are
+                            // replaced; hand-set values are kept (dieDefaults.ts).
+                            const fills = resolveDieLineDefaultsOnSwitch(val, form.getValues(), dieLineDefaultOverrides);
                             for (const [k, fv] of Object.entries(fills)) {
                               form.setValue(k as keyof typeof fills, fv, { shouldDirty: true });
                             }

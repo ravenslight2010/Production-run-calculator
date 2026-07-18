@@ -146,3 +146,38 @@ export function resolveDieLineDefaults(
   }
   return out;
 }
+
+/**
+ * Switch-aware variant used when the user EXPLICITLY picks a die (run form /
+ * setup profile editor die selector). In addition to untouched-blank fields,
+ * a field is also replaceable when its current value matches that field's
+ * auto-fill from ANY known die (built-in map or a manager override) — i.e. it
+ * was almost certainly auto-filled by a previous die selection, not typed by
+ * the user. Values that don't match any die's defaults are still never
+ * overwritten. Import/autofill paths (no explicit prior die pick) must keep
+ * using resolveDieLineDefaults.
+ */
+export function resolveDieLineDefaultsOnSwitch(
+  dieName: string,
+  current: Partial<Record<keyof DieLineDefaults, unknown>>,
+  overrides?: DieLineDefaultsOverrides,
+): Partial<DieLineDefaults> {
+  const defaults = dieLineDefaultsFor(dieName, overrides);
+  if (!defaults) return {};
+  const knownSets: DieLineDefaults[] = [
+    SEVEN,
+    TWELVE,
+    ELEVEN_OR_ARGUS,
+    ...Object.values(overrides ?? {}),
+  ];
+  const out: Partial<DieLineDefaults> = {};
+  for (const key of Object.keys(defaults) as (keyof DieLineDefaults)[]) {
+    const cur = Number(current[key] ?? UNTOUCHED[key]);
+    const replaceable =
+      !Number.isFinite(cur) ||
+      cur === UNTOUCHED[key] ||
+      knownSets.some(s => s[key] === cur);
+    if (replaceable && defaults[key] !== cur) out[key] = defaults[key];
+  }
+  return out;
+}

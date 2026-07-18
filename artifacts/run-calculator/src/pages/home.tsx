@@ -175,7 +175,7 @@ import {
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
-import { resolveDieLineDefaults, resolveCrustLineDefaults } from "../dieDefaults";
+import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import {
   fetchServerDieTypes,
   pushDieTypesToServer,
@@ -13718,10 +13718,12 @@ export default function Home() {
                                 const selecting = v.dieType !== dt;
                                 form.setValue("dieType", selecting ? dt : "", { shouldDirty: true });
                                 if (selecting) {
-                                  // Pre-fill the line settings for this die size —
-                                  // blank-fill only, never overwriting a value the
-                                  // user already changed (see dieDefaults.ts).
-                                  const fills = resolveDieLineDefaults(dt, form.getValues(), dieLineDefaultOverrides);
+                                  // Pre-fill the line settings for this die size.
+                                  // Switch-aware: fields still blank OR still holding
+                                  // another die's auto-filled defaults are replaced;
+                                  // user-typed values are never overwritten
+                                  // (see dieDefaults.ts).
+                                  const fills = resolveDieLineDefaultsOnSwitch(dt, form.getValues(), dieLineDefaultOverrides);
                                   for (const [k, val] of Object.entries(fills)) {
                                     form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
                                   }

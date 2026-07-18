@@ -152,3 +152,4 @@
 - [Corpus regression harness](corpus-harness.md) — no-AI snapshot bench over the real workbook corpus (test:corpus); mix-word rule deliberately beats cheesy components in spec-import routing.
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
 - [Detached process reaping](detached-process-reaping.md) — setsid/nohup from the bash tool dies with the session; >2min runs need a workflow or a smaller foreground run.
+- [Die defaults switch-aware](die-defaults-switch-aware.md) — explicit die picks use the switch-aware resolver (replaces prior die auto-fill); import/autofill paths stay strict blank-fill-only.
