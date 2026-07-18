@@ -668,14 +668,37 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
 
 // Roll up packaging consumables across the given runs: circles are 1 per pizza
 // and shippers are 1 per case, each grouped by the run's selected type. "none"
-// / unset selections contribute nothing.
+// / unset selections contribute nothing. Labeled runs contribute label rolls
+// (pizzas / labels-per-roll; per position when Label Position is Both).
 function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   const circleMap = new Map<string, number>();
   const shipperMap = new Map<string, number>();
   let cartonCases = 0;
+  let labelRolls = 0;
+  let topLabelRolls = 0;
+  let bottomLabelRolls = 0;
   for (const vals of valsList) {
-    // Only cartoned runs contribute to packaging needs; "labeled" / "n-a" runs
-    // are excluded entirely. Accepts legacy "yes" for pre-migration data.
+    const cartonedVal = ((vals.cartoned as string) ?? "").trim().toLowerCase();
+    if (cartonedVal === "labeled") {
+      // Labeled runs need label rolls staged: rolls = total pizzas / labels
+      // per roll, per position (top+bottom separately) when position is Both.
+      const ls = computeSummaryStats(vals);
+      if (ls.totalPizzas > 0) {
+        const pos = ((vals.labelPosition as string) ?? "").trim().toLowerCase();
+        if (pos === "both") {
+          const top = Number(vals.topLabelsPerRoll) || 0;
+          const bottom = Number(vals.bottomLabelsPerRoll) || 0;
+          if (top > 0) topLabelRolls += ls.totalPizzas / top;
+          if (bottom > 0) bottomLabelRolls += ls.totalPizzas / bottom;
+        } else {
+          const single = Number(vals.labelsPerRoll) || 0;
+          if (single > 0) labelRolls += ls.totalPizzas / single;
+        }
+      }
+      continue;
+    }
+    // Only cartoned runs contribute to the remaining packaging needs; "n-a"
+    // runs are excluded entirely. Accepts legacy "yes" for pre-migration data.
     if (!isCartonedValue(vals.cartoned)) continue;
     const s = computeSummaryStats(vals);
     // Cartons are bought by the case: cases = total pizzas / cartons per case.
@@ -694,6 +717,9 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   for (const [type, n] of circleMap) rows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
   for (const [type, n] of shipperMap) rows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
   if (cartonCases > 0) rows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" });
+  if (labelRolls > 0) rows.push({ label: "Label Rolls", value: fmtNum(Math.ceil(labelRolls), 0), sub: "rolls" });
+  if (topLabelRolls > 0) rows.push({ label: "Label Rolls — Top", value: fmtNum(Math.ceil(topLabelRolls), 0), sub: "rolls" });
+  if (bottomLabelRolls > 0) rows.push({ label: "Label Rolls — Bottom", value: fmtNum(Math.ceil(bottomLabelRolls), 0), sub: "rolls" });
   return rows;
 }
 
