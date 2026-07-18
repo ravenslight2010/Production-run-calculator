@@ -57,6 +57,7 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
 import {
   canonicalProfileKey,
@@ -2927,6 +2928,13 @@ export function applySpecImport(
     dough?: SpecImportServerPoolRecipe[];
     sauce?: SpecImportServerPoolRecipe[];
   },
+  /**
+   * Manager-stored per-die line-setting overrides (Manage Lists → Die
+   * Defaults), fetched by the commit glue. Used to blank-fill line settings
+   * from the imported die type; overrides win over the built-in map. Optional
+   * and best-effort — when absent the built-in map still applies.
+   */
+  dieLineDefaultOverrides?: DieLineDefaultsOverrides,
 ): Array<{ brand: string; flavor: string }> {
   if (typeof localStorage === "undefined") return [];
 
@@ -3368,6 +3376,17 @@ export function applySpecImport(
     if (namedPeps.length > 0) {
       (values as Record<string, unknown>).pep1Combined = namedPeps.length >= 2 ? false : true;
     }
+    // Blank-fill line settings from the profile's die type, exactly like
+    // picking the die on the run form / profile editor: manager-stored
+    // overrides (Manage Lists → Die Defaults) win, built-in map second.
+    // resolveDieLineDefaults only returns fields still at their untouched
+    // defaults, so values a user (or prior import) already set are kept.
+    const lineFills = resolveDieLineDefaults(
+      values.dieType ?? "",
+      values as Partial<Record<string, unknown>>,
+      dieLineDefaultOverrides,
+    );
+    Object.assign(values as Record<string, unknown>, lineFills);
     saveProfile(brand, flavor, values);
   }
 

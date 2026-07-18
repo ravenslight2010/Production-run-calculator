@@ -529,6 +529,17 @@ export default function SetupProfileEditor({
         if (rows) rec.frontlineRecipe = rows.map(r => ({ ...r }));
       }
     }
+    // A die type filled by the auto-fill blank-fills the line settings too,
+    // exactly like picking the same die by hand in this editor: manager
+    // overrides first, built-in map second, never overwriting touched values.
+    if (entries.some(e => e.field === "dieType")) {
+      const lineFills = resolveDieLineDefaults(
+        String(rec.dieType ?? ""),
+        rec,
+        dieLineDefaultOverrides,
+      );
+      Object.assign(rec, lineFills);
+    }
     form.reset(values);
     resetFieldArrays(values);
   }

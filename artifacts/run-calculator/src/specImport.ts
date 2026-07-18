@@ -104,6 +104,8 @@ import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { fetchNamedRecipes, saveNamedRecipes, addNamedRecipesToServerIfAbsent } from "./namedRecipes";
+import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
+import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { namedRecipeFromDraft, type NamedRecipe as PoolNamedRecipe } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, fillSpecMixTags, type Mix } from "@workspace/mixes";
@@ -1456,8 +1458,19 @@ export async function commitSpecImport(
     applyParsed = readdPoolMissingRecipes(applyParsed, fullRelinked, poolNamesByKind);
   }
 
+  // Manager-stored per-die line-setting overrides (Manage Lists → Die
+  // Defaults) so the import's blank-fill of crusts/cycle, speed, adjustment,
+  // freezer time, and cases/layer honors them; the built-in map is the
+  // fallback. Best-effort — a failed fetch never blocks the import.
+  let dieLineDefaultOverrides: DieLineDefaultsOverrides | undefined;
+  try {
+    dieLineDefaultOverrides = toOverridesMap(await fetchDieLineDefaults());
+  } catch {
+    // Offline / server error — applySpecImport falls back to the built-in map.
+  }
+
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
-  const touchedProfiles = applySpecImport(applyParsed, applyOut, livePools);
+  const touchedProfiles = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides);
 
   // For the SERVER-POOL collects below only: backfill "who it goes to"
   // brand/flavor targets onto cheese-kind recipes that arrived unscoped, from
