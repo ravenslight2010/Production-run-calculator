@@ -1078,6 +1078,110 @@ async function runSeaSaltAliasUndo(): Promise<void> {
   });
 }
 
+// ── Duplicate mix name purge ────────────────────────────────────────────────
+// Two spec/premix imports minted the SAME mix under two different ids (the
+// first record's id derived from an earlier name, e.g. "Red Fajita Mix",
+// which was later renamed to the full name a second import also created).
+// The Merge screen is name-keyed, so two same-named pool rows look like one
+// name and can never be merged away — the duplicate is stuck in Manage Lists.
+// Keep the row with real data (per-batch/per-pizza amounts, more components,
+// newest), delete the hollow one. Mirrors runCheeseDuplicateNamePurge.
+
+const MIX_DUP_HEAL_ID = "mix-duplicate-name-purge-v1";
+
+type MixDupRow = {
+  id: string;
+  scope: string;
+  name: string;
+  brand: string;
+  flavor: string;
+  batchSize: number;
+  components: { ingredient: string; perPizza?: number }[] | null;
+  createdAt: Date;
+};
+
+/**
+ * Pure selection logic for the mix duplicate purge: group rows by
+ * scope + case-insensitive (name, brand, flavor), keep the best row per
+ * group (real amounts > has batch size > more components > newest), and
+ * return the losers to delete. Exported for unit tests.
+ */
+export function pickMixDuplicateLosers<R extends MixDupRow>(rows: R[]): R[] {
+  const groups = new Map<string, R[]>();
+  for (const row of rows) {
+    const key = [
+      row.scope,
+      row.name.trim().toLowerCase(),
+      row.brand.trim().toLowerCase(),
+      row.flavor.trim().toLowerCase(),
+    ].join("\u0000");
+    const list = groups.get(key);
+    if (list) list.push(row);
+    else groups.set(key, [row]);
+  }
+
+  const rank = (r: R): [number, number, number, number] => {
+    const components = r.components ?? [];
+    const hasAmounts = components.some(
+      (c) =>
+        (c.perPizza ?? 0) > 0 ||
+        ((c as { perBatchLbs?: number }).perBatchLbs ?? 0) > 0,
+    )
+      ? 1
+      : 0;
+    const hasBatch = r.batchSize > 0 ? 1 : 0;
+    // Sort is descending on each term, so the raw timestamp prefers NEWEST.
+    return [hasAmounts, hasBatch, components.length, r.createdAt.getTime()];
+  };
+
+  const losers: R[] = [];
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const sorted = [...list].sort((a, b) => {
+      const ra = rank(a);
+      const rb = rank(b);
+      for (let i = 0; i < ra.length; i++) {
+        if (ra[i] !== rb[i]) return rb[i] - ra[i];
+      }
+      return a.id.localeCompare(b.id);
+    });
+    for (const loser of sorted.slice(1)) losers.push(loser);
+  }
+  return losers;
+}
+
+async function runMixDuplicateNamePurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: MIX_DUP_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(mixesTable).for("update");
+    const dropRows = pickMixDuplicateLosers(rows);
+
+    let deletedRows = 0;
+    for (const loser of dropRows) {
+      // Delete by (id, scope) — the upsert key allows the SAME id in two
+      // scopes, and only the row in the loser's own scope is a duplicate.
+      const a = await tx
+        .delete(mixesTable)
+        .where(
+          and(eq(mixesTable.id, loser.id), eq(mixesTable.scope, loser.scope)),
+        )
+        .returning({ id: mixesTable.id });
+      deletedRows += a.length;
+    }
+
+    logger.info(
+      { heal: MIX_DUP_HEAL_ID, scanned: rows.length, deletedRows },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1096,4 +1200,5 @@ export async function runDataHeals(): Promise<void> {
   await runDoughFamilyWeightDepoison();
   await runSmdPepCheeseRestore();
   await runSeaSaltAliasUndo();
+  await runMixDuplicateNamePurge();
 }

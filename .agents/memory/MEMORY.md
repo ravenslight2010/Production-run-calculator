@@ -150,4 +150,5 @@
 - [Cheese share oz basis](cheese-share-oz-basis.md) — Share % may use oz only with FULL oz coverage of lbs>0 rows; partial imported oz must be stripped (heal + editor clear) or shares go wild.
 - [Spec-import stub pollution](spec-import-stub-pollution.md) — spec imports mint all-zero stub recipes in every pool; unlinked stubs persist in prod; audit method + corpus pointer inside.
 - [Corpus regression harness](corpus-harness.md) — no-AI snapshot bench over the real workbook corpus (test:corpus); mix-word rule deliberately beats cheesy components in spec-import routing.
+- [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
 - [Detached process reaping](detached-process-reaping.md) — setsid/nohup from the bash tool dies with the session; >2min runs need a workflow or a smaller foreground run.
