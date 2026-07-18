@@ -186,6 +186,22 @@ export function mapCount(raw: string): number | undefined {
   return Number.isSafeInteger(n) && n > 0 ? n : undefined;
 }
 
+/**
+ * PIZZAS/CS → count, including multipack notation: the guide writes Costco as
+ * "4 - 3PACK" (4 three-packs per case = 12 pizzas). The real corpus guide
+ * previously left this unmapped, so pizzas/case stayed 0 in the app. Only
+ * "N - MPACK" (any of "-", "x", "×" separators; "PACK"/"PK") multiplies;
+ * anything else still falls back to the strict numeric rule.
+ */
+export function mapPizzasPerCase(raw: string): number | undefined {
+  const m = raw.trim().match(/^(\d+)\s*[-–x×]\s*(\d+)\s*[- ]?\s*(?:pack|pk)s?$/i);
+  if (m) {
+    const n = Number(m[1]) * Number(m[2]);
+    return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+  }
+  return mapCount(raw);
+}
+
 /** Map one guide row to a packaging patch + the list of columns kept as-is. */
 export function shippingPatchFromRow(row: ShippingGuideRow): { patch: ShippingPatch; unmapped: string[] } {
   const patch: ShippingPatch = {};
@@ -203,7 +219,7 @@ export function shippingPatchFromRow(row: ShippingGuideRow): { patch: ShippingPa
   take("circles", row.circle, mapCircles(row.circle), "Circle");
   take("skidStacking", row.stacking, mapStacking(row.stacking), "Stacking");
   take("gripSheets", row.gripSheets, mapGripSheets(row.gripSheets), "Gripsheets");
-  take("pizzasPerCase", row.pizzasPerCase, mapCount(row.pizzasPerCase), "Pizzas/case");
+  take("pizzasPerCase", row.pizzasPerCase, mapPizzasPerCase(row.pizzasPerCase), "Pizzas/case");
   take("casesPerSkid", row.casesPerSkid, mapCount(row.casesPerSkid), "Cases/skid");
   return { patch, unmapped };
 }

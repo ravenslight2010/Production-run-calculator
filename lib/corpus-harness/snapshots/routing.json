@@ -1,0 +1,764 @@
+{
+  "cheeseRouting": [
+    {
+      "name": "4 Cheese with Sweet & Spicy Chili Sauce",
+      "routedToMix": false
+    },
+    {
+      "name": "4Hands Chicken Bacon Club Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "4Hands Meat Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "4Hands Pizella Cheese",
+      "routedToMix": false
+    },
+    {
+      "name": "4Hands Seven Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "4Hands Sugarfire Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Aldo's Parmesan / Oregano Mix",
+      "routedToMix": true
+    },
+    {
+      "name": "Aldo's Standard Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Basha's Original Cheese Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Basha's Ultra Thin 5 Cheese Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Basha's Ultra Thin BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Basha's Ultra Thin Pepperoni Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Basha's Ultra Thin Pepperoni/Romano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Bobo's Breakfast Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Bobo's Chx Alfredo Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Bobo's STL Style Cheese",
+      "routedToMix": false
+    },
+    {
+      "name": "Brand Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Cheeseburger Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Cheeseburger Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Corner BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Corner Booth Five Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Corner Booth Pepperoni Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Corner Booth White Spinach & Mushroom Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Costco Pizella Cheese",
+      "routedToMix": false
+    },
+    {
+      "name": "Edwardo's Bacon Spinach Mix",
+      "routedToMix": true
+    },
+    {
+      "name": "Edwardo's Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Edwardo's Parmesan Oregano Mix",
+      "routedToMix": true
+    },
+    {
+      "name": "Five Cheese Spice Blend",
+      "routedToMix": false
+    },
+    {
+      "name": "Five Cheese Spice Blend",
+      "routedToMix": false
+    },
+    {
+      "name": "Five Cheese Spice Blend",
+      "routedToMix": false
+    },
+    {
+      "name": "Five Cheese Spice Blend",
+      "routedToMix": false
+    },
+    {
+      "name": "Gyro Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Hannaford BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Hannaford Margherita Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Hannaford's Chicken Bacon Club Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Hannaford's Chicken Bacon Club Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's 7 5 Cheese",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's 7 BBQ Chicken",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's 7 Meat Lovers",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's 7 Pepperoni",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's 7 Supreme",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's 7 White Spinach",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's California Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Club Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Grilled Vegetable Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Margehrita Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Pepperoni Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Pepperoni/Romano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Red Pepper Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's Spinach Mushroom Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's White Spinach Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowes/Hannaford Five Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lowes/Hannaford Five Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's 6 Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Americano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Americano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Caribbean Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Caribbean Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Cheeseburger Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Cheeseburger Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Club Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Craft Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Craft Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Italiano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Mexicano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Parisian Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Pepperoni Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Pinsa (Proof) Cheese",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Pinsa Pepperoni Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Pinsa Pepperoni/Romano Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Pinsa Spinach Mushroom Pesto Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Spinach Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Standard Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mauro Tomato Basil Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Member's Selection (PriceSmart) Color Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Monterey Jack Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Mystic 50/50 Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Nob Hill Craft Bacon Club Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Nob Hill Craft Caribbean Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Nob Hill Craft Cheeseburger Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Nob Hill Craft Red Hot Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Price Chopper BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Red Hot Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Red Hot Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Red Hot Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Skim Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Skim Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Skim Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "SMD BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "SMD Four Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "SMD Pepperoni Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie Cheese Mix)",
+      "routedToMix": false
+    },
+    {
+      "name": "Spinach Goat Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Vita Red Pepper Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Vocelli's BBQ Chicken Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Vocelli's Garlic Spinaci Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    },
+    {
+      "name": "Whole Mozzarella Cheese Mix",
+      "routedToMix": false
+    }
+  ],
+  "premixRouting": [
+    {
+      "name": "",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "",
+      "componentCount": 2,
+      "routedToMix": false
+    },
+    {
+      "name": "",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "",
+      "componentCount": 2,
+      "routedToMix": false
+    },
+    {
+      "name": "Bashas Red Fajita Mix",
+      "componentCount": 5,
+      "routedToMix": true
+    },
+    {
+      "name": "Bobo's Breakfast Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Bobo's Deluxe Veggie Mix",
+      "componentCount": 6,
+      "routedToMix": true
+    },
+    {
+      "name": "Corner Booth Hawaiian",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Corner Booth Hot Giardiniera Mix",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Corner Booth House Mix",
+      "componentCount": 3,
+      "routedToMix": true
+    },
+    {
+      "name": "Corner Booth Spinach Mix",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Corner Booth White Fajita Mix",
+      "componentCount": 4,
+      "routedToMix": true
+    },
+    {
+      "name": "Corner Both Garlic Chicken",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Craft Bacon Cheeseburger Mix",
+      "componentCount": 2,
+      "routedToMix": false
+    },
+    {
+      "name": "Craft Club Mix",
+      "componentCount": 3,
+      "routedToMix": true
+    },
+    {
+      "name": "Craft Club Mix",
+      "componentCount": 3,
+      "routedToMix": true
+    },
+    {
+      "name": "Drain Pinapples",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Drain Pinapples",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Drain Pinapples",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "FSD Breakfast",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Hannaford 4 Meat Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Hannaford Chicken Masala Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Hannaford Club Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Hannaford Spinach",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Hannaford White Fajita Mix",
+      "componentCount": 6,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowe's Bacon Cheeseburger Mix",
+      "componentCount": 2,
+      "routedToMix": false
+    },
+    {
+      "name": "Lowe's California Mix",
+      "componentCount": 3,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes 7in Diced Red Fajita",
+      "componentCount": 4,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes 7in White Spinach",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Lowes Caribbean Mix",
+      "componentCount": 4,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes Chicken Club",
+      "componentCount": 3,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes Grilled Vegetable Mix",
+      "componentCount": 7,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes Red Fajita Mix",
+      "componentCount": 5,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes Spinach Mix",
+      "componentCount": 5,
+      "routedToMix": true
+    },
+    {
+      "name": "Lowes White Spinach",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Buffalo Chicken Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucia's Craft Bratwurst Veggie Mix",
+      "componentCount": 3,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucia's Morning Melt Italiano Spinach",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Lucia's Morning Melt Parisian Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucias Craft Alfredo Spinach",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Lucias Craft Caribbean Mix",
+      "componentCount": 4,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucias Craft Chicken Masala Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucias Craft White Fajita Mix",
+      "componentCount": 6,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucias Pinsa Chicken Masala Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucias Pinsa Pesto Spinach Mix",
+      "componentCount": 1,
+      "routedToMix": false
+    },
+    {
+      "name": "Lucias Pinsa White Fajita Mix",
+      "componentCount": 6,
+      "routedToMix": true
+    },
+    {
+      "name": "Lucias Red Fajita Mix",
+      "componentCount": 5,
+      "routedToMix": true
+    },
+    {
+      "name": "Mauros Italian Beef and Gravy Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Nob Hill Bacon Cheeseburger Mix",
+      "componentCount": 2,
+      "routedToMix": false
+    },
+    {
+      "name": "Nob Hill Caribbean Mix",
+      "componentCount": 4,
+      "routedToMix": true
+    },
+    {
+      "name": "Price Chopper Club Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Red Hot Bacon Jalapeno Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Red Hot Bacon Jalapeno Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Red Hot Bacon Jalapeno Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Red Hot Chicken Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Red Hot Chicken Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "Red Hot Chicken Mix",
+      "componentCount": 2,
+      "routedToMix": true
+    },
+    {
+      "name": "SMD Supreme",
+      "componentCount": 7,
+      "routedToMix": true
+    },
+    {
+      "name": "South of the Border Mix",
+      "componentCount": 6,
+      "routedToMix": true
+    },
+    {
+      "name": "South of the Border Mix",
+      "componentCount": 6,
+      "routedToMix": true
+    }
+  ],
+  "cheeseNearDups": [],
+  "premixNearDups": []
+}

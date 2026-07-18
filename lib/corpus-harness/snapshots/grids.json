@@ -1,0 +1,943 @@
+{
+  "specs": [
+    {
+      "file": "Aldo's_Pizza_Specs_-_09.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 25
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Basha's_Original_Pizza_Recipe_Specs_-_3.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 35
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Basha's_Ultra_Thin_Pizza_Recipe_Specs_-_2.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 33
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Bobo's_Pizza_Recipe_Specs_-_29.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet2",
+          "rows": 69
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Brand_Pizza_Recipe_Specs_-_14.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 19
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Corner_Booth_Recipe_Specs_-_24.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 109
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Costco_Pizza_Recipe_Specs_-_14.xlsx",
+      "sheets": [
+        {
+          "name": "OZ.",
+          "rows": 12
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "FSD_7_Inch_Pizza_Specs_-_03.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 32
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Hannaford's_Pizza_Recipe_Specs_-_19.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 58
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lowe's_7_Inch_Pizza_Specs_-_06.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 51
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lowe's_Pizza_Recipe_Specs_-_28.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 132
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lucia's_7_Inch_Morning_Melts_Pizza_Specs_-_08.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 35
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lucia's_Pinsa_Pizzas_-_03.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 33
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lucia_Craft_Pizza_(New)_Recipe_Specs_-_01.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 71
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lucia_Pizza_Recipe_Specs_-_35.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 71
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Mauro's_Pinsa_Pizza_Recipe_Specs_-_01.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 27
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Nob_Hill_Pizza_Recipe_Specs_-_3.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 46
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Price_Chopper_Pizza_Recipe_Specs_-_05.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 37
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Show_Me_Dough_Pizza_Recipe_Specs_-_17.xlsx",
+      "sheets": [
+        {
+          "name": "OZ",
+          "rows": 50
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    }
+  ],
+  "dough": [
+    {
+      "file": "Aldo's_Dough_Mixing_Procedure_-_09.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 31
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Aldo's Dough"
+    },
+    {
+      "file": "Brand_Dough_Mixing_Procedure_-_08.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 33
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Brand Dough"
+    },
+    {
+      "file": "CRB_Dough_Mixing_Procedure_-_38.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 59
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "CRB Dough"
+    },
+    {
+      "file": "Lowe's_French_Fry_Dough_Mixing_Procedure_-_03.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 30
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Lowe's French Fry Dough"
+    },
+    {
+      "file": "Lucia's_French_Fry_Dough_Mixing_Procedure_-_05.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 33
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Lucia's French Fry Dough"
+    },
+    {
+      "file": "Malted_Barley_Dough_Mixing_Procedure_-_28.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 45
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Malted Barley Dough"
+    },
+    {
+      "file": "Margherita_Dough_Mixing_Procedure_-_05.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 36
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Margherita Dough"
+    },
+    {
+      "file": "Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 37
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Masa Dough, Natural, (Lowe's)"
+    },
+    {
+      "file": "Masa_Dough_Mixing_Procedure_-_12.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 38
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Masa Dough"
+    },
+    {
+      "file": "Microwavable_Lucia's_Dough_Mixing_Procedure_-_04.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 39
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Microwavable Lucia's Dough"
+    },
+    {
+      "file": "Modified_Malted_Barley_Dough_Mixing_Procedure_-_07.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 35
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Modified Malted Barley Dough"
+    },
+    {
+      "file": "Naan_Dough_Mixing_Procedure_-_12.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 34
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Naan Dough"
+    },
+    {
+      "file": "Sriracha_Dough_Mixing_Procedure_-_01.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 32
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0,
+      "doughFamilyHint": "Sriracha Dough"
+    }
+  ],
+  "sauce": [
+    {
+      "file": "Aldo_Pizza_Sauce_02.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 22
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Alfredo_Pizza_Sauce_07.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 21
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Asiago_Sauce_02.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 21
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Bobo's_Buffalo_Pizza_Sauce_-_01.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 14
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Bobo's_Pizza_Sauce_01.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 30
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Brand_Marriott_Pizza_Sauce_03.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 27
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Four_Hands_Red_Hot_Pizza_Sauce_-_03.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 24
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Garlic_Alfredo_Pizza_Sauce_02.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 23
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Gravy_Sauce_-_05.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 20
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Lucia_Pizza_Sauce_06.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 30
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Medulla's_TOI_Pizza_Sauce_03.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 33
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Mystic_Pizza_Sauce_05.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 32
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Sweet_Chili_Sauce_02.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 23
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Sweet_and_Sour_Sauce_02.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 15
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    },
+    {
+      "file": "Tikka_Masala_Process.xlsx",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "rows": 48
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 1,
+      "droppedRows": 0
+    }
+  ],
+  "schedule": [
+    {
+      "file": "Production_Schedule_7-8-26.xlsx",
+      "sheets": [
+        {
+          "name": "1-6",
+          "rows": 69
+        },
+        {
+          "name": "1-13",
+          "rows": 68
+        },
+        {
+          "name": "1-20",
+          "rows": 55
+        },
+        {
+          "name": "1-27",
+          "rows": 66
+        },
+        {
+          "name": "2-3",
+          "rows": 66
+        },
+        {
+          "name": "2-10",
+          "rows": 60
+        },
+        {
+          "name": "2-17",
+          "rows": 59
+        },
+        {
+          "name": "2-24",
+          "rows": 59
+        },
+        {
+          "name": "3-3",
+          "rows": 64
+        },
+        {
+          "name": "3-10",
+          "rows": 58
+        },
+        {
+          "name": "3-17",
+          "rows": 61
+        },
+        {
+          "name": "3-24",
+          "rows": 65
+        },
+        {
+          "name": "3-31",
+          "rows": 64
+        },
+        {
+          "name": "4-7",
+          "rows": 63
+        },
+        {
+          "name": "4-14",
+          "rows": 62
+        },
+        {
+          "name": "4-21",
+          "rows": 67
+        },
+        {
+          "name": "4-28",
+          "rows": 65
+        },
+        {
+          "name": "5-5",
+          "rows": 60
+        },
+        {
+          "name": "5-12",
+          "rows": 61
+        },
+        {
+          "name": "5-19",
+          "rows": 68
+        },
+        {
+          "name": "5-26",
+          "rows": 66
+        },
+        {
+          "name": "6-2",
+          "rows": 64
+        },
+        {
+          "name": "6-9",
+          "rows": 73
+        },
+        {
+          "name": "6-16",
+          "rows": 67
+        },
+        {
+          "name": "6-23",
+          "rows": 59
+        },
+        {
+          "name": "6-30",
+          "rows": 51
+        },
+        {
+          "name": "7-7",
+          "rows": 73
+        },
+        {
+          "name": "7-14",
+          "rows": 71
+        },
+        {
+          "name": "7-21",
+          "rows": 59
+        },
+        {
+          "name": "7-28",
+          "rows": 61
+        },
+        {
+          "name": "8-4",
+          "rows": 66
+        },
+        {
+          "name": "8-11",
+          "rows": 66
+        },
+        {
+          "name": "8-18",
+          "rows": 61
+        },
+        {
+          "name": "8-25",
+          "rows": 58
+        },
+        {
+          "name": "9-1",
+          "rows": 67
+        },
+        {
+          "name": "9-8",
+          "rows": 68
+        },
+        {
+          "name": "9-15",
+          "rows": 66
+        },
+        {
+          "name": "9-22",
+          "rows": 66
+        },
+        {
+          "name": "9-29",
+          "rows": 58
+        },
+        {
+          "name": "10-6",
+          "rows": 66
+        },
+        {
+          "name": "10-13",
+          "rows": 62
+        },
+        {
+          "name": "10-20",
+          "rows": 60
+        },
+        {
+          "name": "10-27",
+          "rows": 70
+        },
+        {
+          "name": "11-3",
+          "rows": 62
+        },
+        {
+          "name": "11-10",
+          "rows": 61
+        },
+        {
+          "name": "11-17",
+          "rows": 56
+        },
+        {
+          "name": "11-24",
+          "rows": 46
+        },
+        {
+          "name": "12-1",
+          "rows": 73
+        },
+        {
+          "name": "12-8",
+          "rows": 62
+        },
+        {
+          "name": "12-15",
+          "rows": 65
+        },
+        {
+          "name": "12-22",
+          "rows": 49
+        },
+        {
+          "name": "12-29",
+          "rows": 49
+        },
+        {
+          "name": "1-5",
+          "rows": 64
+        },
+        {
+          "name": "1-12",
+          "rows": 68
+        },
+        {
+          "name": "1-19",
+          "rows": 60
+        },
+        {
+          "name": "1-26",
+          "rows": 70
+        },
+        {
+          "name": "2-2",
+          "rows": 67
+        },
+        {
+          "name": "2-9",
+          "rows": 62
+        },
+        {
+          "name": "2-16",
+          "rows": 62
+        },
+        {
+          "name": "2-23",
+          "rows": 70
+        },
+        {
+          "name": "3-2",
+          "rows": 58
+        },
+        {
+          "name": "3-9",
+          "rows": 59
+        },
+        {
+          "name": "3-16",
+          "rows": 68
+        },
+        {
+          "name": "3-23",
+          "rows": 69
+        },
+        {
+          "name": "3-30",
+          "rows": 61
+        },
+        {
+          "name": "4-6",
+          "rows": 65
+        },
+        {
+          "name": "4-13",
+          "rows": 56
+        },
+        {
+          "name": "4-20",
+          "rows": 67
+        },
+        {
+          "name": "4-27",
+          "rows": 64
+        },
+        {
+          "name": "5-4",
+          "rows": 64
+        },
+        {
+          "name": "5-11",
+          "rows": 74
+        },
+        {
+          "name": "5-18",
+          "rows": 57
+        },
+        {
+          "name": "5-25",
+          "rows": 64
+        },
+        {
+          "name": "6-1",
+          "rows": 70
+        },
+        {
+          "name": "6-8",
+          "rows": 67
+        },
+        {
+          "name": "6-15",
+          "rows": 76
+        },
+        {
+          "name": "6-22",
+          "rows": 65
+        },
+        {
+          "name": "6-29",
+          "rows": 55
+        },
+        {
+          "name": "7-6",
+          "rows": 64
+        },
+        {
+          "name": "7-13",
+          "rows": 67
+        },
+        {
+          "name": "7-20",
+          "rows": 73
+        },
+        {
+          "name": "7-27",
+          "rows": 51
+        },
+        {
+          "name": "8-3",
+          "rows": 51
+        },
+        {
+          "name": "8-10",
+          "rows": 51
+        },
+        {
+          "name": "8-17",
+          "rows": 51
+        },
+        {
+          "name": "8-24",
+          "rows": 51
+        },
+        {
+          "name": "8-31",
+          "rows": 51
+        }
+      ],
+      "sanityIssue": null,
+      "promptChunks": 8,
+      "droppedRows": 2632
+    }
+  ]
+}

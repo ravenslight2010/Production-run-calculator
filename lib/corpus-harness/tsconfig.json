@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["es2022"],
+    "types": ["node"]
+  },
+  "references": [
+    { "path": "../cheese-import" },
+    { "path": "../premix-import" },
+    { "path": "../shipping-import" },
+    { "path": "../spec-import" },
+    { "path": "../name-match" }
+  ],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/regen.mts"]
+}

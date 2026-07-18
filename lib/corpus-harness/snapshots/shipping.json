@@ -1,0 +1,422 @@
+{
+  "file": "Shipping_and_Palletizing_Guide_07.02.2026.xlsx",
+  "rowCount": 20,
+  "rows": [
+    {
+      "row": {
+        "name": "Aldo's",
+        "box": "12\" shipper",
+        "circle": "12''",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "60",
+        "gripSheets": "N/A",
+        "stacking": "Lucia's"
+      },
+      "patch": {
+        "shipper": "12in",
+        "circles": "12in",
+        "skidStacking": "lucia",
+        "gripSheets": "none",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 60
+      },
+      "unmapped": []
+    },
+    {
+      "row": {
+        "name": "Basha's Original",
+        "box": "12\" shipper",
+        "circle": "12''",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "60",
+        "gripSheets": "N/A",
+        "stacking": "Lucia's"
+      },
+      "patch": {
+        "shipper": "12in",
+        "circles": "12in",
+        "skidStacking": "lucia",
+        "gripSheets": "none",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 60
+      },
+      "unmapped": []
+    },
+    {
+      "row": {
+        "name": "Basha's Ultra Thin",
+        "box": "11\" shipper",
+        "circle": "11\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Bobo's",
+        "box": "12\" shipper",
+        "circle": "12''",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "60",
+        "gripSheets": "N/A",
+        "stacking": "Lucia's"
+      },
+      "patch": {
+        "shipper": "12in",
+        "circles": "12in",
+        "skidStacking": "lucia",
+        "gripSheets": "none",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 60
+      },
+      "unmapped": []
+    },
+    {
+      "row": {
+        "name": "Brand MR07CH24",
+        "box": "BC-7\" shipper",
+        "circle": "N/A",
+        "pizzasPerCase": "24",
+        "casesPerSkid": "60",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "7in",
+        "circles": "none",
+        "skidStacking": "column",
+        "pizzasPerCase": 24,
+        "casesPerSkid": 60
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Brand MR12CH14",
+        "box": "BC-12\" shipper",
+        "circle": "12''",
+        "pizzasPerCase": "14",
+        "casesPerSkid": "54",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "12in",
+        "circles": "12in",
+        "skidStacking": "column",
+        "pizzasPerCase": 14,
+        "casesPerSkid": 54
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Corner Booth Pizza",
+        "box": "EDW2 shipper",
+        "circle": "12\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "edwardos",
+        "circles": "12in",
+        "skidStacking": "column",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Costco (Lucia's)",
+        "box": "4 pk. HSC",
+        "circle": "11\"",
+        "pizzasPerCase": "4 - 3PACK",
+        "casesPerSkid": "48",
+        "gripSheets": "x+cardboard",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "costco",
+        "circles": "11in",
+        "skidStacking": "column",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: x+cardboard"
+      ]
+    },
+    {
+      "row": {
+        "name": "FSD 7''",
+        "box": "BC-7\" shipper",
+        "circle": "7\"",
+        "pizzasPerCase": "24",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "7in",
+        "circles": "7in",
+        "skidStacking": "column",
+        "pizzasPerCase": 24,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Hannaford",
+        "box": "11\" shipper",
+        "circle": "11\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Lowes",
+        "box": "11\" shipper",
+        "circle": "11\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Lowes 7\"",
+        "box": "7\" Microwave Shipper",
+        "circle": "7\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "105",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "7in",
+        "circles": "7in",
+        "skidStacking": "column",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 105
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Lucia's w Cartons",
+        "box": "11\" shipper",
+        "circle": "11''",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "54",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 54
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Lucia's w Labels",
+        "box": "12\" shipper",
+        "circle": "12''",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "60",
+        "gripSheets": "N/A",
+        "stacking": "Lucia's"
+      },
+      "patch": {
+        "shipper": "12in",
+        "circles": "12in",
+        "skidStacking": "lucia",
+        "gripSheets": "none",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 60
+      },
+      "unmapped": []
+    },
+    {
+      "row": {
+        "name": "Lucia's Morning Melts",
+        "box": "7\" Microwave Shipper",
+        "circle": "Susceptor",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "105",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "7in",
+        "circles": "microwave",
+        "skidStacking": "column",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 105
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Lucia's Pinsa (Proof)",
+        "box": "EDW2 shipper",
+        "circle": "11\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "edwardos",
+        "circles": "11in",
+        "skidStacking": "column",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Nob Hill",
+        "box": "11\" shipper",
+        "circle": "11''",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "54",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 54
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "Price Chopper",
+        "box": "11\" shipper",
+        "circle": "11\"",
+        "pizzasPerCase": "12",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 12,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    },
+    {
+      "row": {
+        "name": "PriceSmart Member's Selection",
+        "box": "White 12\" shipper",
+        "circle": "11\"",
+        "pizzasPerCase": "6 - 3PACK",
+        "casesPerSkid": "36",
+        "gripSheets": "x+cardboard",
+        "stacking": "Column"
+      },
+      "patch": {
+        "shipper": "12in",
+        "circles": "11in",
+        "skidStacking": "column",
+        "pizzasPerCase": 18,
+        "casesPerSkid": 36
+      },
+      "unmapped": [
+        "Gripsheets: x+cardboard"
+      ]
+    },
+    {
+      "row": {
+        "name": "Show Me Dough",
+        "box": "11\" shipper",
+        "circle": "11''",
+        "pizzasPerCase": "16",
+        "casesPerSkid": "48",
+        "gripSheets": "X",
+        "stacking": "Hannaford"
+      },
+      "patch": {
+        "shipper": "11in",
+        "circles": "11in",
+        "skidStacking": "hannaford",
+        "pizzasPerCase": 16,
+        "casesPerSkid": 48
+      },
+      "unmapped": [
+        "Gripsheets: X"
+      ]
+    }
+  ]
+}

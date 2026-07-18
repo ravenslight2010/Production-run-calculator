@@ -1072,6 +1072,37 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
+  lib/corpus-harness:
+    dependencies:
+      '@workspace/cheese-import':
+        specifier: workspace:*
+        version: link:../cheese-import
+      '@workspace/name-match':
+        specifier: workspace:*
+        version: link:../name-match
+      '@workspace/premix-import':
+        specifier: workspace:*
+        version: link:../premix-import
+      '@workspace/shipping-import':
+        specifier: workspace:*
+        version: link:../shipping-import
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../spec-import
+      xlsx:
+        specifier: npm:@e965/xlsx@^0.20.3
+        version: '@e965/xlsx@0.20.3'
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.2
+      tsx:
+        specifier: 'catalog:'
+        version: 4.21.0
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
   lib/cycle-count:
     devDependencies:
       vitest:

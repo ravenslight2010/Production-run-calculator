@@ -1,0 +1,3367 @@
+{
+  "file": "Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26.xlsx",
+  "brands": [
+    "Aldo",
+    "Basha's Original",
+    "Basha's Ultra Thin",
+    "Bobo",
+    "Brand",
+    "Corner Booth",
+    "Costco",
+    "Edwardo",
+    "FSD 7\"",
+    "Four Hands",
+    "Hannaford",
+    "Lowe",
+    "Lowe's 7\"",
+    "Lucia Craft",
+    "Lucia Improved",
+    "Lucia Morning Melts",
+    "Lucia's Pinsa (Proof)",
+    "Mauro",
+    "Medulla 12x16",
+    "Mystic",
+    "Nob Hill Craft",
+    "Price Chopper",
+    "PriceSmart",
+    "SMD",
+    "Vita",
+    "Vocelli's"
+  ],
+  "recipeCount": 114,
+  "recipes": [
+    {
+      "id": "cheese:aldo:aldo-s-parmesan-oregano-mix",
+      "name": "Aldo's Parmesan / Oregano Mix",
+      "brand": "Aldo",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Grated Parmesan",
+          "lbs": 10
+        },
+        {
+          "name": "Oregano Flake",
+          "lbs": 5
+        }
+      ]
+    },
+    {
+      "id": "cheese:aldo:aldo-s-standard-cheese-mix",
+      "name": "Aldo's Standard Cheese Mix",
+      "brand": "Aldo",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Pizella (Pizza Cheese)",
+          "lbs": 35
+        },
+        {
+          "name": "Parm / Oregano Mix",
+          "lbs": 0.3
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-original:basha-s-original-cheese-cheese-mix",
+      "name": "Basha's Original Cheese Cheese Mix",
+      "brand": "Basha's Original",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-original:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Basha's Original",
+      "flavors": [
+        "Pepperoni",
+        "S&P",
+        "Supreme"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-ultra-thin:basha-s-ultra-thin-5-cheese-cheese-mix",
+      "name": "Basha's Ultra Thin 5 Cheese Cheese Mix",
+      "brand": "Basha's Ultra Thin",
+      "flavors": [
+        "5 Cheese"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 10
+        },
+        {
+          "name": "3Cheese (Asiago, Parm, Romano)",
+          "lbs": 0.8
+        },
+        {
+          "name": "Five Cheese Spice Blend",
+          "lbs": 0.1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-ultra-thin:basha-s-ultra-thin-bbq-chicken-cheese-mix",
+      "name": "Basha's Ultra Thin BBQ Chicken Cheese Mix",
+      "brand": "Basha's Ultra Thin",
+      "flavors": [
+        "BBQ Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 43
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-ultra-thin:basha-s-ultra-thin-pepperoni-cheese-mix",
+      "name": "Basha's Ultra Thin Pepperoni Cheese Mix",
+      "brand": "Basha's Ultra Thin",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Diced Pepperoni",
+          "lbs": 10
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-ultra-thin:basha-s-ultra-thin-pepperoni-romano-cheese-mix",
+      "name": "Basha's Ultra Thin Pepperoni/Romano Cheese Mix",
+      "brand": "Basha's Ultra Thin",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "SHEEP Romano",
+          "lbs": 3
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-ultra-thin:five-cheese-spice-blend",
+      "name": "Five Cheese Spice Blend",
+      "brand": "Basha's Ultra Thin",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Oregano Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Basil Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Thyme Flakes",
+          "lbs": 0.25
+        }
+      ]
+    },
+    {
+      "id": "cheese:basha-s-ultra-thin:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Basha's Ultra Thin",
+      "flavors": [
+        "Hawaiian"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:bobo:bobo-s-breakfast-cheese-mix",
+      "name": "Bobo's Breakfast Cheese Mix",
+      "brand": "Bobo",
+      "flavors": [
+        "Breakfast"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Cheddar Yellow",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:bobo:bobo-s-chx-alfredo-cheese-mix",
+      "name": "Bobo's Chx Alfredo Cheese Mix",
+      "brand": "Bobo",
+      "flavors": [
+        "Chicken Alfredo"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cheddar Yellow",
+          "lbs": 26
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:bobo:bobo-s-stl-style-cheese",
+      "name": "Bobo's STL Style Cheese",
+      "brand": "Bobo",
+      "flavors": [
+        "All varieties except Chicken Alfredo & Breakfast"
+      ],
+      "components": [
+        {
+          "name": "STL Style Cheese",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:brand:brand-cheese-mix",
+      "name": "Brand Cheese Mix",
+      "brand": "Brand",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 24
+        },
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 24
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:corner-booth:corner-bbq-chicken-cheese-mix",
+      "name": "Corner BBQ Chicken Cheese Mix",
+      "brand": "Corner Booth",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 44
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 0.6
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:corner-booth:corner-booth-five-cheese-mix",
+      "name": "Corner Booth Five Cheese Mix",
+      "brand": "Corner Booth",
+      "flavors": [
+        "Five Cheese"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 5
+        },
+        {
+          "name": "Provolone",
+          "lbs": 5
+        },
+        {
+          "name": "Fontina",
+          "lbs": 2.5
+        },
+        {
+          "name": "Parmesan, Grated",
+          "lbs": 2.5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:corner-booth:corner-booth-pepperoni-cheese-mix",
+      "name": "Corner Booth Pepperoni Cheese Mix",
+      "brand": "Corner Booth",
+      "flavors": [
+        "Pep"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Romano (Cow's)",
+          "lbs": 3.5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:corner-booth:corner-booth-white-spinach-mushroom-cheese-mix",
+      "name": "Corner Booth White Spinach & Mushroom Cheese Mix",
+      "brand": "Corner Booth",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Fresh Spinach",
+          "lbs": 17.5
+        },
+        {
+          "name": "Parmesan, Grated",
+          "lbs": 2.5
+        },
+        {
+          "name": "Nutmeg",
+          "lbs": 0.05
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:corner-booth:monterey-jack-cheese-mix",
+      "name": "Monterey Jack Cheese Mix",
+      "brand": "Corner Booth",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 44
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:corner-booth:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Corner Booth",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:costco:costco-pizella-cheese",
+      "name": "Costco Pizella Cheese",
+      "brand": "Costco",
+      "flavors": [
+        "3 Meat"
+      ],
+      "components": [
+        {
+          "name": "Pizella Cheese",
+          "lbs": 48
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:edwardo:edwardo-s-bacon-spinach-mix",
+      "name": "Edwardo's Bacon Spinach Mix",
+      "brand": "Edwardo",
+      "flavors": [
+        "Bacon Spinach"
+      ],
+      "components": [
+        {
+          "name": "Edwardo's Mozzarella Cheese Mix",
+          "lbs": 20.028
+        },
+        {
+          "name": "Spinach - Fresh",
+          "lbs": 7
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:edwardo:edwardo-s-mozzarella-cheese-mix",
+      "name": "Edwardo's Mozzarella Cheese Mix",
+      "brand": "Edwardo",
+      "flavors": [
+        "All varieties except Bacon Spinach"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella Cheese",
+          "lbs": 80
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:edwardo:edwardo-s-parmesan-oregano-mix",
+      "name": "Edwardo's Parmesan Oregano Mix",
+      "brand": "Edwardo",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Parmesan Grated",
+          "lbs": 5
+        },
+        {
+          "name": "Oregano Flake",
+          "lbs": 1.25
+        },
+        {
+          "name": "NO Cellulose",
+          "lbs": 0
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:4hands-chicken-bacon-club-cheese-mix",
+      "name": "4Hands Chicken Bacon Club Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 24
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 8
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:4hands-meat-cheese-mix",
+      "name": "4Hands Meat Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [
+        "Mega Meat"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 44
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 4.5
+        },
+        {
+          "name": "Provolone",
+          "lbs": 4
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:4hands-pizella-cheese",
+      "name": "4Hands Pizella Cheese",
+      "brand": "Four Hands",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Pizella Cheese",
+          "lbs": 48
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:4hands-seven-cheese-mix",
+      "name": "4Hands Seven Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 36
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 9.5
+        },
+        {
+          "name": "Provolone",
+          "lbs": 5
+        },
+        {
+          "name": "Fontina",
+          "lbs": 5
+        },
+        {
+          "name": "3Cheese (Asiago, Parm, Romano)",
+          "lbs": 3
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:4hands-sugarfire-chicken-cheese-mix",
+      "name": "4Hands Sugarfire Chicken Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [
+        "Sugarfire BBQ"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 15
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:cheeseburger-cheese-mix",
+      "name": "Cheeseburger Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [
+        "Bacon Cheeseburger"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:gyro-cheese-mix",
+      "name": "Gyro Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [
+        "Gyro"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Feta Cheese",
+          "lbs": 2.5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:red-hot-cheese-mix",
+      "name": "Red Hot Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [
+        "Red Hot Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Red Hot Riplet Seasoning",
+          "lbs": 0.2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:four-hands:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Four Hands",
+      "flavors": [
+        "Tikka Masala"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:fsd-7:lucia-s-americano-cheese-mix",
+      "name": "Lucia's Americano Cheese Mix",
+      "brand": "FSD 7\"",
+      "flavors": [
+        "Breakfast"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:4-cheese-with-sweet-spicy-chili-sauce",
+      "name": "4 Cheese with Sweet & Spicy Chili Sauce",
+      "brand": "Hannaford",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 7
+        },
+        {
+          "name": "Provolone",
+          "lbs": 6.6
+        },
+        {
+          "name": "Grated Parmesan",
+          "lbs": 1.7
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:five-cheese-spice-blend",
+      "name": "Five Cheese Spice Blend",
+      "brand": "Hannaford",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Oregano Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Basil Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Thyme Flakes",
+          "lbs": 0.25
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:hannaford-bbq-chicken-cheese-mix",
+      "name": "Hannaford BBQ Chicken Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [
+        "BBQ Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:hannaford-margherita-cheese-mix",
+      "name": "Hannaford Margherita Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [
+        "Margherita"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "IQF Basil",
+          "lbs": 0.8
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:hannaford-s-chicken-bacon-club-cheese-mix",
+      "name": "Hannaford's Chicken Bacon Club Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 16
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 16
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:lowes-hannaford-five-cheese-mix",
+      "name": "Lowes/Hannaford Five Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [
+        "Five Cheese"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 10
+        },
+        {
+          "name": "3Cheese Blend (Asiago, Parm, Romano)",
+          "lbs": 0.86
+        },
+        {
+          "name": "Five Cheese Spice Blend",
+          "lbs": 0.066
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:monterey-jack-cheese-mix",
+      "name": "Monterey Jack Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [
+        "Buffalo Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 44
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:skim-mozzarella-cheese-mix",
+      "name": "Skim Mozzarella Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [
+        "4 Meat"
+      ],
+      "components": [
+        {
+          "name": "Skim Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:hannaford:spinach-goat-cheese-mix",
+      "name": "Spinach Goat Cheese Mix",
+      "brand": "Hannaford",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Goat Cheese",
+          "lbs": 7.5
+        },
+        {
+          "name": "Spinach, Fresh Chopped",
+          "lbs": 6
+        },
+        {
+          "name": "Grated Parmesan",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:five-cheese-spice-blend",
+      "name": "Five Cheese Spice Blend",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Oregano Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Basil Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Thyme Flakes",
+          "lbs": 0.25
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:lowe-s-7-5-cheese",
+      "name": "Lowe's 7 5 Cheese",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 5
+        },
+        {
+          "name": "3 Cheese Blend",
+          "lbs": 0.375
+        },
+        {
+          "name": "5 Cheese Spice Blend",
+          "lbs": 0.05
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:lowe-s-7-bbq-chicken",
+      "name": "Lowe's 7 BBQ Chicken",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 43
+        },
+        {
+          "name": "Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:lowe-s-7-meat-lovers",
+      "name": "Lowe's 7 Meat Lovers",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Mozzarella Skim",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:lowe-s-7-pepperoni",
+      "name": "Lowe's 7 Pepperoni",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Mozzarella Skim",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Sheep Romano",
+          "lbs": 2.5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:lowe-s-7-supreme",
+      "name": "Lowe's 7 Supreme",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Mozzarella Skim",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe-s-7:lowe-s-7-white-spinach",
+      "name": "Lowe's 7 White Spinach",
+      "brand": "Lowe's 7\"",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Mozzarella Skim",
+          "lbs": 20
+        },
+        {
+          "name": "Spinach",
+          "lbs": 13
+        },
+        {
+          "name": "Nutmeg",
+          "lbs": 0.63
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:cheeseburger-cheese-mix",
+      "name": "Cheeseburger Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Bacon Cheeseburger"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:five-cheese-spice-blend",
+      "name": "Five Cheese Spice Blend",
+      "brand": "Lowe",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Oregano Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Basil Flakes",
+          "lbs": 1
+        },
+        {
+          "name": "Thyme Flakes",
+          "lbs": 0.25
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-bbq-chicken-cheese-mix",
+      "name": "Lowe's BBQ Chicken Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "BBQ Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-california-cheese-mix",
+      "name": "Lowe's California Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 10
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Fontina",
+          "lbs": 10
+        },
+        {
+          "name": "Goat Cheese",
+          "lbs": 7.5
+        },
+        {
+          "name": "Basil, Frozen",
+          "lbs": 0.75
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-club-cheese-mix",
+      "name": "Lowe's Club Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Chicken Bacon Ranch"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-grilled-vegetable-cheese-mix",
+      "name": "Lowe's Grilled Vegetable Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Grilled Veggie"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "Fontina",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-margehrita-cheese-mix",
+      "name": "Lowe's Margehrita Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "IQF Basil",
+          "lbs": 0.8
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-pepperoni-cheese-mix",
+      "name": "Lowe's Pepperoni Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-pepperoni-romano-cheese-mix",
+      "name": "Lowe's Pepperoni/Romano Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "SHEEP Romano",
+          "lbs": 4.3
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-red-pepper-cheese-mix",
+      "name": "Lowe's Red Pepper Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Red Pepper Spinach"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Feta Cheese",
+          "lbs": 2
+        },
+        {
+          "name": "3Cheese Blend (Asiago, Parm, Romano)",
+          "lbs": 1
+        },
+        {
+          "name": "Spinach, Fresh Chopped",
+          "lbs": 4.6
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-spinach-mushroom-cheese-mix",
+      "name": "Lowe's Spinach Mushroom Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Spinach & Mushroom"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Frozen Mushrooms",
+          "lbs": 8
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowe-s-white-spinach-cheese-mix",
+      "name": "Lowe's White Spinach Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "White Spinach"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 10
+        },
+        {
+          "name": "Fresh Spinach",
+          "lbs": 20
+        },
+        {
+          "name": "Nutmeg",
+          "lbs": 0.05
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lowes-hannaford-five-cheese-mix",
+      "name": "Lowes/Hannaford Five Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Five Cheese",
+        "Roasted Veggie"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 10
+        },
+        {
+          "name": "3Cheese Blend (Asiago, Parm, Romano)",
+          "lbs": 0.86
+        },
+        {
+          "name": "Five Cheese Spice Blend",
+          "lbs": 0.066
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:lucia-s-caribbean-cheese-mix",
+      "name": "Lucia's Caribbean Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Caribbean"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:monterey-jack-cheese-mix",
+      "name": "Monterey Jack Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "South of the Border",
+        "Buffalo Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 44
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:red-hot-cheese-mix",
+      "name": "Red Hot Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Red Hot Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Red Hot Riplet Seasoning",
+          "lbs": 0.2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lowe:skim-mozzarella-cheese-mix",
+      "name": "Skim Mozzarella Cheese Mix",
+      "brand": "Lowe",
+      "flavors": [
+        "Meat Lovers",
+        "Supreme"
+      ],
+      "components": [
+        {
+          "name": "Skim Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:lucia-s-caribbean-cheese-mix",
+      "name": "Lucia's Caribbean Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Caribbean"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:lucia-s-cheeseburger-cheese-mix",
+      "name": "Lucia's Cheeseburger Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Bacon Cheeseburger"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:lucia-s-club-cheese-mix",
+      "name": "Lucia's Club Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Club"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 24
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 12
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:lucia-s-craft-cheese-mix",
+      "name": "Lucia's Craft Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Brat"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:lucia-s-craft-monterey-jack-cheese-mix",
+      "name": "Lucia's Craft Monterey Jack Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:lucia-s-spinach-cheese-mix",
+      "name": "Lucia's Spinach Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Alfredo Chicken & Spinach"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella Cheese",
+          "lbs": 20
+        },
+        {
+          "name": "Spinach - Fresh",
+          "lbs": 5
+        },
+        {
+          "name": "Parmesan - Grated",
+          "lbs": 0.6
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:red-hot-cheese-mix",
+      "name": "Red Hot Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Red Hot Chicken"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Red Hot Riplet Seasoning",
+          "lbs": 0.2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-craft:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Lucia Craft",
+      "flavors": [
+        "Tikka Masala"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-improved:lucia-s-6-cheese-mix",
+      "name": "Lucia's 6 Cheese Mix",
+      "brand": "Lucia Improved",
+      "flavors": [
+        "6 Cheese"
+      ],
+      "components": [
+        {
+          "name": "Pizella (Pizza Cheese)",
+          "lbs": 17.5
+        },
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Fontina",
+          "lbs": 3.5
+        },
+        {
+          "name": "Parmesan, Shredded",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-improved:lucia-s-cheeseburger-cheese-mix",
+      "name": "Lucia's Cheeseburger Cheese Mix",
+      "brand": "Lucia Improved",
+      "flavors": [
+        "Cheeseburger"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-improved:lucia-s-monterey-jack-cheese-mix",
+      "name": "Lucia's Monterey Jack Cheese Mix",
+      "brand": "Lucia Improved",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-improved:lucia-s-pepperoni-cheese-mix",
+      "name": "Lucia's Pepperoni Cheese Mix",
+      "brand": "Lucia Improved",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Pizella (Pizza Cheese)",
+          "lbs": 35
+        },
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Diced Pepperoni",
+          "lbs": 10
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-improved:lucia-s-standard-cheese-mix",
+      "name": "Lucia's Standard Cheese Mix",
+      "brand": "Lucia Improved",
+      "flavors": [
+        "Sausage",
+        "S&P",
+        "Meat Lovers",
+        "Supreme"
+      ],
+      "components": [
+        {
+          "name": "Pizella (Pizza Cheese)",
+          "lbs": 35
+        },
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-morning-melts:lucia-s-americano-cheese-mix",
+      "name": "Lucia's Americano Cheese Mix",
+      "brand": "Lucia Morning Melts",
+      "flavors": [
+        "Americano"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-morning-melts:lucia-s-italiano-cheese-mix",
+      "name": "Lucia's Italiano Cheese Mix",
+      "brand": "Lucia Morning Melts",
+      "flavors": [
+        "Italiano"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "Fresh Spinach",
+          "lbs": 9
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-morning-melts:lucia-s-mexicano-cheese-mix",
+      "name": "Lucia's Mexicano Cheese Mix",
+      "brand": "Lucia Morning Melts",
+      "flavors": [
+        "Mexicano"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cilantro, IQF",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-morning-melts:lucia-s-parisian-cheese-mix",
+      "name": "Lucia's Parisian Cheese Mix",
+      "brand": "Lucia Morning Melts",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-s-pinsa-proof:lucia-s-pinsa-pepperoni-cheese-mix",
+      "name": "Lucia's Pinsa Pepperoni Cheese Mix",
+      "brand": "Lucia's Pinsa (Proof)",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-s-pinsa-proof:lucia-s-pinsa-pepperoni-romano-cheese-mix",
+      "name": "Lucia's Pinsa Pepperoni/Romano Cheese Mix",
+      "brand": "Lucia's Pinsa (Proof)",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Provolone",
+          "lbs": 10
+        },
+        {
+          "name": "Cow's Romano",
+          "lbs": 2.5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-s-pinsa-proof:lucia-s-pinsa-proof-cheese",
+      "name": "Lucia's Pinsa (Proof) Cheese",
+      "brand": "Lucia's Pinsa (Proof)",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella\nExtra Large Cut Blade",
+          "lbs": 40
+        },
+        {
+          "name": "Goat Cheese",
+          "lbs": 4
+        },
+        {
+          "name": "IQF Basil",
+          "lbs": 0.8
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-s-pinsa-proof:lucia-s-pinsa-spinach-mushroom-pesto-cheese-mix",
+      "name": "Lucia's Pinsa Spinach Mushroom Pesto Cheese Mix",
+      "brand": "Lucia's Pinsa (Proof)",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Fresh Spinach",
+          "lbs": 20
+        },
+        {
+          "name": "Grated Parmesan",
+          "lbs": 5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:lucia-s-pinsa-proof:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Lucia's Pinsa (Proof)",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:mauro:mauro-tomato-basil-cheese-mix",
+      "name": "Mauro Tomato Basil Cheese Mix",
+      "brand": "Mauro",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Grated Parmesan",
+          "lbs": 2
+        },
+        {
+          "name": "IQF Basil",
+          "lbs": 0.2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:mauro:mozzarella-cheese-mix",
+      "name": "Mozzarella Cheese Mix",
+      "brand": "Mauro",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:medulla-12x16:mozzarella-cheese-mix",
+      "name": "Mozzarella Cheese Mix",
+      "brand": "Medulla 12x16",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Skim Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:mystic:mozzarella-cheese-mix",
+      "name": "Mozzarella Cheese Mix",
+      "brand": "Mystic",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:mystic:mystic-50-50-cheese-mix",
+      "name": "Mystic 50/50 Cheese Mix",
+      "brand": "Mystic",
+      "flavors": [
+        "Cheese",
+        "Pepperoni",
+        "Spinach"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "White Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:nob-hill-craft:monterey-jack-cheese-mix",
+      "name": "Monterey Jack Cheese Mix",
+      "brand": "Nob Hill Craft",
+      "flavors": [
+        "SOB"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 43
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:nob-hill-craft:nob-hill-craft-bacon-club-cheese-mix",
+      "name": "Nob Hill Craft Bacon Club Cheese Mix",
+      "brand": "Nob Hill Craft",
+      "flavors": [
+        "Club"
+      ],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 30
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 15
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:nob-hill-craft:nob-hill-craft-caribbean-cheese-mix",
+      "name": "Nob Hill Craft Caribbean Cheese Mix",
+      "brand": "Nob Hill Craft",
+      "flavors": [
+        "Caribbean"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:nob-hill-craft:nob-hill-craft-cheeseburger-cheese-mix",
+      "name": "Nob Hill Craft Cheeseburger Cheese Mix",
+      "brand": "Nob Hill Craft",
+      "flavors": [
+        "Bacon Cheeseburger"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:nob-hill-craft:nob-hill-craft-red-hot-cheese-mix",
+      "name": "Nob Hill Craft Red Hot Cheese Mix",
+      "brand": "Nob Hill Craft",
+      "flavors": [
+        "Red Hot"
+      ],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 43
+        },
+        {
+          "name": "Red Hot Riplet Seasoning",
+          "lbs": 0.2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:price-chopper:hannaford-s-chicken-bacon-club-cheese-mix",
+      "name": "Hannaford's Chicken Bacon Club Cheese Mix",
+      "brand": "Price Chopper",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:price-chopper:monterey-jack-cheese-mix",
+      "name": "Monterey Jack Cheese Mix",
+      "brand": "Price Chopper",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 44
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:price-chopper:price-chopper-bbq-chicken-cheese-mix",
+      "name": "Price Chopper BBQ Chicken Cheese Mix",
+      "brand": "Price Chopper",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Monterey Jack",
+          "lbs": 45
+        },
+        {
+          "name": "IQF Cilantro",
+          "lbs": 1
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:price-chopper:skim-mozzarella-cheese-mix",
+      "name": "Skim Mozzarella Cheese Mix",
+      "brand": "Price Chopper",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Skim Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:pricesmart:member-s-selection-pricesmart-color-cheese-mix",
+      "name": "Member's Selection (PriceSmart) Color Cheese Mix",
+      "brand": "PriceSmart",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        }
+      ]
+    },
+    {
+      "id": "cheese:smd:mozzarella-cheese-mix",
+      "name": "Mozzarella Cheese Mix",
+      "brand": "SMD",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:smd:smd-bbq-chicken-cheese-mix",
+      "name": "SMD BBQ Chicken Cheese Mix",
+      "brand": "SMD",
+      "flavors": [
+        "BBQ Chicken"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cheddar Yellow",
+          "lbs": 6
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:smd:smd-four-cheese-mix",
+      "name": "SMD Four Cheese Mix",
+      "brand": "SMD",
+      "flavors": [
+        "4Cheese"
+      ],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Provolone",
+          "lbs": 12
+        },
+        {
+          "name": "Cheddar Yellow",
+          "lbs": 1.5
+        },
+        {
+          "name": "Romano Cheese - COW",
+          "lbs": 0.2
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:smd:smd-pepperoni-cheese-mix",
+      "name": "SMD Pepperoni Cheese Mix",
+      "brand": "SMD",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 8
+        },
+        {
+          "name": "Diced Pepperoni (Hormel #18969)",
+          "lbs": 8
+        },
+        {
+          "name": "Cow's Romano",
+          "lbs": 2.5
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:smd:smd-supreme-cheese-mix-same-as-lowe-s-grilled-veggie-cheese-mix",
+      "name": "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie Cheese Mix)",
+      "brand": "SMD",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Provolone",
+          "lbs": 20
+        },
+        {
+          "name": "Fontina",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:vita:mozzarella-cheese-mix",
+      "name": "Mozzarella Cheese Mix",
+      "brand": "Vita",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Milk Mozzarella",
+          "lbs": 40
+        }
+      ]
+    },
+    {
+      "id": "cheese:vita:vita-red-pepper-cheese-mix",
+      "name": "Vita Red Pepper Cheese Mix",
+      "brand": "Vita",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Part Skim Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Feta Cheese",
+          "lbs": 2
+        },
+        {
+          "name": "3Cheese Blend (Asiago, Parm, Romano)",
+          "lbs": 1
+        },
+        {
+          "name": "Fresh Spinach",
+          "lbs": 4.6
+        }
+      ]
+    },
+    {
+      "id": "cheese:vocelli-s:vocelli-s-bbq-chicken-cheese-mix",
+      "name": "Vocelli's BBQ Chicken Cheese Mix",
+      "brand": "Vocelli's",
+      "flavors": [
+        "BBQ Chicken"
+      ],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Yellow Cheddar",
+          "lbs": 20
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:vocelli-s:vocelli-s-garlic-spinaci-cheese-mix",
+      "name": "Vocelli's Garlic Spinaci Cheese Mix",
+      "brand": "Vocelli's",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 20
+        },
+        {
+          "name": "Fresh Spinach",
+          "lbs": 22.7
+        },
+        {
+          "name": "Feta",
+          "lbs": 16.7
+        },
+        {
+          "name": "Cow's Romano",
+          "lbs": 1.3
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cheese:vocelli-s:whole-mozzarella-cheese-mix",
+      "name": "Whole Mozzarella Cheese Mix",
+      "brand": "Vocelli's",
+      "flavors": [],
+      "components": [
+        {
+          "name": "Whole Mozzarella",
+          "lbs": 40
+        },
+        {
+          "name": "Cellulose",
+          "lbs": 0.3
+        }
+      ]
+    }
+  ],
+  "sheets": [
+    {
+      "brand": "Aldo",
+      "shredderSetting": "#2",
+      "assignments": [
+        {
+          "flavor": "All Varieties",
+          "mixName": "Aldo's Standard Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Aldo's Standard Cheese Mix",
+        "Aldo's Parmesan / Oregano Mix"
+      ]
+    },
+    {
+      "brand": "Basha's Original",
+      "shredderSetting": "",
+      "assignments": [
+        {
+          "flavor": "Cheese",
+          "mixName": "Basha's Original Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Whole Mozz Cheese Mix"
+        },
+        {
+          "flavor": "S&P",
+          "mixName": "Whole Mozz Cheese Mix"
+        },
+        {
+          "flavor": "Supreme",
+          "mixName": "Whole Mozz Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Basha's Original Cheese Cheese Mix",
+        "Whole Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Basha's Ultra Thin",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "5 Cheese",
+          "mixName": "Basha's Ultra Thin 5 Cheese Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Basha's Ultra Thin Pep/Romano Cheese Mix"
+        },
+        {
+          "flavor": "Hawaiian",
+          "mixName": "Whole Mozz Cheese Mix"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "Basha's Ultra Thin BBQ Chicken Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Basha's Ultra Thin 5 Cheese Cheese Mix",
+        "Five Cheese Spice Blend",
+        "Whole Mozzarella Cheese Mix",
+        "Basha's Ultra Thin Pepperoni/Romano Cheese Mix",
+        "Basha's Ultra Thin Pepperoni Cheese Mix",
+        "Basha's Ultra Thin BBQ Chicken Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Bobo",
+      "shredderSetting": "",
+      "assignments": [
+        {
+          "flavor": "All varieties except Chicken Alfredo & Breakfast",
+          "mixName": "Bobo's STL Style Cheese"
+        },
+        {
+          "flavor": "Chicken Alfredo",
+          "mixName": "Bobo's Chicken Alfredo Cheese Mix"
+        },
+        {
+          "flavor": "Breakfast",
+          "mixName": "Bobo's Breakfast Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Bobo's STL Style Cheese",
+        "Bobo's Chx Alfredo Cheese Mix",
+        "Bobo's Breakfast Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Brand",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "All Varieties",
+          "mixName": "Brand Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Brand Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Corner Booth",
+      "shredderSetting": "#3 (4 blades)",
+      "assignments": [
+        {
+          "flavor": "Five Cheese",
+          "mixName": "Corner Booth Five Cheese Mix"
+        },
+        {
+          "flavor": "White Spinach Mushroom",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Pep",
+          "mixName": "Corner Booth Pepperoni Cheese Mix"
+        },
+        {
+          "flavor": "Buffalo",
+          "mixName": "Monterey Jack"
+        },
+        {
+          "flavor": "Supreme",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "Monterey Jack"
+        },
+        {
+          "flavor": "Meat Lover",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Sausage & Giardiniera",
+          "mixName": "Whole Mozzarella"
+        }
+      ],
+      "recipeNames": [
+        "Corner Booth Five Cheese Mix",
+        "Corner Booth White Spinach & Mushroom Cheese Mix",
+        "Monterey Jack Cheese Mix",
+        "Corner Booth Pepperoni Cheese Mix",
+        "Corner BBQ Chicken Cheese Mix",
+        "Whole Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Costco",
+      "shredderSetting": "#2",
+      "assignments": [
+        {
+          "flavor": "3 Meat",
+          "mixName": "Costco Pizella Cheese"
+        }
+      ],
+      "recipeNames": [
+        "Costco Pizella Cheese"
+      ]
+    },
+    {
+      "brand": "Edwardo",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Edwardo Parmesan Oregano Mix",
+          "mixName": "made to go into Edwardo Mozzarella Cheese Mix"
+        },
+        {
+          "flavor": "All varieties except Bacon Spinach",
+          "mixName": "Edwardo's Mozzarella Cheese Mix"
+        },
+        {
+          "flavor": "Bacon Spinach",
+          "mixName": "Edwardo's Bacon Spinach Mix"
+        }
+      ],
+      "recipeNames": [
+        "Edwardo's Parmesan Oregano Mix",
+        "Edwardo's Bacon Spinach Mix",
+        "Edwardo's Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "FSD 7\"",
+      "shredderSetting": "#4",
+      "assignments": [
+        {
+          "flavor": "Breakfast",
+          "mixName": "Lucia's Americano Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Lucia's Americano Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Four Hands",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Seven Cheese",
+          "mixName": "4 Hands Seven Cheese Mix"
+        },
+        {
+          "flavor": "Mega Meat",
+          "mixName": "4Hands Meat Cheese Mix"
+        },
+        {
+          "flavor": "Mission Taco",
+          "mixName": "4 Hands Pizella Cheese"
+        },
+        {
+          "flavor": "Red Hot Chicken",
+          "mixName": "Red Hot Cheese Mix"
+        },
+        {
+          "flavor": "Gyro",
+          "mixName": "Gyro Cheese Mix"
+        },
+        {
+          "flavor": "Chicken Club",
+          "mixName": "Chicken Bacon Club Cheese Mix"
+        },
+        {
+          "flavor": "Bacon Cheeseburger",
+          "mixName": "Cheeseburger Cheese Mix"
+        },
+        {
+          "flavor": "Sugarfire BBQ",
+          "mixName": "4Hands Sugarfire Chicken Cheese Mix"
+        },
+        {
+          "flavor": "Tikka Masala",
+          "mixName": "Whole Mozzarella Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "4Hands Seven Cheese Mix",
+        "4Hands Pizella Cheese",
+        "4Hands Chicken Bacon Club Cheese Mix",
+        "Cheeseburger Cheese Mix",
+        "4Hands Meat Cheese Mix",
+        "4Hands Sugarfire Chicken Cheese Mix",
+        "Gyro Cheese Mix",
+        "Red Hot Cheese Mix",
+        "Whole Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Hannaford",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Five Cheese",
+          "mixName": "Lowes/Hannaford Five Cheese Mix"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "Hannaford BBQ Chicken Cheese Mix"
+        },
+        {
+          "flavor": "Margherita",
+          "mixName": "Hannaford Margherita Cheese Mix"
+        },
+        {
+          "flavor": "4 Meat",
+          "mixName": "Skim Mozzarella Cheese Mix"
+        },
+        {
+          "flavor": "Buffalo Chicken",
+          "mixName": "Monterey Jack Cheese Mix"
+        },
+        {
+          "flavor": "Chicken Club",
+          "mixName": "Hannaford Chicken Bacon Club Cheese Mix"
+        },
+        {
+          "flavor": "4 Cheese with Sweet & Spicy Chili Sauce",
+          "mixName": "Hannaford 4 Cheese with Sweet & Spicy Chili Sauce Cheese Mix"
+        },
+        {
+          "flavor": "Spinach Goat Cheese",
+          "mixName": "Hanaford Spinach Goat Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Hannaford Margherita Cheese Mix",
+        "Hannaford's Chicken Bacon Club Cheese Mix",
+        "Monterey Jack Cheese Mix",
+        "4 Cheese with Sweet & Spicy Chili Sauce",
+        "Hannaford BBQ Chicken Cheese Mix",
+        "Lowes/Hannaford Five Cheese Mix",
+        "Five Cheese Spice Blend",
+        "Skim Mozzarella Cheese Mix",
+        "Spinach Goat Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Lowe",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Californian",
+          "mixName": "Lowe's Californian Cheese Mix"
+        },
+        {
+          "flavor": "White Spinach",
+          "mixName": "Lowe's White Spinach Cheese Mix"
+        },
+        {
+          "flavor": "Grilled Veggie",
+          "mixName": "Lowe's Grilled Vegetable Cheese Mix"
+        },
+        {
+          "flavor": "Spinach & Mushroom",
+          "mixName": "Lowe's Spinach Mushroom Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Lowe's Pep Overload Cheese Mix"
+        },
+        {
+          "flavor": "Red Pepper Spinach",
+          "mixName": "Lowe's Red Pepper Cheese Mix"
+        },
+        {
+          "flavor": "Five Cheese",
+          "mixName": "Lowes/Hannaford Five Cheese Mix"
+        },
+        {
+          "flavor": "Margherita",
+          "mixName": "Lowe's Margherita Cheese Mix"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "Lowe's BBQ Chicken Cheese Mix"
+        },
+        {
+          "flavor": "South of the Border",
+          "mixName": "Monterey Jack Cheese Mix"
+        },
+        {
+          "flavor": "Roasted Veggie",
+          "mixName": "Lowes/Hannaford Five Cheese Mix"
+        },
+        {
+          "flavor": "Meat Lovers",
+          "mixName": "Skim Mozzarella Cheese Mix"
+        },
+        {
+          "flavor": "Supreme",
+          "mixName": "Skim Mozzarella Cheese Mix"
+        },
+        {
+          "flavor": "Buffalo Chicken",
+          "mixName": "Monterey Jack Cheese Mix"
+        },
+        {
+          "flavor": "Chicken Bacon Ranch",
+          "mixName": "Lowe's Club Cheese Mix"
+        },
+        {
+          "flavor": "Bacon Cheeseburger",
+          "mixName": "Cheeseburger Cheese Mix"
+        },
+        {
+          "flavor": "Caribbean",
+          "mixName": "Lucia's Caribbean Cheese Mix"
+        },
+        {
+          "flavor": "Red Hot Chicken",
+          "mixName": "Red Hot Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Lowe's Pepperoni Cheese Mix",
+        "Lowe's Grilled Vegetable Cheese Mix",
+        "Five Cheese Spice Blend",
+        "Lowe's California Cheese Mix",
+        "Lowe's Margehrita Cheese Mix",
+        "Red Hot Cheese Mix",
+        "Lowe's Pepperoni/Romano Cheese Mix",
+        "Lowes/Hannaford Five Cheese Mix",
+        "Lowe's Spinach Mushroom Cheese Mix",
+        "Lowe's Club Cheese Mix",
+        "Monterey Jack Cheese Mix",
+        "Lowe's Red Pepper Cheese Mix",
+        "Cheeseburger Cheese Mix",
+        "Lowe's White Spinach Cheese Mix",
+        "Lowe's BBQ Chicken Cheese Mix",
+        "Skim Mozzarella Cheese Mix",
+        "Lucia's Caribbean Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Lowe's 7\"",
+      "shredderSetting": "#4",
+      "assignments": [
+        {
+          "flavor": "Five Cheese",
+          "mixName": "Lowe's 7 5 Cheese Mix"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "Lowe's 7 BBQ Chicken Cheese Mix"
+        },
+        {
+          "flavor": "Meat Lovers",
+          "mixName": "Lowe's 7 Meat Lovers Cheese Mix"
+        },
+        {
+          "flavor": "White Spinach",
+          "mixName": "Lowe's 7 White Spinach Cheese Mix"
+        },
+        {
+          "flavor": "Supreme",
+          "mixName": "Lowe's 7 Supreme Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Lowe's 7 Pepperoni Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Lowe's 7 5 Cheese",
+        "Lowe's 7 Meat Lovers",
+        "Lowe's 7 Supreme",
+        "Five Cheese Spice Blend",
+        "Lowe's 7 BBQ Chicken",
+        "Lowe's 7 White Spinach",
+        "Lowe's 7 Pepperoni"
+      ]
+    },
+    {
+      "brand": "Lucia Improved",
+      "shredderSetting": "#2 (All Blades)",
+      "assignments": [
+        {
+          "flavor": "6 Cheese",
+          "mixName": "Lucia's 6 Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Lucia's Standard Cheese Mix/Lucia's Pepperoni Cheese Mix"
+        },
+        {
+          "flavor": "Sausage",
+          "mixName": "Lucia's Standard Cheese Mix"
+        },
+        {
+          "flavor": "S&P",
+          "mixName": "Lucia's Standard Cheese Mix"
+        },
+        {
+          "flavor": "Meat Lovers",
+          "mixName": "Lucia's Standard Cheese Mix"
+        },
+        {
+          "flavor": "Cheeseburger",
+          "mixName": "Lucia's Cheeseburger Cheese Mix"
+        },
+        {
+          "flavor": "Supreme",
+          "mixName": "Lucia's Standard Cheese Mix"
+        },
+        {
+          "flavor": "Buffalo Chicken",
+          "mixName": "Monterey Jack Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Lucia's Monterey Jack Cheese Mix",
+        "Lucia's 6 Cheese Mix",
+        "Lucia's Standard Cheese Mix",
+        "Lucia's Pepperoni Cheese Mix",
+        "Lucia's Cheeseburger Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Lucia Craft",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Club",
+          "mixName": "Lucia's Club Cheese Mix"
+        },
+        {
+          "flavor": "Alfredo Chicken & Spinach",
+          "mixName": "Lucia's Spinach Cheese Mix"
+        },
+        {
+          "flavor": "Red Hot Chicken",
+          "mixName": "Red Hot Cheese Mix"
+        },
+        {
+          "flavor": "Bacon Cheeseburger",
+          "mixName": "Lucia's Cheeseburger Cheese Mix"
+        },
+        {
+          "flavor": "Caribbean",
+          "mixName": "Lucia's Caribbean Cheese Mix"
+        },
+        {
+          "flavor": "South of the Border",
+          "mixName": "Monterey Jack Cheese Mix"
+        },
+        {
+          "flavor": "Brat",
+          "mixName": "Lucia's Craft Cheese Mix"
+        },
+        {
+          "flavor": "Tikka Masala",
+          "mixName": "Whole Mozzarella Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Lucia's Craft Monterey Jack Cheese Mix",
+        "Lucia's Club Cheese Mix",
+        "Lucia's Spinach Cheese Mix",
+        "Red Hot Cheese Mix",
+        "Lucia's Craft Cheese Mix",
+        "Lucia's Cheeseburger Cheese Mix",
+        "Lucia's Caribbean Cheese Mix",
+        "Whole Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Lucia Morning Melts",
+      "shredderSetting": "#4",
+      "assignments": [
+        {
+          "flavor": "Americano",
+          "mixName": "Lucia's Americano Cheese Mix"
+        },
+        {
+          "flavor": "Mexicano",
+          "mixName": "Lucia's Mexicano Cheese Mix"
+        },
+        {
+          "flavor": "Italiano",
+          "mixName": "Lucia's Italiano Cheese Mix"
+        },
+        {
+          "flavor": "Parisian",
+          "mixName": "Swiss Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Lucia's Americano Cheese Mix",
+        "Lucia's Italiano Cheese Mix",
+        "Lucia's Mexicano Cheese Mix",
+        "Lucia's Parisian Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Lucia's Pinsa (Proof)",
+      "shredderSetting": "",
+      "assignments": [],
+      "recipeNames": [
+        "Lucia's Pinsa (Proof) Cheese",
+        "Whole Mozzarella Cheese Mix",
+        "Lucia's Pinsa Spinach Mushroom Pesto Cheese Mix",
+        "Lucia's Pinsa Pepperoni Cheese Mix",
+        "Lucia's Pinsa Pepperoni/Romano Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Mauro",
+      "shredderSetting": "#",
+      "assignments": [
+        {
+          "flavor": "Pepperoni Honey G",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Tomato Basil",
+          "mixName": "Whole Mozzarella & Mauro Tomato Basil Cheese Mix"
+        },
+        {
+          "flavor": "Italian Beef & Giardiniera",
+          "mixName": "Whole Mozzarella"
+        }
+      ],
+      "recipeNames": [
+        "Mozzarella Cheese Mix",
+        "Mauro Tomato Basil Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Mystic",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Cheese",
+          "mixName": "Mystic 50/50 Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Mystic 50/50 Cheese Mix"
+        },
+        {
+          "flavor": "Buffalo",
+          "mixName": "Whole Mozzarela"
+        },
+        {
+          "flavor": "Spinach",
+          "mixName": "Mystic 50/50 Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Mozzarella Cheese Mix",
+        "Mystic 50/50 Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Medulla 12x16",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "Cheese",
+          "mixName": "Medulla Cheese Mix"
+        },
+        {
+          "flavor": "Cheese 7\"",
+          "mixName": "Medulla Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "Medulla Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni 7\"",
+          "mixName": "Medulla Cheese Mix"
+        },
+        {
+          "flavor": "Veggie",
+          "mixName": "Medulla Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni & Meatball 7\"",
+          "mixName": "Medulla Cheese Mix"
+        },
+        {
+          "flavor": "Meat Lover",
+          "mixName": "Medulla Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Nob Hill Craft",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "SOB",
+          "mixName": "Monterey Jack Cheese Mix"
+        },
+        {
+          "flavor": "Bacon Cheeseburger",
+          "mixName": "Nob Hill Craft Cheeseburger Cheese Mix"
+        },
+        {
+          "flavor": "Club",
+          "mixName": "Nob Hill Craft Bacon Club Cheese Mix"
+        },
+        {
+          "flavor": "Red Hot",
+          "mixName": "Nob Hill Craft Red Hot Cheese Mix"
+        },
+        {
+          "flavor": "Caribbean",
+          "mixName": "Nob Hill Craft Caribbean Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Monterey Jack Cheese Mix",
+        "Nob Hill Craft Bacon Club Cheese Mix",
+        "Nob Hill Craft Caribbean Cheese Mix",
+        "Nob Hill Craft Cheeseburger Cheese Mix",
+        "Nob Hill Craft Red Hot Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Price Chopper",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "BBQ Chicken Cheese Mix"
+        },
+        {
+          "flavor": "Buffalo Chicken",
+          "mixName": "Monterey Jack"
+        },
+        {
+          "flavor": "Chicken Bacon Club",
+          "mixName": "Hannaford Club Cheese Mix"
+        },
+        {
+          "flavor": "Meat Lovers",
+          "mixName": "Skim Mozzarella"
+        }
+      ],
+      "recipeNames": [
+        "Price Chopper BBQ Chicken Cheese Mix",
+        "Hannaford's Chicken Bacon Club Cheese Mix",
+        "Monterey Jack Cheese Mix",
+        "Skim Mozzarella Cheese Mix"
+      ]
+    },
+    {
+      "brand": "PriceSmart",
+      "shredderSetting": "#5",
+      "assignments": [
+        {
+          "flavor": "PriceSmart Color Cheese",
+          "mixName": "All varieties"
+        }
+      ],
+      "recipeNames": [
+        "Member's Selection (PriceSmart) Color Cheese Mix"
+      ]
+    },
+    {
+      "brand": "SMD",
+      "shredderSetting": "#1",
+      "assignments": [
+        {
+          "flavor": "4Cheese",
+          "mixName": "SMD Four Cheese Mix"
+        },
+        {
+          "flavor": "Meat Lovers",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Supreme",
+          "mixName": "HT Standard Cheese Mix"
+        },
+        {
+          "flavor": "Pepperoni",
+          "mixName": "SMD Pep Cheese Mix"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "SMD BBQ Chicken Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "SMD Four Cheese Mix",
+        "SMD Pepperoni Cheese Mix",
+        "Mozzarella Cheese Mix",
+        "SMD BBQ Chicken Cheese Mix",
+        "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie Cheese Mix)"
+      ]
+    },
+    {
+      "brand": "Vita",
+      "shredderSetting": "#6",
+      "assignments": [
+        {
+          "flavor": "Mediterranean",
+          "mixName": "Red Pepper Cheese Mix"
+        },
+        {
+          "flavor": "Plant Based Chorizo Supreme",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Plant Based Sausage",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Buffalo Cauliflower",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Garlic Spinach Alfredo",
+          "mixName": "Whole Mozzarella"
+        }
+      ],
+      "recipeNames": [
+        "Mozzarella Cheese Mix",
+        "Vita Red Pepper Cheese Mix"
+      ]
+    },
+    {
+      "brand": "Vocelli's",
+      "shredderSetting": "#2",
+      "assignments": [
+        {
+          "flavor": "Deluxe",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "Meat Magnifico",
+          "mixName": "Whole Mozzarella"
+        },
+        {
+          "flavor": "BBQ Chicken",
+          "mixName": "Vocelli's BBQ Chicken Cheese Mix"
+        },
+        {
+          "flavor": "Garlic Spinachi",
+          "mixName": "Whole Mozzarella /Vocelli's Garlic Spinach Cheese Mix"
+        }
+      ],
+      "recipeNames": [
+        "Vocelli's BBQ Chicken Cheese Mix",
+        "Vocelli's Garlic Spinaci Cheese Mix",
+        "Whole Mozzarella Cheese Mix"
+      ]
+    }
+  ]
+}

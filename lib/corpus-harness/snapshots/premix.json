@@ -1,0 +1,1326 @@
+{
+  "file": "Updated_Pre_Mix_Sheets.xlsx",
+  "mixCount": 60,
+  "mixes": [
+    {
+      "name": "Bobo's Deluxe Veggie Mix",
+      "sheetName": "Bobos Deluxe",
+      "batchSize": 147.4875,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion, FR Strips",
+          "perPizza": 0.4,
+          "perBatch": 20.7
+        },
+        {
+          "ingredient": "Red Peppers, FR Strips",
+          "perPizza": 0.82,
+          "perBatch": 42.434999999999995
+        },
+        {
+          "ingredient": "Green Peppers, FR Strips",
+          "perPizza": 0.82,
+          "perBatch": 42.434999999999995
+        },
+        {
+          "ingredient": "1/8 Green Pepper",
+          "perPizza": 0,
+          "perBatch": 10
+        },
+        {
+          "ingredient": "Basil, Frozen",
+          "perPizza": 0.06,
+          "perBatch": 3.1049999999999995
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.75,
+          "perBatch": 38.8125
+        }
+      ]
+    },
+    {
+      "name": "Bobo's Breakfast Mix",
+      "sheetName": "Bobos Breakfast",
+      "batchSize": 126.7875,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Scrambled Egg",
+          "perPizza": 1.75,
+          "perBatch": 90.5625
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.7,
+          "perBatch": 36.224999999999994
+        }
+      ]
+    },
+    {
+      "name": "Bashas Red Fajita Mix",
+      "sheetName": "Basha Original Supreme",
+      "batchSize": 124.19999999999999,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        },
+        {
+          "ingredient": "Green Pepper Strips",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        },
+        {
+          "ingredient": "1/8 green pepper",
+          "perPizza": 0,
+          "perBatch": 10
+        },
+        {
+          "ingredient": "Red Pepper Strips",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        },
+        {
+          "ingredient": "Yellow Pepper Strips",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        }
+      ]
+    },
+    {
+      "name": "Corner Booth Hawaiian",
+      "sheetName": "Basha Ultra Thin Hawaiian",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Pineapple - Drained",
+          "perPizza": 2,
+          "perBatch": 82.8
+        }
+      ]
+    },
+    {
+      "name": "Corner Both Garlic Chicken",
+      "sheetName": "Corner Booth Chicken Alfredo ",
+      "batchSize": 124.19999999999999,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Diced Chicken",
+          "perPizza": 2.98,
+          "perBatch": 123.37199999999999
+        },
+        {
+          "ingredient": "Garlic Powder",
+          "perPizza": 0.02,
+          "perBatch": 0.828
+        }
+      ]
+    },
+    {
+      "name": "Corner Booth Hot Giardiniera Mix",
+      "sheetName": "Corner Booth Giardiniera",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Hot Giardiniera Mix",
+          "perPizza": 1.75,
+          "perBatch": 144.89999999999998
+        }
+      ]
+    },
+    {
+      "name": "Corner Booth House Mix",
+      "sheetName": "Corner Booth House",
+      "batchSize": 111.78,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "White Onion Strips, Blanched",
+          "perPizza": 0.7,
+          "perBatch": 28.979999999999997
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 1,
+          "perBatch": 41.4
+        },
+        {
+          "ingredient": "Mushrooms",
+          "perPizza": 1,
+          "perBatch": 41.4
+        }
+      ]
+    },
+    {
+      "name": "",
+      "sheetName": "Corner Booth Pep & Jal",
+      "batchSize": 0,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Garlic sauce",
+          "perPizza": 4,
+          "perBatch": 180
+        }
+      ]
+    },
+    {
+      "name": "Corner Booth Spinach Mix",
+      "sheetName": "Corner Booth White Spinach",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 1.75,
+          "perBatch": 72.44999999999999
+        }
+      ]
+    },
+    {
+      "name": "Corner Booth White Fajita Mix",
+      "sheetName": "Corner Booth Supreme",
+      "batchSize": 93.23279999999998,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "White Onion Strips, Blanched",
+          "perPizza": 0.563,
+          "perBatch": 23.308199999999996
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.563,
+          "perBatch": 23.308199999999996
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.563,
+          "perBatch": 23.308199999999996
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.563,
+          "perBatch": 23.308199999999996
+        }
+      ]
+    },
+    {
+      "name": "FSD Breakfast",
+      "sheetName": "FSD Breakfast",
+      "batchSize": 36.224999999999994,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Bacon (tri Meats TM3514u or C&f 061anub40)",
+          "perPizza": 0.2,
+          "perBatch": 18.112499999999997
+        },
+        {
+          "ingredient": "Diced Ham",
+          "perPizza": 0.2,
+          "perBatch": 18.112499999999997
+        }
+      ]
+    },
+    {
+      "name": "Hannaford White Fajita Mix",
+      "sheetName": "Hannaford Tikka Masala Mix",
+      "batchSize": 62.099999999999994,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "White Onion Strips, Blanched",
+          "perPizza": 0.375,
+          "perBatch": 15.524999999999999
+        },
+        {
+          "ingredient": "1/8 onion",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.375,
+          "perBatch": 15.524999999999999
+        },
+        {
+          "ingredient": "1/8 green pepper",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.375,
+          "perBatch": 15.524999999999999
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.375,
+          "perBatch": 15.524999999999999
+        }
+      ]
+    },
+    {
+      "name": "Hannaford Chicken Masala Mix",
+      "sheetName": "Hannaford Tikka Masala Mix",
+      "batchSize": 85.698,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Chicken, Diced",
+          "perPizza": 2,
+          "perBatch": 82.8
+        },
+        {
+          "ingredient": "Masala Sauce",
+          "perPizza": 0.07,
+          "perBatch": 2.898
+        }
+      ]
+    },
+    {
+      "name": "Hannaford Spinach",
+      "sheetName": "Hannaford Spinach Goat Cheese",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 0.6,
+          "perBatch": 24.839999999999996
+        }
+      ]
+    },
+    {
+      "name": "Hannaford Club Mix",
+      "sheetName": "Hannaford Club",
+      "batchSize": 35.19,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Bacon Tri Meats tm3514u or",
+          "perPizza": 0.7,
+          "perBatch": 28.979999999999997
+        },
+        {
+          "ingredient": "Green Onion",
+          "perPizza": 0.15,
+          "perBatch": 6.209999999999999
+        }
+      ]
+    },
+    {
+      "name": "Hannaford 4 Meat Mix",
+      "sheetName": "Hannaford 4Meat",
+      "batchSize": 82.8,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Natural Italian Sausage",
+          "perPizza": 1.5,
+          "perBatch": 62.099999999999994
+        },
+        {
+          "ingredient": "Natural Hamburger",
+          "perPizza": 0.5,
+          "perBatch": 20.7
+        }
+      ]
+    },
+    {
+      "name": "Lowes 7in Diced Red Fajita",
+      "sheetName": "Lowes 7in Diced Red Fajita",
+      "batchSize": 45.28125,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion Diced, Blanched",
+          "perPizza": 0.125,
+          "perBatch": 11.3203125
+        },
+        {
+          "ingredient": "Green Pepper Diced, Blanched",
+          "perPizza": 0.125,
+          "perBatch": 11.3203125
+        },
+        {
+          "ingredient": "Red Pepper Diced, Blanched",
+          "perPizza": 0.125,
+          "perBatch": 11.3203125
+        },
+        {
+          "ingredient": "Yellow Pepper Diced, Blanched",
+          "perPizza": 0.125,
+          "perBatch": 11.3203125
+        }
+      ]
+    },
+    {
+      "name": "Lowes 7in White Spinach",
+      "sheetName": "Lowes 7in White Spin",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 0.8,
+          "perBatch": 33.12
+        }
+      ]
+    },
+    {
+      "name": "Lowe's Bacon Cheeseburger Mix",
+      "sheetName": "Lowes Bacon Cheeseburger",
+      "batchSize": 53.81999999999999,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Tomatoes",
+          "perPizza": 0.8,
+          "perBatch": 33.12
+        },
+        {
+          "ingredient": "Bacon - NATURAL",
+          "perPizza": 0.5,
+          "perBatch": 20.7
+        }
+      ]
+    },
+    {
+      "name": "Lowe's California Mix",
+      "sheetName": "Lowes California",
+      "batchSize": 165.59999999999997,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "FR Tomatoes Diced",
+          "perPizza": 2.15,
+          "perBatch": 89.00999999999998
+        },
+        {
+          "ingredient": "FR Red Pepper Strips",
+          "perPizza": 1.25,
+          "perBatch": 51.74999999999999
+        },
+        {
+          "ingredient": "FR Red Onion Strips",
+          "perPizza": 0.6,
+          "perBatch": 24.839999999999996
+        }
+      ]
+    },
+    {
+      "name": "Lowes Caribbean Mix",
+      "sheetName": "Lowes Carribbean",
+      "batchSize": 62.099999999999994,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion Strip",
+          "perPizza": 0.7,
+          "perBatch": 28.979999999999997
+        },
+        {
+          "ingredient": "FR Green Peppers Strip",
+          "perPizza": 0.6,
+          "perBatch": 24.839999999999996
+        },
+        {
+          "ingredient": "1/8 green peppers",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Jalapenos",
+          "perPizza": 0.2,
+          "perBatch": 8.28
+        }
+      ]
+    },
+    {
+      "name": "Drain Pinapples",
+      "sheetName": "Lowes Carribbean",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Drianed Pinapples",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        }
+      ]
+    },
+    {
+      "name": "Lowes Chicken Club",
+      "sheetName": "Lowes Chicken Club",
+      "batchSize": 89.00999999999999,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Tomatoes, Diced",
+          "perPizza": 1.25,
+          "perBatch": 51.74999999999999
+        },
+        {
+          "ingredient": "Bacon, NATURAL",
+          "perPizza": 0.7,
+          "perBatch": 28.979999999999997
+        },
+        {
+          "ingredient": "Green Onion",
+          "perPizza": 0.2,
+          "perBatch": 8.28
+        }
+      ]
+    },
+    {
+      "name": "Lowes Grilled Vegetable Mix",
+      "sheetName": "Lowes Grilled Vegetable",
+      "batchSize": 165.59999999999994,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "FR Tomatoes Diced",
+          "perPizza": 2.02,
+          "perBatch": 83.62799999999999
+        },
+        {
+          "ingredient": "FR Squash",
+          "perPizza": 0.71,
+          "perBatch": 29.393999999999995
+        },
+        {
+          "ingredient": "FR Zucchini",
+          "perPizza": 0.71,
+          "perBatch": 29.393999999999995
+        },
+        {
+          "ingredient": "Red Onions Diced",
+          "perPizza": 0.4,
+          "perBatch": 16.56
+        },
+        {
+          "ingredient": "FR Garlic",
+          "perPizza": 0.1,
+          "perBatch": 4.14
+        },
+        {
+          "ingredient": "Sea Salt",
+          "perPizza": 0.03,
+          "perBatch": 1.242
+        },
+        {
+          "ingredient": "Thyme, IQF",
+          "perPizza": 0.03,
+          "perBatch": 1.242
+        }
+      ]
+    },
+    {
+      "name": "Red Hot Chicken Mix",
+      "sheetName": "Lowes Red Hot",
+      "batchSize": 103.5,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Hot Sauce, Old Vienna",
+          "perPizza": 0.07,
+          "perBatch": 2.898
+        },
+        {
+          "ingredient": "Chicken, Diced",
+          "perPizza": 2.43,
+          "perBatch": 100.602
+        }
+      ]
+    },
+    {
+      "name": "Red Hot Bacon Jalapeno Mix",
+      "sheetName": "Lowes Red Hot",
+      "batchSize": 20.7,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Jalapenos",
+          "perPizza": 0.25,
+          "perBatch": 10.35
+        },
+        {
+          "ingredient": "Bacon, NATURAL",
+          "perPizza": 0.5,
+          "perBatch": 20.7
+        }
+      ]
+    },
+    {
+      "name": "Lowes Red Fajita Mix",
+      "sheetName": "Lowes Supreme",
+      "batchSize": 57.959999999999994,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion Strips",
+          "perPizza": 0.35,
+          "perBatch": 14.489999999999998
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 14.489999999999998
+        },
+        {
+          "ingredient": "1/8 green pepper",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 14.489999999999998
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 14.489999999999998
+        }
+      ]
+    },
+    {
+      "name": "Lowes Spinach Mix",
+      "sheetName": "Lowes Spinach",
+      "batchSize": 124.19999999999997,
+      "daysEarly": 2,
+      "components": [
+        {
+          "ingredient": "Spinach",
+          "perPizza": 2.3,
+          "perBatch": 95.21999999999998
+        },
+        {
+          "ingredient": "Unsalted Butter",
+          "perPizza": 0.24,
+          "perBatch": 9.936
+        },
+        {
+          "ingredient": "Salt",
+          "perPizza": 0.06,
+          "perBatch": 2.484
+        },
+        {
+          "ingredient": "Egg",
+          "perPizza": 0.3,
+          "perBatch": 12.419999999999998
+        },
+        {
+          "ingredient": "Garlic, Granulated",
+          "perPizza": 0.1,
+          "perBatch": 4.14
+        }
+      ]
+    },
+    {
+      "name": "Lowes White Spinach",
+      "sheetName": "Lowes White Spinach",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 2,
+          "perBatch": 90
+        }
+      ]
+    },
+    {
+      "name": "",
+      "sheetName": "Lucias Morming Melts Americano",
+      "batchSize": 0,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Diced Ham",
+          "perPizza": 0.4,
+          "perBatch": 39.375
+        },
+        {
+          "ingredient": "Scrambled Egg",
+          "perPizza": 0.6,
+          "perBatch": 59.0625
+        }
+      ]
+    },
+    {
+      "name": "Lucia's Morning Melt Italiano Spinach",
+      "sheetName": "Lucias Morming Mealts Italiano",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 0.2,
+          "perBatch": 19.6875
+        }
+      ]
+    },
+    {
+      "name": "",
+      "sheetName": "Lucias Morming Melts Mexicano",
+      "batchSize": 0,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Scrambled Egg",
+          "perPizza": 0.6,
+          "perBatch": 59.0625
+        }
+      ]
+    },
+    {
+      "name": "Lucia's Morning Melt Parisian Mix",
+      "sheetName": "Lucias Morming Melts Parisian",
+      "batchSize": 36.224999999999994,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Diced Turkey",
+          "perPizza": 0.2,
+          "perBatch": 18.112499999999997
+        },
+        {
+          "ingredient": "Diced Ham",
+          "perPizza": 0.2,
+          "perBatch": 18.112499999999997
+        }
+      ]
+    },
+    {
+      "name": "Lucias Craft Alfredo Spinach",
+      "sheetName": "Lucias Craft Alfredo Spinach",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 0.98,
+          "perBatch": 49.6125
+        }
+      ]
+    },
+    {
+      "name": "Craft Bacon Cheeseburger Mix",
+      "sheetName": "Lucias Craft Bacon Cheeseburger",
+      "batchSize": 81.50625,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Diced Tomatoes",
+          "perPizza": 1.25,
+          "perBatch": 58.21874999999999
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.5,
+          "perBatch": 23.287499999999998
+        }
+      ]
+    },
+    {
+      "name": "Lucia's Craft Bratwurst Veggie Mix",
+      "sheetName": "Lucias Craft Bratwurst",
+      "batchSize": 95.47874999999999,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Sauerkraut Drained",
+          "perPizza": 1.3,
+          "perBatch": 60.54749999999999
+        },
+        {
+          "ingredient": "Yellow Onion, FR Strips",
+          "perPizza": 0.75,
+          "perBatch": 34.93125
+        },
+        {
+          "ingredient": "1/8 onion",
+          "perPizza": 0,
+          "perBatch": 5
+        }
+      ]
+    },
+    {
+      "name": "Lucias Craft Caribbean Mix",
+      "sheetName": "Lucias Craft Carribbean Mix",
+      "batchSize": 69.8625,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion Strip",
+          "perPizza": 0.7,
+          "perBatch": 32.60249999999999
+        },
+        {
+          "ingredient": "FR Green Peppers Strip",
+          "perPizza": 0.6,
+          "perBatch": 27.945
+        },
+        {
+          "ingredient": "1/8 green peppers",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Jalapenos",
+          "perPizza": 0.2,
+          "perBatch": 9.315
+        }
+      ]
+    },
+    {
+      "name": "Drain Pinapples",
+      "sheetName": "Lucias Craft Carribbean Mix",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Drianed Pinapples",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        }
+      ]
+    },
+    {
+      "name": "Craft Club Mix",
+      "sheetName": "Lucias Craft Chicken Club",
+      "batchSize": 86.16374999999998,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Tomatoes, FR Diced",
+          "perPizza": 1,
+          "perBatch": 46.574999999999996
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.7,
+          "perBatch": 32.60249999999999
+        },
+        {
+          "ingredient": "Green Onion",
+          "perPizza": 0.15,
+          "perBatch": 6.98625
+        }
+      ]
+    },
+    {
+      "name": "Red Hot Chicken Mix",
+      "sheetName": "Lucias Craft Red Hot",
+      "batchSize": 116.4375,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Hot Sauce, Old Vienna",
+          "perPizza": 0.07,
+          "perBatch": 3.26025
+        },
+        {
+          "ingredient": "Chicken, Diced",
+          "perPizza": 2.43,
+          "perBatch": 113.17725
+        }
+      ]
+    },
+    {
+      "name": "Red Hot Bacon Jalapeno Mix",
+      "sheetName": "Lucias Craft Red Hot",
+      "batchSize": 23.287499999999998,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Jalapenos",
+          "perPizza": 0.25,
+          "perBatch": 11.643749999999999
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.5,
+          "perBatch": 23.287499999999998
+        }
+      ]
+    },
+    {
+      "name": "South of the Border Mix",
+      "sheetName": "Lucias Craft SOB",
+      "batchSize": 156.49200000000002,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Black Beans, IQF",
+          "perPizza": 0.74,
+          "perBatch": 34.4655
+        },
+        {
+          "ingredient": "Tomatoes, Diced",
+          "perPizza": 0.71,
+          "perBatch": 33.06825
+        },
+        {
+          "ingredient": "Red Onion, FR Strips",
+          "perPizza": 0.71,
+          "perBatch": 33.06825
+        },
+        {
+          "ingredient": "Corn, FR",
+          "perPizza": 0.63,
+          "perBatch": 29.34225
+        },
+        {
+          "ingredient": "Yellow Pepper Strips",
+          "perPizza": 0.46,
+          "perBatch": 21.424500000000002
+        },
+        {
+          "ingredient": "Cilantro",
+          "perPizza": 0.11,
+          "perBatch": 5.12325
+        }
+      ]
+    },
+    {
+      "name": "Lucias Craft White Fajita Mix",
+      "sheetName": "Lucias Craft Tikka Masala",
+      "batchSize": 69.8625,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "White Onion Strips, Blanched",
+          "perPizza": 0.37,
+          "perBatch": 17.23275
+        },
+        {
+          "ingredient": "1/8 onion",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.37,
+          "perBatch": 17.23275
+        },
+        {
+          "ingredient": "1/8 green pepper",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.39,
+          "perBatch": 18.16425
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.37,
+          "perBatch": 17.23275
+        }
+      ]
+    },
+    {
+      "name": "Lucias Craft Chicken Masala Mix",
+      "sheetName": "Lucias Craft Tikka Masala",
+      "batchSize": 139.72500000000002,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Chicken, Diced",
+          "perPizza": 2.93,
+          "perBatch": 136.46475
+        },
+        {
+          "ingredient": "Masala Sauce",
+          "perPizza": 0.07,
+          "perBatch": 3.26025
+        }
+      ]
+    },
+    {
+      "name": "Lucia's Buffalo Chicken Mix",
+      "sheetName": "Lucias Buffalo Chicken",
+      "batchSize": 129.375,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Diced Chicken",
+          "perPizza": 2.4,
+          "perBatch": 124.19999999999999
+        },
+        {
+          "ingredient": "Buffalo Sauce, Legacy",
+          "perPizza": 0.1,
+          "perBatch": 5.175
+        }
+      ]
+    },
+    {
+      "name": "Lucias Red Fajita Mix",
+      "sheetName": "Lucias Supreme",
+      "batchSize": 155.25,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Red Onion Strips, FR",
+          "perPizza": 0.75,
+          "perBatch": 38.8125
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.75,
+          "perBatch": 38.8125
+        },
+        {
+          "ingredient": "1/8 green pepper",
+          "perPizza": 0,
+          "perBatch": 10
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.75,
+          "perBatch": 38.8125
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.75,
+          "perBatch": 38.8125
+        }
+      ]
+    },
+    {
+      "name": "Lucias Pinsa White Fajita Mix",
+      "sheetName": "Lucias Pinsa Tikka Masala",
+      "batchSize": 86.94,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "White Onion Strips, Blanched",
+          "perPizza": 0.525,
+          "perBatch": 21.735
+        },
+        {
+          "ingredient": "1/8 onion",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.525,
+          "perBatch": 21.735
+        },
+        {
+          "ingredient": "1/8 green pepper",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.525,
+          "perBatch": 21.735
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.525,
+          "perBatch": 21.735
+        }
+      ]
+    },
+    {
+      "name": "Lucias Pinsa Chicken Masala Mix",
+      "sheetName": "Lucias Pinsa Tikka Masala",
+      "batchSize": 82.8,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Chicken, Diced",
+          "perPizza": 1.93,
+          "perBatch": 79.902
+        },
+        {
+          "ingredient": "Masala Sauce",
+          "perPizza": 0.07,
+          "perBatch": 2.898
+        }
+      ]
+    },
+    {
+      "name": "",
+      "sheetName": "Lucias Pinsa Margherita",
+      "batchSize": 0,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Goat Cheese",
+          "perPizza": 0.25,
+          "perBatch": 10.35
+        },
+        {
+          "ingredient": "Garlic Sauce",
+          "perPizza": 2,
+          "perBatch": 82.8
+        }
+      ]
+    },
+    {
+      "name": "Lucias Pinsa Pesto Spinach Mix",
+      "sheetName": "Lucias Pinsa Pesto Spinach",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Fresh Spinach (broken up)",
+          "perPizza": 1,
+          "perBatch": 41.4
+        }
+      ]
+    },
+    {
+      "name": "Mauros Italian Beef and Gravy Mix",
+      "sheetName": "Mauros Italian Beef",
+      "batchSize": 119.02499999999998,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Italian Beef",
+          "perPizza": 2,
+          "perBatch": 103.49999999999999
+        },
+        {
+          "ingredient": "Gravy",
+          "perPizza": 0.3,
+          "perBatch": 15.524999999999999
+        }
+      ]
+    },
+    {
+      "name": "South of the Border Mix",
+      "sheetName": "Nob Hill SOB",
+      "batchSize": 156.49200000000002,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Black Beans, IQF",
+          "perPizza": 0.74,
+          "perBatch": 34.4655
+        },
+        {
+          "ingredient": "Tomatoes, Diced",
+          "perPizza": 0.71,
+          "perBatch": 33.06825
+        },
+        {
+          "ingredient": "Red Onion, FR Strips",
+          "perPizza": 0.71,
+          "perBatch": 33.06825
+        },
+        {
+          "ingredient": "Corn, FR",
+          "perPizza": 0.63,
+          "perBatch": 29.34225
+        },
+        {
+          "ingredient": "Yellow Pepper Strips",
+          "perPizza": 0.46,
+          "perBatch": 21.424500000000002
+        },
+        {
+          "ingredient": "Cilantro",
+          "perPizza": 0.11,
+          "perBatch": 5.12325
+        }
+      ]
+    },
+    {
+      "name": "Nob Hill Bacon Cheeseburger Mix",
+      "sheetName": "Nob Hill Bacon Cheeseburger",
+      "batchSize": 81.50625,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Diced Tomatoes",
+          "perPizza": 1.25,
+          "perBatch": 58.21874999999999
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.5,
+          "perBatch": 23.287499999999998
+        }
+      ]
+    },
+    {
+      "name": "Craft Club Mix",
+      "sheetName": "Nob Hill Club",
+      "batchSize": 86.16374999999998,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Tomatoes, Diced",
+          "perPizza": 1,
+          "perBatch": 46.574999999999996
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.7,
+          "perBatch": 32.60249999999999
+        },
+        {
+          "ingredient": "Green Onion",
+          "perPizza": 0.15,
+          "perBatch": 6.98625
+        }
+      ]
+    },
+    {
+      "name": "Red Hot Chicken Mix",
+      "sheetName": "Nob Hill Red Hot",
+      "batchSize": 116.4375,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Hot Sauce, Old Vienna",
+          "perPizza": 0.07,
+          "perBatch": 3.26025
+        },
+        {
+          "ingredient": "Chicken, Diced",
+          "perPizza": 2.43,
+          "perBatch": 113.17725
+        }
+      ]
+    },
+    {
+      "name": "Red Hot Bacon Jalapeno Mix",
+      "sheetName": "Nob Hill Red Hot",
+      "batchSize": 23.287499999999998,
+      "daysEarly": 3,
+      "components": [
+        {
+          "ingredient": "Jalapenos",
+          "perPizza": 0.25,
+          "perBatch": 11.643749999999999
+        },
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.5,
+          "perBatch": 23.287499999999998
+        }
+      ]
+    },
+    {
+      "name": "Nob Hill Caribbean Mix",
+      "sheetName": "Nob Hill Caribbean",
+      "batchSize": 69.8625,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "FR Red Onion Strip",
+          "perPizza": 0.7,
+          "perBatch": 32.60249999999999
+        },
+        {
+          "ingredient": "FR Green Peppers Strip",
+          "perPizza": 0.6,
+          "perBatch": 27.945
+        },
+        {
+          "ingredient": "1/8 green peppers",
+          "perPizza": 0,
+          "perBatch": 5
+        },
+        {
+          "ingredient": "Jalapenos",
+          "perPizza": 0.2,
+          "perBatch": 9.315
+        }
+      ]
+    },
+    {
+      "name": "Drain Pinapples",
+      "sheetName": "Nob Hill Caribbean",
+      "batchSize": 0,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Drianed Pinapples",
+          "perPizza": 0.75,
+          "perBatch": 31.049999999999997
+        }
+      ]
+    },
+    {
+      "name": "Price Chopper Club Mix",
+      "sheetName": "Price Chopper Club",
+      "batchSize": 35.19,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "Bacon",
+          "perPizza": 0.7,
+          "perBatch": 28.979999999999997
+        },
+        {
+          "ingredient": "Green Onion",
+          "perPizza": 0.15,
+          "perBatch": 6.209999999999999
+        }
+      ]
+    },
+    {
+      "name": "SMD Supreme",
+      "sheetName": "SMD Supreme",
+      "batchSize": 104.87999999999998,
+      "daysEarly": 0,
+      "components": [
+        {
+          "ingredient": "White Onion Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 19.319999999999997
+        },
+        {
+          "ingredient": "1/8 onion",
+          "perPizza": 0,
+          "perBatch": 10
+        },
+        {
+          "ingredient": "Green Pepper Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 19.319999999999997
+        },
+        {
+          "ingredient": "1/8 Green Pepper",
+          "perPizza": 0,
+          "perBatch": 10
+        },
+        {
+          "ingredient": "Red Pepper Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 19.319999999999997
+        },
+        {
+          "ingredient": "Yellow Pepper Strips, Blanched",
+          "perPizza": 0.35,
+          "perBatch": 19.319999999999997
+        },
+        {
+          "ingredient": "Black Olives",
+          "perPizza": 0.5,
+          "perBatch": 27.599999999999998
+        }
+      ]
+    }
+  ]
+}

@@ -623,11 +623,16 @@ export function specImportCheeseRecipeIsMix(
   // "Blend" counts the same as "Mix": sheets name pre-blended topping mixes
   // either way ("White Fajita Mix", "Red Fajita Blend") — a cheese-less
   // multi-ingredient blend belongs on the Mixes screen, not in Cheese.
+  // NOTE: this deliberately wins over the component check below — real
+  // premixes often contain some cheese ("White Fajita Mix" carries Monterey
+  // Jack) yet still belong on the Mixes screen. The cheese WORKBOOK importer
+  // never consults this heuristic, so cheese blends named "... Mix" there
+  // ("Aldo's Parmesan / Oregano Mix") are unaffected.
   if (ingredientCount >= 2 && /\b(?:mix|blend)\b/.test(t)) return true;
   // No mix/blend word, but the components themselves say "not cheese": a
   // multi-ingredient blend with no cheese-ish ingredient defaults to Mix.
   if (componentNames && ingredientCount >= 2) {
-    const named = componentNames.map((n) => n.trim()).filter(Boolean);
+    const named = componentNames.map((n) => (n ?? "").trim()).filter(Boolean);
     if (named.length >= 2 && !named.some(specImportIngredientLooksCheesy)) {
       return true;
     }

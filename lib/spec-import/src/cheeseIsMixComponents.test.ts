@@ -50,6 +50,22 @@ describe("specImportCheeseRecipeIsMix with component names", () => {
     ).toBe(false);
   });
 
+  it("mix/blend name-word rule deliberately beats cheesy components", () => {
+    // Real premixes often carry some cheese ("White Fajita Mix" has Monterey
+    // Jack) and must still route to Mixes. Cheese-workbook blends named
+    // "... Mix" ("Aldo's Parmesan / Oregano Mix") are safe because the cheese
+    // importer never consults this heuristic — see the corpus harness.
+    expect(
+      specImportCheeseRecipeIsMix("White Fajita Mix", none, 2, [
+        "Monterey Jack",
+        "Green Peppers",
+      ]),
+    ).toBe(true);
+    expect(
+      specImportCheeseRecipeIsMix("Red Fajita Blend", none, 2, ["Red Peppers", "Onions"]),
+    ).toBe(true);
+  });
+
   it("name mentioning cheese still NEVER routes to mix, whatever the components", () => {
     expect(
       specImportCheeseRecipeIsMix("Cheese Topping", none, 2, ["Beef", "Gravy"]),

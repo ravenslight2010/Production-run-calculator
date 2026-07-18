@@ -1,0 +1,27 @@
+{
+  "name": "@workspace/corpus-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "snapshots": "tsx ./src/regen.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@workspace/cheese-import": "workspace:*",
+    "@workspace/premix-import": "workspace:*",
+    "@workspace/shipping-import": "workspace:*",
+    "@workspace/spec-import": "workspace:*",
+    "@workspace/name-match": "workspace:*",
+    "xlsx": "npm:@e965/xlsx@^0.20.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "vitest": "^4.1.9"
+  }
+}

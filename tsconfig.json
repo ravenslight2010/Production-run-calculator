@@ -70,6 +70,9 @@
       "path": "./lib/mix-reconcile"
     },
     {
+      "path": "./lib/corpus-harness"
+    },
+    {
       "path": "./lib/cycle-count"
     },
     {

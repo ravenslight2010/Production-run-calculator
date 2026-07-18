@@ -52,6 +52,10 @@ args = "API Server"
 task = "workflow.run"
 args = "Web App"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test:corpus"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -152,6 +156,17 @@ outputType = "console"
 task = "shell.exec"
 args = "cd artifacts/run-calculator && PORT=5173 BASE_PATH=/ pnpm run dev"
 waitForPort = 5173
+
+[[workflows.workflow]]
+name = "test:corpus"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/corpus-harness run test"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"

@@ -7,6 +7,7 @@ import {
   mapStacking,
   mapGripSheets,
   mapCount,
+  mapPizzasPerCase,
   matchShippingBrand,
   buildShippingCandidates,
   describeShippingPatch,
@@ -104,6 +105,15 @@ describe("value mappings", () => {
     expect(mapCount("4 - 3PACK")).toBeUndefined();
     expect(mapCount("")).toBeUndefined();
     expect(mapCount("0")).toBeUndefined();
+    // Pizzas/case also understands multipack notation (Costco "4 - 3PACK"
+    // = 12 pizzas); plain numbers and junk behave like mapCount.
+    expect(mapPizzasPerCase("4 - 3PACK")).toBe(12);
+    expect(mapPizzasPerCase("2 x 6 pack")).toBe(12);
+    expect(mapPizzasPerCase("4 - 3PK")).toBe(12);
+    expect(mapPizzasPerCase("12")).toBe(12);
+    expect(mapPizzasPerCase("PACK")).toBeUndefined();
+    expect(mapPizzasPerCase("4 - 0PACK")).toBeUndefined();
+    expect(mapPizzasPerCase("")).toBeUndefined();
   });
 });
 
@@ -138,8 +148,9 @@ describe("shippingPatchFromRow", () => {
       pizzasPerCase: "4 - 3PACK",
     });
     expect(patch.gripSheets).toBeUndefined();
-    expect(patch.pizzasPerCase).toBeUndefined();
-    expect(unmapped).toEqual(["Gripsheets: X", "Pizzas/case: 4 - 3PACK"]);
+    // Multipack notation now maps (4 three-packs = 12 pizzas per case).
+    expect(patch.pizzasPerCase).toBe(12);
+    expect(unmapped).toEqual(["Gripsheets: X"]);
   });
 });
 
