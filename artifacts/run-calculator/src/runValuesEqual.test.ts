@@ -10,8 +10,8 @@
 // the discriminator. This mirrors mobile's primed-baseline diffStampRunEdits.
 
 import { describe, it, expect } from "vitest";
-import { deepEqual } from "./storage";
-import { DEFAULT_VALUES } from "./types";
+import { deepEqual, isEmptyOverPopulated } from "./storage";
+import { DEFAULT_VALUES, type FormValues } from "./types";
 
 describe("deepEqual — autosave edit attribution", () => {
   it("treats a re-emit of identical values as NOT an edit (key order irrelevant)", () => {
@@ -65,10 +65,11 @@ describe("deepEqual — autosave edit attribution", () => {
 // the real run data on the shared day-state row. This block locks in that guard
 // predicate exactly as written in home.tsx.
 describe("autosave guard — empty form must not clobber populated stored value", () => {
-  // The exact predicate from the effect: skip when the live form equals DEFAULT
-  // but the stored value does not.
-  const blocksClobber = (v: unknown, stored: unknown) =>
-    deepEqual(v, DEFAULT_VALUES) && !deepEqual(stored, DEFAULT_VALUES);
+  // The exact predicate the effect uses (home.tsx now calls
+  // isEmptyOverPopulated, which also treats the legacy pep-25 blank shape as
+  // all-default).
+  const blocksClobber = (v: FormValues, stored: FormValues) =>
+    isEmptyOverPopulated(v, stored);
 
   it("BLOCKS a default form from overwriting a populated stored value", () => {
     const stored = { ...DEFAULT_VALUES, casesNeeded: 500, crustsPerCycle: 12 };

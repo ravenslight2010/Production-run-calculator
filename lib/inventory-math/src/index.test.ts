@@ -113,6 +113,35 @@ describe("applyRecipeSubstitutions", () => {
   });
 });
 
+describe("computeSummaryStats — zero batch weights never produce NaN/Infinity", () => {
+  // Batch/barrel weights now default to 0 (untouched) instead of invented
+  // non-zero fallbacks. Every division by a batch size must be guarded so an
+  // untouched form yields 0 batches, not NaN or Infinity.
+  it("all quantities stay finite when every batch/barrel weight is 0 but usage is set", () => {
+    const stats = computeSummaryStats(
+      baseVals({
+        casesNeeded: 100,
+        pizzasPerCase: 12,
+        sauceOzPerPizza: 4,
+        app1OzPerPizza: 4, app1Type: "Whole Mozzarella",
+        app2OzPerPizza: 3, app2Type: "Cheddar",
+        app3OzPerPizza: 2, app3Type: "Sausage",
+        app4OzPerPizza: 1, app4Type: "Bacon",
+        pep1OzPerPizza: 1, pep1Type: "Pepperoni", pep1Sticks: 2,
+        pep2OzPerPizza: 1, pep2Type: "Pepperoni", pep2Sticks: 1,
+      }) as never,
+      PEP,
+    );
+    for (const [k, v] of Object.entries(stats)) {
+      if (typeof v !== "number") continue;
+      expect(Number.isFinite(v), `stat ${k} must be finite`).toBe(true);
+    }
+    expect(stats.sauceBatches).toBe(0);
+    expect(stats.pep1Batches).toBe(0);
+    expect(stats.pep2Batches).toBe(0);
+  });
+});
+
 describe("applySubstitutions on type fields", () => {
   it("swaps an applicator type so the consumption key changes", () => {
     const vals = {

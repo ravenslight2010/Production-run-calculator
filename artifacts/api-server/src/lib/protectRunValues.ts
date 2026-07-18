@@ -95,21 +95,33 @@ function deepEqualValue(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-// Canonical all-default ("blank") run value. This is exactly what a client emits
-// for a run it has no real data for: web `loadRunValues` returns DEFAULT_VALUES
-// for an unknown id, and the form holds this shape transiently during mount /
-// right after a programmatic form.reset(). It MUST stay in sync with
-// `DEFAULT_VALUES` in artifacts/run-calculator/src/types.ts and the mobile app's
-// equivalent.
+// Canonical all-default ("blank") run values. These are exactly what a client
+// emits for a run it has no real data for: web `loadRunValues` returns
+// DEFAULT_VALUES for an unknown id, and the form holds this shape transiently
+// during mount / right after a programmatic form.reset(). They MUST stay in
+// sync with `DEFAULT_VALUES` in artifacts/run-calculator/src/types.ts (and the
+// mobile app's equivalent when parity resumes).
 //
-// IMPORTANT — fails safe by design: this is only ever used to RECOGNIZE an empty
-// value so we can refuse to let it overwrite a populated one. Recognition is an
-// EXACT deep-equality match, so drift (a field added to the clients' default but
-// not here) only DEGRADES protection — an unrecognized blank falls through to the
-// existing stamp logic, i.e. status quo. It can NEVER produce a false positive
-// that rejects a real edit (a real edit is, by definition, not deep-equal to the
-// blank), so an out-of-date copy can never cause data loss.
-const BLANK_RUN_VALUE: Record<string, unknown> = {
+// IMPORTANT — fails safe by design: these are only ever used to RECOGNIZE an
+// empty value so we can refuse to let it overwrite a populated one. Recognition
+// is an EXACT deep-equality match, so drift (a field added to the clients'
+// default but not here) only DEGRADES protection — an unrecognized blank falls
+// through to the existing stamp logic, i.e. status quo. It can NEVER produce a
+// false positive that rejects a real edit (a real edit is, by definition, not
+// deep-equal to the blank), so an out-of-date copy can never cause data loss.
+//
+// Two templates because the client defaults changed over time:
+//   - LEGACY_BLANK_RUN_VALUE: the older client field set, where the pep
+//     batch-lbs fields defaulted to 25. Stored rows / stale clients can still
+//     carry this shape.
+//   - CURRENT_BLANK_RUN_VALUE: today's DEFAULT_VALUES — all quantity fields 0
+//     (only speedAdjustment is 1.0), including the pep "B"-slot and timer
+//     fields added since.
+// Additionally, a current-shape value whose ONLY difference is all four pep
+// batch fields at 25 (the exact legacy default signature) is blank — mirroring
+// the web's isAllDefaultRunValue. A lone 25 (some but not all four) is treated
+// as a real user-typed weight.
+const LEGACY_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesNeeded: 0,
   crustsPerCycle: 0,
   cycleSpeed: 0,
@@ -174,9 +186,113 @@ const BLANK_RUN_VALUE: Record<string, unknown> = {
   slipSheets: "no",
 };
 
-// True when a run value is the exact all-default/blank template (see above).
+// Today's DEFAULT_VALUES shape (all-zero quantities; speedAdjustment 1.0).
+const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
+  casesNeeded: 0,
+  crustsPerCycle: 0,
+  cycleSpeed: 0,
+  speedAdjustment: 1.0,
+  approxLineSpeed: 0,
+  freezerTime: 0,
+  pizzasPerCase: 0,
+  casesPerSkid: 0,
+  casesPerLayer: 0,
+  doughballsPerTray: 0,
+  crustsPerStack: 0,
+  doughBatchYield: 0,
+  crustsPerCase: 0,
+  skidsCompleted: 0,
+  casesOnCurrentSkid: 0,
+  traysOnLine: 0,
+  batchesReady: 0,
+  mixerLowSec: 0,
+  mixerHighSec: 0,
+  hopperSec: 0,
+  carryOverDone: false,
+  sauceOzPerPizza: 0,
+  sauceBarrelLbs: 0,
+  app1OzPerPizza: 0,
+  app1BatchLbs: 0,
+  app2OzPerPizza: 0,
+  app2BatchLbs: 0,
+  app3OzPerPizza: 0,
+  app3BatchLbs: 0,
+  app4OzPerPizza: 0,
+  app4BatchLbs: 0,
+  pep1Sticks: 0,
+  pep1OzPerPizza: 0,
+  pep1BatchLbs: 0,
+  pep2Sticks: 0,
+  pep2OzPerPizza: 0,
+  pep2BatchLbs: 0,
+  pep1Combined: true,
+  pep1TypeB: "",
+  pep2TypeB: "",
+  pep1SticksB: 0,
+  pep1OzPerPizzaB: 0,
+  pep1BatchLbsB: 0,
+  pep2SticksB: 0,
+  pep2OzPerPizzaB: 0,
+  pep2BatchLbsB: 0,
+  app1Type: "",
+  app2Type: "",
+  app3Type: "",
+  app4Type: "",
+  pep1Type: "",
+  pep2Type: "",
+  dieType: "",
+  allergen: "none",
+  doughRecipeName: "",
+  targetDoughballWeight: 0,
+  doughRecipe: [],
+  app1CheeseRecipeName: "",
+  app1CheeseRecipe: [],
+  app2CheeseRecipeName: "",
+  app2CheeseRecipe: [],
+  app3CheeseRecipeName: "",
+  app3CheeseRecipe: [],
+  app4CheeseRecipeName: "",
+  app4CheeseRecipe: [],
+  frontlineRecipeName: "",
+  frontlineRecipe: [],
+  cartoned: "cartoned",
+  labelPosition: "",
+  cartonsPerCase: 0,
+  labelsPerRoll: 0,
+  topLabelsPerRoll: 0,
+  bottomLabelsPerRoll: 0,
+  circles: "none",
+  shipper: "",
+  skidStacking: "",
+  gripSheets: "none",
+  slipSheets: "no",
+  tempFreezerTime: 0,
+  tempCrustsPerCycle: 0,
+  tempCycleSpeed: 0,
+};
+
+// The four pep batch fields whose OLD default was 25. Only the exact
+// all-four-at-25 signature is legacy-blank; a lone 25 is a real typed weight.
+const LEGACY_PEP_BATCH_FIELDS = [
+  "pep1BatchLbs",
+  "pep2BatchLbs",
+  "pep1BatchLbsB",
+  "pep2BatchLbsB",
+] as const;
+
+// True when a run value is an exact all-default/blank template (see above):
+// the current all-zero shape, the old-field-set legacy template, or the
+// current shape carrying the exact four-field legacy pep-25 signature.
 function isBlankRunValue(v: unknown): boolean {
-  return isPlainObject(v) && deepEqualValue(v, BLANK_RUN_VALUE);
+  if (!isPlainObject(v)) return false;
+  if (deepEqualValue(v, CURRENT_BLANK_RUN_VALUE)) return true;
+  if (deepEqualValue(v, LEGACY_BLANK_RUN_VALUE)) return true;
+  if (LEGACY_PEP_BATCH_FIELDS.every((f) => v[f] === 25)) {
+    const normalized: Record<string, unknown> = { ...v };
+    for (const f of LEGACY_PEP_BATCH_FIELDS) normalized[f] = 0;
+    return deepEqualValue(normalized, CURRENT_BLANK_RUN_VALUE);
+  }
+  return false;
 }
 
 // Collect the set of tombstoned run ids from a payload's deletedItems.runs.

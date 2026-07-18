@@ -26,11 +26,14 @@ explicit Save action, never by autosave — so they are never clobbered. This is
 web-only bug fix restoring behavior mobile already had; no parity change needed.
 
 **Sharp edge — do NOT use a blanket numeric scan for "has real data":**
-`DEFAULT_VALUES` has non-zero numeric defaults (`pep1BatchLbs`/`pep2BatchLbs` =
-25). A clobbered profile equals DEFAULT_VALUES, so any "any non-zero number =
-real" check would classify it as real and BREAK the self-heal. Only string
-fields that default to "" (app/pep types, dieType, recipe names) and non-empty
-recipe arrays are safe signals of real data.
+DEFAULT_VALUES is now all-zero for quantity fields (only `speedAdjustment`
+defaults to 1.0), but LEGACY stored blanks may still carry the old non-zero
+defaults (the four pep batch-lbs fields at 25). A clobbered profile equals a
+default shape, so any "any non-zero number = real" check would classify it as
+real and BREAK the self-heal. Use `isAllDefaultRunValue` in web `storage.ts`
+(recognizes both the all-zero shape and the legacy pep-25 blank shape) or rely
+on string fields that default to "" (app/pep types, dieType, recipe names) and
+non-empty recipe arrays as signals of real data.
 
 **Morning Melts has no sauce:** Morning Melts (breakfast) has no `SAUCE_BRAND_SPECS`
 entry, so an empty frontline/sauce recipe is correct, not a repair miss.

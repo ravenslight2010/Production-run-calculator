@@ -872,7 +872,7 @@ export function isBlankRemovableRun(run: RunMeta, value: unknown): boolean {
     !run.startedAt &&
     !run.endedAt &&
     (run.stoppages ?? []).length === 0 &&
-    deepEqual(value, DEFAULT_VALUES)
+    isAllDefaultRunValue(value)
   );
 }
 
@@ -1087,7 +1087,38 @@ export function isEmptyOverPopulated(
   candidate: FormValues,
   fallback: FormValues,
 ): boolean {
-  return deepEqual(candidate, DEFAULT_VALUES) && !deepEqual(fallback, DEFAULT_VALUES);
+  return isAllDefaultRunValue(candidate) && !isAllDefaultRunValue(fallback);
+}
+
+// The pep batch-lbs fields defaulted to 25 before the defaults cleanup zeroed
+// them (DEFAULT_VALUES now starts them at 0). Blank runs saved under the old
+// defaults are still all-default in spirit — every "is this run value
+// untouched?" check must recognize BOTH shapes, or legacy blank runs stop
+// being sweepable and legacy blank stored copies start counting as
+// "populated" in the empty-over-populated guards.
+const LEGACY_PEP_BATCH_FIELDS = [
+  "pep1BatchLbs",
+  "pep2BatchLbs",
+  "pep1BatchLbsB",
+  "pep2BatchLbsB",
+] as const;
+
+// True when `value` is an all-default run value under EITHER the current
+// all-zero defaults or the exact legacy blank signature where ALL FOUR pep
+// batch-lbs fields were 25 (the old DEFAULT_VALUES shape). Never treats a
+// real edit as default: any other field difference fails the check, and a 25
+// in only SOME of the pep fields is treated as a real user-typed weight —
+// only the full four-field legacy signature counts as untouched.
+export function isAllDefaultRunValue(value: unknown): boolean {
+  if (deepEqual(value, DEFAULT_VALUES)) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const o = value as Record<string, unknown>;
+  for (const f of LEGACY_PEP_BATCH_FIELDS) {
+    if (o[f] !== 25) return false;
+  }
+  const normalized = { ...o };
+  for (const f of LEGACY_PEP_BATCH_FIELDS) normalized[f] = 0;
+  return deepEqual(normalized, DEFAULT_VALUES);
 }
 
 // A form.reset() re-emits values through form.watch(), so a heal that fires

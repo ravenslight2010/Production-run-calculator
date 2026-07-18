@@ -80,7 +80,7 @@ describe("buildProfileAutofillPlan", () => {
     expect(byField.get("sauceOzPerPizza")?.specValue).toBe(4.5);
   });
 
-  it("treats allergen 'none' and non-zero schema defaults as blank (fillable)", () => {
+  it("treats allergen 'none' and untouched (zero) numeric defaults as blank (fillable)", () => {
     const p = plan(
       [sheet(1, 100, {
         profiles: [profile({
@@ -88,12 +88,12 @@ describe("buildProfileAutofillPlan", () => {
           pepperonis: [{ type: "Pepperoni", sticks: 6, ozPerPizza: 1.2, batchLbs: 30 }],
         })],
       })],
-      values(), // allergen "none", pep1BatchLbs default 25
+      values(), // allergen "none", pep1BatchLbs default 0
     );
     const fields = new Set(p.fills.map(f => f.field));
     expect(fields.has("allergen")).toBe(true);
     expect(fields.has("pep1Type")).toBe(true);
-    expect(fields.has("pep1BatchLbs")).toBe(true); // default 25 counts as unset
+    expect(fields.has("pep1BatchLbs")).toBe(true); // default 0 counts as unset
     expect(p.mismatches).toEqual([]);
     expect(p.pepCombinedTarget).toBe(true); // single named pep → combined
   });

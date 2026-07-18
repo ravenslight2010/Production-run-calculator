@@ -6806,7 +6806,7 @@ export default function Home() {
     // an empty form overwrite a populated stored value. (Equality of stored ==
     // DEFAULT is already short-circuited above, so this only blocks the
     // populated→empty transition, never a legitimately blank run.)
-    if (deepEqual(v, DEFAULT_VALUES) && !deepEqual(loadRunValues(runId), DEFAULT_VALUES)) return;
+    if (isEmptyOverPopulated(v, loadRunValues(runId))) return;
     const now = Date.now();
     saveRunValues(runId, v);
     // Stamp this run's edit time so an in-flight stale remote can't clobber it

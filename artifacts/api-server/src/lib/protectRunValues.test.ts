@@ -19,11 +19,14 @@ type Payload = {
 const EMPTY = {};
 const POP = { casesNeeded: 240 };
 
-// The EXACT all-default ("blank") run value a client emits for a run it has no
+// The EXACT all-default ("blank") run values a client emits for a run it has no
 // real data for (web loadRunValues returns DEFAULT_VALUES for an unknown id).
-// Must mirror BLANK_RUN_VALUE in protectRunValues.ts / DEFAULT_VALUES on the
-// clients. The server's empty-over-populated guard recognizes blank by EXACT
-// deep-equality, so these tests use the full shape rather than `{}`.
+// Must mirror LEGACY_BLANK_RUN_VALUE / CURRENT_BLANK_RUN_VALUE in
+// protectRunValues.ts / DEFAULT_VALUES on the clients. The server's
+// empty-over-populated guard recognizes blank by EXACT deep-equality, so these
+// tests use the full shapes rather than `{}`.
+
+// Older client field set, pep batch defaults 25.
 const BLANK = {
   casesNeeded: 0,
   crustsPerCycle: 0,
@@ -89,6 +92,92 @@ const BLANK = {
   slipSheets: "no",
 };
 
+// Today's DEFAULT_VALUES shape — all-zero quantities (speedAdjustment 1.0),
+// including the pep "B"-slot, timer, and label fields added since.
+const CURRENT_BLANK = {
+  casesNeeded: 0,
+  crustsPerCycle: 0,
+  cycleSpeed: 0,
+  speedAdjustment: 1.0,
+  approxLineSpeed: 0,
+  freezerTime: 0,
+  pizzasPerCase: 0,
+  casesPerSkid: 0,
+  casesPerLayer: 0,
+  doughballsPerTray: 0,
+  crustsPerStack: 0,
+  doughBatchYield: 0,
+  crustsPerCase: 0,
+  skidsCompleted: 0,
+  casesOnCurrentSkid: 0,
+  traysOnLine: 0,
+  batchesReady: 0,
+  mixerLowSec: 0,
+  mixerHighSec: 0,
+  hopperSec: 0,
+  carryOverDone: false,
+  sauceOzPerPizza: 0,
+  sauceBarrelLbs: 0,
+  app1OzPerPizza: 0,
+  app1BatchLbs: 0,
+  app2OzPerPizza: 0,
+  app2BatchLbs: 0,
+  app3OzPerPizza: 0,
+  app3BatchLbs: 0,
+  app4OzPerPizza: 0,
+  app4BatchLbs: 0,
+  pep1Sticks: 0,
+  pep1OzPerPizza: 0,
+  pep1BatchLbs: 0,
+  pep2Sticks: 0,
+  pep2OzPerPizza: 0,
+  pep2BatchLbs: 0,
+  pep1Combined: true,
+  pep1TypeB: "",
+  pep2TypeB: "",
+  pep1SticksB: 0,
+  pep1OzPerPizzaB: 0,
+  pep1BatchLbsB: 0,
+  pep2SticksB: 0,
+  pep2OzPerPizzaB: 0,
+  pep2BatchLbsB: 0,
+  app1Type: "",
+  app2Type: "",
+  app3Type: "",
+  app4Type: "",
+  pep1Type: "",
+  pep2Type: "",
+  dieType: "",
+  allergen: "none",
+  doughRecipeName: "",
+  targetDoughballWeight: 0,
+  doughRecipe: [],
+  app1CheeseRecipeName: "",
+  app1CheeseRecipe: [],
+  app2CheeseRecipeName: "",
+  app2CheeseRecipe: [],
+  app3CheeseRecipeName: "",
+  app3CheeseRecipe: [],
+  app4CheeseRecipeName: "",
+  app4CheeseRecipe: [],
+  frontlineRecipeName: "",
+  frontlineRecipe: [],
+  cartoned: "cartoned",
+  labelPosition: "",
+  cartonsPerCase: 0,
+  labelsPerRoll: 0,
+  topLabelsPerRoll: 0,
+  bottomLabelsPerRoll: 0,
+  circles: "none",
+  shipper: "",
+  skidStacking: "",
+  gripSheets: "none",
+  slipSheets: "no",
+  tempFreezerTime: 0,
+  tempCrustsPerCycle: 0,
+  tempCycleSpeed: 0,
+};
+
 describe("protectRunValues", () => {
   it("keeps the populated stored value when an empty push arrives with an EQUAL stamp (the corruption)", () => {
     const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
@@ -116,6 +205,35 @@ describe("protectRunValues", () => {
     const incoming: Payload = { runValues: { r1: BLANK }, runValuesUpdatedAt: { r1: 2000 } };
     const out = protectRunValues(incoming, existing) as Payload;
     expect(out.runValues.r1).toEqual(POP);
+    expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("recognizes the CURRENT all-zero blank shape as empty-over-populated", () => {
+    // Web defaults changed: pep batch lbs now default to 0, and newer fields
+    // (B slots, mixer timers, labels) exist. A blank push in this shape must
+    // not overwrite real data even with a strictly-newer stamp.
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 0 } };
+    const incoming: Payload = { runValues: { r1: CURRENT_BLANK }, runValuesUpdatedAt: { r1: 1700000000000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r1).toEqual(POP);
+    expect(out.runValuesUpdatedAt.r1).toBe(1700000000000);
+  });
+
+  it("recognizes the current shape carrying the exact legacy pep-25 signature (all four fields) as blank", () => {
+    const legacySig = { ...CURRENT_BLANK, pep1BatchLbs: 25, pep2BatchLbs: 25, pep1BatchLbsB: 25, pep2BatchLbsB: 25 };
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
+    const incoming: Payload = { runValues: { r1: legacySig }, runValuesUpdatedAt: { r1: 2000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r1).toEqual(POP);
+    expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("treats a LONE pep 25 (not all four) as real data — a newer-stamped push wins", () => {
+    const lone25 = { ...CURRENT_BLANK, pep1BatchLbs: 25 };
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
+    const incoming: Payload = { runValues: { r1: lone25 }, runValuesUpdatedAt: { r1: 2000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r1).toEqual(lone25);
     expect(out.runValuesUpdatedAt.r1).toBe(2000);
   });
 
