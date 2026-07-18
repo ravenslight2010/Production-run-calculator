@@ -462,7 +462,7 @@ import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { saveSpecImportAliases } from "@/specImportAliases";
+import { saveSpecImportAliases, learnSpecImportAliasesForNameChange } from "@/specImportAliases";
 
 import {
   Form,
@@ -5220,6 +5220,20 @@ export default function Home() {
       } catch {
         // Non-fatal: the merge itself already succeeded; learning is additive.
       }
+      // ALSO learn a spec-import alias: the Excel importers (spec, premix,
+      // cheese) canonicalize through the spec-import alias store, not the merge
+      // suggester's — without this, re-importing an old workbook resurrects the
+      // merged-away brand/flavor as if it were new.
+      try {
+        await learnSpecImportAliasesForNameChange(
+          mergeBfMode === "brands" ? "brand" : "flavor",
+          srcs,
+          tgt,
+          mergeBfMode === "flavors" ? mergeBfBrand : undefined,
+        );
+      } catch {
+        // Non-fatal: the next re-import just shows the old name for review.
+      }
       try {
         await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
           method: "PUT",
@@ -7338,6 +7352,31 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
+    // Server-backed master-data + learned import aliases (best-effort, mirrors
+    // the brand MERGE path): re-point cheese/mix pool rows still naming the old
+    // brand, and learn a spec-import alias so re-importing an old workbook
+    // updates the renamed brand instead of resurrecting the old name.
+    void (async () => {
+      try {
+        await learnSpecImportAliasesForNameChange("brand", [oldName], trimmed);
+      } catch { /* non-fatal: next re-import shows the old name for review */ }
+      try {
+        const cheese = await fetchCheeseRecipes();
+        const changed = repointCheeseRecipesForBrandMerge(cheese, [oldName], trimmed);
+        if (changed.length > 0) {
+          const saved = await saveCheeseRecipes(changed);
+          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+        }
+      } catch { /* non-fatal: rename itself already succeeded */ }
+      try {
+        const mixesList = await fetchMixes();
+        const changed = repointMixesForBrandMerge(mixesList, [oldName], trimmed);
+        if (changed.length > 0) {
+          const saved = await saveMixes(changed);
+          cycleCountQc.setQueryData(["mixes"], saved);
+        }
+      } catch { /* non-fatal: rename itself already succeeded */ }
+    })();
   }
 
   function addFlavor(name: string, brand?: string) {
@@ -7391,6 +7430,31 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
+    // Server-backed master-data + learned import aliases (best-effort, mirrors
+    // the flavor MERGE path): re-point cheese/mix pool rows still naming the old
+    // flavor under this brand, and learn a brand-scoped spec-import alias so a
+    // re-imported workbook updates the renamed flavor instead of resurrecting it.
+    void (async () => {
+      try {
+        await learnSpecImportAliasesForNameChange("flavor", [oldName], trimmed, b);
+      } catch { /* non-fatal: next re-import shows the old name for review */ }
+      try {
+        const cheese = await fetchCheeseRecipes();
+        const changed = repointCheeseRecipesForFlavorMerge(cheese, b, [oldName], trimmed);
+        if (changed.length > 0) {
+          const saved = await saveCheeseRecipes(changed);
+          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+        }
+      } catch { /* non-fatal: rename itself already succeeded */ }
+      try {
+        const mixesList = await fetchMixes();
+        const changed = repointMixesForFlavorMerge(mixesList, b, [oldName], trimmed);
+        if (changed.length > 0) {
+          const saved = await saveMixes(changed);
+          cycleCountQc.setQueryData(["mixes"], saved);
+        }
+      } catch { /* non-fatal: rename itself already succeeded */ }
+    })();
   }
 
   // Move a recipe's saved rows from one preset-map key to another on rename.

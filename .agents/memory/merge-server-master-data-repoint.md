@@ -38,6 +38,24 @@ loose key (lowercase, apostrophes stripped, tokens plural-folded + sorted, so
 into a spec-import stub silently lost the real batch data (SMD incident; healed
 by `smd-pep-cheese-mix-restore-v1`).
 
+**Importers resurrect merged/renamed names unless the alias is learned in the
+SPEC-IMPORT alias store:** the merge suggester's MergeAlias store is separate
+from the `SpecImportAlias` store the importers (spec, premix, cheese) actually
+canonicalize through. Every brand/flavor merge AND rename must also call
+`learnSpecImportAliasesForNameChange` (web `specImportAliases.ts`) or the next
+re-import brings the old name back. Three extra holes fixed together:
+- renames (unlike merges) never re-pointed the server cheese/mix pools — they
+  now call the same repoint helpers, fire-and-forget;
+- cheese import took the brand verbatim from the sheet tab → now remapped via
+  `remapCheeseRecipeBrands` (recomputes `cheeseImportId`; sheet.brand TEXT is
+  kept for brand-prefix stripping);
+- spec-import saved-parse REUSE skipped alias canonicalization entirely and the
+  tombstone partition then silently DROPPED renamed-brand profiles → reuse now
+  remaps aliases BEFORE `partitionTombstonedParse`.
+**How to apply:** any new name-change path (merge, rename, dedupe) must learn
+spec-import aliases + re-point server pools; any new import path must ground
+brand/flavor through the spec-import alias store before dedupe/tombstone logic.
+
 **Why:** the merge path was designed as a "soft" re-point of local state; nobody
 extended it to the newer server-backed pools. Any future server-backed pool that
 keys on brand/flavor must be added to the merge re-point, or it silently drifts.

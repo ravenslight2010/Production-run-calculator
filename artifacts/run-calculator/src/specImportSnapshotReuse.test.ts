@@ -31,13 +31,14 @@ function fixtureParse(): ParsedSpecImport {
   return { profiles: [fixtureProfile()], recipes: [] };
 }
 
-const { parseSpy, saveSheetSpy, fetchSheetsSpy, applySpy } = vi.hoisted(() => ({
+const { parseSpy, saveSheetSpy, fetchSheetsSpy, applySpy, aliasesRef } = vi.hoisted(() => ({
   parseSpy: vi.fn(async () => {
     throw new Error("AI parse must not run on exact re-import");
   }),
   saveSheetSpy: vi.fn(async () => {}),
   fetchSheetsSpy: vi.fn(async () => [] as unknown[]),
   applySpy: vi.fn(),
+  aliasesRef: { current: [] as unknown[] },
 }));
 
 vi.mock("./storage", () => ({
@@ -46,10 +47,12 @@ vi.mock("./storage", () => ({
   recipeExistsForImport: () => false,
   importProfileIsTombstoned: () => false,
   recipeNameIsTombstoned: () => false,
+  isNameDeleted: () => false,
+  flavorNamespace: (brand: string) => `flavors:${brand}`,
   applySpecImport: applySpy,
 }));
 vi.mock("./specImportAliases", () => ({
-  fetchSpecImportAliases: async () => [],
+  fetchSpecImportAliases: async () => aliasesRef.current,
   saveSpecImportAliases: async () => {},
 }));
 vi.mock("./savedSpecSheets", async (importOriginal) => {
@@ -99,6 +102,7 @@ beforeEach(() => {
   applySpy.mockReset();
   fetchSheetsSpy.mockReset();
   fetchSheetsSpy.mockResolvedValue([]);
+  aliasesRef.current = [];
 });
 
 describe("hashSpecImportSource", () => {
@@ -175,6 +179,27 @@ describe("exact re-import parse reuse", () => {
     expect(prepared.sourceHash).toBe(hash);
     expect(prepared.newAliases).toEqual([]);
     expect(prepared.note).toMatch(/imported before/i);
+  });
+
+  it("remaps merged/renamed-away brands in the reused parse instead of resurrecting them", async () => {
+    // Regression: reused snapshots skipped brand/flavor alias canonicalization,
+    // so a re-import after a brand merge/rename resurrected the old brand (or
+    // the tombstone partition silently dropped the profile).
+    const data = bufOf("workbook-bytes");
+    const hash = await hashSpecImportSource([bufOf("workbook-bytes")]);
+    fetchSheetsSpy.mockResolvedValue([
+      { id: 1, label: "Prev", sourceKey: "specs", sourceHash: hash, createdAt: 100, data: fixtureParse() },
+    ]);
+    aliasesRef.current = [
+      { kind: "brand", externalName: "Aldo's", canonicalName: "Aldo Brothers", context: null },
+    ];
+
+    const prepared = await prepareSpecImport(data, "Specs.xlsx");
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.parsed.profiles).toHaveLength(1);
+    expect(prepared.parsed.profiles[0].brand).toBe("Aldo Brothers");
+    expect(prepared.parsed.profiles[0].flavor).toBe("Cheese");
   });
 
   it("single file: changed bytes fall through to a fresh parse", async () => {

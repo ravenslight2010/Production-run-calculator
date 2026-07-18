@@ -247,6 +247,59 @@ function ingredientKnownForKind(
 }
 
 /**
+ * Alias-only brand/flavor remap for the saved-parse REUSE path. A fresh parse
+ * runs full canonicalizeParsed, but a reused snapshot keeps the brand/flavor
+ * text as it was when first imported — if that brand was later merged or
+ * renamed, the old name is now tombstoned and the tombstone partition would
+ * DROP those profiles (or, without a tombstone, resurrect the old brand).
+ * Applying the learned brand/flavor aliases (recorded on merges/renames) first
+ * remaps them onto the current name so the re-import updates it instead.
+ * Alias-only on purpose: no exact/fuzzy re-snapping of a parse the user
+ * already reviewed. Pure given its inputs.
+ */
+function applyBrandFlavorAliasesToParse(
+  parsed: ParsedSpecImport,
+  aliases: SpecImportAlias[],
+): ParsedSpecImport {
+  const usable = sanitizeSpecAliases(aliases);
+  const mapBrand = (b: string): string => pickAlias(usable, "brand", b) ?? b;
+  const mapFlavor = (f: string, brand: string): string =>
+    pickAlias(usable, "flavor", f, brand) ?? f;
+  const profiles = parsed.profiles.map(p => {
+    const brand = mapBrand(p.brand);
+    const flavor = mapFlavor(p.flavor, brand);
+    if (brand === p.brand && flavor === p.flavor) return p;
+    return { ...p, brand, flavor };
+  });
+  const recipes = parsed.recipes.map(r => {
+    const brand = r.brand ? mapBrand(r.brand) : r.brand;
+    const flavor = r.flavor && brand ? mapFlavor(r.flavor, brand) : r.flavor;
+    const targets = r.targets?.map((t): ParsedRecipeTarget => {
+      const tb = mapBrand(t.brand);
+      return { brand: tb, flavor: mapFlavor(t.flavor, tb) };
+    });
+    if (
+      brand === r.brand &&
+      flavor === r.flavor &&
+      (!targets || targets.every((t, i) => t.brand === r.targets![i].brand && t.flavor === r.targets![i].flavor))
+    ) {
+      return r;
+    }
+    return {
+      ...r,
+      ...(brand !== undefined ? { brand } : {}),
+      ...(flavor !== undefined ? { flavor } : {}),
+      ...(targets ? { targets } : {}),
+    };
+  });
+  const warnings = parsed.warnings?.map(w => {
+    const brand = mapBrand(w.brand);
+    return { ...w, brand, flavor: mapFlavor(w.flavor, brand) };
+  });
+  return { ...parsed, profiles, recipes, ...(warnings ? { warnings } : {}) };
+}
+
+/**
  * Canonicalize every name in the AI result against the app's known lists +
  * learned aliases, returning a clean ParsedSpecImport plus the alias pairs worth
  * remembering. Pure given its inputs.
@@ -996,8 +1049,12 @@ function buildReusedPrepared(
   aliases: SpecImportAlias[],
   sourceHash: string | undefined,
 ): SpecImportPrepared {
+  // Remap merged/renamed-away brand+flavor names through the learned aliases
+  // FIRST — a snapshot saved before a merge/rename still carries the old name,
+  // which is now tombstoned and would otherwise be silently dropped (or, with
+  // no tombstone, resurrected) instead of updating the current name.
   const { kept, skipped } = partitionTombstonedParse(
-    snapshotData,
+    applyBrandFlavorAliasesToParse(snapshotData, aliases),
     importProfileIsTombstoned,
     recipeNameIsTombstoned,
   );

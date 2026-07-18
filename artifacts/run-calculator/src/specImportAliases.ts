@@ -31,6 +31,36 @@ export async function fetchSpecImportAliases(): Promise<SpecImportAlias[]> {
   return data.aliases ?? [];
 }
 
+/**
+ * Learn spec-import aliases when a brand/flavor is MERGED or RENAMED so a later
+ * re-import of the same workbook resolves the old name to the new one instead
+ * of resurrecting it. The merge UI already learns a merge-suggester alias, but
+ * the importers canonicalize through THIS store — without this record, a
+ * re-import treats the merged-away/renamed name as brand-new. Flavor aliases
+ * carry the canonical brand as context (flavor names are brand-scoped).
+ * Best-effort by design: callers fire-and-forget; a failure just means the next
+ * re-import shows the old name for manual review again.
+ */
+export async function learnSpecImportAliasesForNameChange(
+  kind: "brand" | "flavor",
+  sources: ReadonlyArray<string>,
+  target: string,
+  brandContext?: string,
+): Promise<void> {
+  const tgt = target.trim();
+  if (!tgt) return;
+  const aliases: SpecImportAlias[] = sources
+    .map((s) => s.trim())
+    .filter((s) => s && s.toLowerCase() !== tgt.toLowerCase())
+    .map((s) => ({
+      kind,
+      externalName: s,
+      canonicalName: tgt,
+      context: kind === "flavor" ? (brandContext?.trim() || null) : null,
+    }));
+  await saveSpecImportAliases(aliases);
+}
+
 export async function saveSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {
   if (aliases.length === 0) return;
   const res = await fetch("/api/spec-import-aliases", {

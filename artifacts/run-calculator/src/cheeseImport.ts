@@ -15,6 +15,7 @@
 
 import {
   parseCheeseWorkbook,
+  cheeseImportId,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
   buildCheeseAliasLinkMap,
@@ -30,7 +31,12 @@ import {
   type ParsedCheeseSheet,
 } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
-import { gridSanityIssue, type SpecImportAlias } from "@workspace/spec-import";
+import {
+  gridSanityIssue,
+  pickAlias,
+  sanitizeSpecAliases,
+  type SpecImportAlias,
+} from "@workspace/spec-import";
 import { readWorkbookGrids } from "./specImport";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
@@ -61,6 +67,27 @@ export type CheeseImportPrepared = {
 
 /** Hard cap on files per import so one batch can't fan out into a flood. */
 export const MAX_CHEESE_IMPORT_FILES = 10;
+
+/**
+ * Resolve a parsed cheese recipe's brand through the learned brand aliases
+ * (recorded on brand merges/renames), so re-importing a workbook whose tab
+ * still carries the OLD customer name updates the renamed pool instead of
+ * resurrecting the old brand. The recipe id is brand-derived, so it is
+ * recomputed too — that is what makes the existing-id "update" match work.
+ * Sheet-level brand text is deliberately NOT remapped by callers: sub-mix
+ * detection strips the brand prefix as WRITTEN on the sheet.
+ */
+export function remapCheeseRecipeBrands(
+  recipes: ReadonlyArray<CheeseRecipe>,
+  aliases: ReadonlyArray<SpecImportAlias>,
+): CheeseRecipe[] {
+  const usable = sanitizeSpecAliases(aliases);
+  return recipes.map((r) => {
+    const canon = pickAlias(usable, "brand", r.brand);
+    if (!canon || canon === r.brand) return r;
+    return { ...r, brand: canon, id: cheeseImportId(canon, r.name) };
+  });
+}
 
 /**
  * Read one or more "Cheese Mix Recipe Specs" workbooks → deterministic parse →
@@ -95,7 +122,17 @@ export async function prepareCheeseImport(
       // Cheap junk-file guard (a renamed PDF/image "reads" as one junk sheet).
       const sanity = gridSanityIssue(grids);
       if (sanity) throw new Error(sanity);
-      const { recipes, sheets: parsedSheets } = parseCheeseWorkbook(grids);
+      const parsedWb = parseCheeseWorkbook(grids);
+      // Snap merged/renamed-away customer names to their canonical brand BEFORE
+      // dedupe/existing-id matching, so a re-import of an old workbook updates
+      // the renamed pool instead of resurrecting the old brand. Sheet recipes
+      // are remapped too (sub-mix detection keys on recipe id), but the sheet's
+      // own brand text stays as written for brand-prefix stripping.
+      const recipes = remapCheeseRecipeBrands(parsedWb.recipes, aliases);
+      const parsedSheets = parsedWb.sheets.map((s) => ({
+        ...s,
+        recipes: remapCheeseRecipeBrands(s.recipes, aliases),
+      }));
       if (recipes.length === 0) {
         failedNames.push(label);
         errors.push(`${label}: no recognizable cheese recipes.`);
