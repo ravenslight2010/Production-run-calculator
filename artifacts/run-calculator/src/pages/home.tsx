@@ -317,6 +317,7 @@ import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 
 import { useClock } from "../hooks/useClock";
+import { usePresentationCast } from "../hooks/usePresentationCast";
 import { useAutoTrack, suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { useNotifications } from "../hooks/useNotifications";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
@@ -4070,6 +4071,14 @@ export default function Home() {
   // ── Screen casting mode ────────────────────────────────────────────────────
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
+  // One-click Chromecast (Presentation API). Disabled on the cast display itself
+  // (screenMode !== null) so TVs never try to reconnect/start presentations.
+  const {
+    supported: castSupported,
+    casts: activeCasts,
+    startCast,
+    stopCast,
+  } = usePresentationCast(screenMode === null);
   const [showMobileQrDialog, setShowMobileQrDialog] = useState(false);
 
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
@@ -11136,6 +11145,15 @@ export default function Home() {
                 <button type="button" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
+              {castSupported ? (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Have a Chromecast? Tap <span className="font-semibold text-foreground">Cast</span> to send a screen straight to a TV — you can cast different screens to different devices at the same time. For AirPlay or Miracast TVs, use the QR code / URL or your device's screen mirroring.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  One-click casting needs Chrome or Edge. In this browser, use the QR code or URL on the TV's browser — or use AirPlay / Miracast screen mirroring from your device.
+                </p>
+              )}
               <div className="space-y-3 overflow-y-auto overscroll-contain flex-1 mt-3">
                 {screens.map(s => (
                   <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
@@ -11173,7 +11191,37 @@ export default function Home() {
                         >
                           <ExternalLink className="w-3 h-3" /> Open
                         </a>
+                        {castSupported && (
+                          activeCasts[s.key] ? (
+                            <button
+                              type="button"
+                              onClick={() => stopCast(s.key)}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-destructive/20 border border-destructive/40 text-destructive hover:bg-destructive/30 transition-colors shrink-0"
+                            >
+                              <Square className="w-3 h-3" /> Stop
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await startCast(s.key, s.url);
+                                if (!res.ok && res.error) {
+                                  toast({ title: "Couldn't cast", description: res.error, variant: "destructive" });
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-primary/20 border border-primary/40 text-primary hover:bg-primary/30 transition-colors shrink-0"
+                            >
+                              <Monitor className="w-3 h-3" /> Cast
+                            </button>
+                          )
+                        )}
                       </div>
+                      {activeCasts[s.key] && (
+                        <p className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1">
+                          <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${activeCasts[s.key] === "connecting" ? "animate-pulse" : ""}`} />
+                          {activeCasts[s.key] === "connecting" ? "Connecting to Cast device…" : "Casting to a Cast device"}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}

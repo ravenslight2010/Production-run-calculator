@@ -26,6 +26,14 @@ Related: the web manual-edit suppression window `AUTO_SUPPRESS_MS` is 1 minute B
 USER CHOICE (July 2026) — do not "fix" it back to mobile's 10 minutes; the user wants
 tracking to resume quickly from a manual baseline.
 
+**One-click Chromecast (July 2026):** the Cast dialog also offers per-screen Cast/Stop
+buttons via the browser Presentation API (`usePresentationCast` hook) — Chrome/Edge only,
+feature-hidden elsewhere with a QR/AirPlay-mirroring note. One PresentationRequest per
+screen URL allows simultaneous casts to multiple devices; presentation ids persist in
+localStorage for reconnect after reload. The hook is DISABLED when `screenMode !== null`
+so TVs never start/reconnect presentations. No custom Cast receiver app — deliberately
+kept to the Presentation API (do not add the Cast SDK).
+
 **How to apply:** when adding/changing a cast screen, do it in web only. To add a new
 castable screen you must (1) add an `if (screenMode === "X")` early-return view and
 (2) add a matching entry to the `screens` array in the Cast dialog. Reuse existing data
