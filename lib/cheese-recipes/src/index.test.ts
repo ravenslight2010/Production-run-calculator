@@ -17,6 +17,7 @@ import {
   renameCheeseRecipesBrand,
   repointCheeseRecipesForFlavorMerge,
   repointCheeseRecipeIngredients,
+  catchAllPreviewSkipReason,
   cheeseRecipeMatchesQuery,
   groupCheeseRecipesByBrand,
   type CheeseRecipe,
@@ -652,5 +653,57 @@ describe("backfillCheeseSharePcts", () => {
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe("b");
     expect(out[0].components.map((c) => c.sharePct)).toEqual([25, 75]);
+  });
+});
+
+describe("catchAllPreviewSkipReason", () => {
+  const known = ["SMD Supreme Cheese Mix", "SMD BBQ Chicken Cheese Mix"];
+
+  it("skips a flavor whose slot links to a different existing recipe", () => {
+    expect(
+      catchAllPreviewSkipReason(
+        ["SMD BBQ Chicken Cheese Mix"],
+        "SMD Supreme Cheese Mix",
+        known,
+      ),
+    ).toBe("SMD BBQ Chicken Cheese Mix");
+  });
+
+  it("never skips when any slot links to this recipe itself", () => {
+    expect(
+      catchAllPreviewSkipReason(
+        ["SMD BBQ Chicken Cheese Mix", "smd supreme cheese mix"],
+        "SMD Supreme Cheese Mix",
+        known,
+      ),
+    ).toBeNull();
+  });
+
+  it("matches slot names case-insensitively and returns the canonical name", () => {
+    expect(
+      catchAllPreviewSkipReason(
+        ["smd bbq chicken cheese mix"],
+        "SMD Supreme Cheese Mix",
+        known,
+      ),
+    ).toBe("SMD BBQ Chicken Cheese Mix");
+  });
+
+  it("ignores slot names that do not match any known recipe (stale links)", () => {
+    expect(
+      catchAllPreviewSkipReason(
+        ["Deleted Old Mix"],
+        "SMD Supreme Cheese Mix",
+        known,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null with no slot links or empty inputs", () => {
+    expect(catchAllPreviewSkipReason([], "SMD Supreme Cheese Mix", known)).toBeNull();
+    expect(catchAllPreviewSkipReason(["", "  "], "SMD Supreme Cheese Mix", known)).toBeNull();
+    expect(
+      catchAllPreviewSkipReason(["SMD BBQ Chicken Cheese Mix"], "SMD Supreme Cheese Mix", []),
+    ).toBeNull();
   });
 });

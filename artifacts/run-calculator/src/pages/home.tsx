@@ -444,6 +444,7 @@ import {
   backfillCheeseRecipeFromMergedSources,
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
+  catchAllPreviewSkipReason,
 } from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
@@ -11929,31 +11930,52 @@ export default function Home() {
                         // the saved profile's cheese applicator Oz/Pizza —
                         // preferring the slot linked to THIS recipe by name,
                         // falling back to the profile's single cheese slot.
+                        // For the catch-all (blank flavors) coverage, flavors
+                        // whose profile is name-linked to a DIFFERENT existing
+                        // cheese recipe are skipped and reported, so the
+                        // preview matches what the run cards actually pick.
                         const brand = recipe.brand.trim();
-                        if (!brand) return [];
-                        const flavors = recipe.flavors.length > 0
-                          ? recipe.flavors
-                          : (brandFlavors[brand] ?? []);
+                        if (!brand) return { targets: [], skipped: [] };
+                        const isCatchAll = recipe.flavors.length === 0;
+                        const flavors = isCatchAll
+                          ? (brandFlavors[brand] ?? [])
+                          : recipe.flavors;
                         const nameLc = recipe.name.trim().toLowerCase();
-                        const out: { flavor: string; oz: number }[] = [];
+                        const knownRecipeNames = cheeseRecipesList.map((r) => r.name);
+                        const targets: { flavor: string; oz: number }[] = [];
+                        const skipped: { flavor: string; recipeName: string }[] = [];
                         for (const flavor of flavors) {
                           const p = loadProfile(brand, flavor);
                           if (!p) continue;
                           const vals = p as unknown as Record<string, unknown>;
+                          const slotNames: string[] = [];
                           let linkedOz = 0;
                           let cheeseOz = 0;
                           let cheeseSlots = 0;
                           for (const n of [1, 2, 3, 4]) {
-                            const slotName = String(vals[`app${n}CheeseRecipeName`] ?? "").trim().toLowerCase();
+                            const slotNameRaw = String(vals[`app${n}CheeseRecipeName`] ?? "").trim();
+                            const slotName = slotNameRaw.toLowerCase();
                             const type = String(vals[`app${n}Type`] ?? "").trim().toLowerCase();
                             const oz = Number(vals[`app${n}OzPerPizza`] ?? 0) || 0;
+                            if (slotNameRaw) slotNames.push(slotNameRaw);
                             if (nameLc && slotName === nameLc && oz > 0) linkedOz = oz;
                             if (type === "cheese" && oz > 0) { cheeseSlots++; cheeseOz = oz; }
                           }
+                          if (isCatchAll) {
+                            const linkedElsewhere = catchAllPreviewSkipReason(
+                              slotNames,
+                              recipe.name,
+                              knownRecipeNames,
+                            );
+                            if (linkedElsewhere) {
+                              skipped.push({ flavor, recipeName: linkedElsewhere });
+                              continue;
+                            }
+                          }
                           const oz = linkedOz > 0 ? linkedOz : cheeseSlots === 1 ? cheeseOz : 0;
-                          if (oz > 0) out.push({ flavor, oz });
+                          if (oz > 0) targets.push({ flavor, oz });
                         }
-                        return out;
+                        return { targets, skipped };
                       }}
                       ingredientSuggestions={[
                         ...cheeseIngredients,

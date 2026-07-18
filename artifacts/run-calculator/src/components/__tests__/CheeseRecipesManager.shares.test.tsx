@@ -50,7 +50,10 @@ function renderManager() {
   return render(
     <QueryClientProvider client={qc}>
       <CheeseRecipesManager
-        getFlavorTargets={() => [{ flavor: "Pepperoni", oz: 5 }]}
+        getFlavorTargets={() => ({
+          targets: [{ flavor: "Pepperoni", oz: 5 }],
+          skipped: [],
+        })}
       />
     </QueryClientProvider>,
   );
@@ -135,5 +138,51 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
 
     const shares = shareValues(container);
     expect(shares).toEqual([60, 30, 10]);
+  });
+});
+
+describe("catch-all preview skipped-flavor hint", () => {
+  it("lists targets and shows the 'uses its own cheese mix' note for skipped flavors", () => {
+    items.push(aldos());
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <CheeseRecipesManager
+          getFlavorTargets={() => ({
+            targets: [{ flavor: "Pepperoni", oz: 5 }],
+            skipped: [
+              { flavor: "BBQ CHICKEN", recipeName: "SMD BBQ Chicken Cheese Mix" },
+            ],
+          })}
+        />
+      </QueryClientProvider>,
+    );
+    expandRecipe();
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("Pepperoni");
+    expect(text).toContain("BBQ CHICKEN uses its own cheese mix (SMD BBQ Chicken Cheese Mix)");
+    // The skipped flavor must NOT appear as a preview target line.
+    expect(text).not.toContain("BBQ CHICKEN — target");
+  });
+
+  it("shows the hint even when no flavor has a preview target", () => {
+    items.push(aldos());
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <CheeseRecipesManager
+          getFlavorTargets={() => ({
+            targets: [],
+            skipped: [{ flavor: "BBQ CHICKEN", recipeName: "SMD BBQ Chicken Cheese Mix" }],
+          })}
+        />
+      </QueryClientProvider>,
+    );
+    expandRecipe();
+
+    expect(container.textContent ?? "").toContain(
+      "BBQ CHICKEN uses its own cheese mix (SMD BBQ Chicken Cheese Mix)",
+    );
   });
 });

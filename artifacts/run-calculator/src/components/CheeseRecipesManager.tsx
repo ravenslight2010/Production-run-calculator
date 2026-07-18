@@ -104,6 +104,13 @@ function blankCheeseRecipe(): CheeseRecipe {
 // SEPARATE pool (cheese is not routed into Mixes). The server enforces the
 // manager role on writes; this card is only rendered for managers.
 export type CheeseFlavorTarget = { flavor: string; oz: number };
+// Flavors a catch-all recipe's preview intentionally skips because their
+// profile is name-linked to a different cheese recipe.
+export type CheeseFlavorSkip = { flavor: string; recipeName: string };
+export type CheeseFlavorCoverage = {
+  targets: CheeseFlavorTarget[];
+  skipped: CheeseFlavorSkip[];
+};
 
 export default function CheeseRecipesManager({
   brands = [],
@@ -118,7 +125,7 @@ export default function CheeseRecipesManager({
   // recipe covers, read from the saved brand/flavor profiles. Drives the
   // "oz per pizza by flavor" preview; optional so the editor still works
   // standalone (no preview shown).
-  getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorTarget[];
+  getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorCoverage;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useCheeseRecipes();
@@ -413,7 +420,7 @@ function CheeseRecipeEditor({
   brands: string[];
   brandFlavors: Record<string, string[]>;
   ingredientSuggestions: string[];
-  getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorTarget[];
+  getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorCoverage;
   onChange: (recipe: CheeseRecipe) => void;
   onDelete: () => void;
 }) {
@@ -481,7 +488,11 @@ function CheeseRecipeEditor({
   // that target split by each ingredient's blend share — the same math the run
   // "Cheese" cards use (cheesePerFlavorComponentOz), so what the manager
   // previews here is exactly what operators see on a run.
-  const flavorTargets = getFlavorTargets ? getFlavorTargets(draft) : [];
+  const flavorCoverage = getFlavorTargets
+    ? getFlavorTargets(draft)
+    : { targets: [], skipped: [] };
+  const flavorTargets = flavorCoverage.targets;
+  const skippedFlavors = flavorCoverage.skipped;
 
   const flavorPreview = useMemo(
     () =>
@@ -723,6 +734,22 @@ function CheeseRecipeEditor({
               </span>
             </div>
           ))}
+          {skippedFlavors.length > 0 && (
+            <p className="text-[11px] text-muted-foreground/80 italic">
+              Not shown: {skippedFlavors
+                .map((s) => `${s.flavor} uses its own cheese mix (${s.recipeName})`)
+                .join(" · ")}
+            </p>
+          )}
+        </div>
+      )}
+      {flavorPreview.length === 0 && skippedFlavors.length > 0 && (
+        <div className="rounded-md border border-border/40 bg-background/40 p-2">
+          <p className="text-[11px] text-muted-foreground/80 italic">
+            Not shown: {skippedFlavors
+              .map((s) => `${s.flavor} uses its own cheese mix (${s.recipeName})`)
+              .join(" · ")}
+          </p>
         </div>
       )}
     </div>

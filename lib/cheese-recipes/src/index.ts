@@ -309,6 +309,45 @@ export function cheesePerFlavorComponentOz(
 }
 
 /**
+ * For a CATCH-ALL (empty flavors) recipe's editor preview coverage: decide
+ * whether a flavor should be SKIPPED because its saved profile's cheese card
+ * is name-linked to a DIFFERENT existing cheese recipe. Returns the linked
+ * recipe's canonical name when the flavor should be skipped, or null when it
+ * should stay in the preview. Pure.
+ *
+ * Rules:
+ * - If ANY slot is linked (case-insensitive) to `recipeName` itself, never
+ *   skip — an explicit link to this recipe wins.
+ * - Otherwise, if some slot names a DIFFERENT recipe that actually exists in
+ *   `knownRecipeNames`, skip and report that recipe's name (first match).
+ * - Slot names that don't match any known recipe are ignored (stale links
+ *   shouldn't hide coverage).
+ */
+export function catchAllPreviewSkipReason(
+  slotRecipeNames: ReadonlyArray<string>,
+  recipeName: string,
+  knownRecipeNames: ReadonlyArray<string>,
+): string | null {
+  const selfLc = recipeName.trim().toLowerCase();
+  const known = new Map<string, string>();
+  for (const n of knownRecipeNames) {
+    const t = n.trim();
+    if (t) known.set(t.toLowerCase(), t);
+  }
+  let other: string | null = null;
+  for (const raw of slotRecipeNames) {
+    const lc = raw.trim().toLowerCase();
+    if (!lc) continue;
+    if (selfLc && lc === selfLc) return null;
+    if (other === null) {
+      const canonical = known.get(lc);
+      if (canonical !== undefined && lc !== selfLc) other = canonical;
+    }
+  }
+  return other;
+}
+
+/**
  * One-time additive backfill: fill in `sharePct` (percent, 2dp) on components
  * that don't have one yet, derived from the recipe's existing ozPerPizza or
  * lbs proportions. Existing sharePct values are NEVER changed; recipes with no
