@@ -21,7 +21,10 @@ import {
   stripPurchasedCrustDie,
   type SpecImportAlias as SpecAliasEntry,
 } from "@workspace/spec-import";
-import { normalizeDoughballVariants } from "@workspace/named-recipes";
+import {
+  normalizeDoughballVariants,
+  collapseDoughballVariantSuffixDuplicates,
+} from "@workspace/named-recipes";
 import {
   backfillCheeseSharePcts,
   stripInconsistentCheeseOz,
@@ -1242,6 +1245,64 @@ async function runPurchasedCrustDieDepoison(): Promise<void> {
   });
 }
 
+// ── Doughball variant suffix-duplicate collapse ─────────────────────────────
+// Variant merging used to key on the EXACT (ci) label, so a later import that
+// phrased a variant label with the family dough name tacked on ("Corner Booth
+// CRB Dough") appended a NEW variant next to the existing "Corner Booth"
+// instead of updating it. The merge paths now fold suffix-equivalent labels
+// (see doughballVariantLabelKey in @workspace/named-recipes); this heal
+// collapses the duplicates that already landed: per dough recipe (all scopes),
+// entries whose labels are suffix-equivalent fold onto one entry keeping the
+// base (shorter) label, later set values winning (identical in the observed
+// production data). Entries whose numbers contradict are never folded, so no
+// legitimate variant is lost.
+
+const DOUGH_VARIANT_SUFFIX_DEDUPE_HEAL_ID = "dough-variant-suffix-dedupe-v1";
+
+async function runDoughVariantSuffixDedupe(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: DOUGH_VARIANT_SUFFIX_DEDUPE_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(doughRecipesTable).for("update");
+    let updatedRows = 0;
+    let removedVariants = 0;
+    for (const row of rows) {
+      const before = normalizeDoughballVariants(row.doughballVariants);
+      const collapsed = collapseDoughballVariantSuffixDuplicates(
+        before,
+        row.name,
+      );
+      if (!collapsed) continue;
+      await tx
+        .update(doughRecipesTable)
+        .set({ doughballVariants: collapsed, updatedAt: new Date() })
+        .where(
+          and(
+            eq(doughRecipesTable.id, row.id),
+            eq(doughRecipesTable.scope, row.scope),
+          ),
+        );
+      updatedRows++;
+      removedVariants += before.length - collapsed.length;
+    }
+
+    logger.info(
+      {
+        heal: DOUGH_VARIANT_SUFFIX_DEDUPE_HEAL_ID,
+        scanned: rows.length,
+        updatedRows,
+        removedVariants,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1262,4 +1323,5 @@ export async function runDataHeals(): Promise<void> {
   await runSeaSaltAliasUndo();
   await runMixDuplicateNamePurge();
   await runPurchasedCrustDieDepoison();
+  await runDoughVariantSuffixDedupe();
 }

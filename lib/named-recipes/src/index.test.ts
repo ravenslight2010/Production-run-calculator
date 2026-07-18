@@ -13,6 +13,8 @@ import {
   fillNamedRecipeDoughballWeights,
   fillNamedRecipeDoughballsPerTray,
   normalizeDoughballVariants,
+  doughballVariantLabelKey,
+  collapseDoughballVariantSuffixDuplicates,
   mergeNamedRecipeDoughballVariants,
   matchDoughballVariant,
   type DoughballVariant,
@@ -509,7 +511,152 @@ describe("normalizeDoughballVariants", () => {
   });
 });
 
+describe("doughballVariantLabelKey", () => {
+  it("strips the family name / generic dough words from the tail only", () => {
+    expect(doughballVariantLabelKey("Corner Booth CRB Dough", "CRB Dough")).toBe("corner booth");
+    expect(doughballVariantLabelKey("Corner Booth", "CRB Dough")).toBe("corner booth");
+    expect(doughballVariantLabelKey("Basha's Ultra Thin CRB Dough", "CRB Dough")).toBe("bashas ultra thin");
+    // middle tokens are never stripped
+    expect(doughballVariantLabelKey("Lowe's CRB Heavier", "CRB Dough")).toBe("lowes crb heavier");
+    expect(doughballVariantLabelKey("Lowe's 7 Inch", "CRB Dough")).toBe("lowes 7 inch");
+  });
+
+  it("never strips to empty — a label that IS the family name keeps a token", () => {
+    expect(doughballVariantLabelKey("CRB Dough", "CRB Dough")).toBe("crb");
+    expect(doughballVariantLabelKey("Dough", "CRB Dough")).toBe("dough");
+  });
+});
+
+describe("normalizeDoughballVariants suffix folding", () => {
+  it("folds a suffixed twin onto the base label when a recipe name is given", () => {
+    expect(
+      normalizeDoughballVariants(
+        [
+          { label: "Corner Booth", weightOz: 8.25, perTray: 20 },
+          { label: "Corner Booth CRB Dough", weightOz: 8.25, perTray: 20 },
+        ],
+        "CRB Dough",
+      ),
+    ).toEqual([{ label: "Corner Booth", weightOz: 8.25, perTray: 20 }]);
+  });
+
+  it("keeps both when numbers contradict, and without a recipe name", () => {
+    expect(
+      normalizeDoughballVariants(
+        [
+          { label: "Corner Booth", weightOz: 8.25 },
+          { label: "Corner Booth CRB Dough", weightOz: 9 },
+        ],
+        "CRB Dough",
+      ),
+    ).toHaveLength(2);
+    expect(
+      normalizeDoughballVariants([
+        { label: "Corner Booth", weightOz: 8.25 },
+        { label: "Corner Booth CRB Dough", weightOz: 8.25 },
+      ]),
+    ).toHaveLength(2);
+  });
+});
+
+describe("collapseDoughballVariantSuffixDuplicates", () => {
+  it("collapses the observed production duplicates, keeping base labels", () => {
+    const collapsed = collapseDoughballVariantSuffixDuplicates(
+      [
+        { label: "Basha's Original/Lucia's New & Improved", weightOz: 6.9, perTray: 24 },
+        { label: "Basha's Ultra Thin", weightOz: 5.5, perTray: 24 },
+        { label: "Corner Booth", weightOz: 8.25, perTray: 20 },
+        { label: "Hannaford, Lowe's, & SMD", weightOz: 7.6, perTray: 24 },
+        { label: "Lowe's 7 Inch", weightOz: 4.25, perTray: 36 },
+        { label: "Basha's Original/Lucia's New & Improved CRB Dough", weightOz: 6.9, perTray: 24 },
+        { label: "Basha's Ultra Thin CRB Dough", weightOz: 5.5, perTray: 24 },
+        { label: "Corner Booth CRB Dough", weightOz: 8.25, perTray: 20 },
+        { label: "Hannaford, Lowe's, & SMD CRB Dough", weightOz: 7.6, perTray: 24 },
+        { label: "Lowe's 7 Inch CRB Dough", weightOz: 4.25, perTray: 36 },
+      ],
+      "CRB Dough",
+    );
+    expect(collapsed?.map((v) => v.label)).toEqual([
+      "Basha's Original/Lucia's New & Improved",
+      "Basha's Ultra Thin",
+      "Corner Booth",
+      "Hannaford, Lowe's, & SMD",
+      "Lowe's 7 Inch",
+    ]);
+    expect(collapsed?.every((v) => (v.weightOz ?? 0) > 0 && (v.perTray ?? 0) > 0)).toBe(true);
+  });
+
+  it("later set values win on a fold", () => {
+    const collapsed = collapseDoughballVariantSuffixDuplicates(
+      [
+        { label: "Corner Booth", weightOz: 8.25 },
+        { label: "Corner Booth CRB Dough", weightOz: 8.25, perTray: 20 },
+      ],
+      "CRB Dough",
+    );
+    expect(collapsed).toEqual([{ label: "Corner Booth", weightOz: 8.25, perTray: 20 }]);
+  });
+
+  it("never folds contradicting numbers or distinct labels; null when unchanged", () => {
+    expect(
+      collapseDoughballVariantSuffixDuplicates(
+        [
+          { label: "Lowe's CRB Heavier", weightOz: 9 },
+          { label: "Lowe's 7 Inch", weightOz: 4.25 },
+        ],
+        "CRB Dough",
+      ),
+    ).toBeNull();
+    expect(
+      collapseDoughballVariantSuffixDuplicates(
+        [
+          { label: "Corner Booth", weightOz: 8.25 },
+          { label: "Corner Booth CRB Dough", weightOz: 9 },
+        ],
+        "CRB Dough",
+      ),
+    ).toBeNull();
+    expect(collapseDoughballVariantSuffixDuplicates([], "CRB Dough")).toBeNull();
+  });
+});
+
 describe("mergeNamedRecipeDoughballVariants", () => {
+  it("a suffixed incoming label UPDATES the existing base variant (no duplicate)", () => {
+    const pool = [
+      makeNamed({
+        id: "d1",
+        name: "CRB Dough",
+        doughballVariants: [{ label: "Corner Booth", weightOz: 8.25, perTray: 20 }],
+      }),
+    ];
+    const changed = mergeNamedRecipeDoughballVariants(
+      pool,
+      new Map([["crb dough", [{ label: "Corner Booth CRB Dough", weightOz: 8.25, perTray: 22 }]]]),
+    );
+    expect(changed).toHaveLength(1);
+    expect(changed[0].doughballVariants).toEqual([
+      { label: "Corner Booth", weightOz: 8.25, perTray: 22 },
+    ]);
+  });
+
+  it("a suffixed incoming label with a contradicting weight appends instead of clobbering", () => {
+    const pool = [
+      makeNamed({
+        id: "d1",
+        name: "CRB Dough",
+        doughballVariants: [{ label: "Corner Booth", weightOz: 8.25 }],
+      }),
+    ];
+    const changed = mergeNamedRecipeDoughballVariants(
+      pool,
+      new Map([["crb dough", [{ label: "Corner Booth CRB Dough", weightOz: 9 }]]]),
+    );
+    expect(changed[0].doughballVariants).toEqual([
+      { label: "Corner Booth", weightOz: 8.25 },
+      { label: "Corner Booth CRB Dough", weightOz: 9 },
+    ]);
+  });
+
   it("appends new labels, updates existing labels' values, returns only changed, pure", () => {
     const pool = [
       makeNamed({ id: "d1", name: "CRB Dough", doughballVariants: [{ label: '11" CRB', weightOz: 10 }] }),

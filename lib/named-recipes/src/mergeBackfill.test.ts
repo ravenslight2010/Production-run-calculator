@@ -83,7 +83,54 @@ describe("backfillNamedRecipeFromMergedSources", () => {
     ]);
     expect(out!.doughballVariants).toEqual([
       { label: "V1", weightOz: 8 },
+      // v1 @99 contradicts V1 @8 — a genuinely different variant survives
+      { label: "v1", weightOz: 99 },
       { label: "V2", weightOz: 13 },
+    ]);
+  });
+
+  it("folds suffix-equivalent variant labels with compatible values", () => {
+    const target = rec({
+      name: "CRB Dough",
+      components: [{ ingredient: "Flour", lbs: 40 }],
+      doughballVariants: [
+        { label: "Corner Booth", weightOz: 8.25, perTray: 24 },
+      ],
+    });
+    const source = rec({
+      name: "S",
+      doughballVariants: [
+        { label: "Corner Booth CRB Dough", weightOz: 8.25, perTray: 24 },
+        { label: "Lowe's 7 Inch", weightOz: 5.7, perTray: 24 },
+      ],
+    });
+    const out = backfillNamedRecipeFromMergedSources(target, [source]);
+    expect(out).not.toBeNull();
+    expect(out!.doughballVariants).toEqual([
+      { label: "Corner Booth", weightOz: 8.25, perTray: 24 },
+      { label: "Lowe's 7 Inch", weightOz: 5.7, perTray: 24 },
+    ]);
+  });
+
+  it("keeps suffix-equivalent variants whose weights contradict", () => {
+    const target = rec({
+      name: "CRB Dough",
+      components: [{ ingredient: "Flour", lbs: 40 }],
+      doughballVariants: [
+        { label: "Corner Booth", weightOz: 8.25, perTray: 24 },
+      ],
+    });
+    const source = rec({
+      name: "S",
+      doughballVariants: [
+        { label: "Corner Booth CRB Dough", weightOz: 9, perTray: 24 },
+      ],
+    });
+    const out = backfillNamedRecipeFromMergedSources(target, [source]);
+    expect(out).not.toBeNull();
+    expect(out!.doughballVariants).toEqual([
+      { label: "Corner Booth", weightOz: 8.25, perTray: 24 },
+      { label: "Corner Booth CRB Dough", weightOz: 9, perTray: 24 },
     ]);
   });
 

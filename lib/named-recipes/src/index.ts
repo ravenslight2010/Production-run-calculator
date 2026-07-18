@@ -163,19 +163,100 @@ export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
   if (ballOz > 0) recipe.doughballWeightOz = ballOz;
   const perTray = Math.round(coerceNum(raw.doughballsPerTray, 0));
   if (perTray > 0) recipe.doughballsPerTray = perTray;
-  const variants = normalizeDoughballVariants(raw.doughballVariants);
+  const variants = normalizeDoughballVariants(raw.doughballVariants, name);
   if (variants.length > 0) recipe.doughballVariants = variants;
   if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
   return recipe;
+}
+
+// Generic dough words that add no identity to a variant label ("Corner Booth
+// CRB Dough" is the same variant as "Corner Booth" on the CRB Dough recipe).
+const GENERIC_DOUGH_LABEL_TOKENS = new Set([
+  "dough",
+  "doughs",
+  "recipe",
+  "recipes",
+]);
+
+function variantLabelTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/['\u2019]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * Equivalence key for a doughball variant LABEL on a given family recipe:
+ * lowercase tokens with the recipe's own family-name tokens and generic dough
+ * words stripped from the TAIL only (never the middle — "Lowe's CRB Heavier"
+ * keeps its distinctive tokens). "Corner Booth CRB Dough" ≡ "Corner Booth" on
+ * the "CRB Dough" recipe. Conservative: at least one token always survives, so
+ * a label that IS the family name never folds onto an unrelated one. Pure.
+ */
+export function doughballVariantLabelKey(
+  label: string,
+  recipeName = "",
+): string {
+  const tokens = variantLabelTokens(label);
+  if (tokens.length === 0) return label.trim().toLowerCase();
+  const strippable = new Set(GENERIC_DOUGH_LABEL_TOKENS);
+  for (const t of variantLabelTokens(recipeName)) strippable.add(t);
+  let end = tokens.length;
+  while (end > 1 && strippable.has(tokens[end - 1])) end--;
+  return tokens.slice(0, end).join(" ");
+}
+
+// Two variant entries may only FOLD (suffix-equivalent labels) when their
+// numbers don't contradict each other. The doughball WEIGHT is the variant's
+// identity number: two set weights that differ mean two genuinely different
+// variants — never folded. Per-tray is a detail a re-import may legitimately
+// update, so it only blocks a fold in `strict` mode (the one-time data heal,
+// which must be conservative because it has no "this is a re-import" signal).
+function doughballVariantValuesCompatible(
+  a: DoughballVariant,
+  b: DoughballVariant,
+  opts?: { strict?: boolean },
+): boolean {
+  const near = (x: number, y: number) => Math.abs(x - y) < 0.005;
+  if (
+    a.weightOz !== undefined &&
+    b.weightOz !== undefined &&
+    !near(a.weightOz, b.weightOz)
+  ) {
+    return false;
+  }
+  if (
+    opts?.strict &&
+    a.perTray !== undefined &&
+    b.perTray !== undefined &&
+    a.perTray !== b.perTray
+  ) {
+    return false;
+  }
+  return true;
+}
+
+// Of two suffix-equivalent labels, keep the base (shorter) spelling — the one
+// without the family name tacked on. Ties keep the existing label.
+function pickBaseVariantLabel(existing: string, incoming: string): string {
+  return incoming.length < existing.length ? incoming : existing;
 }
 
 /**
  * Coerce a raw doughball variants value into a clean list: blank labels and
  * variants with neither a positive weight nor per-tray are dropped; duplicate
  * labels (ci) collapse onto the first occurrence (its set fields win, later
- * duplicates only fill gaps). Pure.
+ * duplicates only fill gaps). When the owning recipe's NAME is supplied,
+ * labels that are suffix-equivalent (identical after stripping the family
+ * name / generic dough words from the tail, e.g. "Corner Booth CRB Dough" vs
+ * "Corner Booth") also collapse — but ONLY when their numbers don't
+ * contradict; the base (shorter) label is kept. Pure.
  */
-export function normalizeDoughballVariants(input: unknown): DoughballVariant[] {
+export function normalizeDoughballVariants(
+  input: unknown,
+  recipeName = "",
+): DoughballVariant[] {
   if (!Array.isArray(input)) return [];
   const out: DoughballVariant[] = [];
   const byKey = new Map<string, number>();
@@ -190,7 +271,7 @@ export function normalizeDoughballVariants(input: unknown): DoughballVariant[] {
     if (weightOz > 0) v.weightOz = weightOz;
     if (perTray > 0) v.perTray = perTray;
     if (v.weightOz === undefined && v.perTray === undefined) continue;
-    const key = label.toLowerCase();
+    const key = doughballVariantLabelKey(label, recipeName);
     const at = byKey.get(key);
     if (at === undefined) {
       byKey.set(key, out.length);
@@ -198,13 +279,65 @@ export function normalizeDoughballVariants(input: unknown): DoughballVariant[] {
       continue;
     }
     const keep = out[at];
+    const exactLabel = keep.label.toLowerCase() === v.label.toLowerCase();
+    if (!exactLabel && !doughballVariantValuesCompatible(keep, v)) {
+      // Suffix-equivalent labels with contradicting numbers: genuinely
+      // different variants — keep both (first keeps the key slot).
+      out.push(v);
+      continue;
+    }
     out[at] = {
       ...keep,
+      label: exactLabel ? keep.label : pickBaseVariantLabel(keep.label, v.label),
       ...(keep.weightOz === undefined && v.weightOz !== undefined ? { weightOz: v.weightOz } : {}),
       ...(keep.perTray === undefined && v.perTray !== undefined ? { perTray: v.perTray } : {}),
     };
   }
   return out;
+}
+
+/**
+ * One-time collapse of a recipe's variant list for the data heal: entries
+ * whose labels are suffix-equivalent under doughballVariantLabelKey fold onto
+ * one entry keeping the base (shorter) label, with the LATER entry's set
+ * fields winning (a later import stated the current numbers — in the observed
+ * production duplicates the values are identical anyway). Entries whose
+ * numbers contradict are never folded. Returns the collapsed list, or null
+ * when nothing changed. Pure.
+ */
+export function collapseDoughballVariantSuffixDuplicates(
+  variants: ReadonlyArray<DoughballVariant> | undefined,
+  recipeName: string,
+): DoughballVariant[] | null {
+  const list = normalizeDoughballVariants(variants as unknown);
+  const out: DoughballVariant[] = [];
+  const byKey = new Map<string, number>();
+  let folded = false;
+  for (const v of list) {
+    const key = doughballVariantLabelKey(v.label, recipeName);
+    const at = byKey.get(key);
+    if (at === undefined) {
+      byKey.set(key, out.length);
+      out.push({ ...v });
+      continue;
+    }
+    const keep = out[at];
+    if (!doughballVariantValuesCompatible(keep, v, { strict: true })) {
+      out.push({ ...v });
+      continue;
+    }
+    out[at] = {
+      label: pickBaseVariantLabel(keep.label, v.label),
+      ...(keep.weightOz !== undefined || v.weightOz !== undefined
+        ? { weightOz: v.weightOz ?? keep.weightOz }
+        : {}),
+      ...(keep.perTray !== undefined || v.perTray !== undefined
+        ? { perTray: v.perTray ?? keep.perTray }
+        : {}),
+    };
+    folded = true;
+  }
+  return folded ? out : null;
 }
 
 /**
@@ -223,28 +356,46 @@ export function mergeNamedRecipeDoughballVariants(
   for (const r of recipes) {
     const incoming = normalizeDoughballVariants(
       variantsByName.get(r.name.trim().toLowerCase()) as unknown,
+      r.name,
     );
     if (incoming.length === 0) continue;
-    const merged = [...normalizeDoughballVariants(r.doughballVariants)];
+    const merged = [...normalizeDoughballVariants(r.doughballVariants, r.name)];
+    // Keyed by the suffix-equivalence key so a re-import whose label carries
+    // the family dough name tacked on ("Corner Booth CRB Dough") UPDATES the
+    // existing base-label variant ("Corner Booth") instead of appending a
+    // duplicate.
     const byKey = new Map<string, number>(
-      merged.map((v, i) => [v.label.toLowerCase(), i]),
+      merged.map((v, i) => [doughballVariantLabelKey(v.label, r.name), i]),
     );
     let touched = false;
     for (const v of incoming) {
-      const at = byKey.get(v.label.toLowerCase());
+      const key = doughballVariantLabelKey(v.label, r.name);
+      const at = byKey.get(key);
       if (at === undefined) {
-        byKey.set(v.label.toLowerCase(), merged.length);
+        byKey.set(key, merged.length);
         merged.push(v);
         touched = true;
         continue;
       }
       const keep = merged[at];
+      const exactLabel = keep.label.toLowerCase() === v.label.toLowerCase();
+      if (!exactLabel && !doughballVariantValuesCompatible(keep, v)) {
+        // Suffix-equivalent labels but contradicting numbers: genuinely
+        // different variants — append instead of clobbering.
+        merged.push(v);
+        touched = true;
+        continue;
+      }
       const next: DoughballVariant = {
         ...keep,
+        label: exactLabel
+          ? keep.label
+          : pickBaseVariantLabel(keep.label, v.label),
         ...(v.weightOz !== undefined ? { weightOz: v.weightOz } : {}),
         ...(v.perTray !== undefined ? { perTray: v.perTray } : {}),
       };
       if (
+        next.label !== keep.label ||
         next.weightOz !== keep.weightOz ||
         next.perTray !== keep.perTray
       ) {
@@ -344,13 +495,27 @@ export function backfillNamedRecipeFromMergedSources(
       changed = true;
     }
     if ((src.doughballVariants ?? []).length > 0) {
-      const have = new Set(
-        (next.doughballVariants ?? []).map((v) => v.label.trim().toLowerCase()),
+      // Suffix-equivalence keys ("Corner Booth CRB Dough" ≡ "Corner Booth")
+      // so a merged-away source can't re-append a suffixed twin of a variant
+      // the target already carries — but contradicting numbers mean a
+      // genuinely different variant, which must survive the union.
+      const have = new Map<string, DoughballVariant>(
+        (next.doughballVariants ?? []).map((v) => [
+          doughballVariantLabelKey(v.label, target.name),
+          v,
+        ]),
       );
       for (const v of src.doughballVariants ?? []) {
-        const key = v.label.trim().toLowerCase();
-        if (!key || have.has(key)) continue;
-        have.add(key);
+        if (!v.label.trim()) continue;
+        const key = doughballVariantLabelKey(v.label, target.name);
+        const existing = have.get(key);
+        if (
+          existing &&
+          doughballVariantValuesCompatible(existing, v, { strict: true })
+        ) {
+          continue;
+        }
+        if (!existing) have.set(key, v);
         next.doughballVariants = [...(next.doughballVariants ?? []), { ...v }];
         changed = true;
       }
