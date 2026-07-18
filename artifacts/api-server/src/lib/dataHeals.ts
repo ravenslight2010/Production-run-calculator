@@ -21,7 +21,11 @@ import {
   type SpecImportAlias as SpecAliasEntry,
 } from "@workspace/spec-import";
 import { normalizeDoughballVariants } from "@workspace/named-recipes";
-import { backfillCheeseSharePcts, normalizeCheeseRecipe } from "@workspace/cheese-recipes";
+import {
+  backfillCheeseSharePcts,
+  stripInconsistentCheeseOz,
+  normalizeCheeseRecipe,
+} from "@workspace/cheese-recipes";
 import {
   POISONED_CHEESE_ALIAS_PAIRS,
   POISONED_FLAVOR_PAIR,
@@ -475,6 +479,55 @@ async function runCheeseShareBackfill(): Promise<void> {
   });
 }
 
+// ── Cheese poisoned-oz strip ────────────────────────────────────────────────
+// Spec imports recorded per-pizza oz values on cheese blend components that
+// (a) no longer cover the whole blend (a manager later added an ingredient
+// with lbs only — e.g. Cellulose on Aldo's Cheese Mix) or (b) contradict the
+// trusted deterministic cheese-workbook lbs by ~10x (Parmesan/Oregano rows).
+// Share math now falls back to lbs on partial coverage, but the stored oz
+// values are still poison: removing the lbs-only row would flip shares back
+// onto the bad oz. This heal drops ALL ozPerPizza values from any recipe
+// whose oz set is partial-coverage or wildly inconsistent with its lbs
+// proportions (see stripInconsistentCheeseOz in @workspace/cheese-recipes).
+// lbs and sharePct are never touched.
+
+const CHEESE_OZ_DEPOISON_HEAL_ID = "cheese-oz-depoison-v1";
+
+async function runCheeseOzDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CHEESE_OZ_DEPOISON_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(cheeseRecipesTable).for("update");
+    let updatedRows = 0;
+    for (const row of rows) {
+      const recipe = normalizeCheeseRecipe(row);
+      if (!recipe) continue;
+      const [changed] = stripInconsistentCheeseOz([recipe]);
+      if (!changed) continue;
+      await tx
+        .update(cheeseRecipesTable)
+        .set({ components: changed.components, updatedAt: new Date() })
+        .where(
+          and(
+            eq(cheeseRecipesTable.id, row.id),
+            eq(cheeseRecipesTable.scope, row.scope),
+          ),
+        );
+      updatedRows++;
+    }
+
+    logger.info(
+      { heal: CHEESE_OZ_DEPOISON_HEAL_ID, scanned: rows.length, updatedRows },
+      "Data heal applied",
+    );
+  });
+}
+
 // ── Dough/sauce recipe name cleanup ─────────────────────────────────────────
 // Past spec imports created dough/sauce pool entries with spec-sheet packaging
 // noise baked into the name: "(made in house)" provenance qualifiers and
@@ -828,6 +881,7 @@ export async function runDataHeals(): Promise<void> {
   await runGenericMixPoisonPurge();
   await runCheeseMixCrossoverPurge();
   await runCheeseShareBackfill();
+  await runCheeseOzDepoison();
   await runNamedRecipeNameCleanup();
   await runDoughYieldDepoison();
   await runDoughFamilyWeightDepoison();

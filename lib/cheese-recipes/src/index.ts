@@ -211,14 +211,22 @@ export function cheeseRecipeTotalLbs(recipe: CheeseRecipe): number {
 // mix, and a flavor's actual per-ingredient oz/pizza is that flavor's cheese
 // applicator target oz × the share. Shares come from (in priority order):
 //   1. explicit manager-entered `sharePct` values,
-//   2. the recorded per-pizza ounce proportions (`ozPerPizza`),
-//   3. the per-batch pound proportions (`lbs`).
+//   2. the recorded per-pizza ounce proportions (`ozPerPizza`) — but ONLY when
+//      they fully cover the blend (every component with positive lbs also has
+//      a positive ozPerPizza). Partial oz coverage (e.g. a manager added a new
+//      ingredient after a spec import recorded oz on the old rows) would zero
+//      the oz-less rows and freeze shares on stale imported data, so in that
+//      case the oz basis is skipped entirely,
+//   3. the per-batch pound proportions (`lbs`),
+//   4. last resort: partial ozPerPizza values when there are no usable lbs at
+//      all (better a partial ratio than none).
 // Whichever source is used, the returned fractions are normalized to sum to 1
-// (or all zeros when the source has no usable numbers).
+// (or all zeros when no source has usable numbers).
 
 /**
  * Index-aligned blend-share FRACTIONS (0–1, summing to 1) for a component
- * list, using the sharePct → ozPerPizza → lbs priority above. Pure.
+ * list, using the sharePct → ozPerPizza (full coverage) → lbs priority above.
+ * Pure.
  */
 export function cheeseComponentShares(
   components: ReadonlyArray<CheeseComponent>,
@@ -228,12 +236,62 @@ export function cheeseComponentShares(
     if (!(total > 0)) return null;
     return vals.map((v) => (v > 0 ? v / total : 0));
   };
+  const ozVals = components.map((c) => Number(c.ozPerPizza ?? 0));
+  // The oz basis only speaks for the whole blend when every weighted (lbs>0)
+  // component carries an oz value; otherwise it's stale/partial import data.
+  const ozCoversBlend = components.every(
+    (c, i) => !(Number(c.lbs ?? 0) > 0) || ozVals[i] > 0,
+  );
   return (
     pick(components.map((c) => Number(c.sharePct ?? 0))) ??
-    pick(components.map((c) => Number(c.ozPerPizza ?? 0))) ??
+    (ozCoversBlend ? pick(ozVals) : null) ??
     pick(components.map((c) => Number(c.lbs ?? 0))) ??
+    pick(ozVals) ??
     components.map(() => 0)
   );
+}
+
+/**
+ * One-time cleanup helper for stored blends that carry poisoned per-pizza oz
+ * data from a spec import: drops ALL ozPerPizza values from a recipe when they
+ * are either PARTIAL (some component with positive lbs has no oz — the oz set
+ * no longer describes the whole blend) or WILDLY INCONSISTENT with the batch
+ * lbs proportions (any row where both bases are usable and the oz share is
+ * more than 3× off the lbs share — the lbs come from the trusted deterministic
+ * cheese workbook, so a contradiction that large means the oz are wrong).
+ * Recipes without usable lbs are left alone (nothing to judge against).
+ * Returns ONLY the recipes that changed. Pure — used by the server data heal.
+ */
+export function stripInconsistentCheeseOz(
+  recipes: ReadonlyArray<CheeseRecipe>,
+): CheeseRecipe[] {
+  const changed: CheeseRecipe[] = [];
+  for (const r of recipes) {
+    const comps = r.components;
+    const lbsTotal = comps.reduce((s, c) => s + Math.max(0, Number(c.lbs ?? 0)), 0);
+    const ozTotal = comps.reduce((s, c) => s + Math.max(0, Number(c.ozPerPizza ?? 0)), 0);
+    if (!(lbsTotal > 0) || !(ozTotal > 0)) continue;
+    const partial = comps.some(
+      (c) => Number(c.lbs ?? 0) > 0 && !(Number(c.ozPerPizza ?? 0) > 0),
+    );
+    const inconsistent = comps.some((c) => {
+      const lbs = Number(c.lbs ?? 0);
+      const oz = Number(c.ozPerPizza ?? 0);
+      if (!(lbs > 0) || !(oz > 0)) return false;
+      const lbsShare = lbs / lbsTotal;
+      const ozShare = oz / ozTotal;
+      const ratio = ozShare / lbsShare;
+      return ratio > 3 || ratio < 1 / 3;
+    });
+    if (!partial && !inconsistent) continue;
+    const components = comps.map((c) => {
+      if (c.ozPerPizza === undefined) return c;
+      const { ozPerPizza: _drop, ...rest } = c;
+      return rest;
+    });
+    changed.push({ ...r, components });
+  }
+  return changed;
 }
 
 /**

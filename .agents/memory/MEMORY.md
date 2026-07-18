@@ -155,4 +155,5 @@
 - [Doughball variants](doughball-variants.md) — family dough recipe carries all variants' weight/per-tray; conservative die-size auto-match, blank-fill-only, stale manual-pick prompts must clear on recipe change.
 - [Unified setup editing](unified-setup-editing.md) — profile-save/pool changes must actively propagate to open forms + linked profiles; first pool snapshot only primes, merges skip per-run/progress fields.
 - [Crust dough-name backstop](crust-dough-name-backstop.md) — AI can omit doughName from "Crust (X Recipe - dies)" rows; deterministic single-candidate backfill + library-row hydration on name-only imports.
+- [Cheese share oz basis](cheese-share-oz-basis.md) — Share % may use oz only with FULL oz coverage of lbs>0 rows; partial imported oz must be stripped (heal + editor clear) or shares go wild.
 - [Detached process reaping](detached-process-reaping.md) — setsid/nohup from the bash tool dies with the session; >2min runs need a workflow or a smaller foreground run.

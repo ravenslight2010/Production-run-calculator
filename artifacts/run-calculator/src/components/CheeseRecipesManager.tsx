@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -25,6 +26,55 @@ import { useCheeseRecipes } from "../hooks/useCheeseRecipes";
 import { saveCheeseRecipes, deleteCheeseRecipes } from "../cheeseRecipes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
+// Decimal-friendly numeric input: keeps the in-progress text locally while
+// focused (so typing "0.", ".5", clearing, etc. never snaps/reformats under
+// the caret), selects everything on focus for easy overwrite, and reports the
+// parsed number on every keystroke so derived UI (shares, batch total)
+// updates live. Syncs from the prop only while NOT focused.
+function DecimalInput({
+  value,
+  onValue,
+  onBlur,
+  disabled,
+  className,
+  max,
+}: {
+  value: number;
+  onValue: (n: number) => void;
+  onBlur?: () => void;
+  disabled?: boolean;
+  className?: string;
+  max?: number;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const clamp = (n: number) =>
+    Math.max(0, max != null ? Math.min(max, n) : n);
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text ?? (value === 0 ? "" : String(value))}
+      placeholder="0"
+      onFocus={(e) => {
+        setText(e.currentTarget.value);
+        e.currentTarget.select();
+      }}
+      onChange={(e) => {
+        const t = e.target.value;
+        if (!/^\d*\.?\d*$/.test(t)) return; // digits + one dot only
+        setText(t);
+        const n = Number(t);
+        onValue(Number.isFinite(n) ? clamp(n) : 0);
+      }}
+      onBlur={() => {
+        setText(null);
+        onBlur?.();
+      }}
+      disabled={disabled}
+      className={className}
+    />
+  );
+}
 
 function genId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -570,9 +620,9 @@ function CheeseRecipeEditor({
           <p className="text-[11px] font-semibold text-muted-foreground">
             Ingredients (lbs per batch · share % of blend)
           </p>
-          {totalLbs > 0 && (
+          {draft.components.length > 0 && (
             <span className="text-[11px] text-muted-foreground font-mono">
-              {totalLbs.toLocaleString(undefined, { maximumFractionDigits: 2 })} lbs / batch
+              Total: {totalLbs.toLocaleString(undefined, { maximumFractionDigits: 2 })} lbs / batch
             </span>
           )}
         </div>
@@ -592,15 +642,13 @@ function CheeseRecipeEditor({
                   placeholder="Ingredient…"
                   className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
                 />
-                <input
-                  type="number"
-                  min={0}
-                  step={0.1}
+                <DecimalInput
                   value={c.lbs}
-                  onChange={(e) =>
-                    patchComponent(idx, {
-                      lbs: Math.max(0, Number(e.target.value) || 0),
-                    })
+                  onValue={(n) =>
+                    // Editing a row's batch lbs makes any imported per-pizza
+                    // oz on that row stale — drop it so the manager's lbs
+                    // (not old spec data) drive the blend shares.
+                    patchComponent(idx, { lbs: n, ozPerPizza: undefined })
                   }
                   onBlur={() => commit()}
                   disabled={disabled}
