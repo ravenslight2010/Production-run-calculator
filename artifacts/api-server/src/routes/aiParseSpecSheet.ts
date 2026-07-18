@@ -321,6 +321,14 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "'Parbake Crust (CRB Recipe - 12\" Dies)' names the dough 'CRB Recipe' (the die " +
     "size segment is not part of the name) — capture such names, do not treat them as generic. " +
     "Omit `doughName` when the sheet just says a generic 'dough'/'crust' without naming one. " +
+    "DIE TYPE vs PURCHASED CRUST: `dieType` is the pressing die that forms in-house dough, " +
+    "and sheets state it EXPLICITLY as a die (e.g. '12\" Dies', 'Argus Dies'), usually inside " +
+    "the crust parenthetical. A product built on a PURCHASED pre-made crust — the crust row " +
+    "names a bought crust with no die mention, e.g. 'Parbake Crust (Bonici 12\")', " +
+    "'Pinsa 12\" Crust - Pedone (WBF-1200-R)', 'Pedone Crust 7\"x12\" Oval' — is not pressed " +
+    "at all: OMIT `dieType` entirely (never put the crust name, its vendor, or a size taken " +
+    "from the crust name into `dieType`) and capture that crust name as the profile's " +
+    "`doughName` instead. " +
     "This is read-only; the user reviews and can edit a summary before anything is saved.";
 
   const known = input.known ?? {};

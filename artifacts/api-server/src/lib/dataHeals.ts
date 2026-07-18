@@ -18,6 +18,7 @@ import {
   isGenericSlotTypeName,
   cleanSpecNamedRecipeName,
   specImportNamedRecipeNamesEqual,
+  stripPurchasedCrustDie,
   type SpecImportAlias as SpecAliasEntry,
 } from "@workspace/spec-import";
 import { normalizeDoughballVariants } from "@workspace/named-recipes";
@@ -1182,6 +1183,65 @@ async function runMixDuplicateNamePurge(): Promise<void> {
   });
 }
 
+// ── Purchased-crust die de-poison ───────────────────────────────────────────
+// Spec imports of purchased pre-made crust products (Bonici/Pedone parbake &
+// pinsa crusts) minted a bogus dieType on the brand profiles: either the whole
+// crust description ("Pedone Crust 7\"x12\" Oval" — with no dough name at all)
+// or a size lifted from the crust name ("Pinsa 12\" Crust …" → die "12\"").
+// Purchased crusts are never pressed, so they have NO die. Apply the same
+// deterministic rule the importer now enforces (stripPurchasedCrustDie in
+// @workspace/spec-import) to stored profile values: a crust-named dieType
+// moves into an empty doughRecipeName and is cleared; a profile whose dough
+// name is a purchased-crust name gets its dieType cleared. In-house names all
+// carry "Dough"/"Recipe"/"Dies", so their dies are untouched.
+
+const PURCHASED_CRUST_DIE_HEAL_ID = "purchased-crust-die-heal-v1";
+
+async function runPurchasedCrustDieDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: PURCHASED_CRUST_DIE_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let updated = 0;
+    for (const p of profiles) {
+      const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+      const before = {
+        dieType: String(values.dieType ?? "").trim() || undefined,
+        doughName: String(values.doughRecipeName ?? "").trim() || undefined,
+      };
+      const after = stripPurchasedCrustDie(before);
+      if (after === before) continue;
+      if (after.dieType !== before.dieType) values.dieType = "";
+      if (after.doughName !== before.doughName) {
+        values.doughRecipeName = after.doughName ?? "";
+      }
+      // Advance the client LWW stamp so a device still holding the poisoned
+      // die can't re-publish it over the heal with a stale stamp.
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      updated++;
+    }
+
+    logger.info(
+      { heal: PURCHASED_CRUST_DIE_HEAL_ID, scanned: profiles.length, updated },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1201,4 +1261,5 @@ export async function runDataHeals(): Promise<void> {
   await runSmdPepCheeseRestore();
   await runSeaSaltAliasUndo();
   await runMixDuplicateNamePurge();
+  await runPurchasedCrustDieDepoison();
 }

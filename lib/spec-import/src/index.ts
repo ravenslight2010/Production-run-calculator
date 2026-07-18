@@ -1503,6 +1503,47 @@ export function linkSpecImportDieTypesToExisting(
 }
 
 /**
+ * Purchased pre-made crusts have NO pressing die — the product arrives formed
+ * (parbake/pinsa crusts from vendors like Bonici or Pedone). The parse model
+ * has been seen minting a `dieType` from such crust rows anyway: either the
+ * whole crust description ("Pedone Crust 7\"x12\" Oval") or the size embedded
+ * in the crust name ("Pinsa 12\" Crust …" → die "12\""), which lands a bogus
+ * die on every profile of the brand.
+ *
+ * Deterministic guard, applied per profile after doughName resolution:
+ *  1. A dieType that itself names a crust (contains "crust"/"parbake") is not
+ *     a die — move it into `doughName` when that is empty, and drop it.
+ *  2. A profile whose doughName is a purchased-crust name (contains "crust"
+ *     but none of "dough"/"recipe"/"die(s)" — an in-house crust row always
+ *     names its dough recipe or its dies) gets its dieType cleared.
+ * Pure and non-mutating — returns the SAME object when nothing changes.
+ */
+const CRUSTLIKE_DIE_RE = /\b(?:crusts?|par[\s-]*baked?)\b/i;
+const PURCHASED_CRUST_NAME_RE = /\bcrusts?\b/i;
+const INHOUSE_CRUST_NAME_RE = /\b(?:doughs?|recipes?|dies?)\b/i;
+
+export function stripPurchasedCrustDie<
+  P extends { dieType?: string; doughName?: string },
+>(profile: P): P {
+  let out = profile;
+  const die = (out.dieType ?? "").trim();
+  if (die && CRUSTLIKE_DIE_RE.test(die)) {
+    out = { ...out, dieType: undefined };
+    if (!(out.doughName ?? "").trim()) out = { ...out, doughName: die };
+  }
+  const dough = (out.doughName ?? "").trim();
+  if (
+    (out.dieType ?? "").trim() &&
+    dough &&
+    PURCHASED_CRUST_NAME_RE.test(dough) &&
+    !INHOUSE_CRUST_NAME_RE.test(dough)
+  ) {
+    out = { ...out, dieType: undefined };
+  }
+  return out;
+}
+
+/**
  * Strip a trailing per-pizza weight token off a cheese-blend name so the same
  * blend applied at two different applicator weights collapses to ONE recipe.
  *
@@ -4270,6 +4311,17 @@ export function sanitizeParsedSpecImport(
       // crust (CRB Recipe - 12\" Dies)"). Backfill so profiles don't land with
       // no dough selected.
       profile.doughName = clampName(sheetCrustDoughName, lim.maxNameChars) || undefined;
+    }
+    {
+      // Purchased pre-made crusts (parbake/pinsa) have no pressing die — drop
+      // a crust-derived dieType and recover the crust name into doughName.
+      const stripped = stripPurchasedCrustDie(profile);
+      if (stripped !== profile) {
+        if (stripped.dieType === undefined) delete profile.dieType;
+        if (stripped.doughName !== profile.doughName) {
+          profile.doughName = clampName(stripped.doughName, lim.maxNameChars) || undefined;
+        }
+      }
     }
     // Allergen the sheet names for this product. Free-form so a NEW allergen
     // beyond egg/soy survives; "none"-style spellings and blanks are dropped

@@ -2,7 +2,7 @@
 - [Recipe print/share](recipe-print-share.md) — AbortError=shared (never clipboard-clobber), escaped print popup; web-only, mobile pending.
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
-- [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; apps self-heal DIE_TYPES from profiles honoring deletions.
+- [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; PURCHASED crusts (Bonici/Pedone parbake/pinsa) get NO die ever; apps self-heal DIE_TYPES from profiles honoring deletions.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it.
 - [Ingredient near-dup merges](ingredient-dedupe.md) — INGREDIENT_RENAMES mirrored web+mobile; FR/Parmesan/mozz-fat carve-outs kept, "Diced" merges by default; bump dedupe marker when adding entries.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
