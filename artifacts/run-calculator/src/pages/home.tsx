@@ -5380,10 +5380,23 @@ export default function Home() {
           // the sources (and their data) alive.
           if (category === "cheese") {
             const pool = await fetchCheeseRecipes();
-            const targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
-            const sourceRows = pool.filter((r) =>
+            let targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
+            let sourceRows = pool.filter((r) =>
               sourceNamesLc.has(r.name.trim().toLowerCase()),
             );
+            // The picked target has NO pool row (a typed/renamed name):
+            // promote the richest source by RENAMING it to the target (the
+            // pool upsert is id-keyed, so keeping the id renames in place).
+            // Without this, deleting the sources below destroyed the only
+            // copies of the recipe data — the merged recipe vanished.
+            if (!targetRow && sourceRows.length > 0) {
+              const best = [...sourceRows].sort(
+                (a, b) => (b.components?.length ?? 0) - (a.components?.length ?? 0),
+              )[0];
+              targetRow = { ...best, name: tgt.trim() };
+              sourceRows = sourceRows.filter((r) => r.id !== best.id);
+              await saveCheeseRecipes([targetRow]);
+            }
             if (targetRow && sourceRows.length > 0) {
               const enriched = backfillCheeseRecipeFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveCheeseRecipes([enriched]);
@@ -5396,10 +5409,21 @@ export default function Home() {
             }
           } else if (category === "mixes") {
             const pool = await fetchMixes();
-            const targetRow = pool.find((m) => m.name.trim().toLowerCase() === tgtLc);
-            const sourceRows = pool.filter((m) =>
+            let targetRow = pool.find((m) => m.name.trim().toLowerCase() === tgtLc);
+            let sourceRows = pool.filter((m) =>
               sourceNamesLc.has(m.name.trim().toLowerCase()),
             );
+            // No pool row for the target name: rename the richest source to
+            // the target instead of deleting every copy of the data (see the
+            // cheese branch above).
+            if (!targetRow && sourceRows.length > 0) {
+              const best = [...sourceRows].sort(
+                (a, b) => (b.components?.length ?? 0) - (a.components?.length ?? 0),
+              )[0];
+              targetRow = { ...best, name: tgt.trim() };
+              sourceRows = sourceRows.filter((m) => m.id !== best.id);
+              await saveMixes([targetRow]);
+            }
             if (targetRow && sourceRows.length > 0) {
               const enriched = backfillMixFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveMixes([enriched]);
@@ -5413,10 +5437,21 @@ export default function Home() {
           } else {
             // dough | sauce — their own named-recipe pools.
             const pool = await fetchNamedRecipes(category);
-            const targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
-            const sourceRows = pool.filter((r) =>
+            let targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
+            let sourceRows = pool.filter((r) =>
               sourceNamesLc.has(r.name.trim().toLowerCase()),
             );
+            // No pool row for the target name: rename the richest source to
+            // the target instead of deleting every copy of the data (see the
+            // cheese branch above).
+            if (!targetRow && sourceRows.length > 0) {
+              const best = [...sourceRows].sort(
+                (a, b) => (b.components?.length ?? 0) - (a.components?.length ?? 0),
+              )[0];
+              targetRow = { ...best, name: tgt.trim() };
+              sourceRows = sourceRows.filter((r) => r.id !== best.id);
+              await saveNamedRecipes(category, [targetRow]);
+            }
             if (targetRow && sourceRows.length > 0) {
               const enriched = backfillNamedRecipeFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveNamedRecipes(category, [enriched]);

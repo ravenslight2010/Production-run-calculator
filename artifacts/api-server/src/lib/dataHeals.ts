@@ -1303,6 +1303,141 @@ async function runDoughVariantSuffixDedupe(): Promise<void> {
   });
 }
 
+// ── Vanished dough-merge restore (Lowe's French Fry) ────────────────────────
+// Merging recipe names in Manage Lists deleted every SOURCE pool row even when
+// the picked TARGET name had no pool row of its own — nothing survived, so the
+// merged dough vanished from the factory-wide pool. On 2026-07-18 this
+// destroyed "LOWE'S FRENCH FRY RECIPE" (an empty spec-import stub) and
+// "LOWE'S HEAVY FRENCH FRY DOUGH" (the real recipe). The client now renames a
+// source to the target instead of orphan-deleting; this heal restores the lost
+// recipe from its saved import parse (saved_spec_sheets id 140/176 — the
+// deterministic source of the deleted row's data) under the fresh,
+// untombstoned name "Lowe's French Fry Dough", and re-points today-and-future
+// day-state run values that still reference the deleted names. Guarded: the
+// insert is skipped if any Lowe's french-fry dough row already exists (e.g.
+// the user re-imported before this shipped).
+
+const DOUGH_MERGE_VANISH_HEAL_ID = "dough-merge-vanish-restore-v1";
+const DOUGH_MERGE_VANISH_FROM_DATE = "2026-07-18";
+
+const LOST_LOWES_FRENCH_FRY_NAMES = new Set([
+  "lowe's french fry recipe",
+  "lowe's heavy french fry dough",
+]);
+const RESTORED_LOWES_FRENCH_FRY = {
+  id: "dough:lowe-s-french-fry-dough-restored",
+  name: "Lowe's French Fry Dough",
+  notes: "",
+  components: [
+    { ingredient: "ADM WHEAT FLOUR", lbs: 200 },
+    { ingredient: "WATER", lbs: 101.5 },
+    { ingredient: "25029 FRENCH FRIES", lbs: 18 },
+    { ingredient: "SUNFLOWER OIL", lbs: 12 },
+    { ingredient: "HONEY", lbs: 9 },
+    { ingredient: "FRESH COMPRESSED YEAST", lbs: 3 },
+    { ingredient: "LION'S CHOICE SEASONING", lbs: 2 },
+    { ingredient: "SALT", lbs: 1 },
+  ],
+  enabled: true,
+  brand: "Lowe's",
+  flavors: [] as string[],
+  doughballWeightOz: 15,
+  doughballsPerTray: 15,
+  doughballVariants: [] as { label: string; weightOz?: number; perTray?: number }[],
+};
+
+async function runDoughMergeVanishRestore(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: DOUGH_MERGE_VANISH_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Restore the pool row (live scope) unless a Lowe's french-fry dough
+    // already exists again — never mint a near-duplicate next to a re-import.
+    const pool = await tx
+      .select({ name: doughRecipesTable.name })
+      .from(doughRecipesTable)
+      .where(eq(doughRecipesTable.scope, "live"))
+      .for("update");
+    const existing = pool.find((r) => {
+      const n = r.name.trim().toLowerCase();
+      return n.includes("lowe") && n.includes("french fry");
+    });
+    // Run values are re-pointed at whatever row actually exists after this
+    // heal: the pre-existing re-imported row if there is one, otherwise the
+    // restored row — never a name with no pool row behind it.
+    const repointTo = existing ? existing.name : RESTORED_LOWES_FRENCH_FRY.name;
+    let restored = 0;
+    if (!existing) {
+      const inserted = await tx
+        .insert(doughRecipesTable)
+        .values({
+          id: RESTORED_LOWES_FRENCH_FRY.id,
+          scope: "live",
+          name: RESTORED_LOWES_FRENCH_FRY.name,
+          notes: RESTORED_LOWES_FRENCH_FRY.notes,
+          components: RESTORED_LOWES_FRENCH_FRY.components,
+          enabled: RESTORED_LOWES_FRENCH_FRY.enabled,
+          brand: RESTORED_LOWES_FRENCH_FRY.brand,
+          flavors: RESTORED_LOWES_FRENCH_FRY.flavors,
+          doughballWeightOz: RESTORED_LOWES_FRENCH_FRY.doughballWeightOz,
+          doughballsPerTray: RESTORED_LOWES_FRENCH_FRY.doughballsPerTray,
+          doughballVariants: RESTORED_LOWES_FRENCH_FRY.doughballVariants,
+          updatedAt: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning({ id: doughRecipesTable.id });
+      restored = inserted.length;
+    }
+
+    // 2) Re-point today-and-future day-state run values still referencing the
+    // deleted names (the merged-away names stay tombstoned — references must
+    // move to the restored name or the runs show a dough that no longer
+    // exists). Past days are history and untouched.
+    const days = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(gte(dailySyncTable.date, DOUGH_MERGE_VANISH_FROM_DATE))
+      .for("update");
+    let repointedDays = 0;
+    for (const day of days) {
+      const data = day.data as Record<string, unknown> | null;
+      const runValues = data?.runValues as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      if (!runValues || typeof runValues !== "object") continue;
+      let changed = false;
+      for (const vals of Object.values(runValues)) {
+        if (!vals || typeof vals !== "object") continue;
+        const dough = String(vals.doughRecipeName ?? "").trim();
+        if (dough && LOST_LOWES_FRENCH_FRY_NAMES.has(dough.toLowerCase())) {
+          vals.doughRecipeName = repointTo;
+          changed = true;
+        }
+      }
+      if (!changed) continue;
+      await tx
+        .update(dailySyncTable)
+        .set({ data: { ...data }, updatedAt: new Date() })
+        .where(
+          and(
+            eq(dailySyncTable.date, day.date),
+            eq(dailySyncTable.scope, day.scope),
+          ),
+        );
+      repointedDays++;
+    }
+
+    logger.info(
+      { heal: DOUGH_MERGE_VANISH_HEAL_ID, restored, repointTo, repointedDays },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1324,4 +1459,5 @@ export async function runDataHeals(): Promise<void> {
   await runMixDuplicateNamePurge();
   await runPurchasedCrustDieDepoison();
   await runDoughVariantSuffixDedupe();
+  await runDoughMergeVanishRestore();
 }
