@@ -11,6 +11,7 @@ import {
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
 import { resolveDieLineDefaults } from "../dieDefaults";
+import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { fetchSavedSpecSheets } from "../savedSpecSheets";
 import { fetchSavedShippingGuides } from "../savedShippingGuides";
 import {
@@ -331,6 +332,9 @@ export default function SetupProfileEditor({
   const replaceCheeseByApp: Record<ApplicatorNum, (rows: RecipeRow[]) => void> = { 1: replaceCheese1, 2: replaceCheese2, 3: replaceCheese3, 4: replaceCheese4 };
 
   const { items: mixes } = useMixes();
+  // Manager-set per-die line-setting overrides (server master-data); die
+  // pre-fill resolves through these first, then the built-in map.
+  const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
   const { items: cheeseRecipesList } = useCheeseRecipes();
   const { items: doughRecipesList } = useNamedRecipes("dough");
   const { items: sauceRecipesList } = useNamedRecipes("sauce");
@@ -899,7 +903,7 @@ export default function SetupProfileEditor({
                           if (val) {
                             // Pre-fill line settings for this die size — blank-fill
                             // only, never overwriting a hand-set value (dieDefaults.ts).
-                            const fills = resolveDieLineDefaults(val, form.getValues());
+                            const fills = resolveDieLineDefaults(val, form.getValues(), dieLineDefaultOverrides);
                             for (const [k, fv] of Object.entries(fills)) {
                               form.setValue(k as keyof typeof fills, fv, { shouldDirty: true });
                             }

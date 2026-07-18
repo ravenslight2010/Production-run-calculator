@@ -74,3 +74,31 @@ describe("resolveDieLineDefaults", () => {
     expect(resolveDieLineDefaults("Mystic", BLANK)).toEqual({});
   });
 });
+
+describe("manager overrides", () => {
+  const OVERRIDE = { crustsPerCycle: 4, cycleSpeed: 9, speedAdjustment: 0.7, freezerTime: 30, casesPerLayer: 8 };
+
+  it("a stored override wins over the built-in map (case-insensitive by name)", () => {
+    const overrides = { '7" dies': OVERRIDE };
+    expect(dieLineDefaultsFor('7" Dies', overrides)).toEqual(OVERRIDE);
+    expect(resolveDieLineDefaults('7" DIES', BLANK, overrides)).toEqual(OVERRIDE);
+  });
+
+  it("an override enables pre-fill for dies the built-in map doesn't know", () => {
+    const overrides = { mystic: OVERRIDE };
+    expect(dieLineDefaultsFor("Mystic", overrides)).toEqual(OVERRIDE);
+    expect(resolveDieLineDefaults("Mystic", BLANK, overrides)).toEqual(OVERRIDE);
+  });
+
+  it("dies without an override still fall back to the built-in map", () => {
+    const overrides = { mystic: OVERRIDE };
+    expect(dieLineDefaultsFor('7"', overrides)).toMatchObject({ crustsPerCycle: 6, freezerTime: 22 });
+  });
+
+  it("overrides still respect the blank-fill-only rule", () => {
+    const overrides = { '7"': OVERRIDE };
+    const filled = resolveDieLineDefaults('7"', { ...BLANK, cycleSpeed: 7.5 }, overrides);
+    expect(filled).not.toHaveProperty("cycleSpeed");
+    expect(filled).toMatchObject({ crustsPerCycle: 4, freezerTime: 30 });
+  });
+});

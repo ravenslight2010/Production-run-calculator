@@ -45,6 +45,7 @@ import type {
   DeleteBrandProfilesInput,
   DeleteCheeseRecipesInput,
   DeleteCycleCountSchedulesInput,
+  DeleteDieLineDefaultsInput,
   DeleteDieTypesInput,
   DeleteFreezerPullItemsInput,
   DeleteIngredientsInput,
@@ -53,6 +54,7 @@ import type {
   DeleteProductionRulesInput,
   DeleteRunTemplatesInput,
   DeniedMergeList,
+  DieLineDefaultsList,
   DieTypeList,
   FacilityKnowledgeList,
   FillMissingInput,
@@ -132,6 +134,7 @@ import type {
   SaveCheeseRecipesInput,
   SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
+  SaveDieLineDefaultsInput,
   SaveDieTypesInput,
   SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
@@ -5470,6 +5473,228 @@ export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
+    }
+
+export const getListDieLineDefaultsUrl = () => {
+
+
+
+
+  return `/api/die-line-defaults`
+}
+
+/**
+ * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
+ * @summary List manager-set per-die line-setting defaults
+ */
+export const listDieLineDefaults = async ( options?: RequestInit): Promise<DieLineDefaultsList> => {
+
+  return customFetch<DieLineDefaultsList>(getListDieLineDefaultsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDieLineDefaultsQueryKey = () => {
+    return [
+    `/api/die-line-defaults`
+    ] as const;
+    }
+
+
+export const getListDieLineDefaultsQueryOptions = <TData = Awaited<ReturnType<typeof listDieLineDefaults>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDieLineDefaultsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDieLineDefaults>>> = ({ signal }) => listDieLineDefaults({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDieLineDefaultsQueryResult = NonNullable<Awaited<ReturnType<typeof listDieLineDefaults>>>
+export type ListDieLineDefaultsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-set per-die line-setting defaults
+ */
+
+export function useListDieLineDefaults<TData = Awaited<ReturnType<typeof listDieLineDefaults>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDieLineDefaults>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDieLineDefaultsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveDieLineDefaultsUrl = () => {
+
+
+
+
+  return `/api/die-line-defaults`
+}
+
+/**
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
+ * @summary Create or update per-die line-setting defaults (manager only)
+ */
+export const saveDieLineDefaults = async (saveDieLineDefaultsInput: SaveDieLineDefaultsInput, options?: RequestInit): Promise<DieLineDefaultsList> => {
+
+  return customFetch<DieLineDefaultsList>(getSaveDieLineDefaultsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveDieLineDefaultsInput,)
+  }
+);}
+
+
+
+
+export const getSaveDieLineDefaultsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDieLineDefaults>>, TError,{data: BodyType<SaveDieLineDefaultsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveDieLineDefaults>>, TError,{data: BodyType<SaveDieLineDefaultsInput>}, TContext> => {
+
+const mutationKey = ['saveDieLineDefaults'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveDieLineDefaults>>, {data: BodyType<SaveDieLineDefaultsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveDieLineDefaults(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveDieLineDefaultsMutationResult = NonNullable<Awaited<ReturnType<typeof saveDieLineDefaults>>>
+    export type SaveDieLineDefaultsMutationBody = BodyType<SaveDieLineDefaultsInput>
+    export type SaveDieLineDefaultsMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update per-die line-setting defaults (manager only)
+ */
+export const useSaveDieLineDefaults = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDieLineDefaults>>, TError,{data: BodyType<SaveDieLineDefaultsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveDieLineDefaults>>,
+        TError,
+        {data: BodyType<SaveDieLineDefaultsInput>},
+        TContext
+      > => {
+      return useMutation(getSaveDieLineDefaultsMutationOptions(options));
+    }
+
+export const getDeleteDieLineDefaultsUrl = () => {
+
+
+
+
+  return `/api/die-line-defaults`
+}
+
+/**
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Manager role required.
+ * @summary Delete per-die line-setting defaults by die name (manager only)
+ */
+export const deleteDieLineDefaults = async (deleteDieLineDefaultsInput: DeleteDieLineDefaultsInput, options?: RequestInit): Promise<DieLineDefaultsList> => {
+
+  return customFetch<DieLineDefaultsList>(getDeleteDieLineDefaultsUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteDieLineDefaultsInput,)
+  }
+);}
+
+
+
+
+export const getDeleteDieLineDefaultsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDieLineDefaults>>, TError,{data: BodyType<DeleteDieLineDefaultsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDieLineDefaults>>, TError,{data: BodyType<DeleteDieLineDefaultsInput>}, TContext> => {
+
+const mutationKey = ['deleteDieLineDefaults'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDieLineDefaults>>, {data: BodyType<DeleteDieLineDefaultsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteDieLineDefaults(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDieLineDefaultsMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDieLineDefaults>>>
+    export type DeleteDieLineDefaultsMutationBody = BodyType<DeleteDieLineDefaultsInput>
+    export type DeleteDieLineDefaultsMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete per-die line-setting defaults by die name (manager only)
+ */
+export const useDeleteDieLineDefaults = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDieLineDefaults>>, TError,{data: BodyType<DeleteDieLineDefaultsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDieLineDefaults>>,
+        TError,
+        {data: BodyType<DeleteDieLineDefaultsInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteDieLineDefaultsMutationOptions(options));
     }
 
 export const getListDieTypesUrl = () => {

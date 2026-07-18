@@ -4,7 +4,9 @@
 // line-setting fields staff otherwise re-type on every run. Defaults are
 // BLANK-FILL ONLY: a field is filled only while it still holds its untouched
 // default value (see DEFAULT_VALUES in types.ts), so numbers a user already
-// changed are never overwritten. The map is hard-coded for now (no manager UI).
+// changed are never overwritten. Managers can override the values per die
+// under Manage Lists → Die Defaults (server master-data); dies with no stored
+// override fall back to the built-in hard-coded map below.
 
 export interface DieLineDefaults {
   crustsPerCycle: number;
@@ -47,14 +49,28 @@ const UNTOUCHED: DieLineDefaults = {
   casesPerLayer: 0,
 };
 
+/** Manager overrides keyed by case-folded die name (see dieLineDefaultsServer). */
+export type DieLineDefaultsOverrides = Record<string, DieLineDefaults>;
+
+/** Canonical override-map key for a die name. */
+export function dieDefaultsKey(dieName: string): string {
+  return (dieName ?? "").trim().toLowerCase();
+}
+
 /**
- * Resolve the line-setting defaults for a die name, tolerating the naming
- * variants in use (`7"`, `7in`, `7 inch`, `12" Dies`, `Argus Dies`, ...).
- * Returns null for unknown/blank dies.
+ * Resolve the line-setting defaults for a die name. A manager-stored override
+ * (matched by exact die name, case-insensitive) wins; otherwise falls back to
+ * the built-in map, tolerating the naming variants in use (`7"`, `7in`,
+ * `7 inch`, `12" Dies`, `Argus Dies`, ...). Returns null for unknown/blank dies.
  */
-export function dieLineDefaultsFor(dieName: string): DieLineDefaults | null {
-  const t = (dieName ?? "").trim().toLowerCase();
+export function dieLineDefaultsFor(
+  dieName: string,
+  overrides?: DieLineDefaultsOverrides,
+): DieLineDefaults | null {
+  const t = dieDefaultsKey(dieName);
   if (!t) return null;
+  const stored = overrides?.[t];
+  if (stored) return stored;
   if (/argus/.test(t)) return ELEVEN_OR_ARGUS;
   const m = t.match(/(\d{1,2})\s*(?:"|”|in\b|inch)?/);
   if (!m) return null;
@@ -74,8 +90,9 @@ export function dieLineDefaultsFor(dieName: string): DieLineDefaults | null {
 export function resolveDieLineDefaults(
   dieName: string,
   current: Partial<Record<keyof DieLineDefaults, unknown>>,
+  overrides?: DieLineDefaultsOverrides,
 ): Partial<DieLineDefaults> {
-  const defaults = dieLineDefaultsFor(dieName);
+  const defaults = dieLineDefaultsFor(dieName, overrides);
   if (!defaults) return {};
   const out: Partial<DieLineDefaults> = {};
   for (const key of Object.keys(defaults) as (keyof DieLineDefaults)[]) {

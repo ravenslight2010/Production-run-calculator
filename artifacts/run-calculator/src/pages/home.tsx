@@ -439,6 +439,8 @@ import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuide
 import { deriveSourceKey } from "@/savedSpecSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
 import CheeseRecipesManager from "@/components/CheeseRecipesManager";
+import DieLineDefaultsManager from "@/components/DieLineDefaultsManager";
+import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import CheeseImportDialog from "@/components/CheeseImportDialog";
 import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
@@ -3574,6 +3576,9 @@ export default function Home() {
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
   const canApproveResets = hasCapability("approve-password-resets");
+  // Manager-set per-die line-setting overrides (server master-data); the run
+  // form's die pre-fill resolves through these first, then the built-in map.
+  const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
 
   // Push every locally-saved dough / sauce recipe preset up into the server pool
   // (match-by-name, no clobber) so they become factory-wide master-data like
@@ -11315,6 +11320,7 @@ export default function Home() {
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageInventory ? [{ key: "mixes", label: "Mixes" }] : []),
           ...(canManageInventory ? [{ key: "cheeseRecipes", label: "Cheese Recipes" }] : []),
+          ...(canManageInventory ? [{ key: "dieDefaults", label: "Die Defaults" }] : []),
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
         ];
@@ -12068,6 +12074,11 @@ export default function Home() {
                       ]}
                     />
                   </div>
+                )}
+
+                {/* Per-die line-setting defaults (server master-data) */}
+                {manageCategory === "dieDefaults" && canManageInventory && (
+                  <DieLineDefaultsManager dieTypes={dieTypes} />
                 )}
 
                 {/* Cycle-count schedules */}
@@ -13703,7 +13714,7 @@ export default function Home() {
                                   // Pre-fill the line settings for this die size —
                                   // blank-fill only, never overwriting a value the
                                   // user already changed (see dieDefaults.ts).
-                                  const fills = resolveDieLineDefaults(dt, form.getValues());
+                                  const fills = resolveDieLineDefaults(dt, form.getValues(), dieLineDefaultOverrides);
                                   for (const [k, val] of Object.entries(fills)) {
                                     form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
                                   }

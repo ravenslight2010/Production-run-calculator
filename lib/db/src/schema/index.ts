@@ -39,4 +39,5 @@ export * from "./runTemplates";
 export * from "./supervisorPinSettings";
 export * from "./ingredients";
 export * from "./dieTypes";
+export * from "./dieLineDefaults";
 export * from "./brandProfiles";

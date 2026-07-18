@@ -2102,6 +2102,69 @@ export const DeleteFreezerPullItemsResponse = zod.object({
 
 
 /**
+ * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
+ * @summary List manager-set per-die line-setting defaults
+ */
+export const ListDieLineDefaultsResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "crustsPerCycle": zod.number(),
+  "cycleSpeed": zod.number(),
+  "speedAdjustment": zod.number(),
+  "freezerTime": zod.number(),
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+}).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
+})
+
+
+/**
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
+ * @summary Create or update per-die line-setting defaults (manager only)
+ */
+export const SaveDieLineDefaultsBody = zod.object({
+  "entries": zod.array(zod.object({
+  "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "crustsPerCycle": zod.number(),
+  "cycleSpeed": zod.number(),
+  "speedAdjustment": zod.number(),
+  "freezerTime": zod.number(),
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+}).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
+})
+
+export const SaveDieLineDefaultsResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "crustsPerCycle": zod.number(),
+  "cycleSpeed": zod.number(),
+  "speedAdjustment": zod.number(),
+  "freezerTime": zod.number(),
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+}).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
+})
+
+
+/**
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Manager role required.
+ * @summary Delete per-die line-setting defaults by die name (manager only)
+ */
+export const DeleteDieLineDefaultsBody = zod.object({
+  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed')
+})
+
+export const DeleteDieLineDefaultsResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "crustsPerCycle": zod.number(),
+  "cycleSpeed": zod.number(),
+  "speedAdjustment": zod.number(),
+  "freezerTime": zod.number(),
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+}).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
+})
+
+
+/**
  * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
  * @summary List factory-wide die types
  */

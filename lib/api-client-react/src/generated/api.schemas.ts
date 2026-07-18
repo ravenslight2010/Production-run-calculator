@@ -2342,6 +2342,33 @@ export interface DieTypeList {
   names: string[];
 }
 
+/**
+ * Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.
+ */
+export interface DieLineDefaultsEntry {
+  /** Die-type display name (matched case-insensitively) */
+  name: string;
+  crustsPerCycle: number;
+  cycleSpeed: number;
+  speedAdjustment: number;
+  freezerTime: number;
+  /** "Extra Case Buffer" in the UI */
+  casesPerLayer: number;
+}
+
+export interface DieLineDefaultsList {
+  entries: DieLineDefaultsEntry[];
+}
+
+export interface SaveDieLineDefaultsInput {
+  entries: DieLineDefaultsEntry[];
+}
+
+export interface DeleteDieLineDefaultsInput {
+  /** Die names whose stored defaults should be removed */
+  names: string[];
+}
+
 export interface SaveDieTypesInput {
   /** Die-type display names to create or update */
   names: string[];

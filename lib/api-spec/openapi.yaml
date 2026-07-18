@@ -1813,6 +1813,76 @@ paths:
         "403":
           description: Manager role required
 
+  /die-line-defaults:
+    get:
+      operationId: listDieLineDefaults
+      tags: [dieLineDefaults]
+      summary: List manager-set per-die line-setting defaults
+      description: >-
+        Returns every stored per-die line-setting default (crusts per cycle,
+        cycle speed, speed adjustment, freezer time, extra case buffer).
+        Factory-wide master-data (not part of the per-day sync payload).
+        Reading is available to any signed-in user so the run form / setup
+        editor can pre-fill line settings; editing is manager-only. Dies with
+        no stored entry fall back to the app's built-in defaults.
+      responses:
+        "200":
+          description: All stored per-die line-setting defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DieLineDefaultsList"
+    post:
+      operationId: saveDieLineDefaults
+      tags: [dieLineDefaults]
+      summary: Create or update per-die line-setting defaults (manager only)
+      description: >-
+        Upserts a batch of per-die line-setting defaults keyed by die name
+        (case-insensitive). Malformed entries are dropped. Manager role
+        required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDieLineDefaultsInput"
+      responses:
+        "200":
+          description: The full updated list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DieLineDefaultsList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteDieLineDefaults
+      tags: [dieLineDefaults]
+      summary: Delete per-die line-setting defaults by die name (manager only)
+      description: >-
+        Removes stored per-die defaults by die name (case-insensitive), so
+        those dies fall back to the app's built-in defaults. Manager role
+        required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteDieLineDefaultsInput"
+      responses:
+        "200":
+          description: The full updated list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DieLineDefaultsList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
   /die-types:
     get:
       operationId: listDieTypes
@@ -7267,6 +7337,66 @@ components:
       properties:
         names:
           type: array
+          items:
+            type: string
+
+    DieLineDefaultsEntry:
+      type: object
+      description: >-
+        Manager-set line-setting defaults for one die type, applied as
+        blank-fill pre-fills when the die is picked on the run form or setup
+        editor.
+      required:
+        - name
+        - crustsPerCycle
+        - cycleSpeed
+        - speedAdjustment
+        - freezerTime
+        - casesPerLayer
+      properties:
+        name:
+          type: string
+          description: Die-type display name (matched case-insensitively)
+        crustsPerCycle:
+          type: number
+        cycleSpeed:
+          type: number
+        speedAdjustment:
+          type: number
+        freezerTime:
+          type: number
+        casesPerLayer:
+          type: number
+          description: '"Extra Case Buffer" in the UI'
+
+    DieLineDefaultsList:
+      type: object
+      required:
+        - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DieLineDefaultsEntry"
+
+    SaveDieLineDefaultsInput:
+      type: object
+      required:
+        - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DieLineDefaultsEntry"
+
+    DeleteDieLineDefaultsInput:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: Die names whose stored defaults should be removed
           items:
             type: string
 
