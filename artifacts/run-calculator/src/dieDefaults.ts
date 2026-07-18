@@ -81,6 +81,50 @@ export function dieLineDefaultsFor(
   return null;
 }
 
+// ─── Crust-mode defaults ────────────────────────────────────────────────────
+// Selecting the "Crust" line type (purchased crusts, no dough mixing) has its
+// own known line settings. Same blank-fill-only semantics as die defaults.
+// crustsPerCase / crustsPerStack intentionally NOT included (still unknown —
+// left at 0 until the factory settles on numbers).
+
+export interface CrustLineDefaults {
+  approxLineSpeed: number;
+  speedAdjustment: number;
+  freezerTime: number;
+  casesPerLayer: number; // "Extra Case Buffer" in the UI
+}
+
+export const CRUST_LINE_DEFAULTS: CrustLineDefaults = {
+  approxLineSpeed: 40,
+  speedAdjustment: 1,
+  freezerTime: 9.2,
+  casesPerLayer: 2,
+};
+
+const CRUST_UNTOUCHED: CrustLineDefaults = {
+  approxLineSpeed: 0,
+  speedAdjustment: 1.0,
+  freezerTime: 0,
+  casesPerLayer: 0,
+};
+
+/**
+ * Given the current form values, return ONLY the crust-mode fields that should
+ * be filled: those whose current value still equals the untouched default.
+ * Anything the user already changed is left alone.
+ */
+export function resolveCrustLineDefaults(
+  current: Partial<Record<keyof CrustLineDefaults, unknown>>,
+): Partial<CrustLineDefaults> {
+  const out: Partial<CrustLineDefaults> = {};
+  for (const key of Object.keys(CRUST_LINE_DEFAULTS) as (keyof CrustLineDefaults)[]) {
+    const cur = Number(current[key] ?? CRUST_UNTOUCHED[key]);
+    const untouched = !Number.isFinite(cur) || cur === CRUST_UNTOUCHED[key];
+    if (untouched && CRUST_LINE_DEFAULTS[key] !== cur) out[key] = CRUST_LINE_DEFAULTS[key];
+  }
+  return out;
+}
+
 /**
  * Given the selected die and the current form values, return ONLY the fields
  * that should be filled: those whose current value still equals the untouched

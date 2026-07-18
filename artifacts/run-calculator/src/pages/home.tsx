@@ -175,7 +175,7 @@ import {
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
-import { resolveDieLineDefaults } from "../dieDefaults";
+import { resolveDieLineDefaults, resolveCrustLineDefaults } from "../dieDefaults";
 import {
   fetchServerDieTypes,
   pushDieTypesToServer,
@@ -13692,6 +13692,13 @@ export default function Home() {
                               const newDs = { ...dayState, runs: newRuns };
                               setDayState(newDs);
                               saveDayState(newDs);
+                              // Pre-fill crust-run line settings — blank-fill only,
+                              // never overwriting a value the user already changed
+                              // (see dieDefaults.ts). crustsPerCase/Stack stay 0.
+                              const fills = resolveCrustLineDefaults(form.getValues());
+                              for (const [k, val] of Object.entries(fills)) {
+                                form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
+                              }
                             }}
                             className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                           >

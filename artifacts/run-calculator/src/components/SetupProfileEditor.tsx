@@ -10,7 +10,7 @@ import {
   LABEL_POSITION_OPTIONS,
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
-import { resolveDieLineDefaults } from "../dieDefaults";
+import { resolveDieLineDefaults, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
 import { fetchSavedSpecSheets } from "../savedSpecSheets";
 import { fetchSavedShippingGuides } from "../savedShippingGuides";
@@ -901,7 +901,15 @@ export default function SetupProfileEditor({
                       <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Line Type</label>
                       <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit">
                         <button type="button" onClick={() => setLineType("dough")} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Dough</button>
-                        <button type="button" onClick={() => setLineType("crusts")} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Crust</button>
+                        <button type="button" onClick={() => {
+                          setLineType("crusts");
+                          // Pre-fill crust-run line settings — blank-fill only,
+                          // never overwriting a hand-set value (dieDefaults.ts).
+                          const fills = resolveCrustLineDefaults(form.getValues());
+                          for (const [k, fv] of Object.entries(fills)) {
+                            form.setValue(k as keyof typeof fills, fv, { shouldDirty: true });
+                          }
+                        }} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Crust</button>
                       </div>
                     </div>
                     {lineType !== "crusts" && (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dieLineDefaultsFor, resolveDieLineDefaults } from "./dieDefaults";
+import { dieLineDefaultsFor, resolveDieLineDefaults, resolveCrustLineDefaults } from "./dieDefaults";
 
 const BLANK = { crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 1.0, freezerTime: 0, casesPerLayer: 0 };
 
@@ -100,5 +100,48 @@ describe("manager overrides", () => {
     const filled = resolveDieLineDefaults('7"', { ...BLANK, cycleSpeed: 7.5 }, overrides);
     expect(filled).not.toHaveProperty("cycleSpeed");
     expect(filled).toMatchObject({ crustsPerCycle: 4, freezerTime: 30 });
+  });
+});
+
+describe("resolveCrustLineDefaults", () => {
+  it("fills all crust defaults on an untouched form", () => {
+    const fills = resolveCrustLineDefaults({
+      approxLineSpeed: 0,
+      speedAdjustment: 1.0,
+      freezerTime: 0,
+      casesPerLayer: 0,
+    });
+    expect(fills).toEqual({
+      approxLineSpeed: 40,
+      freezerTime: 9.2,
+      casesPerLayer: 2,
+      // speedAdjustment already 1 (untouched) — no-op fill omitted
+    });
+  });
+
+  it("never overwrites values the user already changed", () => {
+    const fills = resolveCrustLineDefaults({
+      approxLineSpeed: 35,
+      speedAdjustment: 0.9,
+      freezerTime: 12,
+      casesPerLayer: 4,
+    });
+    expect(fills).toEqual({});
+  });
+
+  it("fills only the still-untouched fields", () => {
+    const fills = resolveCrustLineDefaults({
+      approxLineSpeed: 0,
+      speedAdjustment: 0.9,
+      freezerTime: 10,
+      casesPerLayer: 0,
+    });
+    expect(fills).toEqual({ approxLineSpeed: 40, casesPerLayer: 2 });
+  });
+
+  it("does not touch crustsPerCase / crustsPerStack", () => {
+    const fills = resolveCrustLineDefaults({});
+    expect(fills).not.toHaveProperty("crustsPerCase");
+    expect(fills).not.toHaveProperty("crustsPerStack");
   });
 });
