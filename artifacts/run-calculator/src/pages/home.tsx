@@ -82,6 +82,7 @@ import {
   runLabel,
 } from "../utils";
 import { setActiveSubstitutions } from "../substitutionState";
+import { brandTagLabels } from "@workspace/name-match";
 import {
   freshDayState,
   loadDayState,
@@ -760,6 +761,7 @@ export function IngredientSelect({
   onAddOption,
   onRemoveOption,
   placeholder,
+  optionLabels,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -767,7 +769,11 @@ export function IngredientSelect({
   onAddOption?: (v: string) => void;
   onRemoveOption?: (v: string) => void;
   placeholder?: string;
+  // Optional display label per option value (e.g. brand tags for colliding
+  // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
+  optionLabels?: ReadonlyMap<string, string>;
 }) {
+  const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -777,7 +783,7 @@ export function IngredientSelect({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const scrollKeep = useDropdownScrollKeeper(open);
   const filtered = (options ?? []).filter(o =>
-    o.toLowerCase().includes(inputVal.toLowerCase())
+    labelOf(o).toLowerCase().includes(inputVal.toLowerCase())
   );
 
   function openDropdown() {
@@ -815,7 +821,7 @@ export function IngredientSelect({
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
-          {value || placeholder || "Select…"}
+          {(value && labelOf(value)) || placeholder || "Select…"}
         </span>
         <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
       </button>
@@ -857,7 +863,7 @@ export function IngredientSelect({
                     className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
                     onMouseDown={() => { onChange(opt); setOpen(false); }}
                   >
-                    {opt}
+                    {labelOf(opt)}
                   </button>
                   {onRemoveOption && (
                     <button
@@ -1033,6 +1039,7 @@ export function CheesePickCard({
   embedded,
   recipeMissing,
   poolComponents,
+  optionLabels,
 }: {
   label: string;
   batches: number;
@@ -1056,6 +1063,8 @@ export function CheesePickCard({
   // imported). Drives an inline "pick a real blend" warning instead of a
   // silent, confusing blank body.
   recipeMissing?: boolean;
+  // Optional display label per recipe name (brand tags for colliding names).
+  optionLabels?: ReadonlyMap<string, string>;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   // Scale each component up to the pounds to pull/mix for this run, using the
@@ -1089,7 +1098,7 @@ export function CheesePickCard({
       >
         <option value="">Pick a cheese recipe…</option>
         {options.map(name => (
-          <option key={name} value={name}>{name}</option>
+          <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
         ))}
       </select>
     </div>
@@ -1206,6 +1215,7 @@ export function MixRecipeCard({
   onAddRecipeName,
   onRemoveRecipeName,
   onRecipeNameChange,
+  recipeNameLabels,
 }: {
   label: string;
   totalRunLbs: number;
@@ -1225,6 +1235,8 @@ export function MixRecipeCard({
   onAddRecipeName?: (v: string) => void;
   onRemoveRecipeName?: (v: string) => void;
   onRecipeNameChange?: (v: string) => void;
+  // Optional display label per recipe name (brand tags for colliding names).
+  recipeNameLabels?: ReadonlyMap<string, string>;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -1235,7 +1247,7 @@ export function MixRecipeCard({
     <>
       {recipeNameOptions && onRecipeNameChange && (
         <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
         </div>
       )}
       {fields.length === 0 ? (
@@ -3311,6 +3323,17 @@ export default function Home() {
   const serverCheeseNames = useMemo(
     () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [enabledCheeseRecipes],
+  );
+  // Brand tags for cheese/mix names that collide across customers (same name
+  // under 2+ brands, or a bare name whose brand-prefixed twin exists) — the
+  // pickers show "Taco Mix (Marco's)" while the stored value stays the name.
+  const cheeseNameBrandTags = useMemo(
+    () => brandTagLabels(enabledCheeseRecipes.map((r) => ({ name: r.name, brand: r.brand }))),
+    [enabledCheeseRecipes],
+  );
+  const mixNameBrandTags = useMemo(
+    () => brandTagLabels(mixes.map((m) => ({ name: m.name, brand: m.brand ?? "" }))),
+    [mixes],
   );
 
   // One-time pool-aware applicator-slot heal (v2 of the mix-slot cleanup).
@@ -16499,6 +16522,7 @@ export default function Home() {
                           recipe={v.app1CheeseRecipe ?? []}
                           recipeName={v.app1CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          optionLabels={cheeseNameBrandTags}
                           recipeMissing={(v.app1CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app1CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
@@ -16527,6 +16551,7 @@ export default function Home() {
                           onRemove={removeCheese1}
                           recipeName={v.app1CheeseRecipeName ?? ""}
                           recipeNameOptions={serverMixNames}
+                          recipeNameLabels={mixNameBrandTags}
                           onRecipeNameChange={val => {
                             form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
@@ -16565,6 +16590,7 @@ export default function Home() {
                           recipe={v.app2CheeseRecipe ?? []}
                           recipeName={v.app2CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          optionLabels={cheeseNameBrandTags}
                           recipeMissing={(v.app2CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app2CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
@@ -16593,6 +16619,7 @@ export default function Home() {
                           onRemove={removeCheese2}
                           recipeName={v.app2CheeseRecipeName ?? ""}
                           recipeNameOptions={serverMixNames}
+                          recipeNameLabels={mixNameBrandTags}
                           onRecipeNameChange={val => {
                             form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
@@ -16808,6 +16835,7 @@ export default function Home() {
                           recipe={v.app3CheeseRecipe ?? []}
                           recipeName={v.app3CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          optionLabels={cheeseNameBrandTags}
                           recipeMissing={(v.app3CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app3CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
@@ -16836,6 +16864,7 @@ export default function Home() {
                           onRemove={removeCheese3}
                           recipeName={v.app3CheeseRecipeName ?? ""}
                           recipeNameOptions={serverMixNames}
+                          recipeNameLabels={mixNameBrandTags}
                           onRecipeNameChange={val => {
                             form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
@@ -16874,6 +16903,7 @@ export default function Home() {
                           recipe={v.app4CheeseRecipe ?? []}
                           recipeName={v.app4CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          optionLabels={cheeseNameBrandTags}
                           recipeMissing={(v.app4CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app4CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
@@ -16902,6 +16932,7 @@ export default function Home() {
                           onRemove={removeCheese4}
                           recipeName={v.app4CheeseRecipeName ?? ""}
                           recipeNameOptions={serverMixNames}
+                          recipeNameLabels={mixNameBrandTags}
                           onRecipeNameChange={val => {
                             form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());

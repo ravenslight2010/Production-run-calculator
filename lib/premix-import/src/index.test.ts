@@ -787,10 +787,13 @@ describe("collectSpecImportMixes", () => {
   });
 
   it("recognizes a recipe named like a mix the user already keeps", () => {
+    // Cheesy components, no mix/blend word: only the "named like a mix the
+    // user already keeps" rule can route this (the non-cheesy-components
+    // default-to-mix rule must not fire).
     const parsed = specParse([
       specRecipe({ name: "Secret Topping", rows: [
-        { ingredient: "A", lbs: 1 },
-        { ingredient: "B", lbs: 1 },
+        { ingredient: "Mozzarella", lbs: 1 },
+        { ingredient: "Cheddar", lbs: 1 },
       ] }),
     ]);
     expect(collectSpecImportMixes(parsed, new Set())).toEqual([]);
@@ -854,5 +857,69 @@ describe("specMixDraftToMix", () => {
 
   it("returns null for a blank name", () => {
     expect(specMixDraftToMix({ name: "  ", brand: "", flavor: "", componentIngredients: [] })).toBeNull();
+  });
+});
+
+describe("suggestPremixRedirects brand scope", () => {
+  function pMix(over: Partial<Mix> & { id: string; name: string }): Mix {
+    return {
+      brand: "",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      amountAlreadyMade: 0,
+      components: [],
+      enabled: true,
+      ...over,
+    };
+  }
+  const luciaTaco = pMix({ id: "lucia-taco", name: "Taco Mix", brand: "Lucia's" });
+  const marcoTaco = pMix({ id: "marco-taco", name: "Taco Mix", brand: "Marco's" });
+
+  it("a brand-scoped alias only fires for that brand's candidates", () => {
+    const aliases = [
+      { kind: "appType", externalName: "Taco Blend", canonicalName: "Taco Mix", context: "Lucia's" },
+    ];
+    const lucia = suggestPremixRedirects(
+      [{ mix: pMix({ id: "s1", name: "Taco Blend", brand: "Lucia's" }), status: "new" as const }],
+      [luciaTaco, marcoTaco],
+      aliases,
+    );
+    expect(lucia).toEqual({ s1: "lucia-taco" });
+    const marco = suggestPremixRedirects(
+      [{ mix: pMix({ id: "s2", name: "Taco Blend", brand: "Marco's" }), status: "new" as const }],
+      [luciaTaco, marcoTaco],
+      aliases,
+    );
+    expect(marco).toEqual({});
+  });
+
+  it("a brand-scoped alias beats the context-free one", () => {
+    const other = pMix({ id: "lucia-other", name: "House Blend", brand: "Lucia's" });
+    const out = suggestPremixRedirects(
+      [{ mix: pMix({ id: "s1", name: "Shorthand", brand: "Lucia's" }), status: "new" as const }],
+      [luciaTaco, other],
+      [
+        { kind: "appType", externalName: "Shorthand", canonicalName: "Taco Mix", context: null },
+        { kind: "appType", externalName: "Shorthand", canonicalName: "House Blend", context: "Lucia's" },
+      ],
+    );
+    expect(out).toEqual({ s1: "lucia-other" });
+  });
+
+  it("ambiguous canonical name resolves to the candidate's own brand, never another brand's mix", () => {
+    const out = suggestPremixRedirects(
+      [{ mix: pMix({ id: "s1", name: "Taco Blend", brand: "Marco's" }), status: "new" as const }],
+      [luciaTaco, marcoTaco],
+      [{ kind: "appType", externalName: "Taco Blend", canonicalName: "Taco Mix", context: null }],
+    );
+    expect(out).toEqual({ s1: "marco-taco" });
+    // Unknown third brand → ambiguous, no suggestion.
+    const none = suggestPremixRedirects(
+      [{ mix: pMix({ id: "s2", name: "Taco Blend", brand: "Bobos" }), status: "new" as const }],
+      [luciaTaco, marcoTaco],
+      [{ kind: "appType", externalName: "Taco Blend", canonicalName: "Taco Mix", context: null }],
+    );
+    expect(none).toEqual({});
   });
 });

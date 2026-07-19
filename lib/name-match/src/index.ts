@@ -60,6 +60,86 @@ export function looseNameKey(name: string): string {
   return (kept.length ? kept : tokens).join(" ");
 }
 
+/**
+ * Prefix a recipe/mix name with its brand ("Lucia's" + "Taco Mix" →
+ * "Lucia's Taco Mix") to disambiguate a cross-brand name collision on import.
+ * IDEMPOTENT: when the name already starts with the brand's tokens (compared
+ * through the same loose normalization, so "Lucias Taco Mix" vs "Lucia's"
+ * still counts), the name is returned unchanged — a re-import of the same
+ * workbook converges on the same prefixed name instead of stacking prefixes.
+ * A blank brand (or a brand that normalizes to nothing) never changes the
+ * name. Pure.
+ */
+export function brandPrefixedName(brand: string, name: string): string {
+  const b = (brand ?? "").trim();
+  const n = (name ?? "").trim();
+  if (!b || !n) return n;
+  const bKey = looseNameKey(b);
+  if (!bKey) return n;
+  const nKey = looseNameKey(n);
+  if (nKey === bKey || nKey.startsWith(bKey + " ")) return n;
+  return `${b} ${n}`;
+}
+
+/**
+ * Picker "brand tag" labels for pool names that collide across brands.
+ *
+ * Two rows collide when their names share the same brand-stripped CORE key —
+ * so "Taco Mix" (Marco's) and "Lucia's Taco Mix" (Lucia's) collide (the second
+ * strips its own brand prefix down to the same "taco mix" core), and so do two
+ * rows literally named "Taco Mix" under different brands. Every colliding name
+ * that belongs to exactly one non-blank brand gets a `"Name (Brand)"` label
+ * unless the name already carries that brand's tokens (a prefixed name like
+ * "Lucia's Taco Mix" needs no extra tag); a colliding name shared by several
+ * brands gets all of them (`"Taco Mix (Marco's / Lucia's)"`) so staff can see
+ * the row is genuinely ambiguous. Non-colliding names get no entry — display
+ * code falls back to the bare name. Pure.
+ */
+export function brandTagLabels(
+  rows: ReadonlyArray<{ name: string; brand: string }>,
+): Map<string, string> {
+  // name (exact trim) → brands seen, plus core-key → distinct name keys.
+  const coreOf = (name: string, brand: string): string => {
+    const nKey = looseNameKey(name);
+    const bKey = looseNameKey(brand);
+    if (bKey && nKey.startsWith(bKey + " ")) return nKey.slice(bKey.length + 1);
+    return nKey;
+  };
+  const byName = new Map<string, { name: string; brands: string[]; cores: Set<string> }>();
+  const namesByCore = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const name = (r.name ?? "").trim();
+    if (!name) continue;
+    const nKey = looseNameKey(name);
+    if (!nKey) continue;
+    const brand = (r.brand ?? "").trim();
+    const core = coreOf(name, brand);
+    let e = byName.get(nKey);
+    if (!e) byName.set(nKey, (e = { name, brands: [], cores: new Set() }));
+    const bKey = looseNameKey(brand);
+    if (brand && !e.brands.some((b) => looseNameKey(b) === bKey)) e.brands.push(brand);
+    e.cores.add(core);
+    let names = namesByCore.get(core);
+    if (!names) namesByCore.set(core, (names = new Set()));
+    names.add(nKey);
+  }
+  // A name collides when: its core is shared by another NAME, or the name
+  // itself is held by 2+ brands.
+  const out = new Map<string, string>();
+  for (const [nKey, e] of byName) {
+    const coreShared = [...e.cores].some((c) => (namesByCore.get(c)?.size ?? 0) > 1);
+    const multiBrand = e.brands.length > 1;
+    if (!coreShared && !multiBrand) continue;
+    // A brand-prefixed name already tells staff whose it is.
+    const alreadyTagged =
+      e.brands.length === 1 &&
+      (nKey === looseNameKey(e.brands[0]) || nKey.startsWith(looseNameKey(e.brands[0]) + " "));
+    if (alreadyTagged || e.brands.length === 0) continue;
+    out.set(e.name, `${e.name} (${e.brands.join(" / ")})`);
+  }
+  return out;
+}
+
 /** Digits of a key in order — differing digits means differing products. */
 function digitsOf(s: string): string {
   return s.replace(/[^0-9]/g, "");

@@ -31,7 +31,7 @@ import {
   type CheeseRecipe,
   type CheeseComponent,
 } from "@workspace/cheese-recipes";
-import { buildNearDupNameMatcher } from "@workspace/name-match";
+import { brandPrefixedName, buildNearDupNameMatcher } from "@workspace/name-match";
 
 /** A worksheet flattened to string cells (matches readWorkbookGrids output). */
 export interface CheeseSheetGrid {
@@ -477,7 +477,9 @@ export function buildCheeseLinkMap(
 /**
  * Find the existing pool recipe a workbook blend should link to, or undefined.
  * Returns nothing when the blend already shares an id with a saved recipe (a
- * clean exact-id update) or when no unambiguous same-brand loose match exists.
+ * clean exact-id update) or when no unambiguous loose match exists. Matching is
+ * same-brand FIRST, then UNBRANDED pool rows (shared master data a branded
+ * import may legitimately reuse) — never another brand's row.
  */
 export function findCheeseLink(
   recipe: CheeseRecipe,
@@ -485,7 +487,9 @@ export function findCheeseLink(
   existingIds: ReadonlySet<string>,
 ): CheeseLinkTarget | undefined {
   if (existingIds.has(recipe.id)) return undefined;
-  const target = linkMap.get(cheeseLinkMapKey(recipe.brand, recipe.name));
+  const target =
+    linkMap.get(cheeseLinkMapKey(recipe.brand, recipe.name)) ??
+    (nameKey(recipe.brand) ? linkMap.get(cheeseLinkMapKey("", recipe.name)) : undefined);
   if (target && target.id !== recipe.id) return target;
   return undefined;
 }
@@ -530,15 +534,25 @@ function buildCheeseNearDupResolver(
       allowExtraToken: true,
     });
   }
-  return (recipe, existingIds) => {
-    if (existingIds.has(recipe.id)) return undefined;
-    const entry = byBrand.get(nameKey(recipe.brand));
+  const resolveIn = (
+    entry: { matcher: (name: string) => string | null; targets: Map<string, CheeseLinkTarget> } | undefined,
+    recipe: CheeseRecipe,
+  ): CheeseLinkTarget | undefined => {
     if (!entry) return undefined;
     const matched = entry.matcher(recipe.name);
     if (!matched) return undefined;
     const target = entry.targets.get(nameKey(matched));
     if (!target || target.id === recipe.id) return undefined;
     return target;
+  };
+  return (recipe, existingIds) => {
+    if (existingIds.has(recipe.id)) return undefined;
+    // Same-brand first, then UNBRANDED shared rows (never another brand's).
+    const bk = nameKey(recipe.brand);
+    return (
+      resolveIn(byBrand.get(bk), recipe) ??
+      (bk ? resolveIn(byBrand.get(""), recipe) : undefined)
+    );
   };
 }
 
@@ -594,10 +608,16 @@ function isGenericBlendName(name: string): boolean {
 export function buildCheeseAliasLinkMap(
   aliases: ReadonlyArray<CheeseNameAlias>,
 ): Map<string, string> {
+  return buildAliasMapFrom(
+    aliases.filter((a) => a.kind === "appType" && (a.context ?? null) === null),
+  );
+}
+
+/** Shared alias-map builder (lowercased external → canonical, conflicts dropped). */
+function buildAliasMapFrom(aliases: ReadonlyArray<CheeseNameAlias>): Map<string, string> {
   const map = new Map<string, string>();
   const conflicted = new Set<string>();
   for (const a of aliases) {
-    if (a.kind !== "appType" || (a.context ?? null) !== null) continue;
     const ext = (a.externalName ?? "").trim().toLowerCase();
     const canon = (a.canonicalName ?? "").trim();
     if (!ext || !canon) continue;
@@ -611,6 +631,36 @@ export function buildCheeseAliasLinkMap(
 }
 
 /**
+ * Brand-aware alias link maps: the shared context-free map plus per-brand maps
+ * built from aliases whose `context` names a customer (the review dialogs write
+ * a brand-scoped row alongside the shared one). A brand-scoped alias only ever
+ * fires for that customer's imports, so a redirect learned while importing one
+ * brand's sheet can never drag another brand's same-named blend onto it.
+ */
+export interface CheeseAliasLinkMaps {
+  global: ReadonlyMap<string, string>;
+  /** Keyed by nameKey(brand/context). */
+  byBrand: ReadonlyMap<string, ReadonlyMap<string, string>>;
+}
+
+export function buildCheeseAliasLinkMaps(
+  aliases: ReadonlyArray<CheeseNameAlias>,
+): CheeseAliasLinkMaps {
+  const byBrandRows = new Map<string, CheeseNameAlias[]>();
+  for (const a of aliases) {
+    if (a.kind !== "appType") continue;
+    const ctx = nameKey(a.context ?? "");
+    if (!ctx) continue;
+    let list = byBrandRows.get(ctx);
+    if (!list) byBrandRows.set(ctx, (list = []));
+    list.push(a);
+  }
+  const byBrand = new Map<string, ReadonlyMap<string, string>>();
+  for (const [ctx, rows] of byBrandRows) byBrand.set(ctx, buildAliasMapFrom(rows));
+  return { global: buildCheeseAliasLinkMap(aliases), byBrand };
+}
+
+/**
  * Resolve a candidate's learned-alias link: the manager previously redirected
  * this exact workbook blend name onto an existing pool recipe, so propose that
  * same link again (highest precedence — an explicit past decision beats the
@@ -620,21 +670,45 @@ export function buildCheeseAliasLinkMap(
  */
 function findCheeseAliasLink(
   recipe: CheeseRecipe,
-  aliasLinks: ReadonlyMap<string, string>,
+  aliasLinks: CheeseAliasLinkMaps,
   existing: ReadonlyArray<CheeseRecipe>,
   existingIds: ReadonlySet<string>,
 ): CheeseLinkTarget | undefined {
   if (existingIds.has(recipe.id)) return undefined;
-  const canon = aliasLinks.get(recipe.name.trim().toLowerCase());
+  // A redirect the manager confirmed for THIS customer wins; the shared
+  // context-free alias is only consulted when no brand-scoped one exists.
+  const brandMap = aliasLinks.byBrand.get(nameKey(recipe.brand));
+  const extKey = recipe.name.trim().toLowerCase();
+  const canon = brandMap?.get(extKey) ?? aliasLinks.global.get(extKey);
   if (!canon) return undefined;
   const canonLower = canon.toLowerCase();
-  const matches = existing.filter((r) => r.name.trim().toLowerCase() === canonLower);
+  const allMatches = existing.filter((r) => r.name.trim().toLowerCase() === canonLower);
+  // HARD BRAND WALL: a branded candidate may resolve only to same-brand or
+  // UNBRANDED shared rows — never another customer's recipe, even when that
+  // other recipe is the sole name match (a context-free alias learned from one
+  // customer must not redirect a different customer's blend).
+  const brandKey = nameKey(recipe.brand);
+  const matches = brandKey
+    ? allMatches.filter((r) => {
+        const bk = nameKey(r.brand);
+        return bk === brandKey || !bk;
+      })
+    : allMatches;
   if (matches.length === 0) return undefined;
   let pick = matches[0];
   if (matches.length > 1) {
-    const sameBrand = matches.filter((r) => nameKey(r.brand) === nameKey(recipe.brand));
-    if (sameBrand.length !== 1) return undefined;
-    pick = sameBrand[0];
+    // Same-brand first, then a single UNBRANDED shared row; a remaining
+    // ambiguity yields nothing rather than guessing.
+    const sameBrand = matches.filter((r) => nameKey(r.brand) === brandKey);
+    if (sameBrand.length === 1) {
+      pick = sameBrand[0];
+    } else if (sameBrand.length === 0 && brandKey) {
+      const unbranded = matches.filter((r) => !nameKey(r.brand));
+      if (unbranded.length !== 1) return undefined;
+      pick = unbranded[0];
+    } else {
+      return undefined;
+    }
   }
   if (pick.id === recipe.id) return undefined;
   return { id: pick.id, name: pick.name };
@@ -659,15 +733,23 @@ function findCheeseAliasLink(
 export function withCheeseLinks(
   candidates: ReadonlyArray<CheeseImportCandidate>,
   existing: ReadonlyArray<CheeseRecipe>,
-  aliasLinks?: ReadonlyMap<string, string>,
+  aliasLinks?: ReadonlyMap<string, string> | CheeseAliasLinkMaps,
 ): CheeseImportCandidate[] {
+  // Back-compat: a bare context-free map is treated as { global } with no
+  // brand-scoped rows.
+  const aliasMaps: CheeseAliasLinkMaps | undefined =
+    aliasLinks === undefined
+      ? undefined
+      : aliasLinks instanceof Map
+        ? { global: aliasLinks, byBrand: new Map() }
+        : (aliasLinks as CheeseAliasLinkMaps);
   const linkMap = buildCheeseLinkMap(existing);
   const existingIds = new Set(existing.map((r) => r.id));
   const nearDup = buildCheeseNearDupResolver(existing);
   const proposed = candidates.map(
     (c) =>
-      (aliasLinks
-        ? findCheeseAliasLink(c.recipe, aliasLinks, existing, existingIds)
+      (aliasMaps
+        ? findCheeseAliasLink(c.recipe, aliasMaps, existing, existingIds)
         : undefined) ??
       findCheeseLink(c.recipe, linkMap, existingIds) ??
       nearDup(c.recipe, existingIds),
@@ -687,6 +769,58 @@ export function withCheeseLinks(
     const link = proposed[i];
     if (link && (claims.get(link.id) ?? 0) === 1) return { ...c, linkTo: link };
     return c;
+  });
+}
+
+/**
+ * Cross-brand collision auto-prefix: rename an imported blend to its
+ * brand-prefixed name ("Lucia's Taco Mix") when its name (ci) collides with a
+ * DIFFERENT brand's saved recipe or with a different brand's blend in the same
+ * batch. Same-brand and unbranded collisions are untouched (those are handled
+ * by the id/link passes), candidates with a proposed link keep the link
+ * target's name anyway, and the workbook id is KEPT — cheeseImportId is already
+ * brand-scoped, so a re-import updates the same row in place and this pass
+ * re-applies the same prefixed name deterministically (brandPrefixedName is
+ * idempotent). Apply AFTER withCheeseLinks. Pure.
+ */
+export function withCheeseBrandPrefixes(
+  candidates: ReadonlyArray<CheeseImportCandidate>,
+  existing: ReadonlyArray<CheeseRecipe>,
+): CheeseImportCandidate[] {
+  // name (ci) → set of brand keys holding it, from the pool (by id, so a
+  // candidate updating its own row doesn't collide with itself) and the batch.
+  const brandsByName = new Map<string, Map<string, Set<string>>>(); // nameKey → brandKey → ids/marks
+  const note = (name: string, brand: string, id: string) => {
+    const nk = nameKey(name);
+    if (!nk) return;
+    let brands = brandsByName.get(nk);
+    if (!brands) brandsByName.set(nk, (brands = new Map()));
+    const bk = nameKey(brand);
+    let ids = brands.get(bk);
+    if (!ids) brands.set(bk, (ids = new Set()));
+    ids.add(id);
+  };
+  for (const r of existing) note(r.name, r.brand, r.id);
+  for (const c of candidates) note(c.recipe.name, c.recipe.brand, c.recipe.id);
+  return candidates.map((c) => {
+    if (c.linkTo) return c; // link keeps the target's name
+    const brand = c.recipe.brand.trim();
+    if (!brand) return c;
+    const nk = nameKey(c.recipe.name);
+    const brands = brandsByName.get(nk);
+    if (!brands) return c;
+    const bk = nameKey(brand);
+    const collides = [...brands.entries()].some(
+      ([otherBrand, ids]) =>
+        otherBrand !== "" &&
+        otherBrand !== bk &&
+        // ignore "collisions" that are only this candidate's own id
+        (ids.size > 1 || !ids.has(c.recipe.id)),
+    );
+    if (!collides) return c;
+    const prefixed = brandPrefixedName(brand, c.recipe.name.trim());
+    if (nameKey(prefixed) === nk) return c; // already brand-prefixed
+    return { ...c, recipe: { ...c.recipe, name: prefixed } };
   });
 }
 

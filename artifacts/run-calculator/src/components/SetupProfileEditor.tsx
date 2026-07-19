@@ -12,6 +12,7 @@ import {
 import { loadProfile, saveProfile } from "../storage";
 import { resolveDieLineDefaults, resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
+import { brandTagLabels } from "@workspace/name-match";
 import { fetchSavedSpecSheets } from "../savedSpecSheets";
 import { fetchSavedShippingGuides } from "../savedShippingGuides";
 import {
@@ -372,6 +373,16 @@ export default function SetupProfileEditor({
     return map;
   }, [enabledCheeseRecipes]);
   const serverCheeseNames = useMemo(() => [...new Set(enabledCheeseRecipes.map(r => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [enabledCheeseRecipes]);
+  // Brand tags for cheese/mix names that collide across customers — pickers
+  // show "Taco Mix (Marco's)" while the stored value stays the bare name.
+  const cheeseNameBrandTags = useMemo(
+    () => brandTagLabels(enabledCheeseRecipes.map(r => ({ name: r.name, brand: r.brand }))),
+    [enabledCheeseRecipes],
+  );
+  const mixNameBrandTags = useMemo(
+    () => brandTagLabels(mixes.map(m => ({ name: m.name, brand: m.brand ?? "" }))),
+    [mixes],
+  );
 
   const serverDoughRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
@@ -678,6 +689,7 @@ export default function SetupProfileEditor({
             recipe={recipe}
             recipeName={(v[nameKey] as string) ?? ""}
             recipeNameOptions={cheeseNamesForRun(brand, flavor)}
+            optionLabels={cheeseNameBrandTags}
             recipeMissing={((v[nameKey] as string) ?? "").trim() !== "" && !serverCheeseByName.has(((v[nameKey] as string) ?? "").trim().toLowerCase())}
             shredderSetting={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
             cellulose={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.cellulose ?? ""}
@@ -706,6 +718,7 @@ export default function SetupProfileEditor({
             onRemove={removeCheeseByApp[app]}
             recipeName={(v[nameKey] as string) ?? ""}
             recipeNameOptions={serverMixNames}
+            recipeNameLabels={mixNameBrandTags}
             onRecipeNameChange={val => {
               form.setValue(nameKey, val, { shouldDirty: true });
               const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());

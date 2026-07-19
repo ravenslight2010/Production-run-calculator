@@ -155,3 +155,4 @@
 - [Detached process reaping](detached-process-reaping.md) — setsid/nohup from the bash tool dies with the session; >2min runs need a workflow or a smaller foreground run.
 - [Die defaults switch-aware](die-defaults-switch-aware.md) — explicit die picks use the switch-aware resolver (replaces prior die auto-fill); import/autofill paths stay strict blank-fill-only.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
+- [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.

@@ -18,7 +18,8 @@ import {
   cheeseImportId,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
-  buildCheeseAliasLinkMap,
+  buildCheeseAliasLinkMaps,
+  withCheeseBrandPrefixes,
   withCheeseLinks,
   withCheeseSubMixes,
   detectCheeseSubMixes,
@@ -167,11 +168,17 @@ export async function prepareCheeseImport(
   // Flag sub-mixes (a blend that is itself an ingredient inside another blend on
   // the same tab) so review labels them instead of treating them as pizza-facing
   // blends, and collect fresh/perishable prep items to surface read-only.
+  // After links attach, auto-prefix any still-unlinked blend whose name
+  // collides with a DIFFERENT customer's recipe ("Lucia's Taco Mix") so two
+  // brands' same-named blends never overwrite each other.
   const candidates = withCheeseSubMixes(
-    withCheeseLinks(
-      buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
+    withCheeseBrandPrefixes(
+      withCheeseLinks(
+        buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
+        existing,
+        buildCheeseAliasLinkMaps(aliases),
+      ),
       existing,
-      buildCheeseAliasLinkMap(aliases),
     ),
     detectCheeseSubMixes(sheets),
   );

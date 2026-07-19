@@ -97,6 +97,7 @@
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/ingredient-catalog": "workspace:*",
     "@workspace/mixes": "workspace:*",
+    "@workspace/name-match": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",

@@ -108,3 +108,53 @@ describe("addSpecMixesIfAbsent", () => {
     expect(merged).toHaveLength(0);
   });
 });
+
+describe("addSpecMixesIfAbsent brand scope", () => {
+  it("same name under a DIFFERENT brand is added brand-prefixed, both survive", () => {
+    const existing = [mix("Taco Mix", { id: "marcos", brand: "Marco's", batchSize: 40 })];
+    const candidates = [mix("Taco Mix", { id: "lucias", brand: "Lucia's" })];
+    const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
+    expect(added).toBe(1);
+    expect(merged.map((m) => m.name)).toEqual(["Taco Mix", "Lucia's Taco Mix"]);
+    expect(merged[0].batchSize).toBe(40);
+  });
+
+  it("re-import of the prefixed mix converges (idempotent, no stacking)", () => {
+    const first = addSpecMixesIfAbsent(
+      [mix("Taco Mix", { id: "marcos", brand: "Marco's" })],
+      [mix("Taco Mix", { id: "lucias", brand: "Lucia's" })],
+    ).merged;
+    const { merged, added } = addSpecMixesIfAbsent(first, [
+      mix("Taco Mix", { id: "lucias-2", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(0);
+    expect(merged.map((m) => m.name)).toEqual(["Taco Mix", "Lucia's Taco Mix"]);
+  });
+
+  it("same-brand collision still links (never adds)", () => {
+    const existing = [mix("Taco Mix", { id: "kept", brand: "Lucia's", batchSize: 40 })];
+    const { merged, added } = addSpecMixesIfAbsent(existing, [
+      mix("taco mix", { id: "incoming", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(0);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("kept");
+  });
+
+  it("an unbranded pool mix is shared master-data — branded candidate links, not forks", () => {
+    const existing = [mix("Taco Mix", { id: "shared", brand: "" })];
+    const { added } = addSpecMixesIfAbsent(existing, [
+      mix("Taco Mix", { id: "lucias", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(0);
+  });
+
+  it("cross-brand near-dup (typo) also prefixes instead of linking", () => {
+    const existing = [mix("Buffalo Mix", { id: "hann", brand: "Hannaford" })];
+    const { merged, added } = addSpecMixesIfAbsent(existing, [
+      mix("Bufalo Mix", { id: "bobos", brand: "Bobos" }),
+    ]);
+    expect(added).toBe(1);
+    expect(merged[1].name).toBe("Bobos Bufalo Mix");
+  });
+});

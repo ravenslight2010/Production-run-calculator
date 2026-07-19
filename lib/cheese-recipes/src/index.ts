@@ -21,6 +21,8 @@
 // (NOT in the per-day sync payload) and edited by managers only; the apps keep
 // only thin platform glue (fetch/save/delete) plus the run-side hydration.
 
+import { brandPrefixedName } from "@workspace/name-match";
+
 // One component of a cheese recipe: an ingredient and how many POUNDS of it go
 // into a single batch of the finished blend. This matches the per-batch "LBS"
 // column on the Cheese Mix Recipe Specs sheets and the existing per-run
@@ -440,29 +442,79 @@ export function specCheeseDraftToRecipe(draft: {
 
 /**
  * Add spec-import cheese recipes to the existing pool, skipping any whose NAME
- * already exists (case-insensitive) OR whose id already exists. This is the
- * "match, don't clobber" rule: a manager's curated recipe of the same name is
- * left untouched — the run applicator simply links to it by name — while a
- * genuinely new blend is appended. Pure. Returns the merged list plus how many
+ * already exists (case-insensitive) IN THE SAME BRAND SCOPE or whose id already
+ * exists. This is the "match, don't clobber" rule: a manager's curated recipe of
+ * the same name is left untouched — the run applicator simply links to it by
+ * name — while a genuinely new blend is appended.
+ *
+ * BRAND SCOPE: a name match only counts when the candidate and the pool row
+ * belong to the same customer or either side is unbranded (an unbranded pool
+ * row is shared/curated master-data any brand may link to). When a BRANDED
+ * candidate's name collides only with a DIFFERENT brand's recipe, it is not a
+ * duplicate — it is a different customer's blend that happens to share a
+ * generic name — so it is added under a brand-prefixed name ("Lucia's Taco
+ * Mix"). The prefix is idempotent (see brandPrefixedName) and a `cheese:spec:`
+ * id is re-derived from the prefixed name so two brands' spec imports never
+ * collide on the name-derived id either; re-imports of the same sheet match
+ * their own prefixed row and skip. Pure. Returns the merged list plus how many
  * were actually added.
  */
 export function addCheeseRecipesIfAbsentByName(
   existing: ReadonlyArray<CheeseRecipe>,
   candidates: ReadonlyArray<CheeseRecipe>,
 ): { merged: CheeseRecipe[]; added: number } {
-  const haveNames = new Set(existing.map((r) => r.name.trim().toLowerCase()));
+  const brandKeyOf = (r: { brand?: string }) => (r.brand ?? "").trim().toLowerCase();
+  const rows = existing.map((r) => ({
+    nameKey: r.name.trim().toLowerCase(),
+    brandKey: brandKeyOf(r),
+  }));
   const haveIds = new Set(existing.map((r) => r.id));
   const merged: CheeseRecipe[] = [...existing];
   let added = 0;
+  // Same scope = same brand, or either side unbranded.
+  const inScope = (candBrand: string, rowBrand: string) =>
+    !candBrand || !rowBrand || candBrand === rowBrand;
   for (const c of candidates) {
-    const nameKey = c.name.trim().toLowerCase();
-    if (!nameKey || haveNames.has(nameKey) || haveIds.has(c.id)) continue;
-    haveNames.add(nameKey);
-    haveIds.add(c.id);
-    merged.push(c);
+    const name = c.name.trim();
+    let nameKey = name.toLowerCase();
+    if (!nameKey) continue;
+    const candBrand = brandKeyOf(c);
+    // A same-scope name match → link by name, never add (original behavior).
+    if (rows.some((r) => r.nameKey === nameKey && inScope(candBrand, r.brandKey))) continue;
+    let next = c;
+    if (candBrand && rows.some((r) => r.nameKey === nameKey)) {
+      // Cross-brand-only collision on a branded candidate: keep both apart by
+      // prefixing the new one with its brand.
+      const prefixed = brandPrefixedName((c.brand ?? "").trim(), name);
+      const prefixedKey = prefixed.toLowerCase();
+      if (prefixedKey === nameKey) continue; // already brand-prefixed yet still colliding — treat as dup
+      // Re-import: the prefixed row already exists in this brand's scope.
+      if (rows.some((r) => r.nameKey === prefixedKey && inScope(candBrand, r.brandKey))) continue;
+      next = { ...c, name: prefixed, id: respecCheeseId(c.id, prefixed) };
+      nameKey = prefixedKey;
+    }
+    if (haveIds.has(next.id)) continue;
+    rows.push({ nameKey, brandKey: candBrand });
+    haveIds.add(next.id);
+    merged.push(next);
     added++;
   }
   return { merged, added };
+}
+
+/**
+ * Re-derive a spec-import cheese recipe id after a brand-prefix rename. Only
+ * `cheese:spec:` ids are name-derived (see specCheeseDraftToRecipe) and would
+ * otherwise collide across brands sharing a blend name; ids from other
+ * namespaces (workbook import, manual) are already unique and kept as-is.
+ */
+function respecCheeseId(id: string, name: string): string {
+  if (!id.startsWith("cheese:spec:")) return id;
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug ? `cheese:spec:${slug}` : id;
 }
 
 /**

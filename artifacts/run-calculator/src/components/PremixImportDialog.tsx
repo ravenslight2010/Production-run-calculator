@@ -200,7 +200,9 @@ export default function PremixImportDialog({
       (it) => prepared?.freezerPulls?.[it.key] ?? [],
     );
     // Remember each MANUAL/kept "use existing mix" pick as a blend-name alias
-    // so re-importing the same sheet pre-applies the same redirect.
+    // so re-importing the same sheet pre-applies the same redirect. Both a
+    // brand-scoped row (context = the sheet block's brand — only fires on that
+    // customer's re-imports) and the shared context-free fallback are written.
     const newAliases: SpecImportAlias[] = [];
     const seen = new Set<string>();
     for (const it of included) {
@@ -211,15 +213,18 @@ export default function PremixImportDialog({
       const canonical = target.name.trim();
       if (!external || !canonical) continue;
       if (external.toLowerCase() === canonical.toLowerCase()) continue;
-      const dedupeKey = external.toLowerCase();
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      newAliases.push({
-        kind: "appType",
-        externalName: external,
-        canonicalName: canonical,
-        context: null,
-      });
+      const brand = (it.original.mix.brand ?? "").trim();
+      for (const context of brand ? [brand, null] : [null]) {
+        const dedupeKey = `${external.toLowerCase()}\u0000${(context ?? "").toLowerCase()}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        newAliases.push({
+          kind: "appType",
+          externalName: external,
+          canonicalName: canonical,
+          context,
+        });
+      }
     }
     // Prep-only blocks contribute their pull notes unconditionally.
     onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases);

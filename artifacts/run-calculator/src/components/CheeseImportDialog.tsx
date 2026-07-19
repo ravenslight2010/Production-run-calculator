@@ -187,29 +187,38 @@ export default function CheeseImportDialog({
     if (duplicateTargets.length > 0 || renameCollisions.length > 0) return;
     const newAliases: SpecImportAlias[] = [];
     const seen = new Set<string>();
-    const addAlias = (external: string, canonical: string) => {
+    // Write BOTH a brand-scoped alias (context = the sheet's customer, so the
+    // redirect only pre-applies on that customer's re-imports) and the shared
+    // context-free row (fallback for older flows). Unbranded blends only get
+    // the shared row.
+    const addAlias = (external: string, canonical: string, brand: string) => {
       if (!external || !canonical) return;
       if (external.toLowerCase() === canonical.toLowerCase()) return;
-      const dedupeKey = external.toLowerCase();
-      if (seen.has(dedupeKey)) return;
-      seen.add(dedupeKey);
-      newAliases.push({
-        kind: "appType",
-        externalName: external,
-        canonicalName: canonical,
-        context: null,
-      });
+      const push = (context: string | null) => {
+        const dedupeKey = `${external.toLowerCase()}\u0000${(context ?? "").toLowerCase()}`;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        newAliases.push({
+          kind: "appType",
+          externalName: external,
+          canonicalName: canonical,
+          context,
+        });
+      };
+      if (brand) push(brand);
+      push(null);
     };
     for (const it of included) {
+      const brand = it.candidate.recipe.brand.trim();
       const target = redirectTargetOf(it.key);
       if (target) {
-        addAlias(it.candidate.recipe.name.trim(), target.name.trim());
+        addAlias(it.candidate.recipe.name.trim(), target.name.trim(), brand);
         continue;
       }
       // Rename-before-create: remember the sheet's original name as an alias
       // for the new name so a re-import links instead of duplicating.
       const rename = renameOf(it);
-      if (rename) addAlias(it.candidate.recipe.name.trim(), rename);
+      if (rename) addAlias(it.candidate.recipe.name.trim(), rename, brand);
     }
     onConfirm(included.map(resolveItem), newAliases);
   };

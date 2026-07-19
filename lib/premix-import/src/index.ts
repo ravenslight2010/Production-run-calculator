@@ -942,46 +942,64 @@ export function redirectPremixCandidate(
  * the "remember my pick" half of the review dialog's "Use existing mix" select.
  * Returns candidate-mix-id → existing-mix-id for the review to pre-apply.
  *
- * Mix-name redirect picks are stored in the context-free "appType" namespace
- * (the shared blend-name pool the spec importer's cheese/mix "Use existing
- * recipe" picks also write into), keyed by the sheet's mix name. A suggestion
- * only fires when the learned canonical name (ci) matches exactly ONE existing
- * mix; candidates that are already clean exact-id updates are skipped, and a
- * target claimed by more than one candidate (another suggestion or an exact-id
- * update) is dropped entirely — two redirects onto the same mix would collide
- * in the last-write-wins merge and silently lose one block's data. Pure.
+ * Mix-name redirect picks are stored in the "appType" namespace (the shared
+ * blend-name pool the spec importer's cheese/mix "Use existing recipe" picks
+ * also write into), keyed by the sheet's mix name. BRAND-SCOPED aliases
+ * (context = the candidate's brand) take precedence; the shared context-free
+ * alias is only consulted when no brand-scoped one exists — so a redirect
+ * confirmed for one customer's sheet never pre-selects on another brand's
+ * import of the same generic mix name. A suggestion only fires when the
+ * learned canonical name (ci) matches exactly ONE existing mix (or exactly one
+ * of the candidate's own brand when several brands share the name); candidates
+ * that are already clean exact-id updates are skipped, and a target claimed by
+ * more than one candidate (another suggestion or an exact-id update) is
+ * dropped entirely — two redirects onto the same mix would collide in the
+ * last-write-wins merge and silently lose one block's data. Pure.
  */
 export function suggestPremixRedirects(
   candidates: ReadonlyArray<PremixCandidate>,
   existing: ReadonlyArray<Mix>,
   aliases: ReadonlyArray<SpecImportAlias>,
 ): Record<string, string> {
-  const usable = sanitizeSpecAliases(aliases).filter(
-    (a) => a.kind === "appType" && (a.context ?? null) === null,
-  );
-  if (usable.length === 0) return {};
+  const appTypeAliases = sanitizeSpecAliases(aliases).filter((a) => a.kind === "appType");
+  const contextFree = appTypeAliases.filter((a) => (a.context ?? null) === null);
+  if (appTypeAliases.length === 0) return {};
 
-  // Existing mixes by lowercased name; names shared by 2+ mixes are ambiguous
-  // targets and dropped rather than guessed at.
-  const byName = new Map<string, MixRedirectTarget | null>();
+  // Existing mixes by lowercased name — ALL rows kept so a shared name can
+  // still resolve when exactly one of them belongs to the candidate's brand.
+  const byName = new Map<string, MixRedirectTarget[]>();
   for (const m of existing) {
     const key = m.name.trim().toLowerCase();
     if (!key) continue;
-    if (byName.has(key)) {
-      if (byName.get(key)?.id !== m.id) byName.set(key, null);
-    } else {
-      byName.set(key, { id: m.id, name: m.name, brand: m.brand, flavor: m.flavor });
+    let list = byName.get(key);
+    if (!list) byName.set(key, (list = []));
+    if (!list.some((t) => t.id === m.id)) {
+      list.push({ id: m.id, name: m.name, brand: m.brand, flavor: m.flavor });
     }
   }
+  const brandKey = (b: string | undefined) => (b ?? "").trim().toLowerCase();
 
   const existingIds = new Set(existing.map((m) => m.id));
   const proposed: { from: string; to: string }[] = [];
   for (const c of candidates) {
     if (existingIds.has(c.mix.id)) continue; // already a clean exact-id update
-    const canon = pickAlias(usable, "appType", c.mix.name);
+    const brand = (c.mix.brand ?? "").trim();
+    // Brand-scoped alias first, shared context-free alias as fallback.
+    const canon =
+      (brand ? pickAlias(appTypeAliases, "appType", c.mix.name, brand) : null) ??
+      pickAlias(contextFree, "appType", c.mix.name);
     if (!canon) continue;
-    const target = byName.get(canon.trim().toLowerCase());
+    const matches = byName.get(canon.trim().toLowerCase()) ?? [];
+    let target: MixRedirectTarget | undefined = matches.length === 1 ? matches[0] : undefined;
+    if (!target && matches.length > 1 && brand) {
+      // Several brands share the canonical name: only the candidate's own
+      // brand's mix is a safe target, and only when it is unique.
+      const sameBrand = matches.filter((t) => brandKey(t.brand) === brandKey(brand));
+      if (sameBrand.length === 1) target = sameBrand[0];
+    }
     if (!target || target.id === c.mix.id) continue;
+    // Never redirect a branded candidate onto a DIFFERENT brand's mix.
+    if (brand && brandKey(target.brand) && brandKey(target.brand) !== brandKey(brand)) continue;
     proposed.push({ from: c.mix.id, to: target.id });
   }
 

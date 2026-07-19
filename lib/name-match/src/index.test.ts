@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  brandPrefixedName,
+  brandTagLabels,
   buildNearDupNameMatcher,
   isSingleEditApart,
   looseNameKey,
@@ -146,5 +148,63 @@ describe("buildNearDupNameMatcher excludeSelf", () => {
   it("without excludeSelf an in-pool name still matches its own entry", () => {
     const match = buildNearDupNameMatcher(["Pepperoni Blend"]);
     expect(match("Pepperoni Blend")).toBe("Pepperoni Blend");
+  });
+});
+
+describe("brandPrefixedName", () => {
+  it("prefixes the brand onto a colliding name", () => {
+    expect(brandPrefixedName("Lucia's", "Taco Mix")).toBe("Lucia's Taco Mix");
+  });
+
+  it("is idempotent — an already-prefixed name is unchanged", () => {
+    expect(brandPrefixedName("Lucia's", "Lucia's Taco Mix")).toBe("Lucia's Taco Mix");
+    // Loose normalization: apostrophe drift still counts as prefixed.
+    expect(brandPrefixedName("Lucia's", "Lucias Taco Mix")).toBe("Lucias Taco Mix");
+  });
+
+  it("blank or all-punctuation brand never changes the name", () => {
+    expect(brandPrefixedName("", "Taco Mix")).toBe("Taco Mix");
+    expect(brandPrefixedName("  !! ", "Taco Mix")).toBe("Taco Mix");
+  });
+
+  it("a name that IS the brand is left alone", () => {
+    expect(brandPrefixedName("Lucia's", "Lucias")).toBe("Lucias");
+  });
+});
+
+describe("brandTagLabels", () => {
+  it("tags same-named rows under two brands with both brands", () => {
+    const labels = brandTagLabels([
+      { name: "Taco Mix", brand: "Marco's" },
+      { name: "Taco Mix", brand: "Lucia's" },
+    ]);
+    expect(labels.get("Taco Mix")).toBe("Taco Mix (Marco's / Lucia's)");
+  });
+
+  it("tags a bare name whose brand-prefixed twin exists, but not the prefixed twin", () => {
+    const labels = brandTagLabels([
+      { name: "Taco Mix", brand: "Marco's" },
+      { name: "Lucia's Taco Mix", brand: "Lucia's" },
+    ]);
+    expect(labels.get("Taco Mix")).toBe("Taco Mix (Marco's)");
+    // The prefixed name already tells staff whose it is.
+    expect(labels.has("Lucia's Taco Mix")).toBe(false);
+  });
+
+  it("non-colliding names get no entry", () => {
+    const labels = brandTagLabels([
+      { name: "Buffalo Mix", brand: "Hannaford" },
+      { name: "Deluxe Mix", brand: "Bobos" },
+    ]);
+    expect(labels.size).toBe(0);
+  });
+
+  it("an unbranded colliding row never mints a tag for itself", () => {
+    const labels = brandTagLabels([
+      { name: "Taco Mix", brand: "" },
+      { name: "Lucia's Taco Mix", brand: "Lucia's" },
+    ]);
+    // Bare name collides but has no brand to show — no entry.
+    expect(labels.has("Taco Mix")).toBe(false);
   });
 });

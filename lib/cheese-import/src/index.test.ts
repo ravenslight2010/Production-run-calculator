@@ -8,7 +8,9 @@ import {
   cheeseLinkKey,
   buildCheeseLinkMap,
   buildCheeseAliasLinkMap,
+  buildCheeseAliasLinkMaps,
   withCheeseLinks,
+  withCheeseBrandPrefixes,
   resolveCheeseCandidate,
   detectCheeseSubMixes,
   collectCheesePrepItems,
@@ -857,5 +859,250 @@ describe("detectCheeseSubMixes — shared sub-mix", () => {
     const sub = sheets[0].recipes.find((r) => r.name === "Spice Blend");
     expect(sub).toBeDefined();
     expect(["Blend A", "Blend B"]).toContain(map.get(sub!.id));
+  });
+});
+
+describe("buildCheeseAliasLinkMaps + brand-scoped precedence", () => {
+  const existing: CheeseRecipe[] = [
+    cheese({ id: "lucia-blend", brand: "Lucia's", name: "House Blend" }),
+    cheese({ id: "marco-blend", brand: "Marco's", name: "Marco Special" }),
+  ];
+
+  it("a brand-scoped alias only fires for that brand's imports", () => {
+    const maps = buildCheeseAliasLinkMaps([
+      { kind: "appType", externalName: "Shorthand", canonicalName: "House Blend", context: "Lucia's" },
+    ]);
+    const lucia = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "l1", brand: "Lucia's", name: "Shorthand" })], () => false),
+      existing,
+      maps,
+    );
+    expect(lucia[0].linkTo).toEqual({ id: "lucia-blend", name: "House Blend" });
+    const marco = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "m1", brand: "Marco's", name: "Shorthand" })], () => false),
+      existing,
+      maps,
+    );
+    expect(marco[0].linkTo).toBeUndefined();
+  });
+
+  it("a brand-scoped alias beats the context-free one for the same external name", () => {
+    const maps = buildCheeseAliasLinkMaps([
+      { kind: "appType", externalName: "Shorthand", canonicalName: "Marco Special", context: null },
+      { kind: "appType", externalName: "Shorthand", canonicalName: "House Blend", context: "Lucia's" },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "l1", brand: "Lucia's", name: "Shorthand" })], () => false),
+      existing,
+      maps,
+    );
+    expect(linked[0].linkTo).toEqual({ id: "lucia-blend", name: "House Blend" });
+  });
+
+  it("never alias-links across brands, even when the other brand's row is the only name match", () => {
+    // A context-free alias learned from Marco's must NOT redirect a Bobos
+    // import onto Marco's recipe.
+    const maps = buildCheeseAliasLinkMaps([
+      { kind: "appType", externalName: "Shorthand", canonicalName: "Marco Special", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "x1", brand: "Bobos", name: "Shorthand" })], () => false),
+      existing,
+      maps,
+    );
+    expect(linked[0].linkTo).toBeUndefined();
+  });
+
+  it("context-free alias still resolves to an UNBRANDED shared row for any brand", () => {
+    const pool: CheeseRecipe[] = [
+      ...existing,
+      cheese({ id: "shared-special", brand: "", name: "Shared Special" }),
+    ];
+    const maps = buildCheeseAliasLinkMaps([
+      { kind: "appType", externalName: "Shorthand2", canonicalName: "Shared Special", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "x2", brand: "Bobos", name: "Shorthand2" })], () => false),
+      pool,
+      maps,
+    );
+    expect(linked[0].linkTo).toEqual({ id: "shared-special", name: "Shared Special" });
+  });
+
+  it("an alias whose canonical name exists under two brands prefers the candidate's own brand", () => {
+    const two: CheeseRecipe[] = [
+      cheese({ id: "lucia-taco", brand: "Lucia's", name: "Taco Mix" }),
+      cheese({ id: "marco-taco", brand: "Marco's", name: "Taco Mix" }),
+    ];
+    const maps = buildCheeseAliasLinkMaps([
+      { kind: "appType", externalName: "Taco Blend", canonicalName: "Taco Mix", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "l2", brand: "Lucia's", name: "Taco Blend" })], () => false),
+      two,
+      maps,
+    );
+    expect(linked[0].linkTo).toEqual({ id: "lucia-taco", name: "Taco Mix" });
+    // Unknown third brand → ambiguous, no guess.
+    const other = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "b1", brand: "Bobos", name: "Taco Blend" })], () => false),
+      two,
+      maps,
+    );
+    expect(other[0].linkTo).toBeUndefined();
+  });
+});
+
+describe("withCheeseBrandPrefixes", () => {
+  it("renames a cross-brand name collision to the brand-prefixed name, keeping the id", () => {
+    const existing = [cheese({ id: "marco-taco", brand: "Marco's", name: "Taco Mix" })];
+    const cands = buildCheeseImportCandidates(
+      [cheese({ id: "cheese:import:lucia:taco-mix", brand: "Lucia's", name: "Taco Mix" })],
+      () => false,
+    );
+    const out = withCheeseBrandPrefixes(withCheeseLinks(cands, existing), existing);
+    expect(out[0].recipe.name).toBe("Lucia's Taco Mix");
+    expect(out[0].recipe.id).toBe("cheese:import:lucia:taco-mix");
+  });
+
+  it("is idempotent on re-import (prefixed name stays, no double prefix)", () => {
+    const existing = [
+      cheese({ id: "marco-taco", brand: "Marco's", name: "Taco Mix" }),
+      cheese({ id: "cheese:import:lucia:taco-mix", brand: "Lucia's", name: "Lucia's Taco Mix" }),
+    ];
+    const cands = buildCheeseImportCandidates(
+      [cheese({ id: "cheese:import:lucia:taco-mix", brand: "Lucia's", name: "Taco Mix" })],
+      (id) => existing.some((r) => r.id === id),
+    );
+    const out = withCheeseBrandPrefixes(withCheeseLinks(cands, existing), existing);
+    expect(out[0].recipe.name).toBe("Lucia's Taco Mix");
+  });
+
+  it("same-brand and unbranded collisions are untouched", () => {
+    const existing = [
+      cheese({ id: "lucia-old", brand: "Lucia's", name: "Taco Mix" }),
+      cheese({ id: "shared", brand: "", name: "House Blend" }),
+    ];
+    const cands = buildCheeseImportCandidates(
+      [
+        cheese({ id: "l1", brand: "Lucia's", name: "Taco Mix" }),
+        cheese({ id: "l2", brand: "Lucia's", name: "House Blend" }),
+      ],
+      () => false,
+    );
+    const out = withCheeseBrandPrefixes(cands, existing);
+    expect(out[0].recipe.name).toBe("Taco Mix");
+    expect(out[1].recipe.name).toBe("House Blend");
+  });
+
+  it("a candidate with a proposed link keeps its link and is not renamed", () => {
+    const existing = [
+      cheese({ id: "shared-taco", brand: "", name: "Taco Mix" }),
+      cheese({ id: "marco-other", brand: "Marco's", name: "Taco Mix" }),
+    ];
+    const maps = buildCheeseAliasLinkMaps([
+      { kind: "appType", externalName: "Taco Mix", canonicalName: "Taco Mix", context: "Lucia's" },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates([cheese({ id: "l1", brand: "Lucia's", name: "Taco Mix" })], () => false),
+      existing,
+      maps,
+    );
+    const out = withCheeseBrandPrefixes(linked, existing);
+    expect(out[0].linkTo).toEqual({ id: "shared-taco", name: "Taco Mix" });
+    expect(out[0].recipe.name).toBe("Taco Mix");
+  });
+
+  it("two different brands colliding within the same batch both get prefixed", () => {
+    const cands = buildCheeseImportCandidates(
+      [
+        cheese({ id: "l1", brand: "Lucia's", name: "Taco Mix" }),
+        cheese({ id: "m1", brand: "Marco's", name: "Taco Mix" }),
+      ],
+      () => false,
+    );
+    const out = withCheeseBrandPrefixes(cands, []);
+    expect(out.map((c) => c.recipe.name)).toEqual(["Lucia's Taco Mix", "Marco's Taco Mix"]);
+  });
+});
+
+describe("unbranded pool fallback (same-brand first, then unbranded, never cross-brand)", () => {
+  const shared = cheese({
+    id: "cheese:shared:house-cheese-mix",
+    brand: "",
+    name: "House Cheese Mix",
+  });
+
+  it("exact loose-key: a branded import links to an unbranded pool row", () => {
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(
+        [cheese({ id: "cheese:lucia:house-cheese-mix", brand: "Lucia's", name: "House Cheese Mix" })],
+        () => false,
+      ),
+      [shared],
+    );
+    expect(linked[0].linkTo).toEqual({ id: shared.id, name: "House Cheese Mix" });
+  });
+
+  it("same-brand row wins over an unbranded row with the same loose key", () => {
+    const luciaRow = cheese({
+      id: "cheese:lucia:house-cheese-mix",
+      brand: "Lucia's",
+      name: "House Cheese Mix",
+    });
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(
+        [cheese({ id: "cheese:lucia:house-chees-mix-2", brand: "Lucia's", name: "House Standard Cheese Mix" })],
+        () => false,
+      ),
+      [shared, luciaRow],
+    );
+    expect(linked[0].linkTo).toEqual({ id: luciaRow.id, name: "House Cheese Mix" });
+  });
+
+  it("near-dup: a branded typo import links to an unbranded pool row", () => {
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(
+        [cheese({ id: "cheese:lucia:house-chese-mix", brand: "Lucia's", name: "House Chese Mix" })],
+        () => false,
+      ),
+      [shared],
+    );
+    expect(linked[0].linkTo).toEqual({ id: shared.id, name: "House Cheese Mix" });
+  });
+
+  it("alias: a learned redirect resolves to an unbranded row when names collide across other brands", () => {
+    const marcoRow = cheese({
+      id: "cheese:marco:house-cheese-mix",
+      brand: "Marco's",
+      name: "House Cheese Mix",
+    });
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(
+        [cheese({ id: "cheese:lucia:hcm", brand: "Lucia's", name: "HCM Blend" })],
+        () => false,
+      ),
+      [shared, marcoRow],
+      buildCheeseAliasLinkMaps([
+        { kind: "appType", externalName: "HCM Blend", canonicalName: "House Cheese Mix", context: null },
+      ]),
+    );
+    expect(linked[0].linkTo).toEqual({ id: shared.id, name: "House Cheese Mix" });
+  });
+
+  it("never links to ANOTHER brand's row when no unbranded row exists", () => {
+    const marcoRow = cheese({
+      id: "cheese:marco:secret-cheese-mix",
+      brand: "Marco's",
+      name: "Secret Cheese Mix",
+    });
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(
+        [cheese({ id: "cheese:lucia:secret-cheese-mix", brand: "Lucia's", name: "Secret Cheese Mix" })],
+        () => false,
+      ),
+      [marcoRow],
+    );
+    expect(linked[0].linkTo).toBeUndefined();
   });
 });

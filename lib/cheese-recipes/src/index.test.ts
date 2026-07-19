@@ -264,7 +264,9 @@ describe("applyCheeseOzPerPizza", () => {
 describe("addCheeseRecipesIfAbsentByName", () => {
   it("skips a candidate whose name already exists (case-insensitive) — match, don't clobber", () => {
     const existing = [make({ id: "curated", name: "Cheese Blend", brand: "Curated" })];
-    const candidate = make({ id: "cheese:spec:cheese-blend", name: "cheese blend", brand: "Spec" });
+    // Same brand scope — a cross-brand collision now brand-prefixes instead
+    // (see the brand-scope describe block below).
+    const candidate = make({ id: "cheese:spec:cheese-blend", name: "cheese blend", brand: "Curated" });
     const { merged, added } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
     expect(added).toBe(0);
     expect(merged).toHaveLength(1);
@@ -705,5 +707,54 @@ describe("catchAllPreviewSkipReason", () => {
     expect(
       catchAllPreviewSkipReason(["SMD BBQ Chicken Cheese Mix"], "SMD Supreme Cheese Mix", []),
     ).toBeNull();
+  });
+});
+
+describe("addCheeseRecipesIfAbsentByName brand scope", () => {
+  it("same name under a DIFFERENT brand is added brand-prefixed with a re-derived spec id", () => {
+    const existing = [make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Marco's" })];
+    const { merged, added } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(1);
+    expect(merged.map((r) => r.name)).toEqual(["Taco Mix", "Lucia's Taco Mix"]);
+    expect(merged[1].id).toBe("cheese:spec:lucia-s-taco-mix");
+  });
+
+  it("re-import converges on the prefixed row (idempotent, no dup)", () => {
+    const first = addCheeseRecipesIfAbsentByName(
+      [make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Marco's" })],
+      [make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" })],
+    ).merged;
+    const { merged, added } = addCheeseRecipesIfAbsentByName(first, [
+      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(0);
+    expect(merged).toHaveLength(2);
+  });
+
+  it("same-brand collision still links by name (never adds)", () => {
+    const existing = [make({ id: "kept", name: "Taco Mix", brand: "Lucia's" })];
+    const { added } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "cheese:spec:taco-mix", name: "taco mix", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(0);
+  });
+
+  it("an unbranded pool recipe is shared — branded candidate links, not forks", () => {
+    const existing = [make({ id: "shared", name: "Taco Mix", brand: "" })];
+    const { added } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" }),
+    ]);
+    expect(added).toBe(0);
+  });
+
+  it("non-spec ids are kept as-is on prefix rename", () => {
+    const existing = [make({ id: "a", name: "Taco Mix", brand: "Marco's" })];
+    const { merged } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "cheese:import:lucias:taco-mix", name: "Taco Mix", brand: "Lucia's" }),
+    ]);
+    expect(merged[1].id).toBe("cheese:import:lucias:taco-mix");
+    expect(merged[1].name).toBe("Lucia's Taco Mix");
   });
 });
