@@ -142,6 +142,7 @@ import {
   deleteProfileEntry,
   applyIngredientMerge,
   applyRecipeNameMerge,
+  removeStaleRecipeReference,
   loadMergedAway,
   saveMergedAway,
   dropMergedAway,
@@ -5577,6 +5578,71 @@ export default function Home() {
       setMergeBusy(false);
       setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
       return false;
+    }
+  }
+
+  // Remove a stale ("old reference") recipe name outright — for names with no
+  // real pool recipe behind them and no good merge target. Clears the name from
+  // every surface that still references it (run link fields, profiles,
+  // templates, history, legacy local name lists) and tombstones it so the
+  // additive sync union can't resurrect it on other devices. Refuses pool-backed
+  // names — real recipes are deleted in their Manage Lists section, not here.
+  async function handleRemoveStaleReference(name: string): Promise<void> {
+    if (!isRecipeNameCategory) return;
+    const category = mergeCategory as RecipeNameMergeCategory;
+    const nameCi = name.trim().toLowerCase();
+    const poolCi = new Set(
+      [...serverDoughNames, ...serverSauceNames, ...serverCheeseNames, ...serverMixNames].map(
+        (n) => n.trim().toLowerCase(),
+      ),
+    );
+    if (poolCi.has(nameCi)) {
+      toast({
+        title: "Can't remove a real recipe here",
+        description: `"${name}" exists as a recipe in Manage Lists. Delete it from its own section there instead.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setMergeBusy(true);
+    setMergeError("");
+    const before = captureMasterDataSnapshot();
+    try {
+      const affectedRunIds = removeStaleRecipeReference(category, name);
+      // Advance the edit stamp on every run the removal touched so the push
+      // below wins the per-run lost-update guard (same reasoning as a merge —
+      // otherwise a stale peer resurrects the cleared selection).
+      if (affectedRunIds.length > 0) {
+        const stamp = Date.now();
+        const upd = loadRunValuesUpdated();
+        for (const id of affectedRunIds) upd[id] = stamp;
+        saveRunValuesUpdated(upd);
+      }
+      // Drop the removed name from any in-progress merge selection.
+      setMergeSources((s) => s.filter((n) => n.trim().toLowerCase() !== nameCi));
+      if (mergeTarget.trim().toLowerCase() === nameCi) setMergeTarget("");
+      refreshAfterMerge();
+      // Push immediately (with the deletion tombstone) so an incoming sync
+      // pull's additive union can't re-add the removed name.
+      try {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {
+        // Non-fatal: the tombstone is persisted locally and rides the next push.
+      }
+      noteChange("remove", `Removed old reference "${name}" (${mergePoolLabel})`, before);
+      toast({
+        title: "Old reference removed",
+        description: `"${name}" was cleared from runs, saved setups, templates and history.`,
+      });
+    } finally {
+      setMergeBusy(false);
     }
   }
 
@@ -11991,7 +12057,8 @@ export default function Home() {
                             <p className="text-[11px] text-muted-foreground">
                               These names are still referenced by runs, saved setups, templates or history
                               but no longer exist in {mergePoolLabel}. Load one to pre-fill the merge, then
-                              confirm — merging re-points every place that still uses the old name.
+                              confirm — merging re-points every place that still uses the old name. Or
+                              Remove a name outright if no real recipe should replace it.
                             </p>
                             <div className="space-y-1">
                               {staleCleanupSuggestions.map((s) => (
@@ -12013,6 +12080,18 @@ export default function Home() {
                                     }}
                                     className="ml-auto px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
                                   >Load</button>
+                                  <ConfirmDeleteButton
+                                    title={`Remove "${s.name}"?`}
+                                    description={`This clears "${s.name}" from every place that still references it — run selections, saved setups, templates, history and the old name lists — on every device. No recipe data is deleted (this name has no recipe behind it in ${mergePoolLabel}).`}
+                                    confirmLabel="Remove"
+                                    onConfirm={() => { void handleRemoveStaleReference(s.name); }}
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={mergeBusy}
+                                      className="px-2.5 py-1 rounded border border-destructive/40 text-destructive text-[11px] font-medium hover:bg-destructive/10 transition-colors disabled:opacity-50 shrink-0"
+                                    >Remove</button>
+                                  </ConfirmDeleteButton>
                                 </div>
                               ))}
                             </div>

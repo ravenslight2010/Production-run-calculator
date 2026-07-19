@@ -1724,6 +1724,54 @@ export function clearRecipeNameSelections(
   return affectedRunIds;
 }
 
+/**
+ * Remove a STALE recipe-name reference outright — for "old reference" names
+ * with no real pool recipe behind them and no good merge target. Unlike a
+ * merge there is no target: every surface that still holds the name is
+ * cleared. Walks the same surfaces as applyRecipeNameMerge:
+ *  - legacy local name list (case-insensitive removal) + deletion tombstone,
+ *    so the additive live-sync union can't resurrect it from a stale peer;
+ *  - the category's recipe-preset map (drops the name's entry);
+ *  - recipe-name selection fields on per-run values, brand/crust profiles,
+ *    templates and history (blanked via clearRecipeNameSelections).
+ * Callers must refuse pool-backed names BEFORE calling (pool recipes are
+ * deleted in their Manage Lists section, not here) and must bump the returned
+ * runs' edit stamps + push, exactly like a merge.
+ */
+export function removeStaleRecipeReference(
+  category: RecipeNameMergeCategory,
+  name: string,
+): string[] {
+  if (typeof localStorage === "undefined") return [];
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  const needle = trimmed.toLowerCase();
+  const store = RECIPE_NAME_MERGE_STORE[category];
+  // Tombstone first — even when the list/preset entry only lives on peers or
+  // the server, the synced tombstone is what makes the removal stick.
+  tombstoneDeleted(store.namespace, trimmed);
+  // ── Legacy name list (case-insensitive) ──
+  if (localStorage.getItem(store.listKey) !== null) {
+    const list = loadList(store.listKey, []);
+    const next = list.filter((n) => n.trim().toLowerCase() !== needle);
+    if (next.length !== list.length) saveList(store.listKey, next);
+  }
+  // ── Recipe presets (drop the name's entry, case-insensitive) ──
+  if (store.loadPresets && store.savePresets) {
+    try {
+      const presets = store.loadPresets();
+      const keys = Object.keys(presets).filter((k) => k.trim().toLowerCase() === needle);
+      if (keys.length > 0) {
+        const next = { ...presets };
+        for (const k of keys) delete next[k];
+        store.savePresets(next);
+      }
+    } catch {}
+  }
+  // ── Selection fields on runs/profiles/templates/history ──
+  return clearRecipeNameSelections(category, trimmed);
+}
+
 // ── Master-data change history (local-only undo trail) ──────────────────────
 // A snapshot is every "run-calc-*" localStorage key EXCEPT the change-history
 // key itself (which would nest snapshots and blow up exponentially). This is the
