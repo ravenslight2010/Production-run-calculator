@@ -952,9 +952,13 @@ export function redirectPremixCandidate(
  * learned canonical name (ci) matches exactly ONE existing mix (or exactly one
  * of the candidate's own brand when several brands share the name); candidates
  * that are already clean exact-id updates are skipped, and a target claimed by
- * more than one candidate (another suggestion or an exact-id update) is
- * dropped entirely — two redirects onto the same mix would collide in the
- * last-write-wins merge and silently lose one block's data. Pure.
+ * MORE THAN ONE suggestion is dropped entirely — two redirects onto the same
+ * mix would collide in the last-write-wins merge and silently lose one block's
+ * data. The target's OWN exact-id update does NOT veto a suggestion: after a
+ * Manage Lists merge of two blocks from the same workbook, a re-import carries
+ * both the survivor's block (exact update) and the merged-away block (alias →
+ * survivor) — the review shows the link so the manager can uncheck either,
+ * instead of silently resurrecting the merged-away mix as "new". Pure.
  */
 export function suggestPremixRedirects(
   candidates: ReadonlyArray<PremixCandidate>,
@@ -1003,11 +1007,13 @@ export function suggestPremixRedirects(
     proposed.push({ from: c.mix.id, to: target.id });
   }
 
-  // One-to-one guard: tally every claim on each existing id (exact-id updates
-  // count as a claim too), then keep only uniquely-claimed suggestions.
+  // One-to-one guard: tally SUGGESTION claims on each target id and keep only
+  // uniquely-claimed suggestions. The target's own exact-id update is NOT a
+  // veto — a learned alias is an explicit past decision (merge or "use
+  // existing" pick), and the review surfaces the link for the manager to
+  // accept/clear; dropping it would resurrect the merged-away mix instead.
   const claims = new Map<string, number>();
   const bump = (id: string) => claims.set(id, (claims.get(id) ?? 0) + 1);
-  for (const c of candidates) if (existingIds.has(c.mix.id)) bump(c.mix.id);
   for (const p of proposed) bump(p.to);
 
   const out: Record<string, string> = {};

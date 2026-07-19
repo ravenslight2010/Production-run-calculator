@@ -636,6 +636,56 @@ describe("alias-driven link precedence", () => {
     expect(linked.every((c) => c.linkTo === undefined)).toBe(true);
   });
 
+  it("an alias link survives the target's own exact-id update (merge → re-import)", () => {
+    // Merge-learned alias scenario: the survivor's own block re-imports as an
+    // exact-id update AND the merged-away block aliases onto it. The link must
+    // survive (shown in review to accept/clear) or the merged-away blend
+    // silently resurrects as "new" on every re-import of the same workbook.
+    const imported = [
+      cheese({ id: "cheese:basha:five-cheese-mix", brand: "Basha's", name: "5 Cheese Mix" }),
+      cheese({ id: "cheese:basha:old-blend", brand: "Basha's", name: "Old Blend" }),
+    ];
+    const aliasLinks = buildCheeseAliasLinkMap([
+      { kind: "appType", externalName: "Old Blend", canonicalName: "5 Cheese Mix", context: null },
+    ]);
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, (id) => id === "cheese:basha:five-cheese-mix"),
+      existing,
+      aliasLinks,
+    );
+    expect(linked[0].status).toBe("update");
+    expect(linked[0].linkTo).toBeUndefined();
+    expect(linked[1].linkTo).toEqual({
+      id: "cheese:basha:five-cheese-mix",
+      name: "5 Cheese Mix",
+    });
+  });
+
+  it("a HEURISTIC link is still vetoed by the target's own exact-id update", () => {
+    // "Whole Mozz Cheese Mix" loose-matches "Whole Mozzarella Cheese Mix", but
+    // that recipe's own block is also in the import — the guess stays dropped.
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozzarella-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozzarella Cheese Mix",
+      }),
+      cheese({
+        id: "cheese:basha:whole-mozz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozz Cheese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(
+        imported,
+        (id) => id === "cheese:basha:whole-mozzarella-cheese-mix",
+      ),
+      existing,
+    );
+    expect(linked[1].linkTo).toBeUndefined();
+  });
+
   it("no alias link when the candidate already updates by exact id", () => {
     const imported = [
       cheese({

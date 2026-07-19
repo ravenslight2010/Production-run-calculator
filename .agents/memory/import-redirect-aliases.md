@@ -22,8 +22,12 @@ and near-dup blends would multiply.
 - Auto-apply is suggestion-level only: pre-selects the picker in the review dialog; the
   manager can clear it; nothing writes without Apply.
 - Alias links take precedence over loose-key/near-dup matching but are still subject to
-  the one-to-one claims guard (exact-id updates count as claims; a target claimed twice
-  drops ALL its proposed links — otherwise the last-write-wins merge silently loses data).
+  the one-to-one claims guard: a target claimed by TWO proposed links drops both, and
+  heuristic (loose-key/near-dup) links are also vetoed by the target's own exact-id update.
+  ALIAS links are NOT vetoed by the target's own exact-id update — after a Manage Lists
+  merge of two blocks from the SAME workbook, a re-import carries the survivor's block
+  (exact update) plus the merged-away block (alias → survivor); the review must show that
+  link or the merged-away item silently resurrects as "new" on every re-import.
 - Conflicting learned mappings (same external name → different canonicals, ci) are dropped
   entirely rather than guessed at; a canonical name matching 2+ existing items is ambiguous
   and links nothing (cheese falls back to same-brand-unique).

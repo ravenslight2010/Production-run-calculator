@@ -724,11 +724,16 @@ function findCheeseAliasLink(
  * the near-dup matcher.
  *
  * ONE-TO-ONE GUARD: a proposed link is dropped when its target existing recipe
- * would be claimed by more than one candidate — i.e. another candidate also loose
- * matches the same target, or a candidate already updates that recipe by exact id.
- * Without this guard two accepted links (or a link + an exact update) resolving to
- * the same id would collide in mergeCheeseRecipes' last-write-wins merge and
- * silently drop one recipe's data. When in doubt the blend stays a NEW recipe.
+ * would be claimed by more than one candidate. Without this guard two accepted
+ * links resolving to the same id would collide in mergeCheeseRecipes'
+ * last-write-wins merge and silently drop one recipe's data. When in doubt the
+ * blend stays a NEW recipe. Exception: a LEARNED-ALIAS link is NOT vetoed by
+ * the target's OWN exact-id update — after a Manage Lists merge of two blends
+ * from the same workbook, a re-import carries both the survivor's block (exact
+ * update) and the merged-away block (alias → survivor); the review shows the
+ * link so the manager can uncheck either, instead of silently resurrecting the
+ * merged-away blend as "new". Heuristic (loose-key / near-dup) links keep the
+ * strict guard — they are guesses, not past decisions.
  */
 export function withCheeseLinks(
   candidates: ReadonlyArray<CheeseImportCandidate>,
@@ -746,29 +751,35 @@ export function withCheeseLinks(
   const linkMap = buildCheeseLinkMap(existing);
   const existingIds = new Set(existing.map((r) => r.id));
   const nearDup = buildCheeseNearDupResolver(existing);
-  const proposed = candidates.map(
-    (c) =>
-      (aliasMaps
-        ? findCheeseAliasLink(c.recipe, aliasMaps, existing, existingIds)
-        : undefined) ??
-      findCheeseLink(c.recipe, linkMap, existingIds) ??
-      nearDup(c.recipe, existingIds),
-  );
+  const proposed = candidates.map((c): { link: CheeseLinkTarget; fromAlias: boolean } | undefined => {
+    const aliasLink = aliasMaps
+      ? findCheeseAliasLink(c.recipe, aliasMaps, existing, existingIds)
+      : undefined;
+    if (aliasLink) return { link: aliasLink, fromAlias: true };
+    const heuristic =
+      findCheeseLink(c.recipe, linkMap, existingIds) ?? nearDup(c.recipe, existingIds);
+    return heuristic ? { link: heuristic, fromAlias: false } : undefined;
+  });
 
-  // Tally how many candidates would write each existing id: an exact-id update
-  // claims its own id; a proposed link claims its target id.
-  const claims = new Map<string, number>();
-  const bump = (id: string) => claims.set(id, (claims.get(id) ?? 0) + 1);
+  // Tally claims on each existing id, split by source: exact-id updates and
+  // proposed links. Links to one target always conflict with EACH OTHER; an
+  // exact-id update additionally vetoes heuristic links but not alias links
+  // (an alias is an explicit past decision the review surfaces for approval).
+  const exactClaims = new Map<string, number>();
+  const linkClaims = new Map<string, number>();
+  const bump = (m: Map<string, number>, id: string) => m.set(id, (m.get(id) ?? 0) + 1);
   candidates.forEach((c, i) => {
-    if (existingIds.has(c.recipe.id)) bump(c.recipe.id);
-    const link = proposed[i];
-    if (link) bump(link.id);
+    if (existingIds.has(c.recipe.id)) bump(exactClaims, c.recipe.id);
+    const p = proposed[i];
+    if (p) bump(linkClaims, p.link.id);
   });
 
   return candidates.map((c, i) => {
-    const link = proposed[i];
-    if (link && (claims.get(link.id) ?? 0) === 1) return { ...c, linkTo: link };
-    return c;
+    const p = proposed[i];
+    if (!p) return c;
+    if ((linkClaims.get(p.link.id) ?? 0) !== 1) return c;
+    if (!p.fromAlias && (exactClaims.get(p.link.id) ?? 0) > 0) return c;
+    return { ...c, linkTo: p.link };
   });
 }
 

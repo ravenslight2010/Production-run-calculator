@@ -663,9 +663,11 @@ describe("redirect onto an existing mix", () => {
     expect(out).toEqual({});
   });
 
-  it("drops a suggestion whose target another candidate already claims", () => {
-    // savedB is claimed by an exact-id update, so the alias suggestion onto it
-    // is dropped (two writers of one id would collide in the merge).
+  it("keeps a suggestion even when the target's own block is an exact-id update", () => {
+    // Merge-learned alias scenario: the survivor's own block re-imports as an
+    // exact-id update AND the merged-away block aliases onto it. The suggestion
+    // must survive (shown in review to accept/clear) or the merged-away mix
+    // silently resurrects as "new" on every re-import of the same workbook.
     const exactUpdate = { mix: savedB, status: "update" as const };
     const aliased = {
       mix: mkMix({ id: "sheet-3", name: "Buff Blend" }),
@@ -678,7 +680,7 @@ describe("redirect onto an existing mix", () => {
         { kind: "appType", externalName: "Buff Blend", canonicalName: "Buffalo Mix", context: null },
       ],
     );
-    expect(out).toEqual({});
+    expect(out).toEqual({ "sheet-3": "saved-b" });
   });
 
   it("drops a suggestion when two candidates alias onto the same target", () => {
