@@ -664,6 +664,7 @@ export default function SetupProfileEditor({
     const totalLbs = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     return (
       <div key={app} className="space-y-3">
+        <div className="border-t border-border/60" aria-hidden="true" />
         <TypeDropdown
           label={APPLICATOR_LABELS[app]}
           {...applicatorTypeHandlers(app)}
@@ -1316,6 +1317,7 @@ export default function SetupProfileEditor({
                           line), then App 3, App 4. */}
                       {([1, 2] as ApplicatorNum[]).map(renderApplicator)}
 
+                      <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
                         value={v.pep1Type}
@@ -1373,6 +1375,7 @@ export default function SetupProfileEditor({
 
                       {v.pep1Combined !== true && (
                         <>
+                          <div className="border-t border-border/60" aria-hidden="true" />
                           <TypeDropdown
                             label="Pep Applicator 2"
                             value={v.pep2Type}

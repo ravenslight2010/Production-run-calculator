@@ -15109,12 +15109,14 @@ export default function Home() {
                       testId="output-sauce-batches"
                       highlight={calc.sauceBatches > 0}
                     />
+                    <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
                       label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
                       value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
                       testId="output-app1-batches"
                       highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
                     />
+                    <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
                       label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
                       value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
@@ -15123,6 +15125,7 @@ export default function Home() {
                     />
                     {/* Pep applicators sit between App 2 and App 3, matching
                         the physical line order (and the Run tab's card order). */}
+                    <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
                       label={
                         v.pep1Type
@@ -15143,6 +15146,7 @@ export default function Home() {
                     )}
                     {v.pep1Combined !== true && (
                       <>
+                        <div className="border-t border-border/60" aria-hidden="true" />
                         <StatRow
                           label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
                           value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
@@ -15159,12 +15163,14 @@ export default function Home() {
                         )}
                       </>
                     )}
+                    <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
                       label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
                       value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
                       testId="output-app3-batches"
                       highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
                     />
+                    <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
                       label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
                       value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
@@ -16766,6 +16772,7 @@ export default function Home() {
                         </div>
                       )}
 
+                      <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label="Applicator 1"
                         value={v.app1Type}
@@ -16834,6 +16841,7 @@ export default function Home() {
                         />
                       )}
 
+                      <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label="Applicator 2"
                         value={v.app2Type}
@@ -16902,6 +16910,7 @@ export default function Home() {
                         />
                       )}
 
+                      <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
                         value={v.pep1Type}
@@ -16995,6 +17004,7 @@ export default function Home() {
 
                       {v.pep1Combined !== true && (
                         <>
+                          <div className="border-t border-border/60" aria-hidden="true" />
                           <TypeDropdown
                             label="Pep Applicator 2"
                             value={v.pep2Type}
@@ -17079,6 +17089,7 @@ export default function Home() {
                         </>
                       )}
 
+                      <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label="Applicator 3"
                         value={v.app3Type}
@@ -17147,6 +17158,7 @@ export default function Home() {
                         />
                       )}
 
+                      <div className="border-t border-border/60" aria-hidden="true" />
                       <TypeDropdown
                         label="Applicator 4"
                         value={v.app4Type}
