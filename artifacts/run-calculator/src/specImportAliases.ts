@@ -61,6 +61,112 @@ export async function learnSpecImportAliasesForNameChange(
   await saveSpecImportAliases(aliases);
 }
 
+// ── Customer (brand) rename learning (pool-manager group renames) ────────────
+
+/**
+ * Build the `kind:"brand"` alias rows to persist after a customer-group RENAME
+ * (or merge into an existing group) inside the Cheese Recipes / Mixes pool
+ * managers, so a later re-import of a workbook whose tab still carries the OLD
+ * customer name maps onto the renamed group (via `remapCheeseRecipeBrands` /
+ * the premix brand remap) instead of resurrecting it. Also RE-POINTS existing
+ * brand aliases whose canonical was the old name (chain guard — without it a
+ * raw→old alias plus old→new alias gets dropped wholesale by the sanitizer's
+ * conflict drop on the next import). Brand aliases are context-free. Pure.
+ */
+export function buildBrandRenameAliases(
+  sources: ReadonlyArray<string>,
+  target: string,
+  existingAliases: ReadonlyArray<SpecImportAlias> = [],
+): SpecImportAlias[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const tgtLc = tgt.toLowerCase();
+  const seenSrc = new Set<string>();
+  const srcs = sources
+    .map((s) => s.trim())
+    .filter((s) => {
+      const lc = s.toLowerCase();
+      if (!s || lc === tgtLc || seenSrc.has(lc)) return false;
+      seenSrc.add(lc);
+      return true;
+    });
+  if (srcs.length === 0) return [];
+
+  const out: SpecImportAlias[] = srcs.map((s) => ({
+    kind: "brand" as const,
+    externalName: s,
+    canonicalName: tgt,
+    context: null,
+  }));
+
+  // Re-point prior brand aliases that resolved onto the now-renamed-away name.
+  const srcLc = new Set(srcs.map((s) => s.toLowerCase()));
+  for (const a of existingAliases) {
+    if (a.kind !== "brand") continue;
+    const canonLc = (a.canonicalName ?? "").trim().toLowerCase();
+    if (!srcLc.has(canonLc)) continue;
+    const extLc = (a.externalName ?? "").trim().toLowerCase();
+    if (!extLc || extLc === tgtLc) continue; // would self-alias
+    out.push({ ...a, canonicalName: tgt, context: null });
+  }
+
+  // De-dup by upsert key (kind, externalName, context), last row wins.
+  const byKey = new Map<string, SpecImportAlias>();
+  for (const a of out) {
+    byKey.set(
+      `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`,
+      a,
+    );
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Learn a customer-group rename as a context-free brand alias (with chain
+ * re-point). Fetches the current alias store first (best-effort) so chained
+ * aliases get re-pointed. Best-effort by design: callers fire-and-forget; a
+ * failure just means the next re-import resurrects the old group once more.
+ */
+export async function learnBrandRenameAliases(
+  oldBrand: string,
+  newBrand: string,
+): Promise<void> {
+  let existing: SpecImportAlias[] = [];
+  try {
+    existing = await fetchSpecImportAliases();
+  } catch {
+    // Proceed without re-points; the direct old→new row still saves.
+  }
+  await saveSpecImportAliases(buildBrandRenameAliases([oldBrand], newBrand, existing));
+}
+
+/**
+ * Fire-and-forget brand rename learning for the pool managers. Skips no-op
+ * renames and blank names.
+ */
+export function maybeLearnBrandRename(oldBrand: string, newBrand: string): void {
+  const from = oldBrand.trim();
+  const to = newBrand.trim();
+  if (!from || !to || from.toLowerCase() === to.toLowerCase()) return;
+  void learnBrandRenameAliases(from, to).catch(() => {});
+}
+
+/**
+ * Per-row brand-edit rule: when a single pool row's brand is changed and NO
+ * other row in the pool still carries the old brand, the whole group
+ * effectively moved — learn the rename alias. If other rows keep the old
+ * brand it's a re-scope (the customer still exists), so learn nothing.
+ * Mirrors `maybeLearnPoolRename`'s fire-and-forget pattern.
+ */
+export function maybeLearnRowBrandChange(
+  oldBrand: string,
+  newBrand: string,
+  otherRowsStillCarryOldBrand: boolean,
+): void {
+  if (otherRowsStillCarryOldBrand) return;
+  maybeLearnBrandRename(oldBrand, newBrand);
+}
+
 // ── Recipe-NAME change learning (merge / rename in Manage Lists) ─────────────
 //
 // Importer↔alias-kind mapping (which store each importer consults, so a learned

@@ -967,7 +967,8 @@ export function suggestPremixRedirects(
 ): Record<string, string> {
   const appTypeAliases = sanitizeSpecAliases(aliases).filter((a) => a.kind === "appType");
   const contextFree = appTypeAliases.filter((a) => (a.context ?? null) === null);
-  if (appTypeAliases.length === 0) return {};
+  // NOTE: no early-out when there are no appType aliases — the brand-drift
+  // fallback below must still run (it matches by name+brand, not by alias).
 
   // Existing mixes by lowercased name — ALL rows kept so a shared name can
   // still resolve when exactly one of them belongs to the candidate's brand.
@@ -992,14 +993,36 @@ export function suggestPremixRedirects(
     const canon =
       (brand ? pickAlias(appTypeAliases, "appType", c.mix.name, brand) : null) ??
       pickAlias(contextFree, "appType", c.mix.name);
-    if (!canon) continue;
-    const matches = byName.get(canon.trim().toLowerCase()) ?? [];
-    let target: MixRedirectTarget | undefined = matches.length === 1 ? matches[0] : undefined;
-    if (!target && matches.length > 1 && brand) {
-      // Several brands share the canonical name: only the candidate's own
-      // brand's mix is a safe target, and only when it is unique.
-      const sameBrand = matches.filter((t) => brandKey(t.brand) === brandKey(brand));
-      if (sameBrand.length === 1) target = sameBrand[0];
+    let target: MixRedirectTarget | undefined;
+    if (canon) {
+      const matches = byName.get(canon.trim().toLowerCase()) ?? [];
+      target = matches.length === 1 ? matches[0] : undefined;
+      if (!target && matches.length > 1 && brand) {
+        // Several brands share the canonical name: only the candidate's own
+        // brand's mix is a safe target, and only when it is unique.
+        const sameBrand = matches.filter((t) => brandKey(t.brand) === brandKey(brand));
+        if (sameBrand.length === 1) target = sameBrand[0];
+      }
+    } else if (brand) {
+      // Brand-drift fallback (no name alias): after a customer-group RENAME,
+      // the pool row keeps its old-brand-derived id but carries the new brand,
+      // while the re-imported candidate's brand is remapped by the learned
+      // "brand" alias — so its recomputed id no longer matches. When exactly
+      // ONE saved mix has the SAME name AND SAME brand (ci), redirect onto it
+      // instead of adding a same-name duplicate inside the renamed group.
+      // Conservative on purpose: exact name only, branded candidates only,
+      // unique same-brand match only (flavor tie-break when several).
+      const matches = (byName.get(c.mix.name.trim().toLowerCase()) ?? []).filter(
+        (t) => brandKey(t.brand) === brandKey(brand),
+      );
+      if (matches.length === 1) target = matches[0];
+      else if (matches.length > 1) {
+        const flavorKey = (c.mix.flavor ?? "").trim().toLowerCase();
+        const sameFlavor = matches.filter(
+          (t) => (t.flavor ?? "").trim().toLowerCase() === flavorKey,
+        );
+        if (sameFlavor.length === 1) target = sameFlavor[0];
+      }
     }
     if (!target || target.id === c.mix.id) continue;
     // Never redirect a branded candidate onto a DIFFERENT brand's mix.

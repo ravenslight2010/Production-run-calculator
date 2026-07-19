@@ -24,7 +24,11 @@ import { useMixes } from "../hooks/useMixes";
 import { saveMixes, deleteMixes } from "../mixes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
-import { maybeLearnPoolRename } from "@/specImportAliases";
+import {
+  maybeLearnPoolRename,
+  maybeLearnBrandRename,
+  maybeLearnRowBrandChange,
+} from "@/specImportAliases";
 
 function genId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -134,6 +138,11 @@ export default function MixesManager({
     const changed = renameMixesBrand(items, fromBrand, toBrand);
     setRenamingBrand(null);
     if (changed.length === 0) return;
+    // Learn the rename as a spec-import brand alias (fire-and-forget) so a
+    // re-import of a workbook whose tab still carries the old customer name
+    // lands on the renamed group instead of resurrecting it. Applies to plain
+    // renames AND merges into an existing group.
+    maybeLearnBrandRename(fromBrand, toBrand);
     // Keep the group open under its new key so the result stays visible.
     setOpenBrands((prev) => {
       const next = new Set(prev);
@@ -310,6 +319,19 @@ export default function MixesManager({
                                   ingredientSuggestions={ingredientSuggestions}
                                   onChange={(next) => {
                                     maybeLearnPoolRename("mixes", mix.name, next.name, next.brand);
+                                    // Per-row brand edit: if no OTHER row still
+                                    // carries the old brand, the whole group
+                                    // effectively moved — learn the rename.
+                                    const oldBrandLc = mix.brand.trim().toLowerCase();
+                                    maybeLearnRowBrandChange(
+                                      mix.brand,
+                                      next.brand,
+                                      items.some(
+                                        (m) =>
+                                          m.id !== mix.id &&
+                                          m.brand.trim().toLowerCase() === oldBrandLc,
+                                      ),
+                                    );
                                     saveMutation.mutate([next]);
                                   }}
                                   onDelete={() => deleteMutation.mutate([mix.id])}

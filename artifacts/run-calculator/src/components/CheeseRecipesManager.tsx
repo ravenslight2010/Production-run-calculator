@@ -33,7 +33,11 @@ import { fetchMixes, saveMixes } from "../mixes";
 import { relinkCheeseSlotsToMixInProfiles } from "../storage";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
-import { maybeLearnPoolRename } from "@/specImportAliases";
+import {
+  maybeLearnPoolRename,
+  maybeLearnBrandRename,
+  maybeLearnRowBrandChange,
+} from "@/specImportAliases";
 // Decimal-friendly numeric input: keeps the in-progress text locally while
 // focused (so typing "0.", ".5", clearing, etc. never snaps/reformats under
 // the caret), selects everything on focus for easy overwrite, and reports the
@@ -237,6 +241,11 @@ export default function CheeseRecipesManager({
     const changed = renameCheeseRecipesBrand(items, fromBrand, toBrand);
     setRenamingBrand(null);
     if (changed.length === 0) return;
+    // Learn the rename as a spec-import brand alias (fire-and-forget) so a
+    // re-import of a workbook whose tab still carries the old customer name
+    // lands on the renamed group instead of resurrecting it. Applies to plain
+    // renames AND merges into an existing group.
+    maybeLearnBrandRename(fromBrand, toBrand);
     // Keep the group open under its new key so the result stays visible.
     setOpenBrands((prev) => {
       const next = new Set(prev);
@@ -418,6 +427,19 @@ export default function CheeseRecipesManager({
                                   getFlavorTargets={getFlavorTargets}
                                   onChange={(next) => {
                                     maybeLearnPoolRename("cheese", recipe.name, next.name, next.brand);
+                                    // Per-row brand edit: if no OTHER row still
+                                    // carries the old brand, the whole group
+                                    // effectively moved — learn the rename.
+                                    const oldBrandLc = recipe.brand.trim().toLowerCase();
+                                    maybeLearnRowBrandChange(
+                                      recipe.brand,
+                                      next.brand,
+                                      items.some(
+                                        (r) =>
+                                          r.id !== recipe.id &&
+                                          r.brand.trim().toLowerCase() === oldBrandLc,
+                                      ),
+                                    );
                                     saveMutation.mutate([next]);
                                   }}
                                   onDelete={() => deleteMutation.mutate([recipe.id])}
