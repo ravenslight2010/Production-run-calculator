@@ -10,6 +10,7 @@
 // resumes.
 
 import { buildCiMergeLookup, mapNameCi, type MergeMap } from "./mergeIngredients";
+import { buildNearDupNameMatcher } from "@workspace/name-match";
 
 export type RecipeNameMergeCategory = "dough" | "sauce" | "cheese" | "mixes";
 
@@ -215,22 +216,25 @@ export function healApplicatorSlotValues<T extends Record<string, unknown>>(
 }
 
 /**
- * Collect cheese/mix LINK names referenced by values objects (runs, profiles,
- * templates, history) that match NO server pool name — "phantom" names that
- * still show in the applicator picker (it always includes the current pick)
- * but are otherwise unfindable: not in the Cheese Recipes list and, before
- * this, not offered by the merge picker either. Returned in first-seen
- * spelling, deduped case-insensitively, so the Cheese merge tab can offer
- * them as merge sources.
+ * Collect recipe-name LINK/selection values referenced by values objects
+ * (runs, profiles, templates, history) that match NO server pool name —
+ * "stale references": old names still held after the real recipe was renamed,
+ * merged, or re-imported. They still show in pickers (a picker always includes
+ * the current pick) but are otherwise unfindable — not in the category's
+ * Manage Lists section and, before this, not offered by the merge picker
+ * either. Returned in first-seen spelling, deduped case-insensitively, so the
+ * category's merge tab can offer them as merge sources (the merge rewrites
+ * every link field, which is exactly how a user cleans one up).
  */
-export function collectStaleCheeseLinkNames(
+export function collectStaleRecipeLinkNames(
   objects: readonly Record<string, unknown>[],
   poolNamesCi: ReadonlySet<string>,
+  fields: readonly string[],
 ): string[] {
   const seen = new Map<string, string>();
   for (const obj of objects) {
-    for (const slot of [1, 2, 3, 4]) {
-      const name = String(obj[`app${slot}CheeseRecipeName`] ?? "").trim();
+    for (const field of fields) {
+      const name = String(obj[field] ?? "").trim();
       if (!name) continue;
       const key = ciKey(name);
       if (poolNamesCi.has(key) || seen.has(key)) continue;
@@ -238,4 +242,39 @@ export function collectStaleCheeseLinkNames(
     }
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/** Cheese-tab variant kept for existing callers/tests (link fields = app1-4). */
+export function collectStaleCheeseLinkNames(
+  objects: readonly Record<string, unknown>[],
+  poolNamesCi: ReadonlySet<string>,
+): string[] {
+  return collectStaleRecipeLinkNames(
+    objects,
+    poolNamesCi,
+    RECIPE_NAME_FIELDS_BY_CATEGORY.cheese,
+  );
+}
+
+export interface StaleCleanupSuggestion {
+  /** The stale referenced name (first-seen spelling). */
+  name: string;
+  /** The closest real pool recipe, or null when no single safe match exists. */
+  suggestion: string | null;
+}
+
+/**
+ * Propose the best-matching REAL pool recipe for each stale referenced name,
+ * using the shared near-duplicate matcher (loose key → word order → single
+ * typo → one extra word). The extra-word layer is safe to enable here because
+ * every cleanup is user-confirmed through the merge form before it applies
+ * (the suggestion only PRE-FILLS the merge pair). Ambiguity-guarded: two
+ * plausible pool candidates ⇒ no suggestion (null) rather than a guess. Pure.
+ */
+export function buildStaleCleanupSuggestions(
+  staleNames: readonly string[],
+  poolNames: readonly string[],
+): StaleCleanupSuggestion[] {
+  const matcher = buildNearDupNameMatcher(poolNames, { allowExtraToken: true });
+  return staleNames.map((name) => ({ name, suggestion: matcher(name) }));
 }

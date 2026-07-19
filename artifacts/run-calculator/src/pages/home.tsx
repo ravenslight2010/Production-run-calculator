@@ -302,7 +302,8 @@ import {
   RECIPE_NAME_FIELDS_BY_CATEGORY,
   countRecipeNameReferences,
   isStrayMixName,
-  collectStaleCheeseLinkNames,
+  collectStaleRecipeLinkNames,
+  buildStaleCleanupSuggestions,
 } from "../mergeRecipeNames";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
 import {
@@ -4498,6 +4499,74 @@ export default function Home() {
   // still name-based and global — the tab only narrows what's pickable. On the
   // brand/flavor tab the universe is the brand list (brands mode) or one brand's
   // flavors (flavors mode).
+  // ── Stale recipe references (all four recipe-name tabs) ───────────────────
+  // Names still referenced by a run, profile, template, or history entry (or
+  // held by a legacy synced local name list) that match NO server pool name
+  // for the active recipe tab — e.g. a name whose pool row was merged/renamed/
+  // re-imported while a device held a stale pick. The pickers always show the
+  // current pick, so without this they were visible there but unfindable in
+  // Merge — the merge rewrites every link field, which is exactly how a user
+  // cleans one up. Cheese and mix picks share the app{n}CheeseRecipeName link
+  // fields, so on those tabs a link name is only stale when it matches NEITHER
+  // pool (the same stale name is offered on both tabs — either merge fixes it).
+  const mergeStaleNames = useMemo(() => {
+    const cat = mergeCategory;
+    if (cat !== "mixes" && cat !== "dough" && cat !== "sauce" && cat !== "cheese") {
+      return [] as string[];
+    }
+    // On the Mixes tab, factory MIX_SEED names count as "known" too: they are
+    // locally seeded (not stale), unmergeable by the apply guardrail, and
+    // would just be re-seeded if merged away — treating them as stale would
+    // surface selectable-but-unmergeable rows.
+    const mixSeedCi =
+      cat === "mixes"
+        ? new Set(MIX_SEED.mixRecipeNames.map((n) => n.trim().toLowerCase()))
+        : null;
+    const poolCi = new Set([
+      ...(cat === "dough" ? serverDoughNames
+        : cat === "sauce" ? serverSauceNames
+        : [...serverCheeseNames, ...serverMixNames]
+      ).map((n) => n.trim().toLowerCase()),
+      ...(mixSeedCi ?? []),
+    ]);
+    let stale: string[] = [];
+    try {
+      stale = collectStaleRecipeLinkNames(
+        collectMergeSurfaces().settingsObjects,
+        poolCi,
+        RECIPE_NAME_FIELDS_BY_CATEGORY[cat],
+      );
+    } catch (e) {
+      // Never let a surface-scan failure blank the whole tab — but don't
+      // swallow it silently either (a TDZ error hid here once).
+      console.warn(`${cat} merge stale-name scan failed:`, e);
+    }
+    // The legacy local name lists still feed some pickers (e.g. the schedule
+    // editor's Advanced selects) and are synced factory-wide, so a legacy name
+    // lives on every device forever. Any entry that matches NO pool name is a
+    // stale reference too — offer it here (applyRecipeNameMerge already
+    // rewrites + tombstones these lists). Factory MIX_SEED names are excluded
+    // on the Mixes tab: they are locally seeded (not stale) and would be
+    // re-seeded if merged away.
+    const legacyList =
+      cat === "dough" ? doughRecipeNames
+      : cat === "sauce" ? frontlineRecipeNames
+      : cat === "cheese" ? cheeseRecipeNames
+      : mixRecipeNames;
+    const staleLocal = legacyList.filter((n) => {
+      const key = n.trim().toLowerCase();
+      return key && !poolCi.has(key);
+    });
+    return dedupSorted([...stale, ...staleLocal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeCategory, serverDoughNames, serverSauceNames, serverCheeseNames, serverMixNames, doughRecipeNames, frontlineRecipeNames, cheeseRecipeNames, mixRecipeNames]);
+
+  // Case-insensitive membership for the "old reference" label in the picker.
+  const mergeStaleCi = useMemo(
+    () => new Set(mergeStaleNames.map((n) => n.trim().toLowerCase())),
+    [mergeStaleNames],
+  );
+
   const mergeUniverse = useMemo(() => {
     switch (mergeCategory) {
       // The four recipe categories merge that category's RECIPE NAMES (the
@@ -4505,47 +4574,19 @@ export default function Home() {
       // are all server-backed master-data now (their sections under Manage
       // Lists), so each picker shows the SAME live server pool — not the dormant
       // local `mixRecipeNames` / `doughRecipeNames` / `frontlineRecipeNames`
-      // lists, which held legacy names that no longer appear in the app.
-      case "mixes": return dedupSorted(serverMixNames);
-      case "dough": return dedupSorted(serverDoughNames);
-      case "sauce": return dedupSorted(serverSauceNames);
+      // lists, which held legacy names that no longer appear in the app. Every
+      // recipe tab ALSO unions in the stale referenced names (mergeStaleNames)
+      // so leftover names in any category can be merged away.
+      case "mixes": return dedupSorted([...serverMixNames, ...mergeStaleNames]);
+      case "dough": return dedupSorted([...serverDoughNames, ...mergeStaleNames]);
+      case "sauce": return dedupSorted([...serverSauceNames, ...mergeStaleNames]);
       case "cheese": {
-        // Cheese is server-backed master-data now (the Cheese Recipes section),
-        // so the merge picker must show the SAME live pool — not the dormant
-        // local `cheeseRecipeNames` list, which held legacy names that no longer
-        // appear in the app. A name that also lives in the user Mix list is a
-        // mix, not a cheese recipe, so keep the Cheese tab mix-free.
+        // A name that also lives in the user Mix list is a mix, not a cheese
+        // recipe, so keep the Cheese tab mix-free.
         const mixNameSet = new Set(serverMixNames.map((n) => n.toLowerCase()));
-        // ALSO offer "phantom" link names: cheese/mix names still referenced by
-        // a run, profile, template, or history entry that match NO pool name
-        // (e.g. a name whose pool row was merged/renamed while a device held a
-        // stale pick). The applicator picker always shows the current pick, so
-        // without this they were visible in the picker but unfindable here —
-        // the merge rewrites every link field, which is exactly how a user
-        // cleans one up.
-        const poolCi = new Set(
-          [...serverCheeseNames, ...serverMixNames].map((n) => n.trim().toLowerCase()),
-        );
-        let stale: string[] = [];
-        try {
-          stale = collectStaleCheeseLinkNames(collectMergeSurfaces().settingsObjects, poolCi);
-        } catch (e) {
-          // Never let a surface-scan failure blank the whole tab — but don't
-          // swallow it silently either (a TDZ error hid here once).
-          console.warn("cheese merge stale-name scan failed:", e);
-        }
-        // The legacy local `cheeseRecipeNames` list still feeds one picker (the
-        // schedule editor's Advanced cheese-recipe select) and is synced
-        // factory-wide, so a legacy name lives on every device forever. Any of
-        // its entries that match NO pool name is a phantom too — offer it here
-        // (applyRecipeNameMerge already rewrites + tombstones that list).
-        const staleLocal = cheeseRecipeNames.filter(
-          (n) => n.trim() && !poolCi.has(n.trim().toLowerCase()),
-        );
         return dedupSorted([
           ...serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())),
-          ...stale,
-          ...staleLocal,
+          ...mergeStaleNames,
         ]);
       }
       case "brandflavor":
@@ -4596,11 +4637,33 @@ export default function Home() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, unifiedIngredientUniverse, serverDoughNames, serverSauceNames, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, unifiedIngredientUniverse, serverDoughNames, serverSauceNames, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions, mergeStaleNames]);
 
   // Recipe categories are merged by recipe NAME (not ingredient name).
   const isRecipeNameCategory =
     mergeCategory === "dough" || mergeCategory === "sauce" || mergeCategory === "cheese" || mergeCategory === "mixes";
+
+  // Human label for the active recipe tab's real-recipe home (Manage Lists
+  // section) — used by the "old reference" tag and the cleanup panel copy.
+  const mergePoolLabel =
+    mergeCategory === "mixes" ? "Mixes"
+    : mergeCategory === "dough" ? "Dough Recipes"
+    : mergeCategory === "sauce" ? "Sauce Recipes"
+    : "Cheese Recipes";
+
+  // One suggested cleanup per stale reference: the closest REAL pool recipe
+  // via the shared near-duplicate matcher (ambiguity-guarded — no single safe
+  // match ⇒ no suggestion). Suggestions only PRE-FILL the merge pair; the user
+  // confirms each one through the normal merge flow, never auto-applied.
+  const staleCleanupSuggestions = useMemo(() => {
+    if (!isRecipeNameCategory || mergeStaleNames.length === 0) return [];
+    const poolNames =
+      mergeCategory === "dough" ? serverDoughNames
+      : mergeCategory === "sauce" ? serverSauceNames
+      : mergeCategory === "mixes" ? serverMixNames
+      : serverCheeseNames;
+    return buildStaleCleanupSuggestions(mergeStaleNames, poolNames);
+  }, [isRecipeNameCategory, mergeCategory, mergeStaleNames, serverDoughNames, serverSauceNames, serverMixNames, serverCheeseNames]);
 
   // Which merge-suggest category/brand/pool the AI scan and learned-alias
   // memory should use for the currently active tab. Each tab scans and stores
@@ -5328,10 +5391,14 @@ export default function Home() {
   ): Promise<boolean> {
     const sourcesAll = sourcesArg ?? mergeSources;
     const tgt = targetArg ?? mergeTarget;
-    // Guardrail: only real (server) mix names are mergeable — mirrors the
-    // Cheese tab, which merges over the live server pool.
+    // Guardrail: mergeable mix sources are real (server) mix names OR stale
+    // references (names in NO pool — leftover picks the merge cleans up).
+    // Factory MIX_SEED names stay excluded: they'd just be re-seeded locally.
+    const mixSeedCi = new Set(MIX_SEED.mixRecipeNames.map((n) => n.trim().toLowerCase()));
     const rawSources = category === "mixes"
-      ? sourcesAll.filter((s) => serverMixNames.includes(s))
+      ? sourcesAll.filter(
+          (s) => serverMixNames.includes(s) || !mixSeedCi.has(s.trim().toLowerCase()),
+        )
       : sourcesAll;
     const map = buildMergeMap(rawSources, tgt);
     if (Object.keys(map).length === 0) {
@@ -11915,6 +11982,43 @@ export default function Home() {
                       </p>
                     ) : (
                       <div ref={mergeFormRef} className="space-y-4 scroll-mt-2">
+                        {/* Clean up old references (stale names with no recipe behind them) */}
+                        {isRecipeNameCategory && staleCleanupSuggestions.length > 0 && (
+                          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 space-y-2">
+                            <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                              Clean up old references ({staleCleanupSuggestions.length})
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">
+                              These names are still referenced by runs, saved setups, templates or history
+                              but no longer exist in {mergePoolLabel}. Load one to pre-fill the merge, then
+                              confirm — merging re-points every place that still uses the old name.
+                            </p>
+                            <div className="space-y-1">
+                              {staleCleanupSuggestions.map((s) => (
+                                <div key={s.name} className="flex items-center gap-2 text-xs">
+                                  <span className="min-w-0 truncate font-medium">{s.name}</span>
+                                  {s.suggestion ? (
+                                    <span className="min-w-0 truncate text-muted-foreground">→ {s.suggestion}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground italic whitespace-nowrap">no close match — pick a target below</span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={mergeBusy}
+                                    onClick={() => {
+                                      setMergeSources([s.name]);
+                                      setMergeTarget(s.suggestion ?? "");
+                                      setMergeConfirming(false);
+                                      setMergeError("");
+                                    }}
+                                    className="ml-auto px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+                                  >Load</button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Sources */}
                         <div className="space-y-1.5">
                           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Merge these (sources)</p>
@@ -11934,7 +12038,13 @@ export default function Home() {
                                     onChange={() => toggleMergeSource(name)}
                                     className="accent-primary"
                                   />
-                                  <span className={checked ? "font-semibold text-primary" : ""}>{name}</span>
+                                  <span className={`min-w-0 truncate ${checked ? "font-semibold text-primary" : ""}`}>{name}</span>
+                                  {isRecipeNameCategory && mergeStaleCi.has(name.trim().toLowerCase()) && (
+                                    <span
+                                      className="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 whitespace-nowrap"
+                                      title={`Old reference — this name is still used somewhere but no longer exists in ${mergePoolLabel}. Merge it into a real recipe to clean it up.`}
+                                    >old reference — not in {mergePoolLabel}</span>
+                                  )}
                                 </label>
                               );
                             })}
