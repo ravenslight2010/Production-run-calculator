@@ -1753,6 +1753,142 @@ async function runAldoCheeseOzDepoison(): Promise<void> {
   });
 }
 
+// ── Bobo cross-family alias undo (2026-07-19) ───────────────────────────────
+// A spec re-import review pick learned the context-free alias
+// `appType: "Bobo Breakfast Mix" → "Bobo's Breakfast Cheese Mix"` (+ the
+// mirrored shared-corrections row). Those are DIFFERENT products: the sheet's
+// "Bobo Breakfast Mix" applicator is the egg/bacon premix, while "Bobo's
+// Breakfast Cheese Mix" is the mozzarella/cheddar blend on the other stations.
+// Every later import auto-applied the rename, so the saved spec parse baked
+// the cheese blend's name into the premix station and Auto-Fill kept nagging
+// the (correct) profile with a false Type + Recipe mismatch. This heal:
+//   1. re-runs the alias sanitize purge — the new cross-family guard in
+//      sanitizeSpecAliases now drops this row (and any other appType alias
+//      that adds/removes "cheese" between a mix-family and cheese-family
+//      name), all scopes;
+//   2. deletes the mirrored shared-corrections rows for the exact pair (any
+//      domain — this exact pair can never be a legitimate mapping);
+//   3. restores the sheet's verbatim applicator name in saved spec parses:
+//      an applicator whose type is (ci) "Bobo's Breakfast Cheese Mix" can
+//      ONLY be alias poison — the full pool name never appears as a raw
+//      applicator label in any source workbook (corpus-verified; the raw
+//      labels are "Bobo Breakfast Cheese" / "Bobo Breakfast Mix").
+// Re-learning is permanently blocked by the cross-family guard now enforced
+// in sanitizeSpecAliases, the applySpecMatches learn loop, and the server
+// POST backstop.
+
+const BOBO_CROSS_FAMILY_HEAL_ID = "bobo-cross-family-alias-undo-v1";
+const BOBO_POISONED_CANONICAL = "bobo's breakfast cheese mix";
+const BOBO_VERBATIM_EXTERNAL = "Bobo Breakfast Mix";
+
+/**
+ * Restore the verbatim sheet name on poisoned applicator entries of one saved
+ * spec parse. Returns true when anything changed. Exported for unit tests.
+ */
+export function healBoboApplicatorsInParse(data: {
+  profiles?: Array<{ applicators?: Array<{ type?: unknown }> }>;
+}): boolean {
+  let changed = false;
+  for (const profile of data?.profiles ?? []) {
+    const apps = profile?.applicators;
+    if (!Array.isArray(apps)) continue;
+    for (const a of apps) {
+      if (
+        typeof a?.type === "string" &&
+        a.type.trim().toLowerCase() === BOBO_POISONED_CANONICAL
+      ) {
+        a.type = BOBO_VERBATIM_EXTERNAL;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+async function runBoboCrossFamilyAliasUndo(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: BOBO_CROSS_FAMILY_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Re-run the alias sanitize purge (per scope — conflict detection must
+    // only look at aliases applied together); the new cross-family guard
+    // drops the poisoned row plus any sibling cross-family appType aliases.
+    const rows = await tx.select().from(specImportAliasesTable).for("update");
+    const byScope = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const list = byScope.get(row.scope);
+      if (list) list.push(row);
+      else byScope.set(row.scope, [row]);
+    }
+    const dropIds: number[] = [];
+    for (const scopeRows of byScope.values()) {
+      const entries: SpecAliasEntry[] = scopeRows.map((r) => ({
+        kind: r.kind as SpecAliasEntry["kind"],
+        externalName: r.externalName,
+        canonicalName: r.canonicalName,
+        context: r.context,
+      }));
+      const kept = new Set(sanitizeSpecAliases(entries));
+      for (let i = 0; i < scopeRows.length; i++) {
+        if (!kept.has(entries[i])) dropIds.push(scopeRows[i].id);
+      }
+    }
+    let deletedAliases = 0;
+    for (const id of dropIds) {
+      const a = await tx
+        .delete(specImportAliasesTable)
+        .where(eq(specImportAliasesTable.id, id))
+        .returning({ id: specImportAliasesTable.id });
+      deletedAliases += a.length;
+    }
+
+    // 2) Mirrored shared-corrections rows for the exact pair (any domain).
+    const corrections = await tx
+      .delete(aiCorrectionsTable)
+      .where(
+        and(
+          eq(sql`lower(trim(${aiCorrectionsTable.fromText}))`, "bobo breakfast mix"),
+          eq(sql`lower(trim(${aiCorrectionsTable.toText}))`, BOBO_POISONED_CANONICAL),
+        ),
+      )
+      .returning({ id: aiCorrectionsTable.id });
+
+    // 3) Saved spec parses (all scopes — Auto-Fill reads these directly).
+    let healedSheets = 0;
+    const sheets = await tx
+      .select()
+      .from(savedSpecSheetsTable)
+      .where(
+        sql`${savedSpecSheetsTable.data}::text ilike ${"%bobo's breakfast cheese mix%"}`,
+      )
+      .for("update");
+    for (const sheet of sheets) {
+      const data = sheet.data as Parameters<typeof healBoboApplicatorsInParse>[0] | null;
+      if (!data || !healBoboApplicatorsInParse(data)) continue;
+      await tx
+        .update(savedSpecSheetsTable)
+        .set({ data })
+        .where(eq(savedSpecSheetsTable.id, sheet.id));
+      healedSheets++;
+    }
+
+    logger.info(
+      {
+        heal: BOBO_CROSS_FAMILY_HEAL_ID,
+        scannedAliases: rows.length,
+        deletedAliases,
+        deletedCorrections: corrections.length,
+        healedSheets,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1778,4 +1914,5 @@ export async function runDataHeals(): Promise<void> {
   await runBogusMergeAliasPurge();
   await runCrosslinkedSavedParsePurge();
   await runAldoCheeseOzDepoison();
+  await runBoboCrossFamilyAliasUndo();
 }

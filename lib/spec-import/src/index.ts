@@ -2764,6 +2764,30 @@ export function isModifierDropNamePair(a: string, b: string): boolean {
 }
 
 /**
+ * True when an appType alias pair crosses the mix ↔ cheese-blend family line
+ * by adding/removing the word "cheese": names are classified with the same
+ * precedence the importer's routing uses (a name carrying a "cheese" token is
+ * cheese-family even when it also says "mix" — "Bobo's Breakfast Cheese Mix";
+ * a name with a "mix" token but NO "cheese" token is mix-family — "Bobo
+ * Breakfast Mix"). A pair whose two sides land in DIFFERENT families names two
+ * DIFFERENT products (prod incident: a link pick learned `appType: "Bobo
+ * Breakfast Mix" → "Bobo's Breakfast Cheese Mix"`, renaming the egg/bacon
+ * premix applicator to the mozzarella/cheddar blend on every re-import). Names
+ * with neither token are neutral and never trip this. Pure.
+ */
+export function isCrossFamilyMixCheesePair(a: string, b: string): boolean {
+  const family = (name: string): "cheese" | "mix" | null => {
+    const tokens = new Set(specImportNameMatchKey(name).split(" ").filter(Boolean));
+    if (tokens.has("cheese")) return "cheese";
+    if (tokens.has("mix")) return "mix";
+    return null;
+  };
+  const fa = family(a);
+  const fb = family(b);
+  return fa !== null && fb !== null && fa !== fb;
+}
+
+/**
  * Hygiene filter for learned spec-import aliases, applied before EVERY use:
  *   1. drops appType aliases with a generic slot-type name ("Mix"/"cheese") on
  *      either side (see isGenericSlotTypeName);
@@ -2776,18 +2800,24 @@ export function isModifierDropNamePair(a: string, b: string): boolean {
  *      review step, so such pairs must never rename silently
  *      (see isModifierDropNamePair);
  *   4. finally drops cyclic/chained aliases (dropConflictingSpecAliases).
+ * Additionally drops appType aliases whose two sides cross the mix ↔ cheese
+ * blend family line (see isCrossFamilyMixCheesePair) — adding/removing the
+ * word "cheese" names a DIFFERENT product, so such picks may only ever be
+ * declinable suggestions, never remembered renames.
  * recipeName and ingredient kinds are exempt from the digit rule on purpose:
  * a user deliberately picking pool recipe "CRB DOUGH" for the sheet's
  * `7" CRB recipe` is a legitimate digit-dropping rename. brand/flavor/appType/
  * recipeName kinds are exempt from the subset rule because their renames come
- * from explicit user review (renames and "use existing" link picks — e.g.
- * "Cheeseburger Cheese Mix" → "Cheeseburger Mix" is a deliberate pick). Pure.
+ * from explicit user review (renames and "use existing" link picks). Pure.
  */
 export function sanitizeSpecAliases(
   aliases: ReadonlyArray<SpecImportAlias>,
 ): SpecImportAlias[] {
   const clean = aliases.filter((a) => {
     if (a.kind === "appType" && (isGenericSlotTypeName(a.externalName) || isGenericSlotTypeName(a.canonicalName))) {
+      return false;
+    }
+    if (a.kind === "appType" && isCrossFamilyMixCheesePair(a.externalName, a.canonicalName)) {
       return false;
     }
     if (DIGIT_GUARDED_ALIAS_KINDS.has(a.kind)) {
@@ -4922,6 +4952,10 @@ export function applyNameMatches(
     const cand = (m.candidate ?? "").trim();
     const match = (m.match ?? "").trim();
     if (!cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    // Never LEARN a mix ↔ cheese-family crossing pair (mirror of the sanitize
+    // rule — such a pick names a DIFFERENT product, so it may only ever be a
+    // declinable suggestion, never a remembered rename).
+    if (isCrossFamilyMixCheesePair(cand, match)) continue;
     aliasByKey.set(specAliasKey("appType", cand, null), {
       kind: "appType",
       externalName: cand,

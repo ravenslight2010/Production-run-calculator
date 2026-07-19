@@ -38,6 +38,7 @@ import {
   type ParsedSpecImport,
 } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
+import { buildNearDupNameMatcher } from "@workspace/name-match";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 import { latestSourceKeyIds } from "./savedSpecSheets";
 
@@ -253,6 +254,16 @@ function desiredFromProfile(
     const slot = i + 1;
     const type = (a.type ?? "").trim();
     if (!type) return;
+    // Near-dup equivalence: a sheet blend name the slot resolvers left RAW
+    // (no loose-key match anywhere) may still be the SAME blend the profile
+    // already links on its generic "cheese"/"Mix" slot, just spelled with a
+    // possessive/extra word ("Bobo Breakfast Cheese" vs linked "Bobo's
+    // Breakfast Cheese Mix"). Suggesting the raw name over the generic type
+    // would UNLINK the recipe — a strictly worse setup — so when the profile
+    // slot's linked recipe near-dup-matches the raw name, the type is in
+    // substance equal and no suggestion is made. Genuinely different names
+    // (no near-dup match) still surface as real mismatches.
+    if (rawTypeMatchesProfileLink(type, cur, slot)) return;
     push(`app${slot}Type`, `Applicator ${slot} Type`, type, "string");
     if (Number(a.ozPerPizza) > 0) {
       push(`app${slot}OzPerPizza`, `Applicator ${slot} Oz Per Pizza`, a.ozPerPizza, "number");
@@ -414,6 +425,44 @@ function desiredFromDoughSauceRecipes(
 
 function nameKey(v: string): string {
   return specImportNameMatchKey(cleanSpecCheeseRecipeName(v));
+}
+
+/**
+ * Possessive-tolerant fold key for near-dup comparing a raw sheet applicator
+ * label against a profile slot's linked recipe name: cheese-name cleanup
+ * (trailing weights etc.) then the shared loose brand key (per-token
+ * possessive fold — "Bobo's" == "Bobo").
+ */
+function possessiveFoldNameKey(v: string): string {
+  return specImportBrandMatchKey(cleanSpecCheeseRecipeName(v));
+}
+
+/**
+ * True when a RAW (unresolved) sheet applicator type is in substance the same
+ * blend the profile's slot already carries: the slot is generic-typed
+ * ("cheese"/"Mix"), links a recipe, and that linked recipe name near-dup
+ * matches the raw label under the shared layered matcher (possessive fold +
+ * one extra token allowed — "Bobo Breakfast Cheese" vs "Bobo's Breakfast
+ * Cheese Mix"). Raw labels that already resolved to a generic type never get
+ * here (they compare equal upstream); genuinely different blend names find no
+ * near-dup match and still surface as real Type mismatches.
+ */
+function rawTypeMatchesProfileLink(
+  rawType: string,
+  cur: Record<string, unknown>,
+  slot: number,
+): boolean {
+  const curType = String(cur[`app${slot}Type`] ?? "").trim().toLowerCase();
+  if (curType !== "cheese" && curType !== "mix") return false;
+  const link = String(cur[`app${slot}CheeseRecipeName`] ?? "").trim();
+  if (!link) return false;
+  const rawLower = rawType.trim().toLowerCase();
+  if (rawLower === "cheese" || rawLower === "mix") return false;
+  const match = buildNearDupNameMatcher([link], {
+    keyOf: possessiveFoldNameKey,
+    allowExtraToken: true,
+  });
+  return match(rawType) !== null;
 }
 
 /**

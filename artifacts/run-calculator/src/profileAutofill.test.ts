@@ -115,6 +115,69 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.fills.find(f => f.field === "app1Type")).toBeUndefined();
   });
 
+  it("does not flag a Type mismatch when the raw sheet blend near-dup-matches the slot's linked recipe", () => {
+    // Regression (Bobo): after the cross-family alias purge, the saved sheet
+    // again carries the verbatim label "Bobo Breakfast Mix" — which never
+    // loose-key matches the pool recipe "Bobo's Breakfast Mix"... it does
+    // (possessive folds), but "Bobo Breakfast Cheese" vs the linked
+    // "Bobo's Breakfast Cheese Mix" does NOT (extra "Mix" token), so the slot
+    // resolver leaves it raw and Auto-Fill used to nag "now cheese · import
+    // says Bobo Breakfast Cheese". The linked recipe near-dup-matches the raw
+    // name, so the type is in substance equal — no mismatch, no fill.
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile({
+          applicators: [{ type: "Bobo Breakfast Cheese", ozPerPizza: 3, batchLbs: 0 }],
+        })],
+      })],
+      values({
+        app1Type: "cheese",
+        app1CheeseRecipeName: "Bobo's Breakfast Cheese Mix",
+        app1OzPerPizza: 3,
+      } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "app1Type")).toBeUndefined();
+    // The paired recipe suggestion is suppressed too — the raw label resolves
+    // to no pool recipe, so nothing may offer to overwrite the existing link.
+    expect(p.fills.find(f => f.field === "app1CheeseRecipeName")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "app1CheeseRecipeName")).toBeUndefined();
+  });
+
+  it("still flags a Type mismatch when the raw blend swaps a token vs the linked recipe (allowExtraToken boundary)", () => {
+    // "Pepperoni" vs "Breakfast" is a token CHANGE, not one extra token —
+    // clearly distinct blends under a generic slot must still surface.
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile({
+          applicators: [{ type: "Bobo's Pepperoni Cheese Mix", ozPerPizza: 3, batchLbs: 0 }],
+        })],
+      })],
+      values({
+        app1Type: "cheese",
+        app1CheeseRecipeName: "Bobo's Breakfast Cheese Mix",
+        app1OzPerPizza: 3,
+      } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
+  });
+
+  it("still flags a Type mismatch when the raw sheet blend is genuinely different from the linked recipe", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile({
+          applicators: [{ type: "Deluxe Vegetable Cheese", ozPerPizza: 3, batchLbs: 0 }],
+        })],
+      })],
+      values({
+        app1Type: "cheese",
+        app1CheeseRecipeName: "Bobo's Breakfast Cheese Mix",
+        app1OzPerPizza: 3,
+      } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
+  });
+
   it('matches a saved-sheet row stored under a punctuation-typo brand (Aldo"s → Aldo\'s)', () => {
     // Regression: an AI parse minted brand `Aldo"s` (straight double-quote)
     // for one flavor row; the strict brand compare made Auto-Fill skip it, so

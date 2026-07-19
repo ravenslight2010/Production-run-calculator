@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
 import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
-import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, type SpecAliasKind } from "@workspace/spec-import";
+import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, isCrossFamilyMixCheesePair, type SpecAliasKind } from "@workspace/spec-import";
 
 const router: IRouter = Router();
 
@@ -76,6 +76,14 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
     // renames every distinct blend onto one garbage record at the next import.
     // Old/unfixed clients must not be able to write these.
     if (kind === "appType" && (isGenericSlotTypeName(externalName) || isGenericSlotTypeName(canonicalName))) {
+      continue;
+    }
+    // Server-side backstop: an appType alias that crosses the mix ↔ cheese
+    // blend family line (adds/removes the word "cheese" between a mix-family
+    // and cheese-family name) renames a DIFFERENT product ("Bobo Breakfast
+    // Mix" → "Bobo's Breakfast Cheese Mix" swapped an egg/bacon premix for a
+    // mozzarella blend). Old/unfixed clients must not be able to write these.
+    if (kind === "appType" && isCrossFamilyMixCheesePair(externalName, canonicalName)) {
       continue;
     }
     // Server-side backstop for ingredient aliases: a pair that drops a
