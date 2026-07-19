@@ -7951,6 +7951,11 @@ export default function Home() {
     });
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Learn the rename as a spec-import dieType alias (chain re-point inside)
+    // so a spec-sheet re-import maps the old die name onto the new spelling
+    // instead of resurrecting it in the picklist. The sanitizer's digit guard
+    // drops digit-mismatched pairs (11" → 12") by design. Best-effort.
+    maybeLearnTypeRename("dieType", oldName, trimmed);
   }
 
   function checkPin() {

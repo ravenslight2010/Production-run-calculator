@@ -1718,7 +1718,7 @@ export const AiParseSpecSheetBody = zod.object({
   "cheeseRecipes": zod.array(zod.string()).optional().describe('Existing cheese recipe names (grounds paraphrased recipe names)')
 }).optional().describe('The app\'s known canonical lists, supplied to ground the AI parse.'),
   "aliases": zod.array(zod.object({
-  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName']).describe('Which name-space the mapping lives in'),
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
   "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
@@ -3017,7 +3017,7 @@ export const AppendConversationResponse = zod.object({
  */
 export const ListSpecImportAliasesResponse = zod.object({
   "aliases": zod.array(zod.object({
-  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName']).describe('Which name-space the mapping lives in'),
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
   "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
@@ -3031,7 +3031,7 @@ export const ListSpecImportAliasesResponse = zod.object({
  */
 export const SaveSpecImportAliasesBody = zod.object({
   "aliases": zod.array(zod.object({
-  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName']).describe('Which name-space the mapping lives in'),
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
   "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
@@ -3040,7 +3040,7 @@ export const SaveSpecImportAliasesBody = zod.object({
 
 export const SaveSpecImportAliasesResponse = zod.object({
   "aliases": zod.array(zod.object({
-  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName']).describe('Which name-space the mapping lives in'),
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType']).describe('Which name-space the mapping lives in'),
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
   "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')

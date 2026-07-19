@@ -288,10 +288,16 @@ function applyBrandFlavorAliasesToParse(
   const mapAppType = (t: string): string =>
     isBlendNamedType(t) ? t : pickAlias(usable, "appType", t) ?? t;
   const mapPepType = (t: string): string => pickAlias(usable, "pepType", t) ?? t;
+  const mapDieType = (d: string | undefined): string | undefined => {
+    const raw = (d ?? "").trim();
+    if (!raw) return d;
+    return pickAlias(usable, "dieType", raw) ?? d;
+  };
 
   const profiles = parsed.profiles.map(p => {
     const brand = mapBrand(p.brand);
     const flavor = mapFlavor(p.flavor, brand);
+    const dieType = mapDieType(p.dieType);
     const applicators = p.applicators.map(a => {
       const type = mapAppType(a.type);
       return type === a.type ? a : { ...a, type };
@@ -303,12 +309,20 @@ function applyBrandFlavorAliasesToParse(
     if (
       brand === p.brand &&
       flavor === p.flavor &&
+      dieType === p.dieType &&
       applicators.every((a, i) => a === p.applicators[i]) &&
       pepperonis.every((pep, i) => pep === p.pepperonis[i])
     ) {
       return p;
     }
-    return { ...p, brand, flavor, applicators, pepperonis };
+    return {
+      ...p,
+      brand,
+      flavor,
+      applicators,
+      pepperonis,
+      ...(dieType !== undefined ? { dieType } : {}),
+    };
   });
   const recipes = parsed.recipes.map(r => {
     const brand = r.brand ? mapBrand(r.brand) : r.brand;
@@ -405,12 +419,19 @@ function canonicalizeParsed(
     const flavor = track("flavor", canonicalize(p.flavor, knownFlavors, aliases, "flavor", brand), brand);
     const doughAlias = aliasNamedRecipe(p.doughName, "dough");
     const sauceAlias = aliasNamedRecipe(p.sauceName, "sauce");
+    // Die-type renames learned in Manage Lists: alias-only remap (no exact/
+    // fuzzy — the deterministic die link pass handles loose-key snapping) so
+    // a re-import lands on the renamed die instead of resurrecting the old
+    // picklist name.
+    const dieRaw = (p.dieType ?? "").trim();
+    const dieAlias = dieRaw ? pickAlias(usableAliases, "dieType", dieRaw) : null;
     return {
       ...p,
       brand,
       flavor,
       ...(doughAlias ? { doughName: doughAlias } : {}),
       ...(sauceAlias ? { sauceName: sauceAlias } : {}),
+      ...(dieAlias ? { dieType: dieAlias } : {}),
       applicators: p.applicators.map(a =>
         isBlendNamedType(a.type ?? "")
           ? { ...a }

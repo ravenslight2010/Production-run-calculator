@@ -451,14 +451,15 @@ export function maybeLearnIngredientRename(
 // ── Applicator/pepperoni TYPE rename learning ────────────────────────────────
 
 /**
- * Build the `appType`/`pepType` alias rows to persist after a type RENAME in
- * Manage Lists so a spec re-import maps the old type name onto the new one
- * instead of resurrecting it. Same chain re-point + self-alias drop + dedup
- * pattern. The sanitizer's digit guard (DIGIT_GUARDED_ALIAS_KINDS) still drops
- * digit-mismatched pairs at apply time by design. Pure.
+ * Build the `appType`/`pepType`/`dieType` alias rows to persist after a type
+ * RENAME in Manage Lists so a spec re-import maps the old type name onto the
+ * new one instead of resurrecting it. Same chain re-point + self-alias drop +
+ * dedup pattern. The sanitizer's digit guard (DIGIT_GUARDED_ALIAS_KINDS) still
+ * drops digit-mismatched pairs at apply time by design (for die types that is
+ * exactly right: an 11" die must never silently become a 12" one). Pure.
  */
 export function buildTypeRenameAliases(
-  kind: "appType" | "pepType",
+  kind: "appType" | "pepType" | "dieType",
   sources: ReadonlyArray<string>,
   target: string,
   existingAliases: ReadonlyArray<SpecImportAlias> = [],
@@ -509,11 +510,11 @@ export function buildTypeRenameAliases(
 
 /**
  * Fire-and-forget type rename learning for the Manage Lists applicator /
- * pepperoni type rename controls. Skips no-op renames and blank names.
+ * pepperoni / die type rename controls. Skips no-op renames and blank names.
  * Best-effort by design.
  */
 export function maybeLearnTypeRename(
-  kind: "appType" | "pepType",
+  kind: "appType" | "pepType" | "dieType",
   oldName: string,
   newName: string,
 ): void {

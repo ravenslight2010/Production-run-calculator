@@ -2751,6 +2751,7 @@ export const SpecImportAliasKind = {
   doughIngredient: 'doughIngredient',
   sauceIngredient: 'sauceIngredient',
   recipeName: 'recipeName',
+  dieType: 'dieType',
 } as const;
 
 /**

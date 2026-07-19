@@ -10,7 +10,7 @@ Rule: EVERY entry point that merges or renames a name that can appear on a spec 
 **How to apply:**
 - Ingredient merges/renames: learn under ALL THREE ingredient kinds (dough/sauce/cheese) by default — sheets don't say which pool a name belongs to.
 - Brand renames must re-CONTEXT existing flavor aliases (flavor lookup runs with the NEW canonical brand as context) and re-point alias chains.
-- Type renames (appType/pepType): chain re-point + self-alias drop, context preserved.
+- Type renames (appType/pepType/dieType): chain re-point + self-alias drop, context preserved. Die types can't be MERGED but a picklist RENAME still learns a "dieType" alias (digit-guarded — 11"→12" is dropped as poison); the importer applies it alias-only before the deterministic die link pass, on both fresh-parse and saved-parse reuse paths.
 - The saved-parse REUSE path must also remap ALL kinds — brand/flavor, appType/pepType, and recipe-row ingredients — not just brand/flavor; snapshots carry pre-rename names. (Blend-named applicator types stay verbatim, same guard as the fresh-parse path.)
 - Fuzzy canonicalize has a paren-signature guard: "X (A)" never fuzzy-snaps onto "X (B)" (parenthetical = distinguishing info); same-paren typos still fuzz.
 - Regression coverage: `artifacts/run-calculator/src/specReimportRenameMemory.test.ts` (real workbook bytes, deterministic fixture parse; learn-helper internals need a global fetch stub — vi.mock can't intercept module-internal calls) and `lib/spec-import/src/parenIngredientGuard.test.ts`.

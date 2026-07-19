@@ -8144,7 +8144,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [brand, flavor, appType, pepType, cheeseIngredient, doughIngredient, sauceIngredient, recipeName]
+          enum: [brand, flavor, appType, pepType, cheeseIngredient, doughIngredient, sauceIngredient, recipeName, dieType]
           description: Which name-space the mapping lives in
         externalName:
           type: string

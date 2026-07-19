@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ParsedSpecImport, SpecImportAlias } from "@workspace/spec-import";
+import { sanitizeSpecAliases, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 
 // ── In-memory server stores (shared across mocks) ───────────────────────────
 const { aliasStore, knownStore, parseSpy, fetchSheetsSpy } = vi.hoisted(() => ({
@@ -303,6 +303,18 @@ describe("spec re-import remembers merges/renames (real workbook, deterministic 
     }
   });
 
+  it("5b. die type rename → re-import maps the old die name (fails pre-fix)", async () => {
+    // Rename the way renameDieType learns: '12 inch' → '12"'. Digit signatures
+    // match, so the sanitizer keeps the alias.
+    upsertAliases(
+      buildTypeRenameAliases("dieType", ["12 inch"], '12"', aliasStore.rows as SpecImportAlias[]),
+    );
+
+    const second = await reimport();
+    expect(second.parsed.profiles.length).toBeGreaterThan(0);
+    for (const p of second.parsed.profiles) expect(p.dieType).toBe('12"');
+  });
+
   it("6. saved-parse REUSE path remaps merged brand+flavor+ingredients+types (no AI re-parse)", async () => {
     // Learn the scenario-3 combo first...
     await learnSpecImportAliasesForNameChange("flavor", ["Cheese"], "Classic Cheese", "Aldo's");
@@ -318,6 +330,9 @@ describe("spec re-import remembers merges/renames (real workbook, deterministic 
     );
     upsertAliases(
       buildTypeRenameAliases("pepType", ["Cup Pepperoni"], "Cupping Pep", aliasStore.rows as SpecImportAlias[]),
+    );
+    upsertAliases(
+      buildTypeRenameAliases("dieType", ["12 inch"], '12"', aliasStore.rows as SpecImportAlias[]),
     );
     knownStore.appTypes = ["Mozzarella Shred"];
     knownStore.pepTypes = ["Cupping Pep"];
@@ -348,6 +363,8 @@ describe("spec re-import remembers merges/renames (real workbook, deterministic 
     for (const p of second.parsed.profiles) {
       for (const a of p.applicators) expect(a.type).toBe("Mozzarella Shred");
       for (const pep of p.pepperonis) expect(pep.type).toBe("Cupping Pep");
+      // Die-type renames must apply on the reuse path too.
+      expect(p.dieType).toBe('12"');
     }
     const cheese = second.parsed.recipes.find((r) => r.kind === "cheese")!;
     const rowNames = cheese.rows.map((r) => r.ingredient);
@@ -418,5 +435,17 @@ describe("alias builders (unit)", () => {
     // No-op / blank inputs produce nothing.
     expect(buildTypeRenameAliases("appType", ["Same"], "same", [])).toHaveLength(0);
     expect(buildTypeRenameAliases("pepType", ["Old"], " ", [])).toHaveLength(0);
+  });
+
+  it("buildTypeRenameAliases: dieType kind; sanitizer digit guard drops 11\"→12\"", () => {
+    const rows = buildTypeRenameAliases("dieType", ["12 inch"], '12"', []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "dieType", externalName: "12 inch", canonicalName: '12"', context: null });
+    // Same-digit rename survives the sanitizer; a cross-size alias is poison
+    // (an 11" die must never silently become a 12" one) and must be dropped.
+    expect(sanitizeSpecAliases(rows)).toHaveLength(1);
+    expect(
+      sanitizeSpecAliases([{ kind: "dieType", externalName: '11"', canonicalName: '12"', context: null }]),
+    ).toHaveLength(0);
   });
 });

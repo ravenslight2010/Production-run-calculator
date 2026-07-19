@@ -2376,7 +2376,8 @@ export type SpecAliasKind =
   | "cheeseIngredient"
   | "doughIngredient"
   | "sauceIngredient"
-  | "recipeName";
+  | "recipeName"
+  | "dieType";
 
 export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
   "brand",
@@ -2392,6 +2393,11 @@ export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
   // pre-existing "appType" namespace (the blend-name pool the prepare pass
   // already reads back as link suggestions).
   "recipeName",
+  // A die-type RENAME in Manage Lists (old picklist name -> new name).
+  // Die types are excluded from MERGING by design, but a rename must still be
+  // remembered or a spec re-import resurrects the old die name as a new
+  // picklist entry. Context-free.
+  "dieType",
 ];
 
 /**
@@ -2614,7 +2620,7 @@ export function specNameDigitSignature(name: string): string {
 }
 
 /** Alias kinds where a digit mismatch between external and canonical = poison. */
-const DIGIT_GUARDED_ALIAS_KINDS = new Set<string>(["brand", "flavor", "appType", "pepType"]);
+const DIGIT_GUARDED_ALIAS_KINDS = new Set<string>(["brand", "flavor", "appType", "pepType", "dieType"]);
 
 /**
  * Parenthetical signature of a name: the loose match keys of every "(...)"
