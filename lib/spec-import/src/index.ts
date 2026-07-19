@@ -2617,6 +2617,25 @@ export function specNameDigitSignature(name: string): string {
 const DIGIT_GUARDED_ALIAS_KINDS = new Set<string>(["brand", "flavor", "appType", "pepType"]);
 
 /**
+ * Parenthetical signature of a name: the loose match keys of every "(...)"
+ * group, sorted and joined. "Mozzarella (LMPS)" → "lmps"; "Mozzarella" → "".
+ * Two names that BOTH carry parenthetical qualifiers but with DIFFERENT
+ * contents ("Mozzarella (LMPS)" vs "Mozzarella (WMLM)") are talking about
+ * different products — the parenthetical is spec-relevant info (grade, style,
+ * cut) that must never be silently collapsed by fuzzy matching. Pure.
+ */
+export function specNameParenSignature(name: string): string {
+  const groups: string[] = [];
+  const re = /\(([^)]*)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(name ?? "")) !== null) {
+    const key = specImportNameMatchKey(m[1]);
+    if (key) groups.push(key);
+  }
+  return groups.sort().join("|");
+}
+
+/**
  * Generic slot-card type names ("Mix", "cheese") must never appear on EITHER
  * side of an appType alias: an alias FROM a generic name would rename every
  * plain Mix/cheese slot to one specific blend, and an alias TO a generic name
@@ -2799,8 +2818,14 @@ export function canonicalize(
   //   • neither side's token set may be a proper subset of the other ("Red Hot
   //     Mix" vs "Red Hot Chicken Mix" differ by a whole meaningful word — that
   //     is a different product, not a typo; pure typos alter a token instead
-  //     of adding one).
+  //     of adding one);
+  //   • when BOTH sides carry parenthetical qualifiers, their contents must
+  //     agree ("Mozzarella (LMPS)" vs "Mozzarella (WMLM)" are different
+  //     products — the parenthetical is spec info, not decoration). One-sided
+  //     parens ("Mozzarella (LMPS)" vs "Mozzarella") are already blocked by
+  //     the token-subset guard.
   const rawDigits = specNameDigitSignature(externalName);
+  const rawParens = specNameParenSignature(externalName);
   const rawTokens = new Set(specImportNameMatchKey(externalName).split(" ").filter(Boolean));
   const isProperTokenSubset = (a: Set<string>, b: Set<string>): boolean => {
     if (a.size >= b.size) return false;
@@ -2810,6 +2835,8 @@ export function canonicalize(
   let best: { value: string; ratio: number } | null = null;
   for (const k of known) {
     if (specNameDigitSignature(k) !== rawDigits) continue;
+    const kParens = specNameParenSignature(k);
+    if (rawParens && kParens && rawParens !== kParens) continue;
     const kTokens = new Set(specImportNameMatchKey(k).split(" ").filter(Boolean));
     if (isProperTokenSubset(rawTokens, kTokens) || isProperTokenSubset(kTokens, rawTokens)) {
       continue;

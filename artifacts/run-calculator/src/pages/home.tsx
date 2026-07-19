@@ -465,7 +465,7 @@ import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases } from "@/specImportAliases";
+import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
 
 import {
   Form,
@@ -2590,6 +2590,10 @@ export default function Home() {
     clearDeleted("ingredientTypes", trimmed);
     schedulePush(dayStateRef.current);
     void renameCatalogEntry(oldName, trimmed, "general");
+    // Learn the rename as a spec-import appType alias (chain re-point inside)
+    // so a spec-sheet re-import maps the old applicator type onto the new name
+    // instead of resurrecting it. Best-effort, fire-and-forget.
+    maybeLearnTypeRename("appType", oldName, trimmed);
   }
 
   // ── Ingredient catalog dual-write (Task #102) ──────────────────────────────
@@ -5103,6 +5107,16 @@ export default function Home() {
         await saveMergeAliases(collectMergeAliases(srcs, tgt));
       } catch {
         // Non-fatal: the merge itself already succeeded; learning is additive.
+      }
+      // Also learn spec-import INGREDIENT aliases (all three kinds — the
+      // Ingredients merge tab is category-agnostic and the same physical
+      // ingredient can appear in dough, sauce and cheese recipe rows) so a
+      // spec-sheet re-import maps the merged-away row names onto the survivor
+      // instead of resurrecting them. Best-effort like the other learns.
+      try {
+        await learnIngredientChangeAliases(srcs, tgt);
+      } catch {
+        // Non-fatal: the next re-import just re-offers the old name.
       }
       // Also record each confirmed source→target as a factory-wide correction
       // (ingredient domain) so every other name-resolving AI helper honors it.
@@ -7789,6 +7803,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Learn the rename as a spec-import doughIngredient alias so a spec
+    // re-import maps the old row name onto the new one. Best-effort.
+    maybeLearnIngredientRename(["doughIngredient"], oldName, trimmed);
   }
 
   function renameFrontlineIngredient(oldName: string, newName: string) {
@@ -7812,6 +7829,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Frontline IS the sauce recipe — spec sauce rows canonicalize under the
+    // sauceIngredient kind. Best-effort.
+    maybeLearnIngredientRename(["sauceIngredient"], oldName, trimmed);
   }
 
   function renameCheeseIngredient(oldName: string, newName: string) {
@@ -7838,6 +7858,8 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Learn the rename as a spec-import cheeseIngredient alias. Best-effort.
+    maybeLearnIngredientRename(["cheeseIngredient"], oldName, trimmed);
   }
 
   function renameMixIngredient(oldName: string, newName: string) {
@@ -7864,6 +7886,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Mix recipe rows canonicalize under the cheese kind in spec parses
+    // (mixes ride the cheese recipe kind), so learn cheeseIngredient.
+    maybeLearnIngredientRename(["cheeseIngredient"], oldName, trimmed);
   }
 
   function renamePepType(oldName: string, newName: string) {
@@ -7878,6 +7903,10 @@ export default function Home() {
     tombstoneDeleted("pepTypes", oldName);
     clearDeleted("pepTypes", trimmed);
     schedulePush(dayStateRef.current);
+    // Learn the rename as a spec-import pepType alias (chain re-point inside)
+    // so a spec-sheet re-import maps the old pep type onto the new name
+    // instead of resurrecting it. Best-effort, fire-and-forget.
+    maybeLearnTypeRename("pepType", oldName, trimmed);
   }
 
   function renameDieType(oldName: string, newName: string) {

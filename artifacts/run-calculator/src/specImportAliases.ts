@@ -12,7 +12,7 @@
 // proceeds without learned aliases. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/specImportAliases.ts (replit.md parity).
 
-import type { SpecImportAlias } from "@workspace/spec-import";
+import type { SpecAliasKind, SpecImportAlias } from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
@@ -49,6 +49,19 @@ export async function learnSpecImportAliasesForNameChange(
 ): Promise<void> {
   const tgt = target.trim();
   if (!tgt) return;
+  if (kind === "brand") {
+    // Brand changes go through the full builder: chain re-point of prior brand
+    // aliases PLUS re-contexting of flavor aliases scoped to the old brand
+    // (without which merged-away flavors resurrect under the renamed brand).
+    let existing: SpecImportAlias[] = [];
+    try {
+      existing = await fetchSpecImportAliases();
+    } catch {
+      // Proceed without re-points; the direct old→new rows still save.
+    }
+    await saveSpecImportAliases(buildBrandRenameAliases(sources, tgt, existing));
+    return;
+  }
   const aliases: SpecImportAlias[] = sources
     .map((s) => s.trim())
     .filter((s) => s && s.toLowerCase() !== tgt.toLowerCase())
@@ -56,7 +69,7 @@ export async function learnSpecImportAliasesForNameChange(
       kind,
       externalName: s,
       canonicalName: tgt,
-      context: kind === "flavor" ? (brandContext?.trim() || null) : null,
+      context: brandContext?.trim() || null,
     }));
   await saveSpecImportAliases(aliases);
 }
@@ -99,15 +112,29 @@ export function buildBrandRenameAliases(
     context: null,
   }));
 
-  // Re-point prior brand aliases that resolved onto the now-renamed-away name.
   const srcLc = new Set(srcs.map((s) => s.toLowerCase()));
   for (const a of existingAliases) {
-    if (a.kind !== "brand") continue;
-    const canonLc = (a.canonicalName ?? "").trim().toLowerCase();
-    if (!srcLc.has(canonLc)) continue;
-    const extLc = (a.externalName ?? "").trim().toLowerCase();
-    if (!extLc || extLc === tgtLc) continue; // would self-alias
-    out.push({ ...a, canonicalName: tgt, context: null });
+    // Re-point prior brand aliases that resolved onto the now-renamed-away name.
+    if (a.kind === "brand") {
+      const canonLc = (a.canonicalName ?? "").trim().toLowerCase();
+      if (!srcLc.has(canonLc)) continue;
+      const extLc = (a.externalName ?? "").trim().toLowerCase();
+      if (!extLc || extLc === tgtLc) continue; // would self-alias
+      out.push({ ...a, canonicalName: tgt, context: null });
+      continue;
+    }
+    // Re-point FLAVOR aliases whose context (the canonical brand) is one of the
+    // renamed-away names. On the next import the brand canonicalizes FIRST, so
+    // the flavor lookup runs under the NEW brand as context — an alias still
+    // scoped to the old brand never fires and the merged-away flavor
+    // resurrects. Emitting the same row re-contexted to the new brand keeps it
+    // live (the old-context row becomes inert; the server upserts by
+    // kind+externalName+context so both keys are distinct and harmless).
+    if (a.kind === "flavor") {
+      const ctxLc = (a.context ?? "").trim().toLowerCase();
+      if (!ctxLc || !srcLc.has(ctxLc)) continue;
+      out.push({ ...a, context: tgt });
+    }
   }
 
   // De-dup by upsert key (kind, externalName, context), last row wins.
@@ -302,6 +329,206 @@ export function maybeLearnPoolRename(
   // future sheet that happened to carry the placeholder text.
   if (/^new (mix|dough recipe|sauce recipe|cheese recipe|recipe)$/i.test(from)) return;
   void learnRecipeNameChangeAliases(category, [from], to, brandContext).catch(() => {});
+}
+
+// ── Ingredient merge/rename learning ─────────────────────────────────────────
+
+/**
+ * The three spec-import ingredient alias namespaces. The spec importer
+ * canonicalizes recipe rows per recipe kind: dough rows → "doughIngredient",
+ * sauce (frontline) rows → "sauceIngredient", cheese AND mix rows →
+ * "cheeseIngredient" (mixes ride the cheese recipe kind in spec parses).
+ */
+export const INGREDIENT_ALIAS_KIND_LIST: ReadonlyArray<SpecAliasKind> = [
+  "doughIngredient",
+  "sauceIngredient",
+  "cheeseIngredient",
+];
+
+/**
+ * Build the `*Ingredient` alias rows to persist after an ingredient MERGE or
+ * RENAME so a spec-sheet re-import maps the old row name onto the survivor
+ * instead of resurrecting it in recipe rows. Same chain re-point + self-alias
+ * drop + upsert-key dedup as the brand/recipe builders. `kinds` picks which
+ * namespaces learn: the unified Ingredients MERGE tab is category-agnostic
+ * (the same physical ingredient can appear in dough, sauce and cheese
+ * recipes), so merges learn ALL THREE; a per-pool rename learns only its own
+ * kind. Note: the sanitizer's modifier-drop guard (isModifierDropNamePair)
+ * still drops token-subset pairs like "Sea Salt"→"Salt" at APPLY time by
+ * design — those stay manual-review on re-import. Pure.
+ */
+export function buildIngredientChangeAliases(
+  sources: ReadonlyArray<string>,
+  target: string,
+  opts: {
+    kinds?: ReadonlyArray<SpecAliasKind>;
+    existingAliases?: ReadonlyArray<SpecImportAlias>;
+  } = {},
+): SpecImportAlias[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const tgtLc = tgt.toLowerCase();
+  const seenSrc = new Set<string>();
+  const srcs = sources
+    .map((s) => s.trim())
+    .filter((s) => {
+      const lc = s.toLowerCase();
+      if (!s || lc === tgtLc || seenSrc.has(lc)) return false;
+      seenSrc.add(lc);
+      return true;
+    });
+  if (srcs.length === 0) return [];
+  const kinds = opts.kinds?.length ? opts.kinds : INGREDIENT_ALIAS_KIND_LIST;
+
+  const out: SpecImportAlias[] = [];
+  for (const kind of kinds) {
+    for (const s of srcs) {
+      out.push({ kind, externalName: s, canonicalName: tgt, context: null });
+    }
+  }
+
+  // Re-point prior aliases that resolved onto a now-merged-away source.
+  const srcLc = new Set(srcs.map((s) => s.toLowerCase()));
+  const kindSet = new Set(kinds);
+  for (const a of opts.existingAliases ?? []) {
+    if (!kindSet.has(a.kind)) continue;
+    const canonLc = (a.canonicalName ?? "").trim().toLowerCase();
+    if (!srcLc.has(canonLc)) continue;
+    const extLc = (a.externalName ?? "").trim().toLowerCase();
+    if (!extLc || extLc === tgtLc) continue; // would self-alias
+    out.push({ ...a, canonicalName: tgt });
+  }
+
+  // De-dup by upsert key (kind, externalName, context), last row wins.
+  const byKey = new Map<string, SpecImportAlias>();
+  for (const a of out) {
+    byKey.set(
+      `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`,
+      a,
+    );
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Learn ingredient merge/rename aliases. Fetches the current alias store first
+ * (best-effort) so chained aliases get re-pointed. Best-effort by design:
+ * callers fire-and-forget; a failure just means the next re-import shows the
+ * old name for manual review again.
+ */
+export async function learnIngredientChangeAliases(
+  sources: ReadonlyArray<string>,
+  target: string,
+  kinds?: ReadonlyArray<SpecAliasKind>,
+): Promise<void> {
+  let existing: SpecImportAlias[] = [];
+  try {
+    existing = await fetchSpecImportAliases();
+  } catch {
+    // Proceed without re-points; the direct old→new rows still save.
+  }
+  await saveSpecImportAliases(
+    buildIngredientChangeAliases(sources, target, { kinds, existingAliases: existing }),
+  );
+}
+
+/**
+ * Fire-and-forget ingredient rename learning for the per-pool rename controls
+ * (Dough / Sauce (frontline) / Cheese / Mix ingredient lists). Skips no-op
+ * renames and blank names.
+ */
+export function maybeLearnIngredientRename(
+  kinds: ReadonlyArray<SpecAliasKind>,
+  oldName: string,
+  newName: string,
+): void {
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from || !to || from.toLowerCase() === to.toLowerCase()) return;
+  void learnIngredientChangeAliases([from], to, kinds).catch(() => {});
+}
+
+// ── Applicator/pepperoni TYPE rename learning ────────────────────────────────
+
+/**
+ * Build the `appType`/`pepType` alias rows to persist after a type RENAME in
+ * Manage Lists so a spec re-import maps the old type name onto the new one
+ * instead of resurrecting it. Same chain re-point + self-alias drop + dedup
+ * pattern. The sanitizer's digit guard (DIGIT_GUARDED_ALIAS_KINDS) still drops
+ * digit-mismatched pairs at apply time by design. Pure.
+ */
+export function buildTypeRenameAliases(
+  kind: "appType" | "pepType",
+  sources: ReadonlyArray<string>,
+  target: string,
+  existingAliases: ReadonlyArray<SpecImportAlias> = [],
+): SpecImportAlias[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const tgtLc = tgt.toLowerCase();
+  const seenSrc = new Set<string>();
+  const srcs = sources
+    .map((s) => s.trim())
+    .filter((s) => {
+      const lc = s.toLowerCase();
+      if (!s || lc === tgtLc || seenSrc.has(lc)) return false;
+      seenSrc.add(lc);
+      return true;
+    });
+  if (srcs.length === 0) return [];
+
+  const out: SpecImportAlias[] = srcs.map((s) => ({
+    kind,
+    externalName: s,
+    canonicalName: tgt,
+    context: null,
+  }));
+
+  // Re-point prior aliases (any context — appType rows may be brand-scoped)
+  // that resolved onto the now-renamed-away name.
+  const srcLc = new Set(srcs.map((s) => s.toLowerCase()));
+  for (const a of existingAliases) {
+    if (a.kind !== kind) continue;
+    const canonLc = (a.canonicalName ?? "").trim().toLowerCase();
+    if (!srcLc.has(canonLc)) continue;
+    const extLc = (a.externalName ?? "").trim().toLowerCase();
+    if (!extLc || extLc === tgtLc) continue; // would self-alias
+    out.push({ ...a, canonicalName: tgt });
+  }
+
+  // De-dup by upsert key (kind, externalName, context), last row wins.
+  const byKey = new Map<string, SpecImportAlias>();
+  for (const a of out) {
+    byKey.set(
+      `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`,
+      a,
+    );
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Fire-and-forget type rename learning for the Manage Lists applicator /
+ * pepperoni type rename controls. Skips no-op renames and blank names.
+ * Best-effort by design.
+ */
+export function maybeLearnTypeRename(
+  kind: "appType" | "pepType",
+  oldName: string,
+  newName: string,
+): void {
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from || !to || from.toLowerCase() === to.toLowerCase()) return;
+  void (async () => {
+    let existing: SpecImportAlias[] = [];
+    try {
+      existing = await fetchSpecImportAliases();
+    } catch {
+      // Proceed without re-points; the direct old→new row still saves.
+    }
+    await saveSpecImportAliases(buildTypeRenameAliases(kind, [from], to, existing));
+  })().catch(() => {});
 }
 
 export async function saveSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {

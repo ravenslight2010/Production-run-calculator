@@ -247,13 +247,20 @@ function ingredientKnownForKind(
 }
 
 /**
- * Alias-only brand/flavor remap for the saved-parse REUSE path. A fresh parse
- * runs full canonicalizeParsed, but a reused snapshot keeps the brand/flavor
- * text as it was when first imported — if that brand was later merged or
- * renamed, the old name is now tombstoned and the tombstone partition would
- * DROP those profiles (or, without a tombstone, resurrect the old brand).
- * Applying the learned brand/flavor aliases (recorded on merges/renames) first
- * remaps them onto the current name so the re-import updates it instead.
+ * Alias-only rename/merge remap for the saved-parse REUSE path. A fresh parse
+ * runs full canonicalizeParsed, but a reused snapshot keeps every name as it
+ * was when first imported — if a brand/flavor/ingredient/type was later merged
+ * or renamed, the old name would either be DROPPED by the tombstone partition
+ * or resurrected under the dead name. Applying ALL the learned rename aliases
+ * (recorded on merges/renames) first remaps them onto the current names so the
+ * re-import updates them instead:
+ *   • brand/flavor on profiles, recipes, targets, and warnings
+ *   • applicator types (appType) and pepperoni types (pepType) on profiles
+ *   • recipe-row ingredients (dough/sauce/cheeseIngredient by recipe kind)
+ * Applicator types that name a cheese RECIPE parsed from this same sheet are
+ * kept verbatim — same guard as canonicalizeParsed: the slot resolvers
+ * loose-match those types against the import's recipe names, and renaming
+ * them here would disconnect the slot from its recipe.
  * Alias-only on purpose: no exact/fuzzy re-snapping of a parse the user
  * already reviewed. Pure given its inputs.
  */
@@ -265,11 +272,43 @@ function applyBrandFlavorAliasesToParse(
   const mapBrand = (b: string): string => pickAlias(usable, "brand", b) ?? b;
   const mapFlavor = (f: string, brand: string): string =>
     pickAlias(usable, "flavor", f, brand) ?? f;
+
+  // Same-sheet cheese blend names: applicator types matching them must stay
+  // verbatim (see doc comment above / canonicalizeParsed's blendTypeKeys).
+  const blendTypeKeys = new Set<string>();
+  for (const r of parsed.recipes) {
+    if (r.kind !== "cheese") continue;
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(r.name ?? ""));
+    if (key) blendTypeKeys.add(key);
+  }
+  const isBlendNamedType = (type: string): boolean => {
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(type));
+    return !!key && blendTypeKeys.has(key);
+  };
+  const mapAppType = (t: string): string =>
+    isBlendNamedType(t) ? t : pickAlias(usable, "appType", t) ?? t;
+  const mapPepType = (t: string): string => pickAlias(usable, "pepType", t) ?? t;
+
   const profiles = parsed.profiles.map(p => {
     const brand = mapBrand(p.brand);
     const flavor = mapFlavor(p.flavor, brand);
-    if (brand === p.brand && flavor === p.flavor) return p;
-    return { ...p, brand, flavor };
+    const applicators = p.applicators.map(a => {
+      const type = mapAppType(a.type);
+      return type === a.type ? a : { ...a, type };
+    });
+    const pepperonis = p.pepperonis.map(pep => {
+      const type = mapPepType(pep.type);
+      return type === pep.type ? pep : { ...pep, type };
+    });
+    if (
+      brand === p.brand &&
+      flavor === p.flavor &&
+      applicators.every((a, i) => a === p.applicators[i]) &&
+      pepperonis.every((pep, i) => pep === p.pepperonis[i])
+    ) {
+      return p;
+    }
+    return { ...p, brand, flavor, applicators, pepperonis };
   });
   const recipes = parsed.recipes.map(r => {
     const brand = r.brand ? mapBrand(r.brand) : r.brand;
@@ -278,15 +317,22 @@ function applyBrandFlavorAliasesToParse(
       const tb = mapBrand(t.brand);
       return { brand: tb, flavor: mapFlavor(t.flavor, tb) };
     });
+    const ingredientKind = recipeKindToAliasKind(r.kind);
+    const rows = r.rows.map(row => {
+      const ingredient = pickAlias(usable, ingredientKind, row.ingredient) ?? row.ingredient;
+      return ingredient === row.ingredient ? row : { ...row, ingredient };
+    });
     if (
       brand === r.brand &&
       flavor === r.flavor &&
+      rows.every((row, i) => row === r.rows[i]) &&
       (!targets || targets.every((t, i) => t.brand === r.targets![i].brand && t.flavor === r.targets![i].flavor))
     ) {
       return r;
     }
     return {
       ...r,
+      rows,
       ...(brand !== undefined ? { brand } : {}),
       ...(flavor !== undefined ? { flavor } : {}),
       ...(targets ? { targets } : {}),
