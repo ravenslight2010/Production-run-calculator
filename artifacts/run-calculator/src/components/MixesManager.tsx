@@ -24,6 +24,7 @@ import { useMixes } from "../hooks/useMixes";
 import { saveMixes, deleteMixes } from "../mixes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
+import { maybeLearnPoolRename } from "@/specImportAliases";
 
 function genId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -307,7 +308,10 @@ export default function MixesManager({
                                   brands={brands}
                                   brandFlavors={brandFlavors}
                                   ingredientSuggestions={ingredientSuggestions}
-                                  onChange={(next) => saveMutation.mutate([next])}
+                                  onChange={(next) => {
+                                    maybeLearnPoolRename("mixes", mix.name, next.name, next.brand);
+                                    saveMutation.mutate([next]);
+                                  }}
                                   onDelete={() => deleteMutation.mutate([mix.id])}
                                 />
                               )}

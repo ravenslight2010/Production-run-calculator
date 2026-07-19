@@ -465,7 +465,7 @@ import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { saveSpecImportAliases, learnSpecImportAliasesForNameChange } from "@/specImportAliases";
+import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases } from "@/specImportAliases";
 
 import {
   Form,
@@ -5454,6 +5454,9 @@ export default function Home() {
       // so delete the source recipes from the correct server pool by name (the
       // target recipe wins and is kept). Best-effort + manager-gated, mirroring
       // how handleApplyBrandFlavorMerge re-points these same pools.
+      // The surviving recipe's brand (when its pool row is found below) scopes
+      // the learned import alias — captured here, used after the cleanup block.
+      let aliasBrandCtx: string | undefined;
       try {
         const tgtLc = tgt.trim().toLowerCase();
         const sourceNamesLc = new Set(
@@ -5488,6 +5491,7 @@ export default function Home() {
               sourceRows = sourceRows.filter((r) => r.id !== best.id);
               await saveCheeseRecipes([targetRow]);
             }
+            aliasBrandCtx = targetRow?.brand?.trim() || undefined;
             if (targetRow && sourceRows.length > 0) {
               const enriched = backfillCheeseRecipeFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveCheeseRecipes([enriched]);
@@ -5515,6 +5519,7 @@ export default function Home() {
               sourceRows = sourceRows.filter((m) => m.id !== best.id);
               await saveMixes([targetRow]);
             }
+            aliasBrandCtx = targetRow?.brand?.trim() || undefined;
             if (targetRow && sourceRows.length > 0) {
               const enriched = backfillMixFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveMixes([enriched]);
@@ -5564,6 +5569,16 @@ export default function Home() {
         // Non-fatal: the local merge already succeeded; server pool cleanup is
         // best-effort (the delete endpoints are manager-gated).
       }
+      // Learn spec-import aliases (old name → survivor) so a RE-IMPORT of the
+      // original workbook maps onto the merged recipe instead of resurrecting
+      // it — the importers canonicalize through the SpecImportAlias store, not
+      // the merge-suggester aliases saved above. Mixes/cheese use the shared
+      // "appType" blend namespace (brand-scoped + context-free); dough/sauce
+      // use "recipeName" with the kind in context. Fire-and-forget like the
+      // brand/flavor merge path — a failure never blocks the merge.
+      void learnRecipeNameChangeAliases(category, Object.keys(map), tgt, aliasBrandCtx).catch(
+        () => {},
+      );
       resetMergeForm();
       const label =
         category === "mixes" ? "mix" : category === "sauce" ? "sauce" : category;
@@ -5587,6 +5602,11 @@ export default function Home() {
   // templates, history, legacy local name lists) and tombstones it so the
   // additive sync union can't resurrect it on other devices. Refuses pool-backed
   // names — real recipes are deleted in their Manage Lists section, not here.
+  // NO spec-import alias is learned here on purpose: aliases map old→NEW name
+  // and a removal has no survivor to point at. Re-import behavior: the next
+  // import of a workbook carrying this name simply re-offers it as a new item
+  // for manual review (create/link/skip) — it does not silently resurrect any
+  // local references, since those were cleared and tombstoned above.
   async function handleRemoveStaleReference(name: string): Promise<void> {
     if (!isRecipeNameCategory) return;
     const category = mergeCategory as RecipeNameMergeCategory;
@@ -7678,6 +7698,19 @@ export default function Home() {
     tombstoneDeleted("mixRecipeNames", oldName);
     clearDeleted("mixRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
+    // Learn the rename as a spec-import alias (appType blend namespace, brand
+    // scoped when the renamed mix has a server pool row) so a re-imported
+    // workbook maps the old name onto the renamed mix instead of resurrecting
+    // it. Best-effort, fire-and-forget.
+    void (async () => {
+      let brand: string | undefined;
+      try {
+        brand = (await fetchMixes()).find(
+          (m) => m.name.trim().toLowerCase() === trimmed.toLowerCase(),
+        )?.brand?.trim() || undefined;
+      } catch {}
+      await learnRecipeNameChangeAliases("mixes", [oldName], trimmed, brand);
+    })().catch(() => {});
   }
 
   function renameDoughRecipeName(oldName: string, newName: string) {
@@ -7690,6 +7723,9 @@ export default function Home() {
     tombstoneDeleted("doughRecipeNames", oldName);
     clearDeleted("doughRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
+    // Learn the rename so spec re-imports link the old sheet name to the
+    // renamed dough recipe (kind "recipeName", context "dough"). Best-effort.
+    void learnRecipeNameChangeAliases("dough", [oldName], trimmed).catch(() => {});
   }
 
   function renameFrontlineRecipeName(oldName: string, newName: string) {
@@ -7702,6 +7738,9 @@ export default function Home() {
     tombstoneDeleted("frontlineRecipeNames", oldName);
     clearDeleted("frontlineRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
+    // Learn the rename so spec re-imports link the old sheet name to the
+    // renamed sauce recipe (kind "recipeName", context "sauce"). Best-effort.
+    void learnRecipeNameChangeAliases("sauce", [oldName], trimmed).catch(() => {});
   }
 
   function renameCheeseRecipeName(oldName: string, newName: string) {
@@ -7714,6 +7753,18 @@ export default function Home() {
     tombstoneDeleted("cheeseRecipeNames", oldName);
     clearDeleted("cheeseRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
+    // Learn the rename as an appType blend alias (brand-scoped when the
+    // renamed recipe has a server pool row) so cheese/spec re-imports map the
+    // old name onto the renamed recipe. Best-effort, fire-and-forget.
+    void (async () => {
+      let brand: string | undefined;
+      try {
+        brand = (await fetchCheeseRecipes()).find(
+          (r) => r.name.trim().toLowerCase() === trimmed.toLowerCase(),
+        )?.brand?.trim() || undefined;
+      } catch {}
+      await learnRecipeNameChangeAliases("cheese", [oldName], trimmed, brand);
+    })().catch(() => {});
   }
 
   function renameDoughIngredient(oldName: string, newName: string) {

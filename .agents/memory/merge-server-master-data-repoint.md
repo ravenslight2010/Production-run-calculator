@@ -52,6 +52,19 @@ re-import brings the old name back. Three extra holes fixed together:
 - spec-import saved-parse REUSE skipped alias canonicalization entirely and the
   tombstone partition then silently DROPPED renamed-brand profiles → reuse now
   remaps aliases BEFORE `partitionTombstonedParse`.
+**Recipe-NAME changes learn aliases too (not just brand/flavor):** every
+recipe-name change path — the four merge tabs, the local list renames, and
+inline pool-row renames in the Mixes/Cheese/Dough/Sauce managers — must call
+`learnRecipeNameChangeAliases` (web `specImportAliases.ts`). Kind mapping the
+importers actually consult: mixes/cheese → "appType" (context-free row +
+brand-scoped row when the survivor's brand is known); dough/sauce →
+"recipeName" with the kind in `context`. The builder also RE-POINTS existing
+aliases whose canonical was a merged-away source, or the chain gets dropped
+wholesale by the sanitizer on the next import. Stale-reference Remove learns
+nothing on purpose (no survivor to point at). Inline manager renames skip
+fresh-row placeholder names ("New … Recipe") so naming a new row never mints a
+bogus alias.
+
 **How to apply:** any new name-change path (merge, rename, dedupe) must learn
 spec-import aliases + re-point server pools; any new import path must ground
 brand/flavor through the spec-import alias store before dedupe/tombstone logic.

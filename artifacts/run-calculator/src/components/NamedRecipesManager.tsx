@@ -26,6 +26,7 @@ import {
   type NamedRecipeKind,
 } from "../namedRecipes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import { maybeLearnPoolRename } from "@/specImportAliases";
 
 function genId(prefix: string): string {
   return `${prefix}:` + Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -224,7 +225,10 @@ export default function NamedRecipesManager({
                           ingredientSuggestions={ingredientSuggestions}
                           brands={brands}
                           brandFlavors={brandFlavors}
-                          onChange={(next) => saveMutation.mutate([next])}
+                          onChange={(next) => {
+                            maybeLearnPoolRename(kind, recipe.name, next.name);
+                            saveMutation.mutate([next]);
+                          }}
                           onDelete={() => deleteMutation.mutate([recipe.id])}
                         />
                       )}

@@ -33,6 +33,7 @@ import { fetchMixes, saveMixes } from "../mixes";
 import { relinkCheeseSlotsToMixInProfiles } from "../storage";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { BrandRenamePanel } from "@/components/BrandRenamePanel";
+import { maybeLearnPoolRename } from "@/specImportAliases";
 // Decimal-friendly numeric input: keeps the in-progress text locally while
 // focused (so typing "0.", ".5", clearing, etc. never snaps/reformats under
 // the caret), selects everything on focus for easy overwrite, and reports the
@@ -415,7 +416,10 @@ export default function CheeseRecipesManager({
                                   brandFlavors={brandFlavors}
                                   ingredientSuggestions={ingredientSuggestions}
                                   getFlavorTargets={getFlavorTargets}
-                                  onChange={(next) => saveMutation.mutate([next])}
+                                  onChange={(next) => {
+                                    maybeLearnPoolRename("cheese", recipe.name, next.name, next.brand);
+                                    saveMutation.mutate([next]);
+                                  }}
                                   onDelete={() => deleteMutation.mutate([recipe.id])}
                                   onMoveToMixes={() => moveMutation.mutate(recipe)}
                                 />
