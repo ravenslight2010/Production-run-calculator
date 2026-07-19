@@ -153,4 +153,5 @@
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
 - [Brand rename aliases](brand-rename-aliases.md) — customer renames learn context-free brand spec-import aliases (chain re-point); premix redirect needs the brand-drift fallback, don't restore its early return.
+- [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.
 - [Spec re-import rename memory](spec-reimport-rename-memory.md) — EVERY merge/rename entry point must learn spec-import aliases (ingredients under all 3 kinds; brand learns re-context flavor aliases); paren guard: "X (A)" never fuzzes onto "X (B)".

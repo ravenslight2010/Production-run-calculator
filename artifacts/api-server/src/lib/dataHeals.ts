@@ -1568,6 +1568,191 @@ async function runCrosslinkedSavedParsePurge(): Promise<void> {
   });
 }
 
+// ── Aldo's cheese-mix tolerance-column oz depoison ──────────────────────────
+// The Aldo's spec grid lists the SAME cheese mix on two applicator stations;
+// the second station's row reads "name | 2.9 | 0.2 | 0.1" where 2.9 is the
+// station weight (the sheet's TARGET WEIGHT sums confirm it) and 0.2/0.1 are
+// trailing check/tolerance columns. The AI parse took 0.2 as the second
+// station's ozPerPizza, and applySpecImport wrote it into every Aldo's
+// profile (prod evidence: app3OzPerPizza=0.2 with app3CheeseRecipeName
+// "Aldo's Standard Cheese Mix"). The prompt now pins the weight to the first
+// numeric cell after the name (SPEC_PARSE_VERSION 16), but the poison is
+// already stored in profiles, the saved parse (which Auto-Fill reads
+// directly), and possibly today's day-state. Heal rule, deliberately narrow:
+// a 0.2-oz applicator whose type/recipe name is "Aldo's Standard Cheese Mix"
+// (ci) while a SAME-profile applicator of the same name carries >= 2 oz takes
+// that sibling's weight (2.9, or 3.65 on the plain CHEESE flavor — the sheet
+// repeats the station weight on both rows). Genuine small second stations of
+// DIFFERENT mixes (Nob Hill 0.75, Hannaford 0.85) are untouched by both the
+// name and the 0.2 equality guard.
+
+const ALDO_CHEESE_OZ_HEAL_ID = "aldo-cheese-tolerance-oz-v1";
+const ALDO_CHEESE_MIX_NAME = "aldo's standard cheese mix";
+const ALDO_OZ_HEAL_FROM_DATE = "2026-07-19";
+
+function isAldoCheeseMixName(name: unknown): boolean {
+  return (
+    typeof name === "string" && name.trim().toLowerCase() === ALDO_CHEESE_MIX_NAME
+  );
+}
+
+/**
+ * Fix poisoned 0.2-oz Aldo's cheese-mix slots on a flat run/profile values
+ * object (app1..app4 field style). Returns true when anything changed.
+ */
+export function healAldoCheeseOzInValues(
+  values: Record<string, unknown>,
+): boolean {
+  const slots = [1, 2, 3, 4] as const;
+  let donor = 0;
+  for (const n of slots) {
+    if (
+      isAldoCheeseMixName(values[`app${n}CheeseRecipeName`]) &&
+      typeof values[`app${n}OzPerPizza`] === "number" &&
+      (values[`app${n}OzPerPizza`] as number) >= 2
+    ) {
+      donor = Math.max(donor, values[`app${n}OzPerPizza`] as number);
+    }
+  }
+  if (donor <= 0) return false;
+  let changed = false;
+  for (const n of slots) {
+    if (
+      isAldoCheeseMixName(values[`app${n}CheeseRecipeName`]) &&
+      values[`app${n}OzPerPizza`] === 0.2
+    ) {
+      values[`app${n}OzPerPizza`] = donor;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+async function runAldoCheeseOzDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: ALDO_CHEESE_OZ_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Saved spec parses (Auto-Fill reads these directly; hash reuse is
+    //    already fenced off by the SPEC_PARSE_VERSION bump).
+    let healedSheets = 0;
+    const sheets = await tx
+      .select()
+      .from(savedSpecSheetsTable)
+      .where(
+        sql`${savedSpecSheetsTable.data}::text ilike ${"%aldo's standard cheese mix%"}`,
+      )
+      .for("update");
+    for (const sheet of sheets) {
+      const data = sheet.data as {
+        profiles?: Array<{
+          applicators?: Array<{ type?: unknown; ozPerPizza?: unknown }>;
+        }>;
+      } | null;
+      if (!data?.profiles) continue;
+      let changed = false;
+      for (const profile of data.profiles) {
+        const apps = profile?.applicators;
+        if (!Array.isArray(apps)) continue;
+        let donor = 0;
+        for (const a of apps) {
+          if (
+            isAldoCheeseMixName(a?.type) &&
+            typeof a?.ozPerPizza === "number" &&
+            a.ozPerPizza >= 2
+          ) {
+            donor = Math.max(donor, a.ozPerPizza);
+          }
+        }
+        if (donor <= 0) continue;
+        for (const a of apps) {
+          if (isAldoCheeseMixName(a?.type) && a?.ozPerPizza === 0.2) {
+            a.ozPerPizza = donor;
+            changed = true;
+          }
+        }
+      }
+      if (!changed) continue;
+      await tx
+        .update(savedSpecSheetsTable)
+        .set({ data })
+        .where(eq(savedSpecSheetsTable.id, sheet.id));
+      healedSheets++;
+    }
+
+    // 2) Brand profiles (LWW stamp advanced so stale devices can't re-publish
+    //    the poisoned value).
+    let healedProfiles = 0;
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    for (const p of profiles) {
+      const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+      if (!healAldoCheeseOzInValues(values)) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    // 3) Today-and-future day-state run values (past days are history).
+    let healedDays = 0;
+    const days = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(gte(dailySyncTable.date, ALDO_OZ_HEAL_FROM_DATE))
+      .for("update");
+    for (const day of days) {
+      const data = day.data as Record<string, unknown> | null;
+      const runValues = data?.runValues as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      if (!runValues || typeof runValues !== "object") continue;
+      let changed = false;
+      for (const vals of Object.values(runValues)) {
+        if (!vals || typeof vals !== "object") continue;
+        if (healAldoCheeseOzInValues(vals)) {
+          // Advance the per-field-set LWW stamp monotonically so peers
+          // holding the poisoned value can't merge it back.
+          const prev = Number(vals.valuesUpdatedAtMs ?? 0);
+          vals.valuesUpdatedAtMs = Math.max(prev + 1, Date.now());
+          changed = true;
+        }
+      }
+      if (!changed) continue;
+      await tx
+        .update(dailySyncTable)
+        .set({ data })
+        .where(
+          and(
+            eq(dailySyncTable.date, day.date),
+            eq(dailySyncTable.scope, day.scope),
+          ),
+        );
+      healedDays++;
+    }
+
+    logger.info(
+      {
+        heal: ALDO_CHEESE_OZ_HEAL_ID,
+        healedSheets,
+        healedProfiles,
+        healedDays,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1592,4 +1777,5 @@ export async function runDataHeals(): Promise<void> {
   await runDoughMergeVanishRestore();
   await runBogusMergeAliasPurge();
   await runCrosslinkedSavedParsePurge();
+  await runAldoCheeseOzDepoison();
 }

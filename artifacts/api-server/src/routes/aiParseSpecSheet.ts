@@ -240,7 +240,15 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "min/max pair, an over/under allowance, or any small check-weight figure printed " +
     "next to the target weight — are NOT another applicator; never emit them as a " +
     "second same-named entry (a target of 3.65 with a \u00b10.2 tolerance is ONE " +
-    "applicator at 3.65, not two). " +
+    "applicator at 3.65, not two). On ANY applicator row, the station's " +
+    "`ozPerPizza` is the FIRST numeric cell immediately after the applicator " +
+    "name cell — NEVER a later cell on the same row. Rows often carry trailing " +
+    "check/tolerance columns after the weight (e.g. a name, then 2.9, then 0.2 " +
+    "and 0.1): those small trailing numbers are allowances, not the weight — " +
+    "that row is a station at 2.9, never 0.2. This applies equally to a " +
+    "repeated same-named applicator row: its weight is ITS OWN first numeric " +
+    "cell (which may equal the first station's weight), never a trailing " +
+    "tolerance cell. " +
     "EMBEDDED BLENDS: some spec grids pack a full blend recipe into ONE applicator " +
     "cell — a mix name followed by number+ingredient pairs, e.g. \"Aldo's Cheese " +
     "Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan\" or 'White " +
