@@ -61,6 +61,12 @@ export default function PremixImportDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // "Use existing mix instead" picks: stable key → existing mix id ("" = none).
   const [redirects, setRedirects] = useState<Map<string, string>>(new Map());
+  // Merge-re-import rows: this sheet block's name was previously MERGED onto an
+  // existing mix (learned-alias redirect suggestion) whose OWN sheet block is
+  // also present in this workbook as an exact update. Both rows would target
+  // the same saved mix, so the merged-away one starts UNCHECKED with an
+  // explanatory note instead of tripping the generic duplicate-target block.
+  const [mergedAwayKeys, setMergedAwayKeys] = useState<Set<string>>(new Set());
 
   const existing = useMemo(
     () => new Set(prepared?.existingIds ?? []),
@@ -80,6 +86,11 @@ export default function PremixImportDialog({
     if (prepared) {
       const existsById = (id: string) => prepared.existingIds.includes(id);
       const nextRedirects = new Map<string, string>();
+      // Detect the merge-re-import case: a suggested-redirect row whose target
+      // mix is ALSO present in this workbook as its own exact-id update. The
+      // merged-away row starts unchecked so Apply isn't blocked by default.
+      const candidateIds = new Set(prepared.candidates.map((c) => c.mix.id));
+      const mergedAway = new Set<string>();
       setItems(
         prepared.candidates.map((c) => {
           const key = c.mix.id;
@@ -89,17 +100,26 @@ export default function PremixImportDialog({
             : undefined;
           if (target) {
             nextRedirects.set(key, target.id);
+            if (candidateIds.has(target.id)) mergedAway.add(key);
             return { key, candidate: redirectPremixCandidate(c, target, existsById), original: c };
           }
           return { key, candidate: c, original: c };
         }),
       );
-      setSelected(new Set(prepared.candidates.map((c) => c.mix.id)));
+      setMergedAwayKeys(mergedAway);
+      setSelected(
+        new Set(
+          prepared.candidates
+            .map((c) => c.mix.id)
+            .filter((id) => !mergedAway.has(id)),
+        ),
+      );
       setRedirects(nextRedirects);
     } else {
       setItems([]);
       setSelected(new Set());
       setRedirects(new Map());
+      setMergedAwayKeys(new Set());
     }
   }, [prepared]);
 
@@ -416,7 +436,22 @@ export default function PremixImportDialog({
                                 </select>
                               </div>
                             )}
-                            {redirectTarget && (
+                            {redirectTarget && mergedAwayKeys.has(it.key) && (
+                              <div
+                                className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+                                data-testid={`premix-merged-away-${it.key}`}
+                              >
+                                <Link2 className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                                <span className="text-xs text-amber-700">
+                                  This sheet was merged into{" "}
+                                  <span className="font-medium">"{redirectTarget.name}"</span>
+                                  , which is also in this workbook — so it's left
+                                  unchecked. Check it only if you want it to
+                                  overwrite that mix.
+                                </span>
+                              </div>
+                            )}
+                            {redirectTarget && !mergedAwayKeys.has(it.key) && (
                               <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-blue-400/50 bg-blue-500/10 p-2">
                                 <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
                                 <span className="text-xs text-blue-700">
@@ -527,6 +562,12 @@ export default function PremixImportDialog({
                     would survive. Change one of the "Use existing mix" picks (or
                     uncheck one) before applying.
                   </p>
+                  {includedItems.some((it) => mergedAwayKeys.has(it.key)) && (
+                    <p className="mt-1 text-sm text-destructive/90" data-testid="premix-merge-hint">
+                      Tip: these sheets were merged in Manage Lists — uncheck
+                      the old (merged-away) sheet's row to apply.
+                    </p>
+                  )}
                 </div>
               )}
 

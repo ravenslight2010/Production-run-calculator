@@ -60,11 +60,42 @@ export default function CheeseImportDialog({
   // target's name). The sheet's original name is remembered as an alias so
   // re-imports still match the renamed recipe.
   const [renames, setRenames] = useState<Map<string, string>>(new Map());
+  // Merge-re-import rows: this sheet block's name was previously MERGED onto an
+  // existing recipe (learned alias link) whose OWN sheet block is also present
+  // as an exact update. Both rows would target the same saved recipe, so the
+  // merged-away one starts UNCHECKED with an explanatory note instead of
+  // tripping the generic duplicate-target block.
+  const [mergedAwayKeys, setMergedAwayKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (prepared) {
+      // Detect the merge-re-import case: an alias-linked row whose link target
+      // is also claimed by another candidate's exact-id update.
+      const exactIds = new Set(
+        prepared.candidates
+          .filter((c) => c.status === "update")
+          .map((c) => c.recipe.id),
+      );
+      const mergedAway = new Set(
+        prepared.candidates
+          .filter(
+            (c) =>
+              c.linkTo &&
+              c.linkedByAlias &&
+              exactIds.has(c.linkTo.id) &&
+              c.linkTo.id !== c.recipe.id,
+          )
+          .map((c) => c.recipe.id),
+      );
+      setMergedAwayKeys(mergedAway);
       setItems(prepared.candidates.map((c) => ({ key: c.recipe.id, candidate: c })));
-      setSelected(new Set(prepared.candidates.map((c) => c.recipe.id)));
+      setSelected(
+        new Set(
+          prepared.candidates
+            .map((c) => c.recipe.id)
+            .filter((id) => !mergedAway.has(id)),
+        ),
+      );
       setLinkOn(
         new Set(prepared.candidates.filter((c) => c.linkTo).map((c) => c.recipe.id)),
       );
@@ -76,6 +107,7 @@ export default function CheeseImportDialog({
       setLinkOn(new Set());
       setRedirects(new Map());
       setRenames(new Map());
+      setMergedAwayKeys(new Set());
     }
   }, [prepared]);
 
@@ -386,6 +418,21 @@ export default function CheeseImportDialog({
                                 </span>
                               </div>
                             )}
+                            {mergedAwayKeys.has(it.key) && (
+                              <div
+                                className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+                                data-testid={`cheese-merged-away-${it.key}`}
+                              >
+                                <Link2 className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                                <span className="text-xs text-amber-700">
+                                  This sheet was merged into{" "}
+                                  <span className="font-medium">"{c.linkTo?.name}"</span>
+                                  , which is also in this workbook — so it's
+                                  left unchecked. Check it only if you want it
+                                  to overwrite that recipe.
+                                </span>
+                              </div>
+                            )}
                             {c.linkTo && !redirectTarget && (
                               <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-400/50 bg-blue-500/10 p-2">
                                 <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
@@ -519,6 +566,12 @@ export default function CheeseImportDialog({
                     would survive. Change one of the "Use existing recipe" picks
                     (or uncheck one) before applying.
                   </p>
+                  {included.some((it) => mergedAwayKeys.has(it.key)) && (
+                    <p className="mt-1 text-sm text-destructive/90" data-testid="cheese-merge-hint">
+                      Tip: these sheets were merged in Manage Lists — uncheck
+                      the old (merged-away) sheet's row to apply.
+                    </p>
+                  )}
                 </div>
               )}
 

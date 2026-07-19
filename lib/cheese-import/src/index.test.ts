@@ -659,6 +659,25 @@ describe("alias-driven link precedence", () => {
       id: "cheese:basha:five-cheese-mix",
       name: "5 Cheese Mix",
     });
+    // Marked as alias-sourced so the review dialog can recognize the merge
+    // re-import case and default the merged-away row to unchecked.
+    expect(linked[1].linkedByAlias).toBe(true);
+  });
+
+  it("a HEURISTIC link is not marked linkedByAlias", () => {
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozz Cheese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+    );
+    expect(linked[0].linkTo).toBeDefined();
+    expect(linked[0].linkedByAlias).toBeUndefined();
   });
 
   it("a HEURISTIC link is still vetoed by the target's own exact-id update", () => {

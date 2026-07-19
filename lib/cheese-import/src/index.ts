@@ -398,6 +398,14 @@ export interface CheeseImportCandidate {
    */
   linkTo?: CheeseLinkTarget;
   /**
+   * True when `linkTo` came from a LEARNED alias (the manager redirected or
+   * merged this exact blend name before) rather than a heuristic name match.
+   * The review dialog uses this to recognize the merge-re-import case — the
+   * alias target's own sheet block is also present as an exact update — and
+   * default the merged-away row to unchecked with a plain-language hint.
+   */
+  linkedByAlias?: boolean;
+  /**
    * Set when this blend is a SUB-MIX: its (brand-stripped) name matches an
    * ingredient row inside another blend on the same customer tab (e.g. "Aldo's
    * Parmesan / Oregano Mix" is a block AND appears as the "Parm / Oregano Mix"
@@ -779,7 +787,7 @@ export function withCheeseLinks(
     if (!p) return c;
     if ((linkClaims.get(p.link.id) ?? 0) !== 1) return c;
     if (!p.fromAlias && (exactClaims.get(p.link.id) ?? 0) > 0) return c;
-    return { ...c, linkTo: p.link };
+    return { ...c, linkTo: p.link, ...(p.fromAlias ? { linkedByAlias: true } : {}) };
   });
 }
 
