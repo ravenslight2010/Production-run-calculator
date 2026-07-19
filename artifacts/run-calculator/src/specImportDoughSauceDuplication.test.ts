@@ -35,6 +35,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as XLSX from "xlsx";
 import {
   type ParsedSpecImport,
+  type SpecImportLinkSuggestion,
   type ParsedProfile,
   type ParsedRecipe,
   type SheetGrid,
@@ -442,7 +443,12 @@ function importAgainstPool(
   existingName: string,
   importedName: string,
   kind: "dough" | "sauce",
-): { linkedName: string; added: number; poolNames: string[] } {
+): {
+  linkedName: string;
+  added: number;
+  poolNames: string[];
+  suggestions: SpecImportLinkSuggestion[];
+} {
   const existingRecipe = namedRecipeFromDraft({
     name: existingName,
     components: DUMMY_ROWS,
@@ -456,7 +462,10 @@ function importAgainstPool(
       { kind, name: importedName, brand: BRAND, flavor: "Cheese", rows: DUMMY_ROWS },
     ],
   };
-  const linked = linkSpecImportNamedRecipesToExisting(parsed, kind, [existingName]);
+  const suggestions: SpecImportLinkSuggestion[] = [];
+  const linked = linkSpecImportNamedRecipesToExisting(parsed, kind, [existingName], {
+    suggestions,
+  });
   const linkedName = linked.recipes[0].name;
 
   const draft = namedRecipeFromDraft({
@@ -468,7 +477,7 @@ function importAgainstPool(
     [existingRecipe],
     draft ? [draft] : [],
   );
-  return { linkedName, added, poolNames: merged.map((r) => r.name) };
+  return { linkedName, added, poolNames: merged.map((r) => r.name), suggestions };
 }
 
 describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep", () => {
@@ -487,6 +496,28 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     ["House Marinara", "House Regular Marinara", "sauce"],
     // Filler token "pizza" dropped from a sauce name.
     ["House Marinara", "House Pizza Marinara", "sauce"],
+  ];
+
+  it.each(collapseCases)(
+    "collapses %j ← %j (%s): links to saved name, adds no duplicate",
+    (existingName, importedName, kind) => {
+      const { linkedName, added, poolNames, suggestions } = importAgainstPool(
+        existingName,
+        importedName,
+        kind,
+      );
+      expect(linkedName).toBe(existingName);
+      expect(added).toBe(0);
+      expect(poolNames).toEqual([existingName]);
+      expect(suggestions).toEqual([]);
+    },
+  );
+
+  // ---- SUGGEST: beyond-exact matches (word reorder, single typo) no longer
+  // snap silently — the imported name stays put and the match is surfaced as
+  // a declinable "Use existing" suggestion in the review dialog. Accepting it
+  // there prevents the fork; the raw lib pass alone leaves both names.
+  const suggestCases: Array<[string, string, "dough" | "sauce"]> = [
     // Reordered words (near-dup matcher, word-order layer).
     ["House Dough", "Dough House", "dough"],
     ["House Marinara", "Marinara House", "sauce"],
@@ -495,17 +526,20 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     ["House Dugh", "House Dough", "dough"],
   ];
 
-  it.each(collapseCases)(
-    "collapses %j ← %j (%s): links to saved name, adds no duplicate",
+  it.each(suggestCases)(
+    "SUGGESTS %j ← %j (%s): keeps the imported name, emits a review suggestion",
     (existingName, importedName, kind) => {
-      const { linkedName, added, poolNames } = importAgainstPool(
+      const { linkedName, suggestions } = importAgainstPool(
         existingName,
         importedName,
         kind,
       );
-      expect(linkedName).toBe(existingName);
-      expect(added).toBe(0);
-      expect(poolNames).toEqual([existingName]);
+      expect(linkedName).toBe(importedName);
+      expect(suggestions).toContainEqual({
+        kind,
+        importedName,
+        existingName,
+      });
     },
   );
 
@@ -533,20 +567,22 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     },
   );
 
-  // ---- COLLAPSE (dough): one recipe per dough FAMILY — a variant-qualified
-  // dough name ("House Craft Dough") whose tokens are a superset of an
-  // existing family recipe's distinctive tokens folds onto the base recipe;
-  // qualifiers only locate the doughball weight row, they never fork a
-  // parallel dough entry.
-  it("collapses a variant-qualified dough onto its base family recipe", () => {
-    const { linkedName, added, poolNames } = importAgainstPool(
+  // ---- SUGGEST (dough family fold): a variant-qualified dough name
+  // ("House Craft Dough") whose tokens are a superset of an existing family
+  // recipe's distinctive tokens used to fold silently — now the fold is a
+  // declinable review suggestion instead.
+  it("SUGGESTS folding a variant-qualified dough onto its base family recipe", () => {
+    const { linkedName, suggestions } = importAgainstPool(
       "House Dough",
       "House Craft Dough",
       "dough",
     );
-    expect(linkedName).toBe("House Dough");
-    expect(added).toBe(0);
-    expect(poolNames).toEqual(["House Dough"]);
+    expect(linkedName).toBe("House Craft Dough");
+    expect(suggestions).toContainEqual({
+      kind: "dough",
+      importedName: "House Craft Dough",
+      existingName: "House Dough",
+    });
   });
 
   // ---- "Applicator - " prefix boundary.
@@ -581,14 +617,17 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     expect(poolNames).toEqual(["House Marinara", "Applicator - House Marinara"]);
   });
 
-  it("collapses the applicator prefix for dough via the family matcher", () => {
-    const { linkedName, added, poolNames } = importAgainstPool(
+  it("SUGGESTS collapsing the applicator prefix for dough via the family matcher", () => {
+    const { linkedName, suggestions } = importAgainstPool(
       "House Dough",
       "Applicator - House Dough",
       "dough",
     );
-    expect(linkedName).toBe("House Dough");
-    expect(added).toBe(0);
-    expect(poolNames).toEqual(["House Dough"]);
+    expect(linkedName).toBe("Applicator - House Dough");
+    expect(suggestions).toContainEqual({
+      kind: "dough",
+      importedName: "Applicator - House Dough",
+      existingName: "House Dough",
+    });
   });
 });

@@ -18,6 +18,7 @@ import {
   collectMatchCandidates,
   collectSpecAliases,
   collectSpecImportMixes,
+  collectSpecImportCheeseLinkSuggestions,
   collectSpecImportCheeseRecipes,
   applySpecImportBlendNameAliases,
   canonicalizeSpecImportCheeseRecipeNames,
@@ -64,6 +65,7 @@ import {
   type SheetGrid,
   type SpecAliasKind,
   type SpecImportAlias,
+  type SpecImportLinkSuggestion,
   type SpecImportSkipped,
   type SpecImportSummary,
   type SpecMatchKnown,
@@ -631,7 +633,11 @@ async function linkParsed(
   parsed: ParsedSpecImport,
   known: ReturnType<typeof loadSpecImportKnown>,
   sourceNames?: ReadonlyArray<string>,
-): Promise<{ parsed: ParsedSpecImport; matchAliases: SpecImportAlias[] }> {
+): Promise<{
+  parsed: ParsedSpecImport;
+  matchAliases: SpecImportAlias[];
+  linkSuggestions: SpecImportLinkSuggestion[];
+}> {
   let working = parsed;
   const aliasByKey = new Map<string, SpecImportAlias>();
   const recordAliases = (aliases: SpecImportAlias[]) => {
@@ -785,22 +791,73 @@ async function linkParsed(
   } catch {
     // Best-effort (offline) — local names still match.
   }
+  // Beyond-exact matches (word reorder, single typo, family folds) are NOT
+  // applied silently — they collect here and surface in the review dialog as
+  // pre-selected but declinable "Use existing" picks.
+  const linkSuggestions: SpecImportLinkSuggestion[] = [];
   working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse, {
     doughFamilyHint: doughFamilyHintFromSourceNames(sourceNames),
     existingRecipes: doughPoolRecipes,
+    suggestions: linkSuggestions,
   });
   // Sauce matches against the server pool too — the family recipe ("Lucia
   // Pizza Sauce") a variant reference ("Lucia's Sauce") must snap onto may
-  // exist only in the pool, not in the local preset list.
+  // exist only in the pool, not in the local preset list. Pool rows feed the
+  // formula-conflict guard (same as dough) so a same-family NAME over a
+  // different formula never even suggests a link.
   let sauceUniverse = known.sauceRecipes ?? [];
+  let saucePoolRecipes: Array<{
+    name: string;
+    rows?: Array<{ ingredient?: string | null }>;
+  }> = [];
   try {
     const pool = await fetchNamedRecipes("sauce");
     sauceUniverse = [...new Set([...sauceUniverse, ...pool.map((r) => r.name)])];
+    saucePoolRecipes = pool.map((r) => ({
+      name: r.name,
+      rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+    }));
   } catch {
     // Best-effort (offline) — local names still match.
   }
-  working = linkSpecImportNamedRecipesToExisting(working, "sauce", sauceUniverse);
-  return { parsed: working, matchAliases: [...aliasByKey.values()] };
+  working = linkSpecImportNamedRecipesToExisting(working, "sauce", sauceUniverse, {
+    existingRecipes: saucePoolRecipes,
+    suggestions: linkSuggestions,
+  });
+  return { parsed: working, matchAliases: [...aliasByKey.values()], linkSuggestions };
+}
+
+/**
+ * Convert the heuristic beyond-exact link suggestions into the review
+ * dialog's suggestion-map keys: dough/sauce under recipeLinkSuggestionKey,
+ * cheese under the plain lowercased blend name (the dialog's cross-brand
+ * fallback key). Learned aliases are merged OVER these by callers, so a
+ * user's remembered pick always outranks a fresh heuristic guess.
+ */
+function heuristicLinkSuggestionMap(
+  suggestions: ReadonlyArray<SpecImportLinkSuggestion>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const s of suggestions) {
+    const imported = s.importedName.trim();
+    const existing = s.existingName.trim();
+    if (!imported || !existing) continue;
+    if (s.kind === "cheese") out[imported.toLowerCase()] = existing;
+    else out[recipeLinkSuggestionKey(s.kind, imported)] = existing;
+  }
+  return out;
+}
+
+/**
+ * Cheese pool names for the prepare-time suggestion scan, best-effort:
+ * offline just means no cheese suggestions this import.
+ */
+async function fetchCheesePoolNamesBestEffort(): Promise<string[]> {
+  try {
+    return (await fetchCheeseRecipes()).map((r) => r.name);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -1043,8 +1100,14 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * parses invented the same descriptive flavor (e.g. "Cheese") for every code
  * block, collapsing distinct products into one profile; those parses must not
  * be reused.
+ * v14→v15: snap-to-existing link passes no longer silently rename imported
+ * recipes onto merely SIMILAR pool names (word reorder / single typo / family
+ * fold) — those become declinable review suggestions; only exact loose-key
+ * matches auto-apply. v14-and-earlier saved parses can embed the silently
+ * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
+ * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "14";
+export const SPEC_PARSE_VERSION = "15";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1206,7 +1269,7 @@ export async function prepareSpecImport(
     await parseWorkbookCore(grids, known, aliases);
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed: linked, matchAliases } = await linkParsed(
+  const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(
     rawParsed,
     known,
     name ? [name] : [],
@@ -1243,6 +1306,15 @@ export async function prepareSpecImport(
     overflowRows,
   );
 
+  // Beyond-exact cheese pool near-dups scan on the FINAL (canonicalized +
+  // deduped) recipe names so the suggestion keys line up with what the review
+  // dialog displays. Learned aliases merge OVER heuristics — a remembered
+  // user pick always wins.
+  const cheeseSuggestions = collectSpecImportCheeseLinkSuggestions(
+    parsed,
+    await fetchCheesePoolNamesBestEffort(),
+  );
+
   return {
     parsed,
     summary,
@@ -1252,7 +1324,10 @@ export async function prepareSpecImport(
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
-    aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
+    aliasLinkSuggestions: {
+      ...heuristicLinkSuggestionMap([...linkSuggestions, ...cheeseSuggestions]),
+      ...buildAliasLinkSuggestions(aliases),
+    },
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
   };
@@ -1373,7 +1448,7 @@ export async function prepareSpecImportMulti(
 
   const merged = mergeParsedSpecImports(parsedList);
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed: linked, matchAliases } = await linkParsed(merged, known, names);
+  const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(merged, known, names);
 
   // Respect prior merges/deletions (see prepareSpecImport).
   const { kept, skipped } = partitionTombstonedParse(
@@ -1414,6 +1489,13 @@ export async function prepareSpecImportMulti(
     allOverflow,
   );
 
+  // Beyond-exact cheese pool near-dups on the FINAL recipe names (see
+  // prepareSpecImport); learned aliases merge OVER heuristics.
+  const cheeseSuggestions = collectSpecImportCheeseLinkSuggestions(
+    parsed,
+    await fetchCheesePoolNamesBestEffort(),
+  );
+
   return {
     parsed,
     summary,
@@ -1423,7 +1505,10 @@ export async function prepareSpecImportMulti(
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
-    aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
+    aliasLinkSuggestions: {
+      ...heuristicLinkSuggestionMap([...linkSuggestions, ...cheeseSuggestions]),
+      ...buildAliasLinkSuggestions(aliases),
+    },
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
   };

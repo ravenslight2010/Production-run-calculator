@@ -8,7 +8,10 @@
 // vs an update, and collect the alias mappings worth remembering. Keeping the
 // logic here means both apps stay thin and behave identically (replit.md parity).
 
-import { buildNearDupNameMatcher } from "@workspace/name-match";
+import {
+  buildNearDupNameMatcher,
+  buildNearDupNameMatcherDetailed,
+} from "@workspace/name-match";
 
 // ── Core data shapes ────────────────────────────────────────────────────────
 
@@ -1002,7 +1005,8 @@ export function findSpecImportDoughFamilyMatch(
 }
 
 /**
- * Do two dough ingredient-row lists describe DIFFERENT formulas? True only
+ * Do two ingredient-row lists (dough OR sauce) describe DIFFERENT formulas?
+ * True only
  * when BOTH sides carry rows and their ingredient-name sets differ — a
  * variant of a family shares the family's mixing table verbatim, so a recipe
  * whose ingredients differ ("cream of tartar + sodium bicarbonate" vs
@@ -1144,7 +1148,11 @@ export function linkSpecImportCheeseToExisting(
   parsed: ParsedSpecImport,
   existingCheeseNames: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const match = buildNearDupNameMatcher(existingCheeseNames, {
+  // EXACT (loose-key) matches only: silently renaming an import onto a
+  // merely SIMILAR pool name (word reorder, single typo) has cross-linked
+  // genuinely different recipes. Beyond-exact matches are surfaced as
+  // declinable review suggestions instead (collectSpecImportCheeseLinkSuggestions).
+  const match = buildNearDupNameMatcherDetailed(existingCheeseNames, {
     keyOf: specImportNameMatchKey,
   });
   const noUserMixes = new Set<string>();
@@ -1157,12 +1165,53 @@ export function linkSpecImportCheeseToExisting(
     // A name the user explicitly typed in the review must never be snapped
     // back onto an existing pool name — the rename is deliberate.
     if (r.userNamed) return r;
-    const existing = match(name);
-    if (!existing || existing === name) return r;
+    const hit = match(name);
+    if (!hit || hit.layer !== 1 || hit.name === name) return r;
     changed = true;
-    return { ...r, name: existing };
+    return { ...r, name: hit.name };
   });
   return changed ? { ...parsed, recipes } : parsed;
+}
+
+/** One beyond-exact "this import probably means that existing recipe" hit,
+ * surfaced in the review dialog as a pre-selected but DECLINABLE "Use
+ * existing" pick instead of being applied silently. */
+export type SpecImportLinkSuggestion = {
+  kind: "dough" | "sauce" | "cheese";
+  importedName: string;
+  existingName: string;
+};
+
+/**
+ * Beyond-exact cheese pool matches for the review dialog: word-reorder and
+ * single-typo near-duplicates of an existing Cheese Recipes pool name. Exact
+ * (loose-key) matches are excluded — linkSpecImportCheeseToExisting still
+ * snaps those silently. userNamed and mix-kind recipes never suggest. Pure.
+ */
+export function collectSpecImportCheeseLinkSuggestions(
+  parsed: ParsedSpecImport,
+  existingCheeseNames: ReadonlyArray<string>,
+): SpecImportLinkSuggestion[] {
+  const match = buildNearDupNameMatcherDetailed(existingCheeseNames, {
+    keyOf: specImportNameMatchKey,
+  });
+  const noUserMixes = new Set<string>();
+  const out: SpecImportLinkSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const r of parsed.recipes ?? []) {
+    const name = (r.name ?? "").trim();
+    if (r.kind !== "cheese" || !name || specImportRecipeIsMix(r, noUserMixes)) {
+      continue;
+    }
+    if (r.userNamed) continue;
+    const hit = match(name);
+    if (!hit || hit.layer === 1 || hit.name === name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind: "cheese", importedName: name, existingName: hit.name });
+  }
+  return out;
 }
 
 /**
@@ -1236,17 +1285,25 @@ export function linkSpecImportNamedRecipesToExisting(
     doughFamilyHint?: string | null;
     /**
      * Existing pool recipes WITH their ingredient rows (when available). Used
-     * by the dough family fallback only: an imported dough recipe that carries
-     * its OWN rows must not fold onto a pool recipe whose ingredients differ —
-     * that's a different formula, not a variant of the family.
+     * by the family fallback: an imported recipe that carries its OWN rows
+     * must not fold onto a pool recipe whose ingredients differ — that's a
+     * different formula, not a variant of the family.
      */
     existingRecipes?: ReadonlyArray<{
       name: string;
       rows?: ReadonlyArray<{ ingredient?: string | null }>;
     }>;
+    /**
+     * Collector for beyond-exact matches (word reorder, single typo, family
+     * folds). When supplied, those matches are PUSHED here as declinable
+     * review suggestions instead of being applied silently; when absent (e.g.
+     * the commit-time backstop, where no review is possible) they are simply
+     * not applied. Only exact loose-key / cleaned-key hits ever auto-rename.
+     */
+    suggestions?: SpecImportLinkSuggestion[];
   },
 ): ParsedSpecImport {
-  const match = buildNearDupNameMatcher(existingNames, {
+  const match = buildNearDupNameMatcherDetailed(existingNames, {
     keyOf: specImportNameMatchKey,
   });
   const poolRowsByKey = new Map<
@@ -1265,44 +1322,68 @@ export function linkSpecImportNamedRecipesToExisting(
     const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, ex));
     if (key && !byCleanKey.has(key)) byCleanKey.set(key, ex);
   }
+  // EXACT matches only (loose key, or cleaned-key supplement): only these may
+  // auto-rename silently. Word-reorder / single-typo hits and family folds go
+  // through opts.suggestions instead — silently applying them has cross-linked
+  // genuinely different recipes ("Masa Dough (Lowes)" onto "Masa Dough").
   const matchCleaned = (nm: string): string | null => {
     const direct = match(nm);
-    if (direct) return direct;
+    if (direct?.layer === 1) return direct.name;
     const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, nm));
     return (key && byCleanKey.get(key)) || null;
+  };
+  // Beyond-exact candidate for a name: near-dup layers 2/3 first, then the
+  // kind's family fold — both gated by the formula-conflict guard (a recipe
+  // carrying its OWN ingredient rows never links onto a pool recipe whose
+  // ingredients differ: same-family NAMES over different formulas are
+  // distinct recipes, not variants).
+  const reviewCandidate = (
+    nm: string,
+    rows?: ReadonlyArray<{ ingredient?: string | null }>,
+  ): string | null => {
+    const near = match(nm);
+    const cand =
+      near && near.layer > 1
+        ? near.name
+        : findSpecImportNamedRecipeFamilyMatch(kind, nm, existingNames);
+    if (!cand) return null;
+    if (
+      specImportDoughFormulasConflict(
+        rows,
+        poolRowsByKey.get(specImportNameMatchKey(cand)),
+      )
+    ) {
+      return null;
+    }
+    return cand;
+  };
+  const suggested = new Set<string>();
+  const pushSuggestion = (importedName: string, existingName: string) => {
+    if (!opts?.suggestions) return;
+    const key = importedName.toLowerCase();
+    if (suggested.has(key)) return;
+    suggested.add(key);
+    opts.suggestions.push({ kind, importedName, existingName });
   };
   let changed = false;
   const recipes = (parsed.recipes ?? []).map((r) => {
     const name = (r.name ?? "").trim();
     if (r.kind !== kind || !name) return r;
-    // Family fallback applies to the RECIPES too — an imported "Lucia Recipe"
-    // sauce (or an "11\" CRB recipe" dough) with rows should fold into the
-    // existing family recipe ("Lucia Pizza Sauce" / "CRB Dough"), never fork a
-    // duplicate next to it. Snapping the RECIPE keeps the profile↔recipe tie
-    // intact (both land on the base name via importedKindKeys below) and lets
-    // the variant's doughball weight / rows ride into the family instead of
-    // being stranded under a name the pool guard would drop.
-    let existing = matchCleaned(name);
+    // A name the user explicitly typed in the review must never be snapped
+    // back onto an existing pool name — the rename is deliberate.
+    if (r.userNamed) return r;
+    const existing = matchCleaned(name);
     if (!existing) {
-      const family = findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
-      // Formula guard (dough only): a recipe carrying its OWN ingredient rows
-      // never folds onto a pool recipe whose ingredients differ — same-family
-      // NAMES over different formulas ("Masa Dough (Lowes Natural)" vs "Masa
-      // Dough") are distinct recipes, not variants.
-      if (
-        family &&
-        !(
-          kind === "dough" &&
-          specImportDoughFormulasConflict(
-            r.rows,
-            poolRowsByKey.get(specImportNameMatchKey(family)),
-          )
-        )
-      ) {
-        existing = family;
-      }
+      // Beyond-exact matches (reorder/typo near-dups AND family folds — an
+      // imported "Lucia Recipe" sauce or "11\" CRB recipe" dough that likely
+      // means an existing family recipe) become declinable review
+      // suggestions; accepting one links + repoints the profile through the
+      // dialog's existing plumbing, declining keeps the imported name.
+      const cand = reviewCandidate(name, r.rows);
+      if (cand && cand !== name) pushSuggestion(name, cand);
+      return r;
     }
-    if (!existing || existing === name) return r;
+    if (existing === name) return r;
     changed = true;
     // Dough only: keep the variant's ORIGINAL sheet name as its label so the
     // family recipe's doughballVariants list can carry this variant's
@@ -1411,9 +1492,11 @@ export function linkSpecImportNamedRecipesToExisting(
     const collapsed = collapsedRenames.get(specImportNameMatchKey(nm));
     if (collapsed) return collapsed;
     if (importedKindKeys.has(specImportNameMatchKey(nm))) return null;
+    // Parenthetical candidates snap on EXACT loose-key hits only — a
+    // beyond-exact hit here would silently cross-link the profile.
     for (const cand of parentheticalNameCandidates(nm)) {
       const m = match(cand);
-      if (m) return m;
+      if (m?.layer === 1) return m.name;
     }
     // Family fallback: a variant-qualified dough name ("CRB Heavy Plus
     // recipe") snaps onto its base pool recipe ("CRB Dough") — one recipe per

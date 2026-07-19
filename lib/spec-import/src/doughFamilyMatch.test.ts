@@ -4,6 +4,7 @@ import {
   linkSpecImportNamedRecipesToExisting,
   specImportDoughFamilyHintFromFileName,
   type ParsedSpecImport,
+  type SpecImportLinkSuggestion,
 } from "./index";
 
 describe("specImportDoughFamilyHintFromFileName", () => {
@@ -111,29 +112,36 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
   });
 
-  it("snaps BOTH the recipe and the profile onto the base when THIS import carries a variant dough recipe", () => {
-    // One recipe per dough family: an incoming variant recipe folds into the
-    // existing base recipe (its rows/doughball weight ride along) and the
-    // profile tie survives because both land on the base name. Keeping the
-    // variant name stranded the recipe payload (pool guard dropped it) and
-    // broke the profile↔recipe tie when the profile snapped but the recipe
-    // did not.
+  it("no longer silently folds a variant dough recipe — it becomes a review SUGGESTION", () => {
+    // A family fold is beyond-exact: it used to auto-rename the incoming
+    // variant recipe onto the base pool recipe, which silently cross-linked
+    // similar-named recipes. Now the recipe keeps its sheet name and the
+    // fold surfaces as a declinable suggestion for the review dialog.
     const withRecipe = {
       ...base,
       recipes: [
         { kind: "dough", name: "CRB Heavy Plus recipe", rows: [{ name: "Flour", lbs: 1 }] },
       ],
     } as unknown as ParsedSpecImport;
-    const linked = linkSpecImportNamedRecipesToExisting(withRecipe, "dough", ["CRB Dough"]);
-    expect(linked.recipes?.[0]?.name).toBe("CRB Dough");
-    expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
+    const suggestions: SpecImportLinkSuggestion[] = [];
+    const linked = linkSpecImportNamedRecipesToExisting(withRecipe, "dough", ["CRB Dough"], {
+      suggestions,
+    });
+    expect(linked.recipes?.[0]?.name).toBe("CRB Heavy Plus recipe");
+    expect(linked.profiles?.[0]?.doughName).toBe("CRB Heavy Plus recipe");
+    expect(suggestions).toContainEqual({
+      kind: "dough",
+      importedName: "CRB Heavy Plus recipe",
+      existingName: "CRB Dough",
+    });
   });
 
-  it("collapses row-identical dough siblings onto the family a sibling matched (customer-only labels)", () => {
-    // One mixing table = one family: a yield row named ONLY after the customer
-    // ("Basha's Original") shares no token with "CRB Dough", but it carries the
-    // exact same ingredient rows as a sibling that DID match — it must become a
-    // variant of the same family, never a standalone dough recipe.
+  it("no longer auto-anchors sibling collapse through a family fold — the fold is a SUGGESTION", () => {
+    // The anchor here ("Costco CRB" → "CRB Dough") is itself a beyond-exact
+    // family fold, so it no longer applies silently: every sheet name stays
+    // put and the fold surfaces as a declinable suggestion. (Hint-anchored
+    // and exact-anchored sibling collapses still apply automatically — see
+    // the tests below.)
     const rows = [
       { ingredient: "Flour", lbs: 100 },
       { ingredient: "Water", lbs: 60 },
@@ -154,19 +162,21 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
         { kind: "dough", name: "Lucia's New & Improved", rows, doughballOz: 8.25 },
       ],
     } as unknown as ParsedSpecImport;
-    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB Dough"]);
+    const suggestions: SpecImportLinkSuggestion[] = [];
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB Dough"], {
+      suggestions,
+    });
     expect(linked.recipes?.map((r) => r.name)).toEqual([
-      "CRB Dough",
-      "CRB Dough",
-      "CRB Dough",
-    ]);
-    expect(linked.recipes?.map((r) => r.variantLabel)).toEqual([
       "Costco CRB",
       "Basha's Original",
       "Lucia's New & Improved",
     ]);
-    // The profile's dough reference follows the collapse.
-    expect(linked.profiles?.[0]?.doughName).toBe("CRB Dough");
+    expect(linked.profiles?.[0]?.doughName).toBe("Basha's Original");
+    expect(suggestions).toContainEqual({
+      kind: "dough",
+      importedName: "Costco CRB",
+      existingName: "CRB Dough",
+    });
   });
 
   it("collapses an ANCHORLESS row-identical group onto the file-name family hint (empty pool)", () => {
@@ -352,7 +362,7 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     expect(linked.recipes?.[0]?.variantLabel).toBeUndefined();
   });
 
-  it("still family-folds when the pool recipe's rows MATCH or are absent", () => {
+  it("SUGGESTS the family fold when the pool recipe's rows MATCH or are absent", () => {
     const rows = [
       { ingredient: "Flour", lbs: 100 },
       { ingredient: "Water", lbs: 60 },
@@ -362,18 +372,29 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
         profiles: [],
         recipes: [{ kind: "dough", name: "CRB Heavy Plus recipe", rows }],
       }) as unknown as ParsedSpecImport;
-    // Matching ingredient sets → variant fold as before.
+    const expected = {
+      kind: "dough",
+      importedName: "CRB Heavy Plus recipe",
+      existingName: "CRB Dough",
+    };
+    // Matching ingredient sets → fold offered as a suggestion (never silent).
+    const matchedSugs: SpecImportLinkSuggestion[] = [];
     const matched = linkSpecImportNamedRecipesToExisting(mk(), "dough", ["CRB Dough"], {
       existingRecipes: [
         { name: "CRB Dough", rows: [{ ingredient: "Water" }, { ingredient: "Flour" }] },
       ],
+      suggestions: matchedSugs,
     });
-    expect(matched.recipes?.[0]?.name).toBe("CRB Dough");
+    expect(matched.recipes?.[0]?.name).toBe("CRB Heavy Plus recipe");
+    expect(matchedSugs).toContainEqual(expected);
     // Pool recipe rows unknown/empty (placeholder) → no evidence of conflict.
+    const noRowsSugs: SpecImportLinkSuggestion[] = [];
     const noRows = linkSpecImportNamedRecipesToExisting(mk(), "dough", ["CRB Dough"], {
       existingRecipes: [{ name: "CRB Dough", rows: [] }],
+      suggestions: noRowsSugs,
     });
-    expect(noRows.recipes?.[0]?.name).toBe("CRB Dough");
+    expect(noRows.recipes?.[0]?.name).toBe("CRB Heavy Plus recipe");
+    expect(noRowsSugs).toContainEqual(expected);
   });
 
   it("does not family-collapse sauce names", () => {

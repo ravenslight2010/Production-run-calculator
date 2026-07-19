@@ -126,9 +126,13 @@ describe("mock dough sheet import — one family recipe carries all variants", (
       { id: "dough-crb", name: FAMILY, components: [{ ingredient: "Flour", lbs: 50 }] },
     ]);
 
-    // Commit-time relink against the live pool (real lib): every variant name
+    // Commit-time relink against the live pool (real lib): the workbook's
+    // file-name family hint (passed by prepare, e.g. "CRB Dough Mixing
+    // Procedure - 38.xlsx") anchors the sibling collapse — every variant name
     // snaps onto the family recipe, keeping its sheet name as variantLabel.
-    const linked = linkSpecImportNamedRecipesToExisting(mockSheetParse(), "dough", pool.map((r) => r.name));
+    // (Without the hint the fold is only a review suggestion now — beyond-
+    // exact matches never apply silently.)
+    const linked = linkSpecImportNamedRecipesToExisting(mockSheetParse(), "dough", pool.map((r) => r.name), { doughFamilyHint: FAMILY });
     const doughRecipes = linked.recipes.filter((r) => r.kind === "dough");
     expect(new Set(doughRecipes.map((r) => r.name))).toEqual(new Set([FAMILY]));
     expect(doughRecipes.map((r) => r.variantLabel)).toEqual(SHEET_VARIANTS.map((s) => s.name));
@@ -154,7 +158,7 @@ describe("mock dough sheet import — one family recipe carries all variants", (
     pool = normalizeNamedRecipes([
       { id: "dough-crb", name: FAMILY, components: [{ ingredient: "Flour", lbs: 50 }] },
     ]);
-    const first = linkSpecImportNamedRecipesToExisting(mockSheetParse(), "dough", pool.map((r) => r.name));
+    const first = linkSpecImportNamedRecipesToExisting(mockSheetParse(), "dough", pool.map((r) => r.name), { doughFamilyHint: FAMILY });
     await runImportPush(first);
     expect(normalizeDoughballVariants(pool[0].doughballVariants)).toHaveLength(3);
 
@@ -163,7 +167,7 @@ describe("mock dough sheet import — one family recipe carries all variants", (
     for (const r of corrected.recipes) {
       if (r.kind === "dough" && r.name.startsWith(`14"`)) r.doughballOz = 17;
     }
-    const relinked = linkSpecImportNamedRecipesToExisting(corrected, "dough", pool.map((r) => r.name));
+    const relinked = linkSpecImportNamedRecipesToExisting(corrected, "dough", pool.map((r) => r.name), { doughFamilyHint: FAMILY });
     await runImportPush(relinked);
 
     expect(pool).toHaveLength(1);
@@ -176,7 +180,7 @@ describe("mock dough sheet import — one family recipe carries all variants", (
     pool = normalizeNamedRecipes([
       { id: "dough-crb", name: FAMILY, components: [{ ingredient: "Flour", lbs: 50 }] },
     ]);
-    const linked = linkSpecImportNamedRecipesToExisting(mockSheetParse(), "dough", pool.map((r) => r.name));
+    const linked = linkSpecImportNamedRecipesToExisting(mockSheetParse(), "dough", pool.map((r) => r.name), { doughFamilyHint: FAMILY });
     await runImportPush(linked);
     const variants = normalizeDoughballVariants(pool[0].doughballVariants);
 

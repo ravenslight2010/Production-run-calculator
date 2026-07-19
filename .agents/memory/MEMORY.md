@@ -115,7 +115,7 @@
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
 - [Import format gotchas](spec-import-batch-vs-perpizza.md) + [source semantics](import-source-file-semantics.md) — M&V/Cheese are per-BATCH lbs, premix per-pizza; order spec→dough/sauce→cheese/premix.
 - [Import order + dedup keys](import-order-dedup-keys.md) — spec-first is worst for dedup (AI match no-ops on empty pool); cheese dedup is EXACT name, mix/dough/sauce use LOOSE key; reorder/misspell drift now handled by name-match.
-- [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher (reorder/typo, ambiguity+digit guards) for all importer link passes; extra-word layer is review-only opt-in ("Spicy Cheese Mix" ≠ "Cheese Mix").
+- [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher for importer link passes; only loose-key equality may auto-rename, reorder/typo/family-fold are declinable suggestions (prod cross-link incident).
 - [Stick pep types](stick-pep-types.md) — spec importer stick applicator = pepperoni AND cheese sticks (both are `pepperonis` pep types, not cheese recipes); recognized in BOTH the parse prompt and STICK_PEP_NAME_RE/isStickPepOnlyCheeseRecipe.
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time profile reconciliation in @workspace/profile-cleanup; "has real data" gates must exclude dough or dough-only profiles ghost.

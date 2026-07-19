@@ -36,6 +36,20 @@ Cheese wiring detail worth keeping: the cheese fallback is brand-scoped (matcher
 built per brand key) and uses `cheeseLinkKey` (abbreviation-expanded) as `keyOf`,
 so "Mozz"/"Mozzarella" style drift still folds before the layers run.
 
+## Layer-1-only auto-rename in spec-import link passes (2026-07-19)
+- Spec-import's snap-to-existing passes (cheese + dough/sauce) auto-rename ONLY
+  on layer-1 loose-key equality. Reorder/typo layers and beyond-exact family
+  folds surface as declinable review suggestions (`buildNearDupNameMatcherDetailed`
+  exposes which layer matched).
+- **Why:** silent layer-2/3 links cross-linked different customers' recipes in
+  prod (Basha's Ultra Thin 5-cheese mix saved as "Lowe's/Hannaford 5Cheese Mix").
+  Similar ≠ same when brands differ by a word.
+- **How to apply:** any new importer link pass that renames without user review
+  must use the detailed matcher and treat non-layer-1 matches as suggestions.
+  Learned aliases, userNamed guard, hint/exact-anchored sibling collapse stay
+  auto. Fixing a silent-link bug also needs SPEC_PARSE_VERSION bump (saved
+  parses embed the bad names) + a heal purging poisoned saved parses.
+
 ## Neutral-descriptor fold for TYPE names (2026-07-18)
 - Applicator/pep TYPE names get one more layer in spec-import `canonicalize` (appType/pepType kinds only): tokens in `NEUTRAL_TYPE_EXTRA_TOKENS` ({"milk"}) are dropped from the loose key (`specImportTypeNameFoldKey`), so "Whole Milk Mozzarella" snaps to a known "Whole Mozzarella" (unique-target guard; counted as exact so the alias is learned). Auto-Fill's mismatch compare uses the same fold key.
 - **Why:** "milk" is a dairy spec, not a different product; but "cheese" must NEVER fold (cheese sticks ≠ pepperoni sticks, "Cheese Mix" ≠ "Mix").

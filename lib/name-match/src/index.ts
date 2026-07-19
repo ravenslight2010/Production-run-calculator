@@ -231,6 +231,21 @@ export interface NearDupMatcherOptions {
 export type NearDupNameMatcher = (name: string) => string | null;
 
 /**
+ * Which matcher layer produced a hit:
+ *   1 = loose key equality (exact after normalization)
+ *   2 = word-order-insensitive key equality
+ *   3 = single-typo key
+ *   4 = one extra token (opt-in)
+ * Callers use this to split "safe to apply silently" (layer 1) from
+ * "needs human review" (layers 2+).
+ */
+export type NearDupMatchLayer = 1 | 2 | 3 | 4;
+
+export type NearDupNameMatcherDetailed = (
+  name: string,
+) => { name: string; layer: NearDupMatchLayer } | null;
+
+/**
  * Build a matcher that maps an imported name to the EXACT existing name it
  * near-duplicates, or null when there is no single safe match. Layers, most
  * confident first — each with the ambiguity guard described in the header:
@@ -247,6 +262,19 @@ export function buildNearDupNameMatcher(
   existingNames: ReadonlyArray<string>,
   options?: NearDupMatcherOptions,
 ): NearDupNameMatcher {
+  const detailed = buildNearDupNameMatcherDetailed(existingNames, options);
+  return (name) => detailed(name)?.name ?? null;
+}
+
+/**
+ * Same as buildNearDupNameMatcher but the result carries WHICH layer matched,
+ * so a caller can auto-apply only exact (layer 1) hits and surface everything
+ * beyond exact as a declinable review suggestion. Pure.
+ */
+export function buildNearDupNameMatcherDetailed(
+  existingNames: ReadonlyArray<string>,
+  options?: NearDupMatcherOptions,
+): NearDupNameMatcherDetailed {
   const keyOf = options?.keyOf ?? looseNameKey;
   const entries: Entry[] = [];
   const seen = new Set<string>();
@@ -269,7 +297,7 @@ export function buildNearDupNameMatcher(
     });
   }
 
-  return (rawName: string): string | null => {
+  return (rawName: string): { name: string; layer: NearDupMatchLayer } | null => {
     const name = (rawName ?? "").trim();
     if (!name) return null;
     const key = keyOf(name);
@@ -297,9 +325,11 @@ export function buildNearDupNameMatcher(
         (e) => e.digits === digits && isOneExtraTokenApart(tokens, e.tokens),
       );
     }
-    for (const qualifies of layers) {
-      const hits = pool.filter(qualifies);
-      if (hits.length === 1) return hits[0].name;
+    for (let i = 0; i < layers.length; i++) {
+      const hits = pool.filter(layers[i]);
+      if (hits.length === 1) {
+        return { name: hits[0].name, layer: (i + 1) as NearDupMatchLayer };
+      }
       // Two DIFFERENT saved names both qualify: never guess, and never fall
       // through to a weaker layer that would hide the ambiguity.
       if (hits.length > 1) return null;

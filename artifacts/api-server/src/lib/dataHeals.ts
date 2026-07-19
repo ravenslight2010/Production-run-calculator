@@ -12,6 +12,7 @@ import {
   doughRecipesTable,
   sauceRecipesTable,
   brandProfilesTable,
+  savedSpecSheetsTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import {
@@ -1525,6 +1526,48 @@ async function runDoughMergeVanishRestore(): Promise<void> {
   });
 }
 
+// ── Cross-linked saved spec parse purge (Basha's ↔ Lowe's/Hannaford) ────────
+// Before spec-import v15, the snap-to-existing passes silently renamed
+// imported recipes onto merely SIMILAR pool names. Prod evidence: the Jul 16
+// Basha's Ultra Thin saved parse stored its 5-cheese blend as
+// "Lowe's/Hannaford 5Cheese Mix" (recipe name AND profile applicator types) —
+// a different customer's recipe. Re-imports of a byte-identical file reuse
+// saved parses, and the saved-sheet reconcile panel cross-references them
+// against current recipes, so the poisoned snapshot keeps resurrecting the
+// mislink even after the code fix. Delete any Basha's-sourced saved parse
+// that embeds the cross-linked name (all scopes — sandbox copies carry the
+// same poison). The corrected Jul 19 parse names the recipe properly and is
+// untouched. The parse-version bump (v15) already prevents hash-reuse of
+// other stale parses.
+
+const CROSSLINK_PARSE_HEAL_ID = "basha-hannaford-crosslink-parse-purge-v1";
+
+async function runCrosslinkedSavedParsePurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CROSSLINK_PARSE_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const deleted = await tx
+      .delete(savedSpecSheetsTable)
+      .where(
+        and(
+          sql`lower(coalesce(${savedSpecSheetsTable.sourceKey}, '')) like ${"basha%"}`,
+          sql`${savedSpecSheetsTable.data}::text ilike ${"%lowe's/hannaford%"}`,
+        ),
+      )
+      .returning({ id: savedSpecSheetsTable.id });
+
+    logger.info(
+      { heal: CROSSLINK_PARSE_HEAL_ID, deletedRows: deleted.length },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1548,4 +1591,5 @@ export async function runDataHeals(): Promise<void> {
   await runDoughVariantSuffixDedupe();
   await runDoughMergeVanishRestore();
   await runBogusMergeAliasPurge();
+  await runCrosslinkedSavedParsePurge();
 }

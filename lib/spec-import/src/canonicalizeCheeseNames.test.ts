@@ -6,12 +6,14 @@ import {
   linkSpecImportCheeseToExisting,
   linkSpecImportNamedRecipesToExisting,
   linkSpecImportDieTypesToExisting,
+  collectSpecImportCheeseLinkSuggestions,
   collectSpecImportCheeseRecipes,
   extractEmbeddedApplicatorBlends,
   recipeTargets,
   stripApplicatorLabel,
   parseEmbeddedBlend,
   type ParsedSpecImport,
+  type SpecImportLinkSuggestion,
 } from "./index";
 
 const none = new Set<string>();
@@ -459,13 +461,21 @@ describe("linkSpecImportNamedRecipesToExisting", () => {
     expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Dough"]);
   });
 
-  it("snaps a single-typo sauce name onto the saved recipe", () => {
+  it("no longer silently snaps a single-typo sauce name — it becomes a review SUGGESTION", () => {
     const parsed: ParsedSpecImport = {
       profiles: [],
       recipes: [{ kind: "sauce", name: "Mystic Pizza Sause", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
     };
-    const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"]);
-    expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sauce"]);
+    const suggestions: SpecImportLinkSuggestion[] = [];
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"], {
+      suggestions,
+    });
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sause"]);
+    expect(suggestions).toContainEqual({
+      kind: "sauce",
+      importedName: "Mystic Pizza Sause",
+      existingName: "Mystic Pizza Sauce",
+    });
   });
 
   it("does NOT collapse a MEANINGFUL qualifier (Spicy) onto a different saved sauce", () => {
@@ -540,5 +550,55 @@ describe("linkSpecImportDieTypesToExisting", () => {
       recipes: [],
     };
     expect(linkSpecImportDieTypesToExisting(parsed, ["12 in"])).toBe(parsed);
+  });
+});
+
+describe("collectSpecImportCheeseLinkSuggestions", () => {
+  const mk = (recipes: unknown[]): ParsedSpecImport =>
+    ({ profiles: [], recipes }) as unknown as ParsedSpecImport;
+
+  it("suggests word-reorder and single-typo cheese pool near-dups (never exact)", () => {
+    const parsed = mk([
+      { kind: "cheese", name: "Mix Cheese Spicy", rows: [] },
+      { kind: "cheese", name: "Aldo's Chesse Mix", rows: [] },
+      { kind: "cheese", name: "Plain Cheese Mix", rows: [] },
+    ]);
+    const sugs = collectSpecImportCheeseLinkSuggestions(parsed, [
+      "Spicy Cheese Mix",
+      "Aldo's Cheese Mix",
+      "Plain Cheese Mix",
+    ]);
+    expect(sugs).toContainEqual({
+      kind: "cheese",
+      importedName: "Mix Cheese Spicy",
+      existingName: "Spicy Cheese Mix",
+    });
+    expect(sugs).toContainEqual({
+      kind: "cheese",
+      importedName: "Aldo's Chesse Mix",
+      existingName: "Aldo's Cheese Mix",
+    });
+    // Exact (loose-key) matches snap silently elsewhere — no suggestion.
+    expect(sugs.some((s) => s.importedName === "Plain Cheese Mix")).toBe(false);
+  });
+
+  it("skips userNamed recipes and dedupes repeated imported names", () => {
+    const parsed = mk([
+      { kind: "cheese", name: "Aldo's Chesse Mix", rows: [], userNamed: true },
+      { kind: "cheese", name: "Mix Cheese Spicy", rows: [] },
+      { kind: "cheese", name: "mix cheese spicy", rows: [] },
+    ]);
+    const sugs = collectSpecImportCheeseLinkSuggestions(parsed, [
+      "Aldo's Cheese Mix",
+      "Spicy Cheese Mix",
+    ]);
+    expect(sugs).toHaveLength(1);
+    expect(sugs[0]?.importedName).toBe("Mix Cheese Spicy");
+  });
+
+  it("never silently renames via linkSpecImportCheeseToExisting for beyond-exact matches", () => {
+    const parsed = mk([{ kind: "cheese", name: "Mix Cheese Spicy", rows: [] }]);
+    const linked = linkSpecImportCheeseToExisting(parsed, ["Spicy Cheese Mix"]);
+    expect(linked.recipes?.[0]?.name).toBe("Mix Cheese Spicy");
   });
 });
