@@ -7,6 +7,7 @@ import {
   aiCorrectionsTable,
   importAliasesTable,
   cheeseRecipesTable,
+  mergeAliasesTable,
   mixesTable,
   doughRecipesTable,
   sauceRecipesTable,
@@ -36,6 +37,11 @@ import {
   POISONED_FLAVOR_BRAND_CONTEXT,
   healCheesePicksInPayload,
 } from "./cheesePickHeal";
+import {
+  BOGUS_CHEESE_MERGE_ALIAS_PAIRS,
+  isBogusMergeAlias,
+  toPoolNameSet,
+} from "./mergeAliasPurge";
 import {
   healSeaSaltComponents,
   SEA_SALT_DOUGH_TARGETS,
@@ -968,6 +974,87 @@ async function runSmdPepCheeseRestore(): Promise<void> {
   });
 }
 
+// ── Bogus truncated merge memories (2026-07-19) ─────────────────────────────
+// A handful of cheese-tab merge_aliases rows carry truncated garbage canonical
+// names ("Ald", "Basha", "Pinsa" — partially-typed merge targets) plus the
+// stale half of a bidirectional SMD pair pointing at the dead "SMD Pep Cheese
+// Mix" name. No pool rows carry those names (audited 2026-07-19), but they can
+// bias future AI merge suggestions and any code trusting merge memory. Delete
+// them in every scope (a sandbox re-copy of the same poison must not survive),
+// but ONLY while the canonical name still has no backing cheese pool row in
+// the row's scope — if a manager has since created a recipe with that exact
+// name, the alias is meaningful again and stays. Also delete any mirrored
+// ai_corrections rows for the same pairs (none existed at audit time, but the
+// corrections pool is written best-effort alongside merges).
+
+const BOGUS_MERGE_ALIAS_HEAL_ID = "bogus-merge-alias-purge-v1";
+
+async function runBogusMergeAliasPurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: BOGUS_MERGE_ALIAS_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Cheese pool names per scope, for the "canonical still dead" guard.
+    const pool = await tx
+      .select({ scope: cheeseRecipesTable.scope, name: cheeseRecipesTable.name })
+      .from(cheeseRecipesTable);
+    const poolByScope = new Map<string, Set<string>>();
+    for (const row of pool) {
+      let set = poolByScope.get(row.scope);
+      if (!set) {
+        set = new Set<string>();
+        poolByScope.set(row.scope, set);
+      }
+      toPoolNameSet([row.name]).forEach((n) => set!.add(n));
+    }
+
+    const aliases = await tx
+      .select()
+      .from(mergeAliasesTable)
+      .where(eq(mergeAliasesTable.category, "cheese"))
+      .for("update");
+    let deletedAliases = 0;
+    for (const row of aliases) {
+      const poolNames = poolByScope.get(row.scope) ?? new Set<string>();
+      if (!isBogusMergeAlias(row, poolNames)) continue;
+      await tx
+        .delete(mergeAliasesTable)
+        .where(eq(mergeAliasesTable.id, row.id));
+      deletedAliases++;
+    }
+
+    // Mirrored corrections: the same external→canonical pairs, any domain —
+    // these exact pairs cannot be legitimate mappings.
+    let deletedCorrections = 0;
+    for (const [external, canonical] of BOGUS_CHEESE_MERGE_ALIAS_PAIRS) {
+      const del = await tx
+        .delete(aiCorrectionsTable)
+        .where(
+          and(
+            eq(sql`lower(trim(${aiCorrectionsTable.fromText}))`, external),
+            eq(sql`lower(trim(${aiCorrectionsTable.toText}))`, canonical),
+          ),
+        )
+        .returning({ id: aiCorrectionsTable.id });
+      deletedCorrections += del.length;
+    }
+
+    logger.info(
+      {
+        heal: BOGUS_MERGE_ALIAS_HEAL_ID,
+        scanned: aliases.length,
+        deletedAliases,
+        deletedCorrections,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 // ── Sea Salt is not Salt (2026-07-18) ────────────────────────────────────────
 // A 2026-07-16 import confirm learned "SEA SALT" → "SALT" factory-wide
 // (spec_import_aliases kind doughIngredient + mirrored ai_corrections domain
@@ -1460,4 +1547,5 @@ export async function runDataHeals(): Promise<void> {
   await runPurchasedCrustDieDepoison();
   await runDoughVariantSuffixDedupe();
   await runDoughMergeVanishRestore();
+  await runBogusMergeAliasPurge();
 }
