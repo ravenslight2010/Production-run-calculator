@@ -43,6 +43,7 @@ import {
 import { and, eq, gt, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues } from "../lib/protectRunValues";
+import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
@@ -184,6 +185,27 @@ function applyResetBoundary(
   }
 }
 
+// Durable write-time guard for the Lowe's bare-"NATURAL" pep-type poison: a
+// stale pre-fix client can still push the bare qualifier names ("Natural",
+// "NATURAL", "NATURAL (Hormel - 24878)") in its pep-type list or run values
+// after the one-time heal ran. Canonicalize them at every sync write so the
+// poison can never be re-persisted (idempotent; matching is anchored so real
+// product names like "Natural Bacon" are untouched).
+function canonicalizePepNames(merged: unknown): void {
+  if (!merged || typeof merged !== "object") return;
+  const data = merged as Record<string, unknown>;
+  const healedList = healNaturalPepList(data.pepTypes);
+  if (healedList) data.pepTypes = healedList;
+  const runValues = data.runValues;
+  if (runValues && typeof runValues === "object") {
+    for (const vals of Object.values(runValues as Record<string, unknown>)) {
+      if (vals && typeof vals === "object") {
+        healNaturalPepInValues(vals as Record<string, unknown>);
+      }
+    }
+  }
+}
+
 async function upsertProtected(
   date: string,
   scope: Scope,
@@ -199,6 +221,7 @@ async function upsertProtected(
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
         const merged = protectRunValues(payload, existing?.data);
+        canonicalizePepNames(merged);
         applyResetBoundary(merged, existing?.data, date === clientTodayDate);
         if (existing) {
           await tx

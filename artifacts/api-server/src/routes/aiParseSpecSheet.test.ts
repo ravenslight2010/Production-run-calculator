@@ -62,6 +62,20 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
     expect(system).toContain("do NOT append the code to the brand");
     expect(system).toContain("NEVER give two different code blocks the same invented flavor");
   });
+
+  // Regression guard: the Lowe's sheet's "Pepperoni Stick - NATURAL
+  // (Hormel - 24878)" rows were parsed to a bare "NATURAL" pep type, dropping
+  // the product name factory-wide. The prompt must pin pep-type naming: full
+  // product name kept, vendor/code parenthetical stripped, never a bare
+  // qualifier.
+  it("pins pep type naming to the full product name, never a bare qualifier", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("PEP TYPE NAMES");
+    expect(system).toContain("FULL product name");
+    expect(system).toContain("'Pepperoni Stick - NATURAL (Hormel - 24878)'");
+    expect(system).toContain("type 'Pepperoni Stick - NATURAL'");
+    expect(system).toContain("NEVER emit a bare qualifier");
+  });
 });
 
 // Regression guard for the standalone-procedure rule. A sheet that is one whole

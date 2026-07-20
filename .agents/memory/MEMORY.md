@@ -154,4 +154,5 @@
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
 - [Brand rename aliases](brand-rename-aliases.md) — customer renames learn context-free brand spec-import aliases (chain re-point); premix redirect needs the brand-drift fallback, don't restore its early return.
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.
+- [Bare-qualifier pep names](natural-pep-name-poison.md) — pep type = full product name; canonical "Pepperoni Stick - NATURAL"; synced-name poison needs a write-time sync guard, not just a one-time heal.
 - [Spec re-import rename memory](spec-reimport-rename-memory.md) — EVERY merge/rename entry point must learn spec-import aliases (ingredients under all 3 kinds; brand learns re-context flavor aliases); paren guard: "X (A)" never fuzzes onto "X (B)".

@@ -1889,6 +1889,187 @@ async function runBoboCrossFamilyAliasUndo(): Promise<void> {
   });
 }
 
+// ── Lowe's bare-"NATURAL" pep-type depoison (2026-07-20) ────────────────────
+// The Lowe's 11" spec workbook writes its stick rows as
+// "Pepperoni Stick - NATURAL (Hormel - 24878)"; the AI parse reduced the pep
+// `type` to the bare qualifier ("Natural"/"NATURAL", and one list entry kept
+// the vendor code: "NATURAL (Hormel - 24878)"). The prompt now pins pep-type
+// naming (full product name, vendor parens stripped, never a bare qualifier)
+// and SPEC_PARSE_VERSION 17 fences off stale parses, but the poison is stored
+// in the Lowe's brand profiles, the saved parses, and synced pep-type name
+// lists. Canonical target is "Pepperoni Stick - NATURAL" — the name the web
+// app already uses in PEP_TYPE_RENAMES (clients also rename on read now, so
+// stale local lists self-heal instead of re-pushing the bare names).
+
+const NATURAL_PEP_HEAL_ID = "lowes-natural-pep-name-v1";
+const NATURAL_PEP_CANONICAL = "Pepperoni Stick - NATURAL";
+const NATURAL_PEP_HEAL_FROM_DATE = "2026-07-20";
+const NATURAL_PEP_RE = /^natural(\s*\(.*\))?$/i;
+const PEP_TYPE_FIELDS = ["pep1Type", "pep2Type", "pep1TypeB", "pep2TypeB"] as const;
+
+function isBareNaturalPepName(name: unknown): boolean {
+  return typeof name === "string" && NATURAL_PEP_RE.test(name.trim());
+}
+
+/**
+ * Fix bare-"NATURAL" pep type fields on a flat run/profile values object.
+ * Returns true when anything changed. Exported for unit tests.
+ */
+export function healNaturalPepInValues(
+  values: Record<string, unknown>,
+): boolean {
+  let changed = false;
+  for (const k of PEP_TYPE_FIELDS) {
+    if (isBareNaturalPepName(values[k])) {
+      values[k] = NATURAL_PEP_CANONICAL;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Rename bare-"NATURAL" entries in a pep-type name list, deduping (ci) the
+ * result. Returns the healed list, or null when nothing changed. Exported
+ * for unit tests.
+ */
+export function healNaturalPepList(list: unknown): string[] | null {
+  if (!Array.isArray(list)) return null;
+  let changed = false;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    if (typeof item !== "string") continue;
+    const renamed = isBareNaturalPepName(item) ? NATURAL_PEP_CANONICAL : item;
+    if (renamed !== item) changed = true;
+    const lk = renamed.toLowerCase();
+    if (seen.has(lk)) {
+      changed = true;
+      continue;
+    }
+    seen.add(lk);
+    out.push(renamed);
+  }
+  return changed ? out : null;
+}
+
+async function runNaturalPepNameDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: NATURAL_PEP_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Saved spec parses (Auto-Fill reads these directly; hash reuse is
+    //    already fenced off by the SPEC_PARSE_VERSION bump).
+    let healedSheets = 0;
+    const sheets = await tx
+      .select()
+      .from(savedSpecSheetsTable)
+      .where(sql`${savedSpecSheetsTable.data}::text ~* ${'"natural'}`)
+      .for("update");
+    for (const sheet of sheets) {
+      const data = sheet.data as {
+        profiles?: Array<{ pepperonis?: Array<{ type?: unknown }> }>;
+      } | null;
+      if (!data?.profiles) continue;
+      let changed = false;
+      for (const profile of data.profiles) {
+        const peps = profile?.pepperonis;
+        if (!Array.isArray(peps)) continue;
+        for (const p of peps) {
+          if (isBareNaturalPepName(p?.type)) {
+            p.type = NATURAL_PEP_CANONICAL;
+            changed = true;
+          }
+        }
+      }
+      if (!changed) continue;
+      await tx
+        .update(savedSpecSheetsTable)
+        .set({ data })
+        .where(eq(savedSpecSheetsTable.id, sheet.id));
+      healedSheets++;
+    }
+
+    // 2) Brand profiles (LWW stamp advanced so stale devices can't re-publish
+    //    the poisoned value).
+    let healedProfiles = 0;
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    for (const p of profiles) {
+      const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+      if (!healNaturalPepInValues(values)) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    // 3) Today-and-future day-state: pep-type name lists + run values (past
+    //    days are history). Clients also rename these names on read, so a
+    //    stale device's push re-heals instead of resurrecting.
+    let healedDays = 0;
+    const days = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(gte(dailySyncTable.date, NATURAL_PEP_HEAL_FROM_DATE))
+      .for("update");
+    for (const day of days) {
+      const data = day.data as Record<string, unknown> | null;
+      if (!data || typeof data !== "object") continue;
+      let changed = false;
+      const healedList = healNaturalPepList(data.pepTypes);
+      if (healedList) {
+        data.pepTypes = healedList;
+        changed = true;
+      }
+      const runValues = data.runValues as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      if (runValues && typeof runValues === "object") {
+        for (const vals of Object.values(runValues)) {
+          if (!vals || typeof vals !== "object") continue;
+          if (healNaturalPepInValues(vals)) {
+            const prev = Number(vals.valuesUpdatedAtMs ?? 0);
+            vals.valuesUpdatedAtMs = Math.max(prev + 1, Date.now());
+            changed = true;
+          }
+        }
+      }
+      if (!changed) continue;
+      await tx
+        .update(dailySyncTable)
+        .set({ data })
+        .where(
+          and(
+            eq(dailySyncTable.date, day.date),
+            eq(dailySyncTable.scope, day.scope),
+          ),
+        );
+      healedDays++;
+    }
+
+    logger.info(
+      {
+        heal: NATURAL_PEP_HEAL_ID,
+        healedSheets,
+        healedProfiles,
+        healedDays,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -1915,4 +2096,5 @@ export async function runDataHeals(): Promise<void> {
   await runCrosslinkedSavedParsePurge();
   await runAldoCheeseOzDepoison();
   await runBoboCrossFamilyAliasUndo();
+  await runNaturalPepNameDepoison();
 }

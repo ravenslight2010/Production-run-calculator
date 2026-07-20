@@ -229,6 +229,36 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     expect(row?.runValuesUpdatedAt?.r1).toBe(5000);
   });
 
+  it("canonicalizes bare-NATURAL pep names at write time (stale-client re-push guard)", async () => {
+    // A pre-fix client can still push the poisoned bare qualifier names after
+    // the one-time heal ran; the sync write path must fold them onto the
+    // canonical "Pepperoni Stick - NATURAL" (list deduped) while leaving real
+    // "Natural X" product names untouched.
+    const D = "2030-06-01";
+    await fetch(`${baseUrl}/api/sync/today?today=${D}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "c1",
+        payload: {
+          dayState: { runs: [{ id: "r1", brand: "Lowe's", flavor: "Pepperoni" }] },
+          pepTypes: ["Natural", "NATURAL", "NATURAL (Hormel - 24878)", "Pepperoni Stick", "Natural Bacon"],
+          runValues: { r1: { pep1Type: "NATURAL", pep2TypeB: "Natural", casesNeeded: 5 } },
+          runValuesUpdatedAt: { r1: 1000 },
+        },
+      }),
+    });
+    const res = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
+    const row = (await res.json()) as {
+      pepTypes?: string[];
+      runValues?: Record<string, { pep1Type?: string; pep2TypeB?: string; casesNeeded?: number }>;
+    };
+    expect(row.pepTypes).toEqual(["Pepperoni Stick - NATURAL", "Pepperoni Stick", "Natural Bacon"]);
+    expect(row.runValues?.r1?.pep1Type).toBe("Pepperoni Stick - NATURAL");
+    expect(row.runValues?.r1?.pep2TypeB).toBe("Pepperoni Stick - NATURAL");
+    expect(row.runValues?.r1?.casesNeeded).toBe(5);
+  });
+
   it("keeps the newest-stamped value under CONCURRENT racing PUTs (atomic merge, order-independent)", async () => {
     // Seed a populated run at stamp 2000. Then fire a stale empty@1000 and a
     // genuine edit@3000 concurrently. With the FOR UPDATE transactional merge the

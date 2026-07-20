@@ -214,6 +214,13 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "ingredients are only such sticks. THE ONE EXCEPTION IS DICED PEPPERONI: " +
     "diced pepperoni is a topping and stays part of a CHEESE/topping recipe, NOT " +
     "a profile pepperoni. " +
+    "PEP TYPE NAMES: a `pepperonis` entry's `type` must be the FULL product name " +
+    "as written on the sheet, keeping any qualifier like NATURAL or CURED attached " +
+    "to the product name, and dropping only a trailing vendor/item-code " +
+    "parenthetical. Example: 'Pepperoni Stick - NATURAL (Hormel - 24878)' → type " +
+    "'Pepperoni Stick - NATURAL'; 'Pepperoni Stick (Cured Sugardale - 01874)' → " +
+    "type 'Pepperoni Stick'. NEVER emit a bare qualifier such as 'NATURAL' or " +
+    "'Cured' alone as the type. " +
     "APPLICATOR STATIONS: the physical line runs Applicator 1, Applicator 2, then " +
     "the pep/stick applicators, then Applicator 3, Applicator 4 — the pep " +
     "applicators sit BETWEEN stations 2 and 3. The sheet's layout IS the line " +

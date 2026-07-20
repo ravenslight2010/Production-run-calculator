@@ -466,6 +466,12 @@ export const DEFAULT_PEP_TYPES: string[] = [];
 export const PEP_TYPE_RENAMES: Record<string, string> = {
   "Pep - Cured": "Pepperoni Stick",
   "Pep - Natural": "Pepperoni Stick - NATURAL",
+  // 2026-07-20: the Lowe's spec parse reduced "Pepperoni Stick - NATURAL
+  // (Hormel - 24878)" to a bare qualifier; fold every observed variant back
+  // onto the canonical name (prompt now forbids bare qualifiers).
+  Natural: "Pepperoni Stick - NATURAL",
+  NATURAL: "Pepperoni Stick - NATURAL",
+  "NATURAL (Hormel - 24878)": "Pepperoni Stick - NATURAL",
 };
 // Near-duplicate applicator/cheese-ingredient names (typos, spacing, redundant
 // suffixes, abbreviations, and word-order/blanched variants) collapsed onto a

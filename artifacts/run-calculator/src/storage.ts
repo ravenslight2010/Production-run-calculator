@@ -322,7 +322,7 @@ const PER_RUN_FIELDS: (keyof FormValues)[] = [
 // standard names on read, so saved profiles/runs keep their pre-made calc behavior
 // and never show a stale name. Idempotent and self-healing across sync.
 function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
-  for (const k of ["pep1Type", "pep2Type"] as const) {
+  for (const k of ["pep1Type", "pep2Type", "pep1TypeB", "pep2TypeB"] as const) {
     const val = o[k];
     if (typeof val === "string" && PEP_TYPE_RENAMES[val]) {
       (o as Record<string, unknown>)[k] = PEP_TYPE_RENAMES[val];
