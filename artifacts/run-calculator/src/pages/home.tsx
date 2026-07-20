@@ -2539,6 +2539,14 @@ export default function Home() {
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
     [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
   );
+  // Applicator-type pickers pin the two generic types (Cheese, Mix) to the top
+  // so the most-used picks never require scrolling; the rest stay alphabetical.
+  // Display-only reorder — the stored list stays sorted alphabetically.
+  const ingredientTypeOptions = useMemo(() => {
+    const pinned = ingredientTypes.filter(t => { const k = t.trim().toLowerCase(); return k === "cheese" || k === "mix"; });
+    const rest = ingredientTypes.filter(t => !pinned.includes(t));
+    return [...pinned, ...rest];
+  }, [ingredientTypes]);
 
   // React mirror of the local mergedAway tombstone (localStorage). The unified
   // ingredient universe filters through it so a merged-away name vanishes from
@@ -16777,7 +16785,7 @@ export default function Home() {
                         label="Applicator 1"
                         value={v.app1Type}
                         onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app1BatchLbs"); } }}
-                        options={ingredientTypes}
+                        options={ingredientTypeOptions}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
@@ -16846,7 +16854,7 @@ export default function Home() {
                         label="Applicator 2"
                         value={v.app2Type}
                         onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app2BatchLbs"); } }}
-                        options={ingredientTypes}
+                        options={ingredientTypeOptions}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
@@ -17094,7 +17102,7 @@ export default function Home() {
                         label="Applicator 3"
                         value={v.app3Type}
                         onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app3BatchLbs"); } }}
-                        options={ingredientTypes}
+                        options={ingredientTypeOptions}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
@@ -17163,7 +17171,7 @@ export default function Home() {
                         label="Applicator 4"
                         value={v.app4Type}
                         onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app4BatchLbs"); } }}
-                        options={ingredientTypes}
+                        options={ingredientTypeOptions}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
@@ -18682,7 +18690,7 @@ export default function Home() {
           gripSheetsOptions={gripSheets}
           onAddGripSheets={gripSheetsList.add}
           onRemoveGripSheets={gripSheetsList.remove}
-          ingredientTypes={ingredientTypes}
+          ingredientTypes={ingredientTypeOptions}
           onAddIngredientType={addIngredientType}
           onRemoveIngredientType={removeIngredientType}
           pepTypes={pepTypes}
@@ -19222,7 +19230,7 @@ export default function Home() {
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
-                              {ingredientTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                              {ingredientTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
