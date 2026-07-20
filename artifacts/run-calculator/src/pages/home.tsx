@@ -128,6 +128,7 @@ import {
   saveCheeseRecipePresets,
   applyPepTaxonomyMigrationIfNeeded,
   applyIngredientDedupeMigrationIfNeeded,
+  applyMachineTimeDefaultsHealIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
   applyMixSlotRecategorizeIfNeeded,
   applyPoolAwareSlotHealIfNeeded,
@@ -500,6 +501,7 @@ import {
 // heal devices that carry legacy data.
 applyPepTaxonomyMigrationIfNeeded();
 applyIngredientDedupeMigrationIfNeeded();
+applyMachineTimeDefaultsHealIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
 applyMixSlotRecategorizeIfNeeded();
 applyMixCheeseOverlapDedupeIfNeeded();

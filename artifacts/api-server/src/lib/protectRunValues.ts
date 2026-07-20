@@ -205,9 +205,9 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
-  mixerLowSec: 0,
-  mixerHighSec: 0,
-  hopperSec: 0,
+  mixerLowSec: 180,
+  mixerHighSec: 330,
+  hopperSec: 70,
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
@@ -280,15 +280,30 @@ const LEGACY_PEP_BATCH_FIELDS = [
   "pep2BatchLbsB",
 ] as const;
 
+// Machine-time fields whose default moved from 0 ("not measured") to the
+// factory-typical times. A blank run may carry EITHER shape depending on when
+// the client saved it — normalize 0 to the current default before comparing.
+// Keep in lockstep with the web's MACHINE_TIME_DEFAULTS (types.ts).
+const MACHINE_TIME_DEFAULTS: Record<string, number> = {
+  mixerLowSec: 180,
+  mixerHighSec: 330,
+  hopperSec: 70,
+};
+
 // True when a run value is an exact all-default/blank template (see above):
-// the current all-zero shape, the old-field-set legacy template, or the
-// current shape carrying the exact four-field legacy pep-25 signature.
+// the current default shape (machine times 0 or default), the old-field-set
+// legacy template, or the current shape carrying the exact four-field legacy
+// pep-25 signature.
 function isBlankRunValue(v: unknown): boolean {
   if (!isPlainObject(v)) return false;
-  if (deepEqualValue(v, CURRENT_BLANK_RUN_VALUE)) return true;
   if (deepEqualValue(v, LEGACY_BLANK_RUN_VALUE)) return true;
+  const withMachineDefaults: Record<string, unknown> = { ...v };
+  for (const [k, def] of Object.entries(MACHINE_TIME_DEFAULTS)) {
+    if (withMachineDefaults[k] === 0) withMachineDefaults[k] = def;
+  }
+  if (deepEqualValue(withMachineDefaults, CURRENT_BLANK_RUN_VALUE)) return true;
   if (LEGACY_PEP_BATCH_FIELDS.every((f) => v[f] === 25)) {
-    const normalized: Record<string, unknown> = { ...v };
+    const normalized: Record<string, unknown> = { ...withMachineDefaults };
     for (const f of LEGACY_PEP_BATCH_FIELDS) normalized[f] = 0;
     return deepEqualValue(normalized, CURRENT_BLANK_RUN_VALUE);
   }

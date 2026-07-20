@@ -39,12 +39,14 @@ export const formSchema = z.object({
   casesOnCurrentSkid: z.coerce.number().min(0).default(0),
   traysOnLine: z.coerce.number().min(0).default(0),
   batchesReady: z.coerce.number().min(0).default(0),
-  // Measured machine times (seconds). 0 = not measured — timing features fall
-  // back to line-speed-derived estimates. Mixer runs low then high speed
+  // Measured machine times (seconds). Defaults are the factory's typical
+  // times (low 180 / high 330 / hopper 70); operators can overwrite them with
+  // measured values. A saved/cleared 0 is folded back to the default on read
+  // (see MACHINE_TIME_DEFAULTS). Mixer runs low then high speed
   // back-to-back; total spin = low + high. Hopper = one batch → doughballs.
-  mixerLowSec: z.coerce.number().min(0).default(0),
-  mixerHighSec: z.coerce.number().min(0).default(0),
-  hopperSec: z.coerce.number().min(0).default(0),
+  mixerLowSec: z.coerce.number().min(0).default(180),
+  mixerHighSec: z.coerce.number().min(0).default(330),
+  hopperSec: z.coerce.number().min(0).default(70),
   carryOverDone: z.boolean().default(false),
   sauceOzPerPizza: z.coerce.number().min(0).default(0),
   sauceBarrelLbs: z.coerce.number().min(0).default(0),
@@ -140,6 +142,17 @@ export function withTempOverrides<T extends Partial<Record<string, unknown>>>(v:
 export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
 export type DoughRecipePreset = { rows: RecipeRow[]; doughballWeightOz?: number };
 
+// Factory-typical machine times (seconds) used as defaults for the dough tab's
+// Machine Times fields. Saved profiles/runs that predate these defaults hold 0
+// ("never measured"); read paths fold that 0 back to these defaults so the
+// dough tab shows usable times everywhere. Keep in lockstep with the zod
+// defaults above AND the server's blank-run template (protectRunValues.ts).
+export const MACHINE_TIME_DEFAULTS = {
+  mixerLowSec: 180,
+  mixerHighSec: 330,
+  hopperSec: 70,
+} as const;
+
 export const DEFAULT_VALUES: FormValues = {
   casesNeeded: 0,
   crustsPerCycle: 0,
@@ -158,9 +171,9 @@ export const DEFAULT_VALUES: FormValues = {
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
-  mixerLowSec: 0,
-  mixerHighSec: 0,
-  hopperSec: 0,
+  mixerLowSec: MACHINE_TIME_DEFAULTS.mixerLowSec,
+  mixerHighSec: MACHINE_TIME_DEFAULTS.mixerHighSec,
+  hopperSec: MACHINE_TIME_DEFAULTS.hopperSec,
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,

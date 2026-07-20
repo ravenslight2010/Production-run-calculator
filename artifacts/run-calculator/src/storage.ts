@@ -1,5 +1,6 @@
 import {
   DEFAULT_VALUES,
+  MACHINE_TIME_DEFAULTS,
   CRUST_FIELDS,
   PROGRESS_FIELDS,
   RUN_KEY,
@@ -338,6 +339,58 @@ function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
   normalizePackagingFields(o);
   normalizeIngredientFields(o);
   return o;
+}
+
+// ── One-time machine-time defaults heal ──────────────────────────────────────
+// Machine times used to default to 0 ("not measured"); they now default to the
+// factory-typical times (MACHINE_TIME_DEFAULTS). Rewrite stored profiles and
+// run values ONCE, replacing a 0 with the new default, so existing data picks
+// up the defaults. Marker-guarded: after the heal, a 0 the operator types
+// deliberately is respected (auto-track falls back to line-speed estimates).
+const MACHINE_TIME_HEAL_MARKER = "run-calc-machine-time-defaults-v1";
+
+function foldMachineTimeZeros(o: Record<string, unknown>): boolean {
+  let changed = false;
+  for (const k of Object.keys(MACHINE_TIME_DEFAULTS) as (keyof typeof MACHINE_TIME_DEFAULTS)[]) {
+    const n = Number(o[k]);
+    if (!Number.isFinite(n) || n <= 0) {
+      o[k] = MACHINE_TIME_DEFAULTS[k];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** Returns the ids of healed runs so the caller can refresh an open form. */
+export function applyMachineTimeDefaultsHealIfNeeded(): string[] {
+  const healedRunIds: string[] = [];
+  try {
+    if (typeof localStorage === "undefined") return healedRunIds;
+    if (localStorage.getItem(MACHINE_TIME_HEAL_MARKER)) return healedRunIds;
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      // Machine times live in the main (dough) profile blob and per-run value
+      // blobs; crust profiles never carry them.
+      if (k && (k.startsWith("run-calc-profile-") || k.startsWith("run-calc-run-"))) keys.push(k);
+    }
+    for (const k of keys) {
+      try {
+        const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+        if (!obj || typeof obj !== "object" || Array.isArray(obj)) continue;
+        if (foldMachineTimeZeros(obj)) {
+          localStorage.setItem(k, JSON.stringify(obj));
+          if (k.startsWith("run-calc-run-")) healedRunIds.push(k.slice("run-calc-run-".length));
+        }
+      } catch {
+        // Skip an unreadable blob — never let one bad row block the heal.
+      }
+    }
+    localStorage.setItem(MACHINE_TIME_HEAL_MARKER, "1");
+  } catch {
+    // localStorage unavailable — retry next boot (marker left unset).
+  }
+  return healedRunIds;
 }
 
 // Migrate the legacy yes/no "Cartoned" toggle to the new "Packaging Type" field:
@@ -1115,7 +1168,14 @@ const LEGACY_PEP_BATCH_FIELDS = [
 export function isAllDefaultRunValue(value: unknown): boolean {
   if (deepEqual(value, DEFAULT_VALUES)) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const o = value as Record<string, unknown>;
+  const o = { ...(value as Record<string, unknown>) };
+  // Machine times used to default to 0; blank runs saved under the old
+  // defaults (or with the fields folded either way) are still untouched in
+  // spirit. Normalize 0-or-default to the current default before comparing.
+  for (const k of Object.keys(MACHINE_TIME_DEFAULTS) as (keyof typeof MACHINE_TIME_DEFAULTS)[]) {
+    if (o[k] === 0) o[k] = MACHINE_TIME_DEFAULTS[k];
+  }
+  if (deepEqual(o, DEFAULT_VALUES)) return true;
   for (const f of LEGACY_PEP_BATCH_FIELDS) {
     if (o[f] !== 25) return false;
   }
