@@ -7105,7 +7105,9 @@ export default function Home() {
     // (the "click away and my change disappeared" lost-update).
     markRunValuesUpdated(runId, now);
     if (run?.brand || run?.flavor) {
-      saveProfile(run.brand, run.flavor, v);
+      if (saveProfile(run.brand, run.flavor, v)) {
+        void propagateProfileToPendingRuns(run.brand, run.flavor);
+      }
     }
     lastLocalEditRef.current = now;
     schedulePush(ds, 2000);
@@ -7121,6 +7123,9 @@ export default function Home() {
   // and progress fields of a started run are kept: mergeProfileIntoOpenForm
   // only overlays profile-owned fields.
   function handleSetupProfileSaved(brand: string, flavor: string) {
+    // The profile is the source of truth for every run that hasn't started:
+    // fan the fresh save out to today's pending runs and future scheduled days.
+    void propagateProfileToPendingRuns(brand, flavor);
     const liveDay = dayStateRef.current;
     const liveRun = liveDay?.runs[liveDay.currentIndex];
     if (!liveRun) return;
@@ -7152,6 +7157,103 @@ export default function Home() {
       title: "Run form updated",
       description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
     });
+  }
+
+  // (1b) Profile → every NOT-YET-STARTED run of the same brand+flavor. The
+  // saved profile is the source of truth for pending work: overlay its
+  // profile-owned fields onto today's pending (non-current, never-started)
+  // runs and onto every future scheduled day's matching runs. Per-run fields
+  // (cases needed, temp overrides) and progress are never touched
+  // (mergeProfileIntoOpenForm skips them), and untouched runs are never
+  // re-stamped, so this can't clobber operator-entered data.
+  const propagateSigRef = useRef<Map<string, string>>(new Map());
+  async function propagateProfileToPendingRuns(brand: string, flavor: string) {
+    const b = (brand ?? "").trim();
+    const f = (flavor ?? "").trim();
+    if (!b && !f) return;
+    const profile = loadProfile(b, f);
+    if (!profile) return;
+    // Cheap dedup: nav-saves fire on every tab change — skip the fan-out when
+    // the profile hasn't actually changed since the last propagation.
+    const sigKey = `${b.toLowerCase()}::${f.toLowerCase()}`;
+    const sig = JSON.stringify(profile);
+    if (propagateSigRef.current.get(sigKey) === sig) return;
+    // The signature is only recorded AFTER the full fan-out succeeds — a
+    // failed/stale/401 attempt must be retried on the next save, not skipped.
+    // Same guard as the spec-import reload: a mix recipe name must never land
+    // in the sauce fields (mixes live on the applicator cards).
+    if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+      profile.frontlineRecipeName = "";
+      profile.frontlineRecipe = [];
+    }
+    const matches = (r: { brand?: string; flavor?: string }) =>
+      (r.brand ?? "").trim().toLowerCase() === b.toLowerCase() &&
+      (r.flavor ?? "").trim().toLowerCase() === f.toLowerCase();
+    // 1) Today's pending runs (never started, not the open form — the open
+    //    form is handled by mergeProfileIntoOpenForm + form.reset above).
+    const ds = dayStateRef.current;
+    const openId = ds.runs[ds.currentIndex]?.id;
+    const now = Date.now();
+    let todayChanged = false;
+    for (const r of ds.runs) {
+      if (r.id === openId || r.startedAt || r.endedAt) continue;
+      if (!matches(r)) continue;
+      const stored = loadRunValues(r.id);
+      const merged = mergeProfileIntoOpenForm(stored, profile);
+      if (merged === stored) continue;
+      saveRunValues(r.id, merged);
+      markRunValuesUpdated(r.id, now);
+      todayChanged = true;
+    }
+    if (todayChanged) {
+      lastLocalEditRef.current = now;
+      schedulePush(ds, 0);
+    }
+    // 2) Future scheduled days. Each day's payload is fetched, matching
+    //    not-started runs get the overlay, and the day is PUT back with fresh
+    //    per-run edit stamps so the server's LWW merge accepts the update.
+    try {
+      const listRes = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`);
+      if (listRes.status === 401) { reportUnauthorized(); return; }
+      if (!listRes.ok) return;
+      const days = (await listRes.json()) as
+        { date: string; runs?: { id: string; brand: string; flavor: string }[] }[];
+      let updatedAny = false;
+      let allOk = true;
+      for (const day of days) {
+        if (day.date <= todayStr()) continue;
+        if (!(day.runs ?? []).some(matches)) continue;
+        const payload = await fetchSchedulePayload(day.date);
+        if (!payload?.dayState?.runs) { allOk = false; continue; }
+        const rv = { ...(payload.runValues ?? {}) };
+        const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
+        let dayChanged = false;
+        for (const run of payload.dayState.runs) {
+          if (!matches(run) || run.startedAt || run.endedAt) continue;
+          const stored = rv[run.id];
+          const merged = mergeProfileIntoOpenForm(stored ?? { ...DEFAULT_VALUES }, profile);
+          if (stored && merged === stored) continue;
+          rv[run.id] = merged;
+          stamps[run.id] = now;
+          dayChanged = true;
+        }
+        if (!dayChanged) continue;
+        const res = await fetch(`/api/sync/${day.date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
+        });
+        if (res.status === 401) { reportUnauthorized(); return; }
+        if (!res.ok) { allOk = false; continue; }
+        const stale = handleStaleSyncWrite(await res.json().catch(() => null));
+        if (stale) { allOk = false; continue; }
+        updatedAny = true;
+      }
+      if (updatedAny) void refreshScheduledDays();
+      // Only remember this profile as fully propagated when every write stuck;
+      // otherwise the next save retries the fan-out.
+      if (allOk) propagateSigRef.current.set(sigKey, sig);
+    } catch {}
   }
 
   // (2) Manage Lists dough/sauce pool → run forms + saved profiles. When a
@@ -7293,7 +7395,11 @@ export default function Home() {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    if (currentRun?.brand || currentRun?.flavor) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+      }
+    }
     const newId = dayState.runs[newIndex].id;
     const newDs = { ...dayState, currentIndex: newIndex };
     setDayState(newDs);
@@ -7381,7 +7487,11 @@ export default function Home() {
     if (dayState.runs.length >= MAX_RUNS) return;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    if (currentRun?.brand || currentRun?.flavor) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+      }
+    }
     const newId = genId();
     const newIndex = dayState.runs.length;
     const newDs = {
@@ -7465,7 +7575,11 @@ export default function Home() {
     if (dayState.runs.length >= MAX_RUNS) return false;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    if (currentRun?.brand || currentRun?.flavor) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+      }
+    }
     const newId = genId();
     const newDs = {
       runs: [...dayState.runs, { id: newId, brand, flavor }],
@@ -7494,7 +7608,11 @@ export default function Home() {
     // Save current values to old profile
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    if (currentRun?.brand || currentRun?.flavor) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+      }
+    }
 
     // Update run meta
     const newRuns = dayState.runs.map((r, i) =>
@@ -8060,7 +8178,11 @@ export default function Home() {
   function endRun() {
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    if (currentRun?.brand || currentRun?.flavor) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+      }
+    }
     // Auto-deduct this run's materials from inventory (idempotent by runId;
     // no-op for any material that has no inventory item).
     void consumeRun(currentRunId, computeRunConsumptionLines(cur)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
@@ -8787,7 +8909,11 @@ export default function Home() {
   function copyRun() {
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    if (currentRun?.brand || currentRun?.flavor) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+      }
+    }
     const newId = genId();
     const newIndex = dayState.runs.length;
     // Copy meta (brand/flavor) but clear timing
@@ -18897,6 +19023,18 @@ export default function Home() {
                                     {run.casesNeeded > 0 && (
                                       <span className="text-xs text-muted-foreground shrink-0">{run.casesNeeded} cs</span>
                                     )}
+                                    <button
+                                      type="button"
+                                      disabled={!run.brand && !run.flavor}
+                                      onClick={() => {
+                                        setSetupEditorBrand(run.brand || undefined);
+                                        setSetupEditorFlavor(run.flavor || undefined);
+                                        setSetupEditorOpen(true);
+                                      }}
+                                      className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"
+                                    >
+                                      <Pencil className="w-2.5 h-2.5" /> Setup
+                                    </button>
                                     <button
                                       type="button"
                                       disabled={!run.id}

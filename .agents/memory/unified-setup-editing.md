@@ -7,6 +7,7 @@ Web-only "edit once, updates everywhere" for run setup data.
 
 **The rule:** any out-of-band writer of setup data must actively propagate, never rely on the next load:
 - Setup Profiles editor Save → host page overlays the fresh profile onto the OPEN form when brand+flavor matches (`mergeProfileIntoOpenForm` in web storage.ts) — otherwise the next autosave/nav-save writes the stale form back over the profile (the classic open-form clobber).
+- Profile save (editor Save, or a nav/autosave where `saveProfile` returned true) → `propagateProfileToPendingRuns` overlays the profile onto today's pending runs and future scheduled days' matching not-started runs (see scheduled-run-profile-snapshot.md).
 - Shared dough/sauce pool change (local or remote, detected by a snapshot-diff effect on the react-query list) → `refreshProfilesFromNamedRecipes` rewrites every SAVED profile linked by NAME (targeted merge; never blanks other fields, never creates profiles), and the open form's linked rows refresh via setValue so the normal autosave persists + stamps.
 
 **Why the guards matter:**

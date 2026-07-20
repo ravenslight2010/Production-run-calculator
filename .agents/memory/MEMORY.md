@@ -96,7 +96,7 @@
 - [Recipe-merge sync-receive guards](recipe-merge-sync-receive.md) — web receive-side merge-survival logic extracted to storage.ts helpers (acceptRemoteRunValueOnSync, dropTombstonedPresetKeys); keep home.tsx wired to them, don't re-inline.
 - [Dropdown scroll snap](dropdown-scroll-snap.md) — dev-preview-only list snap-to-top; useDropdownScrollKeeper defends; wire NEW scrollable web dropdown panels into it; e2e sampling gotchas inside.
 - [Multi-day import 401](schedule-import-401.md) — raw-fetch write loops bypass the 401→login bounce; must detect 401, stop, and call reportUnauthorized(), else session expiry looks like "N of N days failed".
-- [Scheduled runs snapshot the profile](scheduled-run-profile-snapshot.md) — web scheduled runs freeze the profile at scheduling time; sauce backfill is blank-fill-only at pull-up; mobile spreads live profile.
+- [Profile source-of-truth for pending runs](scheduled-run-profile-snapshot.md) — profile saves fan out to ALL not-started runs (today + scheduled) w/ LWW stamps; started runs keep their snapshot.
 - [Run lifecycle LWW stamp](run-meta-lww.md) — per-run metaUpdatedAt, newer-stamp wins at all 3 sync merge points; stamping is centralized, bypass paths must self-stamp; never bump on value edits.
 - [Brand quote-typo fold](brand-quote-typo-fold.md) + [spec alias hygiene](spec-alias-hygiene.md) — AI can mint `Aldo"s`; loose keys fold quotes, sanitizer snaps to known brands; digit-mismatch/generic/cyclic aliases dropped at every apply path, fuzzy matches never learned.
 - [Dough weight in server pool](dough-weight-server-pool.md) — doughballWeightOz rides the dough pool (0 = unset); backfill fills only unset, never clobbers manager-typed weights; form self-heals from pool.

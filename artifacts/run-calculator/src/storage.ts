@@ -611,15 +611,17 @@ function rememberProfileSnapshot(key: string, snap: { dough: string; crust: stri
   loadedProfileSnapshots.set(key, list);
 }
 
-export function saveProfile(brand: string, flavor: string, values: FormValues): void {
-  if (!brand && !flavor) return;
+// Returns true when a change was actually persisted (callers use this to
+// decide whether to fan the profile out to pending/scheduled runs).
+export function saveProfile(brand: string, flavor: string, values: FormValues): boolean {
+  if (!brand && !flavor) return false;
   // Never persist a blank/default form as a brand+flavor profile. A profile only
   // holds recipe/topping/template data; an all-empty form is always the result of
   // an autosave (or run switch / sync reset) firing before the profile has loaded
   // into the form. Writing it would zero out the seeded dough/sauce/cheese/toppings
   // for the selected brand+flavor — and unlike the previous guard, this refuses the
   // write even when the existing profile briefly looks empty (race during heal).
-  if (!profileObjHasRealData(values as unknown as Record<string, unknown>)) return;
+  if (!profileObjHasRealData(values as unknown as Record<string, unknown>)) return false;
   const { dough, crust } = extractProfileBlobs(values);
   const key = canonicalProfileKey(brand, flavor);
   // Change detection — profiles are now a factory-wide server pool with
@@ -632,7 +634,7 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   try {
     const storedDough = localStorage.getItem(PROFILE_KEY(brand, flavor));
     const storedCrust = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
-    if (storedDough === dough && storedCrust === crust) return;
+    if (storedDough === dough && storedCrust === crust) return false;
     // The stale-form guard only applies while a stored profile EXISTS to
     // protect: if the local copy is gone (deleted, factory reset, fresh
     // device), an incoming save must persist even when it matches an old
@@ -645,13 +647,14 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
       storedDough != null &&
       snaps?.some((s) => s.dough === dough && s.crust === crust)
     ) {
-      return;
+      return false;
     }
   } catch {}
   try { localStorage.setItem(PROFILE_KEY(brand, flavor), dough); } catch {}
   try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), crust); } catch {}
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
   markProfileEdited(key);
+  return true;
 }
 
 /**
