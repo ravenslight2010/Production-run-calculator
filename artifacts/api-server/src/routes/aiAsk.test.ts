@@ -126,7 +126,7 @@ describe("buildAskPrompt — assembly", () => {
     expect(system).toMatch(/never invent/i);
     expect(user).toContain("QUESTION: Can we finish by 2pm?");
     expect(user).toContain("DATE: 2026-06-18");
-    expect(user).toContain("TARGET FINISH TIME: 14:00");
+    expect(user).toContain("TARGET FINISH TIME: 2:00 PM");
     expect(user).toContain('label="Run run-1"');
     expect(user).toMatch(/Return ONLY JSON/);
   });

@@ -824,6 +824,7 @@ export const WasteInsightResponse = zod.object({
 export const AiOptimizeBody = zod.object({
   "date": zod.string(),
   "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
   "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
   "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
   "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
@@ -913,6 +914,7 @@ export const AiAskBody = zod.object({
   "dayState": zod.object({
   "date": zod.string(),
   "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
   "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
   "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
   "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
@@ -989,6 +991,7 @@ export const AiCommandBody = zod.object({
   "dayState": zod.object({
   "date": zod.string(),
   "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
   "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
   "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
   "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
@@ -1195,6 +1198,7 @@ export const AiMixAssistantResponse = zod.object({
 export const AiProactiveAlertBody = zod.object({
   "date": zod.string(),
   "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "tzOffsetMinutes": zod.number().optional().describe('Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts'),
   "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
   "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
   "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),

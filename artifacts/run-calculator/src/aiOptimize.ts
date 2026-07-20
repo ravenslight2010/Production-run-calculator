@@ -39,6 +39,12 @@ export type OptimizeScheduledRun = {
 export type OptimizeInput = {
   date: string;
   nowMs: number;
+  /**
+   * Client timezone offset in minutes EAST of UTC (-Date.getTimezoneOffset()),
+   * so the server (which runs in UTC) can render local 12-hour wall-clock
+   * times in AI prompts. Optional; the server falls back to its own clock.
+   */
+  tzOffsetMinutes?: number;
   runToTime: string;
   todayPpm: number;
   benchmarkPpm: number | null;
@@ -221,6 +227,9 @@ export function buildOptimizeInput(args: {
   return {
     date: args.date,
     nowMs: args.nowMs,
+    // Minutes EAST of UTC so the server can render local wall-clock times in
+    // AI prompts (the server itself runs in UTC).
+    tzOffsetMinutes: -new Date(args.nowMs).getTimezoneOffset(),
     runToTime: args.runToTime,
     todayPpm,
     benchmarkPpm: benchmarkPpmOf(historyRuns),

@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   buildOptimizePrompt,
+  formatClock12,
+  formatHHMM12,
+  TIME_FORMAT_INSTRUCTION,
   sanitizeAction,
   sanitizeRecommendations,
   validateOptimizeBody,
@@ -16,6 +19,46 @@ import {
 
 // The set of "real" run ids the model's actions are cross-checked against.
 const KNOWN = new Set(["run-1", "run-2", "run-3"]);
+
+describe("12-hour clock formatting for prompts", () => {
+  it("formats an epoch instant in the client's local time when an offset is given", () => {
+    // 2026-07-20 22:47 UTC == 5:47 PM at UTC-5 (offset -300 minutes east).
+    const ms = Date.UTC(2026, 6, 20, 22, 47);
+    expect(formatClock12(ms, -300)).toBe("5:47 PM");
+    expect(formatClock12(ms, 0)).toBe("10:47 PM");
+    expect(formatClock12(Date.UTC(2026, 6, 20, 5, 5), 0)).toBe("5:05 AM");
+    expect(formatClock12(Date.UTC(2026, 6, 20, 0, 0), 0)).toBe("12:00 AM");
+    expect(formatClock12(Date.UTC(2026, 6, 20, 12, 0), 0)).toBe("12:00 PM");
+  });
+
+  it("converts HH:MM display strings to 12-hour form, passing invalid input through", () => {
+    expect(formatHHMM12("16:00")).toBe("4:00 PM");
+    expect(formatHHMM12("00:30")).toBe("12:30 AM");
+    expect(formatHHMM12("12:15")).toBe("12:15 PM");
+    expect(formatHHMM12("not-a-time")).toBe("not-a-time");
+    expect(formatHHMM12("25:00")).toBe("25:00");
+  });
+
+  // Regression: the prose time-format instruction must NOT tell the model to
+  // rewrite machine-readable action "time" fields — those stay HH:MM or
+  // sanitizeAction drops the one-tap action.
+  it("scopes the 12-hour instruction to prose and keeps action times HH:MM", () => {
+    expect(TIME_FORMAT_INSTRUCTION).toMatch(/prose/i);
+    expect(TIME_FORMAT_INSTRUCTION).toContain('"HH:MM"');
+    const { user } = buildOptimizePrompt(buildInput({ runToTime: "16:00" }));
+    expect(user).toContain(TIME_FORMAT_INSTRUCTION);
+    expect(user).toContain('{"kind":"set_target_time","time":"HH:MM"');
+  });
+
+  it("still rejects a 12-hour action time so the drop is explicit, not silent corruption", () => {
+    expect(sanitizeAction({ kind: "set_target_time", time: "4:00 PM" }, KNOWN)).toBeNull();
+    expect(sanitizeAction({ kind: "set_target_time", time: "16:00" }, KNOWN)).toEqual({
+      kind: "set_target_time",
+      label: "Set finish time to 16:00",
+      time: "16:00",
+    });
+  });
+});
 
 describe("sanitizeAction — guards", () => {
   it("drops null / undefined / non-object input", () => {
@@ -604,14 +647,14 @@ function buildInput(overrides: Record<string, unknown> = {}): OptimizeInput {
   return result.data;
 }
 
-// Re-derive the HH:MM clock the builder prints, using the same local-time math,
-// so the assertion stays correct regardless of the runner's timezone.
+// Re-derive the 12-hour clock the builder prints, using the same local-time
+// math, so the assertion stays correct regardless of the runner's timezone.
 function expectedClock(nowMs: number): string {
   const d = new Date(nowMs);
-  return `${d.getHours().toString().padStart(2, "0")}:${d
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  const h24 = d.getHours();
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${d.getMinutes().toString().padStart(2, "0")} ${period}`;
 }
 
 describe("buildOptimizePrompt — system prompt", () => {
@@ -629,7 +672,7 @@ describe("buildOptimizePrompt — header fields", () => {
     const { user } = buildOptimizePrompt(input);
     expect(user).toContain("DATE: 2026-06-18");
     expect(user).toContain(`CURRENT TIME: ${expectedClock(input.nowMs)}`);
-    expect(user).toContain("TARGET FINISH TIME: 16:00");
+    expect(user).toContain("TARGET FINISH TIME: 4:00 PM");
     expect(user).toContain("TODAY PPM (aggregate): 58");
     expect(user).toContain("HISTORICAL BENCHMARK PPM: 60");
   });

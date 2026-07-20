@@ -225,7 +225,7 @@ describe("buildProactivePrompt", () => {
   it("includes the current time, target finish, and run facts", () => {
     const { system, user } = buildProactivePrompt(baseInput());
     expect(system).toMatch(/proactive/i);
-    expect(user).toContain("TARGET FINISH TIME: 16:00");
+    expect(user).toContain("TARGET FINISH TIME: 4:00 PM");
     expect(user).toContain('label="Run 1"');
     expect(user).toContain("casesLeft=400");
     expect(user).toContain("stoppages=[Jam(10m)]");

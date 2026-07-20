@@ -6,7 +6,7 @@ import {
   type VoiceCommandAction,
   type VoiceCommandResponse,
 } from "@workspace/voice-commands";
-import { validateOptimizeBody, type OptimizeInput } from "./aiOptimize";
+import { validateOptimizeBody, formatClock12, formatHHMM12, type OptimizeInput } from "./aiOptimize";
 
 // Bounds for the voice-command endpoint, in the same spirit as the optimize/ask
 // guards: cap how much the model reads and how many actions one utterance can
@@ -108,11 +108,7 @@ export function buildCommandPrompt(
     "{\"type\":\"none\",\"note\":\"...\"} with a brief reason. NEVER invent ids, keys, runs, " +
     "or items. NEVER guess at an ambiguous reference — return none and say it was unclear.";
 
-  const now = new Date(day.nowMs);
-  const nowClock = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  const nowClock = formatClock12(day.nowMs, day.tzOffsetMinutes);
 
   const fmtRun = (r: OptimizeInput["runs"][number]): string =>
     `- id=${r.id} label="${r.label}" brand="${r.brand}" flavor="${r.flavor}" status=${r.status} die=${r.dieType || "?"} casesNeeded=${r.casesNeeded} casesMade=${r.casesMade}`;
@@ -121,7 +117,7 @@ export function buildCommandPrompt(
   lines.push("DATA (the only ids/keys you may reference):");
   lines.push(`DATE: ${day.date}`);
   lines.push(`CURRENT TIME: ${nowClock}`);
-  if (day.runToTime) lines.push(`CURRENT TARGET FINISH TIME: ${day.runToTime}`);
+  if (day.runToTime) lines.push(`CURRENT TARGET FINISH TIME: ${formatHHMM12(day.runToTime)}`);
   lines.push("");
   lines.push("TODAY'S RUNS:");
   lines.push(day.runs.length ? day.runs.map(fmtRun).join("\n") : "(none)");

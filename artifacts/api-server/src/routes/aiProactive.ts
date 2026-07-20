@@ -1,7 +1,13 @@
 import * as z from "zod";
 import type { ReorderItem } from "@workspace/inventory-math";
 import type { IncidentCluster } from "@workspace/incident-cluster";
-import { validateOptimizeBody, type OptimizeInput } from "./aiOptimize";
+import {
+  validateOptimizeBody,
+  formatClock12,
+  formatHHMM12,
+  TIME_FORMAT_INSTRUCTION,
+  type OptimizeInput,
+} from "./aiOptimize";
 import { MAX_FLAGGED_IN_PROMPT, type WasteFlaggedItem } from "./wasteInsight";
 
 // Proactive shift-floor watcher. Same input contract as /ai/optimize (the whole
@@ -262,16 +268,12 @@ export function buildProactivePrompt(
     return `- ${parts.join(" ")}`;
   };
 
-  const now = new Date(input.nowMs);
-  const nowClock = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  const nowClock = formatClock12(input.nowMs, input.tzOffsetMinutes);
 
   const lines: string[] = [];
   lines.push(`DATE: ${input.date}`);
   lines.push(`CURRENT TIME: ${nowClock}`);
-  if (input.runToTime) lines.push(`TARGET FINISH TIME: ${input.runToTime}`);
+  if (input.runToTime) lines.push(`TARGET FINISH TIME: ${formatHHMM12(input.runToTime)}`);
   lines.push(`TODAY PPM (aggregate): ${input.todayPpm ?? 0}`);
   lines.push(`HISTORICAL BENCHMARK PPM: ${input.benchmarkPpm ?? "none (no history yet)"}`);
   lines.push("");
@@ -343,7 +345,8 @@ export function buildProactivePrompt(
       "instance or timestamp. " +
       'Use "category":"break" for a break/changeover window, "category":"efficiency" for an ' +
       'at-risk-stock / waste-avoidance nudge (use the key "stock-expiring") or a low-stock / reorder ' +
-      'nudge (use the key "reorder-now"), otherwise "run".',
+      'nudge (use the key "reorder-now"), otherwise "run". ' +
+      TIME_FORMAT_INSTRUCTION,
   );
 
   return { system, user: lines.join("\n") };

@@ -1,6 +1,12 @@
 import { AiAskBody } from "@workspace/api-zod";
 import * as z from "zod";
-import { validateOptimizeBody, type OptimizeInput } from "./aiOptimize";
+import {
+  validateOptimizeBody,
+  formatClock12,
+  formatHHMM12,
+  TIME_FORMAT_INSTRUCTION,
+  type OptimizeInput,
+} from "./aiOptimize";
 
 // Bounds for the free-form "ask the AI about the day" endpoint, in the same
 // spirit as the optimize guards: cap how much the model is asked to read and
@@ -84,17 +90,13 @@ export function buildAskPrompt(input: AskInput): { system: string; user: string 
     return `- ${parts.join(" ")}`;
   };
 
-  const now = new Date(day.nowMs);
-  const nowClock = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  const nowClock = formatClock12(day.nowMs, day.tzOffsetMinutes);
 
   const lines: string[] = [];
   lines.push("DAY DATA (the only facts you may use):");
   lines.push(`DATE: ${day.date}`);
   lines.push(`CURRENT TIME: ${nowClock}`);
-  if (day.runToTime) lines.push(`TARGET FINISH TIME: ${day.runToTime}`);
+  if (day.runToTime) lines.push(`TARGET FINISH TIME: ${formatHHMM12(day.runToTime)}`);
   lines.push(`TODAY PPM (aggregate): ${day.todayPpm ?? 0}`);
   lines.push(`HISTORICAL BENCHMARK PPM: ${day.benchmarkPpm ?? "none (no history yet)"}`);
   lines.push("");
@@ -129,7 +131,8 @@ export function buildAskPrompt(input: AskInput): { system: string; user: string 
       'Put your plain-language reply in "answer". ' +
       'If the data above does not let you answer, set "answer" to a brief honest ' +
       'explanation that you cannot answer from the available data, and put what ' +
-      'extra information would be needed in "note". Otherwise leave "note" empty.',
+      'extra information would be needed in "note". Otherwise leave "note" empty. ' +
+      TIME_FORMAT_INSTRUCTION,
   );
 
   return { system, user: lines.join("\n") };

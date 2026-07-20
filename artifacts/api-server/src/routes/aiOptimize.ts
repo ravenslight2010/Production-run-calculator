@@ -210,6 +210,47 @@ export function validateOptimizeBody(body: unknown): OptimizeValidationResult {
   return { ok: true, data };
 }
 
+// ── Local wall-clock formatting for prompts ──────────────────────────────────
+// The server runs in UTC, but every clock string shown to the model (and echoed
+// back to the user in alerts/answers) must be the FACTORY's local time in
+// 12-hour form. The client supplies tzOffsetMinutes (minutes EAST of UTC, i.e.
+// -Date.getTimezoneOffset()); when absent we fall back to the server clock so
+// old clients keep working.
+
+function to12h(hours24: number, minutes: number): string {
+  const period = hours24 >= 12 ? "PM" : "AM";
+  const h = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${h}:${minutes.toString().padStart(2, "0")} ${period}`;
+}
+
+export function formatClock12(ms: number, tzOffsetMinutes?: number | null): string {
+  if (tzOffsetMinutes == null || !Number.isFinite(tzOffsetMinutes)) {
+    const d = new Date(ms);
+    return to12h(d.getHours(), d.getMinutes());
+  }
+  const local = new Date(ms + tzOffsetMinutes * 60_000);
+  return to12h(local.getUTCHours(), local.getUTCMinutes());
+}
+
+// Convert an "HH:MM" time-of-day string (e.g. the target finish time) to
+// 12-hour form. Returns the input unchanged when it isn't a valid HH:MM.
+export function formatHHMM12(hhmm: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return hhmm;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return hhmm;
+  return to12h(h, min);
+}
+
+// Standing instruction appended to prompts so the model never re-emits times in
+// 24-hour form even when reasoning about durations.
+export const TIME_FORMAT_INSTRUCTION =
+  "In all prose (titles, details, answers, notes), write times of day using the " +
+  "12-hour clock with AM/PM (e.g. 5:48 PM), matching the times given above — " +
+  'never 24-hour form. EXCEPTION: machine-readable JSON fields such as "time" ' +
+  'inside an action MUST stay in 24-hour "HH:MM" form exactly as specified.';
+
 // Shape the validated input into a compact, model-friendly prompt. Heavy data
 // shaping lives server-side (per the contract-first design) so both clients can
 // stay thin and identical.
@@ -250,16 +291,12 @@ export function buildOptimizePrompt(input: OptimizeInput): {
     return `- ${parts.join(" ")}`;
   };
 
-  const now = new Date(input.nowMs);
-  const nowClock = `${now.getHours().toString().padStart(2, "0")}:${now
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  const nowClock = formatClock12(input.nowMs, input.tzOffsetMinutes);
 
   const lines: string[] = [];
   lines.push(`DATE: ${input.date}`);
   lines.push(`CURRENT TIME: ${nowClock}`);
-  if (input.runToTime) lines.push(`TARGET FINISH TIME: ${input.runToTime}`);
+  if (input.runToTime) lines.push(`TARGET FINISH TIME: ${formatHHMM12(input.runToTime)}`);
   lines.push(`TODAY PPM (aggregate): ${input.todayPpm ?? 0}`);
   lines.push(
     `HISTORICAL BENCHMARK PPM: ${input.benchmarkPpm ?? "none (no history yet)"}`,
@@ -309,6 +346,8 @@ export function buildOptimizePrompt(input: OptimizeInput): {
       "Use run ids EXACTLY as they appear (id=...) in TODAY'S RUNS above; never invent ids and only target today's runs. " +
       'label is a short imperative button caption, e.g. "Move Run 3 before Run 2" or "Set Run 2 target to 480 cases".',
   );
+  lines.push("");
+  lines.push(TIME_FORMAT_INSTRUCTION);
 
   return { system, user: lines.join("\n") };
 }

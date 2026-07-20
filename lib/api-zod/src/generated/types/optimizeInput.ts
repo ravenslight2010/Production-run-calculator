@@ -13,6 +13,8 @@ export interface OptimizeInput {
   date: string;
   /** Client clock (ms epoch) so the model can reason about timing */
   nowMs: number;
+  /** Client timezone offset in minutes EAST of UTC (i.e. -Date.getTimezoneOffset()), so the server can render local wall-clock times in prompts */
+  tzOffsetMinutes?: number;
   /** Target completion time of day (HH:MM), or empty if unset */
   runToTime?: string;
   /** Today's aggregate pizzas-per-minute so far */

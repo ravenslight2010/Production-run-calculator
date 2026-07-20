@@ -35,6 +35,7 @@ import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 import {
   buildOptimizePrompt,
+  formatClock12,
   sanitizeRecommendations,
   validateOptimizeBody,
 } from "./aiOptimize";
@@ -1201,11 +1202,7 @@ router.post(
     // (best-effort) so the watcher's timing improves over time. A write failure
     // must never break the poll, so swallow errors.
     if (alert) {
-      const now = new Date(validation.data.nowMs);
-      const nowClock = `${now.getHours().toString().padStart(2, "0")}:${now
-        .getMinutes()
-        .toString()
-        .padStart(2, "0")}`;
+      const nowClock = formatClock12(validation.data.nowMs, validation.data.tzOffsetMinutes);
       void recordFacilityKnowledge([
         {
           domain: "proactive-alerts",
