@@ -3576,15 +3576,16 @@ export default function Home() {
         (r) => r.brand.trim().toLowerCase() === b,
       );
       if (brandMatches.length === 0) return serverCheeseNames;
-      const flavorMatches = f
-        ? brandMatches.filter(
-            (r) =>
-              r.flavors.length === 0 ||
-              r.flavors.some((x) => x.trim().toLowerCase() === f),
-          )
-        : brandMatches;
-      const pool = flavorMatches.length > 0 ? flavorMatches : brandMatches;
-      return [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+      const matchesFlavor = (r: (typeof brandMatches)[number]) =>
+        r.flavors.length === 0 ||
+        r.flavors.some((x) => x.trim().toLowerCase() === f);
+      const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
+      const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
+      const toNames = (pool: typeof brandMatches) =>
+        [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+      const first = toNames(flavorMatches);
+      const firstSet = new Set(first);
+      return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
     };
   }, [enabledCheeseRecipes, serverCheeseNames]);
   // The make-day chosen on the Mixes tab (defaults to today).

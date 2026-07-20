@@ -464,11 +464,15 @@ export default function SetupProfileEditor({
       if (!bl) return serverCheeseNames;
       const brandMatches = enabledCheeseRecipes.filter(r => r.brand.trim().toLowerCase() === bl);
       if (brandMatches.length === 0) return serverCheeseNames;
-      const flavorMatches = fl
-        ? brandMatches.filter(r => !r.flavors || r.flavors.length === 0 || r.flavors.some(fv => fv.trim().toLowerCase() === fl))
-        : brandMatches;
-      const pool = flavorMatches.length > 0 ? flavorMatches : brandMatches;
-      return [...new Set(pool.map(r => r.name.trim()).filter(Boolean))].sort((a, b2) => a.localeCompare(b2));
+      const matchesFlavor = (r: (typeof brandMatches)[number]) =>
+        !r.flavors || r.flavors.length === 0 || r.flavors.some(fv => fv.trim().toLowerCase() === fl);
+      const flavorMatches = fl ? brandMatches.filter(matchesFlavor) : brandMatches;
+      const rest = fl ? brandMatches.filter(r => !matchesFlavor(r)) : [];
+      const toNames = (pool: typeof brandMatches) =>
+        [...new Set(pool.map(r => r.name.trim()).filter(Boolean))].sort((a, b2) => a.localeCompare(b2));
+      const first = toNames(flavorMatches);
+      const firstSet = new Set(first);
+      return [...first, ...toNames(rest).filter(n => !firstSet.has(n))];
     };
   }, [enabledCheeseRecipes, serverCheeseNames]);
 

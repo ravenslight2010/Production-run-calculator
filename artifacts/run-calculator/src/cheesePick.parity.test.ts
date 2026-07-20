@@ -79,17 +79,18 @@ function buildCheesePickModel(recipes: CheeseRecipe[]): CheesePickModel {
       (r) => r.brand.trim().toLowerCase() === b,
     );
     if (brandMatches.length === 0) return serverCheeseNames;
-    const flavorMatches = f
-      ? brandMatches.filter(
-          (r) =>
-            r.flavors.length === 0 ||
-            r.flavors.some((x) => x.trim().toLowerCase() === f),
-        )
-      : brandMatches;
-    const pool = flavorMatches.length > 0 ? flavorMatches : brandMatches;
-    return [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort(
-      (x, y) => x.localeCompare(y),
-    );
+    const matchesFlavor = (r: (typeof brandMatches)[number]) =>
+      r.flavors.length === 0 ||
+      r.flavors.some((x) => x.trim().toLowerCase() === f);
+    const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
+    const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
+    const toNames = (pool: typeof brandMatches) =>
+      [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort(
+        (x, y) => x.localeCompare(y),
+      );
+    const first = toNames(flavorMatches);
+    const firstSet = new Set(first);
+    return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
   };
 
   return {
@@ -202,20 +203,26 @@ describe("cheeseNamesForRun — brand/flavor narrowing", () => {
     ]);
   });
 
-  it("narrows to the run's brand, then to the run's flavor (incl. All-Varieties)", () => {
+  it("puts the run's flavor matches (incl. All-Varieties) first, then the brand's other blends", () => {
     // Acme + Pepperoni: the Pepperoni recipe + the empty-flavor (All Varieties)
-    // recipe, but NOT the Supreme-only one and NOT the disabled one.
+    // recipe lead; the Supreme-only blend stays pickable AFTER them (so an
+    // operator can switch to it and back — a previously-picked sibling must
+    // never vanish from the list); the disabled one stays hidden.
     expect(cheeseNamesForRun("Acme", "Pepperoni")).toEqual([
       "Acme Cheese - All Varieties",
       "Acme Whole Mozz",
+      "Acme Supreme Blend",
     ]);
   });
 
-  it("keeps an All-Varieties (empty-flavor) recipe for any flavor of the brand", () => {
+  it("keeps an All-Varieties (empty-flavor) recipe first for any flavor of the brand", () => {
     // Acme + Hawaiian matches no flavor LINE, but the All-Varieties recipe has
-    // empty flavors so it applies to every Acme flavor.
+    // empty flavors so it applies to every Acme flavor; the flavor-specific
+    // siblings follow rather than disappearing.
     expect(cheeseNamesForRun("Acme", "Hawaiian")).toEqual([
       "Acme Cheese - All Varieties",
+      "Acme Supreme Blend",
+      "Acme Whole Mozz",
     ]);
   });
 
@@ -239,6 +246,7 @@ describe("cheeseNamesForRun — brand/flavor narrowing", () => {
     expect(cheeseNamesForRun("  acme ", " pepperoni ")).toEqual([
       "Acme Cheese - All Varieties",
       "Acme Whole Mozz",
+      "Acme Supreme Blend",
     ]);
   });
 });
@@ -406,15 +414,16 @@ describe("source-drift guard: web and mobile cheese-pick logic are identical", (
             (r) => r.brand.trim().toLowerCase() === b,
           );
           if (brandMatches.length === 0) return serverCheeseNames;
-          const flavorMatches = f
-            ? brandMatches.filter(
-                (r) =>
-                  r.flavors.length === 0 ||
-                  r.flavors.some((x) => x.trim().toLowerCase() === f),
-              )
-            : brandMatches;
-          const pool = flavorMatches.length > 0 ? flavorMatches : brandMatches;
-          return [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+          const matchesFlavor = (r: (typeof brandMatches)[number]) =>
+            r.flavors.length === 0 ||
+            r.flavors.some((x) => x.trim().toLowerCase() === f);
+          const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
+          const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
+          const toNames = (pool: typeof brandMatches) =>
+            [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+          const first = toNames(flavorMatches);
+          const firstSet = new Set(first);
+          return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
         };
       }, [enabledCheeseRecipes, serverCheeseNames]);`,
     );
