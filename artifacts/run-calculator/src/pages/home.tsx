@@ -13657,10 +13657,10 @@ export default function Home() {
                               <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
                                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Est. Finish</div>
                                 <div className="flex items-baseline gap-2">
-                                  <span className="text-3xl font-black text-foreground tabular-nums tracking-tight">{fmtTime(calc.adjustedTimeSec)}</span>
+                                  <span className="text-3xl font-black text-foreground tabular-nums tracking-tight">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</span>
                                 </div>
                                 <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
-                                  <div className="text-sm font-medium text-foreground tabular-nums">at {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</div>
+                                  <div className="text-sm font-medium text-foreground tabular-nums">{fmtTime(calc.adjustedTimeSec)} remaining</div>
                                   {v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
                                     <div className="text-xs font-semibold text-foreground/80 tabular-nums" data-testid="text-press-cases-left">
                                       {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + freezer counted done)

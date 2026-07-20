@@ -101,6 +101,10 @@ export function useNotifications({
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   const notifiedRunRef = useRef<string | null>(null);
+  // Runs whose countdown has been observed ABOVE the 15-minute threshold.
+  // A short run (press time < 15 min) starts already below 900s — without this
+  // crossing latch the "15 minutes left" alert fires the instant Start is hit.
+  const sawAbove15Ref = useRef<Set<string>>(new Set());
   // Per-run latches (Sets, not single ids): switching to run B and back to a
   // nearly-done run A must NOT re-fire A's staging alerts. Frontline (2 skids
   // left at the press) and packaging (1 skid left) latch independently.
@@ -128,6 +132,14 @@ export function useNotifications({
     if (!currentRun?.startedAt || currentRun?.endedAt) return;
     const runId = currentRun.id;
     if (notifiedRunRef.current === runId) return;
+    // Only alert when the countdown genuinely CROSSES 15 minutes from above.
+    // Runs shorter than 15 minutes never see >900s, so they get no (instantly
+    // stale) "15 minutes left" pop at Start.
+    if (calc.adjustedTimeSec > 900) {
+      sawAbove15Ref.current.add(runId);
+      return;
+    }
+    if (!sawAbove15Ref.current.has(runId)) return;
     if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) {
       // Turned off by this user: still latch the run so re-enabling the
       // alert mid-run doesn't fire a stale "15 minutes left" later.
@@ -277,6 +289,10 @@ export function useNotifications({
     // countdown completion, so don't fire "time's up" right at run start.
     if (runWasTimedRef.current !== runId) return;
     if (runCompleteNotifRef.current === runId) return;
+    // Safety floor: a run can't legitimately complete within its first minute.
+    // Stale carried-over progress fields or a transient calc mismatch right at
+    // Start must never produce an instant "time's up".
+    if (Date.now() - currentRun.startedAt < 60_000) return;
     runCompleteNotifRef.current = runId;
     // Turned off by this user: the run id above is already latched, so
     // re-enabling later never fires a stale "time's up".
