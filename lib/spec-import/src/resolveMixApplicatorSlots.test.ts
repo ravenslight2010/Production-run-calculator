@@ -32,6 +32,27 @@ describe("resolveMixApplicatorSlots", () => {
     expect(applicators[0].type).toBe("Mix");
   });
 
+  it("matches an unbranded sheet label to the brand-prefixed pool mix (sheet's own brand)", () => {
+    const { applicators, links } = resolveMixApplicatorSlots(
+      [app("White Fajita Mix", 3)],
+      ["Corner Booth White Fajita Mix"],
+      "Corner Booth",
+    );
+    expect(applicators[0].type).toBe("Mix");
+    expect(links).toEqual([{ slot: 1, recipeName: "Corner Booth White Fajita Mix" }]);
+  });
+
+  it("never brand-jumps to ANOTHER customer's mix", () => {
+    const input = [app("White Fajita Mix", 3)];
+    const { applicators, links } = resolveMixApplicatorSlots(
+      input,
+      ["Basha's White Fajita Mix"],
+      "Corner Booth",
+    );
+    expect(applicators).toEqual(input);
+    expect(links).toEqual([]);
+  });
+
   it("leaves non-matching applicators untouched", () => {
     const input = [app("Sausage", 2.25), app("Bacon", 1.2)];
     const { applicators, links } = resolveMixApplicatorSlots(input, ["White Fajita Mix"]);

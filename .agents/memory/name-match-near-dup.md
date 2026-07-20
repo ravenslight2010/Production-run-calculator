@@ -50,6 +50,18 @@ so "Mozz"/"Mozzarella" style drift still folds before the layers run.
   auto. Fixing a silent-link bug also needs SPEC_PARSE_VERSION bump (saved
   parses embed the bad names) + a heal purging poisoned saved parses.
 
+## Brand-prefix fold in slot resolvers (2026-07-20)
+- `resolveCheeseApplicatorSlots`/`resolveMixApplicatorSlots` take an optional
+  `brand` (the SHEET's own brand): on top of exact loose-key equality they match
+  a raw grid label vs a candidate differing ONLY by that brand's prefix (both
+  directions, possessive-fold, core >= 4 chars, folded-key ambiguity fail-closed).
+- **Why:** grids write "Monterey Jack" where the pool keeps "Corner Booth
+  Monterey Jack" — the one-extra-token near-dup cap can't bridge two brand
+  tokens, causing false Auto-Fill nags and unlinked importer slots.
+- **How to apply:** this stays layer-1-safe ONLY because the added/stripped
+  tokens are the sheet's own brand — never generalize it to arbitrary prefixes
+  or other customers' brands.
+
 ## Neutral-descriptor fold for TYPE names (2026-07-18)
 - Applicator/pep TYPE names get one more layer in spec-import `canonicalize` (appType/pepType kinds only): tokens in `NEUTRAL_TYPE_EXTRA_TOKENS` ({"milk"}) are dropped from the loose key (`specImportTypeNameFoldKey`), so "Whole Milk Mozzarella" snaps to a known "Whole Mozzarella" (unique-target guard; counted as exact so the alias is learned). Auto-Fill's mismatch compare uses the same fold key.
 - **Why:** "milk" is a dairy spec, not a different product; but "cheese" must NEVER fold (cheese sticks ≠ pepperoni sticks, "Cheese Mix" ≠ "Mix").

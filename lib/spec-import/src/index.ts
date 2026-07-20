@@ -2039,6 +2039,57 @@ export function mirrorSingleCheeseAcrossApplicators(
   return changed ? out : slots;
 }
 
+/**
+ * Brand-aware candidate lookup shared by the cheese/mix slot resolvers. On top
+ * of plain loose-key equality, when the SHEET's own brand is known the lookup
+ * also matches a raw grid label against a candidate that differs ONLY by that
+ * brand's prefix — a spec grid often writes "Monterey Jack" where the factory
+ * pool keeps the brand-prefixed "Corner Booth Monterey Jack" (and vice versa).
+ * Deliberately narrow so the prod cross-link incident can't recur:
+ *   - only the sheet's OWN brand tokens may be added/stripped (never another
+ *     customer's), compared through the possessive-tolerant brand fold so
+ *     "Bobo" == "Bobo's";
+ *   - the unbranded core must be >= 4 chars (mirrors the name-match length
+ *     guard, so a generic "Mix"/"Red" can never brand-jump);
+ *   - a folded key claimed by two DIFFERENT candidate names is dropped
+ *     (ambiguity guard — never guess).
+ */
+function buildBrandAwareSlotLookup(
+  byKey: ReadonlyMap<string, string>,
+  brand: string | undefined,
+): (key: string) => string | undefined {
+  const brandKey = specImportBrandMatchKey(brand ?? "");
+  if (!brandKey) return (key) => byKey.get(key);
+  // Possessive-fold every candidate key once; a folded key shared by two
+  // distinct candidate names becomes ambiguous (null) and never matches.
+  const byFolded = new Map<string, string | null>();
+  for (const [k, name] of byKey) {
+    const f = specImportBrandMatchKey(k);
+    if (!f) continue;
+    const prev = byFolded.get(f);
+    if (prev === undefined) byFolded.set(f, name);
+    else if (prev !== null && prev !== name) byFolded.set(f, null);
+  }
+  const folded = (f: string): string | undefined => byFolded.get(f) ?? undefined;
+  return (key) => {
+    const direct = byKey.get(key);
+    if (direct) return direct;
+    const f = specImportBrandMatchKey(key);
+    if (!f) return undefined;
+    // Sheet label lacks the brand prefix the pool name carries.
+    if (f !== brandKey && f.length >= 4) {
+      const hit = folded(`${brandKey} ${f}`);
+      if (hit) return hit;
+    }
+    // Sheet label carries the brand prefix the pool name lacks.
+    if (f.startsWith(brandKey + " ")) {
+      const core = f.slice(brandKey.length + 1);
+      if (core.length >= 4) return folded(core);
+    }
+    return undefined;
+  };
+}
+
 /** One applicator slot the resolver matched to a cheese blend. `slot` is 1-based. */
 export type CheeseSlotLink = { slot: number; recipeName: string };
 
@@ -2080,6 +2131,7 @@ export type ResolvedCheeseApplicators = {
 export function resolveCheeseApplicatorSlots(
   applicators: ReadonlyArray<ParsedApplicator>,
   candidateCheeseNames: ReadonlyArray<string>,
+  brand?: string,
 ): ResolvedCheeseApplicators {
   const byKey = new Map<string, string>();
   for (const name of candidateCheeseNames) {
@@ -2089,6 +2141,7 @@ export function resolveCheeseApplicatorSlots(
     if (!byKey.has(key)) byKey.set(key, clean);
   }
   if (byKey.size === 0) return { applicators: [...applicators], links: [] };
+  const lookup = buildBrandAwareSlotLookup(byKey, brand);
   const links: CheeseSlotLink[] = [];
   let changed = false;
   const out = applicators.map((a, i) => {
@@ -2097,7 +2150,7 @@ export function resolveCheeseApplicatorSlots(
     // Already a cheese applicator — leave it (its name is resolved elsewhere).
     if (isCheeseApplicatorType(type)) return a;
     const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(type));
-    const recipeName = key ? byKey.get(key) : undefined;
+    const recipeName = key ? lookup(key) : undefined;
     if (!recipeName) return a;
     links.push({ slot: i + 1, recipeName });
     changed = true;
@@ -2138,6 +2191,7 @@ export type ResolvedMixApplicators = {
 export function resolveMixApplicatorSlots(
   applicators: ReadonlyArray<ParsedApplicator>,
   candidateMixNames: ReadonlyArray<string>,
+  brand?: string,
 ): ResolvedMixApplicators {
   const byKey = new Map<string, string>();
   for (const name of candidateMixNames) {
@@ -2147,6 +2201,7 @@ export function resolveMixApplicatorSlots(
     if (!byKey.has(key)) byKey.set(key, clean);
   }
   if (byKey.size === 0) return { applicators: [...applicators], links: [] };
+  const lookup = buildBrandAwareSlotLookup(byKey, brand);
   const links: MixSlotLink[] = [];
   let changed = false;
   const out = applicators.map((a, i) => {
@@ -2155,7 +2210,7 @@ export function resolveMixApplicatorSlots(
     // Already a cheese or mix applicator — leave it (name resolved elsewhere).
     if (isCheeseApplicatorType(type) || isMixApplicatorType(type)) return a;
     const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(type));
-    const recipeName = key ? byKey.get(key) : undefined;
+    const recipeName = key ? lookup(key) : undefined;
     if (!recipeName) return a;
     links.push({ slot: i + 1, recipeName });
     changed = true;

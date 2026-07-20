@@ -144,6 +144,38 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.mismatches.find(m => m.field === "app1CheeseRecipeName")).toBeUndefined();
   });
 
+  it("does not nag when the sheet label is the slot's linked recipe minus the sheet's own brand prefix", () => {
+    // Regression (Monterey Jack): sheet applicator type "Monterey Jack",
+    // profile slot generic "Cheese" linked to "Corner Booth Monterey Jack".
+    // TWO extra brand tokens defeat the near-dup matcher (one-extra-token
+    // cap), but the brand-aware slot resolver now resolves the raw label onto
+    // the linked recipe (sheet's own brand only) — no Type nag, no link
+    // overwrite offer.
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({
+            brand: "Corner Booth",
+            flavor: "Deluxe",
+            applicators: [{ type: "Monterey Jack", ozPerPizza: 2.5, batchLbs: 0 }],
+          })],
+        }),
+      ],
+      brand: "Corner Booth",
+      flavor: "Deluxe",
+      current: values({
+        app1Type: "Cheese",
+        app1CheeseRecipeName: "Corner Booth Monterey Jack",
+        app1OzPerPizza: 2.5,
+      } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+    });
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "app1Type")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "app1CheeseRecipeName")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "app1CheeseRecipeName")).toBeUndefined();
+  });
+
   it("still flags a Type mismatch when the raw blend swaps a token vs the linked recipe (allowExtraToken boundary)", () => {
     // "Pepperoni" vs "Breakfast" is a token CHANGE, not one extra token —
     // clearly distinct blends under a generic slot must still surface.

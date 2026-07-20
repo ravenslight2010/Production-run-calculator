@@ -3409,12 +3409,14 @@ export function applySpecImport(
     const { applicators: cheeseResolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
       assignApplicatorSlots(p.applicators),
       [...cheeseCandidateNames, ...profileLinkCandidates("cheese")],
+      p.brand,
     );
     // Mix slots re-type to the literal "Mix" (the run form's Mix card + Mixes
     // pool picker); the recipe name is linked below just like cheese.
     const { applicators: resolvedApps, links: mixLinks } = resolveMixApplicatorSlots(
       cheeseResolvedApps,
       [...mixCandidateNames, ...profileLinkCandidates("mix")],
+      p.brand,
     );
     resolvedApps.forEach((a, i) => {
       const slot = i + 1;

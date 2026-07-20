@@ -245,10 +245,12 @@ function desiredFromProfile(
   const { applicators: cheeseResolved, links: cheeseLinks } = resolveCheeseApplicatorSlots(
     assignApplicatorSlots(p.applicators ?? []),
     [...cheeseCandidateNames, ...profileLinkCandidates("cheese")],
+    p.brand,
   );
   const { applicators: resolvedApps, links: mixLinks } = resolveMixApplicatorSlots(
     cheeseResolved,
     [...mixCandidateNames, ...profileLinkCandidates("mix")],
+    p.brand,
   );
   resolvedApps.forEach((a, i) => {
     const slot = i + 1;
