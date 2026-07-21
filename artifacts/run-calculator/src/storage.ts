@@ -1025,15 +1025,39 @@ export function loadHistory(): HistoryDay[] {
   return [];
 }
 
+// A history run worth keeping/showing: it has a name (brand or flavor), was
+// actually started, or carries notes. Blank "Unnamed Run" placeholders — e.g.
+// the auto-seeded run created when someone signs in on an off day to work on
+// other things — are noise and are excluded from history.
+export function isDisplayableHistoryRun(run: RunMeta): boolean {
+  return !!(run.brand || run.flavor || run.startedAt || (run.notes ?? "").trim());
+}
+
+// Drop blank/unnamed runs from each archived day, and drop days left with no
+// runs at all. Display-side companion to the archive-time filter, so history
+// polluted before this change (or by older peers over sync) cleans up too.
+export function filterMeaningfulHistory(days: HistoryDay[]): HistoryDay[] {
+  return days
+    .map(day => ({ ...day, runs: day.runs.filter(isDisplayableHistoryRun) }))
+    .filter(day => day.runs.length > 0);
+}
+
 export function archiveDayToHistory(ds: DayState, date: string): void {
   try {
     const history = loadHistory().filter(h => h.date !== date);
+    // Never archive blank/unnamed placeholder runs; if nothing meaningful ran
+    // that day (e.g. an off-day sign-in), don't create a history entry at all.
+    const keptRuns = ds.runs.filter(isDisplayableHistoryRun);
+    if (keptRuns.length === 0) {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+      return;
+    }
     const runValues: Record<string, FormValues> = {};
-    for (const run of ds.runs) {
+    for (const run of keptRuns) {
       const raw = localStorage.getItem(RUN_KEY(run.id));
       if (raw) runValues[run.id] = JSON.parse(raw);
     }
-    const entry: HistoryDay = { date, runs: ds.runs, runValues };
+    const entry: HistoryDay = { date, runs: keptRuns, runValues };
     const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
   } catch {}

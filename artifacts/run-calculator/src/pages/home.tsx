@@ -89,6 +89,7 @@ import {
   saveDayState,
   overlayRunMetaStamps,
   loadHistory,
+  filterMeaningfulHistory,
   archiveDayToHistory,
   loadRunValues,
   saveRunValues,
@@ -18142,14 +18143,18 @@ export default function Home() {
                           </div>
                         );
                       })}
-                      {/* History */}
-                      {history.length > 0 && (
+                      {/* History — blank/unnamed placeholder runs (off-day
+                          sign-ins) are filtered out, and days with nothing
+                          meaningful are hidden entirely. */}
+                      {(() => {
+                        const displayHistory = filterMeaningfulHistory(history);
+                        return displayHistory.length > 0 && (
                         <div className="space-y-3 pt-2 border-t border-border/30">
                           <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                             <History className="w-4 h-4" />
-                            History ({history.length} {history.length === 1 ? "day" : "days"})
+                            History ({displayHistory.length} {displayHistory.length === 1 ? "day" : "days"})
                           </div>
-                          {history.map(day => {
+                          {displayHistory.map(day => {
                             const finishedRuns = day.runs.filter(r => r.endedAt && r.startedAt);
                             const totalHistCases = finishedRuns.reduce((acc, r) => {
                               const vals = day.runValues[r.id] ?? DEFAULT_VALUES;
@@ -18206,7 +18211,8 @@ export default function Home() {
                           );
                           })}
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })()}
