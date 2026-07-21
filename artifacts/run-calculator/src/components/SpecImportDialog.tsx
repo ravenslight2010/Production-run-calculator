@@ -128,6 +128,14 @@ type RecipeItem = {
   updateExisting?: boolean;
   include: boolean;
   tombstoned: boolean;
+  /**
+   * Merge-re-import row: this sheet's name was previously MERGED onto an
+   * existing recipe (learned-alias link suggestion) whose OWN sheet is also
+   * present in this workbook. Starts UNCHECKED with an explanatory note so the
+   * manager isn't confused by two rows pointing at the same saved recipe —
+   * same treatment as the premix/cheese importers' merged-away rows.
+   */
+  mergedAway?: boolean;
 };
 
 const KINDS: SpecImportDisplayKind[] = ["dough", "sauce", "cheese", "mix"];
@@ -187,7 +195,7 @@ function buildRecipeItems(
       (n) => n.trim().toLowerCase() === suggested.trim().toLowerCase(),
     );
   };
-  const kept = prepared.parsed.recipes.map((r, i) => {
+  const kept = prepared.parsed.recipes.map((r, i): RecipeItem => {
     const kind = specImportRecipeDisplayKind(r);
     const linkExisting = suggestLink(r.name ?? "", kind, r.brand ?? "");
     return {
@@ -205,6 +213,27 @@ function buildRecipeItems(
       tombstoned: false,
     };
   });
+  // Merge-re-import detection (dough/sauce): a row pre-linked (learned merge
+  // alias) onto an existing recipe whose OWN sheet is ALSO in this workbook.
+  // Both rows would point at the same saved recipe, so the merged-away one
+  // starts UNCHECKED with an explanatory note — the same treatment the premix
+  // and cheese importers give merged-away sheets, so managers see one
+  // consistent behavior across all importers. Apply is never blocked.
+  for (const it of kept) {
+    if (it.kind !== "dough" && it.kind !== "sauce") continue;
+    const linked = it.linkExisting?.trim().toLowerCase();
+    if (!linked) continue;
+    const survivorAlsoHere = kept.some(
+      (o) =>
+        o !== it &&
+        o.kind === it.kind &&
+        (o.name ?? "").trim().toLowerCase() === linked,
+    );
+    if (survivorAlsoHere) {
+      it.mergedAway = true;
+      it.include = false;
+    }
+  }
   const skipped = prepared.skipped.recipes.map((r, i) => ({
     key: `rs${i}`,
     orig: r,
@@ -863,6 +892,10 @@ export default function SpecImportDialog({
                             kind,
                             linkExisting: undefined,
                             updateExisting: false,
+                            // The merge note describes the ORIGINAL suggested
+                            // link; a kind change clears that link, so the
+                            // note must go too.
+                            mergedAway: false,
                           })
                         }
                         onLinkExisting={(linkExisting) =>
@@ -872,6 +905,10 @@ export default function SpecImportDialog({
                           setRecipe(r.key, {
                             linkExisting: linkExisting || undefined,
                             updateExisting: false,
+                            // The merge note only applies to the originally
+                            // suggested survivor link — picking a different
+                            // recipe (or clearing the pick) retires it.
+                            mergedAway: false,
                           })
                         }
                         onUpdateExisting={(updateExisting) =>
@@ -1328,6 +1365,19 @@ function RecipeRow({
             </div>
           )}
 
+          {linked && item.mergedAway && (
+            <div
+              className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+              data-testid={`spec-recipe-merged-away-${item.key}`}
+            >
+              <span className="text-xs text-amber-700">
+                This sheet was merged into{" "}
+                <span className="font-medium">"{linked}"</span>, which is also
+                in this workbook — so it's left unchecked. Check it only if you
+                want to bring it in pointing at that recipe again.
+              </span>
+            </div>
+          )}
           {linked && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               {item.updateExisting && updateOffered
