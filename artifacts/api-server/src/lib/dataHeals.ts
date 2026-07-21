@@ -44,6 +44,11 @@ import {
   toPoolNameSet,
 } from "./mergeAliasPurge";
 import {
+  findFanTarget,
+  healFanPoisonedValues,
+  type DoughPoolRow,
+} from "./brandFanHeal";
+import {
   healSeaSaltComponents,
   SEA_SALT_DOUGH_TARGETS,
   SEA_SALT_SAUCE_TARGETS,
@@ -2070,6 +2075,146 @@ async function runNaturalPepNameDepoison(): Promise<void> {
   });
 }
 
+// ── Brand-fan dough cross-contamination heal ────────────────────────────────
+// Before the "brand-fan linked-name narrowing" fix, re-importing a
+// brand-anchored dough procedure fanned that dough's name/rows/weight onto
+// EVERY profile of the brand (Jul 19-20, 2026): Malted Barley 13.8 landed on
+// all Hannaford / Lucia's Craft / Nob Hill Craft flavors, Lowe's French Fry 15
+// on most Lowe's flavors, and Lowe's Supreme even picked up Mauro's purchased
+// "Pedone Crust". Scheduled day-state runs (Jul 23/24/27) carry a sibling
+// poison: correct dough names but the family pool's ROOT weight (CRB 5.7 /
+// Malted Barley 7.8) instead of the brand's variant weight. Expected values
+// are audited against the Jul 19 saved spec parses + the dough procedures'
+// doughball charts (AUDIT-REPORT-2026-07-21.md); every write is guarded on
+// the CURRENT value matching a known poison, so corrected or
+// manager-overridden profiles (and the clean dev snapshot) are untouched.
+
+const BRAND_FAN_HEAL_ID = "brand-fan-dough-depoison-v1";
+
+// Day-state: heal only the audited scheduled days and later — past days are
+// history. Date literal so the heal is deterministic (fix shipped 2026-07-21;
+// earliest poisoned scheduled day is 2026-07-23).
+const BRAND_FAN_HEAL_FROM_DATE = "2026-07-23";
+
+async function runBrandFanDoughDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: BRAND_FAN_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Live dough pool → canonical recipe rows for renamed profiles.
+    const doughs = await tx.select().from(doughRecipesTable);
+    const poolByScope = new Map<string, DoughPoolRow[]>();
+    for (const d of doughs) {
+      const comps = Array.isArray(d.components)
+        ? (d.components as { ingredient?: unknown; lbs?: unknown }[])
+            .filter((c) => c && typeof c === "object")
+            .map((c) => ({
+              ingredient: String(c.ingredient ?? ""),
+              lbs: Number(c.lbs ?? 0),
+            }))
+        : [];
+      const list = poolByScope.get(d.scope) ?? [];
+      list.push({ name: d.name, components: comps });
+      poolByScope.set(d.scope, list);
+    }
+
+    // 1) Brand profiles: key is `${brand}__${flavor}` lowercased.
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let healedProfiles = 0;
+    for (const p of profiles) {
+      const sep = p.key.indexOf("__");
+      if (sep < 0) continue;
+      const target = findFanTarget(p.key.slice(0, sep), p.key.slice(sep + 2));
+      if (!target) continue;
+      const values = (p.values ?? {}) as Record<string, unknown>;
+      const healed = healFanPoisonedValues(
+        values,
+        target,
+        poolByScope.get(p.scope) ?? [],
+      );
+      if (!healed) continue;
+      // Advance the client LWW stamp so a device still holding the poisoned
+      // values can't re-publish them over the heal with a stale stamp.
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values: healed, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    // 2) Scheduled day-state runs: match by dayState.runs brand+flavor → the
+    // runValues entry under the run id; stamp monotonically so the heal wins
+    // the additive sync merge.
+    const days = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(gte(dailySyncTable.date, BRAND_FAN_HEAL_FROM_DATE))
+      .for("update");
+    let healedDays = 0;
+    let healedRuns = 0;
+    for (const day of days) {
+      const data = (day.data ?? {}) as Record<string, unknown>;
+      const dayState = data.dayState as Record<string, unknown> | undefined;
+      const runs = Array.isArray(dayState?.runs)
+        ? (dayState.runs as Record<string, unknown>[])
+        : [];
+      const runValues = data.runValues as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      if (!runValues || typeof runValues !== "object") continue;
+      let changed = false;
+      for (const run of runs) {
+        if (!run || typeof run !== "object") continue;
+        const target = findFanTarget(
+          String(run.brand ?? ""),
+          String(run.flavor ?? ""),
+        );
+        if (!target) continue;
+        const id = String(run.id ?? "");
+        const vals = runValues[id];
+        if (!vals || typeof vals !== "object") continue;
+        const healed = healFanPoisonedValues(
+          vals,
+          target,
+          poolByScope.get(day.scope) ?? [],
+        );
+        if (!healed) continue;
+        const prev = Number(vals.valuesUpdatedAtMs ?? 0);
+        healed.valuesUpdatedAtMs = Math.max(prev + 1, Date.now());
+        runValues[id] = healed;
+        changed = true;
+        healedRuns++;
+      }
+      if (!changed) continue;
+      await tx
+        .update(dailySyncTable)
+        .set({ data: { ...data } })
+        .where(
+          and(
+            eq(dailySyncTable.date, day.date),
+            eq(dailySyncTable.scope, day.scope),
+          ),
+        );
+      healedDays++;
+    }
+
+    logger.info(
+      { heal: BRAND_FAN_HEAL_ID, healedProfiles, healedDays, healedRuns },
+      "Data heal applied",
+    );
+  });
+}
+
 /**
  * Run all pending one-time data heals. Best-effort: callers must catch — a
  * failed heal logs and leaves its marker unclaimed (the transaction rolls
@@ -2097,4 +2242,5 @@ export async function runDataHeals(): Promise<void> {
   await runAldoCheeseOzDepoison();
   await runBoboCrossFamilyAliasUndo();
   await runNaturalPepNameDepoison();
+  await runBrandFanDoughDepoison();
 }
