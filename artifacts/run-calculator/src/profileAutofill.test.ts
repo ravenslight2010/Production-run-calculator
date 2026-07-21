@@ -424,7 +424,7 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.mismatches).toEqual([]);
   });
 
-  it("fills dough name + doughball fields from a dough RECIPE with explicit targets (no profile block)", () => {
+  it("ignores explicit targets on a dough RECIPE (brand/flavor targeting retired)", () => {
     const p = plan(
       [sheet(1, 100, {
         recipes: [{
@@ -432,6 +432,27 @@ describe("buildProfileAutofillPlan", () => {
           name: "Ultra Thin Dough",
           rows: [{ ingredient: "Flour", lbs: 200 }],
           targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+          doughballOz: 9.5,
+          doughBatchYield: 120,
+          doughballsPerTray: 24,
+        }],
+      })],
+      values(),
+    );
+    expect(p.fills).toEqual([]);
+    expect(p.mismatches).toEqual([]);
+  });
+
+  it("fills dough name + doughball fields from a SAME-SHEET dough RECIPE (own profile block)", () => {
+    const p = plan(
+      [sheet(1, 100, {
+        profiles: [profile()],
+        recipes: [{
+          kind: "dough",
+          name: "Ultra Thin Dough",
+          rows: [{ ingredient: "Flour", lbs: 200 }],
+          brand: "Aldo's",
+          flavor: "Pepperoni",
           doughballOz: 9.5,
           doughBatchYield: 120,
           doughballsPerTray: 24,
@@ -447,14 +468,14 @@ describe("buildProfileAutofillPlan", () => {
     expect(byField.get("doughballsPerTray")).toBe(24);
   });
 
-  it("fans a brand-only dough recipe out to the edited profile (apply-pool fallback)", () => {
+  it("does NOT fan a brand-only dough recipe out to the edited profile (brand targeting retired)", () => {
     const p = plan(
       [sheet(1, 100, {
         recipes: [{ kind: "dough", name: "House Dough", rows: [{ ingredient: "Flour", lbs: 100 }], brand: "Aldo's" }],
       })],
       values(),
     );
-    expect(p.fills.find(f => f.field === "doughRecipeName")?.specValue).toBe("House Dough");
+    expect(p.fills.find(f => f.field === "doughRecipeName")).toBeUndefined();
   });
 
   it("re-links a dough recipe by loose name match against the current dough name", () => {
@@ -519,7 +540,10 @@ describe("buildProfileAutofillPlan", () => {
     }
   });
 
-  it("an anchored variant row still overwrites an earlier relinked backfill (import ordering)", () => {
+  it("brand-anchored variant rows no longer win: ambiguous same-named rows offer no weight", () => {
+    // Brand targeting is retired — a bare `brand:` on a variant row no longer
+    // anchors it to this profile. With two same-named rows and no known
+    // profile weight, the doughball numbers stay ambiguous → no offer.
     const p = plan(
       [sheet(1, 100, {
         recipes: [
@@ -529,7 +553,8 @@ describe("buildProfileAutofillPlan", () => {
       })],
       values({ doughRecipeName: "CRB Dough" } as Partial<FormValues>),
     );
-    expect(p.fills.find(f => f.field === "targetDoughballWeight")?.specValue).toBe(8.25);
+    expect(p.fills.find(f => f.field === "targetDoughballWeight")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "targetDoughballWeight")).toBeUndefined();
   });
 
   it("dough-pool weight is variant-aware: ambiguous variants offer no weight, a die match offers its variant", () => {
@@ -588,7 +613,8 @@ describe("buildProfileAutofillPlan", () => {
           kind: "dough",
           name: "Canonical Dough",
           rows: [{ ingredient: "Flour", lbs: 100 }],
-          targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+          brand: "Aldo's",
+          flavor: "Pepperoni",
         }],
       })],
       values(),
@@ -596,14 +622,16 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.fills.find(f => f.field === "doughRecipeName")?.specValue).toBe("Canonical Dough");
   });
 
-  it("fills sauce name from a targeted sauce RECIPE", () => {
+  it("fills sauce name from a SAME-SHEET sauce RECIPE", () => {
     const p = plan(
       [sheet(1, 100, {
+        profiles: [profile()],
         recipes: [{
           kind: "sauce",
           name: "House Red Sauce",
           rows: [{ ingredient: "Tomato", lbs: 50 }],
-          targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+          brand: "Aldo's",
+          flavor: "Pepperoni",
         }],
       })],
       values(),
@@ -894,12 +922,12 @@ describe("buildProfileAutofillPlan — qualified dough name must not blanket the
     expect(p.conflicts.map(c => c.field)).toEqual([]);
   });
 
-  it("still offers the dough to a profile with no dough linked yet", () => {
+  it("does not offer the dough even to a profile with no dough linked (brand fan retired)", () => {
     const p = plan(
       [sheet(1, 100, { recipes: [frenchFryRecipe] } as never)],
       values(),
     );
-    expect(p.fills.some(f => f.field === "doughRecipeName")).toBe(true);
+    expect(p.fills.some(f => f.field === "doughRecipeName")).toBe(false);
   });
 });
 

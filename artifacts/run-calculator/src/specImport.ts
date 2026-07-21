@@ -1704,8 +1704,9 @@ export async function commitSpecImport(
     if (!cands.length) continue;
     try {
       const pool = await fetchNamedRecipes(kind);
-      // Group per recipe name: union flavors; multi-brand names stay untagged.
-      const byName = new Map<string, { name: string; brands: Set<string>; flavors: string[] }>();
+      // Group per recipe name. Recipes attach by NAME only — placeholders
+      // carry no brand/flavor targeting.
+      const byName = new Map<string, { name: string }>();
       const poolNames = pool.map((r) => r.name);
       for (const c of cands) {
         if (pool.some((r) => specImportNamedRecipeNamesEqual(r.name, c.name))) continue;
@@ -1715,23 +1716,16 @@ export async function commitSpecImport(
         // family; qualifiers only locate the doughball weight row).
         if (kind === "dough" && findSpecImportDoughFamilyMatch(c.name, poolNames)) continue;
         const key = c.name.trim().toLowerCase();
-        const g = byName.get(key) ?? { name: c.name.trim(), brands: new Set<string>(), flavors: [] };
-        if (c.brand.trim()) g.brands.add(c.brand.trim());
-        const fl = c.flavor.trim();
-        if (fl && !g.flavors.some((f) => f.toLowerCase() === fl.toLowerCase())) g.flavors.push(fl);
-        byName.set(key, g);
+        if (!byName.has(key)) byName.set(key, { name: c.name.trim() });
       }
       const drafts = [...byName.values()]
-        .map((g) => {
-          const singleBrand = g.brands.size === 1 ? [...g.brands][0] : undefined;
-          return namedRecipeFromDraft({
+        .map((g) =>
+          namedRecipeFromDraft({
             name: g.name,
             components: [],
             idPrefix: kind,
-            brand: singleBrand,
-            flavors: singleBrand ? g.flavors : [],
-          });
-        })
+          }),
+        )
         .filter((r): r is PoolNamedRecipe => r != null);
       if (drafts.length) {
         const { added } = await addNamedRecipesToServerIfAbsent(kind, drafts);

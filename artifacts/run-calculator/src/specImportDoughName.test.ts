@@ -248,7 +248,7 @@ describe("later dough recipe import re-links by name", () => {
     expect(plain?.doughballsPerTray).toBe(22);
   });
 
-  it("multiple same-named collapsed variants: each EXPLICIT target keeps its own variant's weight/per-tray", () => {
+  it("multiple same-named collapsed variants: name-relinked profiles get NO ambiguous doughball numbers", () => {
     saveBrandFlavors({
       ...loadBrandFlavors(),
       CRB: ["Cheese", "Pepperoni"],
@@ -283,12 +283,18 @@ describe("later dough recipe import re-links by name", () => {
         },
       ],
     } as unknown as ParsedSpecImport);
+    // Both profiles relink by NAME and get the rows, but with two same-named
+    // variant rows the doughball numbers are per-customer and ambiguous —
+    // brand/flavor targeting is retired, so neither variant's numbers may be
+    // written onto a relinked profile with no known weight.
     const cheese = loadProfile("CRB", "Cheese");
     const pep = loadProfile("CRB", "Pepperoni");
-    expect(cheese?.targetDoughballWeight).toBe(10);
-    expect(cheese?.doughballsPerTray).toBe(20);
-    expect(pep?.targetDoughballWeight).toBe(14);
-    expect(pep?.doughballsPerTray).toBe(16);
+    expect(cheese?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(pep?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(Number(cheese?.targetDoughballWeight ?? 0)).toBe(0);
+    expect(Number(cheese?.doughballsPerTray ?? 0)).toBe(0);
+    expect(Number(pep?.targetDoughballWeight ?? 0)).toBe(0);
+    expect(Number(pep?.doughballsPerTray ?? 0)).toBe(0);
   });
 
   it("does not touch saved profiles pointing at a DIFFERENT dough name", () => {
@@ -368,7 +374,10 @@ describe("later dough recipe import re-links by name", () => {
     expect(prof?.frontlineRecipe).toEqual(SAUCE_ROWS);
   });
 
-  it("fans a recipe with bare brand \"Aldo\" onto profiles saved under brand \"Aldo's\"", () => {
+  it("does NOT fan a recipe with bare brand \"Aldo\" onto profiles saved under brand \"Aldo's\" (brand targeting retired)", () => {
+    // Brand fan-out once blanketed every "Aldo's" flavor with any recipe whose
+    // sheet mentioned "Aldo". Recipes now attach by NAME only — a profile with
+    // no matching dough name linked stays untouched.
     saveBrandFlavors({ ...loadBrandFlavors(), "Aldo's": ["Pepperoni"] });
     saveProfile("Aldo's", "Pepperoni", {
       ...DEFAULT_VALUES,
@@ -387,8 +396,8 @@ describe("later dough recipe import re-links by name", () => {
       ],
     } as unknown as ParsedSpecImport);
     const prof = loadProfile("Aldo's", "Pepperoni");
-    expect(prof?.doughRecipeName).toBe("Aldo Dough");
-    expect(prof?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(prof?.doughRecipeName ?? "").toBe("");
+    expect(prof?.doughRecipe ?? []).toEqual([]);
   });
 
   it("dough/sauce sheet targets never CREATE brands — unknown customer names are skipped", () => {
@@ -419,13 +428,14 @@ describe("later dough recipe import re-links by name", () => {
     const brands = Object.keys(loadBrandFlavors());
     expect(brands).not.toContain("LUCIA'S CRAFT");
     expect(brands).not.toContain("Hannaford");
-    // The known brand+flavor still got the tie.
-    expect(loadProfile("Aldo's", "Pepperoni")?.doughRecipe).toEqual(DOUGH_ROWS);
+    // Brand/flavor targeting is retired entirely: with no matching dough NAME
+    // linked on the profile, no tie happens either.
+    expect(loadProfile("Aldo's", "Pepperoni")?.doughRecipe ?? []).toEqual([]);
   });
 
-  it("canonicalizes a loose-matching target onto the EXISTING brand spelling (no near-dup brand minted)", () => {
-    // A target of "Aldo"/"Pepperoni" loose-matches the saved "Aldo's" brand —
-    // it must tie onto "Aldo's"/"Pepperoni", not register a new "Aldo" brand.
+  it("a loose-matching brand/flavor on the recipe mints no brand and (targeting retired) no tie", () => {
+    // "Aldo"/"Pepperoni" loose-matches the saved "Aldo's" brand, but recipes
+    // attach by NAME only now — no near-dup brand minted, and no tie either.
     saveBrandFlavors({ ...loadBrandFlavors(), "Aldo's": ["Pepperoni"] });
     saveProfile("Aldo's", "Pepperoni", {
       ...DEFAULT_VALUES,
@@ -444,6 +454,6 @@ describe("later dough recipe import re-links by name", () => {
       ],
     } as unknown as ParsedSpecImport);
     expect(Object.keys(loadBrandFlavors())).not.toContain("Aldo");
-    expect(loadProfile("Aldo's", "Pepperoni")?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(loadProfile("Aldo's", "Pepperoni")?.doughRecipe ?? []).toEqual([]);
   });
 });

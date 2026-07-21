@@ -247,47 +247,6 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(out.recipes[0]).toMatchObject({ brand: "NewA" });
   });
 
-  it("keeps a user-typed recipe attach name across the step-1 rename", () => {
-    // A recipe the AI left attached to nothing shows the manual attach editor.
-    const recipe: ParsedRecipe = {
-      kind: "dough",
-      name: "Sheet Dough",
-      rows: [{ ingredient: "Flour", lbs: 40 }],
-    };
-    const onConfirm = vi.fn();
-    renderDialog(
-      makePrepared(
-        [
-          { brand: "A", flavor: "X" },
-          { brand: "Keep", flavor: "Me" },
-        ],
-        [recipe],
-      ),
-      onConfirm,
-    );
-
-    fireEvent.click(screen.getByText("Next"));
-    // User manually attaches the recipe to a product in step 2.
-    fireEvent.change(screen.getByTestId("spec-recipe-brand-rk0"), {
-      target: { value: "Keep" },
-    });
-    fireEvent.change(screen.getByTestId("spec-recipe-flavor-rk0"), {
-      target: { value: "Me" },
-    });
-
-    // Back, rename the OTHER product, and return — the manual attach must stick
-    // (the re-target must not clobber a brand/flavor the user typed).
-    fireEvent.click(screen.getByText("Back"));
-    fireEvent.change(screen.getByTestId("spec-profile-brand-pk0"), {
-      target: { value: "Acme" },
-    });
-    fireEvent.click(screen.getByText("Next"));
-    fireEvent.click(screen.getByText(/^Apply/));
-
-    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
-    expect(out.recipes[0]).toMatchObject({ brand: "Keep", flavor: "Me" });
-  });
-
   it("passes step-1 brand/flavor renames to onConfirm as learnable aliases", () => {
     const onConfirm = vi.fn();
     const prepared = makePrepared([{ brand: '11" Four Hands', flavor: "Chz" }]);

@@ -436,7 +436,7 @@ import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import { mergeSpecAliases, namedRecipeTagFromParsed, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
+import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
@@ -460,7 +460,6 @@ import {
   backfillCheeseRecipeFromMergedSources,
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
-  catchAllPreviewSkipReason,
 } from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
@@ -9169,13 +9168,10 @@ export default function Home() {
       }
       // Any dough / sauce recipes the sheet added are pushed into the server pool
       // so they become factory-wide master-data (like the Mixes / Cheese pools).
-      // Pass along the "who it goes to" brand/flavor tags the sheet ties each
-      // recipe to (single-brand only; multi-brand recipes stay shared/untagged)
-      // so new AND previously-imported recipes get tagged.
+      // Recipes attach by NAME only — no "who it goes to" brand/flavor tags are
+      // computed or pushed anymore (stored tags on existing pool rows are inert).
       // Best-effort, manager-only server-side; never blocks the committed import.
       if (importedRecipes && canManageInventory) {
-        const doughTags = new Map<string, NamedRecipeTag>();
-        const sauceTags = new Map<string, NamedRecipeTag>();
         const doughTrays = new Map<string, number>();
         // Per-VARIANT doughball numbers by FAMILY recipe name: the family snap
         // collapses variant names ("11\" CRB recipe") onto one pool recipe but
@@ -9207,11 +9203,8 @@ export default function Home() {
               doughVariants.set(key, list);
             }
           }
-          const tag = namedRecipeTagFromParsed(r, appliedParsed.profiles);
-          if (!tag) continue;
-          (r.kind === "dough" ? doughTags : sauceTags).set(name.toLowerCase(), tag);
         }
-        void pushLocalDoughSauceToServer({ dough: doughTags, sauce: sauceTags, doughTrays, doughVariants }).catch(() => {});
+        void pushLocalDoughSauceToServer({ doughTrays, doughVariants }).catch(() => {});
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
@@ -12019,8 +12012,6 @@ export default function Home() {
                       <NamedRecipesManager
                         kind={manageCategory === "dough" ? "dough" : "sauce"}
                         ingredientSuggestions={unifiedIngredientUniverse}
-                        brands={brands}
-                        brandFlavors={brandFlavors}
                       />
                     )}
                   </div>
@@ -12616,64 +12607,6 @@ export default function Home() {
                       </button>
                     )}
                     <CheeseRecipesManager
-                      brands={brands}
-                      brandFlavors={brandFlavors}
-                      getFlavorTargets={(recipe) => {
-                        // Per-flavor cheese target weights for the editor's
-                        // "oz per pizza by flavor" preview. Coverage mirrors
-                        // the run cards' pool matching: the recipe's brand +
-                        // its flavors (empty flavors = every flavor of that
-                        // brand, the "All Varieties" catch-all). The target is
-                        // the saved profile's cheese applicator Oz/Pizza —
-                        // preferring the slot linked to THIS recipe by name,
-                        // falling back to the profile's single cheese slot.
-                        // For the catch-all (blank flavors) coverage, flavors
-                        // whose profile is name-linked to a DIFFERENT existing
-                        // cheese recipe are skipped and reported, so the
-                        // preview matches what the run cards actually pick.
-                        const brand = recipe.brand.trim();
-                        if (!brand) return { targets: [], skipped: [] };
-                        const isCatchAll = recipe.flavors.length === 0;
-                        const flavors = isCatchAll
-                          ? (brandFlavors[brand] ?? [])
-                          : recipe.flavors;
-                        const nameLc = recipe.name.trim().toLowerCase();
-                        const knownRecipeNames = cheeseRecipesList.map((r) => r.name);
-                        const targets: { flavor: string; oz: number }[] = [];
-                        const skipped: { flavor: string; recipeName: string }[] = [];
-                        for (const flavor of flavors) {
-                          const p = loadProfile(brand, flavor);
-                          if (!p) continue;
-                          const vals = p as unknown as Record<string, unknown>;
-                          const slotNames: string[] = [];
-                          let linkedOz = 0;
-                          let cheeseOz = 0;
-                          let cheeseSlots = 0;
-                          for (const n of [1, 2, 3, 4]) {
-                            const slotNameRaw = String(vals[`app${n}CheeseRecipeName`] ?? "").trim();
-                            const slotName = slotNameRaw.toLowerCase();
-                            const type = String(vals[`app${n}Type`] ?? "").trim().toLowerCase();
-                            const oz = Number(vals[`app${n}OzPerPizza`] ?? 0) || 0;
-                            if (slotNameRaw) slotNames.push(slotNameRaw);
-                            if (nameLc && slotName === nameLc && oz > 0) linkedOz = oz;
-                            if (type === "cheese" && oz > 0) { cheeseSlots++; cheeseOz = oz; }
-                          }
-                          if (isCatchAll) {
-                            const linkedElsewhere = catchAllPreviewSkipReason(
-                              slotNames,
-                              recipe.name,
-                              knownRecipeNames,
-                            );
-                            if (linkedElsewhere) {
-                              skipped.push({ flavor, recipeName: linkedElsewhere });
-                              continue;
-                            }
-                          }
-                          const oz = linkedOz > 0 ? linkedOz : cheeseSlots === 1 ? cheeseOz : 0;
-                          if (oz > 0) targets.push({ flavor, oz });
-                        }
-                        return { targets, skipped };
-                      }}
                       ingredientSuggestions={unifiedIngredientUniverse}
                     />
                   </div>

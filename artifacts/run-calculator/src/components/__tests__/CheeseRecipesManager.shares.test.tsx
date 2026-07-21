@@ -49,12 +49,7 @@ function renderManager() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <CheeseRecipesManager
-        getFlavorTargets={() => ({
-          targets: [{ flavor: "Pepperoni", oz: 5 }],
-          skipped: [],
-        })}
-      />
+      <CheeseRecipesManager />
     </QueryClientProvider>,
   );
 }
@@ -71,7 +66,7 @@ function shareValues(container: HTMLElement): number[] {
 }
 
 describe("CheeseRecipesManager blend shares with partial oz data", () => {
-  it("derives Share % from lbs (not stale partial oz) and gives Cellulose a non-zero preview oz", () => {
+  it("derives Share % from lbs (not stale partial oz), Cellulose no longer zeroed", () => {
     items.push(aldos());
     const { container } = renderManager();
     expandRecipe();
@@ -84,14 +79,6 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
     expect(shares[0]).toBeCloseTo(63.1, 1);
     expect(shares[1]).toBeCloseTo(36.3, 1);
     expect(shares[4]).toBeGreaterThan(0); // Cellulose no longer zeroed
-
-    // Per-flavor preview: Cellulose row (last) must show a non-zero oz.
-    const preview = container.textContent ?? "";
-    expect(preview).toContain("Pepperoni");
-    // Cellulose's preview oz = 5 oz × (1.6 / 327.9) ≈ 0.0244 — rendered
-    // somewhere in the preview block as a non-zero value; assert via the
-    // share math instead of parsing layout: share > 0 with a 5 oz target
-    // guarantees a non-zero row.
   });
 
   it("updates Share % immediately when a row's lbs are edited (edits win over stale oz)", () => {
@@ -141,48 +128,3 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
   });
 });
 
-describe("catch-all preview skipped-flavor hint", () => {
-  it("lists targets and shows the 'uses its own cheese mix' note for skipped flavors", () => {
-    items.push(aldos());
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { container } = render(
-      <QueryClientProvider client={qc}>
-        <CheeseRecipesManager
-          getFlavorTargets={() => ({
-            targets: [{ flavor: "Pepperoni", oz: 5 }],
-            skipped: [
-              { flavor: "BBQ CHICKEN", recipeName: "SMD BBQ Chicken Cheese Mix" },
-            ],
-          })}
-        />
-      </QueryClientProvider>,
-    );
-    expandRecipe();
-
-    const text = container.textContent ?? "";
-    expect(text).toContain("Pepperoni");
-    expect(text).toContain("BBQ CHICKEN uses its own cheese mix (SMD BBQ Chicken Cheese Mix)");
-    // The skipped flavor must NOT appear as a preview target line.
-    expect(text).not.toContain("BBQ CHICKEN — target");
-  });
-
-  it("shows the hint even when no flavor has a preview target", () => {
-    items.push(aldos());
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { container } = render(
-      <QueryClientProvider client={qc}>
-        <CheeseRecipesManager
-          getFlavorTargets={() => ({
-            targets: [],
-            skipped: [{ flavor: "BBQ CHICKEN", recipeName: "SMD BBQ Chicken Cheese Mix" }],
-          })}
-        />
-      </QueryClientProvider>,
-    );
-    expandRecipe();
-
-    expect(container.textContent ?? "").toContain(
-      "BBQ CHICKEN uses its own cheese mix (SMD BBQ Chicken Cheese Mix)",
-    );
-  });
-});

@@ -1755,52 +1755,29 @@ describe("recipeTargets", () => {
   });
 });
 
-describe("recipeApplyTargets", () => {
+describe("recipeApplyTargets (brand/flavor targeting removed)", () => {
   const profiles = [
     { brand: "Lowes", flavor: "Pepperoni", applicators: [], pepperonis: [] },
     { brand: "Lowes", flavor: "Cheese", applicators: [], pepperonis: [] },
-    { brand: "Lowes", flavor: "Pepperoni", applicators: [], pepperonis: [] }, // dup
     { brand: "DiGiorno", flavor: "Supreme", applicators: [], pepperonis: [] },
   ];
 
-  it("uses explicit targets unchanged when present (no broadening)", () => {
+  it("never fans a recipe onto profiles — explicit targets, brand, and brandAnchors all yield []", () => {
     expect(
       recipeApplyTargets(
-        {
-          kind: "dough",
-          name: "D",
-          rows: [],
-          brand: "Lowes",
-          flavor: "Pepperoni",
-        },
+        { kind: "dough", name: "D", rows: [], brand: "Lowes", flavor: "Pepperoni" },
         profiles,
       ),
-    ).toEqual([{ brand: "Lowes", flavor: "Pepperoni" }]);
-  });
-
-  it("positive: a brand-only recipe (empty explicit targets) links to all same-brand profiles, de-duped", () => {
+    ).toEqual([]);
     expect(
       recipeApplyTargets({ kind: "dough", name: "D", rows: [], brand: "lowes" }, profiles),
-    ).toEqual([
-      { brand: "Lowes", flavor: "Pepperoni" },
-      { brand: "Lowes", flavor: "Cheese" },
-    ]);
-  });
-
-  it("fans EVERY brandAnchor to its same-brand profiles (multi-brand shared recipe)", () => {
+    ).toEqual([]);
     expect(
       recipeApplyTargets(
         { kind: "dough", name: "Masa Dough", rows: [], brandAnchors: ["Lowes", "DiGiorno"] },
         profiles,
       ),
-    ).toEqual([
-      { brand: "Lowes", flavor: "Pepperoni" },
-      { brand: "Lowes", flavor: "Cheese" },
-      { brand: "DiGiorno", flavor: "Supreme" },
-    ]);
-  });
-
-  it("appends brandAnchor fan-out to explicit per-flavor targets, de-duped", () => {
+    ).toEqual([]);
     expect(
       recipeApplyTargets(
         {
@@ -1811,21 +1788,8 @@ describe("recipeApplyTargets", () => {
         },
         profiles,
       ),
-    ).toEqual([
-      { brand: "DiGiorno", flavor: "Supreme" },
-      { brand: "Lowes", flavor: "Pepperoni" },
-      { brand: "Lowes", flavor: "Cheese" },
-    ]);
-  });
-
-  it("negative: a recipe with no brand anchor links to nothing (never broadcast)", () => {
-    expect(recipeApplyTargets({ kind: "sauce", name: "S", rows: [] }, profiles)).toEqual([]);
-  });
-
-  it("negative: a brand with no same-brand profile in the import links to nothing", () => {
-    expect(
-      recipeApplyTargets({ kind: "sauce", name: "S", rows: [], brand: "Unknown" }, profiles),
     ).toEqual([]);
+    expect(recipeApplyTargets({ kind: "sauce", name: "S", rows: [] }, profiles)).toEqual([]);
   });
 });
 

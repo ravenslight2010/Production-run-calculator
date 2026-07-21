@@ -92,7 +92,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import type {
   ParsedSpecImport,
@@ -3566,34 +3566,15 @@ export function applySpecImport(
   }
 
   // ── Tie recipes onto their profiles ──
-  // One recipe can serve many brand/flavor profiles (recipeApplyTargets unions
-  // the singular brand/flavor with the targets[] list, then falls back to all
-  // same-brand profiles when targets are empty), so it ties to each without being
-  // duplicated in the recipe library. The fallback pool is this import's profiles
-  // PLUS every already-saved profile, so a standalone sauce/dough/cheese procedure
-  // sheet (brand-only recipe, no in-import profiles) still attaches to the brand's
-  // existing flavors — otherwise it would import to the library and link to nothing.
-  // Saved profiles enter the pool WITH their currently-linked dough/sauce
-  // names so the brand-fan's qualified-name narrowing (recipeApplyTargets) can
-  // tell "already uses this recipe / still blank" apart from "links a
-  // DIFFERENT recipe" — a French Fry dough procedure must not blanket every
-  // flavor of the brand that already runs on CRB dough.
-  const applyProfilePool = [
-    ...parsed.profiles,
-    ...Object.entries(loadBrandFlavors()).flatMap(([brand, flavors]) =>
-      (flavors ?? []).map(flavor => {
-        const saved = loadProfile(brand, flavor) as Record<string, unknown> | null;
-        return {
-          brand,
-          flavor,
-          doughName: String(saved?.doughRecipeName ?? "").trim() || undefined,
-          sauceName: String(saved?.frontlineRecipeName ?? "").trim() || undefined,
-          applicators: [],
-          pepperonis: [],
-        };
-      }),
-    ),
-  ];
+  // Recipes attach by NAME only. The old brand/flavor apply-target resolution
+  // (explicit sheet targets + same-brand fan-out) is retired — a procedure
+  // sheet naming a brand must never blanket that brand's flavors. A dough or
+  // sauce recipe ties onto every saved profile whose linked dough/sauce recipe
+  // NAME loose-matches it; a cheese/mix blend ties onto every saved profile
+  // with an applicator slot of the right type whose linked name loose-matches.
+  // The import's own profiles were saved (and registered) by the profile loop
+  // above — with the sheet's dough/sauce/slot names already assigned — so the
+  // registry walk below covers them too.
   // A dough mixing sheet can carry MANY same-named per-customer variant rows.
   // Count them so a name-relinked tie can tell "the one CRB Dough row" apart
   // from "18 ambiguous variant rows" (see the weight-match guard below).
@@ -3620,14 +3601,59 @@ export function applySpecImport(
       : r.rows;
     if (r.referenceOnly && sourceRows.length === 0) continue;
     const rows = sourceRows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
-    // ── Re-link by NAME ──
-    // A dough/sauce recipe also ties onto every ALREADY-SAVED profile whose
-    // dough/sauce recipe NAME matches this recipe by the loose key — the
-    // earlier spec import may have assigned only the name (no recipe existed
-    // yet); when the actual recipe arrives later, every product pointing at
-    // that name gets its rows/weights (and the canonical spelling) attached
-    // without the sheet having to restate the brand/flavor targets.
-    let targets = [...recipeApplyTargets(r, applyProfilePool)];
+    // ── Link by NAME (the only tie path) ──
+    // A dough/sauce recipe ties onto every saved profile whose dough/sauce
+    // recipe NAME matches this recipe by the loose key — an earlier spec
+    // import may have assigned only the name (no recipe existed yet); when
+    // the actual recipe arrives later, every product pointing at that name
+    // gets its rows/weights (and the canonical spelling) attached. A
+    // cheese/mix blend ties onto profiles via the applicator-slot scan below.
+    let targets: { brand: string; flavor: string }[] = [];
+    if (r.kind === "cheese") {
+      // Cheese (and mix-routed) blends attach only where a profile's
+      // applicator slot of the matching type is name-linked to this blend.
+      // Blank slot names do NOT attract a recipe — that was brand-targeting's
+      // job and it sprayed blends across unrelated products.
+      const slotType = isMixRecipe ? "mix" : "cheese";
+      const rKey = specImportNameMatchKey(
+        r.userNamed ? r.name : cleanSpecCheeseRecipeName(r.name),
+      );
+      if (rKey) {
+        for (const [brand, flavors] of Object.entries(loadBrandFlavors())) {
+          for (const flavor of flavors ?? []) {
+            const saved = loadProfile(brand, flavor) as Record<string, unknown> | null;
+            if (!saved) continue;
+            const linked = [1, 2, 3, 4].some(n => {
+              if (String(saved[`app${n}Type`] ?? "").trim().toLowerCase() !== slotType) return false;
+              const nm = String(saved[`app${n}CheeseRecipeName`] ?? "").trim();
+              return !!nm && specImportNameMatchKey(cleanSpecCheeseRecipeName(nm)) === rKey;
+            });
+            if (linked) targets.push({ brand, flavor });
+          }
+        }
+      }
+    }
+    // Same-sheet tie: a pizza spec sheet parses its recipes WITH the profile
+    // they sit on (each recipe carries that sheet's own brand/flavor). That
+    // single explicit pairing is not brand targeting — tie onto the import's
+    // OWN parsed profile so it gets the recipe at import time. Restricted to
+    // parsed.profiles: a standalone procedure workbook naming customers never
+    // reaches here as a same-sheet profile.
+    {
+      const rb = (r.brand ?? "").trim().toLowerCase();
+      const rf = (r.flavor ?? "").trim().toLowerCase();
+      if (rb && rf) {
+        const own = parsed.profiles.find(
+          p => p.brand.trim().toLowerCase() === rb && p.flavor.trim().toLowerCase() === rf,
+        );
+        if (own) {
+          const seenT = new Set(targets.map(t => `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`));
+          if (!seenT.has(`${own.brand.trim().toLowerCase()}\u0000${own.flavor.trim().toLowerCase()}`)) {
+            targets.push({ brand: own.brand.trim(), flavor: own.flavor.trim() });
+          }
+        }
+      }
+    }
     // Profiles tied on by the NAME re-link below (rather than the recipe's own
     // explicit spec targets). One dough family serves many flavors with
     // DIFFERENT doughball weights / per-tray counts, and a re-import can carry

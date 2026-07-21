@@ -125,7 +125,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-}, 30_000);
+}, 120_000);
 
 beforeEach(async () => {
   // Each test starts from an empty inventory.

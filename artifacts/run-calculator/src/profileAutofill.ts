@@ -32,7 +32,6 @@ import {
   specImportDieTypeMatchKey,
   specImportTypeNameFoldKey,
   cleanSpecCheeseRecipeName,
-  recipeApplyTargets,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedSpecImport,
@@ -305,15 +304,12 @@ function desiredFromProfile(
 
 /**
  * Mirror of applySpecImport's dough/sauce RECIPE tie (the recipe loop in
- * storage.ts): a dough or sauce recipe reaches this brand+flavor when
- * `recipeApplyTargets` says so — explicit targets, brand anchors, or the
- * same-brand fan-out over the pool (the sheet's own profiles plus the profile
- * being edited, standing in for the import's saved-profile pool) — OR when the
- * profile's CURRENT recipe name loose-matches the recipe (the import's
- * name re-link). The import overwrites the profile's name/rows/doughball
- * fields unconditionally at tie time, so these outrank the profile-level
- * doughName/sauceName within the same sheet; a later recipe in the same sheet
- * overwrites an earlier one, matching the import loop's order.
+ * storage.ts): recipes attach by NAME only — a dough or sauce recipe reaches
+ * this brand+flavor solely when the profile's CURRENT recipe name
+ * loose-matches the recipe (the import's name re-link). The old brand/flavor
+ * apply-target fan is retired. A later recipe in the same sheet overwrites an
+ * earlier one, matching the import loop's order; doughball numbers are
+ * blank-backfill-only, like the import's relink tie.
  */
 function desiredFromDoughSauceRecipes(
   data: ParsedSpecImport,
@@ -340,21 +336,6 @@ function desiredFromDoughSauceRecipes(
     const rowsField = nameField === "doughRecipeName" ? "doughRecipe" : "frontlineRecipe";
     return pName && !hasRealRows(cur[rowsField]) ? pName : "";
   };
-  // The stand-in for the profile being edited carries its effective linked
-  // dough/sauce names so recipeApplyTargets' qualified-name narrowing can see
-  // that this profile already runs a DIFFERENT recipe — mirroring the pool the
-  // real import builds from saved profiles.
-  const pool: ParsedProfile[] = [
-    ...(Array.isArray(data?.profiles) ? data.profiles : []),
-    {
-      brand,
-      flavor,
-      doughName: effectiveName("doughRecipeName") || undefined,
-      sauceName: effectiveName("frontlineRecipeName") || undefined,
-      applicators: [],
-      pepperonis: [],
-    },
-  ];
   const byField = new Map<string, Desired>();
   const set = (field: string, label: string, value: string | number, kind: DesiredKind) => {
     byField.set(field, { field, label, value, kind, source });
@@ -375,21 +356,23 @@ function desiredFromDoughSauceRecipes(
     const nameField = r.kind === "dough" ? ("doughRecipeName" as const) : ("frontlineRecipeName" as const);
     const rKey = specImportNameMatchKey(rName);
     const curName = effectiveName(nameField);
-    // The import distinguishes HOW a recipe ties on: its own explicit spec
-    // targets / brand anchors take doughball values verbatim, while a profile
-    // tied on only by the NAME re-link is blank-fill-only for weight/per-tray
-    // (one dough family serves many flavors with DIFFERENT doughball weights,
-    // and a sheet can carry several same-named variant rows — without this
-    // split, whichever variant is processed last wins, e.g. a Corner Booth
-    // profile offered the Lowe's 7 Inch 5.7 oz instead of its own 8.25).
-    const anchored = recipeApplyTargets(r, pool).some(
-      (t) => brandsEqual(t.brand, brand) && t.flavor.trim().toLowerCase() === f,
-    );
-    // Mirror the import's typo/possessive-tolerant name re-link (see the
-    // relink pass in storage.ts — "Aldo's Sauce" vs "ALDO PIZZA SAUCE").
+    // Recipes attach by NAME only: mirror the import's typo/possessive-
+    // tolerant name re-link (see the relink pass in storage.ts — "Aldo's
+    // Sauce" vs "ALDO PIZZA SAUCE"). Doughball values are blank-fill-only
+    // (one dough family serves many flavors with DIFFERENT doughball
+    // weights, and a sheet can carry several same-named variant rows).
     const relinkOnly =
-      !anchored && !!rKey && !!curName && specImportNamedRecipeNamesEqual(curName, rName);
-    if (!anchored && !relinkOnly) continue;
+      !!rKey && !!curName && specImportNamedRecipeNamesEqual(curName, rName);
+    // Same-sheet tie (import parity): a pizza spec sheet parses its recipes
+    // WITH the profile they sit on — a recipe carrying THIS sheet profile's
+    // own brand/flavor ties verbatim, like the import's own-profile tie.
+    const sameSheet =
+      !!sheetProfile &&
+      !!(r.brand ?? "").trim() && !!(r.flavor ?? "").trim() &&
+      (r.brand ?? "").trim().toLowerCase() === (sheetProfile.brand ?? "").trim().toLowerCase() &&
+      (r.flavor ?? "").trim().toLowerCase() === (sheetProfile.flavor ?? "").trim().toLowerCase();
+    const relinked = relinkOnly && !sameSheet;
+    if (!relinkOnly && !sameSheet) continue;
     // Effective value at tie time, mirroring the import's sequential apply:
     // an earlier recipe in this same sheet may have already written the field.
     const effectiveNum = (field: string): number => {
@@ -405,7 +388,7 @@ function desiredFromDoughSauceRecipes(
       // Booth 24/tray profile). Only the row whose doughball weight equals
       // the profile's known weight is "ours"; with no known weight, offer
       // no doughball numbers at all.
-      if (relinkOnly && (doughNameCounts.get(rKey) ?? 0) > 1) {
+      if (relinked && (doughNameCounts.get(rKey) ?? 0) > 1) {
         const wt = effectiveNum("targetDoughballWeight");
         const rowMatches =
           wt > 0 && r.doughballOz != null && Math.abs(Number(r.doughballOz) - wt) <= 0.005;
@@ -413,19 +396,20 @@ function desiredFromDoughSauceRecipes(
       }
       // Import parity: storage writes targetDoughballWeight whenever the sheet
       // states doughballOz at all (`!= null`), including an explicit 0 — but a
-      // name-relinked tie only backfills when the value is still blank.
-      if (r.doughballOz != null && (anchored || !(effectiveNum("targetDoughballWeight") > 0))) {
+      // name-relinked tie only backfills when the value is still blank. A
+      // same-sheet tie writes verbatim, like the import's own-profile tie.
+      if (r.doughballOz != null && (!relinked || !(effectiveNum("targetDoughballWeight") > 0))) {
         set("targetDoughballWeight", "Doughball Weight (oz)", r.doughballOz, "number");
       }
       if (
         r.doughBatchYield != null && r.doughBatchYield > 0 &&
-        (anchored || !(effectiveNum("doughBatchYield") > 0))
+        (!relinked || !(effectiveNum("doughBatchYield") > 0))
       ) {
         set("doughBatchYield", "Dough Batch Yield (crusts)", r.doughBatchYield, "number");
       }
       if (
         r.doughballsPerTray != null && r.doughballsPerTray > 0 &&
-        (anchored || !(effectiveNum("doughballsPerTray") > 0))
+        (!relinked || !(effectiveNum("doughballsPerTray") > 0))
       ) {
         set("doughballsPerTray", "Doughballs Per Tray", r.doughballsPerTray, "number");
       }

@@ -2289,183 +2289,21 @@ export function recipeTargets(r: ParsedRecipe): ParsedRecipeTarget[] {
 }
 
 /**
- * The brand+flavor profiles a recipe should tie to AT APPLY TIME. When the
- * recipe carries explicit targets (a singular brand+flavor and/or a `targets`
- * list), those win unchanged — a value the sheet actually specifies is never
- * broadened. Only when `recipeTargets(r)` is empty does a conservative
- * same-import fallback kick in:
- *
- *   - If the recipe carries a brand but no flavor (so `recipeTargets` dropped it
- *     for lacking a flavor), it links to EVERY profile in THIS import that shares
- *     that brand — i.e. "one dough/sauce/cheese procedure for all flavors of the
- *     product". This is the apply-time backstop for a shared recipe the AI failed
- *     to populate `targets[]` for.
- *   - A recipe with no brand anchor at all stays unlinked: broadcasting it across
- *     unrelated products (e.g. every "Pepperoni" profile) would be ambiguous, so
- *     non-equivalent profiles are never linked.
- *
- * Pure + non-mutating. Both apps' apply step MUST call this (not `recipeTargets`
- * directly) so the fallback stays identical across web and mobile.
+ * RETIRED: brand/flavor apply-target resolution. Recipes now attach to
+ * profiles by NAME only — a profile's stored dough/sauce recipe-name link and
+ * the cheese/mix applicator-slot name matching in each app's apply step. The
+ * old behavior (explicit sheet targets, catch-all brand anchors, the
+ * same-brand fan-out with qualified-name narrowing) repeatedly caused one
+ * procedure sheet to overwrite recipes across a whole brand's flavors, so it
+ * was removed. Kept as an exported no-op so existing call sites compile;
+ * always returns [] — callers must treat the name-based relink passes as the
+ * only tie path.
  */
 export function recipeApplyTargets(
-  r: ParsedRecipe,
-  profiles: ReadonlyArray<ParsedProfile>,
+  _r: ParsedRecipe,
+  _profiles: ReadonlyArray<ParsedProfile>,
 ): ParsedRecipeTarget[] {
-  const explicit = recipeTargets(r);
-  const out: ParsedRecipeTarget[] = [...explicit];
-  const seen = new Set(
-    out.map((t) => `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`),
-  );
-  // Flavor-qualifier narrowing: a brand-wide fan is meant for a brand's ONE
-  // shared recipe ("Aldo's Pizza Sauce"). But when the recipe NAME carries
-  // flavor words beyond the brand and generic kind words — "Four Hands RED HOT
-  // Pizza Sauce" — spraying it across every flavor of the brand puts a Red Hot
-  // sauce on the BBQ Chicken pizza. If those extra name tokens all appear in
-  // at least one same-brand profile's flavor, fan ONLY to the matching
-  // flavors; when no flavor matches them (they're just brand-line words), the
-  // whole-brand fan stands. Spelled-out numbers fold to digits so a "7 Cheese"
-  // name finds the "Seven Cheese" flavor.
-  const foldTok = (t: string): string => SPEC_NUMBER_WORD_DIGITS[t] ?? t;
-  const GENERIC_RECIPE_NAME_TOKENS = new Set([
-    "sauce", "dough", "mix", "cheese", "crust", "recipe", "blend",
-  ]);
-  const nameQualifierTokens = (brand: string): string[] => {
-    const brandTokens = new Set(
-      specImportNameMatchKey(brand).split(" ").filter(Boolean).map(foldTok),
-    );
-    return specImportNameMatchKey(r.name ?? "")
-      .split(" ")
-      .filter(Boolean)
-      .map(foldTok)
-      .filter((t) => !brandTokens.has(t) && !GENERIC_RECIPE_NAME_TOKENS.has(t));
-  };
-  // Fan one brand out to every same-brand profile in the pool (narrowed to
-  // flavor-qualifier matches when the name names a flavor), appending only
-  // profiles not already covered by an explicit (or prior-anchor) target.
-  const fanBrand = (brand: string): void => {
-    // Possessive-tolerant brand compare — a sauce/dough procedure that says
-    // "ALDO" must still fan onto profiles saved under the "Aldo's" brand.
-    const wantBrand = specImportBrandMatchKey(brand);
-    if (!wantBrand) return;
-    const sameBrand = profiles.filter((p) => {
-      const pb = p.brand.trim();
-      const pf = p.flavor.trim();
-      return !!pb && !!pf && specImportBrandMatchKey(pb) === wantBrand;
-    });
-    let fanTo = sameBrand;
-    const qual = nameQualifierTokens(brand);
-    if (qual.length) {
-      const matching = sameBrand.filter((p) => {
-        const fTokens = new Set(
-          specImportNameMatchKey(p.flavor).split(" ").filter(Boolean).map(foldTok),
-        );
-        return qual.every((t) => fTokens.has(t));
-      });
-      if (matching.length) {
-        fanTo = matching;
-      } else if (r.kind === "dough" || r.kind === "sauce") {
-        // Qualified name, but NO flavor carries those words. Before letting the
-        // whole-brand fan stand, respect what each profile already links: a
-        // "Lowe's FRENCH FRY Dough" procedure must not overwrite the CRB dough
-        // on every other Lowe's flavor just because no flavor is literally
-        // named "French Fry". Keep only profiles whose linked dough/sauce name
-        // is blank or already IS this recipe (typo/possessive-tolerant); a
-        // profile pointing at a DIFFERENT recipe is excluded. When the pool
-        // carries no linked names at all this reduces to the original
-        // whole-brand fan.
-        const linkedName = (p: ParsedProfile): string =>
-          (r.kind === "dough" ? (p.doughName ?? "") : (p.sauceName ?? "")).trim();
-        // Family-variant tolerant: a profile linked to "Lowe's French Fry
-        // Dough" still matches the "LOWE'S HEAVY FRENCH FRY DOUGH" variant row
-        // — one name's loose-key tokens being a subset of the other's counts
-        // as the same recipe line, mirroring the dough-family collapse rule.
-        const rToks = specImportNameMatchKey(r.name ?? "").split(" ").filter(Boolean);
-        const subset = (a: string[], b: string[]): boolean => {
-          const bs = new Set(b);
-          return a.length > 0 && a.every((t) => bs.has(t));
-        };
-        const sameRecipeLine = (nm: string): boolean => {
-          if (specImportNamedRecipeNamesEqual(nm, r.name ?? "")) return true;
-          const nToks = specImportNameMatchKey(nm).split(" ").filter(Boolean);
-          return subset(nToks, rToks) || subset(rToks, nToks);
-        };
-        fanTo = sameBrand.filter((p) => {
-          const nm = linkedName(p);
-          return !nm || sameRecipeLine(nm);
-        });
-      }
-    }
-    for (const p of fanTo) {
-      const pb = p.brand.trim();
-      const pf = p.flavor.trim();
-      const key = `${pb.toLowerCase()}\u0000${pf.toLowerCase()}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ brand: pb, flavor: pf });
-    }
-  };
-  // Fan every catch-all brand anchor the sanitizer captured (may be MANY brands,
-  // e.g. a dough "used for Hannaford and Lucia"). These add to any explicit
-  // per-flavor targets rather than replacing them.
-  for (const b of r.brandAnchors ?? []) fanBrand(b);
-  if (out.length) return out;
-  // No explicit target and no anchors. A singular brand without a flavor is the
-  // only remaining safe anchor: link to every same-brand profile in the pool.
-  const brand = (r.brand ?? "").trim();
-  if (!brand) return [];
-  fanBrand(brand);
-  return out;
-}
-
-/**
- * Derive the display-only "who it goes to" brand/flavor TAG for a dough/sauce
- * recipe from what the import ties it to (mirrors the Cheese Recipes model:
- * one customer brand + the flavors it's used on, empty flavors = all
- * varieties). Returns null when the recipe has no brand anchor at all, or when
- * it serves MULTIPLE brands — a single-brand tag would be misleading there, so
- * the recipe stays shared/untagged. Whole-brand recipes (a brand anchor, or a
- * singular brand with no flavor) tag as all-varieties (empty flavors). Pure.
- */
-export function namedRecipeTagFromParsed(
-  r: ParsedRecipe,
-  profiles: ReadonlyArray<ParsedProfile>,
-): { brand: string; flavors: string[] } | null {
-  const targets = recipeApplyTargets(r, profiles);
-  // Collect every distinct brand this recipe is anchored to (explicit targets,
-  // catch-all anchors, and the singular brand field).
-  const brandsCi = new Map<string, string>();
-  const noteBrand = (raw: string | undefined): void => {
-    const b = (raw ?? "").trim();
-    if (!b) return;
-    const ci = b.toLowerCase();
-    if (!brandsCi.has(ci)) brandsCi.set(ci, b);
-  };
-  for (const t of targets) noteBrand(t.brand);
-  for (const b of r.brandAnchors ?? []) noteBrand(b);
-  noteBrand(r.brand);
-  if (brandsCi.size !== 1) return null;
-  const brand = Array.from(brandsCi.values())[0];
-  const brandCi = brand.toLowerCase();
-  // Whole-brand ("all varieties"): a catch-all anchor, or a singular brand with
-  // no flavor and no explicit per-flavor targets from the sheet itself.
-  const anchored = (r.brandAnchors ?? []).some(
-    (b) => b.trim().toLowerCase() === brandCi,
-  );
-  if (anchored) return { brand, flavors: [] };
-  const explicit = recipeTargets(r);
-  if (explicit.length === 0) return { brand, flavors: [] };
-  const flavors: string[] = [];
-  const seen = new Set<string>();
-  for (const t of targets) {
-    if (t.brand.trim().toLowerCase() !== brandCi) continue;
-    const f = t.flavor.trim();
-    if (!f) continue;
-    const ci = f.toLowerCase();
-    if (seen.has(ci)) continue;
-    seen.add(ci);
-    flavors.push(f);
-  }
-  return { brand, flavors };
+  return [];
 }
 
 // ── Tombstone filtering (respect merged-away / deleted names on import) ───────

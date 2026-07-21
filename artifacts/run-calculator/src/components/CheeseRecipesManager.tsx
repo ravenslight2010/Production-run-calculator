@@ -23,7 +23,6 @@ import {
   groupCheeseRecipesByBrand,
   renameCheeseRecipesBrand,
   cheeseComponentShares,
-  cheesePerFlavorComponentOz,
   type CheeseRecipe,
   type CheeseComponent,
 } from "@workspace/cheese-recipes";
@@ -115,29 +114,10 @@ function blankCheeseRecipe(): CheeseRecipe {
 // and hydrate their rows from it. This works exactly like Mixes but is a
 // SEPARATE pool (cheese is not routed into Mixes). The server enforces the
 // manager role on writes; this card is only rendered for managers.
-export type CheeseFlavorTarget = { flavor: string; oz: number };
-// Flavors a catch-all recipe's preview intentionally skips because their
-// profile is name-linked to a different cheese recipe.
-export type CheeseFlavorSkip = { flavor: string; recipeName: string };
-export type CheeseFlavorCoverage = {
-  targets: CheeseFlavorTarget[];
-  skipped: CheeseFlavorSkip[];
-};
-
 export default function CheeseRecipesManager({
-  brands = [],
-  brandFlavors = {},
   ingredientSuggestions = [],
-  getFlavorTargets,
 }: {
-  brands?: string[];
-  brandFlavors?: Record<string, string[]>;
   ingredientSuggestions?: string[];
-  // Per-flavor cheese applicator target weights (oz/pizza) for the flavors a
-  // recipe covers, read from the saved brand/flavor profiles. Drives the
-  // "oz per pizza by flavor" preview; optional so the editor still works
-  // standalone (no preview shown).
-  getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorCoverage;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useCheeseRecipes();
@@ -411,20 +391,12 @@ export default function CheeseRecipesManager({
                                     {recipe.components.length} ing
                                   </span>
                                 )}
-                                {recipe.flavors.length > 0 && (
-                                  <span className="basis-full sm:basis-auto ml-5 sm:ml-0 max-w-full min-w-0 text-[11px] text-muted-foreground truncate sm:max-w-[14rem]">
-                                    {recipe.flavors.join(", ")}
-                                  </span>
-                                )}
                               </button>
                               {expanded && (
                                 <CheeseRecipeEditor
                                   recipe={recipe}
                                   disabled={busy}
-                                  brands={brands}
-                                  brandFlavors={brandFlavors}
                                   ingredientSuggestions={ingredientSuggestions}
-                                  getFlavorTargets={getFlavorTargets}
                                   onChange={(next) => {
                                     maybeLearnPoolRename("cheese", recipe.name, next.name, next.brand);
                                     // Per-row brand edit: if no OTHER row still
@@ -476,35 +448,25 @@ export default function CheeseRecipesManager({
 function CheeseRecipeEditor({
   recipe,
   disabled,
-  brands,
-  brandFlavors,
   ingredientSuggestions,
-  getFlavorTargets,
   onChange,
   onDelete,
   onMoveToMixes,
 }: {
   recipe: CheeseRecipe;
   disabled: boolean;
-  brands: string[];
-  brandFlavors: Record<string, string[]>;
   ingredientSuggestions: string[];
-  getFlavorTargets?: (recipe: CheeseRecipe) => CheeseFlavorCoverage;
   onChange: (recipe: CheeseRecipe) => void;
   onDelete: () => void;
   onMoveToMixes?: () => void;
 }) {
   const [draft, setDraft] = useState<CheeseRecipe>(recipe);
-  // Flavors edit as a comma-separated string so managers can type freely; it's
-  // split back into the flavors[] on commit.
-  const [flavorsText, setFlavorsText] = useState<string>(recipe.flavors.join(", "));
 
   const signature = JSON.stringify(recipe);
   const [lastSignature, setLastSignature] = useState(signature);
   if (signature !== lastSignature) {
     setLastSignature(signature);
     setDraft(recipe);
-    setFlavorsText(recipe.flavors.join(", "));
   }
 
   function patch(p: Partial<CheeseRecipe>) {
@@ -512,11 +474,9 @@ function CheeseRecipeEditor({
   }
 
   function commit(next: CheeseRecipe = draft) {
-    const flavors = flavorsText
-      .split(",")
-      .map((f) => f.trim())
-      .filter(Boolean);
-    const clean = normalizeCheeseRecipe({ ...next, flavors });
+    // Stored flavors are inert (targeting removed) — pass them through
+    // unchanged; recipes attach via applicator-slot name links only.
+    const clean = normalizeCheeseRecipe(next);
     if (clean) onChange({ ...clean, id: next.id, scope: next.scope });
   }
 
@@ -545,34 +505,11 @@ function CheeseRecipeEditor({
     commit(next);
   }
 
-  const flavorOptions = brandFlavors[draft.brand] ?? [];
   const totalLbs = draft.components.reduce((s, c) => s + (Number(c.lbs) || 0), 0);
   // Each ingredient's share of the blend (fractions summing to 1) — explicit
   // sharePct first, then ozPerPizza proportions, then lbs proportions. Drives
-  // the Share % column's derived placeholder and the per-flavor preview.
+  // the Share % column's derived placeholder.
   const shares = useMemo(() => cheeseComponentShares(draft.components), [draft.components]);
-
-  // Per-flavor cheese target weights from the saved profiles (via the
-  // getFlavorTargets prop wired by the page): each covered flavor's cheese
-  // applicator Oz/Pizza. The per-ingredient oz/pizza shown in the preview is
-  // that target split by each ingredient's blend share — the same math the run
-  // "Cheese" cards use (cheesePerFlavorComponentOz), so what the manager
-  // previews here is exactly what operators see on a run.
-  const flavorCoverage = getFlavorTargets
-    ? getFlavorTargets(draft)
-    : { targets: [], skipped: [] };
-  const flavorTargets = flavorCoverage.targets;
-  const skippedFlavors = flavorCoverage.skipped;
-
-  const flavorPreview = useMemo(
-    () =>
-      flavorTargets.map((ft) => ({
-        flavor: ft.flavor,
-        targetOz: ft.oz,
-        rows: cheesePerFlavorComponentOz(draft.components, ft.oz).rows,
-      })),
-    [draft.components, flavorTargets],
-  );
 
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 p-2.5 space-y-2">
@@ -658,7 +595,6 @@ function CheeseRecipeEditor({
           <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Customer (brand)</span>
           <input
             type="text"
-            list={`cheese-brands-${draft.id}`}
             value={draft.brand}
             onChange={(e) => patch({ brand: e.target.value })}
             onBlur={() => commit()}
@@ -666,11 +602,6 @@ function CheeseRecipeEditor({
             placeholder="Any customer"
             className="w-40 rounded-md border border-input bg-background px-2 py-1 text-xs"
           />
-          <datalist id={`cheese-brands-${draft.id}`}>
-            {brands.map((b) => (
-              <option key={b} value={b} />
-            ))}
-          </datalist>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Shredder setting</span>
@@ -696,28 +627,6 @@ function CheeseRecipeEditor({
             className="w-24 rounded-md border border-input bg-background px-2 py-1 text-xs"
           />
         </div>
-      </div>
-
-      {/* Flavors assigned */}
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-          Flavors (comma separated — blank = all varieties)
-        </span>
-        <input
-          type="text"
-          list={`cheese-flavors-${draft.id}`}
-          value={flavorsText}
-          onChange={(e) => setFlavorsText(e.target.value)}
-          onBlur={() => commit()}
-          disabled={disabled}
-          placeholder="Pepperoni, Cheese, …"
-          className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-        />
-        <datalist id={`cheese-flavors-${draft.id}`}>
-          {flavorOptions.map((f) => (
-            <option key={f} value={f} />
-          ))}
-        </datalist>
       </div>
 
       {/* Notes */}
@@ -821,43 +730,6 @@ function CheeseRecipeEditor({
         </button>
       </div>
 
-      {/* Per-flavor preview: target oz × share for each covered flavor */}
-      {flavorPreview.length > 0 && (
-        <div className="space-y-1.5 rounded-md border border-border/40 bg-background/40 p-2">
-          <p className="text-[11px] font-semibold text-muted-foreground">
-            Per-flavor oz/pizza preview (cheese target × share)
-          </p>
-          {flavorPreview.map((f) => (
-            <div key={f.flavor} className="text-[11px]">
-              <span className="font-semibold">{f.flavor}</span>
-              <span className="text-muted-foreground"> — target {f.targetOz.toLocaleString(undefined, { maximumFractionDigits: 2 })} oz: </span>
-              <span className="font-mono text-muted-foreground">
-                {draft.components
-                  .map((c, i) => ({ ingredient: c.ingredient.trim(), oz: f.rows[i] ?? 0 }))
-                  .filter((r) => r.ingredient)
-                  .map((r) => `${r.ingredient} ${r.oz.toLocaleString(undefined, { maximumFractionDigits: 2 })} oz`)
-                  .join(" · ")}
-              </span>
-            </div>
-          ))}
-          {skippedFlavors.length > 0 && (
-            <p className="text-[11px] text-muted-foreground/80 italic">
-              Not shown: {skippedFlavors
-                .map((s) => `${s.flavor} uses its own cheese mix (${s.recipeName})`)
-                .join(" · ")}
-            </p>
-          )}
-        </div>
-      )}
-      {flavorPreview.length === 0 && skippedFlavors.length > 0 && (
-        <div className="rounded-md border border-border/40 bg-background/40 p-2">
-          <p className="text-[11px] text-muted-foreground/80 italic">
-            Not shown: {skippedFlavors
-              .map((s) => `${s.flavor} uses its own cheese mix (${s.recipeName})`)
-              .join(" · ")}
-          </p>
-        </div>
-      )}
     </div>
   );
 }

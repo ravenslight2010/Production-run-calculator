@@ -3,7 +3,6 @@ import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide
 import {
   recipeApplyIssue,
   profileApplyIssue,
-  recipeApplyTargets,
   buildSpecRenameMaps,
   remapRecipeForRenames,
   crossFillSpecImport,
@@ -18,7 +17,6 @@ import {
   type NamedRecipeRename,
   type ParsedProfile,
   type ParsedRecipe,
-  type ParsedRecipeTarget,
   type ParsedSpecImport,
   type SpecProfileRename,
   type SpecImportAlias,
@@ -857,9 +855,6 @@ export default function SpecImportDialog({
                       <RecipeRow
                         key={r.key}
                         item={r}
-                        editedProfiles={edited.profiles}
-                        brands={brands}
-                        flavorsByBrand={flavorsByBrand}
                         existingOptions={existingRecipeNamesByKind[r.kind] ?? []}
                         onToggle={() => setRecipe(r.key, { include: !r.include })}
                         onName={(name) => setRecipe(r.key, { name })}
@@ -870,8 +865,6 @@ export default function SpecImportDialog({
                             updateExisting: false,
                           })
                         }
-                        onBrand={(brand) => setRecipe(r.key, { brand, brandTouched: true })}
-                        onFlavor={(flavor) => setRecipe(r.key, { flavor, flavorTouched: true })}
                         onLinkExisting={(linkExisting) =>
                           // Changing the pick resets the "update it" checkbox —
                           // consent to overwrite one recipe must never carry
@@ -1219,52 +1212,32 @@ function ProfileRow({
   );
 }
 
-function formatTargets(targets: ParsedRecipeTarget[]): string {
-  const shown = targets.slice(0, 3).map((t) => `${t.brand} — ${t.flavor}`);
-  const extra = targets.length - shown.length;
-  return shown.join(", ") + (extra > 0 ? `, +${extra} more` : "");
-}
-
 function RecipeRow({
   item,
-  editedProfiles,
-  brands,
-  flavorsByBrand,
   existingOptions,
   onToggle,
   onName,
   onKind,
-  onBrand,
-  onFlavor,
   onLinkExisting,
   onUpdateExisting,
 }: {
   item: RecipeItem;
-  editedProfiles: ParsedProfile[];
-  brands: string[];
-  flavorsByBrand: Record<string, string[]>;
   /** Existing saved recipes of this kind the user can reuse instead of creating one. */
   existingOptions: string[];
   onToggle: () => void;
   onName: (v: string) => void;
   onKind: (v: SpecImportDisplayKind) => void;
-  onBrand: (v: string) => void;
-  onFlavor: (v: string) => void;
   onLinkExisting: (v: string) => void;
   onUpdateExisting: (v: boolean) => void;
 }) {
   const linked = item.linkExisting?.trim() ?? "";
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
   const name = linked || item.name.trim();
-  const brand = item.brand.trim();
-  const flavor = item.flavor.trim();
   const candidate: ParsedRecipe = {
     ...item.orig,
     name,
     kind: parseKindOf(item.kind),
     ...(linked ? { referenceOnly: true } : {}),
-    ...(brand ? { brand } : {}),
-    ...(flavor ? { flavor } : {}),
   };
   const issue = linked ? undefined : recipeApplyIssue(candidate);
   // Mixes live in the same preset library as cheese recipes (only the NAME
@@ -1279,31 +1252,13 @@ function RecipeRow({
   // update via the Cheese Mix Recipe Specs workbook importer instead.
   const updateOffered =
     (item.kind === "dough" || item.kind === "sauce") && (item.orig.rows?.length ?? 0) > 0;
-  // Which products this recipe will actually attach to when applied. If empty,
-  // the recipe name lands in the library but shows up on NO run — the silent
-  // "it didn't import" miss the user reported.
-  const targets = recipeApplyTargets(candidate, editedProfiles);
-  const attachesToNothing = item.include && !linked && !issue && targets.length === 0;
-  // Dough & sauce are SHARED library recipes — one recipe serves many
-  // brand/flavors, and a recipe imported before its spec sheets attaches
-  // automatically later (the spec sheet names the dough/sauce and the profile
-  // hydrates from the library by name). Never pressure the user to pick a
-  // brand/flavor for them; the attach editor stays available but optional.
-  const isSharedLibraryKind = item.kind === "dough" || item.kind === "sauce";
-  const needsAttachWarning = attachesToNothing && !isSharedLibraryKind;
-  // Brand chosen but no flavor yet → the recipe currently attaches to EVERY flavor
-  // of that brand. Keep the brand+flavor editor on screen in this state so the
-  // flavor field doesn't vanish the instant a brand is typed (which silently left
-  // the recipe attached to all flavors). The user can then narrow to one flavor or
-  // deliberately leave it applying to all.
-  const attachesToAllFlavors =
-    item.include && !linked && !issue && brand !== "" && flavor === "" && targets.length > 0;
-  const showAttachEditor = attachesToNothing || attachesToAllFlavors;
-  const flavorMatch = Object.keys(flavorsByBrand).find(
-    (b) => b.trim().toLowerCase() === brand.toLowerCase(),
-  );
-  const flavorOpts = flavorMatch ? flavorsByBrand[flavorMatch] ?? [] : [];
-  const flavorListId = `spec-recipe-flavors-${item.key}`;
+  // Recipes attach by NAME only — profiles link a dough/sauce recipe name (or
+  // a cheese/mix applicator-slot name) and hydrate from the library by that
+  // name. There is no brand/flavor attach editor anymore: showing where a
+  // recipe "goes to" was the old targeting model and it caused whole-brand
+  // overwrites. A saved library recipe that nothing links yet is fine — it
+  // attaches automatically when a spec sheet names it.
+  const showLibraryNote = item.include && !linked && !issue;
 
   return (
     <li
@@ -1415,12 +1370,6 @@ function RecipeRow({
             </div>
           )}
 
-          {item.include && !issue && targets.length > 0 && (
-            <div className="mt-1 text-xs text-muted-foreground">
-              Attaches to: {formatTargets(targets)}
-            </div>
-          )}
-
           {item.include && issue === "missing-name" && (
             <div className="mt-1 text-xs text-amber-600">
               Needs a name — this recipe won't be saved until you name it.
@@ -1432,63 +1381,10 @@ function RecipeRow({
             </div>
           )}
 
-          {showAttachEditor && (
-            <div
-              className={`mt-2 rounded-md border p-2 ${
-                needsAttachWarning
-                  ? "border-amber-400/60 bg-amber-500/10"
-                  : "border-border bg-muted/40"
-              }`}
-            >
-              {attachesToNothing && isSharedLibraryKind ? (
-                <div className="text-xs font-medium text-foreground">
-                  Saved to your {item.kind === "dough" ? "dough" : "sauce"} library.
-                  It attaches automatically to any product whose spec sheet names it —
-                  you can also set a brand & flavor below to attach it now.
-                </div>
-              ) : needsAttachWarning ? (
-                <div className="text-xs font-medium text-amber-700">
-                  Won't show on any product yet — set the brand & flavor it belongs to.
-                </div>
-              ) : (
-                <div className="text-xs font-medium text-foreground">
-                  Attaching to every flavor of “{brand}” — add a flavor below to attach
-                  it to just one.
-                </div>
-              )}
-              <datalist id={flavorListId}>
-                {flavorOpts.map((f) => (
-                  <option key={f} value={f} />
-                ))}
-              </datalist>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <input
-                  value={item.brand}
-                  onChange={(e) => onBrand(e.target.value)}
-                  list="spec-import-brands"
-                  placeholder="Brand"
-                  aria-label={`Attach recipe ${item.orig.name || "(unnamed)"} to brand`}
-                  data-testid={`spec-recipe-brand-${item.key}`}
-                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-                />
-                <input
-                  value={item.flavor}
-                  onChange={(e) => onFlavor(e.target.value)}
-                  list={flavorListId}
-                  placeholder="Flavor"
-                  aria-label={`Attach recipe ${item.orig.name || "(unnamed)"} to flavor`}
-                  data-testid={`spec-recipe-flavor-${item.key}`}
-                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-                />
-              </div>
-              <p
-                className={`mt-1 text-[11px] ${
-                  needsAttachWarning ? "text-amber-700/80" : "text-muted-foreground"
-                }`}
-              >
-                Enter both, or set just a brand to attach to every matching product in
-                this import. The recipe is still saved to your library either way.
-              </p>
+          {showLibraryNote && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Saved to your library — it attaches to every product whose setup
+              names this recipe.
             </div>
           )}
 

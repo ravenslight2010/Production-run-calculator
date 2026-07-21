@@ -46,10 +46,10 @@ function blankNamedRecipe(prefix: string, name: string): NamedRecipe {
 
 // Manager-only editor for factory-wide Dough / Sauce recipes. A named recipe is
 // a simple name plus a list of components (each ingredient and its pounds).
-// Like Cheese Recipes each can carry a DISPLAY-ONLY "who it goes to" tag: a
-// customer brand plus the flavors it's used on (brand with no flavors = all
-// varieties; no brand = shared/untagged). Tags never filter the run pickers —
-// this stays a flat, searchable list sorted by name. Recipes are persisted
+// Recipes attach to products by NAME only — a profile links a dough/sauce
+// recipe name and hydrates from this pool; there is no brand/flavor "who it
+// goes to" targeting (stored brand/flavors fields on old rows are inert).
+// This stays a flat, searchable list sorted by name. Recipes are persisted
 // server-side (shared across all signed-in users) and feed the run form's
 // Dough / Sauce cards, which pick one and hydrate their rows from it. This
 // works exactly like Cheese Recipes / Mixes but is a SEPARATE pool per kind.
@@ -58,13 +58,9 @@ function blankNamedRecipe(prefix: string, name: string): NamedRecipe {
 export default function NamedRecipesManager({
   kind,
   ingredientSuggestions = [],
-  brands = [],
-  brandFlavors = {},
 }: {
   kind: NamedRecipeKind;
   ingredientSuggestions?: string[];
-  brands?: string[];
-  brandFlavors?: Record<string, string[]>;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useNamedRecipes(kind);
@@ -206,16 +202,6 @@ export default function NamedRecipesManager({
                             {recipe.components.length} ing
                           </span>
                         )}
-                        {recipe.brand && (
-                          <span className="basis-full sm:basis-auto min-w-0 flex ml-5 sm:ml-0">
-                            <span className="max-w-full min-w-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary truncate sm:max-w-[14rem]">
-                              {recipe.brand}
-                              {recipe.flavors.length > 0
-                                ? ` — ${recipe.flavors.join(", ")}`
-                                : " — all varieties"}
-                            </span>
-                          </span>
-                        )}
                       </button>
                       {expanded && (
                         <NamedRecipeEditor
@@ -223,8 +209,6 @@ export default function NamedRecipesManager({
                           recipe={recipe}
                           disabled={busy}
                           ingredientSuggestions={ingredientSuggestions}
-                          brands={brands}
-                          brandFlavors={brandFlavors}
                           onChange={(next) => {
                             maybeLearnPoolRename(kind, recipe.name, next.name);
                             saveMutation.mutate([next]);
@@ -260,8 +244,6 @@ function NamedRecipeEditor({
   recipe,
   disabled,
   ingredientSuggestions,
-  brands,
-  brandFlavors,
   onChange,
   onDelete,
 }: {
@@ -269,32 +251,16 @@ function NamedRecipeEditor({
   recipe: NamedRecipe;
   disabled: boolean;
   ingredientSuggestions: string[];
-  brands: string[];
-  brandFlavors: Record<string, string[]>;
   onChange: (recipe: NamedRecipe) => void;
   onDelete: () => void;
 }) {
   const [draft, setDraft] = useState<NamedRecipe>(recipe);
-  // Flavors are edited as free comma-separated text and split on commit (same
-  // pattern as the Cheese Recipes editor).
-  const [flavorsText, setFlavorsText] = useState(recipe.flavors.join(", "));
 
   const signature = JSON.stringify(recipe);
   const [lastSignature, setLastSignature] = useState(signature);
   if (signature !== lastSignature) {
     setLastSignature(signature);
     setDraft(recipe);
-    setFlavorsText(recipe.flavors.join(", "));
-  }
-
-  function commitFlavorsText(text: string) {
-    const flavors = text
-      .split(",")
-      .map((f) => f.trim())
-      .filter(Boolean);
-    const next = { ...draft, flavors };
-    setDraft(next);
-    commit(next);
   }
 
   function patch(p: Partial<NamedRecipe>) {
@@ -416,49 +382,6 @@ function NamedRecipeEditor({
         placeholder="Notes (optional)…"
         className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
       />
-
-      {/* Who it goes to (display-only tag — never filters the run pickers) */}
-      <div className="space-y-1">
-        <p className="text-[11px] font-semibold text-muted-foreground">
-          Who it goes to (optional)
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            list={`named-brands-${draft.id}`}
-            value={draft.brand}
-            onChange={(e) => patch({ brand: e.target.value })}
-            onBlur={() => commit()}
-            disabled={disabled}
-            placeholder="Brand (blank = shared)…"
-            className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
-          />
-          <input
-            type="text"
-            list={`named-flavors-${draft.id}`}
-            value={flavorsText}
-            onChange={(e) => setFlavorsText(e.target.value)}
-            onBlur={(e) => commitFlavorsText(e.target.value)}
-            disabled={disabled || !draft.brand.trim()}
-            placeholder={
-              draft.brand.trim()
-                ? "Flavors, comma-separated (blank = all varieties)…"
-                : "Set a brand first…"
-            }
-            className="flex-[1.4] min-w-[9rem] rounded-md border border-input bg-background px-2 py-1 text-xs disabled:opacity-50"
-          />
-        </div>
-        <datalist id={`named-brands-${draft.id}`}>
-          {brands.map((b) => (
-            <option key={b} value={b} />
-          ))}
-        </datalist>
-        <datalist id={`named-flavors-${draft.id}`}>
-          {(brandFlavors[draft.brand.trim()] ?? []).map((f) => (
-            <option key={f} value={f} />
-          ))}
-        </datalist>
-      </div>
 
       {/* Dough only: per-variant doughball numbers this family recipe covers.
           A spec import fills these automatically (label = the variant's sheet

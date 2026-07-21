@@ -1,5 +1,4 @@
-- [Near-dup scan perf](near-dup-scan-perf.md) — in-pool duplicate scans build ONE matcher (excludeSelf), never rebuild per name; O(n²) rebuilds froze the page as import pools grew.
-- [Recipe print/share](recipe-print-share.md) — AbortError=shared (never clipboard-clobber), escaped print popup; web-only, mobile pending.
+- [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
 - [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; PURCHASED crusts (Bonici/Pedone parbake/pinsa) get NO die ever; apps self-heal DIE_TYPES from profiles honoring deletions.
@@ -147,8 +146,7 @@
 - [Spec-import stub pollution](spec-import-stub-pollution.md) — spec imports mint all-zero stub recipes in every pool; unlinked stubs persist in prod; audit method + corpus pointer inside.
 - [Corpus regression harness](corpus-harness.md) — no-AI snapshot bench over the real workbook corpus (test:corpus); mix-word rule deliberately beats cheesy components in spec-import routing.
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
-- [Dev DB connection exhaustion](dev-db-connection-exhaustion.md) — "too many clients" from orphaned external backends can last hours; retry post-merge push, else workspace reboot; restart both API workflows after recovery.
-- [Detached process reaping](detached-process-reaping.md) — setsid/nohup from the bash tool dies with the session; >2min runs need a workflow or a smaller foreground run.
+- [Dev DB connection exhaustion](dev-db-connection-exhaustion.md) + [detached process reaping](detached-process-reaping.md) — "too many clients" can last hours (retry, else reboot; restart both APIs); setsid/nohup dies with the bash session, >2min runs need a workflow.
 - [Die defaults switch-aware](die-defaults-switch-aware.md) — explicit die picks use the switch-aware resolver (replaces prior die auto-fill); import/autofill paths stay strict blank-fill-only.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
@@ -156,4 +154,4 @@
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.
 - [Bare-qualifier pep names](natural-pep-name-poison.md) — pep type = full product name; canonical "Pepperoni Stick - NATURAL"; synced-name poison needs a write-time sync guard, not just a one-time heal.
 - [Spec re-import rename memory](spec-reimport-rename-memory.md) — EVERY merge/rename entry point must learn spec-import aliases (ingredients under all 3 kinds; brand learns re-context flavor aliases); paren guard: "X (A)" never fuzzes onto "X (B)".
-- [Brand-fan linked-name narrowing](brand-fan-linked-name-narrowing.md) — qualified dough/sauce names never blanket a brand onto profiles linked to a DIFFERENT recipe; pool must carry linked names.
+- [Name-only recipe attachment](recipe-name-only-attachment.md) + [historical fan narrowing](brand-fan-linked-name-narrowing.md) — brand/flavor apply-target fan RETIRED; recipes attach by name link/slot match; same-sheet tie is the only brand/flavor path.
