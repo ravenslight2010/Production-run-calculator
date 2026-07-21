@@ -49,6 +49,11 @@ import {
   type DoughPoolRow,
 } from "./brandFanHeal";
 import {
+  BRAND_DRIFT_RENAMES,
+  brandDriftTargetFor,
+  planBrandAliasRepoints,
+} from "./brandDriftHeal";
+import {
   healSeaSaltComponents,
   SEA_SALT_DOUGH_TARGETS,
   SEA_SALT_SAUCE_TARGETS,
@@ -2215,11 +2220,126 @@ async function runBrandFanDoughDepoison(): Promise<void> {
   });
 }
 
-/**
- * Run all pending one-time data heals. Best-effort: callers must catch — a
- * failed heal logs and leaves its marker unclaimed (the transaction rolls
- * back), so it retries on the next boot.
- */
+// ── Drifted customer-name alignment ─────────────────────────────────────────
+// A production audit found pool rows whose brand tag spells the customer
+// differently than the saved product profiles ("Basha's Ultra Thin" vs
+// "Basha's Ultra Thin Crust", 'FSD 7"' vs "FSD 7in", ...), so those recipes
+// don't group under the customer in Manage Lists and brand-scoped import
+// linking can miss them. This heal applies the existing customer-rename flow
+// as data: rewrite the drifted tags to the canonical spelling across all four
+// server pools (every scope — sandbox copies of the drift must not survive),
+// then learn the context-free brand spec-import aliases (with chain re-point)
+// so re-importing the source workbooks resolves onto the canonical customer
+// instead of resurrecting the drifted spelling.
+
+const BRAND_DRIFT_HEAL_ID = "brand-drift-rename-v1";
+
+async function runBrandDriftRename(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: BRAND_DRIFT_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1) Rewrite drifted brand tags in place (same rows keep their ids, like
+    // the pool managers' rename repoint helpers). Collect every scope seen so
+    // alias learning covers each populated scope.
+    const scopes = new Set<string>(["live"]);
+    let renamedRows = 0;
+    const pools = [
+      cheeseRecipesTable,
+      mixesTable,
+      doughRecipesTable,
+      sauceRecipesTable,
+    ] as const;
+    for (const table of pools) {
+      const rows = await tx
+        .select({ id: table.id, scope: table.scope, brand: table.brand })
+        .from(table)
+        .for("update");
+      for (const row of rows) {
+        scopes.add(row.scope);
+        const target = brandDriftTargetFor(row.brand ?? "");
+        if (!target) continue;
+        await tx
+          .update(table)
+          .set({ brand: target, updatedAt: new Date() })
+          .where(and(eq(table.id, row.id), eq(table.scope, row.scope)));
+        renamedRows++;
+      }
+    }
+
+    // 2) Chain re-point existing spec-import aliases (all scopes): brand
+    // aliases that resolved onto a drifted spelling now resolve onto the
+    // canonical name; flavor aliases contexted to a drifted brand are
+    // re-contexted so they still fire after the brand canonicalizes first.
+    const aliasRows = await tx.select().from(specImportAliasesTable).for("update");
+    let repointedAliases = 0;
+    for (const [from, to] of BRAND_DRIFT_RENAMES) {
+      for (const plan of planBrandAliasRepoints(aliasRows, from, to)) {
+        if (plan.action === "delete") {
+          await tx
+            .delete(specImportAliasesTable)
+            .where(eq(specImportAliasesTable.id, plan.row.id));
+        } else {
+          await tx
+            .update(specImportAliasesTable)
+            .set({ ...plan.set, updatedAt: new Date() })
+            .where(eq(specImportAliasesTable.id, plan.row.id));
+        }
+        repointedAliases++;
+      }
+    }
+
+    // 3) Learn the direct drifted→canonical brand aliases per scope (manual
+    // upsert on the alias identity key kind+externalName+context — the table
+    // has no unique constraint; the route dedupes the same way).
+    let learnedAliases = 0;
+    for (const scope of scopes) {
+      for (const [from, to] of BRAND_DRIFT_RENAMES) {
+        const existing = aliasRows.filter(
+          (a) =>
+            a.scope === scope &&
+            a.kind === "brand" &&
+            a.externalName.trim().toLowerCase() === from.trim().toLowerCase() &&
+            (a.context ?? null) === null,
+        );
+        if (existing.length > 0) {
+          for (const row of existing) {
+            if (row.canonicalName === to) continue;
+            await tx
+              .update(specImportAliasesTable)
+              .set({ canonicalName: to, updatedAt: new Date() })
+              .where(eq(specImportAliasesTable.id, row.id));
+            learnedAliases++;
+          }
+        } else {
+          await tx.insert(specImportAliasesTable).values({
+            scope,
+            kind: "brand",
+            externalName: from,
+            canonicalName: to,
+            context: null,
+          });
+          learnedAliases++;
+        }
+      }
+    }
+
+    logger.info(
+      {
+        heal: BRAND_DRIFT_HEAL_ID,
+        renamedRows,
+        repointedAliases,
+        learnedAliases,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -2243,4 +2363,5 @@ export async function runDataHeals(): Promise<void> {
   await runBoboCrossFamilyAliasUndo();
   await runNaturalPepNameDepoison();
   await runBrandFanDoughDepoison();
+  await runBrandDriftRename();
 }
