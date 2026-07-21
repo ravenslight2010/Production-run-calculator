@@ -3573,10 +3573,25 @@ export function applySpecImport(
   // PLUS every already-saved profile, so a standalone sauce/dough/cheese procedure
   // sheet (brand-only recipe, no in-import profiles) still attaches to the brand's
   // existing flavors — otherwise it would import to the library and link to nothing.
+  // Saved profiles enter the pool WITH their currently-linked dough/sauce
+  // names so the brand-fan's qualified-name narrowing (recipeApplyTargets) can
+  // tell "already uses this recipe / still blank" apart from "links a
+  // DIFFERENT recipe" — a French Fry dough procedure must not blanket every
+  // flavor of the brand that already runs on CRB dough.
   const applyProfilePool = [
     ...parsed.profiles,
     ...Object.entries(loadBrandFlavors()).flatMap(([brand, flavors]) =>
-      (flavors ?? []).map(flavor => ({ brand, flavor, applicators: [], pepperonis: [] })),
+      (flavors ?? []).map(flavor => {
+        const saved = loadProfile(brand, flavor) as Record<string, unknown> | null;
+        return {
+          brand,
+          flavor,
+          doughName: String(saved?.doughRecipeName ?? "").trim() || undefined,
+          sauceName: String(saved?.frontlineRecipeName ?? "").trim() || undefined,
+          applicators: [],
+          pepperonis: [],
+        };
+      }),
     ),
   ];
   // A dough mixing sheet can carry MANY same-named per-customer variant rows.

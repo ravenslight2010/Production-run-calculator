@@ -863,3 +863,54 @@ describe("applyAutofillEntries", () => {
     expect((out as unknown as Record<string, unknown>).pep1Combined).toBe(true);
   });
 });
+
+describe("buildProfileAutofillPlan — qualified dough name must not blanket the brand", () => {
+  // Production incident: importing "Lowe's French Fry Dough Mixing Procedure"
+  // suggested the French Fry dough (15 oz / 15 per tray) onto the BBQ Chicken
+  // profile that runs on CRB Dough — the recipe's qualifier tokens matched no
+  // flavor, so the whole-brand fan hit every profile. The fan must now skip a
+  // profile whose linked dough is a DIFFERENT recipe.
+  const frenchFryRecipe = {
+    kind: "dough",
+    name: "ALDO'S HEAVY FRENCH FRY DOUGH",
+    brand: "Aldo's",
+    doughballOz: 15,
+    doughPerTray: 15,
+    rows: [{ ingredient: "Flour", lbs: 100 }],
+  };
+
+  it("skips a profile already linked to a different dough recipe", () => {
+    const p = plan(
+      [sheet(1, 100, { recipes: [frenchFryRecipe] } as never)],
+      values({
+        doughRecipeName: "CRB Dough",
+        doughRecipe: [{ ingredient: "Flour", lbs: 50 }],
+        doughballWeightOz: 5.7,
+        doughPerTray: 24,
+      } as Partial<FormValues>),
+    );
+    expect(p.fills.map(f => f.field)).toEqual([]);
+    expect(p.mismatches.map(m => m.field)).toEqual([]);
+    expect(p.conflicts.map(c => c.field)).toEqual([]);
+  });
+
+  it("still offers the dough to a profile with no dough linked yet", () => {
+    const p = plan(
+      [sheet(1, 100, { recipes: [frenchFryRecipe] } as never)],
+      values(),
+    );
+    expect(p.fills.some(f => f.field === "doughRecipeName")).toBe(true);
+  });
+});
+
+describe("buildProfileAutofillPlan — own-brand prefix on linked recipe names", () => {
+  it("does not flag a mismatch when names differ only by the profile's brand prefix", () => {
+    // "Aldo's BBQ Chicken Cheese Mix" (import de-collided with a brand prefix)
+    // vs the profile's "BBQ Chicken Cheese Mix" — same blend, no nag.
+    const p = plan(
+      [sheet(1, 100, { profiles: [profile({ doughName: "Aldo's CRB Dough" })] })],
+      values({ doughRecipeName: "CRB Dough" } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "doughRecipeName")).toBeUndefined();
+  });
+});

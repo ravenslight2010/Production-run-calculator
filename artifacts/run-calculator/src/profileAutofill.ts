@@ -340,9 +340,20 @@ function desiredFromDoughSauceRecipes(
     const rowsField = nameField === "doughRecipeName" ? "doughRecipe" : "frontlineRecipe";
     return pName && !hasRealRows(cur[rowsField]) ? pName : "";
   };
+  // The stand-in for the profile being edited carries its effective linked
+  // dough/sauce names so recipeApplyTargets' qualified-name narrowing can see
+  // that this profile already runs a DIFFERENT recipe — mirroring the pool the
+  // real import builds from saved profiles.
   const pool: ParsedProfile[] = [
     ...(Array.isArray(data?.profiles) ? data.profiles : []),
-    { brand, flavor, applicators: [], pepperonis: [] },
+    {
+      brand,
+      flavor,
+      doughName: effectiveName("doughRecipeName") || undefined,
+      sauceName: effectiveName("frontlineRecipeName") || undefined,
+      applicators: [],
+      pepperonis: [],
+    },
   ];
   const byField = new Map<string, Desired>();
   const set = (field: string, label: string, value: string | number, kind: DesiredKind) => {
@@ -483,11 +494,39 @@ function brandsEqual(a: string, b: string): boolean {
   return !!ka && !!kb && ka === kb;
 }
 
-function stringsEqual(a: string, b: string, kind: DesiredKind, field?: string): boolean {
+/**
+ * Brand-token-tolerant compare for LINKED RECIPE NAMES on a profile of `brand`:
+ * a cheese/premix import de-collides duplicate names by prefixing the customer
+ * brand ("Lowe's BBQ Chicken Cheese Mix"), so on a Lowe's profile that name and
+ * the unprefixed "BBQ Chicken Cheese Mix" are the same blend — flagging it as a
+ * mismatch just nags. Strips the profile brand's own tokens from BOTH keys and
+ * compares what's left; names differing beyond the brand words stay unequal.
+ */
+function namesEqualIgnoringOwnBrand(a: string, b: string, brand: string): boolean {
+  // Union of both brand-key spellings: the loose name key keeps the
+  // possessive "s" ("aldo s") while the brand match key folds it ("aldo") —
+  // strip both forms or "Aldo's X" vs "X" leaves a stray "s" behind.
+  const brandToks = new Set([
+    ...specImportBrandMatchKey(brand).split(" "),
+    ...nameKey(brand).split(" "),
+  ].filter(Boolean));
+  if (brandToks.size === 0) return false;
+  const strip = (v: string): string =>
+    nameKey(v).split(" ").filter((t) => t && !brandToks.has(t)).join(" ");
+  const sa = strip(a);
+  const sb = strip(b);
+  return !!sa && !!sb && sa === sb;
+}
+
+function stringsEqual(a: string, b: string, kind: DesiredKind, field?: string, brand?: string): boolean {
   if (kind === "name") {
     const ka = nameKey(a);
     const kb = nameKey(b);
-    if (ka && kb) return ka === kb;
+    if (ka && kb) {
+      if (ka === kb) return true;
+      if (brand && namesEqualIgnoringOwnBrand(a, b, brand)) return true;
+      return false;
+    }
   }
   // Applicator/pepperoni TYPE names compare by the import's neutral-descriptor
   // fold key so "Whole Milk Mozzarella" == "Whole Mozzarella" — the sheet's
@@ -528,9 +567,9 @@ function stringIsBlank(field: string, value: string): boolean {
 }
 
 /** Two proposed values are "the same" under the field's comparison rules. */
-function valuesEqual(a: string | number, b: string | number, kind: DesiredKind, field?: string): boolean {
+function valuesEqual(a: string | number, b: string | number, kind: DesiredKind, field?: string, brand?: string): boolean {
   if (kind === "number") return Math.abs(Number(a) - Number(b)) <= 0.005;
-  return stringsEqual(String(a), String(b), kind, field);
+  return stringsEqual(String(a), String(b), kind, field, brand);
 }
 
 function currentIsBlank(field: string, cur: unknown, kind: DesiredKind): boolean {
@@ -873,7 +912,7 @@ export function buildProfileAutofillPlan(opts: {
     // the credit line).
     const distinct: Desired[] = [];
     for (const e of entries) {
-      if (!distinct.some((d) => valuesEqual(d.value, e.value, kind, field))) distinct.push(e);
+      if (!distinct.some((d) => valuesEqual(d.value, e.value, kind, field, brand))) distinct.push(e);
     }
 
     // Sources disagree with EACH OTHER → conflict; the user picks.
@@ -910,7 +949,7 @@ export function buildProfileAutofillPlan(opts: {
       const specS = String(d.value);
       if (stringIsBlank(field, curS)) {
         plan.fills.push({ field, label, specValue: specS, source: d.source });
-      } else if (!stringsEqual(curS, specS, kind, field)) {
+      } else if (!stringsEqual(curS, specS, kind, field, brand)) {
         plan.mismatches.push({
           field,
           label,

@@ -156,3 +156,4 @@
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.
 - [Bare-qualifier pep names](natural-pep-name-poison.md) — pep type = full product name; canonical "Pepperoni Stick - NATURAL"; synced-name poison needs a write-time sync guard, not just a one-time heal.
 - [Spec re-import rename memory](spec-reimport-rename-memory.md) — EVERY merge/rename entry point must learn spec-import aliases (ingredients under all 3 kinds; brand learns re-context flavor aliases); paren guard: "X (A)" never fuzzes onto "X (B)".
+- [Brand-fan linked-name narrowing](brand-fan-linked-name-narrowing.md) — qualified dough/sauce names never blanket a brand onto profiles linked to a DIFFERENT recipe; pool must carry linked names.

@@ -2361,7 +2361,39 @@ export function recipeApplyTargets(
         );
         return qual.every((t) => fTokens.has(t));
       });
-      if (matching.length) fanTo = matching;
+      if (matching.length) {
+        fanTo = matching;
+      } else if (r.kind === "dough" || r.kind === "sauce") {
+        // Qualified name, but NO flavor carries those words. Before letting the
+        // whole-brand fan stand, respect what each profile already links: a
+        // "Lowe's FRENCH FRY Dough" procedure must not overwrite the CRB dough
+        // on every other Lowe's flavor just because no flavor is literally
+        // named "French Fry". Keep only profiles whose linked dough/sauce name
+        // is blank or already IS this recipe (typo/possessive-tolerant); a
+        // profile pointing at a DIFFERENT recipe is excluded. When the pool
+        // carries no linked names at all this reduces to the original
+        // whole-brand fan.
+        const linkedName = (p: ParsedProfile): string =>
+          (r.kind === "dough" ? (p.doughName ?? "") : (p.sauceName ?? "")).trim();
+        // Family-variant tolerant: a profile linked to "Lowe's French Fry
+        // Dough" still matches the "LOWE'S HEAVY FRENCH FRY DOUGH" variant row
+        // — one name's loose-key tokens being a subset of the other's counts
+        // as the same recipe line, mirroring the dough-family collapse rule.
+        const rToks = specImportNameMatchKey(r.name ?? "").split(" ").filter(Boolean);
+        const subset = (a: string[], b: string[]): boolean => {
+          const bs = new Set(b);
+          return a.length > 0 && a.every((t) => bs.has(t));
+        };
+        const sameRecipeLine = (nm: string): boolean => {
+          if (specImportNamedRecipeNamesEqual(nm, r.name ?? "")) return true;
+          const nToks = specImportNameMatchKey(nm).split(" ").filter(Boolean);
+          return subset(nToks, rToks) || subset(rToks, nToks);
+        };
+        fanTo = sameBrand.filter((p) => {
+          const nm = linkedName(p);
+          return !nm || sameRecipeLine(nm);
+        });
+      }
     }
     for (const p of fanTo) {
       const pb = p.brand.trim();
