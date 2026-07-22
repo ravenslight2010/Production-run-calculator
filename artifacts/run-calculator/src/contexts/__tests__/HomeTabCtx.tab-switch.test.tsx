@@ -26,12 +26,21 @@
 // mirrors the homeTabCtxValue useMemo pattern (production deps in, dialog
 // state out).
 //
-// Three tests:
-//  1. PROPAGATION — form value change reaches the tab subscriber via the
-//     real HomeTabCtx.Provider / useHomeTabCtx() path.
-//  2. ISOLATION — dialog open does not trigger a tab re-render.
-//  3. COMBINED — form value change + dialog open: tab shows the new value
-//     but dialog toggle contributes no extra renders.
+// Six describe blocks covering all five Live*TabContent tab types:
+//
+//  Block 1–3: Dough/Packaging slice (casesNeeded, runStatus)
+//    1. PROPAGATION — form value change reaches the tab subscriber.
+//    2. ISOLATION  — dialog open does not trigger a tab re-render.
+//    3. COMBINED   — form change propagates; subsequent dialog open adds no renders.
+//
+//  Block 4: LiveFrontlineTabContent slice (app1Type — applicator form value)
+//    PROPAGATION + ISOLATION
+//
+//  Block 5: LiveSetupRecipesTabContent slice (isSupervisor — role gate)
+//    PROPAGATION + ISOLATION
+//
+//  Block 6: LiveSummaryTabContent slice (runCount derived from dayState.runs)
+//    PROPAGATION + ISOLATION
 
 import { describe, it, expect, afterEach } from "vitest";
 import { useMemo, memo, type ReactNode } from "react";
@@ -230,5 +239,293 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
     // correct casesNeeded (75) without needing another re-render
     expect(getByTestId("cases-needed").textContent).toBe("75");
     expect(getByTestId("run-status").textContent).toBe("running");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 4 — LiveFrontlineTabContent slice
+//
+// The Frontline tab reads `v` (form values) from homeTabCtxValue — specifically
+// applicator fields such as `app1Type`.  Changing `app1Type` must propagate;
+// opening a manage dialog must not cause a re-render.
+// ══════════════════════════════════════════════════════════════════════════════
+
+function FrontlineProvider({
+  app1Type,
+  children,
+}: {
+  app1Type: string;
+  manageCounter: number; // received but intentionally excluded from deps
+  children: ReactNode;
+}) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ v: { app1Type } }), [app1Type]);
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+let frontlineRenderCount = 0;
+
+const FrontlineSubscriber = memo(function FrontlineSubscriberInner() {
+  frontlineRenderCount++;
+  const { v } = useHomeTabCtx();
+  return <span data-testid="app1-type">{(v as any).app1Type}</span>;
+});
+
+afterEach(() => {
+  frontlineRenderCount = 0;
+});
+
+describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
+  // ─── PROPAGATION ──────────────────────────────────────────────────────────
+  // Simulates: operator changes the Applicator 1 type on the Setup tab.
+  // The Frontline tab subscriber must reflect the new value.
+  it("Frontline subscriber sees updated app1Type when form value changes", async () => {
+    const { rerender, getByTestId } = render(
+      <FrontlineProvider app1Type="cheese" manageCounter={0}>
+        <FrontlineSubscriber />
+      </FrontlineProvider>,
+    );
+
+    expect(frontlineRenderCount).toBe(1);
+    expect(getByTestId("app1-type").textContent).toBe("cheese");
+
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="sauce" manageCounter={0}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(2);
+    expect(getByTestId("app1-type").textContent).toBe("sauce");
+  });
+
+  // ─── ISOLATION ────────────────────────────────────────────────────────────
+  // Simulates: manage dialog opens while the user is on the Frontline tab.
+  // Only manageCounter changes; app1Type is stable — no re-render expected.
+  it("Frontline subscriber does NOT re-render when only dialog state changes", async () => {
+    const { rerender } = render(
+      <FrontlineProvider app1Type="cheese" manageCounter={0}>
+        <FrontlineSubscriber />
+      </FrontlineProvider>,
+    );
+
+    expect(frontlineRenderCount).toBe(1);
+
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="cheese" manageCounter={1}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(1);
+
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="cheese" manageCounter={42}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(1);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 5 — LiveSetupRecipesTabContent slice
+//
+// The SetupRecipes tab reads `isSupervisor` from homeTabCtxValue to gate
+// whether the recipe fieldset is editable.  A role change (isSupervisor flip)
+// must propagate; a dialog open must not cause a re-render.
+// ══════════════════════════════════════════════════════════════════════════════
+
+function SetupRecipesProvider({
+  isSupervisor,
+  children,
+}: {
+  isSupervisor: boolean;
+  manageCounter: number; // received but intentionally excluded from deps
+  children: ReactNode;
+}) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ isSupervisor }), [isSupervisor]);
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+let setupRenderCount = 0;
+
+const SetupRecipesSubscriber = memo(function SetupRecipesSubscriberInner() {
+  setupRenderCount++;
+  const { isSupervisor } = useHomeTabCtx();
+  return (
+    <span data-testid="is-supervisor">
+      {(isSupervisor as any) ? "yes" : "no"}
+    </span>
+  );
+});
+
+afterEach(() => {
+  setupRenderCount = 0;
+});
+
+describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () => {
+  // ─── PROPAGATION ──────────────────────────────────────────────────────────
+  // Simulates: user's role changes to supervisor mid-session (e.g. a manager
+  // grants them supervisor access).  The SetupRecipes tab must update.
+  it("SetupRecipes subscriber sees updated isSupervisor when role changes", async () => {
+    const { rerender, getByTestId } = render(
+      <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+        <SetupRecipesSubscriber />
+      </SetupRecipesProvider>,
+    );
+
+    expect(setupRenderCount).toBe(1);
+    expect(getByTestId("is-supervisor").textContent).toBe("no");
+
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(2);
+    expect(getByTestId("is-supervisor").textContent).toBe("yes");
+  });
+
+  // ─── ISOLATION ────────────────────────────────────────────────────────────
+  // Simulates: manage dialog opens while the user is on the SetupRecipes tab.
+  // isSupervisor is stable — subscriber must NOT re-render.
+  it("SetupRecipes subscriber does NOT re-render when only dialog state changes", async () => {
+    const { rerender } = render(
+      <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+        <SetupRecipesSubscriber />
+      </SetupRecipesProvider>,
+    );
+
+    expect(setupRenderCount).toBe(1);
+
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={1}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(1);
+
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={99}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(1);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 6 — LiveSummaryTabContent slice
+//
+// The Summary tab reads `dayState.runs` from homeTabCtxValue to display the
+// shift summary.  Adding a run (run count changes) must propagate; a dialog
+// open must not cause a re-render.
+// ══════════════════════════════════════════════════════════════════════════════
+
+function SummaryProvider({
+  runCount,
+  children,
+}: {
+  runCount: number;
+  manageCounter: number; // received but intentionally excluded from deps
+  children: ReactNode;
+}) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(
+    () => ({ dayState: { runs: Array.from({ length: runCount }, (_, i) => ({ id: `run-${i}` })) } }),
+    [runCount],
+  );
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+let summaryRenderCount = 0;
+
+const SummarySubscriber = memo(function SummarySubscriberInner() {
+  summaryRenderCount++;
+  const { dayState } = useHomeTabCtx();
+  return (
+    <span data-testid="run-count">{(dayState as any).runs.length}</span>
+  );
+});
+
+afterEach(() => {
+  summaryRenderCount = 0;
+});
+
+describe("HomeTabCtx — LiveSummaryTabContent slice (dayState.runs)", () => {
+  // ─── PROPAGATION ──────────────────────────────────────────────────────────
+  // Simulates: a second run is added to the day (e.g. imported from the
+  // schedule).  The Summary tab subscriber must see the updated run count.
+  it("Summary subscriber sees updated run count when dayState.runs changes", async () => {
+    const { rerender, getByTestId } = render(
+      <SummaryProvider runCount={1} manageCounter={0}>
+        <SummarySubscriber />
+      </SummaryProvider>,
+    );
+
+    expect(summaryRenderCount).toBe(1);
+    expect(getByTestId("run-count").textContent).toBe("1");
+
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={2} manageCounter={0}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(2);
+    expect(getByTestId("run-count").textContent).toBe("2");
+  });
+
+  // ─── ISOLATION ────────────────────────────────────────────────────────────
+  // Simulates: manage dialog opens while the user is on the Summary tab.
+  // runCount is stable — subscriber must NOT re-render.
+  it("Summary subscriber does NOT re-render when only dialog state changes", async () => {
+    const { rerender } = render(
+      <SummaryProvider runCount={3} manageCounter={0}>
+        <SummarySubscriber />
+      </SummaryProvider>,
+    );
+
+    expect(summaryRenderCount).toBe(1);
+
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={3} manageCounter={1}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(1);
+
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={3} manageCounter={77}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(1);
   });
 });
