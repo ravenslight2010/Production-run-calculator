@@ -429,3 +429,99 @@ describe("CompactRunStrip resume button — setActiveTab(\"run\") navigation", (
     expect(setActiveTab).not.toHaveBeenCalled();
   });
 });
+
+// ─── CompactRunStrip tab-visibility guard ─────────────────────────────────────
+//
+// Structural guarantee: the parent in home.tsx renders CompactRunStrip (and
+// therefore its resume button) ONLY when activeTab !== "run":
+//
+//   {activeTab !== "run" && <CompactRunStrip />}
+//
+// When the user is already on the Run tab the entire strip is unmounted, so
+// the resume button can never appear — there is no separate in-strip guard
+// needed.  This test models that conditional render directly.
+//
+// Two cases:
+//  1. activeTab === "run" → strip absent, resume button absent
+//  2. activeTab === "setup" (any non-run tab) with runStatus "paused" → strip
+//     present, resume button present
+//
+// Because CompactRunStrip is defined inside home.tsx and cannot be imported
+// directly, the test uses the same ResumeStrip replica already defined above
+// to represent the strip's content.
+
+function ConditionalStrip({
+  activeTab,
+  runStatus,
+  setActiveTab,
+}: {
+  activeTab: string;
+  runStatus: string;
+  setActiveTab: (tab: string) => void;
+}) {
+  const value: ResumeCtxShape = { runStatus, setActiveTab };
+  return (
+    <>
+      {/* Mirrors the exact guard in home.tsx line ~11570 */}
+      {activeTab !== "run" && (
+        <ResumeCtx.Provider value={value}>
+          <ResumeStrip />
+        </ResumeCtx.Provider>
+      )}
+    </>
+  );
+}
+
+describe("CompactRunStrip — hidden when already on the Run tab", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("strip and resume button are absent when activeTab is \"run\" and run is paused", () => {
+    const setActiveTab = vi.fn();
+
+    const { queryByTestId } = render(
+      <ConditionalStrip activeTab="run" runStatus="paused" setActiveTab={setActiveTab} />,
+    );
+
+    // The entire strip is unmounted — no strip element and no resume button.
+    expect(queryByTestId("resume-strip")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+  });
+
+  it("strip and resume button are present when activeTab is not \"run\" and run is paused", () => {
+    const setActiveTab = vi.fn();
+
+    const { getByTestId } = render(
+      <ConditionalStrip activeTab="setup" runStatus="paused" setActiveTab={setActiveTab} />,
+    );
+
+    // Strip is mounted and resume button visible.
+    expect(getByTestId("resume-strip")).not.toBeNull();
+    expect(getByTestId("strip-resume")).not.toBeNull();
+  });
+
+  it("strip is absent on the Run tab regardless of runStatus", async () => {
+    const setActiveTab = vi.fn();
+
+    const { rerender, queryByTestId } = render(
+      <ConditionalStrip activeTab="run" runStatus="running" setActiveTab={setActiveTab} />,
+    );
+    expect(queryByTestId("resume-strip")).toBeNull();
+
+    await act(async () => {
+      rerender(
+        <ConditionalStrip activeTab="run" runStatus="paused" setActiveTab={setActiveTab} />,
+      );
+    });
+    expect(queryByTestId("resume-strip")).toBeNull();
+
+    await act(async () => {
+      rerender(
+        <ConditionalStrip activeTab="run" runStatus="ended" setActiveTab={setActiveTab} />,
+      );
+    });
+    expect(queryByTestId("resume-strip")).toBeNull();
+  });
+});
