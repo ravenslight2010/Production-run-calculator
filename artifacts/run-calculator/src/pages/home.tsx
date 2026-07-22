@@ -15555,7 +15555,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                         </span>
                         <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider truncate">
-                          Running{currentRun?.startedAt ? ` · ${fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? nowTime.getTime() - currentRun.pausedAt : 0))}` : ""}
+                          Running{currentRun?.startedAt ? ` · ${fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? Math.max(0, nowTime.getTime() - currentRun.pausedAt) : 0))}` : ""}
                         </span>
                       </>
                     ) : runStatus === "paused" ? (
