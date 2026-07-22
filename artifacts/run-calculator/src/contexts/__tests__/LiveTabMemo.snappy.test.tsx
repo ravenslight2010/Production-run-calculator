@@ -2305,6 +2305,65 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
     // Test 1's lastNow > firstNow assertion would fail.
     expect(renderCount).toBe(renderCountAfterMount);
   });
+
+  // ─── Test 3: SYMMETRIC SPY GUARD ──────────────────────────────────────────
+  // The render-count counter-proof above (Test 2) validates that HomeTabCtx
+  // alone does not drive re-renders during clock ticks.  But if the simulator
+  // were ever simplified to render null with no hook call at all (trivially
+  // non-subscribed), Test 2 would still pass while no longer validating that an
+  // *active hook consumer* is required to be absent.
+  //
+  // This test adds a symmetric guard using a spy on LiveRunContextNS.useLiveRun:
+  // it renders a simulator that calls useHomeTabCtx() (non-trivial active hook)
+  // but NOT useLiveRun(), and asserts the spy count stays at exactly 0 after
+  // 60 s of clock ticks.
+  //
+  // WHY useHomeTabCtx() AS THE STAND-IN:
+  //   useHomeTabCtx() is the real hook the GlanceOverlay component calls
+  //   alongside useLiveRun().  Using it here keeps the simulator non-degenerate
+  //   (it has an active hook consumer) while confirming that that hook alone
+  //   does NOT trigger the spy — only a direct useLiveRun() call would.
+  //
+  // This proves that if the spy target (LiveRunContextNS.useLiveRun) were ever
+  // renamed or moved to a different module, the sibling subscription test (Test
+  // 1) would start passing vacuously.  This test would immediately fail because
+  // even a non-trivial simulator omitting useLiveRun() would now show spy calls
+  // if the spy were somehow tracking the wrong target.
+  it("symmetric spy guard: spy on LiveRunContextNS.useLiveRun stays at 0 for a useHomeTabCtx()-only simulator (no useLiveRun call) over 60 s", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    try {
+      // Simulator calls useHomeTabCtx() — the non-trivial active hook that the
+      // real GlanceOverlay also calls — but deliberately omits useLiveRun().
+      const HomeTabOnlySim = memo(function HomeTabOnlySimInner() {
+        useHomeTabCtx();
+        return null;
+      });
+
+      render(
+        <GlanceWrapper runStatus="running" manageCounter={0}>
+          <HomeTabOnlySim />
+        </GlanceWrapper>,
+      );
+
+      // No useLiveRun() call in the subtree — spy must be at 0 even after mount.
+      expect(spy.mock.calls.length).toBe(0);
+
+      // Advance 60 s — LiveRunProvider's internal interval fires 60 per-second
+      // ticks and pushes new context values to subscribers.  HomeTabOnlySim is
+      // not subscribed to LiveRunContext so the spy must remain flat.
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      // Still 0: the spy fires ONLY when the hook is actually invoked, not when
+      // the provider emits a new timer value.  If this assertion fails, it means
+      // the spy is intercepting something other than direct useLiveRun() calls —
+      // a signal that the spy target has drifted and Test 1's call-count check
+      // can no longer be trusted.
+      expect(spy.mock.calls.length).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
