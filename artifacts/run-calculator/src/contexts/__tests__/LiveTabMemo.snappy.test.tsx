@@ -2253,14 +2253,36 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
     const firstNow = nowSamples[0];
     expect(firstNow).toBeGreaterThan(0);
 
-    // Advance the fake clock — the simulator must receive updated nowTime via
-    // the LiveRunProvider context update that useLiveRun() subscribes to.
-    await act(async () => { vi.advanceTimersByTime(10_000); });
+    // Spy is set up AFTER the initial render so its baseline count is 0.
+    // This confirms the spy only fires on actual hook invocations during
+    // re-renders, not from module-level side effects.  If the spy target
+    // (LiveRunContextNS.useLiveRun) were ever renamed or moved to a different
+    // module, this pre-tick assertion would still be 0 while the post-tick
+    // assertion below would fail — immediately signalling that Test 1's
+    // call-count guard can no longer be trusted.
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+    try {
+      // Pre-tick: spy count must be 0 — no re-renders have occurred yet between
+      // spy setup and timer advance, so useLiveRun() has not been called again.
+      expect(spy.mock.calls.length).toBe(0);
 
-    const lastNow = nowSamples[nowSamples.length - 1];
-    // Clock ticked → useLiveRun() subscription delivered new nowTime →
-    // component re-rendered with an advanced timestamp.
-    expect(lastNow).toBeGreaterThan(firstNow);
+      // Advance the fake clock — the simulator must receive updated nowTime via
+      // the LiveRunProvider context update that useLiveRun() subscribes to.
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+
+      const lastNow = nowSamples[nowSamples.length - 1];
+      // Clock ticked → useLiveRun() subscription delivered new nowTime →
+      // component re-rendered with an advanced timestamp.
+      expect(lastNow).toBeGreaterThan(firstNow);
+
+      // Post-tick: spy count must be > 0, confirming that re-renders caused by
+      // the LiveRunProvider clock update actually invoked useLiveRun().  Together
+      // with the pre-tick === 0 assertion above, this makes the guard symmetric:
+      // the spy demonstrably starts at 0 and advances only on hook invocations.
+      expect(spy.mock.calls.length).toBeGreaterThan(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
