@@ -829,4 +829,40 @@ describe("CompactRunStrip — strip stays mounted during tab navigation after ru
     expect(queryByTestId("strip-pause")).toBeNull();
     expect(queryByTestId("strip-resume")).toBeNull();
   });
+
+  it("strip remounts correctly after briefly visiting the Run tab with an ended run", async () => {
+    // Step 1: Start on a non-run tab ("dough") with runStatus "ended" — strip present,
+    // no action buttons (run is already over).
+    const { rerender, getByTestId, queryByTestId } = render(
+      <TabGuardedEndedStrip activeTab="dough" runStatus="ended" />,
+    );
+
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+
+    // Step 2: Navigate to the "run" tab — the `activeTab !== "run"` guard unmounts
+    // the strip entirely (the user is now on the run tab itself).
+    await act(async () => {
+      rerender(<TabGuardedEndedStrip activeTab="run" runStatus="ended" />);
+    });
+
+    // Strip must be completely absent while on the Run tab.
+    expect(queryByTestId("ended-strip")).toBeNull();
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+
+    // Step 3: Navigate back to a non-run tab ("setup") — the guard must remount the
+    // strip.  A regression in the guard would leave the strip absent here.
+    await act(async () => {
+      rerender(<TabGuardedEndedStrip activeTab="setup" runStatus="ended" />);
+    });
+
+    // Strip must be remounted and show "ended" status with no action buttons.
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+  });
 });
