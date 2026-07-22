@@ -8,7 +8,8 @@ import { withSubstitutions } from "./substitutionState";
 export { computeCheesePull, computeCheesePerPizzaOz } from "@workspace/inventory-math";
 
 export function fmtElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
+  const clamped = Math.max(0, ms);
+  const totalSec = Math.floor(clamped / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
