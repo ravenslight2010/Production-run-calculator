@@ -1,4 +1,5 @@
 import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -2404,13 +2405,9 @@ const GroupedPanel = ({
 );
 
 // ─── HomeCtx: stable (non-clock) data shared to extracted sub-components ───
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const HomeCtx = createContext<any>(null);
-function useHomeCtx(): any {
-  const ctx = useContext(HomeCtx);
-  if (!ctx) throw new Error("useHomeCtx must be used within HomeCtx.Provider");
-  return ctx;
-}
+// Extracted to src/contexts/HomeCtx.ts so integration tests can import the
+// real useHomeCtx() hook without pulling in the full home.tsx render tree.
+// (imported at top of file)
 
 // ─── HomeRunSummaryCtx: narrow run-data slice for CompactRunStrip ────────────
 // Only the run/production state CompactRunStrip actually reads. Components
