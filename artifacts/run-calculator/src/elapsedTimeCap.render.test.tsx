@@ -151,4 +151,127 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
     );
     expect(screen.getByTestId("badge").textContent).toBe("30m");
   });
+
+  // -------------------------------------------------------------------------
+  // Scenario E: resumed run — cap survives the full start → pause → resume cycle.
+  //
+  // resumeRun(freezerEmpty=false) shifts startedAt forward by the computed
+  // pauseDuration: newStartedAt = startedAt + (now - pausedAt).  When pausedAt
+  // was stamped with a backward-drifted clock (device thought it was 2 h earlier),
+  // pauseDuration becomes huge and pushes newStartedAt far into the future.
+  //
+  // After resume: pausedAt = null, startedAt = newStartedAt.
+  //
+  // The ElapsedTimeBadge must never display an inflated elapsed:
+  //   - Right after resume (nowMs < newStartedAt): fmtElapsed clamps negative
+  //     runAge to 0 → shows "0m", not "2h 40m".
+  //   - Once time advances past newStartedAt: normal accumulation resumes from 0.
+  //
+  // Both call sites (CompactRunStrip "strip-elapsed" + Elapsed Time card
+  // "elapsed-card-value") are covered.
+  // -------------------------------------------------------------------------
+  describe("resumed run (freezerEmpty=false) with extreme forward-drifted pausedAt", () => {
+    const startedAt = 1_000_000_000; // arbitrary epoch anchor  (T)
+    const runActiveMs = 30 * 60_000; // 30 min of running before pause
+    const pauseWallMs = 10 * 60_000; // 10 min of real wall-clock pause
+    // pausedAt was recorded when the device clock was 2 h behind real time:
+    const pausedAtDrifted = startedAt - 2 * 60 * 60_000; // T − 120 min
+
+    // Resume happens at T + 40 min (30 min running + 10 min wall pause).
+    const resumedAtMs = startedAt + runActiveMs + pauseWallMs; // T + 40 min
+
+    // resumeRun computes: pauseDuration = resumedAtMs − pausedAtDrifted = 160 min
+    //                     newStartedAt  = startedAt  + pauseDuration    = T + 160 min
+    const pauseDuration = resumedAtMs - pausedAtDrifted; // 160 min in ms
+    const postResumeStartedAt = startedAt + pauseDuration; // T + 160 min
+
+    // ── right after resume ────────────────────────────────────────────────
+    // nowMs = T + 40 min  <  postResumeStartedAt = T + 160 min
+    // runAge = −120 min → fmtElapsed clamps to 0 → "0m", not "2h 40m".
+
+    it("CompactRunStrip: right after resume shows 0m (not inflated by the drift)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumedAtMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("0m");
+    });
+
+    it("CompactRunStrip: right after resume — elapsed ≤ actual wall-clock since start (40 min)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumedAtMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("strip-elapsed").textContent ?? "",
+      );
+      const wallClockMinutes = (resumedAtMs - startedAt) / 60_000; // 40 min
+      expect(minutes).toBeLessThanOrEqual(wallClockMinutes);
+    });
+
+    it("ElapsedCard: right after resume shows 0m (not inflated by the drift)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumedAtMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("0m");
+    });
+
+    it("ElapsedCard: right after resume — elapsed ≤ actual wall-clock since start (40 min)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumedAtMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("elapsed-card-value").textContent ?? "",
+      );
+      const wallClockMinutes = (resumedAtMs - startedAt) / 60_000; // 40 min
+      expect(minutes).toBeLessThanOrEqual(wallClockMinutes);
+    });
+
+    // ── normal accumulation after the shifted startedAt is passed ────────
+    // 40 min after newStartedAt: runAge = 40 min → "40m" on both call sites.
+
+    it("CompactRunStrip: 40 min past newStartedAt shows 40m (normal accumulation)", () => {
+      const nowMs = postResumeStartedAt + 40 * 60_000;
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={nowMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("40m");
+    });
+
+    it("ElapsedCard: 40 min past newStartedAt shows 40m (normal accumulation)", () => {
+      const nowMs = postResumeStartedAt + 40 * 60_000;
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={nowMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("40m");
+    });
+  });
 });
