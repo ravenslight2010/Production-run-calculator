@@ -2337,3 +2337,188 @@ describe("LiveTabMemo — Suite 5: useAutoTrack and useNotifications mocks retur
     expect(call1.autoTrackSuggestion).toBe(call2.autoTrackSuggestion);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 9 — Real GlanceOverlay is wired to useHomeTabCtx(), not useHomeCtx()
+//
+// Suites 7 and 8 guard GlanceOverlay's isolation and clock subscription using
+// simulators that hard-code the hooks they call.  If the real GlanceOverlay
+// were accidentally re-wired to useHomeCtx() those simulators would still pass
+// because they control their own hook invocations.
+//
+// This suite closes that gap by rendering the REAL GlanceOverlay component
+// inside a wrapper that provides BOTH contexts:
+//   • HomeCtx.Provider  — invalidated when a dialog field (manageCategory)
+//     toggles; mirrors the full-context churn that occurs in home.tsx when a
+//     manage panel opens or closes.
+//   • HomeTabCtx.Provider — stable; only invalidated on production-dep changes
+//     (runStatus), never on dialog-field toggles.
+//
+// Two tests:
+//
+//   1. REAL-COMPONENT ISOLATION — toggling a HomeCtx dialog field does NOT
+//      change the real GlanceOverlay's data-now attribute.  Because the real
+//      component reads HomeTabCtx (stable) not HomeCtx (changed), React.memo()
+//      skips the re-render entirely and data-now stays the same.
+//      If GlanceOverlay were re-wired to useHomeCtx() it would re-render on
+//      the dialog toggle, receive a fresh nowTime from useLiveRun(), and
+//      data-now would advance — failing the assertion.
+//
+//   2. COUNTER-PROOF — a useHomeCtx() subscriber placed in the same tree DOES
+//      re-render on the same dialog toggle, proving Test 1 has teeth.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Module-level stable refs so RealGlanceHomeCtxWrapper re-renders (caused by
+// dialogOpen changing) don't create new object identities for LiveRunProvider
+// props — which would otherwise emit a spurious context update.
+const S9_DAY_STATE = { runs: [ACTIVE_RUN], currentIndex: 0 } as const;
+const S9_UPCOMING_LABELS: string[] = [];
+const S9_MACHINE = { spinSec: 0, hopperSec: 0 } as const;
+
+// Wrapper providing BOTH HomeCtx (changes on dialogOpen) AND HomeTabCtx
+// (stable — never invalidated by dialog toggles).
+function RealGlanceHomeCtxWrapper({
+  runStatus = "running",
+  dialogOpen = false,
+  children,
+}: {
+  runStatus?: string;
+  dialogOpen?: boolean;
+  children: ReactNode;
+}) {
+  const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+  // HomeTabCtx: stable — only runStatus is a dep; dialog fields are excluded.
+  // This is what GlanceOverlay correctly relies on.
+  const tabCtxValue = useMemo(
+    () => makeHomeTabCtxValue(runStatus),
+    [runStatus],
+  );
+
+  // HomeCtx: invalidates when dialogOpen changes (manageCategory is toggled).
+  // This mirrors what happens in home.tsx when a manage panel opens/closes —
+  // HomeCtx emits a new value but HomeTabCtx does not.
+  const homeCtxValue = useMemo(
+    () => ({
+      runStatus,
+      currentRun: { id: "run-live-1", brand: "TestBrand", flavor: "TestFlavor" },
+      dayState: S9_DAY_STATE,
+      form: null,
+      activeTab: "run",
+      manageCategory: dialogOpen ? "mixes" : "",
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus, dialogOpen],
+  );
+
+  return (
+    <HomeCtx.Provider value={homeCtxValue}>
+      <HomeTabCtx.Provider value={tabCtxValue}>
+        <LiveRunProvider
+          v={ACTIVE_VALUES}
+          ve={ACTIVE_VALUES}
+          runStatus={runStatus as "running"}
+          currentRun={ACTIVE_RUN}
+          currentRunId="run-live-1"
+          form={form}
+          dayState={S9_DAY_STATE}
+          doughSubTab="dough"
+          upcomingRunLabels={S9_UPCOMING_LABELS}
+          prefs={undefined}
+          screenMode={null}
+          machine={S9_MACHINE}
+        >
+          {children}
+        </LiveRunProvider>
+      </HomeTabCtx.Provider>
+    </HomeCtx.Provider>
+  );
+}
+
+describe("LiveTabMemo — Suite 9: real GlanceOverlay is wired to useHomeTabCtx(), not useHomeCtx()", () => {
+  afterEach(() => { cleanup(); });
+
+  // ─── Test 1: REAL-COMPONENT ISOLATION ────────────────────────────────────
+  // The real GlanceOverlay's data-now attribute must not change when a HomeCtx
+  // dialog field toggles.  Because GlanceOverlay subscribes to HomeTabCtx
+  // (which is stable — manageCategory is NOT a dep), React.memo() must skip
+  // the re-render and leave data-now unchanged.
+  //
+  // If GlanceOverlay were accidentally re-wired to call useHomeCtx() instead
+  // of useHomeTabCtx(), the manageCategory change would invalidate HomeCtx,
+  // reach the real component, trigger a re-render with a fresh nowTime from
+  // useLiveRun(), and data-now would advance — failing this assertion.
+  //
+  // No fake timers are used here: the clock is not advanced, so any data-now
+  // change is caused exclusively by a dialog-field-induced re-render, not by
+  // a clock tick.
+  it("real GlanceOverlay: data-now does NOT change when a HomeCtx dialog field toggles (HomeTabCtx is stable)", async () => {
+    const { getByTestId, rerender } = render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <GlanceOverlay />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    const nowAfterMount = Number(getByTestId("glance-now").getAttribute("data-now"));
+    expect(nowAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field: manageCategory "" → "mixes".
+    // HomeCtx emits a new value; HomeTabCtx stays the same.
+    // React.memo() must prevent GlanceOverlay from re-rendering because its
+    // only context subscription (HomeTabCtx) did not change.
+    await act(async () => {
+      rerender(
+        <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={true}>
+          <GlanceOverlay />
+        </RealGlanceHomeCtxWrapper>,
+      );
+    });
+
+    const nowAfterDialog = Number(getByTestId("glance-now").getAttribute("data-now"));
+    // data-now must be identical: no re-render occurred because the real
+    // GlanceOverlay reads HomeTabCtx (stable), not HomeCtx (changed).
+    expect(nowAfterDialog).toBe(nowAfterMount);
+  });
+
+  // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
+  // Proves Test 1 has teeth: a memo()-wrapped component that calls useHomeCtx()
+  // instead of useHomeTabCtx() DOES re-render when the same dialog field
+  // toggles in the same wrapper.  This confirms that Test 1's === assertion
+  // would fail if GlanceOverlay were re-wired to call useHomeCtx().
+  it("counter-proof: a useHomeCtx() subscriber DOES re-render when a HomeCtx dialog field toggles (proving Test 1 would catch the regression)", async () => {
+    let renderCount = 0;
+
+    const HomeCtxSub = memo(function HomeCtxSubInner() {
+      renderCount++;
+      // WRONG hook — mirrors what GlanceOverlay would look like if it were
+      // accidentally re-wired to useHomeCtx() instead of useHomeTabCtx().
+      useHomeCtx();
+      return <span data-testid="s9-counter-proof">rendered</span>;
+    });
+
+    const { rerender } = render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <HomeCtxSub />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    const countAfterMount = renderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the same HomeCtx dialog field: HomeCtx invalidates, the
+    // useHomeCtx() subscriber receives the new context value → re-renders.
+    await act(async () => {
+      rerender(
+        <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={true}>
+          <HomeCtxSub />
+        </RealGlanceHomeCtxWrapper>,
+      );
+    });
+
+    // renderCount increased: the wrong hook caused a needless re-render.
+    // This confirms that Test 1's data-now === assertion would also fail
+    // if GlanceOverlay were re-wired to call useHomeCtx() — because the
+    // re-render would deliver a new nowTime and advance data-now.
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+});
