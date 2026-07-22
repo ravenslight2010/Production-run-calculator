@@ -44,6 +44,24 @@
 //  Block 6: LiveSummaryTabContent slice (runCount derived from dayState.runs)
 //    PROPAGATION + ISOLATION
 
+// ── AUDIT: useAutoTrack / useNotifications mock status ───────────────────────
+//
+// Neither useAutoTrack nor useNotifications is mocked in this file, and that is
+// intentional.  Every test here wires controlled providers directly to the real
+// HomeTabCtx.Provider — LiveRunProvider is NEVER mounted.  Because those two
+// hooks are only called inside LiveRunProvider, they are never invoked by any
+// test in this file.
+//
+// IF A FUTURE CHANGE mounts LiveRunProvider here (or imports a component that
+// pulls it in transitively), you MUST add closure-level vi.mock factories for
+// both hooks before the first test — exactly as LiveTabMemo.snappy.test.tsx
+// does.  Inline vi.fn() / object literals inside the mock factory body would
+// produce a new reference on every call, making LiveRunProvider's liveSlice
+// useMemo deps unstable and silently defeating memo() isolation.  See the
+// STABILITY CONTRACT block at the top of LiveTabMemo.snappy.test.tsx for the
+// authoritative pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { describe, it, expect, afterEach } from "vitest";
 import { useMemo, memo, type ReactNode } from "react";
 import { render, act, cleanup } from "@testing-library/react";
