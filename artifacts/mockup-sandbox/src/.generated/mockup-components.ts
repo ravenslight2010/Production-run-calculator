@@ -2,8 +2,6 @@
 type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
 export const modules: ModuleMap = {
   "./components/mockups/enter-info/Streamlined.tsx": () => import("../components/mockups/enter-info/Streamlined.tsx"),
-  "./components/mockups/import-review/ImportReviewLowes.tsx": () => import("../components/mockups/import-review/ImportReviewLowes.tsx"),
-  "./components/mockups/import-review/ImportReviewProposed.tsx": () => import("../components/mockups/import-review/ImportReviewProposed.tsx"),
   "./components/mockups/tab-dough/Current.tsx": () => import("../components/mockups/tab-dough/Current.tsx"),
   "./components/mockups/tab-dough/Dough.tsx": () => import("../components/mockups/tab-dough/Dough.tsx"),
   "./components/mockups/tab-dough/TimersInline.tsx": () => import("../components/mockups/tab-dough/TimersInline.tsx"),
@@ -23,6 +21,8 @@ export const modules: ModuleMap = {
   "./components/mockups/tab-run/VariantC.tsx": () => import("../components/mockups/tab-run/VariantC.tsx"),
   "./components/mockups/tab-summary/Summary.tsx": () => import("../components/mockups/tab-summary/Summary.tsx"),
   "./components/mockups/tab-timing/Timing.tsx": () => import("../components/mockups/tab-timing/Timing.tsx"),
+  "./components/mockups/import-review/ImportReviewLowes.tsx": () => import("../components/mockups/import-review/ImportReviewLowes.tsx"),
+  "./components/mockups/import-review/ImportReviewProposed.tsx": () => import("../components/mockups/import-review/ImportReviewProposed.tsx"),
   "./components/mockups/ui-directions/ColorStatus.tsx": () => import("../components/mockups/ui-directions/ColorStatus.tsx"),
   "./components/mockups/ui-directions/Compact.tsx": () => import("../components/mockups/ui-directions/Compact.tsx"),
   "./components/mockups/ui-directions/Hybrid.tsx": () => import("../components/mockups/ui-directions/Hybrid.tsx"),
