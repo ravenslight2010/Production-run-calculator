@@ -2424,6 +2424,21 @@ function useHomeRunSummaryCtx(): any {
   return ctx;
 }
 
+// ─── HomeTabCtx: narrow context for live production tab components ────────────
+// LivePackagingTabContent, LiveFrontlineTabContent, LiveDoughTabContent,
+// LiveSetupRecipesTabContent, and LiveSummaryTabContent subscribe here instead
+// of the full HomeCtx. This context memoizes on only non-dialog, non-manage,
+// non-import deps, so those tabs do NOT re-render when a manage dialog opens,
+// merge state changes, or import progress ticks — only when actual production
+// data changes (dayState, form values, ingredients, etc.).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const HomeTabCtx = createContext<any>(null);
+function useHomeTabCtx(): any {
+  const ctx = useContext(HomeTabCtx);
+  if (!ctx) throw new Error("useHomeTabCtx must be used within HomeTabCtx.Provider");
+  return ctx;
+}
+
 export default function Home() {
   const {
     signOut,
@@ -10365,6 +10380,63 @@ export default function Home() {
     v, ve, writeError,
   ]);
 
+  // ── Narrow context for live tab components (Packaging/Frontline/Dough/SetupRecipes/Summary) ──
+  // Always-current ref so the useMemo below can capture the latest homeCtxValue at
+  // the moment its deps change, without listing homeCtxValue itself as a dep.
+  const homeCtxValueRef = useRef(homeCtxValue);
+  homeCtxValueRef.current = homeCtxValue;
+
+  // homeTabCtxValue re-fires only on non-dialog, non-manage, non-import deps.
+  // When ONLY dialog/manage/merge/import state changes (showManageDialog flips,
+  // merge runs, import progress ticks), deps stay the same → useMemo returns the
+  // same cached reference → subscribed live tab components skip the re-render.
+  // When production data changes (dayState, v, ve, ingredients, etc.), deps fire
+  // and the fresh homeCtxValue is forwarded to the live tab components.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const homeTabCtxValue = useMemo(
+    () => homeCtxValueRef.current,
+    [
+      // ── Production / run state ──
+      activeCasts, activeStopId, activeTab, allergenWarnings, allMixRecipeOptions,
+      batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brands,
+      canApproveResets, canEditRules, canManageInventory, canManageStaff,
+      caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
+      checklistAcks, checklistSatisfied,
+      cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields,
+      cheeseIngredients, cheeseNameBrandTags, cheeseNamesForRun, cheeseRecipeNames, cheeseRecipesList,
+      circles, circlesList, currentMixPresets, currentRun, currentRunId,
+      customAllergens, cycleCountQc, cycleCountSchedules, dayState,
+      dieLineDefaultOverrides, dieTypes, doughFields, doughIngredients, doughPoolDrift,
+      doughRecipeNameOptions, doughRecipeNames, doughRecipesList, doughSubTab, doughVariantPick,
+      downtimeDays, editingStop, enabledCheeseRecipes,
+      exportSelection, exporting, flashSaved, flexibleViolations, floorDimmed, floorModeEnabled,
+      frontlineFields, frontlineIngredients, frontlineRecipeNameOptions, frontlineRecipeNames,
+      gripSheets, gripSheetsList, histBenchmarkPpm, history,
+      ingredientCatalog, ingredientTypeOptions, ingredientTypes,
+      isFullscreen, isManager, isOnline, isSupervisor,
+      lastEndedRun, lastRunRecall, learnedBatchWeightRows, learnedBatchWeights,
+      me, mixIngredients, mixMakeDay, mixNameBrandTags, mixRecipeNames, mixes,
+      newReasonInput, nextRunDieType,
+      pep1ShowB, pep2ShowB, pepTypes, proactiveAlert, productionRules,
+      promotingRecipeKind, role, ruleViolations, runStatus, runToTime,
+      saucePoolDrift, sauceRecipesList, sauceWeightsOpen, scheduledDays,
+      screenMode, serverCheeseByName, serverCheeseNames, serverCheeseRowsByName,
+      serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
+      serverDoughVariantsByName, serverDoughWeightByName,
+      serverMixNames, serverMixRowsByName, serverSauceNames, serverSauceRowsByName,
+      serverTemplates, setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
+      // ── Dialog state that IS needed by live production tabs ──
+      // (showManageDialog, showImportDialog, merge*, *Import* are intentionally omitted)
+      showAlertSettings, showFloorMode, showGetStarted, showGlance,
+      showManualStopDialog, showReorderDialog, showReportIssue, showStopDialog,
+      skidStacking, skidStackingList,
+      staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
+      swipeCue, syncConnected, syncPushFailed,
+      templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
+      upcomingRunLabels, v, ve, writeError,
+    ]
+  );
+
   const mainContent = (
     <div
       className="min-h-screen bg-background text-foreground p-4 md:p-6 pb-20 font-sans"
@@ -14107,6 +14179,7 @@ export default function Home() {
   return (
     <HomeRunSummaryCtx.Provider value={homeRunSummaryCtxValue}>
       <HomeCtx.Provider value={homeCtxValue}>
+        <HomeTabCtx.Provider value={homeTabCtxValue}>
         <LiveRunProvider
           v={v}
           ve={ve}
@@ -14127,6 +14200,7 @@ export default function Home() {
         >
           {screenMode ? <ScreenModeView /> : mainContent}
         </LiveRunProvider>
+        </HomeTabCtx.Provider>
       </HomeCtx.Provider>
     </HomeRunSummaryCtx.Provider>
   );
@@ -17097,7 +17171,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 });
 
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
-  const hx = useHomeCtx();
+  const hx = useHomeTabCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
@@ -17705,7 +17779,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
 });
 
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
-  const hx = useHomeCtx();
+  const hx = useHomeTabCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
@@ -17953,7 +18027,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
 });
 
 const LiveDoughTabContent = memo(function LiveDoughTabContent() {
-  const hx = useHomeCtx();
+  const hx = useHomeTabCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
@@ -18752,7 +18826,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 });
 
 const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
-  const hx = useHomeCtx();
+  const hx = useHomeTabCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
@@ -19567,7 +19641,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
 });
 
 const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
-  const hx = useHomeCtx();
+  const hx = useHomeTabCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
@@ -19856,7 +19930,7 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
 });
 
 const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
-  const hx = useHomeCtx();
+  const hx = useHomeTabCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
