@@ -68,8 +68,10 @@ function fillPct(secLeft: number, periodSec: number): number {
 // ppm=100, perTray=60  → trayPeriodSec  = (60  / 100) * 60 = 36 s
 // ppm=100, perBatch=600 → lineBatchSec  = (600 / 100) * 60 = 360 s
 //                        drainQuarterSec = lineBatchSec / 4 = 90 s
+// spinSec (mixer cycle): arbitrary realistic value used for batchProd period
 const TRAY_PERIOD_SEC = 36;
 const BATCH_QUARTER_PERIOD_SEC = 90;
+const SPIN_SEC = 120;
 
 // ── Minimal provider wrapper ─────────────────────────────────────────────────
 function TestProvider({
@@ -101,17 +103,22 @@ function TestProvider({
 }
 
 // ── Probe: reads nowTime + tickDueRefs from useLiveRun() and exposes the
-// computed tray and batch fill-pcts as data-attributes for assertion.
+// computed tray, batch, trayProd, and batchProd fill-pcts as data-attributes
+// for assertion.
 function TickBarProbe() {
   const { nowTime, tickDueRefs } = useLiveRun();
   const nowMs = nowTime.getTime();
-  const traySecLeft  = secLeftOf(tickDueRefs.tray.current,  TRAY_PERIOD_SEC,         nowMs);
-  const batchSecLeft = secLeftOf(tickDueRefs.batch.current, BATCH_QUARTER_PERIOD_SEC, nowMs);
+  const traySecLeft      = secLeftOf(tickDueRefs.tray.current,      TRAY_PERIOD_SEC,          nowMs);
+  const batchSecLeft     = secLeftOf(tickDueRefs.batch.current,     BATCH_QUARTER_PERIOD_SEC, nowMs);
+  const trayProdSecLeft  = secLeftOf(tickDueRefs.trayProd.current,  TRAY_PERIOD_SEC,          nowMs);
+  const batchProdSecLeft = secLeftOf(tickDueRefs.batchProd.current, SPIN_SEC,                 nowMs);
   return (
     <div
       data-testid="probe"
-      data-tray-pct={fillPct(traySecLeft,  TRAY_PERIOD_SEC)}
-      data-batch-pct={fillPct(batchSecLeft, BATCH_QUARTER_PERIOD_SEC)}
+      data-tray-pct={fillPct(traySecLeft,      TRAY_PERIOD_SEC)}
+      data-batch-pct={fillPct(batchSecLeft,     BATCH_QUARTER_PERIOD_SEC)}
+      data-tray-prod-pct={fillPct(trayProdSecLeft,  TRAY_PERIOD_SEC)}
+      data-batch-prod-pct={fillPct(batchProdSecLeft, SPIN_SEC)}
     />
   );
 }
@@ -191,6 +198,61 @@ describe("TickBar animation — regression guard", () => {
 
     // Same two guards as the tray test, applied to the batch TickBar.
     expect(pct1).toBeGreaterThan(pct0);
+    expect(pct1).toBeGreaterThan(0);
+  });
+
+  it("trayProd TickBar pct increases as nowTime advances (guards dropped trayProd ref)", async () => {
+    render(
+      <TestProvider>
+        <TickBarProbe />
+      </TestProvider>,
+    );
+
+    // Arm the trayProd ref 36 s in the future.  trayProd uses the same period
+    // as the consumption tray bar (trayPeriodSec), so a dropped or zeroed ref
+    // would leave secLeftOf returning periodSec → pct stays 0.
+    const t0 = Date.now();
+    mockTickRefs.trayProd.current = t0 + TRAY_PERIOD_SEC * 1000;
+
+    const probe = screen.getByTestId("probe");
+    const pct0  = Number(probe.getAttribute("data-tray-prod-pct"));
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_100);
+    });
+
+    const pct1 = Number(probe.getAttribute("data-tray-prod-pct"));
+
+    // Guard 1: pct must increase — nowTime is propagating through useLiveRun().
+    expect(pct1).toBeGreaterThan(pct0);
+    // Guard 2: pct must be above 0 — the ref was set to a valid future timestamp.
+    expect(pct1).toBeGreaterThan(0);
+  });
+
+  it("batchProd TickBar pct increases as nowTime advances (guards dropped batchProd ref)", async () => {
+    render(
+      <TestProvider>
+        <TickBarProbe />
+      </TestProvider>,
+    );
+
+    // Arm the batchProd ref SPIN_SEC (120 s) in the future.  batchProd uses
+    // spinSec as its period; a dropped or zeroed ref keeps pct at 0 forever.
+    const t0 = Date.now();
+    mockTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
+
+    const probe = screen.getByTestId("probe");
+    const pct0  = Number(probe.getAttribute("data-batch-prod-pct"));
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_100);
+    });
+
+    const pct1 = Number(probe.getAttribute("data-batch-prod-pct"));
+
+    // Guard 1: pct must increase — nowTime is propagating through useLiveRun().
+    expect(pct1).toBeGreaterThan(pct0);
+    // Guard 2: pct must be above 0 — the ref was set to a valid future timestamp.
     expect(pct1).toBeGreaterThan(0);
   });
 
