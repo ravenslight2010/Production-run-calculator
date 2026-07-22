@@ -48,6 +48,7 @@ import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
+import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
 
 // ── Shared mocks (same as neighbouring test files) ───────────────────────────
 
@@ -993,5 +994,293 @@ describe("LiveTabMemo — GlanceOverlay live values advance while manage dialog 
     for (const sample of nowSamples) {
       expect(sample).toBeGreaterThanOrEqual(nowSamples[0]);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 5 — FloorModeView skips re-renders when manage/import dialogs open
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// FloorModeView was switched from useHomeCtx() to useHomeTabCtx() so that
+// manage/import/merge dialog state changes (which update HomeCtx but are
+// intentionally OMITTED from homeTabCtxValue's useMemo deps) do not cause
+// the overlay to re-render and stutter mid-run.
+//
+// FloorModeView's dual-context subscription:
+//   • useHomeTabCtx()  → runStatus, currentRun, v, ve, form, … (production deps)
+//   • useLiveRun()     → nowTime, calc, casesInFreezer, … (live clock)
+//
+// Three tests:
+//  1. ISOLATION  — toggling a manage/merge/import counter (excluded from
+//     homeTabCtxValue deps) does NOT cause the FloorModeView subscriber to
+//     re-render.
+//  2. LIVE CLOCK — live values (nowTime, casesInFreezer) keep advancing while
+//     the manage dialog is simultaneously rendered — the LiveRunProvider
+//     subscription is not blocked.
+//  3. PROPAGATION — a real production-dep change (runStatus) DOES reach the
+//     FloorModeView subscriber (over-memoisation guard).
+
+// ── Wrapper: HomeTabCtx (production deps only) + LiveRunProvider ─────────────
+//
+// Mirrors the isolation home.tsx must maintain:
+//   homeTabCtxValue = useMemo(() => …, [dayState, v, ve, runState, …])
+//   // manageCategory / showManageDialog / importState intentionally omitted
+//
+// manageCounter stands in for any dialog/import/merge state field that is
+// intentionally excluded from homeTabCtxValue's useMemo deps.
+
+// Module-level stable references so FloorModeWrapper re-renders (caused by
+// manageCounter prop changing) do not create new object identities for
+// LiveRunProvider props — which would otherwise emit a spurious context update
+// and defeat the isolation test.
+const FLOOR_DAY_STATE = { runs: [ACTIVE_RUN], currentIndex: 0 } as const;
+const FLOOR_UPCOMING_LABELS: string[] = [];
+const FLOOR_MACHINE = { spinSec: 0, hopperSec: 0 } as const;
+
+function FloorModeWrapper({
+  runStatus = "running",
+  manageCounter = 0,
+  children,
+}: {
+  runStatus?: string;
+  manageCounter?: number;
+  children: ReactNode;
+}) {
+  const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+  // Production deps only — manageCounter intentionally excluded.
+  // This is the contract FloorModeView relies on: dialog state must never
+  // reach homeTabCtxValue's useMemo dep array.
+  const tabCtxValue = useMemo(
+    () => ({ runStatus, casesNeeded: ACTIVE_VALUES.casesNeeded }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus],
+  );
+
+  return (
+    <HomeTabCtx.Provider value={tabCtxValue}>
+      <LiveRunProvider
+        v={ACTIVE_VALUES}
+        ve={ACTIVE_VALUES}
+        runStatus={runStatus as "running"}
+        currentRun={ACTIVE_RUN}
+        currentRunId="run-live-1"
+        form={form}
+        dayState={FLOOR_DAY_STATE}
+        doughSubTab="dough"
+        upcomingRunLabels={FLOOR_UPCOMING_LABELS}
+        prefs={undefined}
+        screenMode={null}
+        machine={FLOOR_MACHINE}
+      >
+        {/* Expose manageCounter in the tree to simulate the dialog being
+            rendered, but it is NOT in HomeTabCtx — mirrors how home.tsx
+            renders a dialog element alongside FloorModeView without
+            putting dialog state into homeTabCtxValue. */}
+        {manageCounter > 0 && (
+          <div data-testid="manage-dialog">Manage dialog #{manageCounter}</div>
+        )}
+        {children}
+      </LiveRunProvider>
+    </HomeTabCtx.Provider>
+  );
+}
+
+// ── HomeTabCtx-only provider for isolation / propagation tests ────────────────
+//
+// Tests 1 and 3 verify the HomeTabCtx isolation guarantee in isolation from
+// the live clock.  LiveRunProvider is intentionally omitted so the only
+// source of context updates is HomeTabCtx — making renderCount checks clean.
+//
+// This mirrors the pattern in HomeTabCtx.tab-switch.test.tsx but targets
+// FloorModeView's specific useHomeTabCtx() call.
+//
+// manageCounter is received as a prop but intentionally excluded from the
+// useMemo deps, mirroring home.tsx's homeTabCtxValue pattern.
+function TabOnlyProvider({
+  runStatus,
+  manageCounter: _manageCounter,  // received, intentionally excluded
+  children,
+}: {
+  runStatus: string;
+  manageCounter: number;
+  children: ReactNode;
+}) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ runStatus }), [runStatus]);
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dialogs open", () => {
+  afterEach(() => { cleanup(); });
+
+  // ─── Test 1: ISOLATION ────────────────────────────────────────────────────
+  // FloorModeView uses useHomeTabCtx() (not useHomeCtx()), so the isolation
+  // guarantee is: when manage/merge/import state changes (excluded from
+  // homeTabCtxValue deps), the component does NOT re-render.
+  //
+  // This test uses ONLY HomeTabCtx.Provider (no LiveRunProvider) so that the
+  // only source of context updates is HomeTabCtx — making renderCount clean
+  // and the assertion decisive.
+  it("FloorModeView does NOT re-render when manage/merge/import dialog state toggles", async () => {
+    let renderCount = 0;
+
+    const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+      renderCount++;
+      // Mirrors FloorModeView's useHomeTabCtx() call — the hook that must
+      // NOT be triggered by dialog/manage state changes.
+      const { runStatus } = useHomeTabCtx();
+      return <span data-testid="floor-status">{runStatus}</span>;
+    });
+
+    const { rerender } = render(
+      <TabOnlyProvider runStatus="running" manageCounter={0}>
+        <FloorModeViewSim />
+      </TabOnlyProvider>,
+    );
+
+    expect(renderCount).toBe(1);
+
+    // Open manage dialog — manageCounter changes, runStatus unchanged.
+    // homeTabCtxValue useMemo dep (runStatus) is stable → same ctx ref →
+    // React.memo skips re-render.
+    await act(async () => {
+      rerender(
+        <TabOnlyProvider runStatus="running" manageCounter={1}>
+          <FloorModeViewSim />
+        </TabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(1);
+
+    // Further dialog state changes (e.g. import progress ticking)
+    await act(async () => {
+      rerender(
+        <TabOnlyProvider runStatus="running" manageCounter={42}>
+          <FloorModeViewSim />
+        </TabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(1);
+
+    // Close dialog — still no re-render.
+    await act(async () => {
+      rerender(
+        <TabOnlyProvider runStatus="running" manageCounter={0}>
+          <FloorModeViewSim />
+        </TabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(1);
+  });
+
+  // ─── Tests 2a / 2b: LIVE CLOCK ────────────────────────────────────────────
+  // FloorModeView is the one floor-mode overlay that stays VISIBLE while a
+  // manager is in a dialog.  The live clock and casesInFreezer must keep
+  // advancing — the LiveRunProvider subscription must not be blocked.
+  //
+  // These tests use the full FloorModeWrapper (HomeTabCtx + LiveRunProvider)
+  // with fake timers to verify that live subscriptions keep ticking.
+  it("FloorModeView nowTime advances while a manage dialog is simultaneously rendered", async () => {
+    vi.useFakeTimers();
+    try {
+      const nowSamples: number[] = [];
+
+      const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+        useHomeTabCtx();
+        const { nowTime } = useLiveRun();
+        nowSamples.push(nowTime.getTime());
+        return <span data-testid="floor-now">{nowTime.getTime()}</span>;
+      });
+
+      // Render with the manage dialog already open (manageCounter=1)
+      render(
+        <FloorModeWrapper runStatus="running" manageCounter={1}>
+          <FloorModeViewSim />
+        </FloorModeWrapper>,
+      );
+
+      const firstNow = nowSamples[0];
+      expect(firstNow).toBeGreaterThan(0);
+
+      // Advance the clock — the overlay must keep receiving ticks.
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      const lastNow = nowSamples[nowSamples.length - 1];
+      expect(lastNow).toBeGreaterThan(firstNow);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("FloorModeView casesInFreezer advances while a manage dialog is simultaneously rendered", async () => {
+    vi.useFakeTimers();
+    try {
+      const freezerSamples: number[] = [];
+
+      const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+        useHomeTabCtx();
+        const { calc } = useLiveRun();
+        freezerSamples.push(calc.casesInFreezer);
+        return <span data-testid="floor-freezer">{calc.casesInFreezer}</span>;
+      });
+
+      render(
+        <FloorModeWrapper runStatus="running" manageCounter={1}>
+          <FloorModeViewSim />
+        </FloorModeWrapper>,
+      );
+
+      const firstFreezer = freezerSamples[0];
+
+      // ACTIVE_VALUES gives ppm > 0 and freezerTime = 30 min; advance enough
+      // for cases to accumulate in the freezer.
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      const lastFreezer = freezerSamples[freezerSamples.length - 1];
+      expect(lastFreezer).toBeGreaterThan(firstFreezer);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ─── Test 3: PROPAGATION ─────────────────────────────────────────────────
+  // Guard against over-memoisation: when a REAL production dep (runStatus)
+  // changes, FloorModeView MUST re-render to show the updated status.
+  //
+  // Uses HomeTabCtx-only (no LiveRunProvider) for a clean renderCount signal.
+  it("FloorModeView DOES re-render when a production dep (runStatus) changes", async () => {
+    let renderCount = 0;
+
+    const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+      renderCount++;
+      const { runStatus } = useHomeTabCtx();
+      return <span data-testid="floor-status">{runStatus}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <TabOnlyProvider runStatus="running" manageCounter={0}>
+        <FloorModeViewSim />
+      </TabOnlyProvider>,
+    );
+
+    expect(renderCount).toBe(1);
+    expect(getByTestId("floor-status").textContent).toBe("running");
+
+    // Simulate run pausing — a real production dep change → HomeTabCtx ref
+    // invalidated → subscriber re-renders with new runStatus.
+    await act(async () => {
+      rerender(
+        <TabOnlyProvider runStatus="paused" manageCounter={0}>
+          <FloorModeViewSim />
+        </TabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(2);
+    expect(getByTestId("floor-status").textContent).toBe("paused");
   });
 });
