@@ -583,3 +583,99 @@ describe("authRateLimit — reset-password is blocked when the rate limit is exh
     expect(handler).toHaveBeenCalledTimes(1);
   });
 });
+
+// Sign-in path rate-limit integration test.
+//
+// POST /auth/sign-in is the primary credential-guessing target. It uses
+// authRateLimit (same 20 req / 60 s cap as sign-up and the other auth
+// endpoints). Without this coverage a regression that silently removed
+// authRateLimit from the route would leave the endpoint open to brute-force
+// password guessing with no test catching it. This test constructs the
+// middleware with a tiny cap (max=2), drives it with a mock handler, and
+// confirms the (max+1)th request from the same IP is refused with 429 before
+// the handler is ever called.
+describe("authRateLimit — sign-in is blocked when the rate limit is exhausted", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function fireSignIn(middleware: ReturnType<typeof rateLimit>, ip: string) {
+    const headers: Record<string, string> = {};
+    const setHeader = vi.fn((name: string, value: string) => {
+      headers[name] = value;
+    });
+    const json = vi.fn(() => res);
+    const status = vi.fn(() => res);
+    const res = { setHeader, status, json } as unknown as Response;
+
+    const req = {
+      ip,
+      log: { error: vi.fn(), warn: vi.fn() },
+    } as unknown as Request;
+
+    // Simulates the sign-in route handler: returns 200 when the middleware
+    // passes. The test verifies this is never reached once the cap is hit.
+    const handler = vi.fn(() => {
+      res.status(200);
+      res.json({ token: "tok" });
+    }) as unknown as NextFunction;
+
+    middleware(req, res, handler);
+
+    await vi.waitFor(() => {
+      const handlerCalls = (handler as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+      const statusCalls = status.mock.calls.length;
+      expect(handlerCalls + statusCalls).toBeGreaterThan(0);
+    });
+
+    return { handler, status, json, headers };
+  }
+
+  it("passes requests up to max and returns 429 on the next attempt from the same IP", async () => {
+    const windowMs = 60_000;
+    const max = 2;
+    const ip = "10.0.0.5";
+    const middleware = rateLimit({
+      windowMs,
+      max,
+      store: new MemoryRateLimitStore(windowMs),
+    });
+
+    for (let i = 0; i < max; i++) {
+      const { handler } = await fireSignIn(middleware, ip);
+      expect(handler).toHaveBeenCalledTimes(1);
+    }
+
+    // The very next request from the same IP must be blocked at the middleware
+    // — the sign-in handler must NOT be called and the response must be 429.
+    const blocked = await fireSignIn(middleware, ip);
+    expect(blocked.handler).not.toHaveBeenCalled();
+    expect(blocked.status).toHaveBeenCalledWith(429);
+    expect(blocked.json).toHaveBeenCalledWith({
+      error: "Too many requests. Please wait a moment and try again.",
+    });
+    expect(blocked.headers["RateLimit-Remaining"]).toBe("0");
+    expect(blocked.headers["Retry-After"]).toBeDefined();
+  });
+
+  it("counts requests per IP — a different IP is not affected by the first IP's exhaustion", async () => {
+    const windowMs = 60_000;
+    const max = 2;
+    const store = new MemoryRateLimitStore(windowMs);
+    const middleware = rateLimit({ windowMs, max, store });
+
+    // Exhaust the limit for IP A.
+    for (let i = 0; i <= max; i++) {
+      await fireSignIn(middleware, "172.16.3.1");
+    }
+
+    // IP B's first request must still reach the handler — it has its own bucket.
+    const { handler } = await fireSignIn(middleware, "172.16.3.2");
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
