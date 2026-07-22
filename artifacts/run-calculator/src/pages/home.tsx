@@ -1,5 +1,6 @@
 import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
+import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -2421,20 +2422,6 @@ function useHomeRunSummaryCtx(): any {
   return ctx;
 }
 
-// ─── HomeTabCtx: narrow context for live production tab components ────────────
-// LivePackagingTabContent, LiveFrontlineTabContent, LiveDoughTabContent,
-// LiveSetupRecipesTabContent, and LiveSummaryTabContent subscribe here instead
-// of the full HomeCtx. This context memoizes on only non-dialog, non-manage,
-// non-import deps, so those tabs do NOT re-render when a manage dialog opens,
-// merge state changes, or import progress ticks — only when actual production
-// data changes (dayState, form values, ingredients, etc.).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const HomeTabCtx = createContext<any>(null);
-function useHomeTabCtx(): any {
-  const ctx = useContext(HomeTabCtx);
-  if (!ctx) throw new Error("useHomeTabCtx must be used within HomeTabCtx.Provider");
-  return ctx;
-}
 
 export default function Home() {
   const {
