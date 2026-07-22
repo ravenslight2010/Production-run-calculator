@@ -525,3 +525,143 @@ describe("CompactRunStrip — hidden when already on the Run tab", () => {
     expect(queryByTestId("resume-strip")).toBeNull();
   });
 });
+
+// ─── CompactRunStrip ended-run button visibility ───────────────────────────────
+//
+// Structural guarantee: when runStatus === "ended" the strip renders (it is
+// shown on non-run tabs regardless of run lifecycle state) but NEITHER the
+// pause button (strip-pause) NOR the resume button (strip-resume) appears.
+// Only "running" shows the pause button and only "paused" shows the resume
+// button — "ended" falls through both guards and leaves the strip action-free.
+//
+// This test uses a combined EndedStrip replica that mirrors both guards from
+// the real CompactRunStrip in home.tsx so a single component can cover all
+// three status values.
+
+type EndedCtxShape = {
+  runStatus: string;
+  pauseRunRef: MutableRefObject<() => void>;
+  setActiveTab: (tab: string) => void;
+};
+
+const EndedCtx = createContext<EndedCtxShape | null>(null);
+
+function useEndedCtx() {
+  const ctx = useContext(EndedCtx);
+  if (!ctx) throw new Error("useEndedCtx must be inside EndedCtx.Provider");
+  return ctx;
+}
+
+// Combined strip replica: mirrors BOTH conditional guards from CompactRunStrip —
+//   {runStatus === "running" && <button data-testid="strip-pause" ...>}
+//   {runStatus === "paused"  && <button data-testid="strip-resume" ...>}
+// The strip div itself always renders (data-testid="ended-strip").
+const EndedStrip = memo(function EndedStripInner() {
+  const { runStatus, pauseRunRef, setActiveTab } = useEndedCtx();
+  return (
+    <div data-testid="ended-strip">
+      <span data-testid="status">{runStatus}</span>
+      {runStatus === "running" && (
+        <button
+          data-testid="strip-pause"
+          onClick={(e) => { e.stopPropagation(); pauseRunRef.current(); }}
+        >
+          Pause
+        </button>
+      )}
+      {runStatus === "paused" && (
+        <button
+          data-testid="strip-resume"
+          onClick={(e) => { e.stopPropagation(); setActiveTab("run"); }}
+        >
+          Resume
+        </button>
+      )}
+    </div>
+  );
+});
+
+describe("CompactRunStrip — action buttons hidden when run has ended", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("strip renders but strip-pause and strip-resume are absent when runStatus is \"ended\"", () => {
+    const pauseRunRef = { current: vi.fn() };
+    const setActiveTab = vi.fn();
+
+    const value: EndedCtxShape = { runStatus: "ended", pauseRunRef, setActiveTab };
+    const { getByTestId, queryByTestId } = render(
+      <EndedCtx.Provider value={value}>
+        <EndedStrip />
+      </EndedCtx.Provider>,
+    );
+
+    // The strip itself must be present — it is shown on non-run tabs for ended runs.
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+
+    // Neither action button may appear for an ended run.
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+  });
+
+  it("strip-pause IS present when runStatus is \"running\" (counter-proof)", () => {
+    const pauseRunRef = { current: vi.fn() };
+    const setActiveTab = vi.fn();
+
+    const value: EndedCtxShape = { runStatus: "running", pauseRunRef, setActiveTab };
+    const { getByTestId, queryByTestId } = render(
+      <EndedCtx.Provider value={value}>
+        <EndedStrip />
+      </EndedCtx.Provider>,
+    );
+
+    expect(getByTestId("strip-pause")).not.toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+  });
+
+  it("strip-resume IS present when runStatus is \"paused\" (counter-proof)", () => {
+    const pauseRunRef = { current: vi.fn() };
+    const setActiveTab = vi.fn();
+
+    const value: EndedCtxShape = { runStatus: "paused", pauseRunRef, setActiveTab };
+    const { getByTestId, queryByTestId } = render(
+      <EndedCtx.Provider value={value}>
+        <EndedStrip />
+      </EndedCtx.Provider>,
+    );
+
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(getByTestId("strip-resume")).not.toBeNull();
+  });
+
+  it("transitioning from \"running\" to \"ended\" removes the pause button", async () => {
+    const pauseRunRef = { current: vi.fn() };
+    const setActiveTab = vi.fn();
+
+    const { rerender, getByTestId, queryByTestId } = render(
+      <EndedCtx.Provider value={{ runStatus: "running", pauseRunRef, setActiveTab }}>
+        <EndedStrip />
+      </EndedCtx.Provider>,
+    );
+
+    // Pause button visible while running.
+    expect(getByTestId("strip-pause")).not.toBeNull();
+
+    await act(async () => {
+      rerender(
+        <EndedCtx.Provider value={{ runStatus: "ended", pauseRunRef, setActiveTab }}>
+          <EndedStrip />
+        </EndedCtx.Provider>,
+      );
+    });
+
+    // After the run ends, neither action button must remain.
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+    // Strip element itself stays mounted.
+    expect(getByTestId("ended-strip")).not.toBeNull();
+  });
+});
