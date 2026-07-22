@@ -688,6 +688,85 @@ describe(
 );
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Block 5c — LiveSetupRecipesTabContent lock banner presence
+//
+// The fieldset gate (Block 5b) catches a removed `disabled` attribute, but a
+// future refactor could drop or decouple the lock banner div (the user-facing
+// "Supervisor access required" message) without touching the fieldset.  This
+// block guards the banner independently: it mounts the REAL
+// SetupRecipesRoleGate and asserts that the element with
+// data-testid="setup-recipes-lock-banner" is present when isSupervisor=false
+// and absent when isSupervisor=true.
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe(
+  "HomeTabCtx — LiveSetupRecipesTabContent lock banner presence",
+  () => {
+    // ─── banner visible when locked ──────────────────────────────────────────
+    it("lock banner is present when isSupervisor=false", () => {
+      const { getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+      expect(getByTestId("setup-recipes-lock-banner")).toBeTruthy();
+    });
+
+    // ─── banner hidden when unlocked ─────────────────────────────────────────
+    it("lock banner is absent when isSupervisor=true", () => {
+      const { queryByTestId } = render(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+      expect(queryByTestId("setup-recipes-lock-banner")).toBeNull();
+    });
+
+    // ─── banner appears when role is revoked mid-session ─────────────────────
+    it("lock banner appears when isSupervisor is revoked mid-session", async () => {
+      const { rerender, queryByTestId, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      expect(queryByTestId("setup-recipes-lock-banner")).toBeNull();
+
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      expect(getByTestId("setup-recipes-lock-banner")).toBeTruthy();
+    });
+
+    // ─── banner disappears when role is granted mid-session ──────────────────
+    it("lock banner disappears when isSupervisor is granted mid-session", async () => {
+      const { rerender, queryByTestId, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      expect(getByTestId("setup-recipes-lock-banner")).toBeTruthy();
+
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      expect(queryByTestId("setup-recipes-lock-banner")).toBeNull();
+    });
+  },
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
 // Block 6 — LiveSummaryTabContent slice
 //
 // The Summary tab reads `dayState.runs` from homeTabCtxValue to display the

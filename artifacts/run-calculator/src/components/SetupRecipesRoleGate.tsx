@@ -21,7 +21,10 @@ export function SetupRecipesRoleGate({
   return (
     <>
       {!isSupervisor && (
-        <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+        <div
+          data-testid="setup-recipes-lock-banner"
+          className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground"
+        >
           <Lock className="w-3.5 h-3.5 shrink-0" />
           Supervisor access required to edit these settings
         </div>
