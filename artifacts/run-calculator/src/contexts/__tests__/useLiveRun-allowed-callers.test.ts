@@ -6,25 +6,36 @@
 // Staff…) would cause every one of those tabs to re-render once per second,
 // burning CPU and causing unnecessary UI churn.
 //
-// This test scans home.tsx at build time. If a developer accidentally adds
-// useLiveRun() inside inline tab content that is NOT on the allowlist, this
-// test fails immediately — before review, before deploy.
+// TWO checks live here:
 //
-// HOW TO MAINTAIN THE ALLOWLIST
+//  1. HOME.TSX ALLOWLIST (per-function)
+//     Scans home.tsx and verifies that every useLiveRun() call is inside a
+//     function on the ALLOWED_CALLERS list.  Fine-grained: catches a new
+//     inline tab-content block that sneaks a clock subscription in.
+//
+//  2. FULL SRC/ TREE SCAN (per-file)
+//     Scans every non-test .ts/.tsx file under src/ and verifies that
+//     useLiveRun() only appears in the files on the ALLOWED_FILES list.
+//     Catches the case where a developer extracts a component into a new file
+//     under src/components/ or src/pages/ and accidentally imports and calls
+//     useLiveRun() there — the per-home.tsx scan would miss that entirely.
+//
+// HOW TO MAINTAIN THE ALLOWLISTS
 // ──────────────────────────────
-// The allowlist below is the single source of truth. Every function name on
-// the list is a component that intentionally subscribes to the live clock.
-// If you extract a new live-display component and it needs useLiveRun():
-//   1. Name it with the "Live" prefix OR add it to ALLOWED_CALLERS below.
-//   2. Leave a brief comment explaining why it needs the live clock.
-// If you see this test fail after a refactor, the failing function name is
-// printed so you know exactly what to inspect or add to the list.
+// ALLOWED_CALLERS  — per-function list for home.tsx (check 1).
+//   Add the function name + a brief comment when you add a new live component
+//   inline in home.tsx.
+//
+// ALLOWED_FILES — per-file list for the full-tree scan (check 2).
+//   Add the src/-relative path when a new file outside home.tsx legitimately
+//   calls useLiveRun().  Leave a comment explaining why.
+//   Currently only home.tsx and LiveRunContext.tsx are on this list.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { resolve, relative, join } from "node:path";
 import { describe, it, expect } from "vitest";
 
-// ── Allowlist ─────────────────────────────────────────────────────────────────
+// ── Check 1: per-function allowlist for home.tsx ───────────────────────────
 // Only these function names may call useLiveRun() in home.tsx.
 const ALLOWED_CALLERS = new Set<string>([
   // Live-clock-dependent tab content (re-render every second is intentional)
@@ -48,7 +59,54 @@ const ALLOWED_CALLERS = new Set<string>([
   "CompactRunStrip",
 ]);
 
-// ── Scanner ───────────────────────────────────────────────────────────────────
+// ── Check 2: per-file allowlist for the full src/ tree ────────────────────
+// Paths are relative to src/ (forward slashes, no leading ./). Any file NOT
+// on this list that contains a useLiveRun() call will fail the test.
+//
+// Test files (*.test.ts, *.test.tsx, __tests__/**) are excluded from the scan
+// automatically — they may reference useLiveRun() in describe/it blocks.
+const ALLOWED_FILES = new Set<string>([
+  // home.tsx — the canonical home of all live-clock components; covered in
+  // detail by the per-function allowlist in check 1 above.
+  "pages/home.tsx",
+
+  // LiveRunContext.tsx — this file *defines* useLiveRun(), so naturally
+  // contains useLiveRun() in the function body and type annotations.
+  "contexts/LiveRunContext.tsx",
+]);
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+const SRC_DIR = resolve(__dirname, "../../../src");
+
+/** Collect every .ts / .tsx file under a directory, recursively. */
+function collectSourceFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      results.push(...collectSourceFiles(full));
+    } else if (/\.(tsx?)$/.test(entry)) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+/** Returns true if this path should be skipped (it's a test file). */
+function isTestFile(absPath: string): boolean {
+  const rel = relative(SRC_DIR, absPath).replace(/\\/g, "/");
+  // Skip *.test.ts / *.test.tsx anywhere in the tree.
+  if (/\.test\.(tsx?)$/.test(rel)) return true;
+  // Skip anything under a __tests__ directory.
+  if (rel.split("/").includes("__tests__")) return true;
+  return false;
+}
+
+// Matches an actual useLiveRun() call (not an import statement or comment).
+const USE_LIVE_RUN_RE = /\buseLiveRun\s*\(\s*\)/;
+const IMPORT_COMMENT_RE = /^\s*(import|\/\/|\/\*|\*)/;
+
+// ── Scanner ───────────────────────────────────────────────────────────────
 // Uses a simple line-by-line scan rather than an AST parser so it stays
 // dependency-free and fast. The heuristic is reliable because:
 //   • All function declarations in home.tsx that could contain useLiveRun()
@@ -72,10 +130,6 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     // `function buildNeedRows(`, `function fmtElapsed(`, etc.
     const FUNC_DECL_RE = /^function ([A-Z][A-Za-z0-9]*)[\s<(]/;
 
-    // Matches an actual useLiveRun() call (not an import line or comment).
-    const USE_LIVE_RUN_RE = /\buseLiveRun\s*\(\s*\)/;
-    const IMPORT_RE = /^\s*(import|\/\/|\/\*|\*)/;
-
     let currentFunction: string | null = null;
     const violations: { line: number; fn: string }[] = [];
 
@@ -90,7 +144,7 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
       }
 
       // Skip import lines and comment lines.
-      if (IMPORT_RE.test(line)) continue;
+      if (IMPORT_COMMENT_RE.test(line)) continue;
 
       // Check for a useLiveRun() call.
       if (USE_LIVE_RUN_RE.test(line)) {
@@ -137,4 +191,90 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
       );
     }
   });
+});
+
+describe("useLiveRun — no accidental subscriptions across src/", () => {
+  it(
+    "useLiveRun() only appears in files on the ALLOWED_FILES list",
+    () => {
+      const allSourceFiles = collectSourceFiles(SRC_DIR);
+
+      const violations: { file: string; lines: number[] }[] = [];
+
+      for (const absPath of allSourceFiles) {
+        // Skip test files — they may import or mention useLiveRun() in specs.
+        if (isTestFile(absPath)) continue;
+
+        const relPath = relative(SRC_DIR, absPath).replace(/\\/g, "/");
+
+        // Files on the allowlist are permitted; they are verified separately
+        // (home.tsx in check 1, LiveRunContext.tsx owns the definition).
+        if (ALLOWED_FILES.has(relPath)) continue;
+
+        const content = readFileSync(absPath, "utf8");
+        const lines = content.split("\n");
+
+        const hitLines: number[] = [];
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          // Skip import statements and comment lines.
+          if (IMPORT_COMMENT_RE.test(line)) continue;
+          if (USE_LIVE_RUN_RE.test(line)) {
+            hitLines.push(i + 1);
+          }
+        }
+
+        if (hitLines.length > 0) {
+          violations.push({ file: relPath, lines: hitLines });
+        }
+      }
+
+      if (violations.length > 0) {
+        const detail = violations
+          .map(
+            ({ file, lines }) =>
+              `  src/${file}  (line${lines.length > 1 ? "s" : ""} ${lines.join(", ")})`,
+          )
+          .join("\n");
+
+        expect.fail(
+          `useLiveRun() was found in ${violations.length} file(s) outside the allowlist:\n\n` +
+            `${detail}\n\n` +
+            `Each call causes the component to re-render every second, which is very\n` +
+            `likely unintentional for a non-live file.  If the subscription is\n` +
+            `deliberate, add the src/-relative path to ALLOWED_FILES in\n` +
+            `src/contexts/__tests__/useLiveRun-allowed-callers.test.ts and leave a\n` +
+            `comment explaining why the file needs the live clock.\n\n` +
+            `If you extracted a component from home.tsx into its own file:\n` +
+            `  • Add the new file to ALLOWED_FILES, AND\n` +
+            `  • Remove the function name from ALLOWED_CALLERS (it no longer lives\n` +
+            `    in home.tsx so the per-home.tsx guard would fail as stale anyway).`,
+        );
+      }
+    },
+  );
+
+  it(
+    "ALLOWED_FILES entries all exist on disk (no stale paths)",
+    () => {
+      const stale: string[] = [];
+      for (const relPath of ALLOWED_FILES) {
+        const absPath = join(SRC_DIR, relPath);
+        try {
+          statSync(absPath);
+        } catch {
+          stale.push(relPath);
+        }
+      }
+
+      if (stale.length > 0) {
+        expect.fail(
+          `ALLOWED_FILES contains path(s) that no longer exist on disk:\n` +
+            stale.map((p) => `  src/${p}`).join("\n") +
+            `\n\nRemove them from ALLOWED_FILES in\n` +
+            `src/contexts/__tests__/useLiveRun-allowed-callers.test.ts.`,
+        );
+      }
+    },
+  );
 });
