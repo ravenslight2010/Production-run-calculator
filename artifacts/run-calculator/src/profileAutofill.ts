@@ -265,7 +265,29 @@ function desiredFromProfile(
     // substance equal and no suggestion is made. Genuinely different names
     // (no near-dup match) still surface as real mismatches.
     if (rawTypeMatchesProfileLink(type, cur, slot)) return;
-    push(`app${slot}Type`, `Applicator ${slot} Type`, type, "string");
+    // resolveCheeseApplicatorSlots uses exact-key matching only, so a sheet
+    // that writes "Part Skim Mozzarella" won't auto-resolve to a pool "Skim
+    // Mozzarella" — the raw name leaks into the planner as a raw appType
+    // mismatch. Accepting it would write the raw name to appXType, breaking
+    // the cheese pick card (it only opens when type === "cheese" exactly).
+    // Fix: if the slot is already "cheese"/"Mix" typed and the raw name
+    // near-dup matches a pool recipe (one-extra-word layer, with human review),
+    // emit a cheeseRecipeName fill/mismatch instead of a raw type change so
+    // "Use imported" correctly links to the pool recipe.
+    const curSlotType = String(cur[`app${slot}Type`] ?? "").trim().toLowerCase();
+    let linkedPoolName: string | null = null;
+    if (curSlotType === "cheese" || curSlotType === "mix") {
+      const poolToCheck = curSlotType === "cheese" ? cheeseCandidateNames : mixCandidateNames;
+      linkedPoolName = buildNearDupNameMatcher(poolToCheck, {
+        keyOf: possessiveFoldNameKey,
+        allowExtraToken: true,
+      })(type);
+    }
+    if (linkedPoolName) {
+      push(`app${slot}CheeseRecipeName`, `Applicator ${slot} Recipe`, linkedPoolName, "name");
+    } else {
+      push(`app${slot}Type`, `Applicator ${slot} Type`, type, "string");
+    }
     if (Number(a.ozPerPizza) > 0) {
       push(`app${slot}OzPerPizza`, `Applicator ${slot} Oz Per Pizza`, a.ozPerPizza, "number");
     }

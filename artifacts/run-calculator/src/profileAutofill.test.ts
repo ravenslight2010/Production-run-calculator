@@ -210,6 +210,68 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
   });
 
+  it("converts a pool near-dup into a cheeseRecipeName fill instead of a raw appType mismatch", () => {
+    // Regression: spec says "Part Skim Mozzarella", pool has "Skim Mozzarella".
+    // resolveCheeseApplicatorSlots uses exact-key only so the raw name leaks
+    // into the planner. The old code emitted an appType mismatch; accepting
+    // "Use imported" would write "Part Skim Mozzarella" to app1Type, breaking
+    // the cheese pick card (it only opens when type === "cheese" exactly).
+    // Fix: when the slot is already "cheese" typed and the raw name near-dup
+    // matches a pool recipe (one-extra-token layer), emit a cheeseRecipeName
+    // fill instead so "Use imported" correctly links to the pool recipe.
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({
+            applicators: [{ type: "Part Skim Mozzarella", ozPerPizza: 5, batchLbs: 0 }],
+          })],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values({
+        app1Type: "cheese",
+        app1CheeseRecipeName: "",
+        app1OzPerPizza: 0,
+      } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+      cheeseRecipes: [{ name: "Skim Mozzarella", enabled: true }],
+    });
+    // No raw type mismatch — "Part Skim Mozzarella" is not an appType value.
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "app1Type")).toBeUndefined();
+    // Instead, a cheeseRecipeName fill with the matched pool name.
+    const recipeEntry = p.fills.find(f => f.field === "app1CheeseRecipeName");
+    expect(recipeEntry?.specValue).toBe("Skim Mozzarella");
+    // Applying the fill preserves app1Type and links the recipe.
+    const applied = applyAutofillEntries(
+      values({ app1Type: "cheese", app1CheeseRecipeName: "" } as Partial<FormValues>),
+      [...p.fills, ...p.mismatches],
+    );
+    expect((applied as Record<string, unknown>)["app1Type"]).toBe("cheese");
+    expect((applied as Record<string, unknown>)["app1CheeseRecipeName"]).toBe("Skim Mozzarella");
+  });
+
+  it("still flags a Type mismatch when pool near-dup fails (token swap, not just extra)", () => {
+    // "Whole Milk Blend" vs pool "Skim Mozzarella" — different core tokens,
+    // one-extra-token doesn't apply; must still surface as a real mismatch.
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({
+            applicators: [{ type: "Whole Milk Blend", ozPerPizza: 5, batchLbs: 0 }],
+          })],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values({ app1Type: "cheese", app1CheeseRecipeName: "" } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+      cheeseRecipes: [{ name: "Skim Mozzarella", enabled: true }],
+    });
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
+  });
+
   it('matches a saved-sheet row stored under a punctuation-typo brand (Aldo"s → Aldo\'s)', () => {
     // Regression: an AI parse minted brand `Aldo"s` (straight double-quote)
     // for one flavor row; the strict brand compare made Auto-Fill skip it, so
