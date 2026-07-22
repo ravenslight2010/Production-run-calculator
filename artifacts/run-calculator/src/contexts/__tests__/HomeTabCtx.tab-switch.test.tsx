@@ -364,9 +364,13 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
 // applicator fields such as `app1Type`.  Changing `app1Type` must propagate;
 // opening a manage dialog must not cause a re-render.
 //
-// Three tests:
+// Four tests:
 //   PROPAGATION    — form value change reaches the Frontline subscriber.
 //   ISOLATION      — dialog open does NOT re-render the Frontline subscriber.
+//   COMBINED       — form change propagates; subsequent dialog open adds no renders.
+//                    Exact render counts pinned at every step (mount → form-change
+//                    → dialog-open) so any weakening of the isolation check is
+//                    caught immediately.
 //   REGRESSION GUARD — a deliberately broken provider (manageCounter in deps)
 //                      proves the ISOLATION test would catch the regression:
 //                      the broken provider causes a re-render on every dialog
@@ -475,6 +479,84 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
     });
 
     expect(frontlineRenderCount).toBe(1);
+  });
+
+  // ─── COMBINED ─────────────────────────────────────────────────────────────
+  // Simulates the full scenario:
+  //   1. app1Type changes (form value updated on Setup tab)  → exactly 1 new render
+  //   2. A second app1Type change                            → exactly 1 new render
+  //   3. Manage dialog opens (manageCounter: 0→1)            → exactly 0 new renders
+  //   4. Further dialog state changes (manageCounter: 1→99)  → exactly 0 new renders
+  //
+  // Exact render counts are pinned at every step so that any weakening of the
+  // isolation check (e.g. making the assertion relative rather than absolute,
+  // or accidentally including manageCounter in the provider deps) is caught
+  // immediately — even if the ISOLATION test is softened later.
+  it("COMBINED: app1Type changes propagate; subsequent dialog open adds no extra renders", async () => {
+    const { rerender, getByTestId } = render(
+      <FrontlineProvider app1Type="cheese" manageCounter={0}>
+        <FrontlineSubscriber />
+      </FrontlineProvider>,
+    );
+
+    // PROPAGATION step 0 — initial mount: exactly 1 render.
+    expect(frontlineRenderCount).toBe(1);
+    expect(getByTestId("app1-type").textContent).toBe("cheese");
+
+    // PROPAGATION step 1 — app1Type changes: exactly 1 additional render
+    // (production dep updated → new ctx ref → React.memo allows re-render).
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="sauce" manageCounter={0}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(2); // exact: mount(1) + form-change(1)
+    expect(getByTestId("app1-type").textContent).toBe("sauce");
+
+    // PROPAGATION step 2 — app1Type changes again: exactly 1 more render.
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="pepperoni" manageCounter={0}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(3); // exact: mount(1) + form-change(1) + form-change(1)
+    expect(getByTestId("app1-type").textContent).toBe("pepperoni");
+
+    // DIALOG step — manage dialog opens (manageCounter: 0→1).
+    // Production dep (app1Type) is unchanged.
+    // The ctx ref must NOT change → React.memo must skip → zero new renders.
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="pepperoni" manageCounter={1}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    // Exact guard: frontlineRenderCount must still be 3.  Any spurious re-render
+    // caused by a dialog field leaking into the context deps will bump this to 4+.
+    expect(frontlineRenderCount).toBe(3); // exact: no extra render from dialog open
+
+    // Repeat with a second dialog state change to rule out a lucky no-op.
+    await act(async () => {
+      rerender(
+        <FrontlineProvider app1Type="pepperoni" manageCounter={99}>
+          <FrontlineSubscriber />
+        </FrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(3); // exact: still no extra render from further dialog changes
+
+    // SWITCH step — user navigates to Frontline tab.
+    // The tab already holds the current value; no re-render is needed.
+    expect(getByTestId("app1-type").textContent).toBe("pepperoni");
   });
 
   // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
