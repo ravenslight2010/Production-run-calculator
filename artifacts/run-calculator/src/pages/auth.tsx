@@ -370,7 +370,15 @@ function AuthForm({ mode }: { mode: Mode }) {
 
             <Button
               type="submit"
-              disabled={submitting || (isSignUp && accessCode.trim().length === 0)}
+              disabled={
+                submitting ||
+                (isSignUp && (
+                  username.trim().length < MIN_USERNAME_LENGTH ||
+                  password.length < MIN_PASSWORD_LENGTH ||
+                  password !== confirm ||
+                  accessCode.trim().length === 0
+                ))
+              }
               className="w-full font-semibold"
             >
               {submitting
