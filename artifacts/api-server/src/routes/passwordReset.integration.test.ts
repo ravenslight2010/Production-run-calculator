@@ -138,7 +138,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-}, 30_000);
+}, 60_000);
 
 // A narrowly-scoped role holding ONLY approve-password-resets (mirrors a
 // real "help desk" style role a manager might create), used to prove an

@@ -77,7 +77,10 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server) {
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
   if (pool) await pool.end();
   if (adminPool) {
     if (testDbName) {
@@ -86,7 +89,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-}, 30_000);
+}, 60_000);
 
 function dayRow(date: string) {
   const runId = `run-${date}`;

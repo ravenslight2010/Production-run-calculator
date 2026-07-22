@@ -92,7 +92,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-}, 30_000);
+}, 60_000);
 
 beforeEach(async () => {
   await db.execute(sql`TRUNCATE ${rateLimitCountersTable} RESTART IDENTITY CASCADE`);
