@@ -53,6 +53,7 @@ import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
 import { useNotifications } from "../../hooks/useNotifications";
+import * as HomeTabCtxNS from "../../contexts/HomeTabCtx";
 
 // ── Shared mocks (same as neighbouring test files) ───────────────────────────
 
@@ -1725,6 +1726,53 @@ describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is
       // The spy must have been called more times than at mount.  This is true
       // regardless of which fields are destructured from useLiveRun() — it only
       // fails if the component stops re-rendering entirely on clock ticks.
+      expect(spy.mock.calls.length).toBeGreaterThan(countAtMount);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("real GlanceOverlay: useHomeTabCtx spy call-count advances when runStatus changes (render-count guard)", async () => {
+    // Guards the symmetric risk on the useHomeTabCtx() side: if a refactor
+    // drops that subscription (e.g. by removing the destructure or switching
+    // to a ref snapshot), GlanceOverlay would stop re-rendering when runStatus
+    // or the active run changes mid-overlay.
+    //
+    // The spy counts every invocation of useHomeTabCtx() inside the test
+    // subtree.  GlanceOverlay is the ONLY component in this subtree that
+    // calls useHomeTabCtx() — RealGlanceWrapper only sets up the providers
+    // without calling the hook itself — so the count maps 1-to-1 to
+    // GlanceOverlay's own render count.
+    //
+    // If a refactor stops subscribing to HomeTabCtx (e.g. reads runStatus
+    // from a captured closure or a ref), the context value change caused by
+    // the runStatus flip will no longer trigger a re-render, the spy
+    // call-count will stay flat, and this test will fail.
+    const spy = vi.spyOn(HomeTabCtxNS, "useHomeTabCtx");
+
+    try {
+      const { rerender } = render(
+        <RealGlanceWrapper runStatus="running" manageOpen={false}>
+          <GlanceOverlay />
+        </RealGlanceWrapper>,
+      );
+
+      // Initial mount gives us a baseline.
+      const countAtMount = spy.mock.calls.length;
+      expect(countAtMount).toBeGreaterThan(0);
+
+      // Change a HomeTabCtx dep (runStatus) — RealGlanceWrapper's useMemo
+      // fires, the context ref changes, and GlanceOverlay must re-render.
+      await act(async () => {
+        rerender(
+          <RealGlanceWrapper runStatus="paused" manageOpen={false}>
+            <GlanceOverlay />
+          </RealGlanceWrapper>,
+        );
+      });
+
+      // The spy must have been called again — proving useHomeTabCtx() is
+      // still subscribed and GlanceOverlay re-rendered on the dep change.
       expect(spy.mock.calls.length).toBeGreaterThan(countAtMount);
     } finally {
       spy.mockRestore();
