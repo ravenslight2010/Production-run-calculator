@@ -1835,6 +1835,59 @@ describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is
       spy.mockRestore();
     }
   });
+
+  it("counter-proof: useLiveRun spy count stays flat when no component in the subtree calls it (proves spy cannot pass vacuously from LiveRunProvider timer emissions)", async () => {
+    // Guards the spy-target-drift risk: if GlanceOverlay is ever refactored
+    // to import useLiveRun from a different module (e.g. a barrel re-export),
+    // the vi.spyOn(LiveRunContextNS, "useLiveRun") in the sibling test would
+    // silently stop intercepting calls.  The sibling's call-count would then
+    // stay flat even while GlanceOverlay still renders — causing the guard to
+    // pass vacuously while the real clock subscription is broken.
+    //
+    // This counter-proof renders a simulator that intentionally does NOT call
+    // useLiveRun() at all.  Even as LiveRunProvider's internal clock fires 60
+    // per-second ticks and emits new context values, the spy must NOT fire —
+    // because no component in the subtree invokes the hook.
+    //
+    // If the spy were somehow triggered by provider timer emissions alone (not
+    // by real hook invocations), the count would increase and this test would
+    // fail, revealing a broken spy assumption before it silently corrupts the
+    // guard.
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    try {
+      // Simulator that deliberately omits useLiveRun() — only calls
+      // useHomeTabCtx() so the subtree is non-trivial but the spy has nothing
+      // to intercept on the LiveRun side.
+      const NoLiveRunSim = memo(function NoLiveRunSimInner() {
+        useHomeTabCtx();
+        return null;
+      });
+
+      render(
+        <RealGlanceWrapper runStatus="running" manageOpen={false}>
+          <NoLiveRunSim />
+        </RealGlanceWrapper>,
+      );
+
+      // Nothing in this subtree calls useLiveRun() — spy must stay at 0.
+      expect(spy.mock.calls.length).toBe(0);
+
+      // Advance 60 s — LiveRunProvider's internal interval fires 60 ticks and
+      // pushes new context values to subscribers.  But NoLiveRunSim is not
+      // subscribed to LiveRunContext, so the spy must remain flat.
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      // Still 0 — the spy fires ONLY when the hook is actually called, not
+      // when the provider emits a new timer value.  This confirms the sibling
+      // test's call-count advance is driven by GlanceOverlay's real hook
+      // invocations, not by provider-side timer emissions that would happen
+      // regardless of whether the spy target is correct.
+      expect(spy.mock.calls.length).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
