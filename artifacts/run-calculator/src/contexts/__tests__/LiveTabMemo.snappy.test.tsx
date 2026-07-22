@@ -549,3 +549,134 @@ describe("LiveTabMemo — tab switching preserves live data (no stale snapshot)"
     expect(firstAfterReturn).toBeGreaterThan(lastBeforeHide);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 — GlanceOverlay live values (nowTime, casesInFreezer) advance while
+//            a manage dialog is simultaneously rendered
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// GlanceOverlay is the one memo()-wrapped component that floats over the full
+// page and stays VISIBLE while a manage dialog is open — unlike the tab
+// components, which are hidden behind the dialog.  A silent memo-defeat would
+// freeze the overlay for users who open a manage panel mid-run.
+//
+// The simulator here mirrors GlanceOverlay's exact dual-context subscription:
+//   • useLiveRun()   → nowTime, casesInFreezer
+//   • useHomeCtx()   → manageCategory (manage/dialog state)
+//
+// The test:
+//   1. Renders the overlay simulator + a visible "manage dialog" simultaneously.
+//   2. Advances the fake clock by 60 s.
+//   3. Asserts both nowTime AND casesInFreezer advanced — proving the live
+//      subscription is NOT blocked by the concurrent dialog render.
+
+describe("LiveTabMemo — GlanceOverlay live values advance while manage dialog is open", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => { vi.useRealTimers(); cleanup(); });
+
+  it("GlanceOverlay nowTime advances while a manage dialog is rendered concurrently", async () => {
+    const nowSamples: number[] = [];
+
+    const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+      useHomeCtx();                        // mirrors real GlanceOverlay's homeCtx read
+      const { nowTime } = useLiveRun();
+      nowSamples.push(nowTime.getTime());
+      return <span data-testid="glance-now">{nowTime.getTime()}</span>;
+    });
+
+    render(
+      <BothContextsWrapper runStatus="running" brand="TestBrand" manageCategory="mixes">
+        {/* Simulate the manage dialog being open at the same time as the overlay */}
+        <div data-testid="manage-dialog">Manage: mixes</div>
+        <GlanceOverlaySim />
+      </BothContextsWrapper>,
+    );
+
+    const firstNow = nowSamples[0];
+    expect(firstNow).toBeGreaterThan(0);
+
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    const lastNow = nowSamples[nowSamples.length - 1];
+    // Clock ticked — overlay must have re-rendered with a newer timestamp
+    expect(lastNow).toBeGreaterThan(firstNow);
+  });
+
+  it("GlanceOverlay casesInFreezer advances while a manage dialog is rendered concurrently", async () => {
+    const freezerSamples: number[] = [];
+
+    const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+      useHomeCtx();
+      const { calc } = useLiveRun();
+      freezerSamples.push(calc.casesInFreezer);
+      return <span data-testid="glance-freezer">{calc.casesInFreezer}</span>;
+    });
+
+    render(
+      <BothContextsWrapper runStatus="running" brand="TestBrand" manageCategory="mixes">
+        <div data-testid="manage-dialog">Manage: mixes</div>
+        <GlanceOverlaySim />
+      </BothContextsWrapper>,
+    );
+
+    const firstFreezer = freezerSamples[0];
+
+    // Advance enough time for freezer accumulation (ACTIVE_VALUES: ppm>0, freezerTime=30min)
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    const lastFreezer = freezerSamples[freezerSamples.length - 1];
+    expect(lastFreezer).toBeGreaterThan(firstFreezer);
+  });
+
+  it("opening and closing a manage dialog does NOT reset GlanceOverlay live values", async () => {
+    const nowSamples: number[] = [];
+
+    const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+      useHomeCtx();
+      const { nowTime } = useLiveRun();
+      nowSamples.push(nowTime.getTime());
+      return null;
+    });
+
+    const { rerender } = render(
+      <BothContextsWrapper runStatus="running" brand="TestBrand" manageCategory="">
+        <GlanceOverlaySim />
+      </BothContextsWrapper>,
+    );
+
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    const nowBeforeDialog = nowSamples[nowSamples.length - 1];
+
+    // Open manage dialog — only manageCategory changes, live state unchanged
+    await act(async () => {
+      rerender(
+        <BothContextsWrapper runStatus="running" brand="TestBrand" manageCategory="mixes">
+          <div data-testid="manage-dialog">Manage: mixes</div>
+          <GlanceOverlaySim />
+        </BothContextsWrapper>,
+      );
+    });
+
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+
+    // Close manage dialog
+    await act(async () => {
+      rerender(
+        <BothContextsWrapper runStatus="running" brand="TestBrand" manageCategory="">
+          <GlanceOverlaySim />
+        </BothContextsWrapper>,
+      );
+    });
+
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+
+    const nowAfterClose = nowSamples[nowSamples.length - 1];
+
+    // Clock must have advanced monotonically through the full open/close cycle
+    expect(nowAfterClose).toBeGreaterThan(nowBeforeDialog);
+    // No sample should be less than the value before the dialog opened
+    for (const sample of nowSamples) {
+      expect(sample).toBeGreaterThanOrEqual(nowSamples[0]);
+    }
+  });
+});
