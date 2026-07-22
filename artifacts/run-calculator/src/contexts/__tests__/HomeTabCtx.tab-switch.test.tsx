@@ -601,6 +601,89 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
 
     expect(frontlineRenderCount).toBe(3);
   });
+
+  // ─── REGRESSION GUARD — COMBINED counter-proof ────────────────────────────
+  // Drives BrokenFrontlineProvider through the SAME mount → form-change →
+  // dialog-open sequence as the COMBINED test above, proving that the exact
+  // render-count pin of 3 after the dialog-open step is a real assertion.
+  //
+  // With the correct FrontlineProvider the COMBINED test expects:
+  //   mount(1) + form-change(1) + form-change(1) + dialog-open(0) = 3
+  //
+  // With BrokenFrontlineProvider the dialog-open step produces an extra render,
+  // pushing the count to 4.  This means the COMBINED pin "toBe(3)" WOULD FAIL
+  // under the broken provider — i.e. the COMBINED test is a real guard, not a
+  // false green.
+  //
+  // If THIS test starts FAILING (broken provider no longer bumps the count past
+  // 3 during the dialog-open step), the COMBINED test's exact-count assertion
+  // has become untestable and should be re-examined.
+  it("REGRESSION GUARD (COMBINED counter-proof): broken provider causes extra render during dialog-open after form changes", async () => {
+    const { rerender, getByTestId } = render(
+      <BrokenFrontlineProvider app1Type="cheese" manageCounter={0}>
+        <FrontlineSubscriber />
+      </BrokenFrontlineProvider>,
+    );
+
+    // Step 0 — initial mount.
+    expect(frontlineRenderCount).toBe(1);
+    expect(getByTestId("app1-type").textContent).toBe("cheese");
+
+    // Step 1 — form-change: app1Type changes (sauce).
+    // Both the correct and broken providers yield a new ctx ref here → render.
+    await act(async () => {
+      rerender(
+        <BrokenFrontlineProvider app1Type="sauce" manageCounter={0}>
+          <FrontlineSubscriber />
+        </BrokenFrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(2); // mount(1) + form-change(1)
+    expect(getByTestId("app1-type").textContent).toBe("sauce");
+
+    // Step 2 — form-change: app1Type changes again (pepperoni).
+    await act(async () => {
+      rerender(
+        <BrokenFrontlineProvider app1Type="pepperoni" manageCounter={0}>
+          <FrontlineSubscriber />
+        </BrokenFrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(3); // mount(1) + form-change(1) + form-change(1)
+    expect(getByTestId("app1-type").textContent).toBe("pepperoni");
+
+    // Step 3 — dialog-open: only manageCounter changes (0→1); app1Type is stable.
+    // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at 3.
+    // BROKEN provider:  manageCounter in deps → new ctx ref → spurious re-render
+    //                   → count becomes 4.
+    // This step is the heart of the counter-proof: it shows the COMBINED test's
+    // "toBe(3)" assertion is NOT vacuously true — the broken provider violates it.
+    await act(async () => {
+      rerender(
+        <BrokenFrontlineProvider app1Type="pepperoni" manageCounter={1}>
+          <FrontlineSubscriber />
+        </BrokenFrontlineProvider>,
+      );
+    });
+
+    // BROKEN provider leaked manageCounter into deps → subscriber re-rendered.
+    // The real FrontlineProvider must keep the count at 3 after this step
+    // (see the COMBINED test above).  Here it must be > 3.
+    expect(frontlineRenderCount).toBe(4); // extra render proves the COMBINED pin is real
+
+    // One more dialog change confirms it keeps firing — not a one-time no-op.
+    await act(async () => {
+      rerender(
+        <BrokenFrontlineProvider app1Type="pepperoni" manageCounter={99}>
+          <FrontlineSubscriber />
+        </BrokenFrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(5); // symmetric with Block 1-3's REGRESSION GUARD
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
