@@ -16777,13 +16777,9 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
-    casesPct, casesFreezerPct, casesPctWithFreezer,
-    currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
-    showBatchDue, setShowBatchDue,
+    calc, nowTime, liveFreezerMin,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
-    stallPrompt, setStallPrompt, stallCheck,
+    fireAutoTrackNow,
   } = useLiveRun();
 
   return (
@@ -17415,13 +17411,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
-    casesPct, casesFreezerPct, casesPctWithFreezer,
-    currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
+    calc, nowTime, elapsedBatchSec,
     showBatchDue, setShowBatchDue,
-    autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
+    autoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
-    stallPrompt, setStallPrompt, stallCheck,
   } = useLiveRun();
 
   return (
