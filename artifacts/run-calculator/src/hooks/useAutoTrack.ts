@@ -187,6 +187,16 @@ export function useAutoTrack({
   // 0 = not scheduled yet (first encounter arms the schedule without writing).
   const trayProdNextDueMsRef = useRef<number>(0);
   const batchProdNextDueMsRef = useRef<number>(0);
+  // Stable container object for tickDueRefs — initialized once so the returned
+  // object identity never changes across renders (prevents LiveRunContext's
+  // value useMemo from firing on every LiveRunProvider re-render).
+  const tickDueRefsRef = useRef({
+    case: caseNextDueMsRef,
+    tray: trayNextDueMsRef,
+    trayProd: trayProdNextDueMsRef,
+    batch: batchNextDueMsRef,
+    batchProd: batchProdNextDueMsRef,
+  });
   // Wall-clock ms of each consumption counter's last tick — drives the
   // incremental decrement (consumption for the actual elapsed duration).
   const trayLastMsRef = useRef<number>(0);
@@ -574,12 +584,6 @@ export function useAutoTrack({
     autoTrackSuggestion,
     autoSuppressUntilRef,
     fireAutoTrackNow,
-    tickDueRefs: {
-      case: caseNextDueMsRef,
-      tray: trayNextDueMsRef,
-      trayProd: trayProdNextDueMsRef,
-      batch: batchNextDueMsRef,
-      batchProd: batchProdNextDueMsRef,
-    },
+    tickDueRefs: tickDueRefsRef.current,
   };
 }

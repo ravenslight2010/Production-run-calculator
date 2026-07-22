@@ -54,27 +54,36 @@ import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
 
 // ── Shared mocks (same as neighbouring test files) ───────────────────────────
 
-vi.mock("../../hooks/useNotifications", () => ({
-  useNotifications: () => ({ showBatchDue: false, setShowBatchDue: vi.fn() }),
-}));
+vi.mock("../../hooks/useNotifications", () => {
+  const setShowBatchDue = vi.fn();
+  return {
+    useNotifications: () => ({ showBatchDue: false, setShowBatchDue }),
+  };
+});
 
-vi.mock("../../hooks/useAutoTrack", () => ({
-  useAutoTrack: () => ({
-    autoTrackProgress: false,
-    setAutoTrackProgress: vi.fn(),
-    autoTrackSuggestion: null,
-    autoSuppressUntilRef: { current: 0 },
-    fireAutoTrackNow: vi.fn(),
-    tickDueRefs: {
-      case:      { current: 0 },
-      tray:      { current: 0 },
-      trayProd:  { current: 0 },
-      batch:     { current: 0 },
-      batchProd: { current: 0 },
-    },
-  }),
-  suggestedDoughStaging: () => ({ trays: null, batches: null }),
-}));
+vi.mock("../../hooks/useAutoTrack", () => {
+  const setAutoTrackProgress = vi.fn();
+  const autoSuppressUntilRef = { current: 0 };
+  const fireAutoTrackNow = vi.fn();
+  const tickDueRefs = {
+    case:      { current: 0 },
+    tray:      { current: 0 },
+    trayProd:  { current: 0 },
+    batch:     { current: 0 },
+    batchProd: { current: 0 },
+  };
+  return {
+    useAutoTrack: () => ({
+      autoTrackProgress: false,
+      setAutoTrackProgress,
+      autoTrackSuggestion: null,
+      autoSuppressUntilRef,
+      fireAutoTrackNow,
+      tickDueRefs,
+    }),
+    suggestedDoughStaging: () => ({ trays: null, batches: null }),
+  };
+});
 
 // ── Form values that give a non-zero ppm so casesInFreezer advances ──────────
 const ACTIVE_VALUES: FormValues = {
@@ -1234,31 +1243,6 @@ function FloorModeWrapper({
   );
 }
 
-// ── HomeTabCtx-only provider for isolation / propagation tests ────────────────
-//
-// Tests 1 and 3 verify the HomeTabCtx isolation guarantee in isolation from
-// the live clock.  LiveRunProvider is intentionally omitted so the only
-// source of context updates is HomeTabCtx — making renderCount checks clean.
-//
-// This mirrors the pattern in HomeTabCtx.tab-switch.test.tsx but targets
-// FloorModeView's specific useHomeTabCtx() call.
-//
-// manageCounter is received as a prop but intentionally excluded from the
-// useMemo deps, mirroring home.tsx's homeTabCtxValue pattern.
-function TabOnlyProvider({
-  runStatus,
-  manageCounter: _manageCounter,  // received, intentionally excluded
-  children,
-}: {
-  runStatus: string;
-  manageCounter: number;
-  children: ReactNode;
-}) {
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const value = useMemo(() => ({ runStatus }), [runStatus]);
-  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
-}
-
 describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dialogs open", () => {
   afterEach(() => { cleanup(); });
 
@@ -1267,62 +1251,79 @@ describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dial
   // guarantee is: when manage/merge/import state changes (excluded from
   // homeTabCtxValue deps), the component does NOT re-render.
   //
-  // This test uses ONLY HomeTabCtx.Provider (no LiveRunProvider) so that the
-  // only source of context updates is HomeTabCtx — making renderCount clean
-  // and the assertion decisive.
+  // Uses the full FloorModeWrapper (HomeTabCtx + LiveRunProvider) with fake
+  // timers to prevent clock ticks from emitting spurious context updates,
+  // keeping renderCount clean and the assertion decisive.
+  //
+  // The LiveRunContext value is now wrapped in useMemo — so even though
+  // LiveRunProvider is present, it does NOT emit a new context object unless
+  // one of its constituent values (nowTime, calc, …) actually changes.
+  // With frozen fake timers, nowTime never advances and value stays stable,
+  // so only a HomeTabCtx change (runStatus) would trigger a re-render.
   it("FloorModeView does NOT re-render when manage/merge/import dialog state toggles", async () => {
-    let renderCount = 0;
+    vi.useFakeTimers();
+    try {
+      let renderCount = 0;
 
-    const FloorModeViewSim = memo(function FloorModeViewSimInner() {
-      renderCount++;
-      // Mirrors FloorModeView's useHomeTabCtx() call — the hook that must
-      // NOT be triggered by dialog/manage state changes.
-      const { runStatus } = useHomeTabCtx();
-      return <span data-testid="floor-status">{runStatus}</span>;
-    });
+      const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+        renderCount++;
+        // Mirrors FloorModeView's dual-context subscription:
+        //   useHomeTabCtx() for production state (run/form/status)
+        //   useLiveRun()    for live clock values
+        // The isolation guarantee: dialog/manage state NEVER reaches
+        // homeTabCtxValue's deps, so manageCounter changes produce no re-render.
+        const { runStatus } = useHomeTabCtx();
+        useLiveRun();
+        return <span data-testid="floor-status">{runStatus}</span>;
+      });
 
-    const { rerender } = render(
-      <TabOnlyProvider runStatus="running" manageCounter={0}>
-        <FloorModeViewSim />
-      </TabOnlyProvider>,
-    );
-
-    expect(renderCount).toBe(1);
-
-    // Open manage dialog — manageCounter changes, runStatus unchanged.
-    // homeTabCtxValue useMemo dep (runStatus) is stable → same ctx ref →
-    // React.memo skips re-render.
-    await act(async () => {
-      rerender(
-        <TabOnlyProvider runStatus="running" manageCounter={1}>
+      const { rerender } = render(
+        <FloorModeWrapper runStatus="running" manageCounter={0}>
           <FloorModeViewSim />
-        </TabOnlyProvider>,
+        </FloorModeWrapper>,
       );
-    });
+      // Flush any mount effects (e.g. stallPrompt effect calling setState with
+      // its own initial value, which React may still schedule a re-render for).
+      await act(async () => {});
+      const countAfterMount = renderCount;
 
-    expect(renderCount).toBe(1);
+      // Open manage dialog — manageCounter changes, runStatus unchanged.
+      // HomeTabCtx value is stable (runStatus unchanged) and LiveRunContext
+      // value is stable (nowTime frozen by fake timers) → React.memo skips.
+      await act(async () => {
+        rerender(
+          <FloorModeWrapper runStatus="running" manageCounter={1}>
+            <FloorModeViewSim />
+          </FloorModeWrapper>,
+        );
+      });
 
-    // Further dialog state changes (e.g. import progress ticking)
-    await act(async () => {
-      rerender(
-        <TabOnlyProvider runStatus="running" manageCounter={42}>
-          <FloorModeViewSim />
-        </TabOnlyProvider>,
-      );
-    });
+      expect(renderCount).toBe(countAfterMount);
 
-    expect(renderCount).toBe(1);
+      // Further dialog state changes (e.g. import progress ticking)
+      await act(async () => {
+        rerender(
+          <FloorModeWrapper runStatus="running" manageCounter={42}>
+            <FloorModeViewSim />
+          </FloorModeWrapper>,
+        );
+      });
 
-    // Close dialog — still no re-render.
-    await act(async () => {
-      rerender(
-        <TabOnlyProvider runStatus="running" manageCounter={0}>
-          <FloorModeViewSim />
-        </TabOnlyProvider>,
-      );
-    });
+      expect(renderCount).toBe(countAfterMount);
 
-    expect(renderCount).toBe(1);
+      // Close dialog — still no re-render.
+      await act(async () => {
+        rerender(
+          <FloorModeWrapper runStatus="running" manageCounter={0}>
+            <FloorModeViewSim />
+          </FloorModeWrapper>,
+        );
+      });
+
+      expect(renderCount).toBe(countAfterMount);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ─── Test 1 counter-proof: ISOLATION REGRESSION DETECTION ────────────────
@@ -1459,37 +1460,46 @@ describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dial
   // Guard against over-memoisation: when a REAL production dep (runStatus)
   // changes, FloorModeView MUST re-render to show the updated status.
   //
-  // Uses HomeTabCtx-only (no LiveRunProvider) for a clean renderCount signal.
+  // Uses the full FloorModeWrapper (HomeTabCtx + LiveRunProvider) with fake
+  // timers so the clock doesn't tick.  The only trigger for a re-render is
+  // the HomeTabCtx value change caused by runStatus flipping — proving the
+  // memoisation is not over-aggressive.
   it("FloorModeView DOES re-render when a production dep (runStatus) changes", async () => {
-    let renderCount = 0;
+    vi.useFakeTimers();
+    try {
+      let renderCount = 0;
 
-    const FloorModeViewSim = memo(function FloorModeViewSimInner() {
-      renderCount++;
-      const { runStatus } = useHomeTabCtx();
-      return <span data-testid="floor-status">{runStatus}</span>;
-    });
+      const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+        renderCount++;
+        const { runStatus } = useHomeTabCtx();
+        useLiveRun();
+        return <span data-testid="floor-status">{runStatus}</span>;
+      });
 
-    const { rerender, getByTestId } = render(
-      <TabOnlyProvider runStatus="running" manageCounter={0}>
-        <FloorModeViewSim />
-      </TabOnlyProvider>,
-    );
-
-    expect(renderCount).toBe(1);
-    expect(getByTestId("floor-status").textContent).toBe("running");
-
-    // Simulate run pausing — a real production dep change → HomeTabCtx ref
-    // invalidated → subscriber re-renders with new runStatus.
-    await act(async () => {
-      rerender(
-        <TabOnlyProvider runStatus="paused" manageCounter={0}>
+      const { rerender, getByTestId } = render(
+        <FloorModeWrapper runStatus="running" manageCounter={0}>
           <FloorModeViewSim />
-        </TabOnlyProvider>,
+        </FloorModeWrapper>,
       );
-    });
+      await act(async () => {});
+      const countAfterMount = renderCount;
+      expect(getByTestId("floor-status").textContent).toBe("running");
 
-    expect(renderCount).toBe(2);
-    expect(getByTestId("floor-status").textContent).toBe("paused");
+      // Simulate run pausing — runStatus changes → HomeTabCtx ref invalidated
+      // → subscriber re-renders with new runStatus.
+      await act(async () => {
+        rerender(
+          <FloorModeWrapper runStatus="paused" manageCounter={0}>
+            <FloorModeViewSim />
+          </FloorModeWrapper>,
+        );
+      });
+
+      expect(renderCount).toBeGreaterThan(countAfterMount);
+      expect(getByTestId("floor-status").textContent).toBe("paused");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

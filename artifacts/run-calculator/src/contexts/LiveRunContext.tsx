@@ -397,13 +397,21 @@ export function LiveRunProvider({
   });
 
   // ── Stall detection ───────────────────────────────────────────────────────
-  const stallCheck = detectStallFromDelta({
-    running: !!currentRun?.startedAt && !currentRun?.endedAt && !currentRun?.pausedAt,
-    hasOpenStoppage: (currentRun?.stoppages ?? []).some(s => !s.endedAt),
-    ppm: calc.ppm,
-    pizzasPerCase: v.pizzasPerCase,
-    paceDelta: calc.paceDelta,
-  });
+  const stallCheck = useMemo(
+    () =>
+      detectStallFromDelta({
+        running: !!currentRun?.startedAt && !currentRun?.endedAt && !currentRun?.pausedAt,
+        hasOpenStoppage: (currentRun?.stoppages ?? []).some(s => !s.endedAt),
+        ppm: calc.ppm,
+        pizzasPerCase: v.pizzasPerCase,
+        paceDelta: calc.paceDelta,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      currentRun?.startedAt, currentRun?.endedAt, currentRun?.pausedAt,
+      currentRun?.stoppages, calc.ppm, v.pizzasPerCase, calc.paceDelta,
+    ],
+  );
   const [stallPrompt, setStallPrompt] = useState(false);
   const stallEpisodeShownRef = useRef(false);
   useEffect(() => {
@@ -476,15 +484,27 @@ export function LiveRunProvider({
     markRunValuesUpdated(nextRun.id, Date.now());
   }, [runStatus, calc.pressDone, autoTrackProgress, screenMode, dayState.runs, dayState.currentIndex, currentRunId]);
 
-  const value: LiveRunContextValue = {
-    nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
-    casesPct, casesFreezerPct, casesPctWithFreezer,
-    currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
-    showBatchDue, setShowBatchDue,
-    autoTrackProgress, setAutoTrackProgress,
-    autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
-    stallPrompt, setStallPrompt, stallCheck,
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo<LiveRunContextValue>(
+    () => ({
+      nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      casesPct, casesFreezerPct, casesPctWithFreezer,
+      currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
+      showBatchDue, setShowBatchDue,
+      autoTrackProgress, setAutoTrackProgress,
+      autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      stallPrompt, setStallPrompt, stallCheck,
+    }),
+    [
+      nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
+      casesPct, casesFreezerPct, casesPctWithFreezer,
+      currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
+      showBatchDue, setShowBatchDue,
+      autoTrackProgress, setAutoTrackProgress,
+      autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      stallPrompt, setStallPrompt, stallCheck,
+    ],
+  );
 
   return <LiveRunContext.Provider value={value}>{children}</LiveRunContext.Provider>;
 }
