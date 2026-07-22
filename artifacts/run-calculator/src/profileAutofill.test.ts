@@ -272,6 +272,60 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
   });
 
+  it("does NOT match when the pool is MORE specific than the spec (directional guard)", () => {
+    // Regression: pool has "Lowe's 7in White Spinach" (size qualifier "7in"),
+    // spec just says "Lowe's White Spinach" (no "7in"). The symmetric
+    // allowExtraToken matcher fires on the pool's extra "7in" token, wrongly
+    // suggesting the 7in recipe for the non-7in profile.
+    // The directional rule: spec must have the extra token, not the pool.
+    // "7in" extra is in the POOL here, so it must NOT match.
+    // NOTE: profile brand+flavor must match the plan brand+flavor for the profile
+    // to be found — use "Lowe's"/"White Spinach" consistently.
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({
+            brand: "Lowe's",
+            flavor: "White Spinach",
+            applicators: [{ type: "Lowe's White Spinach", ozPerPizza: 5, batchLbs: 0 }],
+          })],
+        }),
+      ],
+      brand: "Lowe's",
+      flavor: "White Spinach",
+      current: values({ app1Type: "cheese", app1CheeseRecipeName: "" } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+      cheeseRecipes: [{ name: "Lowe's 7in White Spinach", enabled: true }],
+    });
+    // Must NOT offer "Lowe's 7in White Spinach" as a recipe fill.
+    expect(p.fills.find(f => f.field === "app1CheeseRecipeName")).toBeUndefined();
+    // Instead the raw type surfaces (slot is "cheese" typed but resolver
+    // couldn't link it, and the directional pool match also fails).
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
+  });
+
+  it("does NOT match when the spec extra token is a digit qualifier (size mark guard)", () => {
+    // "Skim 7in Mozzarella" (spec, extra "7in" digit token) vs pool
+    // "Skim Mozzarella" — "7in" must NOT be treated as a generic descriptor.
+    // profile() defaults to brand "Aldo's" / flavor "Pepperoni" which matches.
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [profile({
+            applicators: [{ type: "Skim 7in Mozzarella", ozPerPizza: 5, batchLbs: 0 }],
+          })],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      current: values({ app1Type: "cheese", app1CheeseRecipeName: "" } as Partial<FormValues>),
+      mixNamesLower: NO_MIXES,
+      cheeseRecipes: [{ name: "Skim Mozzarella", enabled: true }],
+    });
+    expect(p.fills.find(f => f.field === "app1CheeseRecipeName")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeDefined();
+  });
+
   it('matches a saved-sheet row stored under a punctuation-typo brand (Aldo"s → Aldo\'s)', () => {
     // Regression: an AI parse minted brand `Aldo"s` (straight double-quote)
     // for one flavor row; the strict brand compare made Auto-Fill skip it, so

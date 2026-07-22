@@ -278,10 +278,7 @@ function desiredFromProfile(
     let linkedPoolName: string | null = null;
     if (curSlotType === "cheese" || curSlotType === "mix") {
       const poolToCheck = curSlotType === "cheese" ? cheeseCandidateNames : mixCandidateNames;
-      linkedPoolName = buildNearDupNameMatcher(poolToCheck, {
-        keyOf: possessiveFoldNameKey,
-        allowExtraToken: true,
-      })(type);
+      linkedPoolName = specExtraTokenMatchesPool(type, poolToCheck);
     }
     if (linkedPoolName) {
       push(`app${slot}CheeseRecipeName`, `Applicator ${slot} Recipe`, linkedPoolName, "name");
@@ -482,6 +479,46 @@ function rawTypeMatchesProfileLink(
     allowExtraToken: true,
   });
   return match(rawType) !== null;
+}
+
+/**
+ * Directional pool near-dup: the raw spec label has exactly one extra
+ * non-digit token beyond a pool entry's tokens (pool tokens are all a subset
+ * of the spec tokens). Returns the single matching pool name, or null if zero
+ * or more than one match.
+ *
+ * Direction matters: a pool entry MORE specific than the spec (e.g. pool has
+ * "7in" but spec just says "White Spinach") must NOT auto-match — "7in" is a
+ * meaningful qualifier that distinguishes different products. Only the reverse
+ * is safe: "Part Skim Mozzarella" (spec) carrying an extra descriptor "Part"
+ * beyond the pool's "Skim Mozzarella" is legitimately the same blend with an
+ * optional qualifier.
+ */
+function specExtraTokenMatchesPool(
+  rawType: string,
+  poolNames: ReadonlyArray<string>,
+): string | null {
+  const specToks = possessiveFoldNameKey(rawType).split(" ").filter(Boolean);
+  const hits: string[] = [];
+  for (const name of poolNames) {
+    const poolToks = possessiveFoldNameKey(name).split(" ").filter(Boolean);
+    // Spec must have exactly 1 more token than the pool name.
+    if (specToks.length - poolToks.length !== 1) continue;
+    // All pool tokens must appear in the spec tokens.
+    const specSet = new Set(specToks);
+    if (!poolToks.every((t) => specSet.has(t))) continue;
+    // The one extra spec token must carry no digits (a size mark like "7in"
+    // or "12"x16"" is a meaningful product qualifier, not a generic descriptor).
+    const poolSet = new Set(poolToks);
+    const extra = specToks.find((t) => !poolSet.has(t)) ?? "";
+    if (/\d/.test(extra)) continue;
+    // Pool name must contribute at least 4 shared chars (same guard as
+    // isOneExtraTokenApart — prevents "A Blend" vs "Blend" style noise).
+    if (poolToks.join("").length < 4) continue;
+    hits.push(name);
+  }
+  // Ambiguity guard: two pool entries both qualify → not safe to pick.
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**
