@@ -192,6 +192,7 @@ router.post("/auth/sign-out", (_req, res): void => {
 // their own password change.
 router.post(
   "/auth/change-password",
+  authRateLimit,
   requireAuth,
   async (req, res): Promise<void> => {
     const parsed = ChangePasswordBody.safeParse(req.body);
