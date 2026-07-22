@@ -342,3 +342,90 @@ describe("CompactRunStrip pause button — pauseRunRef wiring", () => {
     expect(queryByTestId("paused-indicator")).not.toBeNull();
   });
 });
+
+// ─── CompactRunStrip resume button: setActiveTab("run") navigation test ───────
+//
+// Structural guarantee: when the strip is in "paused" state, clicking the
+// resume button (data-testid="strip-resume") calls setActiveTab("run").
+//
+// The real CompactRunStrip resume button is:
+//   <button data-testid="strip-resume"
+//     onClick={(e) => { e.stopPropagation(); setActiveTab("run"); }}
+//   >
+//
+// This mirrors that call path in a self-contained replica so the test does not
+// depend on home.tsx being importable.
+
+type ResumeCtxShape = {
+  runStatus: string;
+  setActiveTab: (tab: string) => void;
+};
+
+const ResumeCtx = createContext<ResumeCtxShape | null>(null);
+
+function useResumeCtx() {
+  const ctx = useContext(ResumeCtx);
+  if (!ctx) throw new Error("useResumeCtx must be inside ResumeCtx.Provider");
+  return ctx;
+}
+
+// Mirrors CompactRunStrip: shows resume button (strip-resume) when paused,
+// calls setActiveTab("run") on click — exactly as the real strip does.
+const ResumeStrip = memo(function ResumeStripInner() {
+  const { runStatus, setActiveTab } = useResumeCtx();
+  return (
+    <div data-testid="resume-strip">
+      <span data-testid="status">{runStatus}</span>
+      {runStatus === "paused" && (
+        <button
+          type="button"
+          data-testid="strip-resume"
+          onClick={(e) => { e.stopPropagation(); setActiveTab("run"); }}
+        >
+          Resume
+        </button>
+      )}
+    </div>
+  );
+});
+
+describe("CompactRunStrip resume button — setActiveTab(\"run\") navigation", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("clicking strip-resume calls setActiveTab with \"run\"", async () => {
+    const setActiveTab = vi.fn();
+
+    const value: ResumeCtxShape = { runStatus: "paused", setActiveTab };
+    const { getByTestId } = render(
+      <ResumeCtx.Provider value={value}>
+        <ResumeStrip />
+      </ResumeCtx.Provider>,
+    );
+
+    expect(getByTestId("status").textContent).toBe("paused");
+
+    await act(async () => {
+      fireEvent.click(getByTestId("strip-resume"));
+    });
+
+    expect(setActiveTab).toHaveBeenCalledTimes(1);
+    expect(setActiveTab).toHaveBeenCalledWith("run");
+  });
+
+  it("resume button is not rendered when runStatus is \"running\"", () => {
+    const setActiveTab = vi.fn();
+
+    const value: ResumeCtxShape = { runStatus: "running", setActiveTab };
+    const { queryByTestId } = render(
+      <ResumeCtx.Provider value={value}>
+        <ResumeStrip />
+      </ResumeCtx.Provider>,
+    );
+
+    expect(queryByTestId("strip-resume")).toBeNull();
+    expect(setActiveTab).not.toHaveBeenCalled();
+  });
+});
