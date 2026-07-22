@@ -51,10 +51,39 @@ import * as LiveRunContextNS from "../../contexts/LiveRunContext";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
+import { useAutoTrack } from "../../hooks/useAutoTrack";
+import { useNotifications } from "../../hooks/useNotifications";
 
 // ── Shared mocks (same as neighbouring test files) ───────────────────────────
 
+// !! STABILITY CONTRACT — DO NOT BREAK !!
+//
+// Every object and function returned by these mock factories MUST be defined
+// at closure scope (outside the inner arrow function), NOT created inline.
+//
+// WHY THIS MATTERS:
+//   LiveRunProvider wraps its hook results in a `value` useMemo whose deps
+//   include the return values of useAutoTrack() and useNotifications().
+//   If any field is an inline literal (e.g. `vi.fn()` or `{ current: 0 }`
+//   written directly in the return body), a NEW reference is produced on
+//   every call to the hook.  That makes the useMemo deps unstable, so the
+//   memo fires on every render, which silently defeats the memo()-wrapped
+//   FloorModeView isolation and causes all live tab components to re-render
+//   on every dialog/import state change.
+//
+// CORRECT (closure-level — same ref every call):
+//   const myFn = vi.fn();
+//   return { useFoo: () => ({ fn: myFn }) };
+//
+// WRONG (inline literal — new ref every call):
+//   return { useFoo: () => ({ fn: vi.fn() }) };
+//
+// Suite 5 below enforces this contract with reference-identity assertions.
+
 vi.mock("../../hooks/useNotifications", () => {
+  // Closure-level refs — stable across every call to useNotifications().
+  // Inline `vi.fn()` here would produce a new ref per call and break the
+  // liveSlice useMemo in LiveRunProvider.  See STABILITY CONTRACT above.
   const setShowBatchDue = vi.fn();
   return {
     useNotifications: () => ({ showBatchDue: false, setShowBatchDue }),
@@ -62,6 +91,11 @@ vi.mock("../../hooks/useNotifications", () => {
 });
 
 vi.mock("../../hooks/useAutoTrack", () => {
+  // Closure-level refs — stable across every call to useAutoTrack().
+  // Every object/function here must remain at closure scope.  Moving any
+  // of these inline (e.g. `autoSuppressUntilRef: { current: 0 }` inside
+  // the return body) would silently defeat the FloorModeView isolation.
+  // See STABILITY CONTRACT above.
   const setAutoTrackProgress = vi.fn();
   const autoSuppressUntilRef = { current: 0 };
   const fireAutoTrackNow = vi.fn();
@@ -2112,5 +2146,89 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
     // real GlanceOverlay — the live clock would stop driving re-renders, and
     // Test 1's lastNow > firstNow assertion would fail.
     expect(renderCount).toBe(renderCountAfterMount);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 5 — Mock reference stability: useAutoTrack and useNotifications return
+//            the SAME object/function references on every call
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// LiveRunProvider builds its `value` with a useMemo whose deps include the
+// individual fields returned by useAutoTrack() and useNotifications().  If any
+// field is an inline literal (vi.fn() or { current: 0 } written inside the
+// factory's return body) a NEW reference is produced on every hook call, the
+// useMemo fires on every render, and FloorModeView's memo() isolation is
+// silently defeated.
+//
+// These tests call each mock hook TWICE and assert that every returned
+// object/function field is the exact same reference (===) across both calls.
+// If a future developer moves a closure-level constant inline, the reference
+// changes and the relevant assertion fails here — catching the regression
+// before it silently freezes the live-tab display.
+//
+// See the STABILITY CONTRACT comment block above the vi.mock factories for the
+// full explanation of WHY closure-level refs are mandatory.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("LiveTabMemo — Suite 5: useAutoTrack and useNotifications mocks return stable references across calls", () => {
+  it("useNotifications: setShowBatchDue is the same function reference on every call", () => {
+    const call1 = useNotifications();
+    const call2 = useNotifications();
+    // If setShowBatchDue were defined inline (`vi.fn()` inside the return body),
+    // call1.setShowBatchDue !== call2.setShowBatchDue and this would fail.
+    expect(call1.setShowBatchDue).toBe(call2.setShowBatchDue);
+  });
+
+  it("useNotifications: the returned object is structurally consistent across calls", () => {
+    const call1 = useNotifications();
+    const call2 = useNotifications();
+    expect(call1.showBatchDue).toBe(call2.showBatchDue);
+  });
+
+  it("useAutoTrack: all function references are stable across calls", () => {
+    const call1 = useAutoTrack();
+    const call2 = useAutoTrack();
+    // Each of these would fail if the corresponding constant were moved inline.
+    expect(call1.setAutoTrackProgress).toBe(call2.setAutoTrackProgress);
+    expect(call1.fireAutoTrackNow).toBe(call2.fireAutoTrackNow);
+  });
+
+  it("useAutoTrack: autoSuppressUntilRef is the same object reference across calls", () => {
+    const call1 = useAutoTrack();
+    const call2 = useAutoTrack();
+    // autoSuppressUntilRef is used as a useMemo dep inside LiveRunProvider.
+    // An inline `{ current: 0 }` would produce a new object each call and
+    // defeat the memo — this assertion catches that regression.
+    expect(call1.autoSuppressUntilRef).toBe(call2.autoSuppressUntilRef);
+  });
+
+  it("useAutoTrack: tickDueRefs is the same object reference across calls", () => {
+    const call1 = useAutoTrack();
+    const call2 = useAutoTrack();
+    // tickDueRefs is also used as a useMemo dep.  An inline object literal
+    // would produce a new ref per call; this test catches that drift.
+    expect(call1.tickDueRefs).toBe(call2.tickDueRefs);
+  });
+
+  it("useAutoTrack: each tickDueRef slot is the same object reference across calls", () => {
+    const call1 = useAutoTrack();
+    const call2 = useAutoTrack();
+    // Each individual slot (case, tray, …) must also be a closure-level ref.
+    // If any slot were written inline inside tickDueRefs' object literal, it
+    // would still be a new object each call because a new tickDueRefs wrapper
+    // would be produced.  This is covered transitively by the tickDueRefs test
+    // above, but we also verify the slots directly for clarity.
+    const slots = ["case", "tray", "trayProd", "batch", "batchProd"] as const;
+    for (const slot of slots) {
+      expect(call1.tickDueRefs[slot]).toBe(call2.tickDueRefs[slot]);
+    }
+  });
+
+  it("useAutoTrack: non-ref fields are value-stable across calls", () => {
+    const call1 = useAutoTrack();
+    const call2 = useAutoTrack();
+    expect(call1.autoTrackProgress).toBe(call2.autoTrackProgress);
+    expect(call1.autoTrackSuggestion).toBe(call2.autoTrackSuggestion);
   });
 });
