@@ -248,6 +248,14 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
 // The Frontline tab reads `v` (form values) from homeTabCtxValue — specifically
 // applicator fields such as `app1Type`.  Changing `app1Type` must propagate;
 // opening a manage dialog must not cause a re-render.
+//
+// Three tests:
+//   PROPAGATION    — form value change reaches the Frontline subscriber.
+//   ISOLATION      — dialog open does NOT re-render the Frontline subscriber.
+//   REGRESSION GUARD — a deliberately broken provider (manageCounter in deps)
+//                      proves the ISOLATION test would catch the regression:
+//                      the broken provider causes a re-render on every dialog
+//                      state change, which the real (correct) provider must not.
 // ══════════════════════════════════════════════════════════════════════════════
 
 function FrontlineProvider({
@@ -260,6 +268,26 @@ function FrontlineProvider({
 }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo(() => ({ v: { app1Type } }), [app1Type]);
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+// ── BrokenFrontlineProvider ────────────────────────────────────────────────
+// Intentionally includes `manageCounter` in useMemo deps, simulating the
+// regression where a dialog field leaks into the Frontline context slice.
+// Used only in the REGRESSION GUARD test below to prove the guard is real.
+function BrokenFrontlineProvider({
+  app1Type,
+  manageCounter,
+  children,
+}: {
+  app1Type: string;
+  manageCounter: number;
+  children: ReactNode;
+}) {
+  const value = useMemo(
+    () => ({ v: { app1Type } }),
+    [app1Type, manageCounter], // BUG: manageCounter should NOT be here
+  );
   return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
 }
 
@@ -332,6 +360,49 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
     });
 
     expect(frontlineRenderCount).toBe(1);
+  });
+
+  // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
+  // This test uses BrokenFrontlineProvider — which intentionally includes
+  // `manageCounter` in its useMemo deps — to prove that the ISOLATION test
+  // above is a real guard: if someone accidentally adds a dialog field to the
+  // Frontline context slice's deps, the subscriber WILL re-render on every
+  // dialog state change.
+  //
+  // If this test starts FAILING (broken provider no longer causes re-renders),
+  // the isolation test above has become a false green and the guard is gone.
+  it("REGRESSION GUARD: broken provider (manageCounter in deps) causes spurious Frontline re-renders", async () => {
+    const { rerender } = render(
+      <BrokenFrontlineProvider app1Type="cheese" manageCounter={0}>
+        <FrontlineSubscriber />
+      </BrokenFrontlineProvider>,
+    );
+
+    expect(frontlineRenderCount).toBe(1);
+
+    // Simulate dialog open — only manageCounter changes; app1Type is stable.
+    // With the BROKEN provider, this produces a new ctx ref → spurious re-render.
+    await act(async () => {
+      rerender(
+        <BrokenFrontlineProvider app1Type="cheese" manageCounter={1}>
+          <FrontlineSubscriber />
+        </BrokenFrontlineProvider>,
+      );
+    });
+
+    // BROKEN provider leaks manageCounter into deps → subscriber re-renders.
+    // The real FrontlineProvider must keep this count at 1 (see ISOLATION test).
+    expect(frontlineRenderCount).toBe(2);
+
+    await act(async () => {
+      rerender(
+        <BrokenFrontlineProvider app1Type="cheese" manageCounter={42}>
+          <FrontlineSubscriber />
+        </BrokenFrontlineProvider>,
+      );
+    });
+
+    expect(frontlineRenderCount).toBe(3);
   });
 });
 
