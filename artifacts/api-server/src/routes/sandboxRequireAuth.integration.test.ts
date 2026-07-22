@@ -16,6 +16,8 @@
 //   - non-sandbox token after cache eviction → still 200 in production
 //   - DB error + stale cache sandbox=true → isSandboxUser returns true (blocked)
 //   - DB error + no cache (cold) → isSandboxUser returns false (treated as live)
+//   - promoted-DB scenario: seedSandboxUser() row survives into production → 401
+//   - after promoted sandbox row is deleted + cache evicted → isSandboxUser returns false
 //
 // Pattern mirrors sandboxSignIn.integration.test.ts and sandboxIsolation.integration.test.ts:
 // a throwaway Postgres DB is created, drizzle pushes the schema, and the real
@@ -48,6 +50,8 @@ let newUserId: () => string;
 let hashPassword: (pw: string) => string;
 let clearSandboxCache: () => void;
 let isSandboxUser: (userId: string) => Promise<boolean>;
+let seedSandboxUser: () => Promise<void>;
+let sandboxUsername: string;
 let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
 
@@ -107,6 +111,8 @@ beforeAll(async () => {
   hashPassword = authMod.hashPassword;
   clearSandboxCache = sandboxMod.clearSandboxCache;
   isSandboxUser = sandboxMod.isSandboxUser;
+  seedSandboxUser = sandboxMod.seedSandboxUser;
+  sandboxUsername = sandboxMod.SANDBOX_USERNAME;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   clearSessionBoundaryCache = sessionBoundaryMod.clearSessionBoundaryCache;
 
@@ -370,5 +376,84 @@ describe("isSandboxUser direct cache and DB query behaviour", () => {
       passwordHash: hashPassword("anypassword"),
       sandbox: true,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Promoted-production-DB scenario
+//
+// A dev environment called seedSandboxUser() to create the well-known "test"
+// account. The database was then promoted to production without cleaning up
+// that row. This describe block confirms that:
+//   1. The sandbox gate fires in production even though the row was seeded via
+//      the normal server-boot path (not a hand-crafted test fixture).
+//   2. Once the orphaned row is deleted and the in-process TTL cache is
+//      evicted, isSandboxUser() immediately returns false — proving the gate
+//      is driven by the live DB, not by a one-time boot check.
+// ---------------------------------------------------------------------------
+describe("promoted-DB scenario: stale sandbox row from a dev seed", () => {
+  // sandboxUsername is assigned in beforeAll from sandboxMod.SANDBOX_USERNAME,
+  // so this describe block stays in sync if the constant is ever renamed.
+
+  it("blocks a token for the seeded sandbox account when NODE_ENV is 'production'", async () => {
+    // Simulate: a dev server called seedSandboxUser() on boot, creating the
+    // well-known "test" account with sandbox=true. The database was then
+    // promoted to production without cleaning up that row.
+    await seedSandboxUser();
+
+    // Retrieve the DB-assigned id so we can mint a token without going through
+    // the sign-in flow (matching the threat model: attacker replays a dev-env
+    // token against the promoted instance).
+    const [seededRow] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.username, sandboxUsername))
+      .limit(1);
+    expect(seededRow).toBeDefined();
+    const seededUserId = seededRow.id;
+
+    process.env.NODE_ENV = "production";
+    clearSandboxCache();
+
+    // The token was minted in the dev environment and is now replayed against
+    // the promoted production instance. requireAuth must reject it.
+    const res = await authedRequest(seededUserId, "GET", "/api/me");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Unauthorized");
+  });
+
+  it("isSandboxUser returns false after the promoted sandbox row is deleted and cache is evicted", async () => {
+    // Seed the row (same as above — represents the promoted-DB state).
+    await seedSandboxUser();
+
+    const [seededRow] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.username, sandboxUsername))
+      .limit(1);
+    expect(seededRow).toBeDefined();
+    const seededUserId = seededRow.id;
+
+    // Confirm the gate sees the row as sandbox while it still exists.
+    clearSandboxCache();
+    const beforeDelete = await isSandboxUser(seededUserId);
+    expect(beforeDelete).toBe(true);
+
+    // A production operator deletes the orphaned sandbox row (or it is cleaned
+    // up by a post-promotion migration). After deletion the gate must stop
+    // blocking requests for this userId.
+    //
+    // The userRoles FK cascades on delete, so we only need to remove the user.
+    await db.delete(usersTable).where(eq(usersTable.username, sandboxUsername));
+
+    // Evict the TTL cache to force a fresh DB query — this is what happens in
+    // a long-running server once the 15-second TTL window expires.
+    clearSandboxCache();
+
+    // After the row is gone the DB query returns null, which isSandboxUser
+    // maps to sandbox=false. The userId is no longer treated as sandbox-flagged.
+    const afterDelete = await isSandboxUser(seededUserId);
+    expect(afterDelete).toBe(false);
   });
 });
