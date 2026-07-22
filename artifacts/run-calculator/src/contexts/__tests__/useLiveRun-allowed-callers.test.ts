@@ -124,11 +124,14 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
 
     const lines = readFileSync(homePath, "utf8").split("\n");
 
-    // Regex to detect a top-level function declaration:
-    //   `function FunctionName(` or `function FunctionName<`
+    // Regex to detect a top-level function declaration in two forms:
+    //   1. `function FunctionName(` or `function FunctionName<`
+    //   2. `const FunctionName = memo(function FunctionName(` — React.memo wrap
     // We capture only PascalCase names (components) to skip utilities like
     // `function buildNeedRows(`, `function fmtElapsed(`, etc.
     const FUNC_DECL_RE = /^function ([A-Z][A-Za-z0-9]*)[\s<(]/;
+    // Matches: const CompactRunStrip = memo(function CompactRunStrip() {
+    const MEMO_FUNC_RE = /^const \w+ = \w+\(function ([A-Z][A-Za-z0-9]*)[\s<(]/;
 
     let currentFunction: string | null = null;
     const violations: { line: number; fn: string }[] = [];
@@ -136,8 +139,8 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // Track the current enclosing function.
-      const funcMatch = line.match(FUNC_DECL_RE);
+      // Track the current enclosing function (plain decl or memo-wrapped).
+      const funcMatch = line.match(FUNC_DECL_RE) ?? line.match(MEMO_FUNC_RE);
       if (funcMatch) {
         currentFunction = funcMatch[1];
         continue;
@@ -175,7 +178,7 @@ describe("useLiveRun — allowed callers in home.tsx", () => {
     // allowlist stays in sync with the code.
     const functionsFound = new Set<string>();
     for (const line of lines) {
-      const m = line.match(FUNC_DECL_RE);
+      const m = line.match(FUNC_DECL_RE) ?? line.match(MEMO_FUNC_RE);
       if (m) functionsFound.add(m[1]);
     }
 

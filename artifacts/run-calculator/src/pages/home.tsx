@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -2409,6 +2409,18 @@ const HomeCtx = createContext<any>(null);
 function useHomeCtx(): any {
   const ctx = useContext(HomeCtx);
   if (!ctx) throw new Error("useHomeCtx must be used within HomeCtx.Provider");
+  return ctx;
+}
+
+// ─── HomeRunSummaryCtx: narrow run-data slice for CompactRunStrip ────────────
+// Only the run/production state CompactRunStrip actually reads. Components
+// subscribed here do NOT re-render when manage/merge/import/dialog state
+// changes — only when the run itself changes (dayState, form values, runStatus).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const HomeRunSummaryCtx = createContext<any>(null);
+function useHomeRunSummaryCtx(): any {
+  const ctx = useContext(HomeRunSummaryCtx);
+  if (!ctx) throw new Error("useHomeRunSummaryCtx must be used within HomeRunSummaryCtx.Provider");
   return ctx;
 }
 
@@ -10143,8 +10155,34 @@ export default function Home() {
   );
 
 
-  // ── Stable context value for extracted sub-components ──────────────────
-  const homeCtxValue = {
+  // ── Narrow context value for CompactRunStrip ────────────────────────────
+  // Always-current ref for pauseRun. The function is a plain closure (not
+  // useCallback), so we store it in a stable ref to avoid stale captures
+  // while keeping the ref object itself stable across renders.
+  const _pauseRunRef = useRef<() => void>(pauseRun);
+  _pauseRunRef.current = pauseRun;
+
+  // Memoized narrow context: only re-creates when run data actually changes.
+  // Manage/merge/import/dialog state changes do NOT appear in these deps, so
+  // they do NOT trigger a new context reference → CompactRunStrip skips
+  // the re-render entirely.
+  const homeRunSummaryCtxValue = useMemo(
+    () => ({ runStatus, currentRun, dayState, v, ve, setActiveTab, pauseRunRef: _pauseRunRef }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus, currentRun, dayState, v, ve],
+    // setActiveTab is a stable React setState dispatch; _pauseRunRef is a
+    // stable ref object — both intentionally omitted from deps.
+  );
+
+  // ── Context value for extracted sub-components ──────────────────────────
+  // Wrapped in useMemo so the object reference only changes when reactive
+  // state actually changes.  Plain-function closures (addBrand, pauseRun,
+  // etc.) are NOT listed as deps because all the state they close over IS
+  // already listed; when those state values are unchanged the closures
+  // behave identically to fresh ones.  setState dispatches and refs are
+  // stable by React contract and also omitted.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const homeCtxValue = useMemo(() => ({
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
@@ -10255,7 +10293,77 @@ export default function Home() {
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
     v, ve, writeError,
-  };
+  }), [
+    // ── Reactive state values that actually live in this context object ──
+    // setState dispatches (set*), refs (*Ref), plain-function callbacks, and
+    // constants are intentionally omitted: they are either stable by React
+    // contract or their correctness is guaranteed by the state deps below.
+    activeCasts, activeStopId, activeTab, allergenWarnings, allMixRecipeOptions,
+    batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
+    canApproveResets, canEditRules, canManageInventory, canManageStaff,
+    caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
+    checklistAcks, checklistSatisfied,
+    cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields,
+    cheeseImportApplying, cheeseImportError, cheeseImportLoading,
+    cheeseImportPrepared, cheeseImportProgress, cheeseIngredients,
+    cheeseNameBrandTags, cheeseNamesForRun, cheeseRecipeNames, cheeseRecipesList,
+    circles, circlesList, copiedSummary, currentMixPresets, currentRun, currentRunId,
+    customAllergens, cycleCountQc, cycleCountSchedules, dayState, dedupSorted,
+    dieLineDefaultOverrides, dieTypes, doughFields, doughIngredients, doughPoolDrift,
+    doughRecipeNameOptions, doughRecipeNames, doughRecipesList, doughSubTab, doughVariantPick,
+    downtimeDays, editingStop, enabledCheeseRecipes, existingImportRecipeNames,
+    expandedHistoryDay, expandedScheduleDay, exportSelection, exporting,
+    flashSaved, flavorInput, flexibleViolations, floorDimmed, floorModeEnabled,
+    freezerPullItems, frontlineFields, frontlineIngredients,
+    frontlineRecipeNameOptions, frontlineRecipeNames, gripSheets, gripSheetsList,
+    histBenchmarkPpm, history, importDefaultDate, importIntoEditor,
+    importProgress, importResult, ingredientCatalog, ingredientTypeOptions, ingredientTypes,
+    isFullscreen, isManager, isOnline, isSupervisor,
+    lastEndedRun, lastRunRecall, learnedBatchWeightRows, learnedBatchWeights,
+    manageBrandFilter, manageCategory, manageInput,
+    manualStopEnd, manualStopNotes, manualStopReason, manualStopStart, manualStopType,
+    me, mergeBatchBusy, mergeBfBrand, mergeBfMode, mergeBusy, mergeCategory,
+    mergeCheckRequest, mergeConfirming, mergeError, mergeFromImport, mergeFullUniverse,
+    mergeMap, mergePoolLabel, mergePreviewCount, mergeSources, mergeStaleCi,
+    mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
+    mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected,
+    mergeSuggestions, mergeTarget, mergeTargetOptions, mergeUniverse,
+    mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput, mgPresetRows,
+    mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
+    mixRecipeNames, mixes, newPin, newPinConfirm, newReasonInput, nextRunDieType,
+    noFacilityPin, pep1ShowB, pep2ShowB, pendingResetCount, pepTypes,
+    pinChangeMsg, pinError, pinInput,
+    premixImportApplying, premixImportError, premixImportLoading,
+    premixImportPrepared, premixImportProgress, proactiveAlert, productionRules,
+    promotingRecipeKind, resolvedPin, resumeDialog, role, ruleViolations,
+    runStatus, runToTime, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
+    scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
+    scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
+    scheduleMove, scheduleMoveDate, scheduleMoving, scheduleSaving,
+    scheduleView, scheduledDays, screenMode,
+    serverCheeseByName, serverCheeseNames, serverCheeseRowsByName,
+    serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
+    serverDoughVariantsByName, serverDoughWeightByName,
+    serverMixNames, serverMixRowsByName, serverPin,
+    serverSauceNames, serverSauceRowsByName, serverTemplates,
+    setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
+    shipper, shipperList, shippingImportApplying, shippingImportError,
+    shippingImportLoading, shippingImportPrepared,
+    showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog,
+    showFlavorDrop, showFloorMode, showGetStarted, showGlance, showImportDialog,
+    showManageDialog, showManualStopDialog, showMobileQrDialog, showPasswordDialog,
+    showPinDialog, showPremixImport, showReorderDialog, showReportIssue,
+    showScheduleDialog, showScreensDialog, showShippingImport, showSpecImport,
+    showStopDialog, showTemplatesDialog, showTour,
+    skidStacking, skidStackingList,
+    specImportApplying, specImportError, specImportLoading,
+    specImportPrepared, specImportProgress, specReconcileSignal,
+    staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
+    swipeCue, syncConnected, syncPushFailed,
+    templateNameInput, templateSaveMode, templates, templatesLoaded,
+    undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount, upcomingRunLabels,
+    v, ve, writeError,
+  ]);
 
   const mainContent = (
     <div
@@ -13997,28 +14105,30 @@ export default function Home() {
   );
 
   return (
-    <HomeCtx.Provider value={homeCtxValue}>
-      <LiveRunProvider
-        v={v}
-        ve={ve}
-        runStatus={runStatus}
-        currentRun={currentRun}
-        currentRunId={currentRunId}
-        form={form}
-        dayState={dayState}
-        doughSubTab={doughSubTab}
-        upcomingRunLabels={upcomingRunLabels}
-        prefs={me?.notificationPrefs}
-        screenMode={screenMode}
-        externalAutoSuppressRef={autoSuppressUntilRef}
-        machine={{
-          spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
-          hopperSec: Number(v.hopperSec) || 0,
-        }}
-      >
-        {screenMode ? <ScreenModeView /> : mainContent}
-      </LiveRunProvider>
-    </HomeCtx.Provider>
+    <HomeRunSummaryCtx.Provider value={homeRunSummaryCtxValue}>
+      <HomeCtx.Provider value={homeCtxValue}>
+        <LiveRunProvider
+          v={v}
+          ve={ve}
+          runStatus={runStatus}
+          currentRun={currentRun}
+          currentRunId={currentRunId}
+          form={form}
+          dayState={dayState}
+          doughSubTab={doughSubTab}
+          upcomingRunLabels={upcomingRunLabels}
+          prefs={me?.notificationPrefs}
+          screenMode={screenMode}
+          externalAutoSuppressRef={autoSuppressUntilRef}
+          machine={{
+            spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
+            hopperSec: Number(v.hopperSec) || 0,
+          }}
+        >
+          {screenMode ? <ScreenModeView /> : mainContent}
+        </LiveRunProvider>
+      </HomeCtx.Provider>
+    </HomeRunSummaryCtx.Provider>
   );
 }
 
@@ -15341,126 +15451,18 @@ function GlanceOverlay() {
         );
 }
 
-function CompactRunStrip() {
-  const hx = useHomeCtx();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const {
-    RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
-    addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
-    addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
-    addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
-    appendCheese1, appendCheese2, appendCheese3, appendCheese4, appendDough, appendFrontline,
-    applyCaseUpdateChoices, applyForecast, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange, applyOptimizeAction,
-    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef, applyTemplate, applyVoiceCommand,
-    autoSandboxResetRef, autoSuppressUntilRef, batchWeightCandidatesSig, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
-    blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
-    buildSyncPayload, buildVoiceHandlers, canApproveResets, canEditRules, canManageInventory, canManageStaff,
-    caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory, checkPin, checklistAcks,
-    checklistSatisfied, cheese1Fields, cheese2Fields, cheese3Fields, cheese4Fields, cheeseImportApplying,
-    cheeseImportError, cheeseImportGenRef, cheeseImportInputRef, cheeseImportLoading, cheeseImportPrepared, cheeseImportProgress,
-    cheeseIngredients, cheeseNameBrandTags, cheeseNamesForRun, cheeseRecipeNames, cheeseRecipesList, circles,
-    circlesList, clearMergedAwayBoth, clearSubstitutions, clientId, collectMergeSurfaces, collectRecipeNameSurfaces,
-    commitExcelImport, commitMissingField, commitMultiDayImport, confirmDeleteBrand, confirmDeleteBrandRef, confirmDeleteFlavor,
-    confirmDeleteFlavorRef, confirmDeleteStopId, confirmRemoveBlanks, confirmRemoveRun, copiedSummary, copyRun,
-    currentMixPresets, currentRun, currentRunId, currentRunIdRef, customAllergens, cycleCountQc,
-    cycleCountSchedules, dayState, dayStateRef, dedupSorted, deleteCatalogEntryByName, deleteScheduledDay,
-    deleteStop, deleteTemplate, dieLineDefaultOverrides, dieTypes, dismissGetStarted, dismissProactiveAlert,
-    doFetch, doughFields, doughIngredients, doughPoolDrift, doughRecipeNameOptions, doughRecipeNames,
-    doughRecipesList, doughSauceMigratedRef, doughSubTab, doughVariantPick, downtimeDays, editingStop,
-    enabledCheeseRecipes, endRun, endStop, existingImportRecipeNames, expandedHistoryDay, expandedScheduleDay,
-    exportCSV, exportExcel, exportHistoryCSV, exportQuickBooks, exportSelection, exporting,
-    fetchSchedulePayload, flashSaved, flavorInput, flavorScrollKeep, flexibleViolations, floorDimmed,
-    floorModeEnabled, floorModeMigratedRef, forceSignedOut, form, freezerPullItems, frontlineFields,
-    frontlineIngredients, frontlineRecipeNameOptions, frontlineRecipeNames, gripSheets, gripSheetsList, handleApplyBrandFlavorMerge,
-    handleApplyMerge, handleApplyRecipeNameMerge, handleCheeseImportConfirm, handleCheeseImportFile, handleConfirmMerge, handleImportFile,
-    handlePremixImportConfirm, handlePremixImportFile, handleRemoveStaleReference, handleScheduleImportFile, handleSetupProfileSaved, handleShippingImportConfirm,
-    handleShippingImportFile, handleSpecImportConfirm, handleSpecImportFile, handleStaleSyncWrite, handleSuggestMerges, handleUndoChange,
-    hasCapability, histBenchmarkPpm, history, ignoreMergeSuggestion, importDefaultDate, importExcelIntoEditor,
-    importInputRef, importIntoEditor, importProgress, importResult, ingredientCatalog, ingredientTypeOptions,
-    ingredientTypes, initialFinishTimestampRef, isFullscreen, isManager, isOnline, isRecipeNameCategory,
-    isSupervisor, isSyncApplyingRef, lastEndedRun, lastLocalEditRef, lastRunRecall, lastSyncSigRef,
-    learnedBatchWeightRows, learnedBatchWeights, learnedBatchWeightsRef, loadMergeSuggestion, logStop, makePackagingList,
-    makeSubLogEntry, manageBrandFilter, manageCategory, manageInput, manualStopEnd, manualStopNotes,
-    manualStopReason, manualStopStart, manualStopType, markCountedMutation, markOnboardingSeen, markTourCompleted,
-    me, mergeBatchBusy, mergeBfBrand, mergeBfMode, mergeBrands, mergeBusy,
-    mergeCatalogEntries, mergeCategory, mergeCheckRequest, mergeConfirming, mergeError, mergeFlavors,
-    mergeFormRef, mergeFromImport, mergeFullUniverse, mergeMap, mergePoolLabel, mergePreviewCount,
-    mergeSources, mergeStaleCi, mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
-    mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected, mergeSuggestions, mergeTarget,
-    mergeTargetOptions, mergeUniverse, mergeUniverseRanked, mergedAwayTomb, mgIngInput, mgNamesInput,
-    mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
-    mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
-    nameConsolidationRef, namedPoolSnapRef, newPin, newPinConfirm, newReasonInput, nextRunDieType,
-    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseRun, pendingMixPushRef,
-    pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
-    persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
-    premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
-    premixImportProgress, printSummary, proactiveAlert, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
-    propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
-    refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
-    removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
-    removeDoughIngredient, removeDoughRecipeName, removeFlavor, removeFrontline, removeFrontlineIngredient, removeFrontlineRecipeName,
-    removeIngredientType, removeMixIngredient, removeMixRecipeName, removePepType, removeRun, removeSubstitution,
-    renameBrand, renameCatalogEntry, renameCheeseIngredient, renameCheeseRecipeName, renameDieType, renameDoughIngredient,
-    renameDoughRecipeName, renameFlavor, renameFrontlineIngredient, renameFrontlineRecipeName, renameIngredientType, renameMixIngredient,
-    renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
-    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin, resumeDialog,
-    resumeRun, revalidate, role, ruleViolations, runStatus, runToTime,
-    saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveAsTemplate, saveCatalogEntry, saveScheduledDay,
-    savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
-    scheduleEditorLoadedRunIdsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
-    scheduleMoving, schedulePush, scheduleSaving, scheduleView, scheduledDays, screenMode,
-    serverCheeseByName, serverCheeseNames, serverCheeseRowsByName, serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
-    serverDoughVariantsByName, serverDoughWeightByName, serverMixNames, serverMixRowsByName, serverPin, serverSauceNames,
-    serverSauceRowsByName, serverTemplates, setActiveStopId, setActiveTab, setBrandFlavors, setBrandInput,
-    setBrands, setCaseUpdateAccepted, setCaseUpdatePrompt, setChangeHistory, setChecklistAcks, setCheeseImportApplying,
-    setCheeseImportError, setCheeseImportLoading, setCheeseImportPrepared, setCheeseImportProgress, setCheeseIngredients, setCheeseRecipeNames,
-    setCircles, setConfirmDeleteBrand, setConfirmDeleteFlavor, setConfirmDeleteStopId, setConfirmRemoveBlanks, setConfirmRemoveRun,
-    setCopiedSummary, setDayState, setDieTypes, setDoughIngredients, setDoughRecipeNames, setDoughSubTab,
-    setDoughVariantPick, setDrainBump, setEditingStop, setExpandedHistoryDay, setExpandedScheduleDay, setExportSelection,
-    setExporting, setFlavorInput, setFloorDimmed, setFrontlineIngredients, setFrontlineRecipeNames, setGripSheets,
-    setHistory, setImportDefaultDate, setImportIntoEditor, setImportProgress, setImportResult, setIngredientTypes,
-    setIsFullscreen, setIsOnline, setManageBrandFilter, setManageCategory, setManageInput, setManualStopEnd,
-    setManualStopNotes, setManualStopReason, setManualStopStart, setManualStopType, setMergeBatchBusy, setMergeBfBrand,
-    setMergeBfMode, setMergeBusy, setMergeCategory, setMergeCheckRequest, setMergeConfirming, setMergeError,
-    setMergeFromImport, setMergeSources, setMergeSuggestBusy, setMergeSuggestError, setMergeSuggestNote, setMergeSuggestRan,
-    setMergeSuggestSelected, setMergeSuggestions, setMergeTarget, setMergedAwayTomb, setMgIngInput, setMgNamesInput,
-    setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
-    setNewPin, setNewPinConfirm, setNewReasonInput, setPep1ShowB, setPep2ShowB, setPepTypes,
-    setPinChangeMsg, setPinError, setPinInput, setPremixImportApplying, setPremixImportError, setPremixImportLoading,
-    setPremixImportPrepared, setPremixImportProgress, setPromotingRecipeKind, setResumeDialog, setRole, setRunBrandFlavor,
-    setRunToTime, setSauceWeightsOpen, setScheduleAdvancedRunId, setScheduleDeleteConfirm, setScheduleEditorDate, setScheduleEditorIsLiveDay,
-    setScheduleEditorRunValues, setScheduleEditorRuns, setScheduleMove, setScheduleMoveDate, setScheduleMoving, setScheduleSaving,
-    setScheduleView, setScheduledDays, setSetupEditorBrand, setSetupEditorFlavor, setSetupEditorOpen, setSheetListSignal,
-    setShipper, setShippingImportApplying, setShippingImportError, setShippingImportLoading, setShippingImportPrepared, setShowAlertSettings,
-    setShowBrandDrop, setShowCheeseImport, setShowEditReasonsDialog, setShowFlavorDrop, setShowFloorMode, setShowGetStarted,
-    setShowGlance, setShowImportDialog, setShowManageDialog, setShowManualStopDialog, setShowMobileQrDialog, setShowPasswordDialog,
-    setShowPinDialog, setShowPremixImport, setShowReorderDialog, setShowReportIssue, setShowScheduleDialog, setShowScreensDialog,
-    setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTemplatesDialog, setShowTour, setSkidStacking,
-    setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
-    setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setTemplateNameInput, setTemplateSaveMode, setTemplates, setUndoBusy, setWriteError, setupEditorBrand,
-    setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
-    shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
-    showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
-    showGetStarted, showGlance, showImportDialog, showManageDialog, showManualStopDialog, showMobileQrDialog,
-    showPasswordDialog, showPinDialog, showPremixImport, showReorderDialog, showReportIssue, showScheduleDialog,
-    showScreensDialog, showShippingImport, showSpecImport, showStopDialog, showTemplatesDialog, showTour,
-    signOut, skidStacking, skidStackingList, slotHealRanRef, specImportApplying, specImportError,
-    specImportGenRef, specImportInputRef, specImportLoading, specImportPrepared, specImportProgress, specReconcileSignal,
-    staleCleanupSuggestions, startCast, startRun, stopCast, stopNotes, stopReason,
-    stopReasonsList, strictViolations, swipeCue, swipeCueTimer, swipeState, switchMergeCategory,
-    switchToRun, syncConnected, syncPushFailed, templateNameInput, templateSaveMode, templates,
-    templatesLoaded, templatesMigratedRef, toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
-    toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
-    upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
-    v, ve, writeError,
-  } = hx;
+const CompactRunStrip = memo(function CompactRunStrip() {
+  // Narrow context: only run state. Does NOT re-render when manage/merge/import
+  // state changes — only when dayState, form values, or runStatus change.
+  // React.memo prevents re-renders from parent re-renders (e.g. Home re-rendering
+  // because manage-dialog state changed): with no prop changes + stable narrow
+  // context, this component only re-renders when run data or the live clock tick.
+  const { runStatus, currentRun, dayState, v, ve, setActiveTab, pauseRunRef } = useHomeRunSummaryCtx();
 
   const {
-    calc, nowTime, liveFreezerMin, elapsedBatchSec, casesPct, casesFreezerPct,
-    casesPctWithFreezer, currentRunDowntimeMs, currentBatchNum, secUntilNextBatch,
+    calc, nowTime, elapsedBatchSec, casesPct, casesFreezerPct,
   } = useLiveRun();
+
   return (
           <div className="print:hidden sticky top-2 z-40">
             <div
@@ -15549,7 +15551,7 @@ function CompactRunStrip() {
                         type="button"
                         title="Pause run"
                         data-testid="strip-pause"
-                        onClick={(e: any) => { e.stopPropagation(); pauseRun(); }}
+                        onClick={(e: any) => { e.stopPropagation(); pauseRunRef.current(); }}
                         className="bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
                       >
                         <Pause className="w-4 h-4 fill-current" />
@@ -15613,7 +15615,7 @@ function CompactRunStrip() {
             })()}
           </div>
   );
-}
+});
 
 function LiveRunTabContent() {
   const hx = useHomeCtx();
