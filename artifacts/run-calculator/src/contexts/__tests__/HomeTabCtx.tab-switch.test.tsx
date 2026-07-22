@@ -219,12 +219,13 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
 
   // ─── Test 3: COMBINED ────────────────────────────────────────────────────
   // Simulates the full scenario from the task spec:
-  //   1. Form value changes (casesNeeded updated on Run tab)
-  //   2. Manage dialog opens
-  //   3. User switches to Dough/Packaging tab
+  //   1. Form value changes (casesNeeded updated on Run tab)  → exactly 1 new render
+  //   2. Manage dialog opens                                  → exactly 0 new renders
+  //   3. User switches to Dough/Packaging tab                 → tab already current
   //
-  // Expected: the tab subscriber shows the new value (from step 1) and the
-  // dialog open (step 2) does NOT contribute any extra re-renders.
+  // Exact render counts are pinned at every step so that any weakening of the
+  // isolation check (e.g. making the assertion relative rather than absolute)
+  // is caught immediately.
   it("form value change propagates; subsequent dialog open adds no extra renders", async () => {
     const { rerender, getByTestId } = render(
       <TabProvider casesNeeded={50} runStatus="running" manageCounter={0}>
@@ -232,11 +233,12 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
       </TabProvider>,
     );
 
-    // Initial render
+    // PROPAGATION step 0 — initial mount: exactly 1 render.
     expect(renderCount).toBe(1);
     expect(getByTestId("cases-needed").textContent).toBe("50");
 
-    // Step 1: user edits casesNeeded → production dep changes → re-render
+    // PROPAGATION step 1 — casesNeeded changes: exactly 1 additional render
+    // (production dep updated → new ctx ref → React.memo allows re-render).
     await act(async () => {
       rerender(
         <TabProvider casesNeeded={75} runStatus="running" manageCounter={0}>
@@ -245,27 +247,51 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
       );
     });
 
-    expect(renderCount).toBe(2);
+    expect(renderCount).toBe(2); // exact: mount(1) + form-change(1)
     expect(getByTestId("cases-needed").textContent).toBe("75");
 
-    const countAfterFormChange = renderCount;
-
-    // Step 2: manage dialog opens (showManageDialog flips) — must NOT re-render
+    // PROPAGATION step 2 — runStatus also changes: exactly 1 more render.
     await act(async () => {
       rerender(
-        <TabProvider casesNeeded={75} runStatus="running" manageCounter={1}>
+        <TabProvider casesNeeded={75} runStatus="paused" manageCounter={0}>
           <TabSubscriber />
         </TabProvider>,
       );
     });
 
-    // Dialog open added zero renders
-    expect(renderCount).toBe(countAfterFormChange);
+    expect(renderCount).toBe(3); // exact: mount(1) + form-change(1) + status-change(1)
+    expect(getByTestId("run-status").textContent).toBe("paused");
 
-    // Step 3: user switches to Dough tab — the tab is already showing the
-    // correct casesNeeded (75) without needing another re-render
+    // DIALOG step — manage dialog opens (manageCounter: 0→1).
+    // Production deps (casesNeeded, runStatus) are unchanged.
+    // The ctx ref must NOT change → React.memo must skip → zero new renders.
+    await act(async () => {
+      rerender(
+        <TabProvider casesNeeded={75} runStatus="paused" manageCounter={1}>
+          <TabSubscriber />
+        </TabProvider>,
+      );
+    });
+
+    // Exact guard: renderCount must still be 3.  Any spurious re-render caused
+    // by a dialog field leaking into the context deps will bump this to 4+.
+    expect(renderCount).toBe(3); // exact: no extra render from dialog open
+
+    // Repeat with a second dialog state change to rule out a lucky no-op.
+    await act(async () => {
+      rerender(
+        <TabProvider casesNeeded={75} runStatus="paused" manageCounter={99}>
+          <TabSubscriber />
+        </TabProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(3); // exact: still no extra render from further dialog changes
+
+    // SWITCH step — user navigates to Dough/Packaging tab.
+    // The tab already holds the current values; no re-render is needed.
     expect(getByTestId("cases-needed").textContent).toBe("75");
-    expect(getByTestId("run-status").textContent).toBe("running");
+    expect(getByTestId("run-status").textContent).toBe("paused");
   });
 
   // ─── REGRESSION GUARD ────────────────────────────────────────────────────
