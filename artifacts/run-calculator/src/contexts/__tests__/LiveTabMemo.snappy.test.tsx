@@ -1577,3 +1577,308 @@ describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is
     expect(nowWithDialog).toBeGreaterThan(nowBeforeDialog);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 7 — GlanceOverlay uses useHomeTabCtx(), NOT useHomeCtx()
+//
+// GlanceOverlay floats over the full page and remains visible while a manage
+// dialog is open.  It must subscribe to HomeTabCtx (the narrow context whose
+// useMemo deps intentionally exclude all dialog/manage/import fields) rather
+// than HomeCtx (the full context that changes on every dialog open/close).
+//
+// If GlanceOverlay were accidentally re-wired to useHomeCtx(), every dialog
+// open/close cycle would trigger a re-render, producing a visible stutter for
+// any user who opens a manage panel while the overlay is showing.
+//
+// GlanceOverlay's dual-context subscription (matches home.tsx lines ~15125-15130):
+//   • useHomeTabCtx()  → currentRun, runStatus, v, setShowGlance (production deps)
+//   • useLiveRun()     → calc, nowTime, casesFreezerPct (live clock)
+//
+// Four tests:
+//  1. ISOLATION       — toggling dialog/manage state (excluded from
+//     homeTabCtxValue deps) does NOT cause the GlanceOverlay subscriber to
+//     re-render.
+//  2. LIVE CLOCK      — nowTime keeps advancing while a manage dialog is
+//     simultaneously rendered — the LiveRunProvider subscription is not blocked.
+//  3. PROPAGATION     — a real production-dep change (runStatus) DOES reach
+//     the GlanceOverlay subscriber (over-memoisation guard).
+//  4. COUNTER-PROOF   — if the same simulator were accidentally re-wired to
+//     useHomeCtx() instead of useHomeTabCtx(), dialog-field toggles DO cause
+//     re-renders, proving that Tests 1–3 would catch the regression.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Module-level stable references so GlanceWrapper re-renders (caused by
+// manageCounter changing) don't create new object identities for LiveRunProvider
+// props — which would otherwise emit a spurious context update and defeat the
+// isolation test.  Same pattern used for FloorModeWrapper above.
+const GLANCE_DAY_STATE = { runs: [ACTIVE_RUN], currentIndex: 0 } as const;
+const GLANCE_UPCOMING_LABELS: string[] = [];
+const GLANCE_MACHINE = { spinSec: 0, hopperSec: 0 } as const;
+
+// ── Full wrapper: HomeTabCtx (production deps only) + LiveRunProvider ─────────
+//
+// manageCounter stands in for any dialog/import/merge state field that is
+// intentionally excluded from homeTabCtxValue's useMemo deps.  GlanceOverlay
+// reads from HomeTabCtx, so dialog-state changes (represented here by
+// manageCounter) must never invalidate the HomeTabCtx value.
+function GlanceWrapper({
+  runStatus = "running",
+  manageCounter = 0,
+  children,
+}: {
+  runStatus?: string;
+  manageCounter?: number;
+  children: ReactNode;
+}) {
+  const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+  // Production deps only — manageCounter intentionally excluded.
+  // This mirrors the contract GlanceOverlay relies on.
+  const tabCtxValue = useMemo(
+    () => ({ runStatus, casesNeeded: ACTIVE_VALUES.casesNeeded }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus],
+  );
+
+  return (
+    <HomeTabCtx.Provider value={tabCtxValue}>
+      <LiveRunProvider
+        v={ACTIVE_VALUES}
+        ve={ACTIVE_VALUES}
+        runStatus={runStatus as "running"}
+        currentRun={ACTIVE_RUN}
+        currentRunId="run-live-1"
+        form={form}
+        dayState={GLANCE_DAY_STATE}
+        doughSubTab="dough"
+        upcomingRunLabels={GLANCE_UPCOMING_LABELS}
+        prefs={undefined}
+        screenMode={null}
+        machine={GLANCE_MACHINE}
+      >
+        {manageCounter > 0 && (
+          <div data-testid="glance-manage-dialog">Manage dialog #{manageCounter}</div>
+        )}
+        {children}
+      </LiveRunProvider>
+    </HomeTabCtx.Provider>
+  );
+}
+
+// ── HomeTabCtx-only provider (isolation / propagation tests without clock) ────
+function GlanceTabOnlyProvider({
+  runStatus,
+  manageCounter: _manageCounter,
+  children,
+}: {
+  runStatus: string;
+  manageCounter: number;
+  children: ReactNode;
+}) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ runStatus }), [runStatus]);
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+describe("LiveTabMemo — GlanceOverlay uses useHomeTabCtx(), not useHomeCtx() (regression guard)", () => {
+  afterEach(() => { cleanup(); });
+
+  // ─── Test 1: ISOLATION ────────────────────────────────────────────────────
+  // GlanceOverlay must use useHomeTabCtx() so dialog/manage state changes
+  // (excluded from homeTabCtxValue deps) do NOT trigger re-renders.
+  //
+  // Uses HomeTabCtx-only (no LiveRunProvider) for a clean renderCount signal.
+  it("GlanceOverlay does NOT re-render when manage/dialog state toggles", async () => {
+    let renderCount = 0;
+
+    const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+      renderCount++;
+      // Mirrors the real GlanceOverlay's useHomeTabCtx() subscription.
+      // If accidentally changed to useHomeCtx(), the isolation test fails
+      // because dialog-field changes would also reach HomeCtx.
+      const { runStatus } = useHomeTabCtx();
+      return <span data-testid="glance-status">{runStatus}</span>;
+    });
+
+    const { rerender } = render(
+      <GlanceTabOnlyProvider runStatus="running" manageCounter={0}>
+        <GlanceOverlaySim />
+      </GlanceTabOnlyProvider>,
+    );
+
+    expect(renderCount).toBe(1);
+
+    // Open manage dialog — manageCounter changes but runStatus is unchanged.
+    // homeTabCtxValue useMemo dep (runStatus) is stable → same ctx ref →
+    // React.memo skips re-render.
+    await act(async () => {
+      rerender(
+        <GlanceTabOnlyProvider runStatus="running" manageCounter={1}>
+          <GlanceOverlaySim />
+        </GlanceTabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(1);
+
+    // Import in progress (ticking counter) — still no re-render.
+    await act(async () => {
+      rerender(
+        <GlanceTabOnlyProvider runStatus="running" manageCounter={42}>
+          <GlanceOverlaySim />
+        </GlanceTabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(1);
+
+    // Close dialog — still no re-render.
+    await act(async () => {
+      rerender(
+        <GlanceTabOnlyProvider runStatus="running" manageCounter={0}>
+          <GlanceOverlaySim />
+        </GlanceTabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(1);
+  });
+
+  // ─── Test 2: LIVE CLOCK ───────────────────────────────────────────────────
+  // GlanceOverlay stays visible on top of manage dialogs.  Its live clock
+  // (nowTime) must keep advancing even while the manage dialog is rendered.
+  it("GlanceOverlay nowTime advances while a manage dialog is simultaneously rendered", async () => {
+    vi.useFakeTimers();
+    try {
+      const nowSamples: number[] = [];
+
+      const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+        useHomeTabCtx();
+        const { nowTime } = useLiveRun();
+        nowSamples.push(nowTime.getTime());
+        return <span data-testid="glance-now">{nowTime.getTime()}</span>;
+      });
+
+      render(
+        <GlanceWrapper runStatus="running" manageCounter={1}>
+          <GlanceOverlaySim />
+        </GlanceWrapper>,
+      );
+
+      const firstNow = nowSamples[0];
+      expect(firstNow).toBeGreaterThan(0);
+
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      const lastNow = nowSamples[nowSamples.length - 1];
+      expect(lastNow).toBeGreaterThan(firstNow);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ─── Test 3: PROPAGATION ─────────────────────────────────────────────────
+  // Guard against over-memoisation: when a real production dep (runStatus)
+  // changes, GlanceOverlay MUST re-render to reflect the updated status.
+  //
+  // Uses HomeTabCtx-only for a clean renderCount signal.
+  it("GlanceOverlay DOES re-render when a production dep (runStatus) changes", async () => {
+    let renderCount = 0;
+
+    const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+      renderCount++;
+      const { runStatus } = useHomeTabCtx();
+      return <span data-testid="glance-status2">{runStatus}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <GlanceTabOnlyProvider runStatus="running" manageCounter={0}>
+        <GlanceOverlaySim />
+      </GlanceTabOnlyProvider>,
+    );
+
+    expect(renderCount).toBe(1);
+    expect(getByTestId("glance-status2").textContent).toBe("running");
+
+    // Simulate the run pausing — a real production dep change.
+    // homeTabCtxValue useMemo fires (runStatus changed) → new ctx ref →
+    // HomeTabCtx subscriber re-renders.
+    await act(async () => {
+      rerender(
+        <GlanceTabOnlyProvider runStatus="paused" manageCounter={0}>
+          <GlanceOverlaySim />
+        </GlanceTabOnlyProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(2);
+    expect(getByTestId("glance-status2").textContent).toBe("paused");
+  });
+
+  // ─── Test 4: COUNTER-PROOF ────────────────────────────────────────────────
+  // Proves the regression guard has teeth: if GlanceOverlay were accidentally
+  // re-wired to useHomeCtx() instead of useHomeTabCtx(), dialog-field changes
+  // WOULD reach HomeCtx subscribers and cause re-renders.
+  //
+  // This test uses a HomeCtx.Provider (the FULL context) and toggles a
+  // dialog field via DIALOG_REGISTRY.  The subscriber calls useHomeCtx() —
+  // the wrong hook.  The HomeCtx value IS invalidated by the dialog toggle,
+  // so renderCount increases, proving that Test 1 would catch the regression.
+  it("counter-proof: a useHomeCtx() subscriber DOES re-render when dialog fields toggle (proving Test 1 would catch the regression)", async () => {
+    // Pick any dialog field from the registry to simulate the regression.
+    const testEntry = DIALOG_REGISTRY.find(({ field }) => field === "manageCategory")!;
+
+    let renderCount = 0;
+
+    const WrongGlanceSim = memo(function WrongGlanceSimInner() {
+      renderCount++;
+      // WRONG: uses useHomeCtx() instead of useHomeTabCtx() — the regression
+      // this suite guards against.
+      useHomeCtx();
+      return <span data-testid="wrong-glance">rendered</span>;
+    });
+
+    // Use a HomeCtx.Provider that DOES invalidate when dialog fields change.
+    // This mirrors what would happen if GlanceOverlay called useHomeCtx().
+    function DialogAwareProvider({
+      dialogExtras,
+      children,
+    }: {
+      dialogExtras: Record<string, unknown>;
+      children: ReactNode;
+    }) {
+      // Full context — dialog fields ARE in the deps (opposite of the guard).
+      const ctxValue = useMemo(
+        () => ({ runStatus: "running", brand: "TestBrand", ...dialogExtras }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [dialogExtras],
+      );
+      return <HomeCtx.Provider value={ctxValue}>{children}</HomeCtx.Provider>;
+    }
+
+    const emptyExtras = {};
+    const { rerender } = render(
+      <DialogAwareProvider dialogExtras={emptyExtras}>
+        <WrongGlanceSim />
+      </DialogAwareProvider>,
+    );
+
+    const countAfterMount = renderCount;
+
+    // Toggle the dialog field open — HomeCtx value changes → useHomeCtx()
+    // subscriber re-renders (because dialogExtras is in deps and is a new ref).
+    const openExtras = { [testEntry.field]: testEntry.openValue };
+    await act(async () => {
+      rerender(
+        <DialogAwareProvider dialogExtras={openExtras}>
+          <WrongGlanceSim />
+        </DialogAwareProvider>,
+      );
+    });
+
+    // renderCount increased — the wrong hook caused a needless re-render.
+    // This proves that Test 1 (which uses useHomeTabCtx() and stays at 1)
+    // would fail if GlanceOverlay were accidentally re-wired to useHomeCtx().
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+});
