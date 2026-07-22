@@ -47,6 +47,7 @@ import { render, act, cleanup } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
+import * as LiveRunContextNS from "../../contexts/LiveRunContext";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
 import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
 import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
@@ -1635,6 +1636,55 @@ describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is
 
     const nowWithDialog = Number(getByTestId("glance-now").getAttribute("data-now"));
     expect(nowWithDialog).toBeGreaterThan(nowBeforeDialog);
+  });
+
+  it("real GlanceOverlay: render count increases after 60 s of clock ticks (no data attribute reliance)", async () => {
+    // This test guards against a future refactor that drops the `nowTime`
+    // destructuring from GlanceOverlay's useLiveRun() call.  Without `nowTime`
+    // being read, React may not schedule a re-render on every clock tick (memo +
+    // selective context subscription).  The overlay clock display would then
+    // silently freeze mid-run.
+    //
+    // Unlike the sibling tests above, this test does NOT rely on the `data-now`
+    // attribute being present.  Instead it spies on the `useLiveRun` hook so
+    // that every invocation — i.e. every render of GlanceOverlay — is counted
+    // directly.
+    //
+    // IMPORTANT: GlanceOverlay is the ONLY component in this test's subtree
+    // that calls useLiveRun().  RealGlanceWrapper only sets up providers
+    // (HomeTabCtx.Provider + LiveRunProvider) — it does NOT call useLiveRun()
+    // itself.  This means the spy call-count maps 1-to-1 to GlanceOverlay's
+    // own render count.  If future changes add other useLiveRun() consumers
+    // inside RealGlanceWrapper, the 1:1 assumption breaks and this test should
+    // be updated to use a dedicated minimal wrapper instead.
+    //
+    // If a refactor stops importing / destructuring `nowTime` and React's memo
+    // coalesces away the per-tick re-renders, the spy call-count stops advancing
+    // and this test fails — catching the regression before it ships.
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    try {
+      render(
+        <RealGlanceWrapper runStatus="running" manageOpen={true}>
+          <GlanceOverlay />
+        </RealGlanceWrapper>,
+      );
+
+      // The initial mount(s) give us a baseline call count.
+      const countAtMount = spy.mock.calls.length;
+      expect(countAtMount).toBeGreaterThan(0);
+
+      // Advance 60 s — each clock tick emits a new LiveRunProvider context
+      // value → React re-renders GlanceOverlay → useLiveRun is invoked again.
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      // The spy must have been called more times than at mount.  This is true
+      // regardless of which fields are destructured from useLiveRun() — it only
+      // fails if the component stops re-rendering entirely on clock ticks.
+      expect(spy.mock.calls.length).toBeGreaterThan(countAtMount);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
