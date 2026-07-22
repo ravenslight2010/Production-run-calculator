@@ -52,8 +52,8 @@ const ALLOWED_CALLERS = new Set<string>([
   "ScreenModeView",
   // FloorModeView — idle floor-mode big-numbers monitor
   "FloorModeView",
-  // GlanceOverlay — full-screen glance overlay that shows live run stats
-  "GlanceOverlay",
+  // GlanceOverlay was extracted to src/components/GlanceOverlay.tsx so it can
+  // be tested in isolation.  It is listed in ALLOWED_FILES below instead.
   // CompactRunStrip — persistent strip shown on non-Run tabs; displays live
   //   counters (cases made, pace, time left) so it must subscribe to the clock
   "CompactRunStrip",
@@ -73,6 +73,12 @@ const ALLOWED_FILES = new Set<string>([
   // LiveRunContext.tsx — this file *defines* useLiveRun(), so naturally
   // contains useLiveRun() in the function body and type annotations.
   "contexts/LiveRunContext.tsx",
+
+  // GlanceOverlay.tsx — extracted from home.tsx so the real component can be
+  // imported and rendered in isolation by LiveTabMemo.snappy.test.tsx (Suite 5).
+  // It is the full-screen live-stats overlay that stays visible while manage
+  // dialogs are open, so it genuinely needs the per-second clock subscription.
+  "components/GlanceOverlay.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────

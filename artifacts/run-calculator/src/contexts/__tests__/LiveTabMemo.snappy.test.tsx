@@ -42,6 +42,7 @@ import {
   memo,
   type ReactNode,
 } from "react";
+import GlanceOverlay from "../../components/GlanceOverlay";
 import { render, act, cleanup } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { type FormValues, DEFAULT_VALUES } from "../../types";
@@ -868,7 +869,7 @@ describe("LiveTabMemo — tab switching preserves live data (no stale snapshot)"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Suite 4 — GlanceOverlay live values (nowTime, casesInFreezer) advance while
-//            a manage dialog is simultaneously rendered
+//            a manage dialog is simultaneously rendered  [SIMULATOR]
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // GlanceOverlay is the one memo()-wrapped component that floats over the full
@@ -1282,5 +1283,151 @@ describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dial
 
     expect(renderCount).toBe(2);
     expect(getByTestId("floor-status").textContent).toBe("paused");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 6 — REAL GlanceOverlay component stays live while a manage dialog is open
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Suite 4 above uses a SIMULATOR that mirrors GlanceOverlay's subscription
+// pattern.  This suite imports and renders the ACTUAL GlanceOverlay component
+// from src/components/GlanceOverlay.tsx.  If the real component were refactored
+// to snapshot a value instead of subscribing (e.g. reading from a ref rather
+// than calling useLiveRun()), the Suite 4 simulator would still pass but this
+// test would fail — catching the regression before it ships.
+//
+// The wrapper supplies:
+//   • HomeTabCtx.Provider — provides currentRun, runStatus, setShowGlance, v
+//   • LiveRunProvider      — drives the live clock and casesInFreezer calc
+//
+// The manage dialog is simulated as a plain <div data-testid="glance-manage-dialog">
+// rendered CONCURRENTLY with GlanceOverlay, matching the real production tree
+// where both are mounted at the same time.
+
+// ── Minimal homeTabCtx value the real GlanceOverlay reads ────────────────────
+function makeHomeTabCtxValue(runStatus: string, extras: Record<string, unknown> = {}) {
+  return {
+    runStatus,
+    currentRun: { id: "run-live-1", brand: "TestBrand", flavor: "TestFlavor" },
+    setShowGlance: () => {},
+    v: ACTIVE_VALUES,
+    ...extras,
+  };
+}
+
+// ── Provider wrapper: HomeTabCtx.Provider + LiveRunProvider ───────────────────
+function RealGlanceWrapper({
+  runStatus = "running",
+  manageOpen = false,
+  children,
+}: {
+  runStatus?: string;
+  manageOpen?: boolean;
+  children: ReactNode;
+}) {
+  const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+  const tabCtxValue = useMemo(
+    () => makeHomeTabCtxValue(runStatus),
+    [runStatus],
+  );
+  return (
+    <HomeTabCtx.Provider value={tabCtxValue}>
+      <LiveRunProvider
+        v={ACTIVE_VALUES}
+        ve={ACTIVE_VALUES}
+        runStatus={runStatus as "running"}
+        currentRun={ACTIVE_RUN}
+        currentRunId="run-live-1"
+        form={form}
+        dayState={{ runs: [ACTIVE_RUN], currentIndex: 0 }}
+        doughSubTab="dough"
+        upcomingRunLabels={[]}
+        prefs={undefined}
+        screenMode={null}
+        machine={{ spinSec: 0, hopperSec: 0 }}
+      >
+        {manageOpen && (
+          <div data-testid="glance-manage-dialog">Manage: mixes</div>
+        )}
+        {children}
+      </LiveRunProvider>
+    </HomeTabCtx.Provider>
+  );
+}
+
+describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is open", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => { vi.useRealTimers(); cleanup(); });
+
+  it("real GlanceOverlay: nowTime (data-now attr) advances after a clock tick while manage dialog is present", async () => {
+    const { getByTestId } = render(
+      <RealGlanceWrapper runStatus="running" manageOpen={true}>
+        <GlanceOverlay />
+      </RealGlanceWrapper>,
+    );
+
+    // Confirm manage dialog is simultaneously present
+    expect(getByTestId("glance-manage-dialog")).toBeTruthy();
+
+    // Read the initial nowTime from the data-now attribute stamped by GlanceOverlay
+    const firstNow = Number(getByTestId("glance-now").getAttribute("data-now"));
+    expect(firstNow).toBeGreaterThan(0);
+
+    // Advance clock by 60 s — GlanceOverlay must re-render via useLiveRun()
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    const lastNow = Number(getByTestId("glance-now").getAttribute("data-now"));
+    expect(lastNow).toBeGreaterThan(firstNow);
+  });
+
+  it("real GlanceOverlay: casesInFreezer displayed advances after a clock tick while manage dialog is present", async () => {
+    const { getByTestId } = render(
+      <RealGlanceWrapper runStatus="running" manageOpen={true}>
+        <GlanceOverlay />
+      </RealGlanceWrapper>,
+    );
+
+    expect(getByTestId("glance-manage-dialog")).toBeTruthy();
+
+    // Let the run accumulate freezer stock over 60 s
+    // (ACTIVE_VALUES: ppm > 0, freezerTime = 30 min → casesInFreezer grows)
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    // The "+N in freezer" element must be present and non-zero
+    const freezerEl = getByTestId("glance-cases-freezer");
+    expect(freezerEl).toBeTruthy();
+    const freezerText = freezerEl.textContent ?? "";
+    const match = freezerText.match(/[\d,.]+/);
+    expect(match).toBeTruthy();
+    expect(parseFloat((match![0] ?? "0").replace(/,/g, ""))).toBeGreaterThan(0);
+  });
+
+  it("real GlanceOverlay: live values continue advancing when manage dialog opens mid-run (open after start, not concurrent from mount)", async () => {
+    const { getByTestId, rerender } = render(
+      <RealGlanceWrapper runStatus="running" manageOpen={false}>
+        <GlanceOverlay />
+      </RealGlanceWrapper>,
+    );
+
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    const nowBeforeDialog = Number(getByTestId("glance-now").getAttribute("data-now"));
+
+    // Open the manage dialog mid-run
+    await act(async () => {
+      rerender(
+        <RealGlanceWrapper runStatus="running" manageOpen={true}>
+          <GlanceOverlay />
+        </RealGlanceWrapper>,
+      );
+    });
+
+    expect(getByTestId("glance-manage-dialog")).toBeTruthy();
+
+    // Clock keeps ticking with the dialog open
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+
+    const nowWithDialog = Number(getByTestId("glance-now").getAttribute("data-now"));
+    expect(nowWithDialog).toBeGreaterThan(nowBeforeDialog);
   });
 });
