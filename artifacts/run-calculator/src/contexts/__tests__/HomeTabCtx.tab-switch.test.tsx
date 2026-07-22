@@ -1182,3 +1182,107 @@ describe("DoughRoleGate — lock banner presence (Dough tab recipe section)", ()
     expect(queryByTestId("dough-lock-banner")).toBeNull();
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 7b — LineSetupRoleGate fieldset disabled attribute (Run tab Line Setup)
+//
+// Block 7 guards the lock banner.  This block goes one layer deeper: it mounts
+// the REAL LineSetupRoleGate component and asserts that its
+// <fieldset data-testid="line-setup-role-gate-fieldset"> has the correct
+// `disabled` attribute when isSupervisor changes.
+//
+// Because LineSetupRoleGate is the actual production component, any future
+// refactor that removes or moves the `disabled={!isSupervisor}` attribute will
+// fail here, catching the regression before it ships.
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe(
+  "LineSetupRoleGate — fieldset disabled attribute (Run tab Line Setup section)",
+  () => {
+    // ─── disabled → enabled ──────────────────────────────────────────────────
+    // Primary regression guard: if the disabled attribute is removed from the
+    // production LineSetupRoleGate component, this test fails.
+    it("fieldset is disabled when isSupervisor=false and enabled when isSupervisor=true", async () => {
+      const { rerender, getByTestId } = render(
+        <RealLineSetupSubscriber isSupervisor={false} />,
+      );
+
+      const fieldset = getByTestId("line-setup-role-gate-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(true);
+
+      await act(async () => {
+        rerender(<RealLineSetupSubscriber isSupervisor={true} />);
+      });
+
+      expect(fieldset.disabled).toBe(false);
+    });
+
+    // ─── enabled → disabled ──────────────────────────────────────────────────
+    it("fieldset becomes disabled when isSupervisor is revoked mid-session", async () => {
+      const { rerender, getByTestId } = render(
+        <RealLineSetupSubscriber isSupervisor={true} />,
+      );
+
+      const fieldset = getByTestId("line-setup-role-gate-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+
+      await act(async () => {
+        rerender(<RealLineSetupSubscriber isSupervisor={false} />);
+      });
+
+      expect(fieldset.disabled).toBe(true);
+    });
+  },
+);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 8b — DoughRoleGate fieldset disabled attribute (Dough tab)
+//
+// Block 8 guards the lock banner.  This block goes one layer deeper: it mounts
+// the REAL DoughRoleGate component and asserts that its
+// <fieldset data-testid="dough-role-gate-fieldset"> has the correct `disabled`
+// attribute when isSupervisor changes.
+//
+// Because DoughRoleGate is the actual production component, any future refactor
+// that removes or moves the `disabled={!isSupervisor}` attribute will fail
+// here, catching the regression before it ships.
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe(
+  "DoughRoleGate — fieldset disabled attribute (Dough tab recipe section)",
+  () => {
+    // ─── disabled → enabled ──────────────────────────────────────────────────
+    // Primary regression guard: if the disabled attribute is removed from the
+    // production DoughRoleGate component, this test fails.
+    it("fieldset is disabled when isSupervisor=false and enabled when isSupervisor=true", async () => {
+      const { rerender, getByTestId } = render(
+        <RealDoughSubscriber isSupervisor={false} />,
+      );
+
+      const fieldset = getByTestId("dough-role-gate-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(true);
+
+      await act(async () => {
+        rerender(<RealDoughSubscriber isSupervisor={true} />);
+      });
+
+      expect(fieldset.disabled).toBe(false);
+    });
+
+    // ─── enabled → disabled ──────────────────────────────────────────────────
+    it("fieldset becomes disabled when isSupervisor is revoked mid-session", async () => {
+      const { rerender, getByTestId } = render(
+        <RealDoughSubscriber isSupervisor={true} />,
+      );
+
+      const fieldset = getByTestId("dough-role-gate-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+
+      await act(async () => {
+        rerender(<RealDoughSubscriber isSupervisor={false} />);
+      });
+
+      expect(fieldset.disabled).toBe(true);
+    });
+  },
+);
