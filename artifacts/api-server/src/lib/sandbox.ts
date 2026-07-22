@@ -72,6 +72,12 @@ function evictSandboxCache(userId: string): void {
   cache.delete(userId);
 }
 
+// Exported for integration tests only: wipe the entire in-process TTL cache so
+// tests that switch NODE_ENV mid-run don't see a stale isSandboxUser result.
+export function clearSandboxCache(): void {
+  cache.clear();
+}
+
 // Ensure the seeded sandbox account exists with a known password, the sandbox
 // flag set, and a manager role (so every manager-gated feature is reachable in
 // the sandbox). Idempotent — safe to call on every boot.

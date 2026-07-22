@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { SESSION_COOKIE, verifyToken } from "../lib/auth";
 import { getSessionBoundaryMs } from "../lib/sessionBoundary";
 import { getUserSecurityState } from "../lib/userValidity";
-import { isSandboxUser } from "../lib/sandbox";
+import { isSandboxUser, sandboxAllowed } from "../lib/sandbox";
 import { runWithScope, type Scope } from "../lib/requestScope";
 
 declare global {
@@ -91,11 +91,21 @@ export async function requireAuth(
     return;
   }
   req.userId = verified.sub;
+  // Sandbox gate: the sandbox account uses publicly-known credentials (it is
+  // labelled "Log in as test user" in both clients). A sandbox-flagged user
+  // must never reach authenticated routes on a real deployment — not just at
+  // sign-in time. This catches the case where a token was minted in a dev
+  // environment and later presented to a promoted production instance.
+  const sandbox = await isSandboxUser(verified.sub);
+  if (sandbox && !sandboxAllowed()) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
   // Route every read/write for the seeded sandbox account into the isolated
   // "sandbox" scope; everyone else stays on "live". Running next() inside the
   // AsyncLocalStorage store makes the scope visible to every DB helper invoked
   // downstream (the store propagates across the handler's awaits).
-  const scope: Scope = (await isSandboxUser(verified.sub)) ? "sandbox" : "live";
+  const scope: Scope = sandbox ? "sandbox" : "live";
   req.scope = scope;
   runWithScope(scope, () => next());
 }
