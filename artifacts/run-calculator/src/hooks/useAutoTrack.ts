@@ -90,6 +90,14 @@ interface AutoTrackParams {
    * manual edits on every other device.
    */
   disabled?: boolean;
+  /**
+   * When provided, the hook uses this ref for its own suppression check
+   * (Date.now() < externalAutoSuppressRef.current) instead of maintaining a
+   * separate internal ref. Callers (e.g. LiveRunProvider) pass Home's ref so
+   * that manual-edit suppression latches written by UI consumers are honoured
+   * by the auto-track write loop.
+   */
+  externalAutoSuppressRef?: React.MutableRefObject<number>;
 }
 
 interface AutoTrackResult {
@@ -162,9 +170,13 @@ export function useAutoTrack({
   form,
   machine,
   disabled = false,
+  externalAutoSuppressRef,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
-  const autoSuppressUntilRef = useRef<number>(0);
+  const internalAutoSuppressRef = useRef<number>(0);
+  // Prefer caller's ref so that suppression latches written by UI consumers
+  // (e.g. Home's autoSuppressUntilRef) are seen by this hook's write loop.
+  const autoSuppressUntilRef = externalAutoSuppressRef ?? internalAutoSuppressRef;
   // Per-counter "next tick due at" wall-clock timestamps (ms). 0 = fire on the
   // next tick (fresh baseline / forced resume).
   const caseNextDueMsRef = useRef<number>(0);

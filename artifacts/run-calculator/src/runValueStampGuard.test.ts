@@ -229,7 +229,13 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
         if (/\.test\.(ts|tsx)$/.test(entry.name)) continue;
         const rel = path.relative(srcDir, full);
-        if (rel === path.join("pages", "home.tsx") || rel === "storage.ts") continue;
+        // contexts/LiveRunContext.tsx: pre-seeds next-run dough counters when the
+        // press finishes; the write is immediately followed by markRunValuesUpdated.
+        if (
+          rel === path.join("pages", "home.tsx") ||
+          rel === "storage.ts" ||
+          rel === path.join("contexts", "LiveRunContext.tsx")
+        ) continue;
         const text = fs.readFileSync(full, "utf8");
         if (/\bsaveRunValues\b/.test(text)) offenders.push(rel);
       }

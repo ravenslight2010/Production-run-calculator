@@ -1,3 +1,4 @@
+- [LiveRunContext clock isolation](live-run-context-clock-isolation.md) — Home must not hold nowTime; clock + calc + auto-track live in LiveRunProvider; 11 sub-components call useLiveRun(); transform_home.py gotchas inside.
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
