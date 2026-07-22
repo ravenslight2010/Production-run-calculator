@@ -29,9 +29,11 @@
 // Six describe blocks covering all five Live*TabContent tab types:
 //
 //  Block 1–3: Dough/Packaging slice (casesNeeded, runStatus)
-//    1. PROPAGATION — form value change reaches the tab subscriber.
-//    2. ISOLATION  — dialog open does not trigger a tab re-render.
-//    3. COMBINED   — form change propagates; subsequent dialog open adds no renders.
+//    1. PROPAGATION    — form value change reaches the tab subscriber.
+//    2. ISOLATION      — dialog open does not trigger a tab re-render.
+//    3. COMBINED       — form change propagates; subsequent dialog open adds no renders.
+//    REGRESSION GUARD  — a deliberately broken provider (manageCounter in deps)
+//                        proves the ISOLATION test would catch the regression.
 //
 //  Block 4: LiveFrontlineTabContent slice (app1Type — applicator form value)
 //    PROPAGATION + ISOLATION
@@ -85,6 +87,28 @@ function TabProvider({
     // of showManageDialog / importState / merge state.
   );
   // Use the REAL HomeTabCtx.Provider from production code.
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+// ── BrokenTabProvider ─────────────────────────────────────────────────────────
+// Intentionally includes `manageCounter` in useMemo deps, simulating the
+// regression where a dialog field leaks into the Dough/Packaging context slice.
+// Used only in the REGRESSION GUARD test below to prove the guard is real.
+function BrokenTabProvider({
+  casesNeeded,
+  runStatus,
+  manageCounter,
+  children,
+}: {
+  casesNeeded: number;
+  runStatus: string;
+  manageCounter: number;
+  children: ReactNode;
+}) {
+  const value = useMemo(
+    () => ({ casesNeeded, runStatus }),
+    [casesNeeded, runStatus, manageCounter], // BUG: manageCounter should NOT be here
+  );
   return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
 }
 
@@ -240,6 +264,50 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
     // correct casesNeeded (75) without needing another re-render
     expect(getByTestId("cases-needed").textContent).toBe("75");
     expect(getByTestId("run-status").textContent).toBe("running");
+  });
+
+  // ─── REGRESSION GUARD ────────────────────────────────────────────────────
+  // This test uses BrokenTabProvider — which intentionally includes
+  // `manageCounter` in its useMemo deps — to prove that the ISOLATION test
+  // above is a real guard: if someone accidentally adds a dialog field to the
+  // Dough/Packaging context slice's deps, the subscriber WILL re-render on
+  // every dialog state change (freezing the tab while a dialog is open).
+  //
+  // If this test starts FAILING (broken provider no longer causes re-renders),
+  // the isolation test above has become a false green and the guard is gone.
+  it("REGRESSION GUARD: broken provider (manageCounter in deps) causes spurious Dough/Packaging re-renders", async () => {
+    const { rerender } = render(
+      <BrokenTabProvider casesNeeded={100} runStatus="running" manageCounter={0}>
+        <TabSubscriber />
+      </BrokenTabProvider>,
+    );
+
+    expect(renderCount).toBe(1);
+
+    // Simulate dialog open — only manageCounter changes; casesNeeded and
+    // runStatus are stable.
+    // With the BROKEN provider, this produces a new ctx ref → spurious re-render.
+    await act(async () => {
+      rerender(
+        <BrokenTabProvider casesNeeded={100} runStatus="running" manageCounter={1}>
+          <TabSubscriber />
+        </BrokenTabProvider>,
+      );
+    });
+
+    // BROKEN provider leaks manageCounter into deps → subscriber re-renders.
+    // The real TabProvider must keep this count at 1 (see ISOLATION test).
+    expect(renderCount).toBe(2);
+
+    await act(async () => {
+      rerender(
+        <BrokenTabProvider casesNeeded={100} runStatus="running" manageCounter={42}>
+          <TabSubscriber />
+        </BrokenTabProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(3);
   });
 });
 
