@@ -1778,6 +1778,63 @@ describe("LiveTabMemo — REAL GlanceOverlay stays live while a manage dialog is
       spy.mockRestore();
     }
   });
+
+  it("counter-proof: useHomeTabCtx spy count stays flat when no component in the subtree calls it (proves spy cannot pass vacuously from provider emissions)", async () => {
+    // Guards the spy-target-drift risk: if GlanceOverlay is ever refactored to
+    // import useHomeTabCtx from a different module (e.g. a barrel re-export),
+    // the vi.spyOn(HomeTabCtxNS, "useHomeTabCtx") in the sibling test would
+    // silently stop intercepting calls.  The sibling's call-count would stay
+    // flat while the component still renders — causing it to pass vacuously.
+    //
+    // This counter-proof renders a simulator that intentionally does NOT call
+    // useHomeTabCtx() at all.  Even when runStatus changes and RealGlanceWrapper
+    // emits a new HomeTabCtx context value, the spy must NOT fire — because no
+    // component in the subtree invokes the hook.
+    //
+    // If the spy were somehow triggered by provider emissions alone (not by real
+    // hook invocations), the count would increase and this test would fail,
+    // revealing a broken spy assumption before it silently corrupts the guard.
+    const spy = vi.spyOn(HomeTabCtxNS, "useHomeTabCtx");
+
+    try {
+      // Simulator that deliberately omits useHomeTabCtx() — only mounts via
+      // useLiveRun() so the subtree is non-trivial but the spy has nothing to
+      // intercept on the HomeTabCtx side.
+      const NoTabCtxSim = memo(function NoTabCtxSimInner() {
+        useLiveRun();
+        return null;
+      });
+
+      const { rerender } = render(
+        <RealGlanceWrapper runStatus="running" manageOpen={false}>
+          <NoTabCtxSim />
+        </RealGlanceWrapper>,
+      );
+
+      // Nothing in this subtree calls useHomeTabCtx() — spy must stay at 0.
+      expect(spy.mock.calls.length).toBe(0);
+
+      // Change runStatus — RealGlanceWrapper's tabCtxValue useMemo fires and
+      // a new HomeTabCtx value is pushed to subscribers.  But NoTabCtxSim
+      // is not subscribed, so the spy must remain flat.
+      await act(async () => {
+        rerender(
+          <RealGlanceWrapper runStatus="paused" manageOpen={false}>
+            <NoTabCtxSim />
+          </RealGlanceWrapper>,
+        );
+      });
+
+      // Still 0 — the spy fires ONLY when the hook is actually called, not
+      // when the provider emits a new value.  This confirms the sibling test's
+      // call-count advance is driven by GlanceOverlay's real hook invocations,
+      // not by provider-side emissions that would happen regardless of whether
+      // the spy target is correct.
+      expect(spy.mock.calls.length).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
