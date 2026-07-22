@@ -206,6 +206,8 @@ import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
 import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
 import { TickBar } from "../components/TickBar";
+import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
+import { DoughRoleGate } from "../components/DoughRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useRunTemplates } from "../hooks/useRunTemplates";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
@@ -16396,7 +16398,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
                     </summary>
                     <div className={`border-t border-border/40 px-5 pb-5 pt-4 space-y-3${!isSupervisor ? " opacity-60 pointer-events-none" : ""}`}>
-                    <fieldset disabled={!isSupervisor} className="contents">
+                    <LineSetupRoleGate isSupervisor={!!isSupervisor}>
                       {/* Dough / Crust toggle */}
                       <div>
                         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Line Type</label>
@@ -16675,7 +16677,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           />
                         );
                       })()}
-                    </fieldset>
+                    </LineSetupRoleGate>
                     </div>
                 </details>
     </>
@@ -17449,7 +17451,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 })()}
                 {/* What You Need Now — above the steppers, matching the
                     approved mockup's order */}
-                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
+                <DoughRoleGate isSupervisor={!!isSupervisor}>
                 {/* ── Crust run ── */}
                 {doughSubTab === "crusts" && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
@@ -17503,7 +17505,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 </div>
                   </>
                 )}
-                </fieldset>
+                </DoughRoleGate>
                 {/* Supply progress steppers (moved from Current Progress) */}
                 <div className="mb-4">
                   {(() => {

@@ -48,6 +48,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { useMemo, memo, type ReactNode } from "react";
 import { render, act, cleanup } from "@testing-library/react";
 import { SetupRecipesRoleGate } from "../../components/SetupRecipesRoleGate";
+import { LineSetupRoleGate } from "../../components/LineSetupRoleGate";
+import { DoughRoleGate } from "../../components/DoughRoleGate";
 
 // Import the REAL HomeTabCtx and useHomeTabCtx — not a replica.
 // Any refactor that breaks these exports or changes the context identity
@@ -1000,5 +1002,139 @@ describe("HomeTabCtx — LiveSummaryTabContent slice (dayState.runs)", () => {
     });
 
     expect(summaryRenderCount).toBe(3);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 7 — LineSetupRoleGate lock banner presence (Run tab "Line Setup")
+//
+// The LiveRunTabContent "Line Setup" section (Run tab) gates its content with
+// LineSetupRoleGate, which renders a data-testid="line-setup-lock-banner" div
+// when isSupervisor=false.  A future refactor could drop that banner without
+// touching the fieldset.  This block guards the banner independently by
+// mounting the REAL LineSetupRoleGate component and asserting on the banner.
+//
+// If either test starts failing because the banner div or its testid was
+// removed from LineSetupRoleGate, the regression is caught before it ships.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const RealLineSetupSubscriber = memo(
+  function RealLineSetupSubscriberInner({ isSupervisor }: { isSupervisor: boolean }) {
+    return (
+      <LineSetupRoleGate isSupervisor={isSupervisor}>
+        <input data-testid="line-setup-input" defaultValue="test" />
+      </LineSetupRoleGate>
+    );
+  },
+);
+
+describe("LineSetupRoleGate — lock banner presence (Run tab Line Setup section)", () => {
+  // ─── banner visible when locked ──────────────────────────────────────────
+  it("lock banner is present when isSupervisor=false", () => {
+    const { getByTestId } = render(<RealLineSetupSubscriber isSupervisor={false} />);
+    expect(getByTestId("line-setup-lock-banner")).toBeTruthy();
+  });
+
+  // ─── banner hidden when unlocked ─────────────────────────────────────────
+  it("lock banner is absent when isSupervisor=true", () => {
+    const { queryByTestId } = render(<RealLineSetupSubscriber isSupervisor={true} />);
+    expect(queryByTestId("line-setup-lock-banner")).toBeNull();
+  });
+
+  // ─── banner appears when role is revoked mid-session ─────────────────────
+  it("lock banner appears when isSupervisor is revoked mid-session", async () => {
+    const { rerender, queryByTestId, getByTestId } = render(
+      <RealLineSetupSubscriber isSupervisor={true} />,
+    );
+
+    expect(queryByTestId("line-setup-lock-banner")).toBeNull();
+
+    await act(async () => {
+      rerender(<RealLineSetupSubscriber isSupervisor={false} />);
+    });
+
+    expect(getByTestId("line-setup-lock-banner")).toBeTruthy();
+  });
+
+  // ─── banner disappears when role is granted mid-session ──────────────────
+  it("lock banner disappears when isSupervisor is granted mid-session", async () => {
+    const { rerender, queryByTestId, getByTestId } = render(
+      <RealLineSetupSubscriber isSupervisor={false} />,
+    );
+
+    expect(getByTestId("line-setup-lock-banner")).toBeTruthy();
+
+    await act(async () => {
+      rerender(<RealLineSetupSubscriber isSupervisor={true} />);
+    });
+
+    expect(queryByTestId("line-setup-lock-banner")).toBeNull();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 8 — DoughRoleGate lock banner presence (Dough tab recipe section)
+//
+// The LiveDoughTabContent recipe/settings section uses DoughRoleGate, which
+// renders a data-testid="dough-lock-banner" div when isSupervisor=false.  A
+// future refactor could drop that banner without touching the fieldset.  This
+// block guards the banner independently by mounting the REAL DoughRoleGate
+// component and asserting on the banner.
+//
+// If either test starts failing because the banner div or its testid was
+// removed from DoughRoleGate, the regression is caught before it ships.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const RealDoughSubscriber = memo(
+  function RealDoughSubscriberInner({ isSupervisor }: { isSupervisor: boolean }) {
+    return (
+      <DoughRoleGate isSupervisor={isSupervisor}>
+        <input data-testid="dough-input" defaultValue="test" />
+      </DoughRoleGate>
+    );
+  },
+);
+
+describe("DoughRoleGate — lock banner presence (Dough tab recipe section)", () => {
+  // ─── banner visible when locked ──────────────────────────────────────────
+  it("lock banner is present when isSupervisor=false", () => {
+    const { getByTestId } = render(<RealDoughSubscriber isSupervisor={false} />);
+    expect(getByTestId("dough-lock-banner")).toBeTruthy();
+  });
+
+  // ─── banner hidden when unlocked ─────────────────────────────────────────
+  it("lock banner is absent when isSupervisor=true", () => {
+    const { queryByTestId } = render(<RealDoughSubscriber isSupervisor={true} />);
+    expect(queryByTestId("dough-lock-banner")).toBeNull();
+  });
+
+  // ─── banner appears when role is revoked mid-session ─────────────────────
+  it("lock banner appears when isSupervisor is revoked mid-session", async () => {
+    const { rerender, queryByTestId, getByTestId } = render(
+      <RealDoughSubscriber isSupervisor={true} />,
+    );
+
+    expect(queryByTestId("dough-lock-banner")).toBeNull();
+
+    await act(async () => {
+      rerender(<RealDoughSubscriber isSupervisor={false} />);
+    });
+
+    expect(getByTestId("dough-lock-banner")).toBeTruthy();
+  });
+
+  // ─── banner disappears when role is granted mid-session ──────────────────
+  it("lock banner disappears when isSupervisor is granted mid-session", async () => {
+    const { rerender, queryByTestId, getByTestId } = render(
+      <RealDoughSubscriber isSupervisor={false} />,
+    );
+
+    expect(getByTestId("dough-lock-banner")).toBeTruthy();
+
+    await act(async () => {
+      rerender(<RealDoughSubscriber isSupervisor={true} />);
+    });
+
+    expect(queryByTestId("dough-lock-banner")).toBeNull();
   });
 });
