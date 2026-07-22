@@ -273,5 +273,65 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
       );
       expect(screen.getByTestId("elapsed-card-value").textContent).toBe("40m");
     });
+
+    // ── recovery point: 1 ms past newStartedAt ────────────────────────────
+    // nowMs = postResumeStartedAt + 1ms → runAge = 1ms → fmtElapsed rounds
+    // to "0m".  This confirms the display is NOT permanently stuck at 0m —
+    // it is a valid fresh-start reading at the exact recovery boundary.
+    // A future refactor that capped or skipped the startedAt shift would
+    // cause nowMs > postResumeStartedAt to show an inflated elapsed (e.g.
+    // "2h 40m") instead of "0m", catching the regression here.
+
+    it("CompactRunStrip: 1 ms past newStartedAt shows 0m (valid recovery point, not stuck)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={postResumeStartedAt + 1}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("0m");
+    });
+
+    it("ElapsedCard: 1 ms past newStartedAt shows 0m (valid recovery point, not stuck)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={postResumeStartedAt + 1}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("0m");
+    });
+
+    // ── 30 min past newStartedAt ──────────────────────────────────────────
+    // Confirms the display advances normally once the shifted startedAt is
+    // cleared: runAge = 30 min → "30m" on both call sites.
+
+    it("CompactRunStrip: 30 min past newStartedAt shows 30m (normal accumulation)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={postResumeStartedAt + 30 * 60_000}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("30m");
+    });
+
+    it("ElapsedCard: 30 min past newStartedAt shows 30m (normal accumulation)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={postResumeStartedAt + 30 * 60_000}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("30m");
+    });
   });
 });
