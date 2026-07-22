@@ -14192,9 +14192,8 @@ export default function Home() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extracted sub-components — co-located with Home
-// ScreenModeView and GlanceOverlay use useHomeTabCtx() (narrow context, no
-// re-render on manage/import/merge state changes).
-// FloorModeView uses useHomeCtx() (needs activeStopId / allergenWarnings).
+// ScreenModeView, GlanceOverlay, and FloorModeView all use useHomeTabCtx()
+// (narrow context — no re-render on manage/import/merge state changes).
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ScreenModeView() {
@@ -14865,13 +14864,12 @@ function ScreenModeView() {
 }
 
 function FloorModeView() {
-  const hx = useHomeCtx();
   const {
-    activeStopId, allergenWarnings, autoSuppressUntilRef, currentRun,
-    doughSubTab, endStop, floorDimmed, form, pauseRun, runStatus,
-    setResumeDialog, setShowFloorMode, setShowStopDialog, setStopNotes,
-    setStopReason, v,
-  } = hx;
+    activeStopId, allergenWarnings, autoSuppressUntilRef, currentRun, doughSubTab,
+    endStop, floorDimmed, form, pauseRun, runStatus,
+    setResumeDialog, setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
+    v, ve,
+  } = useHomeTabCtx();
 
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
