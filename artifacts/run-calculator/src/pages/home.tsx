@@ -78,6 +78,7 @@ import {
   computeSummaryStats,
   computeCheesePull,
   computeCheesePerPizzaOz,
+  computeResumedStartedAt,
   sauceBarrelBreakdown,
   genId,
   todayStr,
@@ -8182,13 +8183,7 @@ export default function Home() {
     const run = dayState.runs[dayState.currentIndex];
     if (!run?.pausedAt) return;
     const now = Date.now();
-    let newStartedAt = run.startedAt!;
-    if (freezerEmpty) {
-      newStartedAt = now;
-    } else {
-      const pauseDuration = now - run.pausedAt;
-      newStartedAt = run.startedAt! + pauseDuration;
-    }
+    const newStartedAt = computeResumedStartedAt(run.startedAt!, run.pausedAt, now, freezerEmpty);
     // Close the open pause stoppage
     const updatedStoppages = (run.stoppages ?? []).map(s =>
       s.type === "pause" && !s.endedAt ? { ...s, endedAt: now } : s

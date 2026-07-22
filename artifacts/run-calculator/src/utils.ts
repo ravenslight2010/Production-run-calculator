@@ -7,6 +7,36 @@ import { withSubstitutions } from "./substitutionState";
 // single `../utils` import boundary; the formula lives in @workspace/inventory-math.
 export { computeCheesePull, computeCheesePerPizzaOz } from "@workspace/inventory-math";
 
+/**
+ * Pure helper for resumeRun's startedAt-advancing formula.
+ *
+ * When a run is resumed the clock never went backwards — it was just paused.
+ * We shift `startedAt` forward by the pause duration so that
+ * `nowTime - newStartedAt` reflects only the time the run was actually
+ * running (not the time it was paused).
+ *
+ * Guarantee: the returned value is always ≥ `startedAt`, and
+ *   `now - returnValue` is always ≥ 0 for valid inputs
+ *   (i.e. pausedAt ≥ startedAt and now ≥ pausedAt).
+ *
+ * @param startedAt  Original run start timestamp (ms since epoch)
+ * @param pausedAt   Timestamp when the run was paused (ms since epoch)
+ * @param now        Current timestamp (ms since epoch)
+ * @param freezerEmpty  When true the run restarts fresh from `now`
+ */
+export function computeResumedStartedAt(
+  startedAt: number,
+  pausedAt: number,
+  now: number,
+  freezerEmpty: boolean,
+): number {
+  if (freezerEmpty) {
+    return now;
+  }
+  const pauseDuration = now - pausedAt;
+  return startedAt + pauseDuration;
+}
+
 export function fmtElapsed(ms: number): string {
   const clamped = Math.max(0, ms);
   const totalSec = Math.floor(clamped / 1000);
