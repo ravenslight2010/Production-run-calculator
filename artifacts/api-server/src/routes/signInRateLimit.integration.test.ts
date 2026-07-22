@@ -7,12 +7,11 @@
 // test proves the middleware is actually wired onto the sign-in route in
 // routes/auth.ts so a future accidental removal cannot go undetected.
 //
-// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests with a valid-
-// looking body but wrong credentials (all return 401 — the route handler fires
-// but the password check fails with no DB write). The rate-limit counter
-// increments on every request, including rejected ones — that is the intended
-// behaviour so brute-force attempts still exhaust the budget. The next request
-// must return 429 regardless of its credentials.
+// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests with a
+// non-existent username (all return 401 — DB lookup returns null, fast). The
+// next request must return 429 regardless of its body. Using a non-existent
+// user keeps the test fast — the handler returns early after the failed lookup
+// without any expensive crypto work.
 //
 // Like the other *.integration.test.ts files in this directory, this stands up
 // a disposable Postgres database so the real router can import @workspace/db.
@@ -26,6 +25,7 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { AUTH_RATE_MAX } from "./authRateLimit.constants";
 
 type DbModule = typeof import("@workspace/db");
 let pool: DbModule["pool"];
@@ -35,11 +35,6 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
-
-// The production cap defined in routes/auth.ts. Keeping this in sync with the
-// source constant is intentional — the test would need to be updated if the cap
-// changes, which is exactly the right behaviour (it documents what the limit is).
-const AUTH_RATE_MAX = 20;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -81,7 +76,8 @@ beforeAll(async () => {
   });
   // All fetch() calls from the test process originate from the local loopback
   // address (127.0.0.1), so every request naturally lands in the same
-  // rate-limit bucket without any IP override.
+  // rate-limit bucket without any IP override. No trust-proxy manipulation is
+  // needed — and attempting to write to req.ip (an Express getter) would throw.
   app.use("/api", routerMod.default);
 
   await new Promise<void>((resolve) => {
@@ -108,18 +104,16 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
-// Helper: POST /api/auth/sign-in with valid-schema credentials for a user that
-// does not exist in the (empty) test DB. Returns the raw Response so the caller
-// can inspect the status. The route handler fires — finding no matching user —
-// and responds 401, so each call increments the rate-limit counter exactly once
-// without creating any DB state.
-function signInWrongCredentials(): Promise<Response> {
+// Helper: POST /api/auth/sign-in with a non-existent username and wrong
+// password. Returns the raw Response so the caller can inspect the status.
+// The DB is empty so findUserByUsername returns null → 401 immediately.
+function signInWrongCreds(): Promise<Response> {
   return fetch(`${baseUrl}/api/auth/sign-in`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      username: `usr_${Math.random().toString(36).slice(2)}`,
-      password: "wrongpassword99",
+      username: `nosuchuser_${Math.random().toString(36).slice(2)}`,
+      password: "definitely-wrong-password",
     }),
   });
 }
@@ -128,23 +122,21 @@ describe("POST /api/auth/sign-in — authRateLimit fires after AUTH_RATE_MAX req
   it(
     "returns 429 on the request that exceeds the cap and 401 for all requests within it",
     async () => {
-      // Send AUTH_RATE_MAX requests. Each uses credentials for a non-existent
-      // user so the server returns 401 (no DB write). The rate-limit counter
-      // increments on every request, including rejected ones — that is the
-      // intended behaviour so brute-force guessing still exhausts the budget.
+      // Send AUTH_RATE_MAX requests with non-existent credentials. Each hits a
+      // non-existent username so the server returns 401 (no DB write, just a
+      // fast lookup that returns null). The rate-limit counter increments on
+      // every request, including rejected ones — that is the intended behaviour
+      // so credential stuffing still exhausts the budget.
       for (let i = 1; i <= AUTH_RATE_MAX; i++) {
-        const res = await signInWrongCredentials();
+        const res = await signInWrongCreds();
         // Every request within the cap must be processed by the route handler
-        // (no such user → 401), not intercepted by the rate limiter.
-        expect(
-          res.status,
-          `request ${i} of ${AUTH_RATE_MAX} should reach the handler (401), got ${res.status}`,
-        ).toBe(401);
+        // (wrong creds → 401), not intercepted by the rate limiter.
+        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (401), got ${res.status}`).toBe(401);
       }
 
       // The very next request exceeds the cap. The rate-limit middleware must
       // intercept it BEFORE the route handler runs and return 429.
-      const blocked = await signInWrongCredentials();
+      const blocked = await signInWrongCreds();
       expect(blocked.status, "request over the cap should be rate-limited (429)").toBe(429);
 
       const body = (await blocked.json()) as { error: string };

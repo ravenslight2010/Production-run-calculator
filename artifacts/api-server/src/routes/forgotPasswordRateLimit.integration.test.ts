@@ -2,16 +2,17 @@
 //
 // POST /auth/forgot-password uses authRateLimit (20 requests / 60 s per IP).
 // If that middleware were accidentally removed or misconfigured the endpoint
-// would be silently open to spam and enumeration attempts. The unit-level tests
-// in rateLimit.test.ts prove the middleware itself works; THIS test proves the
-// middleware is actually wired onto the forgot-password route in routes/auth.ts
-// so a future accidental removal cannot go undetected.
+// would be silently open to unlimited enumeration and spam against the
+// password-reset flow. The unit-level tests in rateLimit.test.ts prove the
+// middleware itself works; THIS test proves the middleware is actually wired
+// onto the forgot-password route in routes/auth.ts so a future accidental
+// removal cannot go undetected.
 //
-// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests for an unknown
-// username. The endpoint is intentionally enumeration-safe — it always responds
-// 200 with { ok: true } whether or not the account exists — so every within-cap
-// request returns 200 with no meaningful side-effects. The next request must
-// return 429 regardless of its body.
+// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests for a
+// non-existent username (all return 200 — the endpoint is intentionally
+// enumeration-safe and always responds { ok: true }). The next request must
+// return 429 regardless of its body. Using a non-existent user keeps the test
+// fast — createResetRequest is a no-op for unknown usernames.
 //
 // Like the other *.integration.test.ts files in this directory, this stands up
 // a disposable Postgres database so the real router can import @workspace/db.
@@ -25,6 +26,7 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { AUTH_RATE_MAX } from "./authRateLimit.constants";
 
 type DbModule = typeof import("@workspace/db");
 let pool: DbModule["pool"];
@@ -35,11 +37,6 @@ let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
 
-// The production cap defined in routes/auth.ts. Keeping this in sync with the
-// source constant is intentional — the test would need to be updated if the cap
-// changes, which is exactly the right behaviour (it documents what the limit is).
-const AUTH_RATE_MAX = 20;
-
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
@@ -48,7 +45,7 @@ beforeAll(async () => {
 
   adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
   adminPool.on("error", () => {});
-  testDbName = `helium_forgot_ratelimit_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  testDbName = `helium_forgotpw_ratelimit_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   await adminPool.query(`CREATE DATABASE "${testDbName}"`);
 
   const testUrl = new URL(originalDatabaseUrl);
@@ -80,7 +77,8 @@ beforeAll(async () => {
   });
   // All fetch() calls from the test process originate from the local loopback
   // address (127.0.0.1), so every request naturally lands in the same
-  // rate-limit bucket without any IP override.
+  // rate-limit bucket without any IP override. No trust-proxy manipulation is
+  // needed — and attempting to write to req.ip (an Express getter) would throw.
   app.use("/api", routerMod.default);
 
   await new Promise<void>((resolve) => {
@@ -107,17 +105,16 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
-// Helper: POST /api/auth/forgot-password with an unknown username. Returns the
-// raw Response so the caller can inspect the status. The endpoint always returns
-// 200 with { ok: true } regardless of whether the account exists — this is a
-// deliberate enumeration-safety guarantee. Each call increments the rate-limit
-// counter once without creating any persistent DB state.
-function forgotPasswordUnknownUser(): Promise<Response> {
+// Helper: POST /api/auth/forgot-password for a non-existent username.
+// Returns the raw Response so the caller can inspect the status. The endpoint
+// always responds { ok: true } regardless of whether the account exists, so
+// the response is 200 for all requests within the rate-limit cap.
+function forgotPasswordRequest(): Promise<Response> {
   return fetch(`${baseUrl}/api/auth/forgot-password`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      username: `nouser_${Math.random().toString(36).slice(2)}`,
+      username: `nosuchuser_${Math.random().toString(36).slice(2)}`,
     }),
   });
 }
@@ -126,24 +123,21 @@ describe("POST /api/auth/forgot-password — authRateLimit fires after AUTH_RATE
   it(
     "returns 429 on the request that exceeds the cap and 200 for all requests within it",
     async () => {
-      // Send AUTH_RATE_MAX requests for non-existent usernames. The endpoint is
-      // enumeration-safe so every within-cap request returns 200 regardless of
-      // whether the user exists. The rate-limit counter still increments each
-      // time — this is the intended behaviour so spam and abuse attempts exhaust
-      // the budget even when the responses look benign.
+      // Send AUTH_RATE_MAX requests for non-existent users. Each returns 200
+      // because the endpoint is intentionally enumeration-safe — the route
+      // always responds { ok: true } whether or not the account exists. The
+      // rate-limit counter increments on every request, including successful
+      // ones — that is the intended behaviour so spam still exhausts the budget.
       for (let i = 1; i <= AUTH_RATE_MAX; i++) {
-        const res = await forgotPasswordUnknownUser();
+        const res = await forgotPasswordRequest();
         // Every request within the cap must be processed by the route handler
-        // (always 200 for enumeration safety), not intercepted by the rate limiter.
-        expect(
-          res.status,
-          `request ${i} of ${AUTH_RATE_MAX} should reach the handler (200), got ${res.status}`,
-        ).toBe(200);
+        // (200), not intercepted by the rate limiter.
+        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (200), got ${res.status}`).toBe(200);
       }
 
       // The very next request exceeds the cap. The rate-limit middleware must
       // intercept it BEFORE the route handler runs and return 429.
-      const blocked = await forgotPasswordUnknownUser();
+      const blocked = await forgotPasswordRequest();
       expect(blocked.status, "request over the cap should be rate-limited (429)").toBe(429);
 
       const body = (await blocked.json()) as { error: string };
