@@ -15276,7 +15276,7 @@ function FloorModeView() {
         );
 }
 
-function GlanceOverlay() {
+const GlanceOverlay = memo(function GlanceOverlay() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -15449,7 +15449,7 @@ function GlanceOverlay() {
             <p className="absolute bottom-6 text-xs text-muted-foreground/50">Tap anywhere to dismiss</p>
           </div>
         );
-}
+});
 
 const CompactRunStrip = memo(function CompactRunStrip() {
   // Narrow context: only run state. Does NOT re-render when manage/merge/import
@@ -15617,7 +15617,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
   );
 });
 
-function LiveRunTabContent() {
+const LiveRunTabContent = memo(function LiveRunTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -17094,9 +17094,9 @@ function LiveRunTabContent() {
                 </details>
     </>
   );
-}
+});
 
-function LivePackagingTabContent() {
+const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -17702,9 +17702,9 @@ function LivePackagingTabContent() {
                 </details>
     </>
   );
-}
+});
 
-function LiveFrontlineTabContent() {
+const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -17950,9 +17950,9 @@ function LiveFrontlineTabContent() {
                 })}
     </>
   );
-}
+});
 
-function LiveDoughTabContent() {
+const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -18749,9 +18749,9 @@ function LiveDoughTabContent() {
                 )}
     </>
   );
-}
+});
 
-function LiveSetupRecipesTabContent() {
+const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -19564,9 +19564,9 @@ function LiveSetupRecipesTabContent() {
                 </fieldset>
     </>
   );
-}
+});
 
-function LiveStoppagesTabContent() {
+const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -19853,9 +19853,9 @@ function LiveStoppagesTabContent() {
                 })()}
     </>
   );
-}
+});
 
-function LiveSummaryTabContent() {
+const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   const hx = useHomeCtx();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {
@@ -20650,4 +20650,4 @@ function LiveSummaryTabContent() {
                 })()}
     </>
   );
-}
+});
