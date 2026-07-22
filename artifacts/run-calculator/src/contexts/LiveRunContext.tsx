@@ -100,6 +100,9 @@ export interface LiveRunContextValue {
 }
 
 // ── Module-level calc ref (readable by Home without subscribing to context) ──
+// ISOLATION INVARIANT: components that do not call useLiveRun() must NOT
+// re-render when nowTime changes. calcRef lets Home read the latest calc value
+// without subscribing. Regression test: contexts/__tests__/LiveRunContext.clock-isolation.test.tsx
 export const calcRef: { current: Calc | null } = { current: null };
 
 // ── Provider props ───────────────────────────────────────────────────────────
