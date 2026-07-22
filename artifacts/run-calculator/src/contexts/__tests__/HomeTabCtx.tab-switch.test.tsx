@@ -1361,6 +1361,21 @@ describe("DoughRoleGate — lock banner presence (Dough tab recipe section)", ()
 // fail here, catching the regression before it ships.
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Context-reading subscriber for LineSetupRoleGate — used in the dialog-
+// stability test below so that isSupervisor is supplied via SetupRecipesProvider
+// (mirroring the Block 5b pattern exactly).
+const RealLineSetupCtxSubscriber = memo(
+  function RealLineSetupCtxSubscriberInner() {
+    const hx = useHomeTabCtx();
+    const isSupervisor = Boolean((hx as Record<string, unknown>).isSupervisor);
+    return (
+      <LineSetupRoleGate isSupervisor={isSupervisor}>
+        <input data-testid="line-setup-input" defaultValue="test" />
+      </LineSetupRoleGate>
+    );
+  },
+);
+
 describe(
   "LineSetupRoleGate — fieldset disabled attribute (Run tab Line Setup section)",
   () => {
@@ -1397,6 +1412,35 @@ describe(
 
       expect(fieldset.disabled).toBe(true);
     });
+
+    // ─── dialog open does not flip disabled ───────────────────────────────────
+    // Confirms that opening a manage dialog (only manageCounter changes) does
+    // not accidentally re-gate the LineSetupRoleGate fieldset when isSupervisor
+    // is stable.  Uses SetupRecipesProvider (manageCounter excluded from deps)
+    // to mirror the Block 5b pattern exactly.
+    it("fieldset disabled state is unaffected by dialog state changes", async () => {
+      const { rerender, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealLineSetupCtxSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      const fieldset = getByTestId("line-setup-role-gate-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+
+      // Simulate several dialog open/close cycles
+      for (const counter of [1, 2, 99]) {
+        await act(async () => {
+          rerender(
+            <SetupRecipesProvider isSupervisor={true} manageCounter={counter}>
+              <RealLineSetupCtxSubscriber />
+            </SetupRecipesProvider>,
+          );
+        });
+        // fieldset must remain enabled throughout
+        expect(fieldset.disabled).toBe(false);
+      }
+    });
   },
 );
 
@@ -1412,6 +1456,21 @@ describe(
 // that removes or moves the `disabled={!isSupervisor}` attribute will fail
 // here, catching the regression before it ships.
 // ══════════════════════════════════════════════════════════════════════════════
+
+// Context-reading subscriber for DoughRoleGate — used in the dialog-stability
+// test below so that isSupervisor is supplied via SetupRecipesProvider
+// (mirroring the Block 5b pattern exactly).
+const RealDoughCtxSubscriber = memo(
+  function RealDoughCtxSubscriberInner() {
+    const hx = useHomeTabCtx();
+    const isSupervisor = Boolean((hx as Record<string, unknown>).isSupervisor);
+    return (
+      <DoughRoleGate isSupervisor={isSupervisor}>
+        <input data-testid="dough-input" defaultValue="test" />
+      </DoughRoleGate>
+    );
+  },
+);
 
 describe(
   "DoughRoleGate — fieldset disabled attribute (Dough tab recipe section)",
@@ -1448,6 +1507,35 @@ describe(
       });
 
       expect(fieldset.disabled).toBe(true);
+    });
+
+    // ─── dialog open does not flip disabled ───────────────────────────────────
+    // Confirms that opening a manage dialog (only manageCounter changes) does
+    // not accidentally re-gate the DoughRoleGate fieldset when isSupervisor is
+    // stable.  Uses SetupRecipesProvider (manageCounter excluded from deps) to
+    // mirror the Block 5b pattern exactly.
+    it("fieldset disabled state is unaffected by dialog state changes", async () => {
+      const { rerender, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealDoughCtxSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      const fieldset = getByTestId("dough-role-gate-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+
+      // Simulate several dialog open/close cycles
+      for (const counter of [1, 2, 99]) {
+        await act(async () => {
+          rerender(
+            <SetupRecipesProvider isSupervisor={true} manageCounter={counter}>
+              <RealDoughCtxSubscriber />
+            </SetupRecipesProvider>,
+          );
+        });
+        // fieldset must remain enabled throughout
+        expect(fieldset.disabled).toBe(false);
+      }
     });
   },
 );
