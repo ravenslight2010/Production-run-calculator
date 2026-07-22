@@ -412,6 +412,14 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
 // The SetupRecipes tab reads `isSupervisor` from homeTabCtxValue to gate
 // whether the recipe fieldset is editable.  A role change (isSupervisor flip)
 // must propagate; a dialog open must not cause a re-render.
+//
+// Three tests:
+//   PROPAGATION    — role change reaches the SetupRecipes subscriber.
+//   ISOLATION      — dialog open does NOT re-render the SetupRecipes subscriber.
+//   REGRESSION GUARD — a deliberately broken provider (manageCounter in deps)
+//                      proves the ISOLATION test would catch the regression:
+//                      the broken provider causes a re-render on every dialog
+//                      state change, which the real (correct) provider must not.
 // ══════════════════════════════════════════════════════════════════════════════
 
 function SetupRecipesProvider({
@@ -424,6 +432,26 @@ function SetupRecipesProvider({
 }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo(() => ({ isSupervisor }), [isSupervisor]);
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+// ── BrokenSetupRecipesProvider ─────────────────────────────────────────────
+// Intentionally includes `manageCounter` in useMemo deps, simulating the
+// regression where a dialog field leaks into the SetupRecipes context slice.
+// Used only in the REGRESSION GUARD test below to prove the guard is real.
+function BrokenSetupRecipesProvider({
+  isSupervisor,
+  manageCounter,
+  children,
+}: {
+  isSupervisor: boolean;
+  manageCounter: number;
+  children: ReactNode;
+}) {
+  const value = useMemo(
+    () => ({ isSupervisor }),
+    [isSupervisor, manageCounter], // BUG: manageCounter should NOT be here
+  );
   return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
 }
 
@@ -501,6 +529,49 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
 
     expect(setupRenderCount).toBe(1);
   });
+
+  // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
+  // This test uses BrokenSetupRecipesProvider — which intentionally includes
+  // `manageCounter` in its useMemo deps — to prove that the ISOLATION test
+  // above is a real guard: if someone accidentally adds a dialog field to the
+  // SetupRecipes context slice's deps, the subscriber WILL re-render on every
+  // dialog state change (freezing the tab while a dialog is open).
+  //
+  // If this test starts FAILING (broken provider no longer causes re-renders),
+  // the isolation test above has become a false green and the guard is gone.
+  it("REGRESSION GUARD: broken provider (manageCounter in deps) causes spurious SetupRecipes re-renders", async () => {
+    const { rerender } = render(
+      <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={0}>
+        <SetupRecipesSubscriber />
+      </BrokenSetupRecipesProvider>,
+    );
+
+    expect(setupRenderCount).toBe(1);
+
+    // Simulate dialog open — only manageCounter changes; isSupervisor is stable.
+    // With the BROKEN provider, this produces a new ctx ref → spurious re-render.
+    await act(async () => {
+      rerender(
+        <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={1}>
+          <SetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+    });
+
+    // BROKEN provider leaks manageCounter into deps → subscriber re-renders.
+    // The real SetupRecipesProvider must keep this count at 1 (see ISOLATION test).
+    expect(setupRenderCount).toBe(2);
+
+    await act(async () => {
+      rerender(
+        <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={99}>
+          <SetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(3);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -509,6 +580,14 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
 // The Summary tab reads `dayState.runs` from homeTabCtxValue to display the
 // shift summary.  Adding a run (run count changes) must propagate; a dialog
 // open must not cause a re-render.
+//
+// Three tests:
+//   PROPAGATION    — run count change reaches the Summary subscriber.
+//   ISOLATION      — dialog open does NOT re-render the Summary subscriber.
+//   REGRESSION GUARD — a deliberately broken provider (manageCounter in deps)
+//                      proves the ISOLATION test would catch the regression:
+//                      the broken provider causes a re-render on every dialog
+//                      state change, which the real (correct) provider must not.
 // ══════════════════════════════════════════════════════════════════════════════
 
 function SummaryProvider({
@@ -523,6 +602,26 @@ function SummaryProvider({
   const value = useMemo(
     () => ({ dayState: { runs: Array.from({ length: runCount }, (_, i) => ({ id: `run-${i}` })) } }),
     [runCount],
+  );
+  return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+}
+
+// ── BrokenSummaryProvider ──────────────────────────────────────────────────
+// Intentionally includes `manageCounter` in useMemo deps, simulating the
+// regression where a dialog field leaks into the Summary context slice.
+// Used only in the REGRESSION GUARD test below to prove the guard is real.
+function BrokenSummaryProvider({
+  runCount,
+  manageCounter,
+  children,
+}: {
+  runCount: number;
+  manageCounter: number;
+  children: ReactNode;
+}) {
+  const value = useMemo(
+    () => ({ dayState: { runs: Array.from({ length: runCount }, (_, i) => ({ id: `run-${i}` })) } }),
+    [runCount, manageCounter], // BUG: manageCounter should NOT be here
   );
   return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
 }
@@ -598,5 +697,48 @@ describe("HomeTabCtx — LiveSummaryTabContent slice (dayState.runs)", () => {
     });
 
     expect(summaryRenderCount).toBe(1);
+  });
+
+  // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
+  // This test uses BrokenSummaryProvider — which intentionally includes
+  // `manageCounter` in its useMemo deps — to prove that the ISOLATION test
+  // above is a real guard: if someone accidentally adds a dialog field to the
+  // Summary context slice's deps, the subscriber WILL re-render on every
+  // dialog state change (freezing the tab while a dialog is open).
+  //
+  // If this test starts FAILING (broken provider no longer causes re-renders),
+  // the isolation test above has become a false green and the guard is gone.
+  it("REGRESSION GUARD: broken provider (manageCounter in deps) causes spurious Summary re-renders", async () => {
+    const { rerender } = render(
+      <BrokenSummaryProvider runCount={2} manageCounter={0}>
+        <SummarySubscriber />
+      </BrokenSummaryProvider>,
+    );
+
+    expect(summaryRenderCount).toBe(1);
+
+    // Simulate dialog open — only manageCounter changes; runCount is stable.
+    // With the BROKEN provider, this produces a new ctx ref → spurious re-render.
+    await act(async () => {
+      rerender(
+        <BrokenSummaryProvider runCount={2} manageCounter={1}>
+          <SummarySubscriber />
+        </BrokenSummaryProvider>,
+      );
+    });
+
+    // BROKEN provider leaks manageCounter into deps → subscriber re-renders.
+    // The real SummaryProvider must keep this count at 1 (see ISOLATION test).
+    expect(summaryRenderCount).toBe(2);
+
+    await act(async () => {
+      rerender(
+        <BrokenSummaryProvider runCount={2} manageCounter={77}>
+          <SummarySubscriber />
+        </BrokenSummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(3);
   });
 });
