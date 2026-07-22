@@ -77,5 +77,36 @@ describe("fmtElapsed", () => {
       );
       expect(result).toBe("1h 10m");
     });
+
+    it("forward clock drift: addend is capped at run age so elapsed cannot exceed 2× run age", () => {
+      const startedAt = 0;
+      const nowTime = 30 * 60 * 1000; // 30 min after start
+      // Device clock drifted forward — pausedAt was recorded when clock was much
+      // earlier, so nowTime - pausedAt is far larger than the run's actual age.
+      const pausedAt = 1 * 60 * 1000; // 1 min after start, paused 29 min ago
+      const runAge = nowTime - startedAt; // 30 min
+
+      // Without upper bound: 30min + 29min = 59min — plausible here but with
+      // extreme drift (pausedAt very far in the past) the addend can massively
+      // overstate elapsed time.
+      //
+      // With the upper-bound cap: addend = min(runAge, 29min) = 29min → 59min
+      // In the extreme forward-drift case, cap kicks in:
+      const extremePausedAt = -60 * 60 * 1000; // 1 hr before startedAt (severe drift)
+      const addendUncapped = nowTime - extremePausedAt; // 90 min — larger than the 30-min run
+      const addendCapped = Math.min(runAge, Math.max(0, nowTime - extremePausedAt));
+
+      expect(addendUncapped).toBeGreaterThan(runAge);
+      expect(addendCapped).toBe(runAge); // capped at run age
+
+      // Total elapsed with cap: 30min + 30min = 60min (2× run age max)
+      const result = fmtElapsed(runAge + addendCapped);
+      expect(result).toBe("1h 0m");
+
+      // Without cap the total would be 30min + 90min = 120min — unrealistically
+      // large for a run that only started 30 min ago.
+      const uncapped = fmtElapsed(runAge + addendUncapped);
+      expect(uncapped).toBe("2h 0m");
+    });
   });
 });
