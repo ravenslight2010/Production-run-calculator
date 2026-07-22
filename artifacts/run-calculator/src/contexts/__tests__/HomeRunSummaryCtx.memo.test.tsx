@@ -753,3 +753,80 @@ describe("CompactRunStrip — strip stays mounted on every non-run tab when run 
     expect(queryByTestId("ended-strip")).toBeNull();
   });
 });
+
+// ─── CompactRunStrip — dynamic navigation after run ends ──────────────────────
+//
+// Structural guarantee: the strip stays mounted throughout a navigation sequence
+// that crosses multiple non-run tabs after runStatus transitions "running" →
+// "ended".  The per-tab suite above only mounts fresh on each tab; this suite
+// proves the guard does not accidentally drop the strip mid-session.
+//
+// Scenario:
+//   1. Mount on "dough" with runStatus "running" → strip present, pause button visible.
+//   2. Transition runStatus to "ended" (still on "dough") → strip stays, action
+//      buttons disappear.
+//   3. Navigate to "setup" → strip still mounted.
+//   4. Navigate to "inventory" → strip still mounted.
+//   5. Navigate to "mixes" → strip still mounted.
+//
+// Uses the same TabGuardedEndedStrip + EndedStrip helpers already defined above.
+
+describe("CompactRunStrip — strip stays mounted during tab navigation after run ends", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("strip stays mounted across non-run tab switches after transitioning running → ended", async () => {
+    // Step 1: running on the "dough" tab — strip present with pause button.
+    const { rerender, getByTestId, queryByTestId } = render(
+      <TabGuardedEndedStrip activeTab="dough" runStatus="running" />,
+    );
+
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("running");
+    // Pause button visible during a running run.
+    expect(getByTestId("strip-pause")).not.toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+
+    // Step 2: run ends while still on the "dough" tab.
+    await act(async () => {
+      rerender(<TabGuardedEndedStrip activeTab="dough" runStatus="ended" />);
+    });
+
+    // Strip must stay mounted after the end event; action buttons must disappear.
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+
+    // Step 3: navigate to "setup" — strip must remain mounted.
+    await act(async () => {
+      rerender(<TabGuardedEndedStrip activeTab="setup" runStatus="ended" />);
+    });
+
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+
+    // Step 4: navigate to "inventory" — strip must remain mounted.
+    await act(async () => {
+      rerender(<TabGuardedEndedStrip activeTab="inventory" runStatus="ended" />);
+    });
+
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+
+    // Step 5: navigate to "mixes" — strip must remain mounted (4th non-run tab visited).
+    await act(async () => {
+      rerender(<TabGuardedEndedStrip activeTab="mixes" runStatus="ended" />);
+    });
+
+    expect(getByTestId("ended-strip")).not.toBeNull();
+    expect(getByTestId("status").textContent).toBe("ended");
+    expect(queryByTestId("strip-pause")).toBeNull();
+    expect(queryByTestId("strip-resume")).toBeNull();
+  });
+});
