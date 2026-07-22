@@ -325,6 +325,41 @@ describe("TickBar animation — regression guard", () => {
     // nowTime has not advanced yet, so pct must be the same as at mount.
     expect(pct1).toBe(pct0);
   });
+
+  it("counter-proof: trayProd and batchProd pcts do NOT increase when the run is pending (clock at 10 s cadence)", async () => {
+    // Arms both production-side refs (trayProd, batchProd) under
+    // runStatus="pending" so the 10-second clock cadence means the interval
+    // has NOT fired after 2.1 s of fake time.  If a future developer weakens
+    // the counter-proof to cover only the consumption refs (tray/batch), this
+    // dedicated check will still catch a regression where trayProd or
+    // batchProd mistakenly animates while the run is not yet active.
+    render(
+      <TestProvider runStatus="pending">
+        <TickBarProbe />
+      </TestProvider>,
+    );
+
+    const t0 = Date.now();
+    mockTickRefs.trayProd.current  = t0 + TRAY_PERIOD_SEC * 1000;
+    mockTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
+
+    const probe = screen.getByTestId("probe");
+    const trayProdPct0  = Number(probe.getAttribute("data-tray-prod-pct"));
+    const batchProdPct0 = Number(probe.getAttribute("data-batch-prod-pct"));
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_100);
+    });
+
+    const trayProdPct1  = Number(probe.getAttribute("data-tray-prod-pct"));
+    const batchProdPct1 = Number(probe.getAttribute("data-batch-prod-pct"));
+
+    // nowTime has not advanced (10 s cadence, only 2.1 s elapsed), so neither
+    // production bar should have changed.  If it does, the clock subscription
+    // is firing faster than expected for a pending run — a freeze-risk signal.
+    expect(trayProdPct1).toBe(trayProdPct0);
+    expect(batchProdPct1).toBe(batchProdPct0);
+  });
 });
 
 // ── STABILITY CONTRACT enforcement ───────────────────────────────────────────
