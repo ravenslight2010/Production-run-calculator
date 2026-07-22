@@ -10,11 +10,16 @@ import { normalizeIngredient, type Ingredient } from "@workspace/ingredient-cata
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 
-// Factory-wide ingredient catalog (Task #102). Reading is open to any signed-in
+// Factory-wide ingredient catalog. Reading is open to any signed-in
 // user (both apps resolve recipe rows and build category pickers from this),
 // while creating/renaming/merging/deleting are manager-only — matching the
 // mixes / cheese-recipes precedent (open GET, manager-gated writes). Gated on
 // "manage-inventory" since this is warehouse/inventory master-data.
+//
+// GET /ingredients has no capability guard by design — every authenticated role
+// needs access. A 403 on that route would indicate the request reached the
+// server without a valid session (e.g. a race during sign-up before the cookie
+// is fully applied), not a privilege problem.
 //
 // Renames are just an upsert of an existing id with a new name: since recipe
 // rows reference the id, the new name is picked up everywhere with no

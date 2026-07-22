@@ -101,7 +101,7 @@ function messageForError(err: unknown, mode: Mode): string {
     if (mode === "sign-in" && err.status === 401)
       return "Incorrect username or password.";
     if (mode === "sign-up" && err.status === 403)
-      return "Invalid access code. Check with your manager for the correct code.";
+      return "Incorrect facility code. Ask your manager for the correct sign-up code.";
     if (mode === "sign-up" && err.status === 409)
       return "That username is already taken.";
     if (err.status === 400)

@@ -114,7 +114,7 @@ router.post("/auth/sign-up", authRateLimit, async (req, res): Promise<void> => {
   }
   const { username, password, accessCode } = parsed.data;
   if (!accessCodeMatches(accessCode)) {
-    res.status(403).json({ error: "Invalid or missing access code." });
+    res.status(403).json({ error: "Incorrect facility code." });
     return;
   }
   const created = await createUser(username, password);
