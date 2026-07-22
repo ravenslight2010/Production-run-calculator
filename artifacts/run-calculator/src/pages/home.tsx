@@ -15182,6 +15182,36 @@ const GlanceOverlay = memo(function GlanceOverlay() {
         );
 });
 
+// ─── ElapsedTimeBadge ────────────────────────────────────────────────────────
+// Pure presentational helper: given the three clock values, computes the
+// display-safe elapsed string (with forward-drift upper-bound cap) and renders
+// it as a plain span.  Exported so component-level tests can render the REAL
+// implementation rather than re-implementing the expression inline.
+//
+// Cap logic (both clamps applied):
+//   lower: Math.max(0, nowMs - pausedAt)  — future pausedAt adds nothing
+//   upper: Math.min(runAge, …)            — addend never exceeds the run's age
+// This bounds the displayed total to [runAge, 2 × runAge] regardless of clock skew.
+export function ElapsedTimeBadge({
+  nowMs,
+  startedAt,
+  pausedAt,
+  "data-testid": testId,
+  className,
+}: {
+  nowMs: number;
+  startedAt: number;
+  pausedAt?: number | null;
+  "data-testid"?: string;
+  className?: string;
+}) {
+  const runAge = nowMs - startedAt;
+  const addend = pausedAt != null
+    ? Math.min(runAge, Math.max(0, nowMs - pausedAt))
+    : 0;
+  return <span data-testid={testId} className={className}>{fmtElapsed(runAge + addend)}</span>;
+}
+
 const CompactRunStrip = memo(function CompactRunStrip() {
   // Narrow context: only run state. Does NOT re-render when manage/merge/import
   // state changes — only when dayState, form values, or runStatus change.
@@ -15212,7 +15242,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                         </span>
                         <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider truncate">
-                          Running{currentRun?.startedAt ? ` · ${fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? Math.min(nowTime.getTime() - currentRun.startedAt, Math.max(0, nowTime.getTime() - currentRun.pausedAt)) : 0))}` : ""}
+                          Running{currentRun?.startedAt ? <> · <ElapsedTimeBadge data-testid="strip-elapsed" nowMs={nowTime.getTime()} startedAt={currentRun.startedAt} pausedAt={currentRun.pausedAt ?? null} /></> : ""}
                         </span>
                       </>
                     ) : runStatus === "paused" ? (
@@ -15772,9 +15802,13 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <div className="flex items-center justify-center">
                       <div className="bg-card px-3 py-1.5 rounded-full border border-border/50 text-xs text-muted-foreground font-medium">
                         Elapsed Time:{" "}
-                        <span className="text-foreground font-bold tabular-nums">
-                          {fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? Math.min(nowTime.getTime() - currentRun.startedAt, Math.max(0, nowTime.getTime() - currentRun.pausedAt)) : 0))}
-                        </span>
+                        <ElapsedTimeBadge
+                          data-testid="elapsed-card-value"
+                          className="text-foreground font-bold tabular-nums"
+                          nowMs={nowTime.getTime()}
+                          startedAt={currentRun.startedAt}
+                          pausedAt={currentRun.pausedAt ?? null}
+                        />
                       </div>
                     </div>
                   ) : null}
