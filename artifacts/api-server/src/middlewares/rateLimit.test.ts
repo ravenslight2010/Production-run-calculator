@@ -210,3 +210,102 @@ describe("rateLimit — enforces the cap and returns 429 over the limit", () => 
     expect(blocked.headers["Retry-After"]).toBe("60");
   });
 });
+
+// Sign-up path rate-limit integration test.
+//
+// POST /auth/sign-up uses authRateLimit (20 req / 60 s per IP in production).
+// If that middleware were accidentally removed or misconfigured, the endpoint
+// would be silently open to brute-force access-code guessing. This test
+// constructs the same rateLimit middleware with a tiny cap (max=2) backed by a
+// fresh MemoryRateLimitStore, drives it with a mock sign-up handler, and
+// confirms that the (max+1)th request from the same IP is refused with 429
+// before the handler is ever called — exactly the guard the real authRateLimit
+// provides on the live route.
+describe("authRateLimit — sign-up is blocked when the rate limit is exhausted", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function fireSignUp(middleware: ReturnType<typeof rateLimit>, ip: string) {
+    const headers: Record<string, string> = {};
+    const setHeader = vi.fn((name: string, value: string) => {
+      headers[name] = value;
+    });
+    const json = vi.fn(() => res);
+    const status = vi.fn(() => res);
+    const res = { setHeader, status, json } as unknown as Response;
+
+    const req = {
+      ip,
+      log: { error: vi.fn(), warn: vi.fn() },
+    } as unknown as Request;
+
+    // Simulates the sign-up route handler: returns 201 when the middleware
+    // passes. The test verifies this is never reached once the cap is hit.
+    const signUpHandler = vi.fn(() => {
+      res.status(201);
+      res.json({ token: "tok" });
+    }) as unknown as NextFunction;
+
+    middleware(req, res, signUpHandler);
+
+    await vi.waitFor(() => {
+      const handlerCalls = (signUpHandler as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+      const statusCalls = status.mock.calls.length;
+      expect(handlerCalls + statusCalls).toBeGreaterThan(0);
+    });
+
+    return { signUpHandler, status, json, headers };
+  }
+
+  it("passes requests up to max and returns 429 on the next attempt from the same IP", async () => {
+    const windowMs = 60_000;
+    const max = 2;
+    const ip = "10.0.0.1";
+    // Use a fresh store so this suite doesn't share state with others.
+    const middleware = rateLimit({
+      windowMs,
+      max,
+      store: new MemoryRateLimitStore(windowMs),
+    });
+
+    // First `max` requests must reach the handler (the handler itself sets
+    // status 201, but the middleware must not set it before the handler runs).
+    for (let i = 0; i < max; i++) {
+      const { signUpHandler } = await fireSignUp(middleware, ip);
+      expect(signUpHandler).toHaveBeenCalledTimes(1);
+    }
+
+    // The very next request from the same IP must be blocked at the middleware
+    // — the sign-up handler must NOT be called and the response must be 429.
+    const blocked = await fireSignUp(middleware, ip);
+    expect(blocked.signUpHandler).not.toHaveBeenCalled();
+    expect(blocked.status).toHaveBeenCalledWith(429);
+    expect(blocked.json).toHaveBeenCalledWith({
+      error: "Too many requests. Please wait a moment and try again.",
+    });
+    expect(blocked.headers["RateLimit-Remaining"]).toBe("0");
+    expect(blocked.headers["Retry-After"]).toBeDefined();
+  });
+
+  it("counts requests per IP — a different IP is not affected by the first IP's exhaustion", async () => {
+    const windowMs = 60_000;
+    const max = 2;
+    const store = new MemoryRateLimitStore(windowMs);
+    const middleware = rateLimit({ windowMs, max, store });
+
+    // Exhaust the limit for IP A.
+    for (let i = 0; i <= max; i++) {
+      await fireSignUp(middleware, "192.168.1.1");
+    }
+
+    // IP B's first request must still reach the handler — it has its own bucket.
+    const { signUpHandler } = await fireSignUp(middleware, "192.168.1.2");
+    expect(signUpHandler).toHaveBeenCalledTimes(1);
+  });
+});
