@@ -152,6 +152,20 @@ function PasswordHint({ value }: { value: string }) {
   );
 }
 
+function AccessCodeHint({ value }: { value: string }) {
+  const filled = value.trim().length > 0;
+  return (
+    <p
+      className={`flex items-center gap-1.5 text-xs ${
+        filled ? "text-green-600 dark:text-green-500" : "text-muted-foreground"
+      }`}
+    >
+      <Check className={`h-3.5 w-3.5 ${filled ? "opacity-100" : "opacity-40"}`} />
+      {filled ? "Access code entered" : "Ask your manager for the code new staff use to sign up."}
+    </p>
+  );
+}
+
 function ConfirmPasswordHint({
   password,
   confirm,
@@ -225,6 +239,10 @@ function AuthForm({ mode }: { mode: Mode }) {
     }
     if (isSignUp && password !== confirm) {
       setError("Passwords don't match.");
+      return;
+    }
+    if (isSignUp && accessCode.trim().length === 0) {
+      setError("Please enter the facility access code your manager gave you.");
       return;
     }
     setSubmitting(true);
@@ -344,9 +362,7 @@ function AuthForm({ mode }: { mode: Mode }) {
                   onChange={(e) => setAccessCode(e.target.value)}
                   className="text-foreground"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Ask your manager for the code new staff use to sign up.
-                </p>
+                <AccessCodeHint value={accessCode} />
               </div>
             )}
 
