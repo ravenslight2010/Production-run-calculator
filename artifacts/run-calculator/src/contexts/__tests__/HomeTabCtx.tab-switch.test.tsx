@@ -45,6 +45,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { useMemo, memo, type ReactNode } from "react";
 import { render, act, cleanup } from "@testing-library/react";
+import { SetupRecipesRoleGate } from "../../components/SetupRecipesRoleGate";
 
 // Import the REAL HomeTabCtx and useHomeTabCtx — not a replica.
 // Any refactor that breaks these exports or changes the context identity
@@ -573,6 +574,118 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
     expect(setupRenderCount).toBe(3);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Block 5b — LiveSetupRecipesTabContent fieldset disabled attribute
+//
+// The prior block confirms the context value propagates.  This block goes one
+// layer deeper: it mounts the REAL SetupRecipesRoleGate component (the
+// production component that LiveSetupRecipesTabContent uses) and asserts that
+// its <fieldset disabled> attribute flips when isSupervisor changes.
+//
+// Because SetupRecipesRoleGate is the actual production code, any future
+// refactor that removes or moves the disabled gate will fail here, catching
+// the regression before it ships.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Subscriber that reads isSupervisor from context and passes it to the REAL
+// SetupRecipesRoleGate component — the same path LiveSetupRecipesTabContent
+// takes in production.
+const RealSetupRecipesSubscriber = memo(
+  function RealSetupRecipesSubscriberInner() {
+    const hx = useHomeTabCtx();
+    const isSupervisor = Boolean((hx as Record<string, unknown>).isSupervisor);
+    return (
+      <SetupRecipesRoleGate isSupervisor={isSupervisor}>
+        <input data-testid="recipe-input" defaultValue="test" />
+      </SetupRecipesRoleGate>
+    );
+  },
+);
+
+describe(
+  "HomeTabCtx — LiveSetupRecipesTabContent fieldset disabled attribute",
+  () => {
+    // ─── disabled → enabled ──────────────────────────────────────────────────
+    // Starts with isSupervisor=false (fieldset disabled), then grants supervisor
+    // access and confirms the real SetupRecipesRoleGate fieldset becomes enabled.
+    // This is the primary regression guard: if the disabled attribute is removed
+    // from the production SetupRecipesRoleGate component, this test fails.
+    it("fieldset is disabled when isSupervisor=false and enabled when isSupervisor=true", async () => {
+      const { rerender, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      // Initially not a supervisor → real SetupRecipesRoleGate fieldset is disabled
+      const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(true);
+
+      // Manager grants supervisor role mid-session
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      // isSupervisor is now true → fieldset must be enabled
+      expect(fieldset.disabled).toBe(false);
+    });
+
+    // ─── enabled → disabled ──────────────────────────────────────────────────
+    // Role revoked mid-session: starts enabled, supervisor access removed.
+    it("fieldset becomes disabled when isSupervisor is revoked mid-session", async () => {
+      const { rerender, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      expect(fieldset.disabled).toBe(true);
+    });
+
+    // ─── dialog open does not flip disabled ───────────────────────────────────
+    // Confirms that opening a manage dialog (only manageCounter changes) does
+    // not accidentally re-gate the fieldset when isSupervisor is stable.
+    it("fieldset disabled state is unaffected by dialog state changes", async () => {
+      const { rerender, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
+      expect(fieldset.disabled).toBe(false);
+
+      // Simulate several dialog open/close cycles
+      for (const counter of [1, 2, 99]) {
+        await act(async () => {
+          rerender(
+            <SetupRecipesProvider isSupervisor={true} manageCounter={counter}>
+              <RealSetupRecipesSubscriber />
+            </SetupRecipesProvider>,
+          );
+        });
+        // fieldset must remain enabled throughout
+        expect(fieldset.disabled).toBe(false);
+      }
+    });
+  },
+);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Block 6 — LiveSummaryTabContent slice

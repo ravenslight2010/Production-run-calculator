@@ -203,6 +203,7 @@ import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
+import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useRunTemplates } from "../hooks/useRunTemplates";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
@@ -18062,13 +18063,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
   const { calc } = useLiveRun();
   return (
     <>
-                {!isSupervisor && (
-                  <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
-                    <Lock className="w-3.5 h-3.5 shrink-0" />
-                    Supervisor access required to edit these settings
-                  </div>
-                )}
-                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
+                <SetupRecipesRoleGate isSupervisor={!!isSupervisor}>
                 <div className="space-y-5">
                   <DoughRecipeCard
                     batchesNeeded={calc.batchesNeeded}
@@ -18753,7 +18748,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                     </CardContent>}
                   </Card>
                 </div>
-                </fieldset>
+                </SetupRecipesRoleGate>
     </>
   );
 });
