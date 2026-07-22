@@ -6844,10 +6844,12 @@ export default function Home() {
               schedulePush(ds, 0);
               fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               // The new day's resetAt becomes the server-side session boundary
-              // (pushed above), so the daily reset signs everyone out. Drop this
-              // device to the login screen now instead of waiting for its next
-              // 401 — forceSignedOut keeps the cookie so the push lands first.
-              forceSignedOut();
+              // (pushed above), so the daily reset signs everyone out. Call
+              // signOut (not forceSignedOut) to also clear the rc_auth cookie —
+              // forceSignedOut only wipes the in-memory cache, so a hard refresh
+              // would re-authenticate from the cookie before resetBoundaryAt
+              // propagates. The push is already in-flight so it lands fine.
+              void signOut();
               return;
             }
           }
@@ -6862,13 +6864,15 @@ export default function Home() {
         resetFieldArrays(DEFAULT_VALUES);
         schedulePush(fresh, 0);
         // See note above: the daily reset signs everyone out, including us.
-        forceSignedOut();
+        // Use signOut (not forceSignedOut) to clear the rc_auth cookie so a
+        // hard refresh can't bypass sign-in via the still-valid cookie.
+        void signOut();
       }
     }
     // Run once on mount too. loadDayState() only resets the in-memory view when
     // the stored date is stale; it does NOT archive, stamp resetAt, push the new
     // boundary, or sign out. Without this immediate call, the rollover (and its
-    // forceSignedOut) only fires up to 60s later via the interval — by which
+    // signOut) only fires up to 60s later via the interval — by which
     // time another device's pushed resetAt may have already 401-bounced us to
     // login, so the user sees the logout but never the reset. Mobile already
     // rolls over on its mount effect; this brings web to parity.
@@ -9973,6 +9977,10 @@ export default function Home() {
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
               fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              // Sign out to clear the rc_auth cookie — without this a hard
+              // refresh re-authenticates from the cookie before resetBoundaryAt
+              // propagates, bypassing the sign-in requirement.
+              void signOut();
               scheduleReset();
               return;
             }
@@ -9987,6 +9995,8 @@ export default function Home() {
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
         schedulePush(fresh, 0);
+        // Clear the rc_auth cookie so a hard refresh can't bypass sign-in.
+        void signOut();
         scheduleReset();
       }, msUntilMidnight());
     }
