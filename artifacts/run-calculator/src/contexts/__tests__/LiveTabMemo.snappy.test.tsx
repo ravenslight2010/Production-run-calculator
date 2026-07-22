@@ -2634,3 +2634,124 @@ describe("LiveTabMemo — Suite 9: real GlanceOverlay is wired to useHomeTabCtx(
     expect(renderCount).toBeGreaterThan(countAfterMount);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 10 — Real GlanceOverlay's useLiveRun() subscription advances in the
+//             combined HomeCtx + HomeTabCtx wrapper (Suite 9 setup)
+//
+// The gap closed here:
+//   Suite 9 Test 1 guards against useHomeCtx() re-wiring by checking data-now
+//   stability on a dialog toggle.  But it relies on a re-render (caused by the
+//   wrong hook) to distinguish "subscribed to wrong context" from "not subscribed
+//   at all".  If BOTH useLiveRun() AND useHomeTabCtx() were dropped simultaneously,
+//   data-now would never advance (no re-renders), and Suite 9 Test 1 would still
+//   pass — masking the freeze entirely.
+//
+//   Suite 6 covers the useLiveRun spy, but only inside RealGlanceWrapper
+//   (HomeTabCtx + LiveRunProvider only; no HomeCtx in the tree).  This suite
+//   runs the same spy check inside RealGlanceHomeCtxWrapper (both HomeCtx AND
+//   HomeTabCtx present), matching the exact render tree used by Suite 9, so a
+//   simultaneous removal of both hooks cannot hide behind Suite 9's dialog-toggle
+//   assertion.
+//
+// Two tests:
+//
+//   1. CALL-COUNT ADVANCE — after 60 s of fake clock ticks, the useLiveRun()
+//      spy call count on the real GlanceOverlay exceeds its count at mount.
+//      If useLiveRun() were removed from GlanceOverlay, the count would be flat
+//      and this test would fail.
+//
+//   2. COUNTER-PROOF — a memo()-wrapped component that omits useLiveRun() and
+//      sits in the same wrapper produces a flat spy call count after the same
+//      60 s advance, proving the advancing count in Test 1 is caused by
+//      GlanceOverlay's real useLiveRun() subscription and not by some other
+//      source in the render tree.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count advances in combined HomeCtx+HomeTabCtx wrapper", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => { vi.useRealTimers(); cleanup(); });
+
+  // ─── Test 1: CALL-COUNT ADVANCE ──────────────────────────────────────────
+  // Spy on the exported useLiveRun symbol and confirm the real GlanceOverlay
+  // keeps calling it on every clock-driven re-render.  Uses the
+  // RealGlanceHomeCtxWrapper (HomeCtx + HomeTabCtx + LiveRunProvider) from
+  // Suite 9 so the combined tree is identical to the one that Suite 9 tests.
+  //
+  // If useLiveRun() were accidentally removed from GlanceOverlay:
+  //   • the component would stop re-rendering on clock ticks
+  //   • spy.mock.calls.length would stay flat after advanceTimersByTime
+  //   • this assertion would fail — catching the freeze before it ships
+  it("real GlanceOverlay: useLiveRun() spy call count advances after 60 s of clock ticks (combined HomeCtx+HomeTabCtx wrapper)", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <GlanceOverlay />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    // At mount the real GlanceOverlay must have already called useLiveRun()
+    // at least once (initial render).
+    const countAtMount = spy.mock.calls.length;
+    expect(countAtMount).toBeGreaterThan(0);
+
+    // Advance the fake clock 60 s — LiveRunProvider emits a new context value
+    // every second, so GlanceOverlay must re-render and call useLiveRun() many
+    // more times.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    // Call count must have increased: useLiveRun() was invoked on each
+    // clock-tick re-render.  A flat count means the subscription was lost.
+    expect(spy.mock.calls.length).toBeGreaterThan(countAtMount);
+
+    spy.mockRestore();
+  });
+
+  // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
+  // A memo()-wrapped component that deliberately omits useLiveRun() sits in
+  // the same RealGlanceHomeCtxWrapper.  After 60 s of clock ticks the spy
+  // call count must be flat (equal to its count at mount), proving that the
+  // advancing count in Test 1 is caused exclusively by GlanceOverlay's
+  // useLiveRun() subscription and not by some other call site in the tree
+  // (e.g. LiveRunProvider itself or another mounted component).
+  //
+  // This gives Test 1 its teeth: if the counter-proof count were also
+  // advancing it would mean the spy is picking up background calls that have
+  // nothing to do with GlanceOverlay, invalidating Test 1's signal.
+  it("counter-proof: a memo() component with no useLiveRun() subscription has a flat spy call count after 60 s of clock ticks", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    // A minimal memo()-wrapped component that mirrors GlanceOverlay's
+    // HomeTabCtx subscription but deliberately omits useLiveRun().
+    // This is the "useLiveRun() accidentally deleted" scenario: it still
+    // subscribes to one context but no longer to the live clock.
+    const NoLiveRunSubscriber = memo(function NoLiveRunSubscriberInner() {
+      useHomeTabCtx(); // correct context subscription — just like GlanceOverlay
+      // useLiveRun() intentionally absent — the scenario under test
+      return <span data-testid="s10-no-live-run">static</span>;
+    });
+
+    render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <NoLiveRunSubscriber />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    // Record call count immediately after mount.  The wrapper itself does not
+    // call useLiveRun(), and NoLiveRunSubscriber does not either, so the
+    // count at mount should be 0.
+    const countAtMount = spy.mock.calls.length;
+
+    // Same 60 s advance used in Test 1.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    // Call count must be flat: without a useLiveRun() subscription the
+    // component does not re-render on clock ticks and the spy records no
+    // new calls.  Any increase would invalidate Test 1's advancing-count
+    // signal.
+    expect(spy.mock.calls.length).toBe(countAtMount);
+
+    spy.mockRestore();
+  });
+});
