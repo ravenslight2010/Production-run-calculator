@@ -86,6 +86,12 @@ describe("sign-up form: incorrect facility code error", () => {
     // Facility code field.
     await user.type(screen.getByLabelText(/facility.*code|access.*code/i), "wrong-code");
 
+    // Wait for the debounced username availability check to resolve so the
+    // button is no longer disabled in the "checking" state.
+    await waitFor(() => {
+      expect(screen.getByText(/username is available/i)).toBeTruthy();
+    });
+
     await user.click(screen.getByRole("button", { name: /create.*account|sign.*up/i }));
 
     // The server error must be surfaced; the client must NOT show a generic
@@ -116,6 +122,11 @@ describe("sign-up form: incorrect facility code error", () => {
     await user.type(pwFields[0], "password123");
     await user.type(pwFields[1], "password123");
     await user.type(screen.getByLabelText(/facility.*code|access.*code/i), "any-code");
+
+    // Wait for the debounced availability check to resolve before clicking.
+    await waitFor(() => {
+      expect(screen.getByText(/username is available/i)).toBeTruthy();
+    });
 
     await user.click(screen.getByRole("button", { name: /create.*account|sign.*up/i }));
 

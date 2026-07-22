@@ -374,6 +374,8 @@ function AuthForm({ mode }: { mode: Mode }) {
                 submitting ||
                 (isSignUp && (
                   username.trim().length < MIN_USERNAME_LENGTH ||
+                  usernameStatus === "checking" ||
+                  usernameStatus === "taken" ||
                   password.length < MIN_PASSWORD_LENGTH ||
                   password !== confirm ||
                   accessCode.trim().length === 0
