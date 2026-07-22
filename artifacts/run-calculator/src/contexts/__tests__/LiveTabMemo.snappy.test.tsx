@@ -1324,6 +1324,66 @@ describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dial
     expect(renderCount).toBe(1);
   });
 
+  // ─── Test 1 counter-proof: ISOLATION REGRESSION DETECTION ────────────────
+  // Proves the test framework CAN detect the exact regression Test 1 guards
+  // against: if someone accidentally adds a dialog field (e.g. manageCounter)
+  // to homeTabCtxValue's useMemo deps, the subscriber WILL re-render on every
+  // dialog state change.
+  //
+  // This mirrors the Suite 1 counter-proof ("memo() does NOT prevent live tabs
+  // from receiving useLiveRun() context updates (counter-proof)") and ensures
+  // Test 1 is not a vacuous pass — the test harness is sensitive enough to
+  // surface the regression.
+  it("FloorModeView re-render count DOES increase when dialog state leaks into useMemo deps (isolation regression counter-proof)", async () => {
+    let renderCount = 0;
+
+    // Leaky provider: manageCounter IS included in useMemo deps, simulating the
+    // regression where a developer accidentally adds a dialog/manage field to
+    // homeTabCtxValue's dep array.
+    function TabOnlyProviderLeaky({
+      runStatus,
+      manageCounter,
+      children,
+    }: {
+      runStatus: string;
+      manageCounter: number;
+      children: ReactNode;
+    }) {
+      // manageCounter intentionally IN deps — this is the regression under test
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const value = useMemo(() => ({ runStatus }), [runStatus, manageCounter]);
+      return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
+    }
+
+    const FloorModeViewSim = memo(function FloorModeViewSimInner() {
+      renderCount++;
+      const { runStatus } = useHomeTabCtx();
+      return <span data-testid="floor-status-leak">{runStatus}</span>;
+    });
+
+    const { rerender } = render(
+      <TabOnlyProviderLeaky runStatus="running" manageCounter={0}>
+        <FloorModeViewSim />
+      </TabOnlyProviderLeaky>,
+    );
+
+    expect(renderCount).toBe(1);
+
+    // Open manage dialog — manageCounter changes, runStatus unchanged.
+    // Because manageCounter IS in deps this time, the context ref changes →
+    // the subscriber re-renders (the regression).
+    await act(async () => {
+      rerender(
+        <TabOnlyProviderLeaky runStatus="running" manageCounter={1}>
+          <FloorModeViewSim />
+        </TabOnlyProviderLeaky>,
+      );
+    });
+
+    // renderCount MUST be > 1 — proves the framework detects context leakage
+    expect(renderCount).toBeGreaterThan(1);
+  });
+
   // ─── Tests 2a / 2b: LIVE CLOCK ────────────────────────────────────────────
   // FloorModeView is the one floor-mode overlay that stays VISIBLE while a
   // manager is in a dialog.  The live clock and casesInFreezer must keep
