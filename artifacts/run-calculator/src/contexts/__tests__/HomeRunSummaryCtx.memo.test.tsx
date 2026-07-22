@@ -665,3 +665,91 @@ describe("CompactRunStrip — action buttons hidden when run has ended", () => {
     expect(getByTestId("ended-strip")).not.toBeNull();
   });
 });
+
+// ─── CompactRunStrip strip visibility across all non-run tabs (ended run) ─────
+//
+// Structural guarantee: the home.tsx guard `{activeTab !== "run" && <CompactRunStrip />}`
+// keeps the strip mounted on EVERY non-run tab, including when runStatus is "ended".
+// A regression in that guard could silently remove the ended-run indicator from
+// setup, inventory, schedule, and other tabs without breaking any other test.
+//
+// This suite iterates over every known non-run tab and asserts that the strip
+// container remains mounted when runStatus is "ended".  It uses the same
+// ConditionalStrip replica (which mirrors the `activeTab !== "run"` guard exactly)
+// and EndedStrip (which mirrors the combined pause/resume guard) together.
+//
+// For "ended" status: neither the pause button nor the resume button should appear,
+// but the strip div itself (data-testid="ended-strip") must be present.
+
+// All tab values reachable in home.tsx other than "run".
+const NON_RUN_TABS = [
+  "dough",
+  "sauce",
+  "frontline",
+  "packaging",
+  "warehouse",
+  "setup",
+  "inventory",
+  "stoppages",
+  "summary",
+  "mixes",
+  "ai",
+  "incidents",
+  "quality",
+  "downtime",
+  "staff",
+] as const;
+
+// Wrapper that applies the `activeTab !== "run"` guard and supplies the
+// EndedCtx so EndedStrip can read runStatus.
+function TabGuardedEndedStrip({
+  activeTab,
+  runStatus,
+}: {
+  activeTab: string;
+  runStatus: string;
+}) {
+  const pauseRunRef = { current: () => {} };
+  const setActiveTab = () => {};
+  const ctxValue: EndedCtxShape = { runStatus, pauseRunRef, setActiveTab };
+  return (
+    <>
+      {activeTab !== "run" && (
+        <EndedCtx.Provider value={ctxValue}>
+          <EndedStrip />
+        </EndedCtx.Provider>
+      )}
+    </>
+  );
+}
+
+describe("CompactRunStrip — strip stays mounted on every non-run tab when run has ended", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  for (const tab of NON_RUN_TABS) {
+    it(`strip container present on tab "${tab}" with runStatus "ended"`, () => {
+      const { getByTestId, queryByTestId } = render(
+        <TabGuardedEndedStrip activeTab={tab} runStatus="ended" />,
+      );
+
+      // Strip container must be mounted — the ended-run indicator must be visible.
+      expect(getByTestId("ended-strip")).not.toBeNull();
+      expect(getByTestId("status").textContent).toBe("ended");
+
+      // Neither action button should appear for an ended run.
+      expect(queryByTestId("strip-pause")).toBeNull();
+      expect(queryByTestId("strip-resume")).toBeNull();
+    });
+  }
+
+  it("strip is absent on the \"run\" tab even when run has ended (control case)", () => {
+    const { queryByTestId } = render(
+      <TabGuardedEndedStrip activeTab="run" runStatus="ended" />,
+    );
+
+    // The guard unmounts the entire strip on the Run tab.
+    expect(queryByTestId("ended-strip")).toBeNull();
+  });
+});
