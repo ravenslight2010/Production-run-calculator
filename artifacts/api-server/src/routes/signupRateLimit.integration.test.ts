@@ -24,6 +24,7 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { AUTH_RATE_MAX } from "./authRateLimit.constants";
 
 type DbModule = typeof import("@workspace/db");
 let pool: DbModule["pool"];
@@ -34,11 +35,6 @@ let originalDatabaseUrl: string | undefined;
 let originalStaffSignupCode: string | undefined;
 let server: Server;
 let baseUrl: string;
-
-// The production cap defined in routes/auth.ts. Keeping this in sync with the
-// source constant is intentional — the test would need to be updated if the cap
-// changes, which is exactly the right behaviour (it documents what the limit is).
-const AUTH_RATE_MAX = 20;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 

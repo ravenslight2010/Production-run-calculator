@@ -28,6 +28,9 @@ import { createRoleForNewUser, getStaffMember } from "../lib/roles";
 import { requireAuth } from "../middlewares/requireAuth";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
+import { AUTH_RATE_WINDOW_MS, AUTH_RATE_MAX } from "./authRateLimit.constants";
+
+export { AUTH_RATE_WINDOW_MS, AUTH_RATE_MAX };
 
 const router: IRouter = Router();
 
@@ -39,8 +42,6 @@ const router: IRouter = Router();
 // instances; falls back to in-memory in dev/test (single process, no DB
 // dependency, and keeps the test suite's many sequential calls from tripping
 // the limiter).
-const AUTH_RATE_WINDOW_MS = 60_000;
-const AUTH_RATE_MAX = 20;
 const authRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(AUTH_RATE_WINDOW_MS)
