@@ -10376,6 +10376,10 @@ export default function Home() {
   // same cached reference → subscribed live tab components skip the re-render.
   // When production data changes (dayState, v, ve, ingredients, etc.), deps fire
   // and the fresh homeCtxValue is forwarded to the live tab components.
+  //
+  // !! KEEP IN SYNC: homeTabCtxDeps.ts mirrors this dep list for the freeze-guard
+  // test (LiveTabMemo.snappy.test.tsx Suite 4).  Update BOTH when adding/removing
+  // a dep.  Dialog/manage/merge/import fields must NOT appear in either list. !!
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const homeTabCtxValue = useMemo(
     () => homeCtxValueRef.current,

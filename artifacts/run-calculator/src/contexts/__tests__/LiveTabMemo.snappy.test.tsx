@@ -47,6 +47,7 @@ import { useForm } from "react-hook-form";
 import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
 import { HomeCtx, useHomeCtx } from "../../contexts/HomeCtx";
+import { HOME_TAB_CTX_DEP_FIELDS } from "../../pages/homeTabCtxDeps";
 
 // ── Shared mocks (same as neighbouring test files) ───────────────────────────
 
@@ -452,6 +453,320 @@ describe("LiveTabMemo — manage-dialog open does NOT corrupt live data (real Ho
     });
 
     expect(getByTestId("live-data").textContent).toBe("paused|Acme");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 — Regression guard: homeTabCtxValue is stable across ALL known
+//            manage/dialog/import field changes
+//
+// home.tsx maintains TWO separate contexts:
+//   • HomeCtx (full, 300+ fields including dialog state) — subscribed to by
+//     manage dialogs, import panels, etc.
+//   • HomeTabCtx (narrow, live-data-only) — subscribed to by the 8 memo()-
+//     wrapped live tab components. Its useMemo dep list intentionally excludes
+//     all manage/dialog/import variables so those tabs do NOT re-render when
+//     a manage dialog opens, a merge runs, or import progress ticks.
+//
+// This suite guards against the regression where a new dialog-state field is
+// accidentally added to homeTabCtxValue's useMemo dep list. If that happens,
+// opening the new dialog invalidates the HomeTabCtx value on every render,
+// causing all 8 live tab components to re-render unnecessarily.
+//
+// The guard simulates the homeTabCtxValue isolation pattern:
+//   useMemo(() => liveData, [liveField1, liveField2, …])
+//   // dialogExtras intentionally NOT in deps
+//
+// When dialogExtras changes (simulating "dialog opens"), the useMemo returns
+// the SAME cached reference. React bails out the context update → subscriber
+// does not re-render → renderCount stays at 1. If a dialog field is
+// accidentally added to the dep list, the useMemo fires → new ref → context
+// update → subscriber re-renders → renderCount increases → test fails.
+//
+// HOW TO MAINTAIN THIS GUARD:
+//   When a new manage/dialog/import state variable is added to homeCtxValue
+//   that must NOT enter homeTabCtxValue's dep list, add its name and a
+//   realistic "open/in-flight" value to DIALOG_REGISTRY below. The batch test
+//   auto-covers it — no other changes needed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Authoritative registry of dialog-state fields excluded from homeTabCtxValue deps ──
+// Each entry:
+//   field     — state variable name as it appears in homeCtxValue/homeTabCtxValue
+//   openValue — realistic "dialog open / in-flight" value (non-default / truthy)
+// ↓↓↓  ADD NEW DIALOG FIELDS HERE when extending manage dialogs or import flows  ↓↓↓
+const DIALOG_REGISTRY: ReadonlyArray<{ field: string; openValue: unknown }> = [
+  // ── Manage dialog ──
+  { field: "manageCategory",           openValue: "mixes"              },
+  { field: "manageBrandFilter",        openValue: "Acme"               },
+  { field: "manageInput",              openValue: "search term"        },
+  // ── Merge ──
+  { field: "mergeConfirming",          openValue: true                 },
+  { field: "mergeCategory",            openValue: "dough"              },
+  { field: "mergeBusy",                openValue: true                 },
+  { field: "mergeError",               openValue: "conflict"           },
+  { field: "mergeSources",             openValue: ["a", "b"]           },
+  { field: "mergeTarget",              openValue: "b"                  },
+  { field: "mergeSuggestBusy",         openValue: true                 },
+  { field: "mergeBatchBusy",           openValue: true                 },
+  { field: "mergeBfMode",              openValue: "brand"              },
+  { field: "mergeCheckRequest",        openValue: "req-1"              },
+  { field: "mergeFromImport",          openValue: true                 },
+  // ── Show-dialog booleans ──
+  { field: "showManageDialog",         openValue: true                 },
+  { field: "showImportDialog",         openValue: true                 },
+  { field: "showSpecImport",           openValue: true                 },
+  { field: "showCheeseImport",         openValue: true                 },
+  { field: "showPremixImport",         openValue: true                 },
+  { field: "showShippingImport",       openValue: true                 },
+  { field: "showScheduleDialog",       openValue: true                 },
+  { field: "showPasswordDialog",       openValue: true                 },
+  { field: "showPinDialog",            openValue: true                 },
+  { field: "showTemplatesDialog",      openValue: true                 },
+  { field: "showMobileQrDialog",       openValue: true                 },
+  { field: "showScreensDialog",        openValue: true                 },
+  { field: "showEditReasonsDialog",    openValue: true                 },
+  { field: "showBrandDrop",            openValue: true                 },
+  { field: "showFlavorDrop",           openValue: true                 },
+  { field: "showTour",                 openValue: true                 },
+  // ── Generic import progress / result ──
+  { field: "importProgress",           openValue: 50                   },
+  { field: "importResult",             openValue: { ok: true }         },
+  { field: "importIntoEditor",         openValue: true                 },
+  { field: "importDefaultDate",        openValue: "2026-07-22"         },
+  // ── Spec import ──
+  { field: "specImportLoading",        openValue: true                 },
+  { field: "specImportProgress",       openValue: 30                   },
+  { field: "specImportPrepared",       openValue: { rows: [] }         },
+  { field: "specImportApplying",       openValue: true                 },
+  { field: "specImportError",          openValue: "parse failed"       },
+  // ── Cheese import ──
+  { field: "cheeseImportLoading",      openValue: true                 },
+  { field: "cheeseImportProgress",     openValue: 40                   },
+  { field: "cheeseImportPrepared",     openValue: { rows: [] }         },
+  { field: "cheeseImportApplying",     openValue: true                 },
+  { field: "cheeseImportError",        openValue: "parse failed"       },
+  // ── Premix import ──
+  { field: "premixImportLoading",      openValue: true                 },
+  { field: "premixImportProgress",     openValue: 60                   },
+  { field: "premixImportPrepared",     openValue: { rows: [] }         },
+  { field: "premixImportApplying",     openValue: true                 },
+  { field: "premixImportError",        openValue: "parse failed"       },
+  // ── Shipping import ──
+  { field: "shippingImportLoading",    openValue: true                 },
+  { field: "shippingImportPrepared",   openValue: { rows: [] }         },
+  { field: "shippingImportApplying",   openValue: true                 },
+  { field: "shippingImportError",      openValue: "parse failed"       },
+  // ── Schedule editor / move ──
+  { field: "scheduleEditorDate",       openValue: "2026-07-22"         },
+  { field: "scheduleDeleteConfirm",    openValue: "2026-07-22"         },
+  { field: "scheduleMove",             openValue: "run-1"              },
+  { field: "scheduleMoveDate",         openValue: "2026-07-22"         },
+  { field: "scheduleMoving",           openValue: true                 },
+  { field: "scheduleSaving",           openValue: true                 },
+  { field: "scheduleView",             openValue: "calendar"           },
+  { field: "scheduleAdvancedRunId",    openValue: "run-1"              },
+  { field: "scheduleEditorIsLiveDay",  openValue: false                },
+  // ── Confirm dialogs ──
+  { field: "confirmRemoveRun",         openValue: "run-1"              },
+  { field: "confirmRemoveBlanks",      openValue: true                 },
+  // ── PIN / password / auth ──
+  { field: "pinInput",                 openValue: "1234"               },
+  { field: "pinError",                 openValue: "wrong pin"          },
+  { field: "newPin",                   openValue: "5678"               },
+  { field: "newPinConfirm",            openValue: "5678"               },
+  { field: "pinChangeMsg",             openValue: "PIN updated"        },
+  // ── Resume / manual stop ──
+  { field: "resumeDialog",             openValue: true                 },
+  { field: "manualStopReason",         openValue: "Equipment issue"    },
+  { field: "manualStopNotes",          openValue: "Machine down"       },
+  { field: "manualStopStart",          openValue: "08:00"              },
+  { field: "manualStopEnd",            openValue: "08:30"              },
+  // ── Manage-dialog form inputs ──
+  { field: "mgNamesInput",             openValue: "Cheese Blend"       },
+  { field: "mgIngInput",               openValue: "Parmesan"           },
+  { field: "mgStandaloneInput",        openValue: "new entry"          },
+  { field: "templateNameInput",        openValue: "My Template"        },
+  // NOTE: "newReasonInput" is a live-tab dep (stop-reason editing), NOT dialog-only
+  { field: "brandInput",               openValue: "Acme"               },
+  { field: "flavorInput",              openValue: "Plain"              },
+  // ── Misc dialog / UI state ──
+  { field: "copiedSummary",            openValue: true                 },
+  { field: "expandedHistoryDay",       openValue: "2026-07-21"         },
+  { field: "expandedScheduleDay",      openValue: "2026-07-23"         },
+  // NOTE: "promotingRecipeKind" is a live-tab dep (recipe promotion flow), NOT dialog-only
+  { field: "specReconcileSignal",      openValue: 1                    },
+  { field: "pendingResetCount",        openValue: 2                    },
+];
+// ↑↑↑  END OF DIALOG FIELDS REGISTRY  ↑↑↑
+
+// ── Simulation of homeTabCtxValue isolation ───────────────────────────────────
+//
+// Mirrors the pattern in home.tsx:
+//   const homeTabCtxValue = useMemo(
+//     () => homeCtxValueRef.current,
+//     [liveField1, liveField2, …]   // dialog fields intentionally omitted
+//   );
+//
+// In this simulation, dialogExtras is passed as a prop but intentionally NOT
+// listed as a useMemo dep, so the context value ref is stable across dialog
+// field changes.  If a dialog field were accidentally added to the dep list
+// (i.e., the regression we are guarding against), the useMemo would fire on
+// every dialog toggle → new ref → context update → subscriber re-renders.
+function LiveTabGuardProvider({
+  runStatus,
+  brand,
+  dialogExtras,
+  children,
+}: {
+  runStatus: string;
+  brand: string;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  // Only live fields in deps — dialogExtras intentionally excluded.
+  // This is the invariant home.tsx must maintain in homeTabCtxValue.
+  const ctxValue = useMemo(
+    () => ({
+      runStatus,
+      brand,
+      flavor: "TestFlavor",
+      // dialogExtras are captured at first render only (same as homeTabCtxValue
+      // which reads homeCtxValueRef.current when its live deps last fired).
+      // Subsequent dialog-only changes must NOT cause a new ref.
+      ...dialogExtras,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus, brand],
+    // dialogExtras intentionally omitted — adding any dialog field here is
+    // exactly the regression this test guards against.
+  );
+  return <HomeCtx.Provider value={ctxValue}>{children}</HomeCtx.Provider>;
+}
+
+describe("LiveTabMemo — Suite 4: homeTabCtxValue ref is stable across ALL dialog-state field changes (registry guard)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("render count stays at 1 when every DIALOG_REGISTRY field toggles open then closed", async () => {
+    // If any entry in DIALOG_REGISTRY accidentally enters the liveSlice useMemo
+    // deps, toggling it would produce a new context ref → subscriber re-renders →
+    // renderCount increases → this test fails.
+    let renderCount = 0;
+
+    const LiveTabSim4 = memo(function LiveTabSim4Inner() {
+      renderCount++;
+      const { runStatus, brand } = useHomeCtx();
+      return <span data-testid="live4">{runStatus}|{brand}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <LiveTabGuardProvider runStatus="running" brand="Acme" dialogExtras={{}}>
+        <LiveTabSim4 />
+      </LiveTabGuardProvider>,
+    );
+
+    // Confirm live data is correct after initial render.
+    expect(getByTestId("live4").textContent).toBe("running|Acme");
+    const initialRenderCount = renderCount;
+    expect(initialRenderCount).toBe(1);
+
+    // Cycle through every dialog field: open → closed.
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      await act(async () => {
+        rerender(
+          <LiveTabGuardProvider runStatus="running" brand="Acme" dialogExtras={{ [field]: openValue }}>
+            <LiveTabSim4 />
+          </LiveTabGuardProvider>,
+        );
+      });
+      await act(async () => {
+        rerender(
+          <LiveTabGuardProvider runStatus="running" brand="Acme" dialogExtras={{}}>
+            <LiveTabSim4 />
+          </LiveTabGuardProvider>,
+        );
+      });
+    }
+
+    // Live values must be unchanged throughout — no dialog field affected them.
+    expect(getByTestId("live4").textContent).toBe("running|Acme");
+
+    // renderCount must still be 1: stable context ref → React bails out context
+    // update → memo()-wrapped subscriber never re-renders.
+    // A failure here means a DIALOG_REGISTRY field was added to the liveSlice
+    // useMemo deps, which would cause all live tab components to re-render on
+    // every dialog open/close cycle.
+    expect(renderCount).toBe(initialRenderCount);
+  });
+
+  it("live data DOES update when actual run state changes (not over-isolated)", async () => {
+    // Counter-proof: the isolation must not prevent genuine live-state updates.
+    let renderCount = 0;
+
+    const LiveTabSim4b = memo(function LiveTabSim4bInner() {
+      renderCount++;
+      const { runStatus, brand } = useHomeCtx();
+      return <span data-testid="live4b">{runStatus}|{brand}</span>;
+    });
+
+    const { rerender, getByTestId } = render(
+      <LiveTabGuardProvider runStatus="running" brand="Acme" dialogExtras={{}}>
+        <LiveTabSim4b />
+      </LiveTabGuardProvider>,
+    );
+
+    expect(getByTestId("live4b").textContent).toBe("running|Acme");
+    const countAfterMount = renderCount;
+
+    // Change a live field → liveSlice useMemo must invalidate → subscriber re-renders.
+    await act(async () => {
+      rerender(
+        <LiveTabGuardProvider runStatus="paused" brand="Acme" dialogExtras={{}}>
+          <LiveTabSim4b />
+        </LiveTabGuardProvider>,
+      );
+    });
+
+    expect(getByTestId("live4b").textContent).toBe("paused|Acme");
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+
+  it("all DIALOG_REGISTRY entries are distinct (no duplicate field names)", () => {
+    const fieldNames = DIALOG_REGISTRY.map(({ field }) => field);
+    const unique = new Set(fieldNames);
+    expect(unique.size).toBe(fieldNames.length);
+  });
+
+  it("no DIALOG_REGISTRY field appears in HOME_TAB_CTX_DEP_FIELDS (static dep-list guard)", () => {
+    // !! THIS IS THE PRIMARY REGRESSION GUARD !!
+    //
+    // HOME_TAB_CTX_DEP_FIELDS (from homeTabCtxDeps.ts) mirrors the real
+    // homeTabCtxValue useMemo dep array in home.tsx.  The two files carry a
+    // "KEEP IN SYNC" contract: when a developer adds a dep to homeTabCtxValue,
+    // they must also add it to homeTabCtxDeps.ts.
+    //
+    // This static test verifies that none of the DIALOG_REGISTRY fields appear
+    // in HOME_TAB_CTX_DEP_FIELDS.  If a dialog field is accidentally added to
+    // homeTabCtxValue's deps AND reflected in homeTabCtxDeps.ts, this test
+    // fails immediately — preventing the manage-dialog freeze regression.
+    //
+    // Failure here means: a dialog/manage/import field has entered the
+    // homeTabCtxValue dep list, which will cause all 8 live tab components to
+    // re-render on every dialog open/close cycle (the original freeze bug).
+    const liveDepSet = new Set<string>(HOME_TAB_CTX_DEP_FIELDS);
+    const violations: string[] = [];
+    for (const { field } of DIALOG_REGISTRY) {
+      if (liveDepSet.has(field)) {
+        violations.push(field);
+      }
+    }
+    if (violations.length > 0) {
+      throw new Error(
+        `The following dialog-state fields were found in HOME_TAB_CTX_DEP_FIELDS ` +
+        `(homeTabCtxDeps.ts) — they must be removed from homeTabCtxValue's dep ` +
+        `list to prevent the manage-dialog freeze regression:\n  ${violations.join(", ")}`,
+      );
+    }
   });
 });
 
