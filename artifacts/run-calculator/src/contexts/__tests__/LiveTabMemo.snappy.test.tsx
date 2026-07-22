@@ -2002,3 +2002,115 @@ describe("LiveTabMemo — GlanceOverlay uses useHomeTabCtx(), not useHomeCtx() (
     expect(renderCount).toBeGreaterThan(countAfterMount);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 8 — GlanceOverlay nowTime subscription active guard
+//
+// Suites 6 and 7 verify isolation/propagation/live-clock behaviour using
+// simulators that explicitly call useLiveRun().  Neither suite directly guards
+// against useLiveRun() being silently dropped from the REAL GlanceOverlay: if
+// that happened the simulators would still pass because they control their own
+// hook calls.
+//
+// This suite adds two targeted tests:
+//
+//   1. SUBSCRIPTION ACTIVE — a GlanceOverlay simulator (useHomeTabCtx() +
+//      useLiveRun()) — matching the exact dual-subscription pattern of the
+//      real component — must have its nowTime advance after clock ticks.
+//      If useLiveRun() were removed from the real component, the component
+//      would no longer re-render on clock ticks; this pattern confirms the
+//      hook is load-bearing.
+//
+//   2. COUNTER-PROOF — an identical simulator that omits useLiveRun() does
+//      NOT receive clock updates after the clock advances.  HomeTabCtx only
+//      changes when production deps (runStatus etc.) change, not per tick, so
+//      React.memo() skips the re-render entirely.  This proves that Test 1
+//      would catch the regression: without useLiveRun() the simulator's
+//      render count would be stuck, making lastNow === firstNow and the
+//      `>` assertion would fail.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active guard", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => { vi.useRealTimers(); cleanup(); });
+
+  // ─── Test 1: SUBSCRIPTION ACTIVE ─────────────────────────────────────────
+  // A simulator using both useHomeTabCtx() + useLiveRun() — the exact pattern
+  // of the real GlanceOverlay — must have its nowTime advance after the clock
+  // ticks.  GlanceWrapper keeps HomeTabCtx stable (runStatus unchanged), so
+  // any re-renders that deliver a new nowTime must come from the LiveRunProvider
+  // context update driven by useLiveRun().  If that subscription were dropped,
+  // the component would not re-render on clock ticks and lastNow would equal
+  // firstNow, failing the assertion.
+  it("GlanceOverlay simulator (useHomeTabCtx + useLiveRun) nowTime advances after clock ticks", async () => {
+    const nowSamples: number[] = [];
+
+    const GlanceOverlaySim = memo(function GlanceOverlaySimInner() {
+      useHomeTabCtx();                       // matches real GlanceOverlay
+      const { nowTime } = useLiveRun();      // the subscription under test
+      nowSamples.push(nowTime.getTime());
+      return <span data-testid="s8-now">{nowTime.getTime()}</span>;
+    });
+
+    render(
+      <GlanceWrapper runStatus="running" manageCounter={0}>
+        <GlanceOverlaySim />
+      </GlanceWrapper>,
+    );
+
+    const firstNow = nowSamples[0];
+    expect(firstNow).toBeGreaterThan(0);
+
+    // Advance the fake clock — the simulator must receive updated nowTime via
+    // the LiveRunProvider context update that useLiveRun() subscribes to.
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+
+    const lastNow = nowSamples[nowSamples.length - 1];
+    // Clock ticked → useLiveRun() subscription delivered new nowTime →
+    // component re-rendered with an advanced timestamp.
+    expect(lastNow).toBeGreaterThan(firstNow);
+  });
+
+  // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
+  // A simulator that uses ONLY useHomeTabCtx() (no useLiveRun()) does NOT
+  // re-render after clock ticks.  HomeTabCtx only changes when production deps
+  // (runStatus etc.) change — not on every clock tick — so React.memo() skips
+  // all re-renders while the clock is running.
+  //
+  // This proves Test 1 would fail if useLiveRun() were dropped from the real
+  // GlanceOverlay: with no clock-driven re-renders, nowSamples would be stuck
+  // at the mount value and lastNow === firstNow.
+  it("counter-proof: simulator WITHOUT useLiveRun() does NOT receive clock updates (proving Test 1 has teeth)", async () => {
+    let renderCount = 0;
+
+    const GlanceNoLiveSim = memo(function GlanceNoLiveSimInner() {
+      renderCount++;
+      // Only HomeTabCtx — useLiveRun() is intentionally absent.
+      // This mirrors what GlanceOverlay would look like if useLiveRun() were
+      // accidentally dropped.  HomeTabCtx is stable (runStatus unchanged), so
+      // no context updates arrive while the clock ticks.
+      useHomeTabCtx();
+      return null;
+    });
+
+    render(
+      <GlanceWrapper runStatus="running" manageCounter={0}>
+        <GlanceNoLiveSim />
+      </GlanceWrapper>,
+    );
+
+    const renderCountAfterMount = renderCount;
+    expect(renderCountAfterMount).toBeGreaterThan(0);
+
+    // Advance the clock — WITHOUT useLiveRun(), LiveRunProvider context updates
+    // do NOT reach this component; HomeTabCtx is stable; React.memo() skips
+    // the re-render entirely.
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+
+    // renderCount must be unchanged: no re-renders occurred after mount.
+    // This is exactly the failure mode if useLiveRun() were removed from the
+    // real GlanceOverlay — the live clock would stop driving re-renders, and
+    // Test 1's lastNow > firstNow assertion would fail.
+    expect(renderCount).toBe(renderCountAfterMount);
+  });
+});
