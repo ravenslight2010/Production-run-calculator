@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LifeBuoy,
@@ -26,6 +26,7 @@ import {
   type IncidentClustersResult,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
+import { useIdle } from "../hooks/useIdle";
 
 const SEVERITY_STYLE: Record<IncidentCluster["severity"], string> = {
   high: "bg-red-500/15 text-red-400",
@@ -296,11 +297,18 @@ function IncidentRow({ incident }: { incident: Incident }) {
 export default function IncidentsTab() {
   const { hasCapability, isLoading: roleLoading } = useMe();
   const canReview = hasCapability("review-incidents");
+  const isIdle = useIdle();
+  const jitter = useMemo(() => Math.floor(Math.random() * 10_000), []);
+  const [pollingReady, setPollingReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setPollingReady(true), jitter);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { data, isLoading, error } = useQuery({
     queryKey: ["incidents"],
     queryFn: fetchIncidents,
     enabled: canReview,
-    refetchInterval: 20_000,
+    refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
 
   const [status, setStatus] = useState<StatusFilter>("all");

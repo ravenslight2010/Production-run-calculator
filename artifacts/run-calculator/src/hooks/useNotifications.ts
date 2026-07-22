@@ -127,6 +127,19 @@ export function useNotifications({
   const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
 
+  // ── Batch cycle: per-tick memoization ─────────────────────────────────────
+  // The batch effect runs every second (nowTime in deps). Track the last
+  // computed batchNum so ticks within the same batch window return immediately
+  // without string construction or ref lookups — most ticks do almost no work.
+  const prevBatchNumRef = useRef(-1);
+  // Reset prev batch num when the run or crust flag changes so a new run
+  // starts fresh and doesn't skip its first batch boundary.
+  const prevBatchRunIdRef = useRef<string | undefined>(undefined);
+  if (prevBatchRunIdRef.current !== currentRun?.id) {
+    prevBatchRunIdRef.current = currentRun?.id;
+    prevBatchNumRef.current = -1;
+  }
+
   // ── 15-minute end-of-run notification ─────────────────────────────────────
   useEffect(() => {
     if (!currentRun?.startedAt || currentRun?.endedAt) return;
@@ -253,6 +266,11 @@ export function useNotifications({
     const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
     const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
     if (batchNum < 1) return;
+    // Early exit: same batch window as the previous tick — nothing to evaluate.
+    // This saves string construction and ref lookups on the vast majority of
+    // 1-second ticks where the batch boundary hasn't changed.
+    if (batchNum === prevBatchNumRef.current) return;
+    prevBatchNumRef.current = batchNum;
     const key = `${currentRun.id}-${batchNum}`;
     if (batchNotifRef.current === key) return;
     batchNotifRef.current = key;
@@ -313,12 +331,14 @@ export function useNotifications({
     const freezerMs = Number(v.freezerTime) * 60000;
     if (freezerMs <= 0) return;
     const runId = currentRun.id;
+    // Short-circuit: if this run's freezer is already done and latched, skip
+    // the remainMs computation on every subsequent nowTime tick.
+    if (freezerDoneNotifRef.current.has(runId)) return;
     const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
     if (remainMs > 0) { freezerDrainingRef.current.add(runId); return; }
     // Only fire if we actually watched this run's freezer drain down — not when
     // selecting/scrolling to an already-drained completed run.
     if (!freezerDrainingRef.current.has(runId)) return;
-    if (freezerDoneNotifRef.current.has(runId)) return;
     freezerDoneNotifRef.current.add(runId);
     // Turned off by this user: the run is already latched above, so
     // re-enabling later never fires a stale "freezer empty".

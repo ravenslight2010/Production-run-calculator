@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
@@ -56,6 +56,7 @@ import {
   type StaffMember,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
+import { useIdle } from "../hooks/useIdle";
 
 const MIN_PASSWORD_LENGTH = 6;
 
@@ -134,12 +135,20 @@ export default function StaffRolesCard() {
     null,
   );
 
+  const isIdle = useIdle();
+  const jitter = useMemo(() => Math.floor(Math.random() * 10_000), []);
+  const [pollingReady, setPollingReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setPollingReady(true), jitter);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const resetRequestsQuery = useQuery({
     queryKey: ["passwordResetRequests"],
     queryFn: fetchPasswordResetRequests,
     // Poll so an approver sees new requests without manually refreshing.
     enabled: canApproveResets,
-    refetchInterval: 20_000,
+    refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
 
   const approveMutation = useMutation({
