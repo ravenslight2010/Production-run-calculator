@@ -773,6 +773,152 @@ describe("LiveTabMemo — Suite 4: homeTabCtxValue ref is stable across ALL dial
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Suite 4 counter-proof — guard DOES catch the regression
+//
+// This describe block is the explicit counter-proof for Suite 4.  It
+// deliberately introduces the regression that Suite 4 guards against: a
+// "BrokenLiveTabGuardProvider" that puts dialogExtras IN the useMemo dep list.
+//
+// Expected behaviour:
+//   • Every time a dialog field changes, useMemo fires a new object ref.
+//   • The context update propagates to the memo()-wrapped subscriber.
+//   • renderCount increases beyond 1 — exactly the bug Suite 4 prevents.
+//
+// If this describe block ever starts PASSING with renderCount === 1, the
+// counter-proof is wrong and must be fixed — it means the broken provider is
+// accidentally correct (i.e., the regression would not be caught).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Deliberately broken provider — dialogExtras IS in useMemo deps ────────────
+//
+// This mirrors what would happen if a developer accidentally added a dialog
+// field to homeTabCtxValue's useMemo dep list in home.tsx.  Every dialog
+// open/close cycle produces a new context ref → subscriber re-renders.
+function BrokenLiveTabGuardProvider({
+  runStatus,
+  brand,
+  dialogExtras,
+  children,
+}: {
+  runStatus: string;
+  brand: string;
+  dialogExtras: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  // BUG: dialogExtras is in the dep list — this is exactly the regression
+  // that Suite 4 guards against.  Any change to dialogExtras invalidates
+  // the memo → new context ref → all subscribers re-render.
+  const ctxValue = useMemo(
+    () => ({
+      runStatus,
+      brand,
+      flavor: "TestFlavor",
+      ...dialogExtras,
+    }),
+    // dialogExtras intentionally INCLUDED here to simulate the regression.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus, brand, dialogExtras],
+  );
+  return <HomeCtx.Provider value={ctxValue}>{children}</HomeCtx.Provider>;
+}
+
+describe("LiveTabMemo — Suite 4 counter-proof: guard DOES catch the regression (dialog field in liveSlice deps)", () => {
+  afterEach(() => { cleanup(); });
+
+  it("renderCount exceeds 1 when a dialog field is in the liveSlice useMemo deps (broken variant)", async () => {
+    // This test asserts the BROKEN behaviour — it confirms that putting
+    // dialogExtras in the useMemo dep list causes the subscriber to re-render
+    // on every dialog field change.  Suite 4's passing test (renderCount === 1)
+    // therefore IS a meaningful guard: the moment that invariant breaks, the
+    // subscriber re-renders, and the passing test flips to failing.
+    let renderCount = 0;
+
+    const BrokenLiveTabSim = memo(function BrokenLiveTabSimInner() {
+      renderCount++;
+      const { runStatus, brand } = useHomeCtx();
+      return <span data-testid="broken-live">{runStatus}|{brand}</span>;
+    });
+
+    const { rerender } = render(
+      <BrokenLiveTabGuardProvider runStatus="running" brand="Acme" dialogExtras={{}}>
+        <BrokenLiveTabSim />
+      </BrokenLiveTabGuardProvider>,
+    );
+
+    expect(renderCount).toBe(1);
+
+    // Toggle a dialog field — because dialogExtras IS in the dep list, this
+    // produces a new context ref → React propagates the update → memo()-wrapped
+    // subscriber re-renders even though runStatus and brand are unchanged.
+    await act(async () => {
+      rerender(
+        <BrokenLiveTabGuardProvider
+          runStatus="running"
+          brand="Acme"
+          dialogExtras={{ manageCategory: "mixes" }}
+        >
+          <BrokenLiveTabSim />
+        </BrokenLiveTabGuardProvider>,
+      );
+    });
+
+    // renderCount MUST be > 1: the broken dep list caused an unnecessary
+    // re-render.  If this assertion fails it means the broken provider
+    // accidentally avoids re-renders — the counter-proof is invalid.
+    expect(renderCount).toBeGreaterThan(1);
+
+    // Live values are still correct (the bug is about frequency, not values).
+    const el = document.querySelector("[data-testid='broken-live']");
+    expect(el?.textContent).toBe("running|Acme");
+  });
+
+  it("every DIALOG_REGISTRY field individually causes a spurious re-render when in useMemo deps (broken variant)", async () => {
+    // Exhaustive per-field version of the counter-proof.  Each entry in
+    // DIALOG_REGISTRY is toggled in isolation to confirm that ANY single
+    // dialog field in the dep list is enough to trigger the bug.
+    for (const { field, openValue } of DIALOG_REGISTRY) {
+      let renderCount = 0;
+
+      const BrokenSim = memo(function BrokenSimInner() {
+        renderCount++;
+        useHomeCtx();
+        return null;
+      });
+
+      const { rerender, unmount } = render(
+        <BrokenLiveTabGuardProvider runStatus="running" brand="Acme" dialogExtras={{}}>
+          <BrokenSim />
+        </BrokenLiveTabGuardProvider>,
+      );
+
+      expect(renderCount).toBe(1);
+
+      await act(async () => {
+        rerender(
+          <BrokenLiveTabGuardProvider
+            runStatus="running"
+            brand="Acme"
+            dialogExtras={{ [field]: openValue }}
+          >
+            <BrokenSim />
+          </BrokenLiveTabGuardProvider>,
+        );
+      });
+
+      // Each individual dialog field must cause a re-render when in deps.
+      // If any field does NOT trigger a re-render, the counter-proof is wrong
+      // for that field (e.g., the value is referentially stable by accident).
+      expect(renderCount).toBeGreaterThan(
+        1,
+        `Expected field "${field}" to cause a spurious re-render when in useMemo deps, but renderCount stayed at 1`,
+      );
+
+      unmount();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Suite 3 — Tab switching preserves live data (no stale snapshot)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
