@@ -268,6 +268,7 @@ import {
   lookupBatchWeight,
   collectBatchWeightCandidates,
   type BatchWeightCandidate,
+  type IngredientBatchWeightRow,
 } from "../ingredientBatchWeights";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
@@ -2420,6 +2421,123 @@ const ListPanel = ({
         </ul>
     }
   </div>
+  );
+};
+
+// ── Ingredient Batch Weights panel ───────────────────────────────────────────
+// Module-scope so it keeps its local edit state across Home re-renders (the
+// run clock ticks every second and would otherwise wipe mid-edit values).
+const IngredientWeightsPanel = ({
+  items,
+  learnedWeights,
+  onSave,
+}: {
+  items: string[];
+  learnedWeights: Map<string, number>;
+  onSave: (entries: { name: string; lbs: number }[]) => void;
+}) => {
+  const [vals, setVals] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {};
+    for (const n of items) {
+      const w = learnedWeights.get(n.trim().toLowerCase());
+      m[n] = w != null ? String(w) : "";
+    }
+    return m;
+  });
+
+  // Re-sync when the external learned map updates (e.g. after a save completes
+  // and the query cache refreshes). Only fills in values that the user hasn't
+  // locally changed — avoids overwriting mid-edit.
+  const prevLearnedRef = useRef(learnedWeights);
+  useEffect(() => {
+    if (prevLearnedRef.current === learnedWeights) return;
+    prevLearnedRef.current = learnedWeights;
+    setVals(prev => {
+      const next = { ...prev };
+      for (const n of items) {
+        const key = n.trim().toLowerCase();
+        const w = learnedWeights.get(key);
+        const learned = w != null ? String(w) : "";
+        if (!(n in next)) next[n] = learned;
+      }
+      return next;
+    });
+  }, [learnedWeights, items]);
+
+  // When the item list grows, seed new entries from the learned map.
+  const prevItemsRef = useRef(items);
+  useEffect(() => {
+    if (prevItemsRef.current === items) return;
+    prevItemsRef.current = items;
+    setVals(prev => {
+      const next: Record<string, string> = {};
+      for (const n of items) {
+        if (n in prev) {
+          next[n] = prev[n];
+        } else {
+          const w = learnedWeights.get(n.trim().toLowerCase());
+          next[n] = w != null ? String(w) : "";
+        }
+      }
+      return next;
+    });
+  // learnedWeights intentionally omitted — item-list changes are the trigger
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  function commit(name: string) {
+    const raw = (vals[name] ?? "").trim();
+    const lbs = raw === "" ? 0 : Number(raw);
+    if (!Number.isFinite(lbs) || lbs < 0) return;
+    onSave([{ name, lbs }]);
+  }
+
+  if (items.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-2">
+        No plain applicator types yet. Add ingredient types in the{" "}
+        <span className="font-medium text-foreground">Applicator Types</span> or{" "}
+        <span className="font-medium text-foreground">Pep Types</span> tab first.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Set a remembered batch weight for each applicator ingredient. The weight
+        auto-fills the Batch&nbsp;(lbs) field when the ingredient is picked on
+        the Setup tab. Clear a value to stop auto-filling it.
+      </p>
+      <div className="space-y-1.5">
+        {items.map(name => (
+          <div
+            key={name}
+            className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-muted/30"
+          >
+            <span className="text-sm font-medium truncate">{name}</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={vals[name] ?? ""}
+                onChange={e =>
+                  setVals(prev => ({ ...prev, [name]: e.target.value }))
+                }
+                onBlur={() => commit(name)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                className="w-24 border border-input rounded-md px-2 py-1.5 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring text-right"
+                placeholder="—"
+              />
+              <span className="text-xs text-muted-foreground w-5">lbs</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -10850,6 +10968,7 @@ export default function Home() {
           { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: histAdd("Applicator Types", addIngredientType), onRemove: histRemove("Applicator Types", removeIngredientType), onRename: histRename("Applicator Types", renameIngredientType) },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: histAdd("Pep Types", addPepType), onRemove: histRemove("Pep Types", removePepType), onRename: histRename("Pep Types", renamePepType) },
           { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: histAdd("Die Types", addDieType), onRemove: histRemove("Die Types", removeDieType), onRename: histRename("Die Types", renameDieType) },
+          { key: "ingredient-weights", label: "Ingredient Weights", items: [], onAdd: () => {}, onRemove: () => {} },
           { key: "merge", label: "Merge", items: [], onAdd: () => {}, onRemove: () => {} },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
         ];
@@ -11440,7 +11559,7 @@ export default function Home() {
                 )}
 
                 {/* Standalone: simple list tabs (Brands, Applicator Ingredients, Pep Types, Die Types) */}
-                {!isGrouped && manageCategory !== "flavors" && manageCategory !== "pin" && manageCategory !== "merge" && standaloneTab && (
+                {!isGrouped && manageCategory !== "flavors" && manageCategory !== "pin" && manageCategory !== "merge" && manageCategory !== "ingredient-weights" && standaloneTab && (
                   <ListPanel
                     items={standaloneTab.items}
                     onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}
@@ -11452,6 +11571,58 @@ export default function Home() {
                     setInputVal={setMgStandaloneInput}
                   />
                 )}
+
+                {/* Ingredient Weights: pre-set batch lbs for plain applicator types */}
+                {manageCategory === "ingredient-weights" && (() => {
+                  // Plain applicator types (exclude "cheese" and "mix" — those
+                  // derive batch weight from their recipe rows, not a manual field).
+                  const plainTypes = ingredientTypes.filter(t => {
+                    const k = t.trim().toLowerCase();
+                    return k !== "cheese" && k !== "mix";
+                  });
+                  // Non-default pep types (default pep types use sticks, not lbs).
+                  const nonDefaultPeps = pepTypes.filter(t => !DEFAULT_PEP_TYPES.includes(t));
+                  // Union, dedup by lowercase key, preserve first-seen order.
+                  const seen = new Set<string>();
+                  const weightItems: string[] = [];
+                  for (const n of [...plainTypes, ...nonDefaultPeps]) {
+                    const k = n.trim().toLowerCase();
+                    if (k && !seen.has(k)) { seen.add(k); weightItems.push(n); }
+                  }
+                  return (
+                    <IngredientWeightsPanel
+                      items={weightItems}
+                      learnedWeights={learnedBatchWeights}
+                      onSave={(entries) => {
+                        const positive = entries.filter(e => e.lbs > 0);
+                        const cleared = entries.filter(e => e.lbs <= 0);
+                        // Cleared entries: remove from local cache immediately so
+                        // applyLearnedBatchLbs stops auto-filling that ingredient.
+                        // The server ignores zero/non-positive writes, so the
+                        // prior server row becomes stale — local removal is enough.
+                        if (cleared.length > 0) {
+                          const clearedKeys = new Set(
+                            cleared.map(e => (e.name ?? "").trim().toLowerCase()),
+                          );
+                          cycleCountQc.setQueryData<IngredientBatchWeightRow[]>(
+                            ["ingredientBatchWeights"],
+                            (prev) =>
+                              (prev ?? []).filter(
+                                r => !clearedKeys.has((r.name ?? "").trim().toLowerCase()),
+                              ),
+                          );
+                        }
+                        // Positive entries: POST to server and refresh cache.
+                        if (positive.length > 0) {
+                          batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
+                            .then(() => saveIngredientBatchWeights(positive))
+                            .then(() => void cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
+                            .catch(() => {});
+                        }
+                      }}
+                    />
+                  );
+                })()}
 
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
                 {manageCategory === "setupProfiles" && isSupervisor && (
