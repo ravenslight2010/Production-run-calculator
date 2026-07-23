@@ -902,6 +902,7 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
 // takes in production.
 const RealSetupRecipesSubscriber = memo(
   function RealSetupRecipesSubscriberInner() {
+    setupRenderCount++;
     const hx = useHomeTabCtx();
     const isSupervisor = Boolean((hx as Record<string, unknown>).isSupervisor);
     return (
@@ -979,6 +980,9 @@ describe(
 
       const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(false);
+      // Subscriber must have rendered exactly once on mount; a broken provider
+      // that leaks manageCounter into context deps would already inflate this.
+      expect(setupRenderCount).toBe(1);
 
       // Simulate several dialog open/close cycles
       for (const counter of [1, 2, 99]) {
@@ -991,6 +995,9 @@ describe(
         });
         // fieldset must remain enabled throughout
         expect(fieldset.disabled).toBe(false);
+        // isSupervisor is unchanged, so the memo'd subscriber must NOT re-render;
+        // the count must stay pinned at 1 for every dialog cycle.
+        expect(setupRenderCount).toBe(1);
       }
     });
   },
