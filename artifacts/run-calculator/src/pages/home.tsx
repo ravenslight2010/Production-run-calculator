@@ -6846,7 +6846,15 @@ export default function Home() {
           archiveDayToHistory(finalDs, stored.date);
         }
         const newDate = todayStr();
-        // Try to load any pre-scheduled data for the new day
+        // Try to load any pre-scheduled data for the new day.
+        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
+        // there are no scheduled runs (GET succeeded with an empty row). If the
+        // GET itself fails (network error, transient 5xx), do NOT push — an
+        // empty push with a newer resetAt would wholesale-adopt over any
+        // previously saved scheduled runs (protectRunValues escape hatch). The
+        // session boundary (resetBoundaryAt) will be established on the next
+        // successful push once the connection recovers.
+        let serverConfirmedNoRuns = false;
         try {
           const res = await fetch(`/api/sync/${newDate}`);
           if (res.ok) {
@@ -6892,9 +6900,12 @@ export default function Home() {
               void signOut();
               return;
             }
+            serverConfirmedNoRuns = true;
           }
         } catch {}
-        // Fallback: fresh empty state
+        // Fallback: fresh empty state. Only push to the server if the GET
+        // confirmed there are no scheduled runs — otherwise we'd risk wiping
+        // them via the wholesale-adopt escape hatch (see comment above).
         const fresh = { ...freshDayState(), resetAt: Date.now() };
         { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         saveDayState(fresh);
@@ -6902,7 +6913,7 @@ export default function Home() {
         setRunToTime("19:15");
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
-        schedulePush(fresh, 0);
+        if (serverConfirmedNoRuns) schedulePush(fresh, 0);
         // See note above: the daily reset signs everyone out, including us.
         // Use signOut (not forceSignedOut) to clear the rc_auth cookie so a
         // hard refresh can't bypass sign-in via the still-valid cookie.
@@ -9969,7 +9980,15 @@ export default function Home() {
           archiveDayToHistory(finalDs, storedDs.date);
         }
         const newDate = todayStr();
-        // Try to load any pre-scheduled data for the new day
+        // Try to load any pre-scheduled data for the new day.
+        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
+        // there are no scheduled runs (GET succeeded with an empty row). If the
+        // GET itself fails (network error, transient 5xx), do NOT push — an
+        // empty push with a newer resetAt would wholesale-adopt over any
+        // previously saved scheduled runs (protectRunValues escape hatch). The
+        // session boundary (resetBoundaryAt) will be established on the next
+        // successful push once the connection recovers.
+        let serverConfirmedNoRuns = false;
         try {
           const res = await fetch(`/api/sync/${newDate}`);
           if (res.ok) {
@@ -10013,9 +10032,12 @@ export default function Home() {
               scheduleReset();
               return;
             }
+            serverConfirmedNoRuns = true;
           }
         } catch {}
-        // Fallback: fresh empty state
+        // Fallback: fresh empty state. Only push to the server if the GET
+        // confirmed there are no scheduled runs — otherwise we'd risk wiping
+        // them via the wholesale-adopt escape hatch (see comment above).
         const fresh = { ...freshDayState(), resetAt: Date.now() };
         { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         setDayState(fresh);
@@ -10023,7 +10045,7 @@ export default function Home() {
         setRunToTime("19:15");
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
-        schedulePush(fresh, 0);
+        if (serverConfirmedNoRuns) schedulePush(fresh, 0);
         // Clear the rc_auth cookie so a hard refresh can't bypass sign-in.
         void signOut();
         scheduleReset();
