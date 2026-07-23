@@ -3046,6 +3046,65 @@ describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count a
     // the drift before Test 2's "flat spy count" signal is undermined.
     expect(s10RenderCount).toBe(countAfterMount);
   });
+
+  // ─── Test 5: STRICT-EQUAL HAS REAL TEETH ─────────────────────────────────
+  // Proves that Test 4's `expect(s10RenderCount).toBe(countAfterMount)` is not
+  // vacuous.  If that strict-equal assertion were softened to
+  // `toBeGreaterThanOrEqual`, or if NoLiveRunSubscriber were re-wired to call
+  // useHomeCtx() instead of useHomeTabCtx(), the assertion would still pass —
+  // even though the counter-proof component would now be accepting re-renders
+  // triggered by HomeCtx dialog-toggle updates, silently undermining the
+  // isolation signal Test 4 is designed to provide.
+  //
+  // This test renders a LOCAL variant of NoLiveRunSubscriber that calls
+  // useHomeCtx() instead of useHomeTabCtx() (the accidental re-wiring scenario),
+  // then toggles the SAME dialogOpen field used in Test 4.  Because HomeCtx
+  // memos on dialogOpen (manageCategory "" → "mixes" inside
+  // RealGlanceHomeCtxWrapper), the wrong-hook variant re-renders and the count
+  // INCREASES — confirming that Test 4's strict-equal assertion would correctly
+  // FAIL under the regression it is designed to catch.
+  it("strict-equal teeth: a variant wired to useHomeCtx() DOES re-render when the HomeCtx dialog field toggles, proving Test 4's flat-count assertion is not vacuous", async () => {
+    let homeCtxVariantCount = 0;
+
+    // Local variant: identical to the describe-scope NoLiveRunSubscriber except
+    // it calls useHomeCtx() instead of useHomeTabCtx() — the accidental
+    // re-wiring that Test 4 is designed to catch.  A separate counter is used
+    // so this test does not interfere with s10RenderCount (reset in beforeEach).
+    const HomeCtxVariant = memo(function HomeCtxVariantInner() {
+      homeCtxVariantCount++;
+      useHomeCtx(); // wrong hook — subscribed to the broader HomeCtx
+      return <span data-testid="s10-homectx-variant">variant</span>;
+    });
+
+    const { rerender } = render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <HomeCtxVariant />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    const countAfterMount = homeCtxVariantCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field — dialogOpen false → true causes
+    // RealGlanceHomeCtxWrapper's homeCtxValue memo to re-run (manageCategory
+    // "" → "mixes") while tabCtxValue stays stable.  A component wired to
+    // useHomeCtx() must receive the update and re-render.
+    await act(async () => {
+      rerender(
+        <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={true}>
+          <HomeCtxVariant />
+        </RealGlanceHomeCtxWrapper>,
+      );
+    });
+
+    // homeCtxVariantCount increased: the useHomeCtx() subscription delivered
+    // the HomeCtx update.  This demonstrates that the REAL NoLiveRunSubscriber
+    // (which uses useHomeTabCtx()) would also increase its count under the same
+    // wrong-hook scenario — and Test 4's strict `.toBe(countAfterMount)` would
+    // correctly fail, confirming the assertion has genuine teeth and cannot be
+    // vacuously satisfied.
+    expect(homeCtxVariantCount).toBeGreaterThan(countAfterMount);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
