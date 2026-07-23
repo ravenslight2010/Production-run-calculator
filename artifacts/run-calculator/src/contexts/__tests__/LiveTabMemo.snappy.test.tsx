@@ -2434,6 +2434,13 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
   it("counter-proof: simulator WITHOUT useLiveRun() does NOT receive clock updates (proving Test 1 has teeth)", async () => {
     let renderCount = 0;
 
+    // Guard: confirm the export still exists under the expected name before
+    // setting up the spy.  If useHomeTabCtx is renamed or moved in HomeTabCtxNS,
+    // vi.spyOn would target a non-existent property (silently succeeding or
+    // vacuously passing), stripping the counter-proof of its teeth.  This
+    // assertion fails immediately with a clear message in that scenario.
+    expect(typeof HomeTabCtxNS.useHomeTabCtx).toBe("function");
+
     // Set up the spy BEFORE render so it captures the initial mount call(s).
     // This confirms that useHomeTabCtx() was actually invoked during rendering
     // (the simulator is non-degenerate — it has a real active hook consumer)
