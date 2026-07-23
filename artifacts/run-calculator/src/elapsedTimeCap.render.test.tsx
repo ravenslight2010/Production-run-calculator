@@ -334,4 +334,116 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
       expect(screen.getByTestId("elapsed-card-value").textContent).toBe("30m");
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Scenario F: resumed run with freezerEmpty=true (full restart path).
+  //
+  // resumeRun(freezerEmpty=true) resets startedAt to now and clears pausedAt,
+  // regardless of how long the run was paused or whether pausedAt was drifted.
+  //
+  //   computeResumedStartedAt(..., freezerEmpty=true) => now
+  //
+  // Post-resume state: startedAt = resumeInstant, pausedAt = null.
+  // Elapsed always counts fresh from the resume moment — no cap expression is
+  // needed, but a regression (e.g. accidentally carrying over a stale pausedAt)
+  // would inflate the display.  This scenario pins the correct behaviour:
+  //
+  //   - Right at resume (nowMs === startedAt): runAge = 0 ms → "0m".
+  //   - After 25 minutes: runAge = 25 min → "25m".
+  //
+  // Both call sites (CompactRunStrip "strip-elapsed" + Elapsed Time card
+  // "elapsed-card-value") are covered.
+  // -------------------------------------------------------------------------
+  describe("resumed run (freezerEmpty=true) — full restart path", () => {
+    // Arbitrary anchor; resumeRun sets startedAt = now at this instant.
+    const resumeInstant = 2_000_000_000;
+    // Post-resume state: startedAt = resumeInstant, pausedAt = null.
+    const postResumeStartedAt = resumeInstant;
+
+    // ── right at resume ───────────────────────────────────────────────────
+    // nowMs === startedAt → runAge = 0 → fmtElapsed clamps to 0 → "0m".
+
+    it("CompactRunStrip: right at resume shows 0m", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumeInstant}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("0m");
+    });
+
+    it("ElapsedCard: right at resume shows 0m", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumeInstant}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("0m");
+    });
+
+    // ── 25 min after resume ───────────────────────────────────────────────
+    // nowMs = resumeInstant + 25 min → runAge = 25 min → "25m".
+
+    it("CompactRunStrip: 25 min after resume shows 25m (normal accumulation)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumeInstant + 25 * 60_000}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("25m");
+    });
+
+    it("ElapsedCard: 25 min after resume shows 25m (normal accumulation)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumeInstant + 25 * 60_000}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("25m");
+    });
+
+    // ── stale pausedAt must NOT be carried over ───────────────────────────
+    // A regression where pausedAt is accidentally carried forward from before
+    // the resume would inflate elapsed.  The correct post-resume state has
+    // pausedAt=null.  These assertions confirm elapsed equals exactly the raw
+    // run age (no addend from a stale pausedAt).
+
+    it("CompactRunStrip: elapsed equals raw run age — no stale pausedAt addend", () => {
+      const nowMs = resumeInstant + 45 * 60_000;
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={nowMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("45m");
+    });
+
+    it("ElapsedCard: elapsed equals raw run age — no stale pausedAt addend", () => {
+      const nowMs = resumeInstant + 45 * 60_000;
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={nowMs}
+          startedAt={postResumeStartedAt}
+          pausedAt={null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("45m");
+    });
+  });
 });
