@@ -203,6 +203,70 @@ describe("sign-up button: disabled when username is taken", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Recovery path: taken → corrected to available → button re-enables
+// ---------------------------------------------------------------------------
+describe("sign-up button: re-enables after correcting a taken username", () => {
+  it(
+    "re-enables the submit button when the user fixes a taken username to an available one",
+    async () => {
+      const user = userEvent.setup();
+
+      // First call (taken username) resolves taken; second call (corrected
+      // username) resolves available.
+      mockCheckUsernameAvailable
+        .mockResolvedValueOnce({ available: false })
+        .mockResolvedValueOnce({ available: true });
+
+      renderSignUpPage();
+
+      // Fill all required fields other than username first.
+      const pwFields = screen.getAllByLabelText(/password/i);
+      await user.type(pwFields[0], "password123");
+      await user.type(pwFields[1], "password123");
+      await user.type(
+        screen.getByLabelText(/facility.*code|access.*code/i),
+        "valid-code",
+      );
+
+      // Step 1: type a taken username and wait for the "already taken" hint.
+      const usernameInput = screen.getByLabelText(/^username$/i);
+      await user.type(usernameInput, "takenuser");
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/already taken/i)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+
+      // Button must be disabled while the username is taken.
+      const submitButton = screen.getByRole("button", {
+        name: /create.*account/i,
+      });
+      expect((submitButton as HTMLButtonElement).disabled).toBe(true);
+
+      // Step 2: clear the field and type an available username.
+      await user.clear(usernameInput);
+      await user.type(usernameInput, "newstaff");
+
+      // Wait for the "Username is available" hint — debounce fired and the
+      // second mock resolved with available: true.
+      await waitFor(
+        () => {
+          expect(screen.getByText(/username is available/i)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+
+      // All fields are satisfied and usernameStatus is now "available" — the
+      // button must be re-enabled.
+      expect((submitButton as HTMLButtonElement).disabled).toBe(false);
+    },
+    8000,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Sign-in button: must NOT be gated on username availability at all
 // ---------------------------------------------------------------------------
 describe("sign-in button: unaffected by username availability", () => {
