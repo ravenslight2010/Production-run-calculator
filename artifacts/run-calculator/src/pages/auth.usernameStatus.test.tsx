@@ -43,7 +43,12 @@ vi.mock("@/inventoryShared", async (importOriginal) => {
 });
 
 import { AuthContext, type AuthContextValue } from "@/useAuth";
-import { SignUpPage, SignInPage, useUsernameAvailability } from "./auth";
+import {
+  SignUpPage,
+  SignInPage,
+  useUsernameAvailability,
+  MIN_USERNAME_LENGTH,
+} from "./auth";
 
 afterEach(() => {
   cleanup();
@@ -491,12 +496,19 @@ function AvailabilityHookHarness({
 // eventually call the mock — making this test fail immediately.
 // ---------------------------------------------------------------------------
 describe("short-username branch: status is 'short' and no API call is made when enabled=true but username is below the minimum length", () => {
+  // Derive boundary inputs from the exported constant so that if
+  // MIN_USERNAME_LENGTH changes, the probed values shift with it and the tests
+  // continue to exercise the correct boundary rather than passing vacuously.
+  const twoBelow = "a".repeat(MIN_USERNAME_LENGTH - 2); // MIN_USERNAME_LENGTH - 2 chars (≥ 1 when MIN ≥ 3)
+  const oneBelow = "a".repeat(MIN_USERNAME_LENGTH - 1); // MIN_USERNAME_LENGTH - 1 chars — highest "short" value
+  const atMin = "a".repeat(MIN_USERNAME_LENGTH); // exactly MIN_USERNAME_LENGTH chars — first "ok" value
+
   it(
-    "sets status to 'short' and never calls checkUsernameAvailable for a 1-character username with enabled=true",
+    `sets status to 'short' and never calls checkUsernameAvailable for a ${MIN_USERNAME_LENGTH - 2}-character username with enabled=true`,
     async () => {
       mockCheckUsernameAvailable.mockResolvedValue({ available: true });
 
-      render(<AvailabilityHookHarness initialUsername="a" />);
+      render(<AvailabilityHookHarness initialUsername={twoBelow} />);
 
       // The hook must set status → "short" synchronously in the first effect
       // run (before the debounce timer) because the username is below MIN_USERNAME_LENGTH.
@@ -519,11 +531,11 @@ describe("short-username branch: status is 'short' and no API call is made when 
   );
 
   it(
-    "sets status to 'short' and never calls checkUsernameAvailable for a 2-character username with enabled=true",
+    `sets status to 'short' and never calls checkUsernameAvailable for a ${MIN_USERNAME_LENGTH - 1}-character username with enabled=true`,
     async () => {
       mockCheckUsernameAvailable.mockResolvedValue({ available: true });
 
-      render(<AvailabilityHookHarness initialUsername="ab" />);
+      render(<AvailabilityHookHarness initialUsername={oneBelow} />);
 
       await waitFor(
         () => {
@@ -543,12 +555,12 @@ describe("short-username branch: status is 'short' and no API call is made when 
   );
 
   it(
-    "transitions from 'short' to 'checking' (and eventually calls the API) when the username is extended to 3 characters",
+    `transitions from 'short' to 'checking' (and eventually calls the API) when the username is extended to exactly ${MIN_USERNAME_LENGTH} characters`,
     async () => {
       const user = userEvent.setup();
       mockCheckUsernameAvailable.mockResolvedValue({ available: true });
 
-      render(<AvailabilityHookHarness initialUsername="ab" />);
+      render(<AvailabilityHookHarness initialUsername={oneBelow} />);
 
       // Start in "short" state.
       await waitFor(
@@ -560,13 +572,14 @@ describe("short-username branch: status is 'short' and no API call is made when 
         { timeout: 1000 },
       );
 
-      // Extend the username to exactly 3 characters — the minimum.
-      await user.type(screen.getByLabelText("username-field"), "c");
+      // Extend the username to exactly MIN_USERNAME_LENGTH characters — the minimum.
+      // Type the same character used to build oneBelow so the result equals atMin.
+      await user.type(screen.getByLabelText("username-field"), "a");
 
       // The hook must now advance to "checking" and eventually call the API.
       await waitFor(
         () => {
-          expect(mockCheckUsernameAvailable).toHaveBeenCalledWith("abc");
+          expect(mockCheckUsernameAvailable).toHaveBeenCalledWith(atMin);
         },
         { timeout: 1500 },
       );
