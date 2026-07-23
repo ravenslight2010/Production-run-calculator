@@ -6280,7 +6280,14 @@ export default function Home() {
         // updater sees) because `rejectedStale` is read right after this block,
         // possibly before React runs the updater.
         if (remoteResetAt <= localResetAt) {
-          const localMetaById = new Map(dayStateRef.current.runs.map(r => [r.id, r]));
+          // Same stamp-source fix as the functional updater below: use
+          // overlayRunMetaStamps so we see the latest localStorage stamp
+          // (e.g. T_start from startRun's saveDayState) even when React
+          // state hasn't re-rendered yet and dayStateRef still carries
+          // the old stamp. Without this, the rejectedStale re-push is
+          // suppressed and a startRun push dropped by isSyncApplyingRef
+          // never gets retried — leaving the run un-started on the server.
+          const localMetaById = new Map(overlayRunMetaStamps(dayStateRef.current.runs).map(r => [r.id, r]));
           if (payload.dayState.runs.some(rr => {
             const lr = localMetaById.get(rr.id);
             return !!lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0);
@@ -6309,7 +6316,15 @@ export default function Home() {
                 // can't clobber it back to unstarted. Absent/equal stamps keep the
                 // old remote-wins behavior; a kept-local run triggers the
                 // rejectedStale re-push below so peers converge on ours.
-                const localById = new Map(prev.runs.map(r => [r.id, r]));
+                // Use overlayRunMetaStamps so the LWW comparison sees the
+                // STORED (localStorage) metaUpdatedAt stamps, not the React
+                // state copies. saveDayState() (called by startRun, pauseRun,
+                // etc.) stamps localStorage but the React state run objects
+                // keep the old stamp — a stale SSE echo with a higher stamp
+                // from the prior push (e.g. the "trick" push) would otherwise
+                // beat the local run and erase startedAt even though the
+                // operator just pressed Start.
+                const localById = new Map(overlayRunMetaStamps(prev.runs).map(r => [r.id, r]));
                 const mergedRemote = remoteRuns.map(rr => {
                   const lr = localById.get(rr.id);
                   return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr;
