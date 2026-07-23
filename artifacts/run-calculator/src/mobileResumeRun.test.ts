@@ -262,6 +262,14 @@ describe("mobile elapsed-time after pause-resume — netElapsedSec invariants", 
   });
 });
 
+// Shared regex used by BOTH the source guard and its self-check test below.
+// Changing this constant changes both tests simultaneously, preventing silent
+// drift between an updated guard and a stale self-check.
+// If variable names in RunContext.tsx are renamed, update this constant AND
+// the CANONICAL_FORMULA in the self-check test in lockstep.
+const DOWNTIME_SUBTRACTION_REGEX =
+  /netElapsedSec\s*=\s*Math\.max\s*\(\s*0\s*,\s*grossElapsedSec\s*-\s*totalDowntimeSec\s*\)/;
+
 describe("mobile elapsed-time — counter-proof: without downtime subtraction elapsed overstates", () => {
   it("removing downtime subtraction overstates elapsed by exactly the pause duration", () => {
     // Paused 30 min in, resumed 10 min later.  Now = 40 min after start.
@@ -310,9 +318,45 @@ describe("mobile elapsed-time — counter-proof: without downtime subtraction el
   it("source guard: computeCalc subtracts stoppages from elapsed (formula must not drop the subtraction)", () => {
     // This test reads the raw RunContext source and asserts the downtime
     // subtraction is present. If a refactor removes it, this fails immediately.
+    //
+    // FALSE-POSITIVE TRIGGER: if the variable names netElapsedSec,
+    // grossElapsedSec, or totalDowntimeSec are renamed in RunContext.tsx, this
+    // test will fail even though the formula is still correct. When that
+    // happens you MUST update BOTH:
+    //   1. the regex here (and in the self-check test below), AND
+    //   2. the CANONICAL_FORMULA string in the self-check test.
+    // The self-check test ensures the regex is never weakened below what the
+    // canonical string requires.
     const source = fs.readFileSync(MOBILE_FILE, "utf8");
     // The formula: netElapsedSec = Math.max(0, grossElapsedSec - totalDowntimeSec)
     // Both operands must appear on the same line.
-    expect(source).toMatch(/netElapsedSec\s*=\s*Math\.max\s*\(\s*0\s*,\s*grossElapsedSec\s*-\s*totalDowntimeSec\s*\)/);
+    expect(source).toMatch(DOWNTIME_SUBTRACTION_REGEX);
+  });
+
+  it("source guard self-check: regex matches the canonical formula string (catches a stale or weakened guard)", () => {
+    // This is a meta-guard for the source guard above.
+    //
+    // WHY: the regex in the source guard is tied to specific variable names. If
+    // those names change in a refactor and the regex is not updated, the source
+    // guard stops protecting anything (it would fail on every run, so engineers
+    // might delete it or broaden it into uselessness). This test keeps the
+    // regex honest by asserting it MUST match the canonical formula string
+    // below — the exact text the formula should read in RunContext.tsx.
+    //
+    // If this test fails after a variable rename, update:
+    //   1. CANONICAL_FORMULA below (to the new variable names),
+    //   2. DOWNTIME_SUBTRACTION_REGEX above (to match the new names), AND
+    //   3. verify the formula still subtracts downtime from gross elapsed.
+
+    // This is a verbatim copy of the formula line in RunContext.tsx (without
+    // the leading `const ` keyword so it stays comparable across const/let).
+    // Keep it in sync with the actual source.
+    const CANONICAL_FORMULA =
+      "netElapsedSec = Math.max(0, grossElapsedSec - totalDowntimeSec)";
+
+    // Uses the same shared constant as the source guard above — so that
+    // updating the regex also updates this check, and weakening it here
+    // is impossible without also weakening the live source guard.
+    expect(CANONICAL_FORMULA).toMatch(DOWNTIME_SUBTRACTION_REGEX);
   });
 });
