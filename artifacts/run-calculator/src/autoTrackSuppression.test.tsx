@@ -191,6 +191,59 @@ describe("auto-track suppression for case/skid counters", () => {
     expect(writes.casesOnCurrentSkid?.length ?? 0).toBeGreaterThan(caseWritesBefore);
   });
 
+  it("counter-proof: without suppression the t0+16 s tick produces an incremental write (mirrors resume-now sequence)", () => {
+    // This is the critical non-vacuousness guard for the "resumes writing"
+    // test above. If the case-period formula changes so that no incremental
+    // writes ever fire in the t0→t0+8s→t0+16s window, the suppression test
+    // could silently become vacuous (writes=0 both before AND after resume).
+    //
+    // Same time sequence as the resume-now test, but NO suppression is ever
+    // armed. The hook must produce at least one incremental case write by
+    // t0+16 s, confirming the formula is live.
+    const t0 = Date.now();
+    const { form, writes } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 5,
+      batchesReady: 2,
+    });
+
+    const elapsed = 30 * 60;
+    const v = makeV();
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc,
+          v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: elapsed } },
+    );
+
+    // Mount seeds from zero → 1 skid + 23 cases. Record write count.
+    const writesAfterMount = writes.casesOnCurrentSkid?.length ?? 0;
+    expect(writesAfterMount).toBeGreaterThan(0); // seed must have fired
+
+    // Tick at t0+8 s (past one case period of 7.2 s) — no suppression armed.
+    rerender({ nowTime: new Date(t0 + 8000), elapsedBatchSec: elapsed + 8 });
+    const writesAfter8s = writes.casesOnCurrentSkid?.length ?? 0;
+
+    // Tick at t0+16 s — the exact moment the resume-now test asserts a write.
+    rerender({ nowTime: new Date(t0 + 16000), elapsedBatchSec: elapsed + 16 });
+
+    // The t0+16 s tick specifically must produce at least one more write
+    // beyond whatever happened at t0+8 s, proving the formula fires an
+    // incremental write at this precise point in the time sequence.
+    expect(writes.casesOnCurrentSkid?.length ?? 0).toBeGreaterThan(
+      writesAfter8s,
+    );
+  });
+
   it("counter-proof: without suppression the case counter advances on the very first tick past the case period", () => {
     // Symmetric guard: if this test ALSO shows no write, the suppression
     // tests above would be vacuously true (the hook never writes cases at all
