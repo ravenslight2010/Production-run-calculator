@@ -20,6 +20,9 @@
 // suite-2 tests fail, making the mismatch visible before it ships.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "./pages/home";
 
 afterEach(cleanup);
@@ -161,5 +164,101 @@ describe("ManualOverrideBanner — call-site formula guard (Suite 2)", () => {
 
     render(<ManualOverrideBanner show={show} minsLeft={0} onResume={() => {}} />);
     expect(screen.queryByTestId("manual-override-banner")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 3: source-level call-site formula drift guard
+//
+// Reads home.tsx as plain text, extracts the complete show={...} expression
+// from every ManualOverrideBanner call site, and asserts each expression
+// exactly matches the canonical three-argument signature — with no additional
+// operators, conditions, or argument substitutions allowed.
+//
+// Why this exists: Suite 2 tests the exported predicate function itself, but
+// does not verify that the real JSX call sites actually delegate to that
+// function.  A developer could rewrite a call site to use an inline boolean
+// expression or append an extra `&& extraFlag` condition, and the Suite 2
+// tests would still pass while the live banner behaviour silently diverged.
+//
+// This suite catches exactly that class of drift: any change to the `show=`
+// expression at either call site that does not match the canonical form below
+// will fail these tests immediately.
+// ---------------------------------------------------------------------------
+describe("ManualOverrideBanner — source-level call-site formula drift guard (Suite 3)", () => {
+  // Resolve home.tsx relative to this test file so the path survives moves.
+  const __filename = fileURLToPath(import.meta.url);
+  const __dir = dirname(__filename);
+  const homeSrc = readFileSync(join(__dir, "pages/home.tsx"), "utf-8");
+
+  // Canonical form of the show= attribute at both ManualOverrideBanner call
+  // sites.  The second argument is a local variable name that differs between
+  // the two sites (s vs autoTrackSuggestion) so it is matched as \w+.
+  // Crucially, the regex is anchored end-to-end with ^ and $, so any trailing
+  // operator (&& / ||) or extra condition fails the assertion.
+  const CANONICAL_SHOW_RE =
+    /^show=\{manualOverrideBannerShow\(\s*autoTrackProgress\s*,\s*\w+\s*,\s*autoSuppressUntilRef\.current\s*\)\}$/;
+
+  // Extracts every show={manualOverrideBannerShow(...)} attribute from src.
+  // Both real call sites are on a single line, so a regex that captures from
+  // `show={` to the closing `}` (with a single level of nested parens) is
+  // sufficient and avoids a full AST parse.
+  function extractShowProps(src: string): string[] {
+    // [^)]* inside the outer parens matches a flat argument list (no nested
+    // balanced parens needed — the predicate takes three simple identifiers).
+    const re = /show=\{manualOverrideBannerShow\([^)]*\)\}/g;
+    return (src.match(re) ?? []).map((s) => s.trim());
+  }
+
+  it("home.tsx contains exactly 2 ManualOverrideBanner JSX call sites", () => {
+    // Count every <ManualOverrideBanner JSX tag.  The component definition
+    // itself uses `export function ManualOverrideBanner`, which does NOT match
+    // the JSX tag pattern, so every match here is a real call site.
+    const matches = homeSrc.match(/<ManualOverrideBanner/g) ?? [];
+    expect(matches).toHaveLength(2);
+  });
+
+  it("every ManualOverrideBanner show= prop exactly matches the canonical three-arg signature", () => {
+    const showProps = extractShowProps(homeSrc);
+
+    // There must be exactly 2 show= attributes using the predicate function —
+    // one per call site.  A count mismatch means a site was inlined or added.
+    expect(showProps).toHaveLength(2);
+
+    for (const prop of showProps) {
+      // The full show={...} expression must conform to the canonical form:
+      //   show={manualOverrideBannerShow(autoTrackProgress, <ident>, autoSuppressUntilRef.current)}
+      // No trailing operators, no extra conditions, no argument substitutions.
+      expect(prop).toMatch(CANONICAL_SHOW_RE);
+    }
+  });
+
+  it("counter-proof: inline formula or extra operator would fail the canonical check", () => {
+    // Verify that the CANONICAL_SHOW_RE rejects every known class of drift.
+    const driftPatterns = [
+      // Extra AND condition appended after the predicate
+      "show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current) && extraFlag}",
+      // Extra OR override appended after the predicate
+      "show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current) || override}",
+      // Inline three-condition formula replacing the predicate entirely
+      "show={autoTrackProgress && !!s && Date.now() < autoSuppressUntilRef.current}",
+      // Wrong first argument (hardcoded true instead of autoTrackProgress)
+      "show={manualOverrideBannerShow(true, s, autoSuppressUntilRef.current)}",
+      // Wrong last argument (local variable instead of the ref)
+      "show={manualOverrideBannerShow(autoTrackProgress, s, suppressUntil)}",
+    ];
+
+    for (const pattern of driftPatterns) {
+      expect(pattern).not.toMatch(CANONICAL_SHOW_RE);
+    }
+  });
+
+  it("counter-proof: exactly 2 source lines contain the canonical show= prop", () => {
+    // Belt-and-suspenders: confirm the source lines with the show= prop are
+    // exactly 2, independently of the extractShowProps helper above.
+    const callSiteLines = homeSrc
+      .split("\n")
+      .filter((line) => /show=\{manualOverrideBannerShow\(/.test(line));
+    expect(callSiteLines).toHaveLength(2);
   });
 });
