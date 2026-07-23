@@ -13872,7 +13872,7 @@ export default function Home() {
                       </button>
                       <button
                         type="button"
-                        disabled={!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.some(r => !r.brand || !r.casesNeeded)}
+                        disabled={!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.length === 0 || scheduleEditorRuns.some(r => !r.brand)}
                         onClick={saveScheduledDay}
                         className="flex-1 py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
