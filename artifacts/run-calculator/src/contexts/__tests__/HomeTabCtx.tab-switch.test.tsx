@@ -1364,8 +1364,11 @@ describe("DoughRoleGate — lock banner presence (Dough tab recipe section)", ()
 // Context-reading subscriber for LineSetupRoleGate — used in the dialog-
 // stability test below so that isSupervisor is supplied via SetupRecipesProvider
 // (mirroring the Block 5b pattern exactly).
+let lineSetupCtxRenderCount = 0;
+
 const RealLineSetupCtxSubscriber = memo(
   function RealLineSetupCtxSubscriberInner() {
+    lineSetupCtxRenderCount++;
     const hx = useHomeTabCtx();
     const isSupervisor = Boolean((hx as Record<string, unknown>).isSupervisor);
     return (
@@ -1375,6 +1378,10 @@ const RealLineSetupCtxSubscriber = memo(
     );
   },
 );
+
+afterEach(() => {
+  lineSetupCtxRenderCount = 0;
+});
 
 describe(
   "LineSetupRoleGate — fieldset disabled attribute (Run tab Line Setup section)",
@@ -1441,6 +1448,51 @@ describe(
         expect(fieldset.disabled).toBe(false);
       }
     });
+
+    // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
+    // This test uses BrokenSetupRecipesProvider — which intentionally includes
+    // `manageCounter` in its useMemo deps — to prove that the dialog-stability
+    // test above is a real guard: if someone accidentally adds a dialog field to
+    // the context slice's deps, RealLineSetupCtxSubscriber WILL re-render on
+    // every dialog state change.
+    //
+    // If this test starts FAILING (broken provider no longer causes re-renders),
+    // the dialog-stability test above has become a false green and the guard is
+    // gone.
+    it("REGRESSION GUARD: broken provider (manageCounter in deps) causes spurious RealLineSetupCtxSubscriber re-renders", async () => {
+      const { rerender } = render(
+        <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealLineSetupCtxSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+
+      expect(lineSetupCtxRenderCount).toBe(1);
+
+      // Simulate dialog open — only manageCounter changes; isSupervisor is stable.
+      // With the BROKEN provider, this produces a new ctx ref → spurious re-render.
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={1}>
+            <RealLineSetupCtxSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      // BROKEN provider leaks manageCounter into deps → subscriber re-renders.
+      // The real SetupRecipesProvider must keep this count at 1 (see dialog-
+      // stability test above).
+      expect(lineSetupCtxRenderCount).toBe(2);
+
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={99}>
+            <RealLineSetupCtxSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      expect(lineSetupCtxRenderCount).toBe(3);
+    });
   },
 );
 
@@ -1460,8 +1512,11 @@ describe(
 // Context-reading subscriber for DoughRoleGate — used in the dialog-stability
 // test below so that isSupervisor is supplied via SetupRecipesProvider
 // (mirroring the Block 5b pattern exactly).
+let doughCtxRenderCount = 0;
+
 const RealDoughCtxSubscriber = memo(
   function RealDoughCtxSubscriberInner() {
+    doughCtxRenderCount++;
     const hx = useHomeTabCtx();
     const isSupervisor = Boolean((hx as Record<string, unknown>).isSupervisor);
     return (
@@ -1471,6 +1526,10 @@ const RealDoughCtxSubscriber = memo(
     );
   },
 );
+
+afterEach(() => {
+  doughCtxRenderCount = 0;
+});
 
 describe(
   "DoughRoleGate — fieldset disabled attribute (Dough tab recipe section)",
@@ -1536,6 +1595,51 @@ describe(
         // fieldset must remain enabled throughout
         expect(fieldset.disabled).toBe(false);
       }
+    });
+
+    // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
+    // This test uses BrokenSetupRecipesProvider — which intentionally includes
+    // `manageCounter` in its useMemo deps — to prove that the dialog-stability
+    // test above is a real guard: if someone accidentally adds a dialog field to
+    // the context slice's deps, RealDoughCtxSubscriber WILL re-render on every
+    // dialog state change.
+    //
+    // If this test starts FAILING (broken provider no longer causes re-renders),
+    // the dialog-stability test above has become a false green and the guard is
+    // gone.
+    it("REGRESSION GUARD: broken provider (manageCounter in deps) causes spurious RealDoughCtxSubscriber re-renders", async () => {
+      const { rerender } = render(
+        <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <RealDoughCtxSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+
+      expect(doughCtxRenderCount).toBe(1);
+
+      // Simulate dialog open — only manageCounter changes; isSupervisor is stable.
+      // With the BROKEN provider, this produces a new ctx ref → spurious re-render.
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={1}>
+            <RealDoughCtxSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      // BROKEN provider leaks manageCounter into deps → subscriber re-renders.
+      // The real SetupRecipesProvider must keep this count at 1 (see dialog-
+      // stability test above).
+      expect(doughCtxRenderCount).toBe(2);
+
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={99}>
+            <RealDoughCtxSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      expect(doughCtxRenderCount).toBe(3);
     });
   },
 );
