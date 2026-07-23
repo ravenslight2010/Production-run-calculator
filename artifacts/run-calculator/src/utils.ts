@@ -37,6 +37,33 @@ export function computeResumedStartedAt(
   return startedAt + pauseDuration;
 }
 
+/**
+ * Pure state transformation for resumeRun.
+ *
+ * Takes a run that is currently paused (pausedAt must be set) and returns a
+ * new run object with:
+ *   - startedAt advanced by computeResumedStartedAt
+ *   - pausedAt cleared (set to undefined)
+ *   - any open pause stoppage closed with endedAt = now
+ *
+ * Mirrors exactly what the resumeRun closure in home.tsx does to the run
+ * object, so this function can be unit-tested independently of the component.
+ *
+ * Returns null if the run has no pausedAt (guard matches resumeRun's guard).
+ */
+export function applyResumeToRun(
+  run: RunMeta,
+  freezerEmpty: boolean,
+  now: number,
+): RunMeta | null {
+  if (!run.pausedAt) return null;
+  const newStartedAt = computeResumedStartedAt(run.startedAt!, run.pausedAt, now, freezerEmpty);
+  const updatedStoppages = (run.stoppages ?? []).map(s =>
+    s.type === "pause" && !s.endedAt ? { ...s, endedAt: now } : s,
+  );
+  return { ...run, startedAt: newStartedAt, pausedAt: undefined, stoppages: updatedStoppages };
+}
+
 export function fmtElapsed(ms: number): string {
   const clamped = Math.max(0, ms);
   const totalSec = Math.floor(clamped / 1000);

@@ -80,6 +80,7 @@ import {
   computeCheesePull,
   computeCheesePerPizzaOz,
   computeResumedStartedAt,
+  applyResumeToRun,
   sauceBarrelBreakdown,
   genId,
   todayStr,
@@ -8177,17 +8178,12 @@ export default function Home() {
 
   function resumeRun(freezerEmpty: boolean) {
     const run = dayState.runs[dayState.currentIndex];
-    if (!run?.pausedAt) return;
+    if (!run) return;
     const now = Date.now();
-    const newStartedAt = computeResumedStartedAt(run.startedAt!, run.pausedAt, now, freezerEmpty);
-    // Close the open pause stoppage
-    const updatedStoppages = (run.stoppages ?? []).map(s =>
-      s.type === "pause" && !s.endedAt ? { ...s, endedAt: now } : s
-    );
+    const resumed = applyResumeToRun(run, freezerEmpty, now);
+    if (!resumed) return;
     const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
-        ? { ...r, startedAt: newStartedAt, pausedAt: undefined, stoppages: updatedStoppages }
-        : r
+      i === dayState.currentIndex ? resumed : r
     );
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
