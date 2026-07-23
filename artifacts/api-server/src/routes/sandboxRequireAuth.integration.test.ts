@@ -57,6 +57,8 @@ let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
 // Kept at module level so the cross-environment-replay test can spy on it.
 let sandboxMod: typeof import("../lib/sandbox");
+// Kept at module level so the DB-query-call-count test can spy on getUserById.
+let usersMod: typeof import("../lib/users");
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -101,6 +103,7 @@ beforeAll(async () => {
   const rolesMod = await import("../lib/roles");
   const authMod = await import("../lib/auth");
   sandboxMod = await import("../lib/sandbox");
+  usersMod = await import("../lib/users");
   const userValidityMod = await import("../lib/userValidity");
   const sessionBoundaryMod = await import("../lib/sessionBoundary");
 
@@ -732,6 +735,145 @@ describe("cross-environment token replay: verifyToken rejects before sandbox gat
 
       expect(res.status).toBe(401);
       expect(isSandboxUserCallCount).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DB-query call-count guard: cold-cache path must hit the DB exactly once
+//
+// The existing cold-start tests confirm that the *outcome* of a cold-cache
+// request is correct (401 for sandbox, 200 for live). However, they cannot
+// distinguish "DB was queried and returned true" from "cache was pre-seeded
+// with sandbox=true from a hard-coded default". A future initialisation that
+// sets the cache entry to sandbox=false before the first request would make
+// every cold-cache test pass (default=false → no gate fired → same 401-path
+// reasoning is moot) while silently skipping the DB entirely.
+//
+// These tests spy on getUserById — the function isSandboxUser() calls when
+// the cache is empty — and assert the exact call count. A regression that
+// pre-seeds the cache (or short-circuits via a default) would produce a call
+// count of 0, which fails immediately and visibly.
+// ---------------------------------------------------------------------------
+describe("DB is actually queried on cold cache — guards against default-value bypass", () => {
+  // Both requireAuth paths (userValidity + sandbox gate) call getUserById when
+  // their respective in-process caches are cold. On the first request of each
+  // test case BOTH caches are cold (beforeEach clears them), so the total
+  // getUserById call count per cold-cache request is 2:
+  //   1. getUserSecurityState() in userValidity.ts (checks user still exists)
+  //   2. isSandboxUser() in sandbox.ts (checks the sandbox flag)
+  //
+  // If a future change pre-seeds the sandbox cache with a default value
+  // (bypassing the DB read for the sandbox flag), the count drops to 1 — only
+  // userValidity's call remains. The exact-count assertions below catch that
+  // regression even when the HTTP outcome (401/200) happens to look correct.
+
+  it("getUserById is called exactly twice on the first cold-cache request for a sandbox user (one from each requireAuth path)", async () => {
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    let getUserByIdCallCount = 0;
+    const origGetUserById = usersMod.getUserById;
+    const spy = vi
+      .spyOn(usersMod, "getUserById")
+      .mockImplementation(async (id: string) => {
+        getUserByIdCallCount++;
+        return origGetUserById(id);
+      });
+
+    try {
+      const res = await authedRequest(SANDBOX_USER_ID, "GET", "/api/me");
+      expect(res.status).toBe(401);
+      // Both the userValidity check and the sandbox gate must have hit the DB:
+      // count === 2 proves both cold-cache paths ran. If the sandbox cache were
+      // pre-seeded with a default, sandbox.ts would skip its DB call and the
+      // count would drop to 1 — the regression is caught here.
+      expect(getUserByIdCallCount).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("getUserById is called exactly twice on the first cold-cache request for a non-sandbox user", async () => {
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    let getUserByIdCallCount = 0;
+    const origGetUserById = usersMod.getUserById;
+    const spy = vi
+      .spyOn(usersMod, "getUserById")
+      .mockImplementation(async (id: string) => {
+        getUserByIdCallCount++;
+        return origGetUserById(id);
+      });
+
+    try {
+      const res = await authedRequest(REGULAR_USER_ID, "GET", "/api/me");
+      expect(res.status).toBe(200);
+      // Same two-path guarantee for a non-sandbox user. A default of false
+      // would still let the request through (200), masking that the sandbox
+      // gate never consulted the DB — the count drops to 1 and this fails.
+      expect(getUserByIdCallCount).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("getUserById is NOT called again on a second request within the TTL window (both caches hit)", async () => {
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    let getUserByIdCallCount = 0;
+    const origGetUserById = usersMod.getUserById;
+    const spy = vi
+      .spyOn(usersMod, "getUserById")
+      .mockImplementation(async (id: string) => {
+        getUserByIdCallCount++;
+        return origGetUserById(id);
+      });
+
+    try {
+      // First request: both caches cold → 2 DB calls.
+      await authedRequest(SANDBOX_USER_ID, "GET", "/api/me");
+      expect(getUserByIdCallCount).toBe(2);
+
+      // Second request within the TTL window: both caches are still valid,
+      // so neither path touches the DB — count stays at 2.
+      await authedRequest(SANDBOX_USER_ID, "GET", "/api/me");
+      expect(getUserByIdCallCount).toBe(2); // count unchanged — both caches hit
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("getUserById is called once more after sandbox cache eviction (only the sandbox path re-queries)", async () => {
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    let getUserByIdCallCount = 0;
+    const origGetUserById = usersMod.getUserById;
+    const spy = vi
+      .spyOn(usersMod, "getUserById")
+      .mockImplementation(async (id: string) => {
+        getUserByIdCallCount++;
+        return origGetUserById(id);
+      });
+
+    try {
+      // First cold-cache request: 2 DB calls (userValidity + sandbox).
+      await authedRequest(SANDBOX_USER_ID, "GET", "/api/me");
+      expect(getUserByIdCallCount).toBe(2);
+
+      // Evict only the sandbox cache (simulating TTL expiry for that entry).
+      // userValidity's cache entry remains warm.
+      clearSandboxCache();
+
+      // Post-eviction request: userValidity hits its cache (no call), but
+      // sandbox.ts must re-query the DB because its cache was evicted → +1.
+      await authedRequest(SANDBOX_USER_ID, "GET", "/api/me");
+      expect(getUserByIdCallCount).toBe(3);
     } finally {
       spy.mockRestore();
     }
