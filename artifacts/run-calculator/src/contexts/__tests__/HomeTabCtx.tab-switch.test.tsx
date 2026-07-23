@@ -410,6 +410,22 @@ function BrokenFrontlineProvider({
   return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
 }
 
+// ── FRONTLINE_COMBINED_PIN ────────────────────────────────────────────────────
+// Invariant: mount(1) + form-change(1) + form-change(1) + dialog-open(0) = 3.
+//
+// This constant is the single source of truth for the COMBINED test's exact
+// render-count pin.  The REGRESSION GUARD (COMBINED counter-proof) below MUST
+// assert `FRONTLINE_COMBINED_PIN + 1` after the dialog-open step (and
+// `FRONTLINE_COMBINED_PIN + 2` after the second dialog change) — never a
+// literal 4 or 5 — so the two tests stay in lockstep:
+//
+//   COMBINED pin after dialog-open:        FRONTLINE_COMBINED_PIN     (= 3)
+//   Counter-proof pin after dialog-open:   FRONTLINE_COMBINED_PIN + 1 (= 4)
+//
+// If the COMBINED test's pin changes (e.g. a third form-change step is added),
+// bump this constant; the counter-proof pins will follow automatically.
+const FRONTLINE_COMBINED_PIN = 3;
+
 let frontlineRenderCount = 0;
 
 const FrontlineSubscriber = memo(function FrontlineSubscriberInner() {
@@ -525,7 +541,7 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
       );
     });
 
-    expect(frontlineRenderCount).toBe(3); // exact: mount(1) + form-change(1) + form-change(1)
+    expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN); // exact: mount(1) + form-change(1) + form-change(1)
     expect(getByTestId("app1-type").textContent).toBe("pepperoni");
 
     // DIALOG step — manage dialog opens (manageCounter: 0→1).
@@ -539,9 +555,11 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
       );
     });
 
-    // Exact guard: frontlineRenderCount must still be 3.  Any spurious re-render
-    // caused by a dialog field leaking into the context deps will bump this to 4+.
-    expect(frontlineRenderCount).toBe(3); // exact: no extra render from dialog open
+    // Exact guard: frontlineRenderCount must still be FRONTLINE_COMBINED_PIN (3).
+    // Any spurious re-render caused by a dialog field leaking into the context
+    // deps will bump this to FRONTLINE_COMBINED_PIN+1 — which is exactly what
+    // the COMBINED counter-proof below asserts for the broken provider.
+    expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN); // exact: no extra render from dialog open
 
     // Repeat with a second dialog state change to rule out a lucky no-op.
     await act(async () => {
@@ -552,7 +570,7 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
       );
     });
 
-    expect(frontlineRenderCount).toBe(3); // exact: still no extra render from further dialog changes
+    expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN); // exact: still no extra render from further dialog changes
 
     // SWITCH step — user navigates to Frontline tab.
     // The tab already holds the current value; no re-render is needed.
@@ -669,9 +687,11 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
     });
 
     // BROKEN provider leaked manageCounter into deps → subscriber re-rendered.
-    // The real FrontlineProvider must keep the count at 3 after this step
-    // (see the COMBINED test above).  Here it must be > 3.
-    expect(frontlineRenderCount).toBe(4); // extra render proves the COMBINED pin is real
+    // The real FrontlineProvider must keep the count at FRONTLINE_COMBINED_PIN (3)
+    // after this step (see the COMBINED test above).  Here it MUST be
+    // FRONTLINE_COMBINED_PIN + 1 — proving the COMBINED test's "toBe(3)" is a
+    // real assertion that the broken provider would violate.
+    expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN + 1); // = 4; extra render proves the COMBINED pin is real
 
     // One more dialog change confirms it keeps firing — not a one-time no-op.
     await act(async () => {
@@ -682,7 +702,7 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
       );
     });
 
-    expect(frontlineRenderCount).toBe(5); // symmetric with Block 1-3's REGRESSION GUARD
+    expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN + 2); // = 5; symmetric with Block 1-3's REGRESSION GUARD
   });
 });
 
