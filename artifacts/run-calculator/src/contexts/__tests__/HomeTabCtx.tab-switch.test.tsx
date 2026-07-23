@@ -1200,7 +1200,36 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
 // Because SetupRecipesRoleGate is the actual production code, any future
 // refactor that removes or moves the disabled gate will fail here, catching
 // the regression before it ships.
+//
+// Four tests:
+//   disabled → enabled        — fieldset becomes enabled when role is granted.
+//   enabled → disabled        — fieldset becomes disabled when role is revoked.
+//   dialog open is isolated   — dialog open does NOT re-render the subscriber
+//                               or flip the fieldset disabled state.
+//   COMBINED                  — role change propagates (with correct disabled
+//                               state); subsequent dialog open adds no renders.
+//                               Exact render counts pinned at every step
+//                               (mount → role-change → dialog-open) so any
+//                               weakening of the isolation check is caught.
+//   REGRESSION GUARD          — BrokenSetupRecipesProvider drives the same
+//   (COMBINED counter-proof)    mount → role-change → dialog-open sequence,
+//                               proving the COMBINED pin is a real assertion.
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── SETUP_5B_COMBINED_PIN ─────────────────────────────────────────────────────
+// Invariant: mount(1) + role-change(1) + dialog-open(0) = 2.
+//
+// This constant is the single source of truth for the Block 5b COMBINED test's
+// exact render-count pin.  The REGRESSION GUARD (COMBINED counter-proof) below
+// MUST assert `SETUP_5B_COMBINED_PIN + 1` after the dialog-open step — never a
+// literal 3 — so the two tests stay in lockstep:
+//
+//   COMBINED pin after dialog-open:        SETUP_5B_COMBINED_PIN     (= 2)
+//   Counter-proof pin after dialog-open:   SETUP_5B_COMBINED_PIN + 1 (= 3)
+//
+// If the COMBINED test's pin changes (e.g. a second role-change step is added),
+// bump this constant; the counter-proof pins will follow automatically.
+const SETUP_5B_COMBINED_PIN = 2;
 
 // Subscriber that reads isSupervisor from context and passes it to the REAL
 // SetupRecipesRoleGate component — the same path LiveSetupRecipesTabContent
@@ -1314,6 +1343,162 @@ describe(
         // the count must stay pinned at 1 for every dialog cycle.
         expect(setupRenderCount).toBe(1);
       }
+    });
+
+    // ─── COMBINED ─────────────────────────────────────────────────────────────
+    // Drives the real SetupRecipesRoleGate through a role-change followed
+    // immediately by a dialog-open, verifying:
+    //   1. The role-change renders exactly once and flips the fieldset.
+    //   2. The subsequent dialog-open adds zero renders and leaves the fieldset
+    //      disabled state unchanged.
+    //
+    // Exact render counts are pinned at every step using SETUP_5B_COMBINED_PIN
+    // so that any weakening of the dialog-open isolation check (e.g. softening
+    // "toBe(SETUP_5B_COMBINED_PIN)" to "toBeGreaterThanOrEqual") is caught by
+    // the REGRESSION GUARD (COMBINED counter-proof) below.
+    it("COMBINED: role change propagates to fieldset; subsequent dialog open adds no extra renders", async () => {
+      const { rerender, getByTestId } = render(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+
+      const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
+
+      // PROPAGATION step 0 — initial mount: fieldset disabled, exactly 1 render.
+      expect(fieldset.disabled).toBe(true);
+      expect(setupRenderCount).toBe(1);
+
+      // PROPAGATION step 1 — role granted (isSupervisor false→true): fieldset
+      // must become enabled and exactly 1 new render must occur.
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      expect(fieldset.disabled).toBe(false);
+      // DRIFT GUARD: pins renderCount to SETUP_5B_COMBINED_PIN immediately
+      // before the dialog-open step.  If a second role-change step is ever
+      // added without bumping SETUP_5B_COMBINED_PIN, this line fails, forcing
+      // the constant to be bumped first.  The counter-proof's
+      // SETUP_5B_COMBINED_PIN + 1 assertion then follows automatically.
+      expect(setupRenderCount).toBe(SETUP_5B_COMBINED_PIN); // exact: mount(1) + role-change(1)
+
+      // DIALOG step — manage dialog opens (manageCounter: 0→1).
+      // isSupervisor is unchanged.  The ctx ref must NOT change → React.memo
+      // skips → zero new renders → fieldset stays enabled.
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={true} manageCounter={1}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      // Exact guard: renderCount must still be SETUP_5B_COMBINED_PIN (2).  Any
+      // spurious re-render caused by a dialog field leaking into the context deps
+      // will bump this to SETUP_5B_COMBINED_PIN+1 — which is exactly what the
+      // COMBINED counter-proof below asserts for the broken provider.
+      expect(fieldset.disabled).toBe(false);
+      expect(setupRenderCount).toBe(SETUP_5B_COMBINED_PIN); // exact: no extra render from dialog open
+
+      // Repeat with a second dialog state change to rule out a lucky no-op.
+      await act(async () => {
+        rerender(
+          <SetupRecipesProvider isSupervisor={true} manageCounter={99}>
+            <RealSetupRecipesSubscriber />
+          </SetupRecipesProvider>,
+        );
+      });
+
+      expect(fieldset.disabled).toBe(false);
+      expect(setupRenderCount).toBe(SETUP_5B_COMBINED_PIN); // exact: still no extra render from further dialog changes
+    });
+
+    // ─── REGRESSION GUARD — COMBINED counter-proof ────────────────────────────
+    // Drives BrokenSetupRecipesProvider through the SAME mount → role-change →
+    // dialog-open sequence as the COMBINED test above, proving that the exact
+    // render-count pin of SETUP_5B_COMBINED_PIN (2) after the dialog-open step
+    // is a real assertion.
+    //
+    // With the correct SetupRecipesProvider the COMBINED test expects:
+    //   mount(1) + role-change(1) + dialog-open(0) = 2
+    //
+    // With BrokenSetupRecipesProvider the dialog-open step produces an extra
+    // render, pushing the count to 3.  This means the COMBINED pin
+    // "toBe(SETUP_5B_COMBINED_PIN)" WOULD FAIL under the broken provider —
+    // i.e. the COMBINED test is a real guard, not a false green.
+    //
+    // If THIS test starts FAILING (broken provider no longer bumps the count
+    // past SETUP_5B_COMBINED_PIN during the dialog-open step), the COMBINED
+    // test's exact-count assertion has become untestable and should be
+    // re-examined.
+    it("REGRESSION GUARD (COMBINED counter-proof): broken provider causes extra render during dialog-open after role change", async () => {
+      const { rerender, getByTestId } = render(
+        <BrokenSetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <RealSetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+
+      const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
+
+      // Step 0 — initial mount.
+      expect(fieldset.disabled).toBe(true);
+      expect(setupRenderCount).toBe(1);
+
+      // Step 1 — role-change: isSupervisor changes false→true.
+      // Both the correct and broken providers yield a new ctx ref here → render.
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={0}>
+            <RealSetupRecipesSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      expect(fieldset.disabled).toBe(false);
+      // Lockstep with COMBINED: using SETUP_5B_COMBINED_PIN here (not a literal)
+      // means that if the constant is bumped (e.g. a 2nd role-change step is
+      // added), this assertion automatically requires adding that step here too —
+      // keeping the counter-proof scenario identical to the COMBINED test.
+      expect(setupRenderCount).toBe(SETUP_5B_COMBINED_PIN); // = 2; mount(1) + role-change(1)
+
+      // Step 2 — dialog-open: only manageCounter changes (0→1); isSupervisor stable.
+      // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at SETUP_5B_COMBINED_PIN.
+      // BROKEN provider:  manageCounter in deps → new ctx ref → spurious re-render
+      //                   → count becomes SETUP_5B_COMBINED_PIN + 1.
+      // This step is the heart of the counter-proof: it shows the COMBINED test's
+      // "toBe(SETUP_5B_COMBINED_PIN)" assertion is NOT vacuously true — the broken
+      // provider violates it.
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={1}>
+            <RealSetupRecipesSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      // BROKEN provider leaked manageCounter into deps → subscriber re-rendered.
+      // The real SetupRecipesProvider must keep the count at SETUP_5B_COMBINED_PIN (2)
+      // after this step (see the COMBINED test above).  Here it MUST be
+      // SETUP_5B_COMBINED_PIN + 1 — proving the COMBINED test's pin is a real
+      // assertion that the broken provider would violate.
+      expect(fieldset.disabled).toBe(false); // fieldset value itself is correct — the issue is the extra render
+      expect(setupRenderCount).toBe(SETUP_5B_COMBINED_PIN + 1); // = 3; extra render proves the COMBINED pin is real
+
+      // One more dialog change confirms it keeps firing — not a one-time no-op.
+      await act(async () => {
+        rerender(
+          <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={99}>
+            <RealSetupRecipesSubscriber />
+          </BrokenSetupRecipesProvider>,
+        );
+      });
+
+      expect(setupRenderCount).toBe(SETUP_5B_COMBINED_PIN + 2); // = 4; symmetric with other blocks' counter-proofs
     });
   },
 );
