@@ -482,6 +482,109 @@ function AvailabilityHookHarness({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Short-username branch: enabled=true + 1–2 char username → "short", no API call
+//
+// This test directly exercises the hook's MIN_USERNAME_LENGTH guard via the
+// exported hook (through AvailabilityHookHarness). If the branch is removed
+// or its threshold is widened, the status will advance to "checking" and
+// eventually call the mock — making this test fail immediately.
+// ---------------------------------------------------------------------------
+describe("short-username branch: status is 'short' and no API call is made when enabled=true but username is below the minimum length", () => {
+  it(
+    "sets status to 'short' and never calls checkUsernameAvailable for a 1-character username with enabled=true",
+    async () => {
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      render(<AvailabilityHookHarness initialUsername="a" />);
+
+      // The hook must set status → "short" synchronously in the first effect
+      // run (before the debounce timer) because the username is below MIN_USERNAME_LENGTH.
+      await waitFor(
+        () => {
+          expect(
+            (screen.getByTestId("status") as HTMLElement).textContent,
+          ).toBe("short");
+        },
+        { timeout: 1000 },
+      );
+
+      // Wait well past the 400 ms debounce window to confirm the API is never reached.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
+      // The short-circuit must have prevented any network call.
+      expect(mockCheckUsernameAvailable).not.toHaveBeenCalled();
+    },
+    4000,
+  );
+
+  it(
+    "sets status to 'short' and never calls checkUsernameAvailable for a 2-character username with enabled=true",
+    async () => {
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      render(<AvailabilityHookHarness initialUsername="ab" />);
+
+      await waitFor(
+        () => {
+          expect(
+            (screen.getByTestId("status") as HTMLElement).textContent,
+          ).toBe("short");
+        },
+        { timeout: 1000 },
+      );
+
+      // Wait well past the debounce to confirm the API is never invoked.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
+      expect(mockCheckUsernameAvailable).not.toHaveBeenCalled();
+    },
+    4000,
+  );
+
+  it(
+    "transitions from 'short' to 'checking' (and eventually calls the API) when the username is extended to 3 characters",
+    async () => {
+      const user = userEvent.setup();
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      render(<AvailabilityHookHarness initialUsername="ab" />);
+
+      // Start in "short" state.
+      await waitFor(
+        () => {
+          expect(
+            (screen.getByTestId("status") as HTMLElement).textContent,
+          ).toBe("short");
+        },
+        { timeout: 1000 },
+      );
+
+      // Extend the username to exactly 3 characters — the minimum.
+      await user.type(screen.getByLabelText("username-field"), "c");
+
+      // The hook must now advance to "checking" and eventually call the API.
+      await waitFor(
+        () => {
+          expect(mockCheckUsernameAvailable).toHaveBeenCalledWith("abc");
+        },
+        { timeout: 1500 },
+      );
+
+      // Status must settle to "available" once the mock resolves.
+      await waitFor(
+        () => {
+          expect(
+            (screen.getByTestId("status") as HTMLElement).textContent,
+          ).toBe("available");
+        },
+        { timeout: 1000 },
+      );
+    },
+    6000,
+  );
+});
+
 describe("sign-in guard: availability check fires when the guard is bypassed (enabled forced to true)", () => {
   it(
     "calls checkUsernameAvailable after the debounce when enabled is forced to true — proving the guard is the load-bearing suppressor on sign-in",
