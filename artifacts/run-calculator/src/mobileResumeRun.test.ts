@@ -270,6 +270,15 @@ describe("mobile elapsed-time after pause-resume — netElapsedSec invariants", 
 const DOWNTIME_SUBTRACTION_REGEX =
   /netElapsedSec\s*=\s*Math\.max\s*\(\s*0\s*,\s*grossElapsedSec\s*-\s*totalDowntimeSec\s*\)/;
 
+// Verbatim copy of the formula line in RunContext.tsx (without the leading
+// `const ` keyword so it stays comparable across const/let).
+// Shared by BOTH self-check tests below — editing it in one place updates both,
+// making it impossible for the regex-self-check and the live-source check to
+// diverge. If a variable rename lands in RunContext.tsx, update this string AND
+// DOWNTIME_SUBTRACTION_REGEX above together.
+const CANONICAL_FORMULA =
+  "netElapsedSec = Math.max(0, grossElapsedSec - totalDowntimeSec)";
+
 describe("mobile elapsed-time — counter-proof: without downtime subtraction elapsed overstates", () => {
   it("removing downtime subtraction overstates elapsed by exactly the pause duration", () => {
     // Paused 30 min in, resumed 10 min later.  Now = 40 min after start.
@@ -344,19 +353,32 @@ describe("mobile elapsed-time — counter-proof: without downtime subtraction el
     // below — the exact text the formula should read in RunContext.tsx.
     //
     // If this test fails after a variable rename, update:
-    //   1. CANONICAL_FORMULA below (to the new variable names),
+    //   1. the module-scope CANONICAL_FORMULA (to the new variable names),
     //   2. DOWNTIME_SUBTRACTION_REGEX above (to match the new names), AND
     //   3. verify the formula still subtracts downtime from gross elapsed.
 
-    // This is a verbatim copy of the formula line in RunContext.tsx (without
-    // the leading `const ` keyword so it stays comparable across const/let).
-    // Keep it in sync with the actual source.
-    const CANONICAL_FORMULA =
-      "netElapsedSec = Math.max(0, grossElapsedSec - totalDowntimeSec)";
-
-    // Uses the same shared constant as the source guard above — so that
-    // updating the regex also updates this check, and weakening it here
-    // is impossible without also weakening the live source guard.
+    // Uses the module-scope CANONICAL_FORMULA and DOWNTIME_SUBTRACTION_REGEX
+    // constants — editing either one updates both self-check tests at once,
+    // making it impossible for the regex guard and the live-source check to
+    // silently diverge.
     expect(CANONICAL_FORMULA).toMatch(DOWNTIME_SUBTRACTION_REGEX);
+  });
+
+  it("source guard self-check: CANONICAL_FORMULA is present verbatim in RunContext.tsx (catches a drifted canonical string)", () => {
+    // WHY: CANONICAL_FORMULA is a manually maintained string. The previous
+    // self-check only confirms it matches the regex — it does NOT verify the
+    // string reflects what RunContext.tsx actually contains. If someone edits
+    // CANONICAL_FORMULA to differ from the live formula line, the self-check
+    // above still passes but both guards no longer reflect reality.
+    //
+    // This test closes that gap by reading the live source and asserting the
+    // module-scope CANONICAL_FORMULA is a verbatim substring. Because both
+    // self-check tests share that single constant, editing it in one place
+    // updates both — the two guards cannot silently diverge.
+    // If it fails, CANONICAL_FORMULA and the live formula have drifted; update
+    // CANONICAL_FORMULA (and DOWNTIME_SUBTRACTION_REGEX if variable names
+    // changed) to match the actual formula in RunContext.tsx.
+    const source = fs.readFileSync(MOBILE_FILE, "utf8");
+    expect(source).toContain(CANONICAL_FORMULA);
   });
 });
