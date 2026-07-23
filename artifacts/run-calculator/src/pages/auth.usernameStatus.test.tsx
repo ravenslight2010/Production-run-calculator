@@ -291,4 +291,30 @@ describe("sign-in button: unaffected by username availability", () => {
     },
     6000,
   );
+
+  it(
+    "availability check is never invoked even after the full debounce window elapses on sign-in",
+    async () => {
+      const user = userEvent.setup();
+
+      renderSignInPage();
+
+      // Type a long valid username — well above the ≥3 char minimum that would
+      // trigger the availability hook on sign-up.
+      await user.type(
+        screen.getByLabelText(/^username$/i),
+        "longusernameinput",
+      );
+
+      // Wait well past the 400 ms debounce window so that any accidentally-
+      // enabled hook would have had time to fire and call the mock.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
+      // The availability hook must never have been invoked in sign-in mode,
+      // even after the debounce period. This catches a future refactor that
+      // accidentally passes `enabled: true` to the hook on the sign-in page.
+      expect(mockCheckUsernameAvailable).not.toHaveBeenCalled();
+    },
+    6000,
+  );
 });
