@@ -3965,4 +3965,123 @@ describe("LiveTabMemo — Suite 12: real CompactRunStrip is wired to useHomeTabC
 
     spy.mockRestore();
   });
+
+  // ─── Test 5 (guard for Test 2's counter-proof): BROKEN-WRAPPER FLAT-COUNT PROOF ──
+  //
+  // WHY THIS IS NEEDED:
+  //   Test 2 asserts `expect(renderCount).toBeGreaterThan(countAfterMount)` —
+  //   i.e. the useHomeCtx() subscriber re-renders when the same dialog field
+  //   toggles.  That assertion gives Test 1 its teeth.
+  //
+  //   But if S12Wrapper's homeCtxValue useMemo accidentally excluded dialogOpen
+  //   from its deps, HomeCtx would never emit a new value on toggle.  The
+  //   subscriber would NOT re-render — renderCount would stay flat (=== countAfterMount).
+  //
+  //   If Test 2 then used .toBeGreaterThanOrEqual(countAfterMount), the assertion
+  //   would vacuously pass (`countAfterMount >= countAfterMount`), silently
+  //   removing all guarantee from Test 1.
+  //
+  //   .toBeGreaterThan(countAfterMount) REQUIRES a strict increase:
+  //     expect(countAfterMount).toBeGreaterThan(countAfterMount) → FAILS immediately.
+  //
+  //   This test makes the broken-wrapper scenario observable: it renders the same
+  //   useHomeCtx() subscriber inside a BrokenS12Wrapper (dialogOpen excluded from
+  //   deps), toggles dialogOpen, and asserts the render count stays FLAT.
+  //   That flat count is precisely the scenario where .toBeGreaterThanOrEqual would
+  //   pass vacuously — proving .toBeGreaterThan is the load-bearing assertion.
+  it("guard for Test 2: broken S12Wrapper (homeCtxValue excludes dialogOpen from deps) keeps useHomeCtx() subscriber render count FLAT on toggle — proving toBeGreaterThan cannot be weakened to toBeGreaterThanOrEqual", async () => {
+    // Broken wrapper: homeCtxValue useMemo intentionally excludes dialogOpen.
+    // Toggling dialogOpen does NOT invalidate the memoized HomeCtx value, so
+    // the context reference is unchanged and no subscriber re-renders.
+    function BrokenS12Wrapper({
+      runStatus = "running",
+      dialogOpen = false,
+      children,
+    }: {
+      runStatus?: string;
+      dialogOpen?: boolean;
+      children: ReactNode;
+    }) {
+      const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+      const tabCtxValue = useMemo(
+        () => makeCompactRunStripCtxValue(runStatus),
+        [runStatus],
+      );
+
+      // BROKEN: dialogOpen is intentionally omitted from deps.
+      // The memoized object captures `dialogOpen` at its value from the first
+      // render and never updates when dialogOpen changes — HomeCtx stays stale.
+      const homeCtxValue = useMemo(
+        () => ({
+          runStatus,
+          currentRun: { id: "run-live-1", brand: "TestBrand", flavor: "TestFlavor" },
+          dayState: S12_DAY_STATE,
+          form: null,
+          activeTab: "run",
+          manageCategory: dialogOpen ? "mixes" : "",
+        }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [runStatus], // ← dialogOpen deliberately excluded (the bug this guard catches)
+      );
+
+      return (
+        <HomeCtx.Provider value={homeCtxValue}>
+          <HomeTabCtx.Provider value={tabCtxValue}>
+            <LiveRunProvider
+              v={ACTIVE_VALUES}
+              ve={ACTIVE_VALUES}
+              runStatus={runStatus as "running"}
+              currentRun={ACTIVE_RUN}
+              currentRunId="run-live-1"
+              form={form}
+              dayState={S12_DAY_STATE}
+              doughSubTab="dough"
+              upcomingRunLabels={S12_UPCOMING_LABELS}
+              prefs={undefined}
+              screenMode={null}
+              machine={S12_MACHINE}
+            >
+              {children}
+            </LiveRunProvider>
+          </HomeTabCtx.Provider>
+        </HomeCtx.Provider>
+      );
+    }
+
+    let renderCount = 0;
+    const HomeCtxSub = memo(function HomeCtxSubBrokenWrapper() {
+      renderCount++;
+      useHomeCtx();
+      return <span data-testid="s12-broken-guard">rendered</span>;
+    });
+
+    const { rerender } = render(
+      <BrokenS12Wrapper runStatus="running" dialogOpen={false}>
+        <HomeCtxSub />
+      </BrokenS12Wrapper>,
+    );
+
+    const countAfterMount = renderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle dialogOpen — but the broken homeCtxValue memo does NOT update
+    // (dialogOpen is not a dep), so HomeCtx emits the SAME cached reference.
+    // The subscriber sees no context change and does NOT re-render.
+    await act(async () => {
+      rerender(
+        <BrokenS12Wrapper runStatus="running" dialogOpen={true}>
+          <HomeCtxSub />
+        </BrokenS12Wrapper>,
+      );
+    });
+
+    // Flat render count: HomeCtx never changed, so no re-render occurred.
+    // This is the scenario where:
+    //   .toBeGreaterThan(countAfterMount)    → FAILS (strict increase required)
+    //   .toBeGreaterThanOrEqual(countAfterMount) → PASSES vacuously
+    // Proving that Test 2's .toBeGreaterThan is the assertion that cannot be
+    // silently weakened — a weaker form would hollow out Test 1 entirely.
+    expect(renderCount).toBe(countAfterMount);
+  });
 });
