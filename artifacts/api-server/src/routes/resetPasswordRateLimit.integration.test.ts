@@ -8,11 +8,11 @@
 // onto the reset-password route in routes/auth.ts so a future accidental
 // removal cannot go undetected.
 //
-// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests with a
-// non-existent username and a bogus reset code (all return 401 — the handler
-// finds no matching approved request). The next request must return 429
-// regardless of its body. Using bad credentials keeps the test fast — no
-// DB writes ever occur.
+// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests with an empty
+// body (all return 400 — the Zod schema requires username, code, and
+// newPassword, so the handler rejects the request immediately without any DB
+// access). The next request must return 429 regardless of its body. Using an
+// invalid body keeps the test fast and side-effect-free.
 //
 // Like the other *.integration.test.ts files in this directory, this stands up
 // a disposable Postgres database so the real router can import @workspace/db.
@@ -105,41 +105,39 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
-// Helper: POST /api/auth/reset-password with a bogus reset code for a
-// non-existent username. Returns the raw Response so the caller can inspect
-// the status. The DB is empty so resetPasswordWithCode finds no matching
-// approved request → 401 immediately.
-function resetPasswordWrongCode(): Promise<Response> {
+// Helper: POST /api/auth/reset-password with an empty body.
+// Returns the raw Response so the caller can inspect the status. The Zod
+// schema requires username, code, and newPassword, so the handler rejects the
+// request with 400 immediately — no DB access occurs, keeping the test fast
+// and free of side-effects.
+function resetPasswordRequest(): Promise<Response> {
   return fetch(`${baseUrl}/api/auth/reset-password`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      username: `nosuchuser_${Math.random().toString(36).slice(2)}`,
-      code: "000000",
-      newPassword: "newpassword123",
-    }),
+    body: JSON.stringify({}),
   });
 }
 
 describe("POST /api/auth/reset-password — authRateLimit fires after AUTH_RATE_MAX requests", () => {
   it(
-    "returns 429 on the request that exceeds the cap and 401 for all requests within it",
+    "returns 429 on the request that exceeds the cap and 400 for all requests within it",
     async () => {
-      // Send AUTH_RATE_MAX requests with bogus codes for non-existent users.
-      // Each returns 401 (no matching approved reset request found). The
-      // rate-limit counter increments on every request, including rejected
-      // ones — that is the intended behaviour so code-guessing still exhausts
-      // the budget.
+      // Send AUTH_RATE_MAX requests with an empty body. Each returns 400
+      // because the Zod schema rejects it before any DB access — username,
+      // code, and newPassword are all required. The rate-limit counter
+      // increments on every request, including rejected ones — that is the
+      // intended behaviour so token brute-force attempts still exhaust the
+      // budget.
       for (let i = 1; i <= AUTH_RATE_MAX; i++) {
-        const res = await resetPasswordWrongCode();
+        const res = await resetPasswordRequest();
         // Every request within the cap must be processed by the route handler
-        // (bad code → 401), not intercepted by the rate limiter.
-        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (401), got ${res.status}`).toBe(401);
+        // (missing/invalid body → 400), not intercepted by the rate limiter.
+        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (400), got ${res.status}`).toBe(400);
       }
 
       // The very next request exceeds the cap. The rate-limit middleware must
       // intercept it BEFORE the route handler runs and return 429.
-      const blocked = await resetPasswordWrongCode();
+      const blocked = await resetPasswordRequest();
       expect(blocked.status, "request over the cap should be rate-limited (429)").toBe(429);
 
       const body = (await blocked.json()) as { error: string };
