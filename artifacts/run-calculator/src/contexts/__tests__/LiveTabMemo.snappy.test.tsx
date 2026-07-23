@@ -3780,6 +3780,69 @@ describe("LiveTabMemo — Suite 12: real CompactRunStrip is wired to useHomeTabC
     spy.mockRestore();
   });
 
+  // ─── Test 3: SYMMETRIC SPY COUNTER-PROOF ─────────────────────────────────
+  // Proves the spy in Test 1 has teeth: the vi.spyOn(LiveRunContextNS,
+  // "useLiveRun") target IS the real hook that CompactRunStrip calls.
+  //
+  // WHY THIS IS NEEDED:
+  //   Test 1 asserts countAfterMount > 0 (spy fires at mount) and then flat
+  //   after a dialog toggle.  But if the export named "useLiveRun" were ever
+  //   renamed in the source module, the spy would silently no-op: every call
+  //   in the real component would bypass the spy, the mount count would be 0,
+  //   and `expect(0).toBe(0)` would vacuously pass the flat assertion — the
+  //   regression would be invisible.
+  //
+  // This test guards against that by advancing the fake clock 60 s while
+  // CompactRunStrip is mounted and asserting the spy count IS strictly greater
+  // than the mount count.  The LiveRunProvider emits one new context value per
+  // second; each emission causes CompactRunStrip to re-render (useLiveRun()
+  // subscription delivers the new nowTime) and call useLiveRun() again.
+  //
+  // If "useLiveRun" were renamed in the source module:
+  //   • The spy target would no longer intercept any calls.
+  //   • Spy count would stay at 0 both at mount and after 60 s of ticks.
+  //   • `expect(0).toBeGreaterThan(0)` would FAIL — regression caught.
+  //
+  // This symmetric guard completes the spy-wiring proof:
+  //   Test 1 — spy stays FLAT after dialog toggle (isolation holds).
+  //   Test 3 — spy ADVANCES after clock ticks (spy is wired to real calls).
+  //   Together they rule out both false negatives (wrong hook) and vacuous
+  //   passes (renamed / unspied export).
+  it("symmetric spy counter-proof: spy on LiveRunContextNS.useLiveRun IS > mount count after clock ticks (proves spy is wired to the real hook, not renamed)", async () => {
+    vi.useFakeTimers();
+
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    try {
+      render(
+        <S12Wrapper runStatus="running" dialogOpen={false}>
+          <CompactRunStrip />
+        </S12Wrapper>,
+      );
+
+      // Spy must fire at mount — strip is rendered and calls useLiveRun().
+      // If "useLiveRun" were renamed in the source, this would be 0 and the
+      // toBeGreaterThan below would already fail here.
+      const countAfterMount = spy.mock.calls.length;
+      expect(countAfterMount).toBeGreaterThan(0);
+
+      // Advance 60 s — LiveRunProvider fires 60 per-second clock ticks.
+      // Each tick pushes a new context value; CompactRunStrip is subscribed
+      // via useLiveRun() and re-renders, invoking the hook each time.
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+
+      // Spy count must be strictly greater than the mount count: the 60-s
+      // window of clock ticks caused additional useLiveRun() invocations.
+      // If the spy target were renamed, the count would remain at 0 (or stay
+      // frozen at mount count), and this assertion would fail — catching the
+      // regression before it can silently hollow out Test 1's flat assertion.
+      expect(spy.mock.calls.length).toBeGreaterThan(countAfterMount);
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
   // Proves Test 1 has teeth: a memo()-wrapped component that calls useHomeCtx()
   // instead of useHomeTabCtx() DOES re-render when the same dialog field
