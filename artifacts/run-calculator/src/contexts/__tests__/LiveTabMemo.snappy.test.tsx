@@ -3308,6 +3308,116 @@ describe("LiveTabMemo — Suite 11: real CompactRunStrip useLiveRun() subscripti
 
     expect(s11NoLiveRunRenderCount).toBeGreaterThan(countAfterMount);
   });
+
+  // ─── Test 4: COUNTER-PROOF IS NOT WIRED TO HomeCtx ───────────────────────
+  // Mirrors Suite 10 Test 4: confirms that S11NoLiveRunSubscriber (the shared
+  // counter-proof component from Tests 2 & 3) does NOT re-render when a
+  // HomeCtx dialog field toggles, proving it is subscribed to HomeTabCtx
+  // only and not accidentally wired to the broader HomeCtx.
+  //
+  // Why this matters:
+  //   Test 3 proves S11NoLiveRunSubscriber re-renders on a HomeTabCtx (runStatus)
+  //   change.  But it does not prove the re-render is caused EXCLUSIVELY by
+  //   HomeTabCtx.  If S11NoLiveRunSubscriber were inadvertently changed to call
+  //   useHomeCtx() instead of (or in addition to) useHomeTabCtx(), it would
+  //   still re-render on runStatus changes (HomeCtx also carries runStatus),
+  //   and Test 3 would still pass — masking the drift.
+  //
+  //   This test closes that gap: it toggles only the HomeCtx dialogOpen field
+  //   (which is NOT in HomeTabCtx's dep list) and asserts s11NoLiveRunRenderCount
+  //   stays flat.  A genuine useHomeTabCtx()-only subscriber must NOT re-render;
+  //   a component wired to useHomeCtx() would re-render and fail this test.
+  //
+  // Uses S12Wrapper (both HomeCtx + HomeTabCtx present) so that the HomeCtx
+  // value can change on dialogOpen without affecting HomeTabCtx.
+  it("counter-proof isolation: S11NoLiveRunSubscriber does NOT re-render when only a HomeCtx dialog field toggles (confirming it is not wired to HomeCtx)", async () => {
+    const { rerender } = render(
+      <S12Wrapper runStatus="running" dialogOpen={false}>
+        <S11NoLiveRunSubscriber />
+      </S12Wrapper>,
+    );
+
+    const countAfterMount = s11NoLiveRunRenderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field (dialogOpen false → true, which changes
+    // manageCategory "" → "mixes" inside S12Wrapper) WITHOUT changing runStatus.
+    // HomeCtx emits a new value; HomeTabCtx stays the same.
+    await act(async () => {
+      rerender(
+        <S12Wrapper runStatus="running" dialogOpen={true}>
+          <S11NoLiveRunSubscriber />
+        </S12Wrapper>,
+      );
+    });
+
+    // s11NoLiveRunRenderCount must be unchanged: HomeTabCtx did not emit a new
+    // value, so a genuine useHomeTabCtx()-only subscriber must not re-render.
+    // If useHomeTabCtx() were replaced with useHomeCtx() inside
+    // S11NoLiveRunSubscriber, the HomeCtx change above would reach the component,
+    // s11NoLiveRunRenderCount would increase, and this assertion would fail —
+    // catching the drift before Test 2's "flat spy count" signal is undermined.
+    expect(s11NoLiveRunRenderCount).toBe(countAfterMount);
+  });
+
+  // ─── Test 5: STRICT-EQUAL HAS REAL TEETH ─────────────────────────────────
+  // Mirrors Suite 10 Test 5: proves that Test 4's strict `.toBe(countAfterMount)`
+  // is not vacuous.  If that assertion were softened to `toBeGreaterThanOrEqual`,
+  // or if S11NoLiveRunSubscriber were re-wired to call useHomeCtx() instead of
+  // useHomeTabCtx(), the assertion would still pass — even though the
+  // counter-proof component would now be accepting re-renders triggered by
+  // HomeCtx dialog-toggle updates, silently undermining the isolation signal
+  // Test 4 is designed to provide.
+  //
+  // This test renders a LOCAL variant of S11NoLiveRunSubscriber that calls
+  // useHomeCtx() instead of useHomeTabCtx() (the accidental re-wiring scenario),
+  // then toggles the SAME dialogOpen field used in Test 4.  Because HomeCtx
+  // includes manageCategory in its value (and S12Wrapper memos on dialogOpen),
+  // the wrong-hook variant re-renders and the count INCREASES — confirming that
+  // Test 4's strict-equal assertion would correctly FAIL under the regression
+  // it is designed to catch.
+  it("strict-equal teeth: a variant wired to useHomeCtx() DOES re-render when the HomeCtx dialog field toggles, proving Test 4's flat-count assertion is not vacuous", async () => {
+    let homeCtxVariantCount = 0;
+
+    // Local variant: identical to the describe-scope S11NoLiveRunSubscriber
+    // except it calls useHomeCtx() instead of useHomeTabCtx() — the accidental
+    // re-wiring that Test 4 is designed to catch.  A separate counter is used
+    // so this test does not interfere with s11NoLiveRunRenderCount (reset in beforeEach).
+    const HomeCtxVariant = memo(function HomeCtxVariantInner() {
+      homeCtxVariantCount++;
+      useHomeCtx(); // wrong hook — subscribed to the broader HomeCtx
+      return <span data-testid="s11-homectx-variant">variant</span>;
+    });
+
+    const { rerender } = render(
+      <S12Wrapper runStatus="running" dialogOpen={false}>
+        <HomeCtxVariant />
+      </S12Wrapper>,
+    );
+
+    const countAfterMount = homeCtxVariantCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field — dialogOpen false → true causes
+    // S12Wrapper's homeCtxValue memo to re-run (manageCategory "" → "mixes")
+    // while tabCtxValue stays stable.  A component wired to useHomeCtx() must
+    // receive the update and re-render.
+    await act(async () => {
+      rerender(
+        <S12Wrapper runStatus="running" dialogOpen={true}>
+          <HomeCtxVariant />
+        </S12Wrapper>,
+      );
+    });
+
+    // homeCtxVariantCount increased: the useHomeCtx() subscription delivered
+    // the HomeCtx update.  This demonstrates that the REAL S11NoLiveRunSubscriber
+    // (which uses useHomeTabCtx()) would also increase its count under the same
+    // wrong-hook scenario — and Test 4's strict `.toBe(countAfterMount)` would
+    // correctly fail, confirming the assertion has genuine teeth and cannot be
+    // vacuously satisfied.
+    expect(homeCtxVariantCount).toBeGreaterThan(countAfterMount);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
