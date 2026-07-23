@@ -3302,3 +3302,211 @@ describe("LiveTabMemo — Suite 11: real CompactRunStrip useLiveRun() subscripti
     expect(s11NoLiveRunRenderCount).toBeGreaterThan(countAfterMount);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 12 — Real CompactRunStrip is wired to useHomeTabCtx(), not useHomeCtx()
+//
+// Suites 11 guards CompactRunStrip's useLiveRun() subscription (clock stays
+// live while a manage dialog is open).  But it does NOT detect the specific
+// regression where useHomeTabCtx() is accidentally swapped for useHomeCtx()
+// inside CompactRunStrip.
+//
+// If that swap happened:
+//   • Opening a manage dialog emits a new HomeCtx value.
+//   • CompactRunStrip (subscribed to HomeCtx instead of HomeTabCtx) re-renders.
+//   • It calls useLiveRun() again — the spy count advances.
+//   • Suite 11 Test 1 (clock ticks advance spy count) still passes because
+//     the spy also advances during normal clock ticks.
+//   • The wrong-hook swap is INVISIBLE to Suite 11.
+//
+// This suite closes that gap by:
+//   1. Providing BOTH HomeCtx (invalidated on dialogOpen) AND HomeTabCtx
+//      (stable, never invalidated by dialog toggles) in the wrapper.
+//   2. Toggling dialogOpen WITHOUT advancing the fake clock.
+//   3. Asserting that useLiveRun() spy count does NOT increase — proving
+//      CompactRunStrip did NOT re-render from the HomeCtx change.
+//
+// If useHomeTabCtx() were swapped for useHomeCtx():
+//   • HomeCtx invalidates → CompactRunStrip re-renders → calls useLiveRun()
+//   • Spy count increases by 1 → assertion fails — regression caught.
+//
+// Two tests mirror Suite 9 (GlanceOverlay) exactly:
+//
+//   1. REAL-COMPONENT ISOLATION — toggling a HomeCtx dialog field does NOT
+//      cause an extra useLiveRun() call.  Because the real component reads
+//      HomeTabCtx (stable), React.memo() skips the re-render entirely.
+//
+//   2. COUNTER-PROOF — a useHomeCtx() subscriber in the same tree DOES
+//      re-render on the same dialog toggle, proving the HomeCtx value truly
+//      changed and Test 1's flat-spy assertion has teeth.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Module-level stable refs so S12Wrapper re-renders (caused by dialogOpen
+// changing) don't create new object identities for LiveRunProvider props —
+// which would otherwise emit a spurious context update and confuse the spy count.
+const S12_DAY_STATE = { runs: [ACTIVE_RUN], currentIndex: 0 } as const;
+const S12_UPCOMING_LABELS: string[] = [];
+const S12_MACHINE = { spinSec: 0, hopperSec: 0 } as const;
+
+// Wrapper providing BOTH HomeCtx (changes on dialogOpen) AND HomeTabCtx
+// (stable — never invalidated by dialog toggles).
+// This mirrors the real home.tsx render tree: homeCtxValue carries ALL fields
+// (including manage/dialog state), while homeTabCtxValue is a narrow useMemo
+// whose deps intentionally exclude dialog fields.
+function S12Wrapper({
+  runStatus = "running",
+  dialogOpen = false,
+  children,
+}: {
+  runStatus?: string;
+  dialogOpen?: boolean;
+  children: ReactNode;
+}) {
+  const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+  // HomeTabCtx: stable — only runStatus is a dep; dialogOpen is excluded.
+  // CompactRunStrip correctly relies on this narrow context.
+  const tabCtxValue = useMemo(
+    () => makeCompactRunStripCtxValue(runStatus),
+    [runStatus],
+  );
+
+  // HomeCtx: invalidates when dialogOpen changes.
+  // Mirrors home.tsx: the full homeCtxValue carries manage/dialog fields and
+  // re-emits whenever any of them change — HomeTabCtx does NOT.
+  const homeCtxValue = useMemo(
+    () => ({
+      runStatus,
+      currentRun: { id: "run-live-1", brand: "TestBrand", flavor: "TestFlavor" },
+      dayState: S12_DAY_STATE,
+      form: null,
+      activeTab: "run",
+      manageCategory: dialogOpen ? "mixes" : "",
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runStatus, dialogOpen],
+  );
+
+  return (
+    <HomeCtx.Provider value={homeCtxValue}>
+      <HomeTabCtx.Provider value={tabCtxValue}>
+        <LiveRunProvider
+          v={ACTIVE_VALUES}
+          ve={ACTIVE_VALUES}
+          runStatus={runStatus as "running"}
+          currentRun={ACTIVE_RUN}
+          currentRunId="run-live-1"
+          form={form}
+          dayState={S12_DAY_STATE}
+          doughSubTab="dough"
+          upcomingRunLabels={S12_UPCOMING_LABELS}
+          prefs={undefined}
+          screenMode={null}
+          machine={S12_MACHINE}
+        >
+          {children}
+        </LiveRunProvider>
+      </HomeTabCtx.Provider>
+    </HomeCtx.Provider>
+  );
+}
+
+describe("LiveTabMemo — Suite 12: real CompactRunStrip is wired to useHomeTabCtx(), not useHomeCtx()", () => {
+  afterEach(() => { cleanup(); });
+
+  // ─── Test 1: REAL-COMPONENT ISOLATION ────────────────────────────────────
+  // The real CompactRunStrip must NOT call useLiveRun() an extra time when a
+  // HomeCtx dialog field toggles.  Because CompactRunStrip reads HomeTabCtx
+  // (stable — dialogOpen is NOT a dep), React.memo() must skip the re-render
+  // entirely and the useLiveRun() spy count must stay flat.
+  //
+  // If CompactRunStrip were accidentally re-wired to call useHomeCtx() instead
+  // of useHomeTabCtx(), the manageCategory toggle would invalidate HomeCtx,
+  // reach the real component, trigger a re-render, and the re-render would
+  // call useLiveRun() — advancing the spy count and failing this assertion.
+  //
+  // No fake timers are used here: the clock is not advanced, so any spy-count
+  // increase is caused exclusively by a dialog-field-induced re-render, not
+  // by a clock tick.
+  it("real CompactRunStrip: useLiveRun() spy count does NOT increase when a HomeCtx dialog field toggles (HomeTabCtx is stable)", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    const { rerender } = render(
+      <S12Wrapper runStatus="running" dialogOpen={false}>
+        <CompactRunStrip />
+      </S12Wrapper>,
+    );
+
+    // Strip is present and useLiveRun() was called at mount.
+    expect(document.querySelector("[data-testid='compact-run-strip']")).not.toBeNull();
+    const countAfterMount = spy.mock.calls.length;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field: manageCategory "" → "mixes".
+    // HomeCtx emits a new value; HomeTabCtx stays the same.
+    // React.memo() must prevent CompactRunStrip from re-rendering because its
+    // HomeTabCtx subscription (the only broad context it reads) did not change.
+    await act(async () => {
+      rerender(
+        <S12Wrapper runStatus="running" dialogOpen={true}>
+          <CompactRunStrip />
+        </S12Wrapper>,
+      );
+    });
+
+    // Strip is still present.
+    expect(document.querySelector("[data-testid='compact-run-strip']")).not.toBeNull();
+
+    // Spy count must be flat: no extra useLiveRun() call means no re-render
+    // was triggered by the HomeCtx change.
+    // If useHomeTabCtx() were swapped for useHomeCtx(), the spy count would
+    // have increased by 1 here — catching the regression.
+    expect(spy.mock.calls.length).toBe(countAfterMount);
+
+    spy.mockRestore();
+  });
+
+  // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
+  // Proves Test 1 has teeth: a memo()-wrapped component that calls useHomeCtx()
+  // instead of useHomeTabCtx() DOES re-render when the same dialog field
+  // toggles in the same wrapper.  This confirms that the HomeCtx value truly
+  // changed (so the S12Wrapper is doing its job), and that Test 1's flat-spy
+  // assertion would fail if CompactRunStrip were re-wired to call useHomeCtx().
+  it("counter-proof: a useHomeCtx() subscriber DOES re-render when a HomeCtx dialog field toggles (proving Test 1 would catch the regression)", async () => {
+    let renderCount = 0;
+
+    const HomeCtxSub = memo(function HomeCtxSubInner() {
+      renderCount++;
+      // WRONG hook — mirrors what CompactRunStrip would look like if it were
+      // accidentally re-wired to useHomeCtx() instead of useHomeTabCtx().
+      useHomeCtx();
+      return <span data-testid="s12-counter-proof">rendered</span>;
+    });
+
+    const { rerender } = render(
+      <S12Wrapper runStatus="running" dialogOpen={false}>
+        <HomeCtxSub />
+      </S12Wrapper>,
+    );
+
+    const countAfterMount = renderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the same HomeCtx dialog field.
+    // HomeCtx invalidates → the useHomeCtx() subscriber receives the new
+    // context value → re-renders.
+    await act(async () => {
+      rerender(
+        <S12Wrapper runStatus="running" dialogOpen={true}>
+          <HomeCtxSub />
+        </S12Wrapper>,
+      );
+    });
+
+    // renderCount increased: the wrong hook caused a needless re-render.
+    // This confirms that Test 1's flat useLiveRun() spy assertion would also
+    // fail if CompactRunStrip were re-wired to call useHomeCtx() — because
+    // the re-render would call useLiveRun() and advance the spy count.
+    expect(renderCount).toBeGreaterThan(countAfterMount);
+  });
+});
