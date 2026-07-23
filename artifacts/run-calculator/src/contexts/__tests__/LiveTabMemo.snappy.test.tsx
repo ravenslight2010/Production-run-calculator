@@ -2691,7 +2691,24 @@ describe("LiveTabMemo — Suite 9: real GlanceOverlay is wired to useHomeTabCtx(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count advances in combined HomeCtx+HomeTabCtx wrapper", () => {
-  beforeEach(() => vi.useFakeTimers());
+  // ── Shared counter-proof component ────────────────────────────────────────
+  // Both Test 2 (flat spy count) and Test 3 (liveness guard) use this EXACT
+  // component definition.  A single shared definition ensures that any future
+  // weakening of the counter-proof (e.g. removing useHomeTabCtx()) is
+  // immediately visible to both tests — there is no separate copy that can
+  // silently drift away from the component actually exercised by Test 2.
+  let s10RenderCount = 0;
+
+  // NOTE: memo() is called here at describe-scope so React sees a stable
+  // component identity across tests.  s10RenderCount is reset in beforeEach.
+  const NoLiveRunSubscriber = memo(function NoLiveRunSubscriberInner() {
+    s10RenderCount++;
+    useHomeTabCtx(); // live HomeTabCtx subscriber — just like GlanceOverlay
+    // useLiveRun() intentionally absent — the counter-proof scenario
+    return <span data-testid="s10-no-live-run">static</span>;
+  });
+
+  beforeEach(() => { s10RenderCount = 0; vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); cleanup(); });
 
   // ─── Test 1: CALL-COUNT ADVANCE ──────────────────────────────────────────
@@ -2744,16 +2761,9 @@ describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count a
   it("counter-proof: a memo() component with no useLiveRun() subscription has a flat spy call count after 60 s of clock ticks", async () => {
     const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
 
-    // A minimal memo()-wrapped component that mirrors GlanceOverlay's
-    // HomeTabCtx subscription but deliberately omits useLiveRun().
-    // This is the "useLiveRun() accidentally deleted" scenario: it still
-    // subscribes to one context but no longer to the live clock.
-    const NoLiveRunSubscriber = memo(function NoLiveRunSubscriberInner() {
-      useHomeTabCtx(); // correct context subscription — just like GlanceOverlay
-      // useLiveRun() intentionally absent — the scenario under test
-      return <span data-testid="s10-no-live-run">static</span>;
-    });
-
+    // NoLiveRunSubscriber is defined at describe-scope (shared with Test 3).
+    // It mirrors GlanceOverlay's HomeTabCtx subscription but deliberately
+    // omits useLiveRun() — the "useLiveRun() accidentally deleted" scenario.
     render(
       <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
         <NoLiveRunSubscriber />
@@ -2775,5 +2785,53 @@ describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count a
     expect(spy.mock.calls.length).toBe(countAtMount);
 
     spy.mockRestore();
+  });
+
+  // ─── Test 3: COUNTER-PROOF IS NOT A NO-OP ────────────────────────────────
+  // Confirms the counter-proof component from Test 2 (NoLiveRunSubscriber) is
+  // a genuine live subscriber to HomeTabCtx and not a trivial no-op wrapper.
+  //
+  // Why this matters:
+  //   If someone accidentally removed useHomeTabCtx() from NoLiveRunSubscriber,
+  //   it would stop receiving HomeTabCtx updates entirely — yet it would still
+  //   produce a flat useLiveRun() spy count after 60 s (because it still omits
+  //   useLiveRun()).  Test 2 would continue to pass vacuously, giving Test 1
+  //   false confidence that the advancing call count is meaningful.
+  //
+  // The fix: prove NoLiveRunSubscriber IS a live subscriber to something by
+  // showing it re-renders when HomeTabCtx changes (runStatus toggle).
+  // tabCtxValue in RealGlanceHomeCtxWrapper memos on runStatus, so flipping
+  // "running" → "idle" emits a new HomeTabCtx value.  A genuine useHomeTabCtx()
+  // subscriber must re-render; a hollow no-op would not.
+  it("counter-proof liveness: NoLiveRunSubscriber re-renders when HomeTabCtx changes (runStatus toggle), proving it is not a no-op", async () => {
+    // Uses the SAME NoLiveRunSubscriber defined at describe-scope — the exact
+    // component exercised by Test 2.  s10RenderCount is reset in beforeEach.
+    const { rerender } = render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <NoLiveRunSubscriber />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    const countAfterMount = s10RenderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle runStatus "running" → "idle": HomeTabCtx emits a new value
+    // (tabCtxValue memos on runStatus inside RealGlanceHomeCtxWrapper).
+    // The useHomeTabCtx() subscriber must re-render.
+    await act(async () => {
+      rerender(
+        <RealGlanceHomeCtxWrapper runStatus="idle" dialogOpen={false}>
+          <NoLiveRunSubscriber />
+        </RealGlanceHomeCtxWrapper>,
+      );
+    });
+
+    // s10RenderCount increased: the useHomeTabCtx() subscription delivered the
+    // updated context and triggered a re-render.  If useHomeTabCtx() were
+    // removed from NoLiveRunSubscriber (the shared describe-scope component),
+    // s10RenderCount would stay flat — meaning Test 2's "flat spy count" would
+    // be vacuously satisfied and Test 1's advancing-count signal would be
+    // unguarded.
+    expect(s10RenderCount).toBeGreaterThan(countAfterMount);
   });
 });
