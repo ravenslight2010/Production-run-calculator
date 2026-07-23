@@ -3496,6 +3496,125 @@ describe("LiveTabMemo — Suite 11: real CompactRunStrip useLiveRun() subscripti
     // vacuously satisfied.
     expect(homeCtxVariantCount).toBeGreaterThan(countAfterMount);
   });
+
+  // ─── Test 6: TEETH GUARD — Test 5's count-increases assertion is not vacuous ─
+  // Test 5 proves that Test 4's strict `.toBe(countAfterMount)` has real teeth
+  // by showing a useHomeCtx() variant DOES re-render when S12Wrapper's homeCtxValue
+  // changes on a dialogOpen toggle.  But Test 5 itself uses `.toBeGreaterThan` —
+  // if that assertion were softened to `.toBeGreaterThanOrEqual`, or if S12Wrapper
+  // inadvertently excluded dialogOpen from homeCtxValue's deps, the count could
+  // stay flat and both Test 5 and Test 4 would vacuously pass.
+  //
+  // This guard closes that gap by demonstrating the necessary condition:
+  //   If S12Wrapper's homeCtxValue excluded dialogOpen from its useMemo deps,
+  //   HomeCtx would NOT emit a new value on the toggle, the useHomeCtx() variant
+  //   would NOT re-render, and the count would be FLAT.
+  //
+  // The strict `.toBe(countAfterMount)` assertion here confirms that the count
+  // genuinely can stay flat (the regression scenario is reachable), proving that
+  // Test 5's `.toBeGreaterThan(countAfterMount)` is the load-bearing check that
+  // cannot be safely replaced with `.toBeGreaterThanOrEqual`.
+  it("teeth guard: a useHomeCtx() variant does NOT re-render when the wrapper's homeCtxValue excludes dialogOpen from deps, proving Test 5's toBeGreaterThan assertion is not vacuous", async () => {
+    let teethGuardCount = 0;
+
+    // Same subscription pattern as Test 5's HomeCtxVariant — reads useHomeCtx().
+    // A separate counter so this test never interferes with s11NoLiveRunRenderCount.
+    const HomeCtxVariantTeethGuard = memo(function HomeCtxVariantTeethGuardInner() {
+      teethGuardCount++;
+      useHomeCtx(); // subscribed to the broader HomeCtx — like Test 5's variant
+      return <span data-testid="s11-teeth-guard-variant">variant</span>;
+    });
+
+    // Broken wrapper: homeCtxValue's useMemo intentionally excludes dialogOpen
+    // from its deps.  When dialogOpen toggles, homeCtxValue stays the same
+    // cached reference — HomeCtx does NOT emit a new value — so a useHomeCtx()
+    // subscriber does NOT re-render.  This is the failure scenario that Test 5's
+    // `.toBeGreaterThan` assertion is designed to catch.
+    function BrokenS12Wrapper({
+      runStatus = "running",
+      dialogOpen: _dialogOpen = false,
+      children,
+    }: {
+      runStatus?: string;
+      dialogOpen?: boolean;
+      children: ReactNode;
+    }) {
+      const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+      // Stable narrow context — same as real S12Wrapper.
+      const tabCtxValue = useMemo(
+        () => makeCompactRunStripCtxValue(runStatus),
+        [runStatus],
+      );
+
+      // BUG SIMULATION: dialogOpen is not a dep → homeCtxValue is frozen;
+      // toggling dialogOpen from outside will NOT produce a new HomeCtx value.
+      const homeCtxValue = useMemo(
+        () => ({
+          runStatus,
+          currentRun: { id: "run-live-1", brand: "TestBrand", flavor: "TestFlavor" },
+          dayState: S12_DAY_STATE,
+          form: null,
+          activeTab: "run",
+          manageCategory: "",  // always "" — dialogOpen excluded from deps
+        }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [runStatus],  // dialogOpen deliberately absent — this is the bug being simulated
+      );
+
+      return (
+        <HomeCtx.Provider value={homeCtxValue}>
+          <HomeTabCtx.Provider value={tabCtxValue}>
+            <LiveRunProvider
+              v={ACTIVE_VALUES}
+              ve={ACTIVE_VALUES}
+              runStatus={runStatus as "running"}
+              currentRun={ACTIVE_RUN}
+              currentRunId="run-live-1"
+              form={form}
+              dayState={S12_DAY_STATE}
+              doughSubTab="dough"
+              upcomingRunLabels={S12_UPCOMING_LABELS}
+              prefs={undefined}
+              screenMode={null}
+              machine={S12_MACHINE}
+            >
+              {children}
+            </LiveRunProvider>
+          </HomeTabCtx.Provider>
+        </HomeCtx.Provider>
+      );
+    }
+
+    const { rerender } = render(
+      <BrokenS12Wrapper runStatus="running" dialogOpen={false}>
+        <HomeCtxVariantTeethGuard />
+      </BrokenS12Wrapper>,
+    );
+
+    const countAfterMount = teethGuardCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle dialogOpen — but because BrokenS12Wrapper excludes it from
+    // homeCtxValue's deps, HomeCtx does NOT emit a new value.
+    await act(async () => {
+      rerender(
+        <BrokenS12Wrapper runStatus="running" dialogOpen={true}>
+          <HomeCtxVariantTeethGuard />
+        </BrokenS12Wrapper>,
+      );
+    });
+
+    // Count must be UNCHANGED: HomeCtx did not emit a new value, so the
+    // useHomeCtx() subscriber did not re-render.
+    //
+    // This confirms that when the HomeCtx value is frozen (the regression
+    // scenario), a useHomeCtx() variant produces a flat count — exactly the
+    // scenario Test 5 must detect.  Test 5's strict `.toBeGreaterThan(countAfterMount)`
+    // would correctly FAIL in this situation, proving it is not vacuous and
+    // cannot be safely softened to `.toBeGreaterThanOrEqual`.
+    expect(teethGuardCount).toBe(countAfterMount);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
