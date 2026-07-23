@@ -75,6 +75,29 @@ let usersMod: typeof import("../lib/users");
 // into a visible build error caught at typecheck time.
 type _AssertGetUserByIdExported = (typeof usersMod)["getUserById"];
 
+// Kept at module level so a future spy on getUserSecurityState (or the
+// compile-time guard below) can reference it without re-importing.
+//
+// NOTE: no direct vi.spyOn(userValidityMod, "getUserSecurityState") spy is
+// used in this file. The DB-query-call-count tests already verify the
+// getUserSecurityState → getUserById code path indirectly by spying on
+// usersMod.getUserById. A call count of 2 per cold-cache request confirms
+// that getUserSecurityState itself called getUserById (count 1) and the
+// sandbox gate called it again (count 2). Adding a parallel direct spy on
+// getUserSecurityState would create the same fragile string-key risk this
+// guard pattern is designed to prevent — so the indirection is intentional
+// and sufficient. If a future test does introduce such a spy, add a
+// vi.spyOn(userValidityMod, "getUserSecurityState") call and rely on the
+// compile-time assertion below to catch any rename.
+let userValidityMod: typeof import("../lib/userValidity");
+
+// Compile-time guard: if 'getUserSecurityState' is renamed in userValidity.ts,
+// TypeScript will error here ("Property 'getUserSecurityState' does not exist
+// on type ..."). This prevents a future developer from adding a direct spy on
+// userValidityMod.getUserSecurityState that would silently target a missing key
+// after a rename — turning a vacuous pass into a visible build error.
+type _AssertGetUserSecurityStateExported = (typeof userValidityMod)["getUserSecurityState"];
+
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
@@ -119,7 +142,7 @@ beforeAll(async () => {
   const authMod = await import("../lib/auth");
   sandboxMod = await import("../lib/sandbox");
   usersMod = await import("../lib/users");
-  const userValidityMod = await import("../lib/userValidity");
+  userValidityMod = await import("../lib/userValidity");
   const sessionBoundaryMod = await import("../lib/sessionBoundary");
 
   db = dbMod.db;
@@ -801,6 +824,34 @@ describe("spy-wiring guard: getUserById export must remain a callable function",
     // call-count tests in the DB-query suite become obviously broken rather
     // than silently passing with vacuous counts.
     expect(typeof usersMod.getUserById).toBe("function");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spy-wiring guard: getUserSecurityState export must remain a callable function
+//
+// No direct vi.spyOn(userValidityMod, "getUserSecurityState") spy is currently
+// used in this file — the DB-query-call-count tests verify that code path
+// indirectly by counting getUserById calls (each cold-cache requireAuth
+// request produces 2 calls: one from getUserSecurityState in userValidity.ts
+// and one from isSandboxUser in sandbox.ts). The indirection is intentional
+// and sufficient.
+//
+// However, if a future test does add such a direct spy, a rename of
+// getUserSecurityState in userValidity.ts would cause vi.spyOn to silently
+// target a missing key, making call-count assertions pass vacuously. This
+// describe block is the belt-and-suspenders runtime layer that pairs with the
+// compile-time type assertion (_AssertGetUserSecurityStateExported) declared
+// near the module-level variable. It runs after beforeAll populates
+// userValidityMod, so any gap between the static type and the actual runtime
+// binding is caught with a clear failure message rather than a vacuous pass.
+// ---------------------------------------------------------------------------
+describe("spy-wiring guard: getUserSecurityState export must remain a callable function", () => {
+  it("userValidityMod.getUserSecurityState is a function — a rename in userValidity.ts would break any future vi.spyOn wiring", () => {
+    // If getUserSecurityState is renamed, typeof userValidityMod.getUserSecurityState
+    // is "undefined". This assertion fails immediately with a clear message,
+    // making the breakage obvious rather than producing silently vacuous counts.
+    expect(typeof userValidityMod.getUserSecurityState).toBe("function");
   });
 });
 
