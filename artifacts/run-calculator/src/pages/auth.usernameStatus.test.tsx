@@ -267,6 +267,71 @@ describe("sign-up button: re-enables after correcting a taken username", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Clear path: taken → field cleared entirely → idle hint, button still disabled
+// ---------------------------------------------------------------------------
+describe("sign-up button: clearing the username field after a taken result reverts to idle", () => {
+  it(
+    "shows the idle hint and keeps the button disabled when the username field is cleared after a taken result",
+    async () => {
+      const user = userEvent.setup();
+
+      mockCheckUsernameAvailable.mockResolvedValue({ available: false });
+
+      renderSignUpPage();
+
+      // Fill all required fields other than username first.
+      const pwFields = screen.getAllByLabelText(/password/i);
+      await user.type(pwFields[0], "password123");
+      await user.type(pwFields[1], "password123");
+      await user.type(
+        screen.getByLabelText(/facility.*code|access.*code/i),
+        "valid-code",
+      );
+
+      // Step 1: type a taken username and wait for the "already taken" hint.
+      const usernameInput = screen.getByLabelText(/^username$/i);
+      await user.type(usernameInput, "takenuser");
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/already taken/i)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+
+      // Confirm the button is disabled while the username is taken.
+      const submitButton = screen.getByRole("button", {
+        name: /create.*account/i,
+      });
+      expect((submitButton as HTMLButtonElement).disabled).toBe(true);
+
+      // Step 2: clear the field entirely — hook must snap back to "idle"
+      // synchronously (handle.length === 0 branch fires in useEffect without
+      // waiting for the debounce timer).
+      await user.clear(usernameInput);
+
+      // The idle hint ("At least 3 characters") must replace "already taken".
+      // Neither "taken" nor "checking" should appear.
+      // Use getAllByText because the password hint also says "At least 6 characters".
+      // We verify at least one element matches the username-specific "3 characters" text.
+      await waitFor(
+        () => {
+          expect(screen.getByText(/at least\s+3\s+characters/i)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+      expect(screen.queryByText(/already taken/i)).toBeNull();
+      expect(screen.queryByText(/checking availability/i)).toBeNull();
+
+      // The button must remain disabled — the username is now empty so the
+      // length guard blocks submission (right reason, not the "taken" status).
+      expect((submitButton as HTMLButtonElement).disabled).toBe(true);
+    },
+    8000,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Sign-in button: must NOT be gated on username availability at all
 // ---------------------------------------------------------------------------
 describe("sign-in button: unaffected by username availability", () => {
