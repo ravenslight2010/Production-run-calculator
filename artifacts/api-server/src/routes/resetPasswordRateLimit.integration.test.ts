@@ -8,11 +8,13 @@
 // onto the reset-password route in routes/auth.ts so a future accidental
 // removal cannot go undetected.
 //
-// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests with an empty
-// body (all return 400 — the Zod schema requires username, code, and
-// newPassword, so the handler rejects the request immediately without any DB
-// access). The next request must return 429 regardless of its body. Using an
-// invalid body keeps the test fast and side-effect-free.
+// Strategy: exhaust the limit by sending AUTH_RATE_MAX requests carrying a
+// deliberately invalid reset code (a random string that can never match a real
+// code stored in the DB). Each request passes Zod validation and reaches the
+// handler, which quickly rejects the bogus code with a 4xx. The next request
+// must return 429 regardless of its body. Using an invalid-but-well-shaped
+// body is more representative of a real brute-force attempt than an empty body
+// that only exercises Zod schema rejection.
 //
 // Like the other *.integration.test.ts files in this directory, this stands up
 // a disposable Postgres database so the real router can import @workspace/db.
@@ -105,34 +107,41 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
-// Helper: POST /api/auth/reset-password with an empty body.
-// Returns the raw Response so the caller can inspect the status. The Zod
-// schema requires username, code, and newPassword, so the handler rejects the
-// request with 400 immediately — no DB access occurs, keeping the test fast
-// and free of side-effects.
+// Helper: POST /api/auth/reset-password with a well-shaped body carrying a
+// bogus reset code. Returns the raw Response so the caller can inspect the
+// status. The request passes Zod validation and reaches the handler, which
+// rejects the bogus code with a 4xx quickly — no successful write occurs.
+// This is closer to a real brute-force attack than an empty body that only
+// exercises Zod schema rejection.
 function resetPasswordRequest(): Promise<Response> {
   return fetch(`${baseUrl}/api/auth/reset-password`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+      username: `nosuchuser_${Math.random().toString(36).slice(2)}`,
+      code: Math.random().toString(36).slice(2).toUpperCase(),
+      newPassword: "ValidPass123!",
+    }),
   });
 }
 
 describe("POST /api/auth/reset-password — authRateLimit fires after AUTH_RATE_MAX requests", () => {
   it(
-    "returns 429 on the request that exceeds the cap and 400 for all requests within it",
+    "returns 429 on the request that exceeds the cap and a non-429 status for all requests within it",
     async () => {
-      // Send AUTH_RATE_MAX requests with an empty body. Each returns 400
-      // because the Zod schema rejects it before any DB access — username,
-      // code, and newPassword are all required. The rate-limit counter
-      // increments on every request, including rejected ones — that is the
-      // intended behaviour so token brute-force attempts still exhaust the
-      // budget.
+      // Send AUTH_RATE_MAX requests carrying an invalid-but-well-shaped reset
+      // code. Each request passes Zod validation and reaches the handler, which
+      // quickly rejects the bogus code with a 4xx. The rate-limit counter
+      // increments on every request — that is the intended behaviour so
+      // brute-force code-guessing attempts still exhaust the budget.
       for (let i = 1; i <= AUTH_RATE_MAX; i++) {
         const res = await resetPasswordRequest();
         // Every request within the cap must be processed by the route handler
-        // (missing/invalid body → 400), not intercepted by the rate limiter.
-        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (400), got ${res.status}`).toBe(400);
+        // (bogus code → 4xx), not intercepted by the rate limiter (429).
+        // Assert a client-error response to also catch unexpected server errors.
+        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (4xx non-429), got ${res.status}`).toBeGreaterThanOrEqual(400);
+        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (4xx non-429), got ${res.status}`).toBeLessThan(500);
+        expect(res.status, `request ${i} of ${AUTH_RATE_MAX} should reach the handler (4xx non-429), got ${res.status}`).not.toBe(429);
       }
 
       // The very next request exceeds the cap. The rate-limit middleware must
