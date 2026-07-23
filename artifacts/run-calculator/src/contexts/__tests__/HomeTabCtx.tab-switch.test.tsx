@@ -132,6 +132,22 @@ function BrokenTabProvider({
   return <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>;
 }
 
+// ── PACKAGING_COMBINED_PIN ────────────────────────────────────────────────────
+// Invariant: mount(1) + form-change(1) + status-change(1) + dialog-open(0) = 3.
+//
+// This constant is the single source of truth for the Block 1–3 COMBINED test's
+// exact render-count pin.  The REGRESSION GUARD (COMBINED counter-proof) below
+// MUST assert `PACKAGING_COMBINED_PIN + 1` after the dialog-open step (and
+// `PACKAGING_COMBINED_PIN + 2` after the second dialog change) — never a
+// literal 4 or 5 — so the two tests stay in lockstep:
+//
+//   COMBINED pin after dialog-open:        PACKAGING_COMBINED_PIN     (= 3)
+//   Counter-proof pin after dialog-open:   PACKAGING_COMBINED_PIN + 1 (= 4)
+//
+// If the COMBINED test's pin changes (e.g. a third form-change step is added),
+// bump this constant; the counter-proof pins will follow automatically.
+const PACKAGING_COMBINED_PIN = 3;
+
 // ── Subscriber component (mirrors Live*TabContent) ────────────────────────────
 // Uses the REAL useHomeTabCtx() hook, wrapped in React.memo.
 // In production, LiveDoughTabContent / LivePackagingTabContent call exactly
@@ -277,7 +293,14 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
       );
     });
 
-    expect(renderCount).toBe(3); // exact: mount(1) + form-change(1) + status-change(1)
+    // DRIFT GUARD: this assertion pins renderCount to PACKAGING_COMBINED_PIN
+    // immediately before the dialog-open step.  If a third form-change step is
+    // ever added to this COMBINED test without bumping PACKAGING_COMBINED_PIN,
+    // this line will fail (count N+1 vs expected N) → the constant must be
+    // bumped first.  The counter-proof's PACKAGING_COMBINED_PIN + 1 and + 2
+    // assertions then follow automatically, keeping the two tests in lockstep
+    // without any further edits.
+    expect(renderCount).toBe(PACKAGING_COMBINED_PIN); // exact: mount(1) + form-change(1) + status-change(1)
     expect(getByTestId("run-status").textContent).toBe("paused");
 
     // DIALOG step — manage dialog opens (manageCounter: 0→1).
@@ -291,9 +314,11 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
       );
     });
 
-    // Exact guard: renderCount must still be 3.  Any spurious re-render caused
-    // by a dialog field leaking into the context deps will bump this to 4+.
-    expect(renderCount).toBe(3); // exact: no extra render from dialog open
+    // Exact guard: renderCount must still be PACKAGING_COMBINED_PIN (3).  Any
+    // spurious re-render caused by a dialog field leaking into the context deps
+    // will bump this to PACKAGING_COMBINED_PIN+1 — which is exactly what the
+    // COMBINED counter-proof below asserts for the broken provider.
+    expect(renderCount).toBe(PACKAGING_COMBINED_PIN); // exact: no extra render from dialog open
 
     // Repeat with a second dialog state change to rule out a lucky no-op.
     await act(async () => {
@@ -304,7 +329,7 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
       );
     });
 
-    expect(renderCount).toBe(3); // exact: still no extra render from further dialog changes
+    expect(renderCount).toBe(PACKAGING_COMBINED_PIN); // exact: still no extra render from further dialog changes
 
     // SWITCH step — user navigates to Dough/Packaging tab.
     // The tab already holds the current values; no re-render is needed.
@@ -354,6 +379,97 @@ describe("HomeTabCtx — tab-switch propagation and dialog isolation", () => {
     });
 
     expect(renderCount).toBe(3);
+  });
+
+  // ─── REGRESSION GUARD — COMBINED counter-proof ────────────────────────────
+  // Drives BrokenTabProvider through the SAME mount → form-change →
+  // status-change → dialog-open sequence as the COMBINED test above, proving
+  // that the exact render-count pin of PACKAGING_COMBINED_PIN (3) after the
+  // dialog-open step is a real assertion.
+  //
+  // With the correct TabProvider the COMBINED test expects:
+  //   mount(1) + form-change(1) + status-change(1) + dialog-open(0) = 3
+  //
+  // With BrokenTabProvider the dialog-open step produces an extra render,
+  // pushing the count to 4.  This means the COMBINED pin "toBe(PACKAGING_COMBINED_PIN)"
+  // WOULD FAIL under the broken provider — i.e. the COMBINED test is a real
+  // guard, not a false green.
+  //
+  // If THIS test starts FAILING (broken provider no longer bumps the count past
+  // PACKAGING_COMBINED_PIN during the dialog-open step), the COMBINED test's
+  // exact-count assertion has become untestable and should be re-examined.
+  it("REGRESSION GUARD (COMBINED counter-proof): broken provider causes extra render during dialog-open after form changes", async () => {
+    const { rerender, getByTestId } = render(
+      <BrokenTabProvider casesNeeded={50} runStatus="running" manageCounter={0}>
+        <TabSubscriber />
+      </BrokenTabProvider>,
+    );
+
+    // Step 0 — initial mount.
+    expect(renderCount).toBe(1);
+    expect(getByTestId("cases-needed").textContent).toBe("50");
+
+    // Step 1 — form-change: casesNeeded changes.
+    // Both the correct and broken providers yield a new ctx ref here → render.
+    await act(async () => {
+      rerender(
+        <BrokenTabProvider casesNeeded={75} runStatus="running" manageCounter={0}>
+          <TabSubscriber />
+        </BrokenTabProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(2); // mount(1) + form-change(1)
+    expect(getByTestId("cases-needed").textContent).toBe("75");
+
+    // Step 2 — status-change: runStatus also changes.
+    await act(async () => {
+      rerender(
+        <BrokenTabProvider casesNeeded={75} runStatus="paused" manageCounter={0}>
+          <TabSubscriber />
+        </BrokenTabProvider>,
+      );
+    });
+
+    // Lockstep with COMBINED: using PACKAGING_COMBINED_PIN here (not a literal)
+    // means that if the constant is bumped (e.g. a 3rd form-change step is added),
+    // this assertion automatically requires adding that 3rd step here too —
+    // keeping the counter-proof scenario identical to the COMBINED test.
+    expect(renderCount).toBe(PACKAGING_COMBINED_PIN); // = 3; mount(1) + form-change(1) + status-change(1)
+    expect(getByTestId("run-status").textContent).toBe("paused");
+
+    // Step 3 — dialog-open: only manageCounter changes (0→1); production deps stable.
+    // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at PACKAGING_COMBINED_PIN.
+    // BROKEN provider:  manageCounter in deps → new ctx ref → spurious re-render
+    //                   → count becomes PACKAGING_COMBINED_PIN + 1.
+    // This step is the heart of the counter-proof: it shows the COMBINED test's
+    // "toBe(PACKAGING_COMBINED_PIN)" assertion is NOT vacuously true — the broken
+    // provider violates it.
+    await act(async () => {
+      rerender(
+        <BrokenTabProvider casesNeeded={75} runStatus="paused" manageCounter={1}>
+          <TabSubscriber />
+        </BrokenTabProvider>,
+      );
+    });
+
+    // BROKEN provider leaked manageCounter into deps → subscriber re-rendered.
+    // The real TabProvider must keep the count at PACKAGING_COMBINED_PIN (3)
+    // after this step (see the COMBINED test above).  Here it MUST be
+    // PACKAGING_COMBINED_PIN + 1 — proving the COMBINED test's pin is a real
+    // assertion that the broken provider would violate.
+    expect(renderCount).toBe(PACKAGING_COMBINED_PIN + 1); // = 4; extra render proves the COMBINED pin is real
+
+    // One more dialog change confirms it keeps firing — not a one-time no-op.
+    await act(async () => {
+      rerender(
+        <BrokenTabProvider casesNeeded={75} runStatus="paused" manageCounter={99}>
+          <TabSubscriber />
+        </BrokenTabProvider>,
+      );
+    });
+
+    expect(renderCount).toBe(PACKAGING_COMBINED_PIN + 2); // = 5; symmetric with Block 4's counter-proof
   });
 });
 
