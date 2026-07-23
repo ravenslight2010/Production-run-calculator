@@ -1950,6 +1950,40 @@ export function NumField({
 // tracking should pick right back up from it, not go quiet for 10 minutes).
 const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
 
+/**
+ * Amber banner shown while a manual stepper override is holding auto-track
+ * writes back. Renders nothing when `show` is false (suppression window
+ * inactive, auto-track disabled, or no suggestion available). Exported so
+ * it can be rendered directly in component tests without mounting the full
+ * LivePackagingTabContent / LiveDoughTabContent tree.
+ */
+export function ManualOverrideBanner({
+  show,
+  minsLeft,
+  onResume,
+}: {
+  show: boolean;
+  minsLeft: number;
+  onResume: () => void;
+}) {
+  if (!show) return null;
+  return (
+    <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left" data-testid="manual-override-banner">
+      <span className="text-amber-400 font-semibold">
+        Manual override active · auto resumes in ~{fmtMins(minsLeft)}
+      </span>
+      <button
+        type="button"
+        onClick={onResume}
+        className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0"
+        data-testid="btn-resume-now"
+      >
+        Resume now
+      </button>
+    </div>
+  );
+}
+
 // Persisted last-active tab so an unexpected reload restores the user's place.
 const ACTIVE_TAB_STORAGE_KEY = "run-calc-active-tab";
 const VALID_TABS = new Set([
@@ -16733,12 +16767,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           const skidPct = casesPerSkid > 0 ? Math.min(casesOnSkid / casesPerSkid, 1) : 0;
                           return (
                             <>
-                              {autoTrackProgress && s && suppressed && (
-                                <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left">
-                                  <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{fmtMins(suppressedMinsLeft)}</span>
-                                  <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0">Resume now</button>
-                                </div>
-                              )}
+                              <ManualOverrideBanner
+                                show={autoTrackProgress && !!s && suppressed}
+                                minsLeft={suppressedMinsLeft}
+                                onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
+                              />
 
                               <div>
                                 <div className="flex justify-center items-end gap-3 font-mono">
@@ -17172,12 +17205,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   const suppressedMinsLeftNow = suppressedNow ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
                   return (
                     <>
-                      {autoTrackProgress && autoTrackSuggestion && suppressedNow && (
-                        <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] mb-2">
-                          <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{fmtMins(suppressedMinsLeftNow)}</span>
-                          <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
-                        </div>
-                      )}
+                      <ManualOverrideBanner
+                        show={autoTrackProgress && !!autoTrackSuggestion && suppressedNow}
+                        minsLeft={suppressedMinsLeftNow}
+                        onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
+                      />
                       <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
                           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                             Batch Pipeline · 3 max
