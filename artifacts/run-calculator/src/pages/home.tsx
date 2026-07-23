@@ -16244,18 +16244,43 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
               ) : (
                 <div className="w-16" />
               )}
-            {dayState.runs.length > 1 && (
-              <div className="flex items-center justify-center gap-1.5 py-1">
-                {dayState.runs.map((_: any, i: any) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => switchToRun(i)}
-                    className={`rounded-full transition-all ${i === dayState.currentIndex ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
-                  />
-                ))}
-              </div>
-            )}
+            {dayState.runs.length > 1 && (() => {
+              const total = dayState.runs.length;
+              const cur = dayState.currentIndex;
+              const MAX_DOTS = 7;
+              if (total <= MAX_DOTS) {
+                return (
+                  <div className="flex items-center justify-center gap-1.5 py-1 min-w-0">
+                    {dayState.runs.map((_: any, i: any) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => switchToRun(i)}
+                        className={`rounded-full transition-all shrink-0 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                      />
+                    ))}
+                  </div>
+                );
+              }
+              const half = Math.floor(MAX_DOTS / 2);
+              let start = Math.max(0, cur - half);
+              const end = Math.min(total, start + MAX_DOTS);
+              start = Math.max(0, end - MAX_DOTS);
+              return (
+                <div className="flex items-center justify-center gap-1 py-1 min-w-0">
+                  {start > 0 && <span className="text-[9px] text-muted-foreground/50 leading-none">…</span>}
+                  {Array.from({ length: end - start }, (_, j) => start + j).map((i: number) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => switchToRun(i)}
+                      className={`rounded-full transition-all shrink-0 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                    />
+                  ))}
+                  {end < total && <span className="text-[9px] text-muted-foreground/50 leading-none">…</span>}
+                </div>
+              );
+            })()}
               {dayState.currentIndex < dayState.runs.length - 1 ? (
                 <button
                   type="button"
