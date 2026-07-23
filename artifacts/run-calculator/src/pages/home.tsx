@@ -6295,6 +6295,9 @@ export default function Home() {
           // an incoming payload that predates it. The run-deletion tombstone strips
           // ids deleted on a peer so the union can't resurrect them.
           const remoteRuns = payload.dayState.runs;
+          // Hoisted so the IIFE and the post-merge newIndex computation can both
+          // reference the run the user was on before the merge changes the list.
+          const currentLocalId = prev.runs[prev.currentIndex]?.id;
           const mergedRuns = isReset
             ? remoteRuns
             : (() => {
@@ -6312,7 +6315,6 @@ export default function Home() {
                   return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr;
                 });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
-                const currentLocalId = prev.runs[prev.currentIndex]?.id;
                 const localOnly = prev.runs.filter(r => {
                   if (remoteIds.has(r.id)) return false;
                   // Drop our untouched auto-created placeholder run once the
@@ -6346,7 +6348,21 @@ export default function Home() {
           const newRuns = mergedRuns.length > 0
             ? mergedRuns
             : [{ id: genId(), brand: "", flavor: "", seeded: true }];
-          const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
+          // Track the current run by its ID, not just by position. If a peer
+          // pushes a new run that lands before the current run in the remote
+          // ordering (e.g. they add a run that sorts to index 0), a plain
+          // position-clamp would leave currentIndex = 0 pointing at the new
+          // blank run instead of the run the user was actively viewing — which
+          // produces the "run stopped / no case count / line setup gone" symptom
+          // on the next SSE receive or reconnect. Find the current run in the
+          // merged list by ID and use its new position; fall back to clamping
+          // only when the run was deleted (tombstoned) or filtered out.
+          const foundIdx = currentLocalId
+            ? newRuns.findIndex(r => r.id === currentLocalId)
+            : -1;
+          const newIndex = foundIdx >= 0
+            ? foundIdx
+            : Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
           // A true daily reset bumps resetAt strictly forward: adopt the remote
           // day's overlays wholesale so the reset's empty maps clear ours. When
           // resetAt is EQUAL (normal same-day concurrent editing across devices)
@@ -6417,8 +6433,15 @@ export default function Home() {
           // empty-over-populated corruption guarded on the run-values loop above).
           && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
           const merged = mergeRunDefaults(payload.runValues[currentId] as FormValues);
-          form.reset(merged);
-          resetFieldArrays(merged);
+          // Skip the reset entirely when the merged remote values equal what
+          // the form already shows (idle SSE reconnect echo). An unnecessary
+          // form.reset() re-emits through form.watch(), which retriggers the
+          // autosave [v] effect and can stamp a fresh markRunValuesUpdated() on
+          // an otherwise-idle run — defeating the lost-update guard on peers.
+          if (!deepEqual(form.getValues(), merged)) {
+            form.reset(merged);
+            resetFieldArrays(merged);
+          }
         }
       }
 
