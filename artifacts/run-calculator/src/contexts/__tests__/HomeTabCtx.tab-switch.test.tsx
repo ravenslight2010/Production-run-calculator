@@ -839,14 +839,37 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
 // whether the recipe fieldset is editable.  A role change (isSupervisor flip)
 // must propagate; a dialog open must not cause a re-render.
 //
-// Three tests:
+// Five tests:
 //   PROPAGATION    — role change reaches the SetupRecipes subscriber.
 //   ISOLATION      — dialog open does NOT re-render the SetupRecipes subscriber.
+//   COMBINED       — role changes propagate; subsequent dialog open adds no renders.
+//                    Exact render counts pinned at every step (mount → role-change
+//                    → role-change → dialog-open) so any weakening of the isolation
+//                    check is caught immediately.
 //   REGRESSION GUARD — a deliberately broken provider (manageCounter in deps)
 //                      proves the ISOLATION test would catch the regression:
 //                      the broken provider causes a re-render on every dialog
 //                      state change, which the real (correct) provider must not.
+//   REGRESSION GUARD (COMBINED counter-proof) — drives BrokenSetupRecipesProvider
+//                      through the same mount → role-change → role-change →
+//                      dialog-open sequence as the COMBINED test, proving that the
+//                      exact pin of SETUP_COMBINED_PIN (3) is a real assertion.
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── SETUP_COMBINED_PIN ────────────────────────────────────────────────────────
+// Invariant: mount(1) + role-change(1) + role-change(1) + dialog-open(0) = 3.
+//
+// This constant is the single source of truth for the Block 5 COMBINED test's
+// exact render-count pin.  The REGRESSION GUARD (COMBINED counter-proof) below
+// MUST assert `SETUP_COMBINED_PIN + 1` after the dialog-open step — never a
+// literal 4 — so the two tests stay in lockstep:
+//
+//   COMBINED pin after dialog-open:        SETUP_COMBINED_PIN     (= 3)
+//   Counter-proof pin after dialog-open:   SETUP_COMBINED_PIN + 1 (= 4)
+//
+// If the COMBINED test's pin changes (e.g. a third role-change step is added),
+// bump this constant; the counter-proof pins will follow automatically.
+const SETUP_COMBINED_PIN = 3;
 
 function SetupRecipesProvider({
   isSupervisor,
@@ -956,6 +979,81 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
     expect(setupRenderCount).toBe(1);
   });
 
+  // ─── COMBINED ─────────────────────────────────────────────────────────────
+  // Simulates the full scenario:
+  //   1. Role changes false→true (isSupervisor updated)   → exactly 1 new render
+  //   2. Role changes true→false (second role change)     → exactly 1 new render
+  //   3. Manage dialog opens                              → exactly 0 new renders
+  //
+  // Exact render counts are pinned at every step so that any weakening of the
+  // isolation check (e.g. making the assertion relative rather than absolute)
+  // is caught immediately.
+  it("role changes propagate; subsequent dialog open adds no extra renders", async () => {
+    const { rerender, getByTestId } = render(
+      <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+        <SetupRecipesSubscriber />
+      </SetupRecipesProvider>,
+    );
+
+    // PROPAGATION step 0 — initial mount: exactly 1 render.
+    expect(setupRenderCount).toBe(1);
+    expect(getByTestId("is-supervisor").textContent).toBe("no");
+
+    // PROPAGATION step 1 — isSupervisor changes false→true: 1 additional render.
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(2); // exact: mount(1) + role-change(1)
+    expect(getByTestId("is-supervisor").textContent).toBe("yes");
+
+    // PROPAGATION step 2 — isSupervisor changes true→false: 1 more render.
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    // DRIFT GUARD: pins renderCount to SETUP_COMBINED_PIN immediately before the
+    // dialog-open step.  If a third role-change step is ever added without bumping
+    // SETUP_COMBINED_PIN, this line will fail, forcing the constant to be bumped
+    // first.  The counter-proof's SETUP_COMBINED_PIN + 1 assertion then follows
+    // automatically.
+    expect(setupRenderCount).toBe(SETUP_COMBINED_PIN); // exact: mount(1) + role-change(1) + role-change(1)
+    expect(getByTestId("is-supervisor").textContent).toBe("no");
+
+    // DIALOG step — manage dialog opens (manageCounter: 0→1).
+    // isSupervisor is unchanged.  The ctx ref must NOT change → React.memo skips.
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={1}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    // Exact guard: renderCount must still be SETUP_COMBINED_PIN (3).
+    expect(setupRenderCount).toBe(SETUP_COMBINED_PIN); // exact: no extra render from dialog open
+
+    // Repeat with a second dialog state change to rule out a lucky no-op.
+    await act(async () => {
+      rerender(
+        <SetupRecipesProvider isSupervisor={false} manageCounter={99}>
+          <SetupRecipesSubscriber />
+        </SetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(SETUP_COMBINED_PIN); // exact: still no extra render from further dialog changes
+    expect(getByTestId("is-supervisor").textContent).toBe("no");
+  });
+
   // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
   // This test uses BrokenSetupRecipesProvider — which intentionally includes
   // `manageCounter` in its useMemo deps — to prove that the ISOLATION test
@@ -997,6 +1095,97 @@ describe("HomeTabCtx — LiveSetupRecipesTabContent slice (isSupervisor)", () =>
     });
 
     expect(setupRenderCount).toBe(3);
+  });
+
+  // ─── REGRESSION GUARD — COMBINED counter-proof ────────────────────────────
+  // Drives BrokenSetupRecipesProvider through the SAME mount → role-change →
+  // role-change → dialog-open sequence as the COMBINED test above, proving that
+  // the exact render-count pin of SETUP_COMBINED_PIN (3) after the dialog-open
+  // step is a real assertion.
+  //
+  // With the correct SetupRecipesProvider the COMBINED test expects:
+  //   mount(1) + role-change(1) + role-change(1) + dialog-open(0) = 3
+  //
+  // With BrokenSetupRecipesProvider the dialog-open step produces an extra
+  // render, pushing the count to 4.  This means the COMBINED pin
+  // "toBe(SETUP_COMBINED_PIN)" WOULD FAIL under the broken provider — i.e.
+  // the COMBINED test is a real guard, not a false green.
+  //
+  // If THIS test starts FAILING (broken provider no longer bumps the count past
+  // SETUP_COMBINED_PIN during the dialog-open step), the COMBINED test's
+  // exact-count assertion has become untestable and should be re-examined.
+  it("REGRESSION GUARD (COMBINED counter-proof): broken provider causes extra render during dialog-open after role changes", async () => {
+    const { rerender, getByTestId } = render(
+      <BrokenSetupRecipesProvider isSupervisor={false} manageCounter={0}>
+        <SetupRecipesSubscriber />
+      </BrokenSetupRecipesProvider>,
+    );
+
+    // Step 0 — initial mount.
+    expect(setupRenderCount).toBe(1);
+    expect(getByTestId("is-supervisor").textContent).toBe("no");
+
+    // Step 1 — role-change: isSupervisor changes false→true.
+    // Both the correct and broken providers yield a new ctx ref here → render.
+    await act(async () => {
+      rerender(
+        <BrokenSetupRecipesProvider isSupervisor={true} manageCounter={0}>
+          <SetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(2); // mount(1) + role-change(1)
+    expect(getByTestId("is-supervisor").textContent).toBe("yes");
+
+    // Step 2 — role-change: isSupervisor changes true→false.
+    await act(async () => {
+      rerender(
+        <BrokenSetupRecipesProvider isSupervisor={false} manageCounter={0}>
+          <SetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+    });
+
+    // Lockstep with COMBINED: using SETUP_COMBINED_PIN here (not a literal)
+    // means that if the constant is bumped (e.g. a 3rd role-change step is
+    // added), this assertion automatically requires adding that 3rd step here
+    // too — keeping the counter-proof scenario identical to the COMBINED test.
+    expect(setupRenderCount).toBe(SETUP_COMBINED_PIN); // = 3; mount(1) + role-change(1) + role-change(1)
+    expect(getByTestId("is-supervisor").textContent).toBe("no");
+
+    // Step 3 — dialog-open: only manageCounter changes (0→1); isSupervisor stable.
+    // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at SETUP_COMBINED_PIN.
+    // BROKEN provider:  manageCounter in deps → new ctx ref → spurious re-render
+    //                   → count becomes SETUP_COMBINED_PIN + 1.
+    // This step is the heart of the counter-proof: it shows the COMBINED test's
+    // "toBe(SETUP_COMBINED_PIN)" assertion is NOT vacuously true — the broken
+    // provider violates it.
+    await act(async () => {
+      rerender(
+        <BrokenSetupRecipesProvider isSupervisor={false} manageCounter={1}>
+          <SetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+    });
+
+    // BROKEN provider leaked manageCounter into deps → subscriber re-rendered.
+    // The real SetupRecipesProvider must keep the count at SETUP_COMBINED_PIN (3)
+    // after this step (see the COMBINED test above).  Here it MUST be
+    // SETUP_COMBINED_PIN + 1 — proving the COMBINED test's pin is a real
+    // assertion that the broken provider would violate.
+    expect(setupRenderCount).toBe(SETUP_COMBINED_PIN + 1); // = 4; extra render proves the COMBINED pin is real
+
+    // One more dialog change confirms it keeps firing — not a one-time no-op.
+    await act(async () => {
+      rerender(
+        <BrokenSetupRecipesProvider isSupervisor={false} manageCounter={99}>
+          <SetupRecipesSubscriber />
+        </BrokenSetupRecipesProvider>,
+      );
+    });
+
+    expect(setupRenderCount).toBe(SETUP_COMBINED_PIN + 2); // = 5; symmetric with other blocks' counter-proofs
   });
 });
 
@@ -1205,14 +1394,38 @@ describe(
 // shift summary.  Adding a run (run count changes) must propagate; a dialog
 // open must not cause a re-render.
 //
-// Three tests:
+// Five tests:
 //   PROPAGATION    — run count change reaches the Summary subscriber.
 //   ISOLATION      — dialog open does NOT re-render the Summary subscriber.
+//   COMBINED       — run count changes propagate; subsequent dialog open adds no
+//                    renders.  Exact render counts pinned at every step (mount →
+//                    run-change → run-change → dialog-open) so any weakening of
+//                    the isolation check is caught immediately.
 //   REGRESSION GUARD — a deliberately broken provider (manageCounter in deps)
 //                      proves the ISOLATION test would catch the regression:
 //                      the broken provider causes a re-render on every dialog
 //                      state change, which the real (correct) provider must not.
+//   REGRESSION GUARD (COMBINED counter-proof) — drives BrokenSummaryProvider
+//                      through the same mount → run-change → run-change →
+//                      dialog-open sequence as the COMBINED test, proving that
+//                      the exact pin of SUMMARY_COMBINED_PIN (3) is a real
+//                      assertion.
 // ══════════════════════════════════════════════════════════════════════════════
+
+// ── SUMMARY_COMBINED_PIN ──────────────────────────────────────────────────────
+// Invariant: mount(1) + run-change(1) + run-change(1) + dialog-open(0) = 3.
+//
+// This constant is the single source of truth for the Block 6 COMBINED test's
+// exact render-count pin.  The REGRESSION GUARD (COMBINED counter-proof) below
+// MUST assert `SUMMARY_COMBINED_PIN + 1` after the dialog-open step — never a
+// literal 4 — so the two tests stay in lockstep:
+//
+//   COMBINED pin after dialog-open:        SUMMARY_COMBINED_PIN     (= 3)
+//   Counter-proof pin after dialog-open:   SUMMARY_COMBINED_PIN + 1 (= 4)
+//
+// If the COMBINED test's pin changes (e.g. a third run-change step is added),
+// bump this constant; the counter-proof pins will follow automatically.
+const SUMMARY_COMBINED_PIN = 3;
 
 function SummaryProvider({
   runCount,
@@ -1323,6 +1536,81 @@ describe("HomeTabCtx — LiveSummaryTabContent slice (dayState.runs)", () => {
     expect(summaryRenderCount).toBe(1);
   });
 
+  // ─── COMBINED ─────────────────────────────────────────────────────────────
+  // Simulates the full scenario:
+  //   1. Run count changes 1→2 (runCount updated)  → exactly 1 new render
+  //   2. Run count changes 2→3 (second run added)  → exactly 1 new render
+  //   3. Manage dialog opens                       → exactly 0 new renders
+  //
+  // Exact render counts are pinned at every step so that any weakening of the
+  // isolation check (e.g. making the assertion relative rather than absolute)
+  // is caught immediately.
+  it("run count changes propagate; subsequent dialog open adds no extra renders", async () => {
+    const { rerender, getByTestId } = render(
+      <SummaryProvider runCount={1} manageCounter={0}>
+        <SummarySubscriber />
+      </SummaryProvider>,
+    );
+
+    // PROPAGATION step 0 — initial mount: exactly 1 render.
+    expect(summaryRenderCount).toBe(1);
+    expect(getByTestId("run-count").textContent).toBe("1");
+
+    // PROPAGATION step 1 — runCount changes 1→2: 1 additional render.
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={2} manageCounter={0}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(2); // exact: mount(1) + run-change(1)
+    expect(getByTestId("run-count").textContent).toBe("2");
+
+    // PROPAGATION step 2 — runCount changes 2→3: 1 more render.
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={3} manageCounter={0}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    // DRIFT GUARD: pins renderCount to SUMMARY_COMBINED_PIN immediately before
+    // the dialog-open step.  If a third run-change step is ever added without
+    // bumping SUMMARY_COMBINED_PIN, this line will fail, forcing the constant
+    // to be bumped first.  The counter-proof's SUMMARY_COMBINED_PIN + 1
+    // assertion then follows automatically.
+    expect(summaryRenderCount).toBe(SUMMARY_COMBINED_PIN); // exact: mount(1) + run-change(1) + run-change(1)
+    expect(getByTestId("run-count").textContent).toBe("3");
+
+    // DIALOG step — manage dialog opens (manageCounter: 0→1).
+    // runCount is unchanged.  The ctx ref must NOT change → React.memo skips.
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={3} manageCounter={1}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    // Exact guard: renderCount must still be SUMMARY_COMBINED_PIN (3).
+    expect(summaryRenderCount).toBe(SUMMARY_COMBINED_PIN); // exact: no extra render from dialog open
+
+    // Repeat with a second dialog state change to rule out a lucky no-op.
+    await act(async () => {
+      rerender(
+        <SummaryProvider runCount={3} manageCounter={99}>
+          <SummarySubscriber />
+        </SummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(SUMMARY_COMBINED_PIN); // exact: still no extra render from further dialog changes
+    expect(getByTestId("run-count").textContent).toBe("3");
+  });
+
   // ─── REGRESSION GUARD ─────────────────────────────────────────────────────
   // This test uses BrokenSummaryProvider — which intentionally includes
   // `manageCounter` in its useMemo deps — to prove that the ISOLATION test
@@ -1364,6 +1652,97 @@ describe("HomeTabCtx — LiveSummaryTabContent slice (dayState.runs)", () => {
     });
 
     expect(summaryRenderCount).toBe(3);
+  });
+
+  // ─── REGRESSION GUARD — COMBINED counter-proof ────────────────────────────
+  // Drives BrokenSummaryProvider through the SAME mount → run-change →
+  // run-change → dialog-open sequence as the COMBINED test above, proving that
+  // the exact render-count pin of SUMMARY_COMBINED_PIN (3) after the
+  // dialog-open step is a real assertion.
+  //
+  // With the correct SummaryProvider the COMBINED test expects:
+  //   mount(1) + run-change(1) + run-change(1) + dialog-open(0) = 3
+  //
+  // With BrokenSummaryProvider the dialog-open step produces an extra render,
+  // pushing the count to 4.  This means the COMBINED pin
+  // "toBe(SUMMARY_COMBINED_PIN)" WOULD FAIL under the broken provider — i.e.
+  // the COMBINED test is a real guard, not a false green.
+  //
+  // If THIS test starts FAILING (broken provider no longer bumps the count past
+  // SUMMARY_COMBINED_PIN during the dialog-open step), the COMBINED test's
+  // exact-count assertion has become untestable and should be re-examined.
+  it("REGRESSION GUARD (COMBINED counter-proof): broken provider causes extra render during dialog-open after run changes", async () => {
+    const { rerender, getByTestId } = render(
+      <BrokenSummaryProvider runCount={1} manageCounter={0}>
+        <SummarySubscriber />
+      </BrokenSummaryProvider>,
+    );
+
+    // Step 0 — initial mount.
+    expect(summaryRenderCount).toBe(1);
+    expect(getByTestId("run-count").textContent).toBe("1");
+
+    // Step 1 — run-change: runCount changes 1→2.
+    // Both the correct and broken providers yield a new ctx ref here → render.
+    await act(async () => {
+      rerender(
+        <BrokenSummaryProvider runCount={2} manageCounter={0}>
+          <SummarySubscriber />
+        </BrokenSummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(2); // mount(1) + run-change(1)
+    expect(getByTestId("run-count").textContent).toBe("2");
+
+    // Step 2 — run-change: runCount changes 2→3.
+    await act(async () => {
+      rerender(
+        <BrokenSummaryProvider runCount={3} manageCounter={0}>
+          <SummarySubscriber />
+        </BrokenSummaryProvider>,
+      );
+    });
+
+    // Lockstep with COMBINED: using SUMMARY_COMBINED_PIN here (not a literal)
+    // means that if the constant is bumped (e.g. a 3rd run-change step is
+    // added), this assertion automatically requires adding that 3rd step here
+    // too — keeping the counter-proof scenario identical to the COMBINED test.
+    expect(summaryRenderCount).toBe(SUMMARY_COMBINED_PIN); // = 3; mount(1) + run-change(1) + run-change(1)
+    expect(getByTestId("run-count").textContent).toBe("3");
+
+    // Step 3 — dialog-open: only manageCounter changes (0→1); runCount stable.
+    // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at SUMMARY_COMBINED_PIN.
+    // BROKEN provider:  manageCounter in deps → new ctx ref → spurious re-render
+    //                   → count becomes SUMMARY_COMBINED_PIN + 1.
+    // This step is the heart of the counter-proof: it shows the COMBINED test's
+    // "toBe(SUMMARY_COMBINED_PIN)" assertion is NOT vacuously true — the broken
+    // provider violates it.
+    await act(async () => {
+      rerender(
+        <BrokenSummaryProvider runCount={3} manageCounter={1}>
+          <SummarySubscriber />
+        </BrokenSummaryProvider>,
+      );
+    });
+
+    // BROKEN provider leaked manageCounter into deps → subscriber re-rendered.
+    // The real SummaryProvider must keep the count at SUMMARY_COMBINED_PIN (3)
+    // after this step (see the COMBINED test above).  Here it MUST be
+    // SUMMARY_COMBINED_PIN + 1 — proving the COMBINED test's pin is a real
+    // assertion that the broken provider would violate.
+    expect(summaryRenderCount).toBe(SUMMARY_COMBINED_PIN + 1); // = 4; extra render proves the COMBINED pin is real
+
+    // One more dialog change confirms it keeps firing — not a one-time no-op.
+    await act(async () => {
+      rerender(
+        <BrokenSummaryProvider runCount={3} manageCounter={99}>
+          <SummarySubscriber />
+        </BrokenSummaryProvider>,
+      );
+    });
+
+    expect(summaryRenderCount).toBe(SUMMARY_COMBINED_PIN + 2); // = 5; symmetric with other blocks' counter-proofs
   });
 });
 
