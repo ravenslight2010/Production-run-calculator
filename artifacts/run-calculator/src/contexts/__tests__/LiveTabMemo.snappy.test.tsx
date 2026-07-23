@@ -2343,6 +2343,102 @@ describe("LiveTabMemo — GlanceOverlay uses useHomeTabCtx(), not useHomeCtx() (
   // three toggles is > 1.  A strict `.toBe(1)` would correctly FAIL; a
   // `.toBeGreaterThanOrEqual(1)` would vacuously PASS — confirming that
   // weakening the assertion would blind the guard.
+  // ─── Test 3 strict-equal assertion guard ──────────────────────────────────
+  // Guards against weakening Test 3's `expect(renderCount).toBe(2)` to a range
+  // check such as `toBeGreaterThanOrEqual(2)`.
+  //
+  // The regression Test 3 catches is: GlanceOverlay over-subscribes and
+  // re-renders on every parent-level state change (not just genuine runStatus
+  // changes), causing visible stutter during manage-dialog open/close cycles.
+  //
+  // If the `.toBe(2)` assertion were softened to `.toBeGreaterThanOrEqual(2)`,
+  // a component that renders on initial mount AND again on a non-production dep
+  // change AND again on the real runStatus change would satisfy it with
+  // renderCount = 3 — the over-subscription regression would silently pass.
+  //
+  // This test demonstrates the danger by running a manageCounter change THEN
+  // the same runStatus change as Test 3 against a LOCAL over-subscribing
+  // provider (manageCounter IS in deps).  The subscriber re-renders on both
+  // changes, giving renderCount = 3.  A strict `.toBe(2)` would correctly
+  // FAIL; a `.toBeGreaterThanOrEqual(2)` would vacuously PASS — confirming
+  // that weakening the assertion would blind the guard.
+  it("strict-equal teeth: an over-subscribing provider causes renderCount > 2 on one runStatus change, proving Test 3's toBe(2) is not vacuous", async () => {
+    let renderCount = 0;
+
+    // Provider where manageCounter IS in deps — the opposite of the production
+    // contract (GlanceTabOnlyProvider keeps manageCounter out of deps).
+    // This simulates an over-subscribing context that re-renders on every
+    // parent-level state change, not just genuine production dep changes.
+    function OverSubscribingTabProvider({
+      runStatus,
+      manageCounter,
+      children,
+    }: {
+      runStatus: string;
+      manageCounter: number;
+      children: ReactNode;
+    }) {
+      // manageCounter INTENTIONALLY included — simulates the regression where
+      // context invalidates on non-production-dep changes, causing spurious
+      // re-renders of every HomeTabCtx subscriber.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const value = useMemo(() => ({ runStatus, manageCounter }), [runStatus, manageCounter]);
+      return (
+        <HomeTabCtx.Provider value={value}>{children}</HomeTabCtx.Provider>
+      );
+    }
+
+    // Mirrors the GlanceOverlaySim from Test 3 exactly — same hook, same
+    // memo() wrap, same dep (runStatus).
+    const GlanceOverlaySimT3 = memo(function GlanceOverlaySimT3Inner() {
+      renderCount++;
+      const { runStatus } = useHomeTabCtx();
+      return <span data-testid="glance-t3-teeth">{runStatus}</span>;
+    });
+
+    const { rerender } = render(
+      <OverSubscribingTabProvider runStatus="running" manageCounter={0}>
+        <GlanceOverlaySimT3 />
+      </OverSubscribingTabProvider>,
+    );
+
+    // After initial mount renderCount must be exactly 1 — just like Test 3.
+    expect(renderCount).toBe(1);
+
+    // Change manageCounter (a NON-production dep, intentionally excluded from
+    // GlanceTabOnlyProvider's useMemo deps).  In the over-subscribing provider
+    // this IS in deps, so the context ref changes and the subscriber re-renders.
+    // In the CLEAN provider used by Test 3 this would be a no-op.
+    await act(async () => {
+      rerender(
+        <OverSubscribingTabProvider runStatus="running" manageCounter={1}>
+          <GlanceOverlaySimT3 />
+        </OverSubscribingTabProvider>,
+      );
+    });
+
+    // renderCount is now 2 — the over-subscribing spurious re-render fired.
+    // (In Test 3's clean provider this step would leave renderCount at 1.)
+
+    // Now change runStatus — the real production dep, exactly as Test 3 does.
+    // Both the clean provider AND the over-subscribing provider fire here, so
+    // renderCount advances to 3 in the over-subscribing case.
+    await act(async () => {
+      rerender(
+        <OverSubscribingTabProvider runStatus="paused" manageCounter={1}>
+          <GlanceOverlaySimT3 />
+        </OverSubscribingTabProvider>,
+      );
+    });
+
+    // renderCount = 3: the over-subscribing provider caused one extra render
+    // beyond what the real production dep alone would justify.
+    // • toBe(2)               → FAILS  (renderCount is 3) — teeth confirmed.
+    // • toBeGreaterThanOrEqual(2) → PASSES (silent regression allowed).
+    // This proves that weakening Test 3's assertion would blind the guard.
+    expect(renderCount).toBeGreaterThan(2);
+  });
+
   it("strict-equal teeth: a useHomeCtx() variant re-renders on every dialog toggle, proving Test 1's toBe(1) is not vacuous", async () => {
     let renderCount = 0;
 
