@@ -203,6 +203,26 @@ function doughYieldDerivedFromRecipe(rec: Rec): boolean {
   return recipeLbs > 0 && weightOz > 0;
 }
 
+// Sum the lbs values from a recipe row array.
+function sumRecipeLbs(rows: unknown): number {
+  if (!Array.isArray(rows)) return 0;
+  return (rows as Rec[]).reduce((s, r) => s + asNumber(r && (r as Rec).lbs), 0);
+}
+
+// When a sauce (frontline) recipe has ingredient rows with lbs > 0, the calc
+// uses the row sum as the effective barrel size and ignores sauceBarrelLbs
+// entirely. Matches: sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : sauceBarrelLbs
+function sauceBarrelDerivedFromRecipe(rec: Rec): boolean {
+  return sumRecipeLbs(rec.frontlineRecipe) > 0;
+}
+
+// When an applicator slot has a cheese/topping recipe with lbs > 0, the calc
+// uses the row sum as the effective batch size and ignores app${n}BatchLbs.
+// Matches: sumRecipe(app${n}CheeseRecipe) > 0 ? sum : app${n}BatchLbs
+function appBatchLbsDerivedFromRecipe(rec: Rec, n: number): boolean {
+  return sumRecipeLbs(rec[`app${n}CheeseRecipe`]) > 0;
+}
+
 // Some fields only matter conditionally (e.g. cartons only when cartoned, an
 // applicator slot only when that slot is in use, dough vs crust supply fields
 // only in their own mode). Returns false to skip a field.
@@ -222,8 +242,18 @@ function fieldApplies(spec: FieldSpec, rec: Rec): boolean {
   if (spec.key === "crustsPerStack" || spec.key === "crustsPerCase") {
     return isCrustMode(rec);
   }
+  // sauceBarrelLbs: irrelevant when a mixed sauce recipe provides the barrel size.
+  if (spec.key === "sauceBarrelLbs") {
+    return !sauceBarrelDerivedFromRecipe(rec);
+  }
   const appMatch = /^app([1-4])/.exec(spec.key);
-  if (appMatch) return appSlotInUse(rec, Number(appMatch[1]));
+  if (appMatch) {
+    const n = Number(appMatch[1]);
+    if (!appSlotInUse(rec, n)) return false;
+    // app${n}BatchLbs: irrelevant when the cheese/topping recipe provides the batch size.
+    if (spec.key === `app${n}BatchLbs`) return !appBatchLbsDerivedFromRecipe(rec, n);
+    return true;
+  }
   const pepMatch = /^pep([1-2])/.exec(spec.key);
   if (pepMatch) return pepSlotInUse(rec, Number(pepMatch[1]));
   return true;

@@ -131,6 +131,73 @@ describe("detectMissingFields", () => {
     });
   });
 
+  describe("sauceBarrelLbs derived from sauce recipe", () => {
+    it("skips sauceBarrelLbs when frontlineRecipe rows have lbs > 0", () => {
+      const keys = keysOf({
+        frontlineRecipe: [{ ingredient: "Tomatoes", lbs: 450 }],
+      });
+      expect(keys).not.toContain("sauceBarrelLbs");
+    });
+
+    it("still flags sauceBarrelLbs when frontlineRecipe is absent", () => {
+      expect(keysOf({})).toContain("sauceBarrelLbs");
+    });
+
+    it("still flags sauceBarrelLbs when frontlineRecipe rows all have lbs 0", () => {
+      const keys = keysOf({
+        frontlineRecipe: [{ ingredient: "Tomatoes", lbs: 0 }],
+      });
+      expect(keys).toContain("sauceBarrelLbs");
+    });
+
+    it("still flags sauceBarrelLbs when frontlineRecipe is an empty array", () => {
+      expect(keysOf({ frontlineRecipe: [] })).toContain("sauceBarrelLbs");
+    });
+  });
+
+  describe("app${n}BatchLbs derived from cheese/topping recipe", () => {
+    it("skips app1BatchLbs when app1CheeseRecipe rows have lbs > 0", () => {
+      const keys = keysOf({
+        app1Type: "Mozzarella",
+        app1CheeseRecipe: [{ ingredient: "Whole Milk Mozzarella", lbs: 30 }],
+      });
+      expect(keys).not.toContain("app1BatchLbs");
+      // Other fields on the active slot still appear.
+      expect(keys).toContain("app1OzPerPizza");
+    });
+
+    it("skips app3BatchLbs when app3CheeseRecipe rows have lbs > 0", () => {
+      const keys = keysOf({
+        app3Type: "Cheese Blend",
+        app3CheeseRecipe: [{ ingredient: "Blend", lbs: 45 }],
+      });
+      expect(keys).not.toContain("app3BatchLbs");
+    });
+
+    it("still flags app1BatchLbs when the recipe is absent", () => {
+      const keys = keysOf({ app1Type: "Mozzarella" });
+      expect(keys).toContain("app1BatchLbs");
+    });
+
+    it("still flags app1BatchLbs when the recipe has all-zero lbs", () => {
+      const keys = keysOf({
+        app1Type: "Mozzarella",
+        app1CheeseRecipe: [{ ingredient: "Mozz", lbs: 0 }],
+      });
+      expect(keys).toContain("app1BatchLbs");
+    });
+
+    it("does not suppress app2BatchLbs when only app1 has a recipe", () => {
+      const keys = keysOf({
+        app1Type: "Mozz",
+        app1CheeseRecipe: [{ ingredient: "Mozz", lbs: 30 }],
+        app2Type: "Provolone",
+      });
+      expect(keys).not.toContain("app1BatchLbs"); // recipe-derived → skipped
+      expect(keys).toContain("app2BatchLbs");     // no recipe on slot 2 → still flagged
+    });
+  });
+
   describe("doughBatchYield derived from a selected recipe", () => {
     it("skips doughBatchYield when a recipe with lbs AND a doughball weight are set (web key)", () => {
       const keys = keysOf({

@@ -17176,7 +17176,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     <p className="text-xs text-muted-foreground mb-4">
                       Based on{" "}
                       <span className="font-mono text-foreground">
-                        {fmtNum(calc.casesLeftToRun, 0)}
+                        {fmtNum(Math.max(0, calc.casesLeftToRun), 0)}
                       </span>{" "}
                       cases ×{" "}
                       <span className="font-mono text-foreground">
@@ -17194,6 +17194,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       })()}
                       testId="output-sauce-batches"
                       highlight={calc.sauceBatches > 0}
+                      sub={v.frontlineRecipeName?.trim() || undefined}
                     />
                     <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
