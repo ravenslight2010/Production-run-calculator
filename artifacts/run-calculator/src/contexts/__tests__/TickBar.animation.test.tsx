@@ -360,6 +360,48 @@ describe("TickBar animation — regression guard", () => {
     expect(trayProdPct1).toBe(trayProdPct0);
     expect(batchProdPct1).toBe(batchProdPct0);
   });
+
+  it("symmetric guard: trayProd and batchProd pcts DO change when the pending clock is forced to fire (11 s advance)", async () => {
+    // This test is the symmetric complement of the counter-proof above.
+    // The counter-proof asserts that pcts do NOT change after 2.1 s under
+    // runStatus="pending" (10 s cadence — interval has not fired yet).
+    // HERE we advance by 11 s, which IS enough to trigger the pending clock
+    // interval, so nowTime WILL advance and pct MUST increase.
+    //
+    // If the counter-proof were passing vacuously (e.g. the useLiveRun spy
+    // target drifted so nowTime never propagates at all regardless of cadence),
+    // this test would fail because even 11 s of elapsed time would not change
+    // the pct — catching the drift before it silently masks a real freeze.
+    render(
+      <TestProvider runStatus="pending">
+        <TickBarProbe />
+      </TestProvider>,
+    );
+
+    const t0 = Date.now();
+    mockTickRefs.trayProd.current  = t0 + TRAY_PERIOD_SEC * 1000;
+    mockTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
+
+    const probe = screen.getByTestId("probe");
+    const trayProdPct0  = Number(probe.getAttribute("data-tray-prod-pct"));
+    const batchProdPct0 = Number(probe.getAttribute("data-batch-prod-pct"));
+
+    // Advance by 11 s — crosses the 10 s pending clock cadence, so the
+    // interval fires at least once and nowTime advances.
+    await act(async () => {
+      vi.advanceTimersByTime(11_000);
+    });
+
+    const trayProdPct1  = Number(probe.getAttribute("data-tray-prod-pct"));
+    const batchProdPct1 = Number(probe.getAttribute("data-batch-prod-pct"));
+
+    // Both production bars must have increased: nowTime propagated through
+    // useLiveRun() and the armed refs contributed to the computation.
+    // If either stays at its mount value, the useLiveRun spy target has
+    // drifted and the counter-proof was passing vacuously.
+    expect(trayProdPct1).toBeGreaterThan(trayProdPct0);
+    expect(batchProdPct1).toBeGreaterThan(batchProdPct0);
+  });
 });
 
 // ── STABILITY CONTRACT enforcement ───────────────────────────────────────────
