@@ -2337,35 +2337,60 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
   it("counter-proof: simulator WITHOUT useLiveRun() does NOT receive clock updates (proving Test 1 has teeth)", async () => {
     let renderCount = 0;
 
-    const GlanceNoLiveSim = memo(function GlanceNoLiveSimInner() {
-      renderCount++;
-      // Only HomeTabCtx — useLiveRun() is intentionally absent.
-      // This mirrors what GlanceOverlay would look like if useLiveRun() were
-      // accidentally dropped.  HomeTabCtx is stable (runStatus unchanged), so
-      // no context updates arrive while the clock ticks.
-      useHomeTabCtx();
-      return null;
-    });
+    // Set up the spy BEFORE render so it captures the initial mount call(s).
+    // This confirms that useHomeTabCtx() was actually invoked during rendering
+    // (the simulator is non-degenerate — it has a real active hook consumer)
+    // and that no extra calls arrive after clock ticks (render count stayed flat).
+    const spy = vi.spyOn(HomeTabCtxNS, "useHomeTabCtx");
 
-    render(
-      <GlanceWrapper runStatus="running" manageCounter={0}>
-        <GlanceNoLiveSim />
-      </GlanceWrapper>,
-    );
+    try {
+      const GlanceNoLiveSim = memo(function GlanceNoLiveSimInner() {
+        renderCount++;
+        // Only HomeTabCtx — useLiveRun() is intentionally absent.
+        // This mirrors what GlanceOverlay would look like if useLiveRun() were
+        // accidentally dropped.  HomeTabCtx is stable (runStatus unchanged), so
+        // no context updates arrive while the clock ticks.
+        useHomeTabCtx();
+        return null;
+      });
 
-    const renderCountAfterMount = renderCount;
-    expect(renderCountAfterMount).toBeGreaterThan(0);
+      render(
+        <GlanceWrapper runStatus="running" manageCounter={0}>
+          <GlanceNoLiveSim />
+        </GlanceWrapper>,
+      );
 
-    // Advance the clock — WITHOUT useLiveRun(), LiveRunProvider context updates
-    // do NOT reach this component; HomeTabCtx is stable; React.memo() skips
-    // the re-render entirely.
-    await act(async () => { vi.advanceTimersByTime(10_000); });
+      const renderCountAfterMount = renderCount;
+      expect(renderCountAfterMount).toBeGreaterThan(0);
 
-    // renderCount must be unchanged: no re-renders occurred after mount.
-    // This is exactly the failure mode if useLiveRun() were removed from the
-    // real GlanceOverlay — the live clock would stop driving re-renders, and
-    // Test 1's lastNow > firstNow assertion would fail.
-    expect(renderCount).toBe(renderCountAfterMount);
+      // Post-mount: spy count must be > 0, confirming useHomeTabCtx() was
+      // actually invoked during rendering.  If the simulator were simplified to
+      // a trivially empty component with no hook calls, renderCount would still
+      // track renders but this assertion would fail — immediately signalling that
+      // the counter-proof is no longer validating an active hook consumer.
+      const spyCountAfterMount = spy.mock.calls.length;
+      expect(spyCountAfterMount).toBeGreaterThan(0);
+
+      // Advance the clock — WITHOUT useLiveRun(), LiveRunProvider context updates
+      // do NOT reach this component; HomeTabCtx is stable; React.memo() skips
+      // the re-render entirely.
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+
+      // renderCount must be unchanged: no re-renders occurred after mount.
+      // This is exactly the failure mode if useLiveRun() were removed from the
+      // real GlanceOverlay — the live clock would stop driving re-renders, and
+      // Test 1's lastNow > firstNow assertion would fail.
+      expect(renderCount).toBe(renderCountAfterMount);
+
+      // Post-tick: spy count must equal the mount count, confirming that no
+      // additional useHomeTabCtx() calls (i.e. no extra re-renders) occurred
+      // after clock ticks.  Together with the pre-tick > 0 assertion above,
+      // this makes the guard symmetric: the active hook was called on mount,
+      // then stayed flat — proving the no-useLiveRun path is genuinely inert.
+      expect(spy.mock.calls.length).toBe(spyCountAfterMount);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   // ─── Test 3: SYMMETRIC SPY GUARD ──────────────────────────────────────────
