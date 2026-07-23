@@ -39,6 +39,13 @@ import { mockAutoTrackTickRefs } from "../../hooks/__mocks__/useAutoTrack";
 // accidentally brings the advance back below the cadence.
 const SYMMETRIC_GUARD_ADVANCE_MS = PENDING_CLOCK_MS + 1_000;
 
+// The counter-proof tests advance fake time by this amount to stay BELOW the
+// pending clock cadence and confirm nowTime does NOT advance.  If
+// PENDING_CLOCK_MS is ever lowered (e.g. to 2 s), the meta-guard below will
+// catch the mismatch immediately with a clear diagnostic before the
+// counter-proof tests start failing for a confusing reason.
+const COUNTER_PROOF_ADVANCE_MS = 2_100;
+
 // ── Shared manual mocks ───────────────────────────────────────────────────────
 //
 // Closure-level stability is enforced STRUCTURALLY by the shared manual mock
@@ -284,7 +291,7 @@ describe("TickBar animation — regression guard", () => {
     const pct0  = Number(probe.getAttribute("data-tray-pct"));
 
     await act(async () => {
-      vi.advanceTimersByTime(2_100);
+      vi.advanceTimersByTime(COUNTER_PROOF_ADVANCE_MS);
     });
 
     const pct1 = Number(probe.getAttribute("data-tray-pct"));
@@ -315,15 +322,16 @@ describe("TickBar animation — regression guard", () => {
     const batchProdPct0 = Number(probe.getAttribute("data-batch-prod-pct"));
 
     await act(async () => {
-      vi.advanceTimersByTime(2_100);
+      vi.advanceTimersByTime(COUNTER_PROOF_ADVANCE_MS);
     });
 
     const trayProdPct1  = Number(probe.getAttribute("data-tray-prod-pct"));
     const batchProdPct1 = Number(probe.getAttribute("data-batch-prod-pct"));
 
-    // nowTime has not advanced (10 s cadence, only 2.1 s elapsed), so neither
-    // production bar should have changed.  If it does, the clock subscription
-    // is firing faster than expected for a pending run — a freeze-risk signal.
+    // nowTime has not advanced (10 s cadence, only COUNTER_PROOF_ADVANCE_MS ms
+    // elapsed), so neither production bar should have changed.  If it does,
+    // the clock subscription is firing faster than expected for a pending run —
+    // a freeze-risk signal.
     expect(trayProdPct1).toBe(trayProdPct0);
     expect(batchProdPct1).toBe(batchProdPct0);
   });
@@ -496,5 +504,31 @@ describe("TickBar.animation — META-GUARD: symmetric advance exceeds pending cl
     // that happens to keep the advance above the cadence but breaks the
     // explicit +1_000 margin this file relies on.
     expect(SYMMETRIC_GUARD_ADVANCE_MS).toBe(PENDING_CLOCK_MS + 1_000);
+  });
+});
+
+// ── META-GUARD: counter-proof advance must stay below the pending clock cadence
+//
+// The counter-proof tests advance fake time by COUNTER_PROOF_ADVANCE_MS and
+// assert that pct does NOT change, relying on the fact that this advance is
+// strictly less than PENDING_CLOCK_MS (the pending-run clock interval).  If
+// PENDING_CLOCK_MS is ever lowered below COUNTER_PROOF_ADVANCE_MS (e.g. from
+// 10 s to 2 s), the interval will fire within the counter-proof window and the
+// counter-proof tests will start failing for a confusing reason with no clear
+// explanation of why.
+//
+// This meta-guard catches that drift immediately: it fails as soon as
+// COUNTER_PROOF_ADVANCE_MS is no longer strictly less than PENDING_CLOCK_MS,
+// giving the developer a clear diagnostic — update either PENDING_CLOCK_MS or
+// COUNTER_PROOF_ADVANCE_MS to restore the invariant.
+
+describe("TickBar.animation — META-GUARD: counter-proof advance stays below pending clock cadence", () => {
+  it("COUNTER_PROOF_ADVANCE_MS is strictly less than PENDING_CLOCK_MS", () => {
+    // If this assertion fails, lowering PENDING_CLOCK_MS caused the
+    // counter-proof advance to cross the pending clock interval.  Either
+    // raise PENDING_CLOCK_MS back above COUNTER_PROOF_ADVANCE_MS, or lower
+    // COUNTER_PROOF_ADVANCE_MS so the counter-proof window is safely below the
+    // new cadence.
+    expect(COUNTER_PROOF_ADVANCE_MS).toBeLessThan(PENDING_CLOCK_MS);
   });
 });
