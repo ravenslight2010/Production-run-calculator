@@ -5849,6 +5849,7 @@ export default function Home() {
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleDeleteConfirm, setScheduleDeleteConfirm] = useState<string | null>(null);
   const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
   const [scheduleMoveDate, setScheduleMoveDate] = useState("");
@@ -5922,6 +5923,7 @@ export default function Home() {
     // run tombstones (the additive union resurrects removed runs), and it never
     // touches this tab's in-memory day — so the next push (e.g. Start Run)
     // visibly "reverts" everything to the original schedule.
+    setScheduleError(null);
     if (scheduleEditorDate === todayStr()) {
       try {
         const now = Date.now();
@@ -5975,7 +5977,9 @@ export default function Home() {
         }
         schedulePush(newDs, 0);
         setScheduleView("list");
-      } catch {}
+      } catch {
+        setScheduleError("Couldn't save — check your connection and try again.");
+      }
       setScheduleSaving(false);
       return;
     }
@@ -6008,8 +6012,12 @@ export default function Home() {
       if (res.ok && !handleStaleSyncWrite(await res.json().catch(() => null))) {
         fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
         setScheduleView("list");
+      } else if (!res.ok) {
+        setScheduleError(res.status === 401 ? "Session expired — please sign in again and re-save." : `Couldn't save (server error ${res.status}) — check your connection and try again.`);
       }
-    } catch {}
+    } catch {
+      setScheduleError("Couldn't save — check your connection and try again.");
+    }
     setScheduleSaving(false);
   }
   async function deleteScheduledDay(date: string) {
@@ -13791,22 +13799,27 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
-                  <div className="px-5 py-4 border-t border-border/40 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setScheduleView("list")}
-                      className="flex-1 py-2 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.some(r => !r.brand || !r.casesNeeded)}
-                      onClick={saveScheduledDay}
-                      className="flex-1 py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {scheduleSaving ? "Saving…" : "Save Schedule"}
-                    </button>
+                  <div className="px-5 pt-3 pb-4 border-t border-border/40">
+                    {scheduleError && (
+                      <p className="text-xs text-destructive mb-3 text-center">{scheduleError}</p>
+                    )}
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setScheduleView("list")}
+                        className="flex-1 py-2 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.some(r => !r.brand || !r.casesNeeded)}
+                        onClick={saveScheduledDay}
+                        className="flex-1 py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {scheduleSaving ? "Saving…" : "Save Schedule"}
+                      </button>
+                    </div>
                   </div>
                 </>
               ) : scheduleAdvancedRunId ? (
