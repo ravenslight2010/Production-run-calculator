@@ -656,6 +656,57 @@ describe("cross-environment token replay: verifyToken rejects before sandbox gat
     }
   });
 
+  it("spy counter reaches exactly 1 for a valid sandbox token — proving spy interception works (counter-proof)", async () => {
+    // This test is a counter-proof for the two zero-count assertions above.
+    //
+    // If the vi.spyOn() call silently stopped intercepting isSandboxUser
+    // (e.g. because the module system changed from ESM live-bindings to CJS
+    // copies, or vitest config changed), every spy-based test in this file
+    // would pass vacuously: the real function would still run, the request
+    // would still 401, but the call count would read 0 even on a valid token
+    // — making the zero-count assertions in the bogus-token tests meaningless.
+    //
+    // By sending a correctly-signed sandbox token (one that passes verifyToken)
+    // and asserting the spy count is EXACTLY 1, we guarantee that the spy is
+    // genuinely intercepting calls that originate from within requireAuth.
+    // Any spy wiring regression will flip this assertion from 1 to 0 and
+    // immediately surface the broken setup.
+    let isSandboxUserCallCount = 0;
+    const origIsSandboxUser = isSandboxUser;
+    const spy = vi
+      .spyOn(sandboxMod, "isSandboxUser")
+      .mockImplementation(async (userId: string) => {
+        isSandboxUserCallCount++;
+        return origIsSandboxUser(userId);
+      });
+
+    try {
+      process.env.NODE_ENV = "production";
+      clearSandboxCache();
+
+      // A correctly-signed token for the sandbox user. verifyToken will accept
+      // it, so requireAuth proceeds past the signature check and MUST call
+      // isSandboxUser before deciding to block the request.
+      const validSandboxToken = signToken(SANDBOX_USER_ID);
+      const res = await fetch(`${baseUrl}/api/me`, {
+        headers: { Authorization: `Bearer ${validSandboxToken}` },
+      });
+
+      // The sandbox gate must still block the request in production.
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("Unauthorized");
+
+      // The spy must have been called exactly once — the sandbox check that
+      // runs after verifyToken succeeds in requireAuth. Exactly 1 confirms
+      // both that the spy is wired (not 0) and that there's no double-call
+      // regression (not 2+).
+      expect(isSandboxUserCallCount).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("a cross-env token for a non-sandbox userId is also rejected at verifyToken, not the sandbox gate", async () => {
     // Confirm the ordering holds for regular users too: a token signed with
     // the wrong secret is always rejected at verifyToken regardless of whether
