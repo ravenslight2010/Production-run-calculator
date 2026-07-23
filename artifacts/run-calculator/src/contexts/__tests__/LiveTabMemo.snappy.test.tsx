@@ -2900,6 +2900,56 @@ describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count a
     // unguarded.
     expect(s10RenderCount).toBeGreaterThan(countAfterMount);
   });
+
+  // ─── Test 4: COUNTER-PROOF IS NOT WIRED TO HomeCtx ───────────────────────
+  // Mirrors Suite 9 Test 1: confirms that NoLiveRunSubscriber (the shared
+  // counter-proof component from Tests 2 & 3) does NOT re-render when a
+  // HomeCtx dialog field toggles, proving it is subscribed to HomeTabCtx
+  // only and not accidentally wired to the broader HomeCtx.
+  //
+  // Why this matters:
+  //   Test 3 proves NoLiveRunSubscriber re-renders on a HomeTabCtx (runStatus)
+  //   change.  But it does not prove the re-render is caused EXCLUSIVELY by
+  //   HomeTabCtx.  If NoLiveRunSubscriber were inadvertently changed to call
+  //   useHomeCtx() instead of (or in addition to) useHomeTabCtx(), it would
+  //   still re-render on runStatus changes (HomeCtx also carries runStatus),
+  //   and Test 3 would still pass — masking the drift.
+  //
+  //   This test closes that gap: it toggles only the HomeCtx dialogOpen field
+  //   (which is NOT in HomeTabCtx's dep list) and asserts s10RenderCount stays
+  //   flat.  A genuine useHomeTabCtx()-only subscriber must NOT re-render;
+  //   a component wired to useHomeCtx() would re-render and fail this test.
+  it("counter-proof isolation: NoLiveRunSubscriber does NOT re-render when only a HomeCtx dialog field toggles (confirming it is not wired to HomeCtx)", async () => {
+    // Uses the SAME NoLiveRunSubscriber defined at describe-scope — the exact
+    // component exercised by Tests 2 & 3.  s10RenderCount is reset in beforeEach.
+    const { rerender } = render(
+      <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={false}>
+        <NoLiveRunSubscriber />
+      </RealGlanceHomeCtxWrapper>,
+    );
+
+    const countAfterMount = s10RenderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field (dialogOpen "" → "mixes" manageCategory)
+    // WITHOUT changing runStatus.  HomeCtx emits a new value; HomeTabCtx stays
+    // the same (dialogOpen is not a dep of tabCtxValue in RealGlanceHomeCtxWrapper).
+    await act(async () => {
+      rerender(
+        <RealGlanceHomeCtxWrapper runStatus="running" dialogOpen={true}>
+          <NoLiveRunSubscriber />
+        </RealGlanceHomeCtxWrapper>,
+      );
+    });
+
+    // s10RenderCount must be unchanged: HomeTabCtx did not emit a new value,
+    // so a genuine useHomeTabCtx()-only subscriber must not re-render.
+    // If useHomeTabCtx() were replaced with useHomeCtx() inside
+    // NoLiveRunSubscriber, the HomeCtx change above would reach the component,
+    // s10RenderCount would increase, and this assertion would fail — catching
+    // the drift before Test 2's "flat spy count" signal is undermined.
+    expect(s10RenderCount).toBe(countAfterMount);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
