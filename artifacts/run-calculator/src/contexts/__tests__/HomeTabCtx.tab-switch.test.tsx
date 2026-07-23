@@ -541,6 +541,12 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
       );
     });
 
+    // DRIFT GUARD: this assertion pins frontlineRenderCount to FRONTLINE_COMBINED_PIN
+    // immediately before the dialog-open step.  If a third form-change step is ever
+    // added to this COMBINED test without bumping FRONTLINE_COMBINED_PIN, this line
+    // will fail (count N+1 vs expected N) → the constant must be bumped first.
+    // The counter-proof's FRONTLINE_COMBINED_PIN + 1 and + 2 assertions then follow
+    // automatically, keeping the two tests in lockstep without any further edits.
     expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN); // exact: mount(1) + form-change(1) + form-change(1)
     expect(getByTestId("app1-type").textContent).toBe("pepperoni");
 
@@ -669,15 +675,19 @@ describe("HomeTabCtx — LiveFrontlineTabContent slice (app1Type)", () => {
       );
     });
 
-    expect(frontlineRenderCount).toBe(3); // mount(1) + form-change(1) + form-change(1)
+    // Lockstep with COMBINED: using FRONTLINE_COMBINED_PIN here (not a literal)
+    // means that if the constant is bumped (e.g. a 3rd form-change step is added),
+    // this assertion automatically requires adding that 3rd form-change step here
+    // too — keeping the counter-proof scenario identical to the COMBINED test.
+    expect(frontlineRenderCount).toBe(FRONTLINE_COMBINED_PIN); // = 3; mount(1) + form-change(1) + form-change(1)
     expect(getByTestId("app1-type").textContent).toBe("pepperoni");
 
     // Step 3 — dialog-open: only manageCounter changes (0→1); app1Type is stable.
-    // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at 3.
+    // CORRECT provider: ctx ref unchanged → React.memo skips → count stays at FRONTLINE_COMBINED_PIN.
     // BROKEN provider:  manageCounter in deps → new ctx ref → spurious re-render
-    //                   → count becomes 4.
+    //                   → count becomes FRONTLINE_COMBINED_PIN + 1.
     // This step is the heart of the counter-proof: it shows the COMBINED test's
-    // "toBe(3)" assertion is NOT vacuously true — the broken provider violates it.
+    // "toBe(FRONTLINE_COMBINED_PIN)" assertion is NOT vacuously true — the broken provider violates it.
     await act(async () => {
       rerender(
         <BrokenFrontlineProvider app1Type="pepperoni" manageCounter={1}>
