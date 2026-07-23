@@ -2,13 +2,13 @@
 type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
 export const modules: ModuleMap = {
   "./components/mockups/enter-info/Streamlined.tsx": () => import("../components/mockups/enter-info/Streamlined.tsx"),
-  "./components/mockups/import-review/ImportReviewLowes.tsx": () => import("../components/mockups/import-review/ImportReviewLowes.tsx"),
-  "./components/mockups/import-review/ImportReviewProposed.tsx": () => import("../components/mockups/import-review/ImportReviewProposed.tsx"),
   "./components/mockups/tab-dough/Current.tsx": () => import("../components/mockups/tab-dough/Current.tsx"),
   "./components/mockups/tab-dough/Dough.tsx": () => import("../components/mockups/tab-dough/Dough.tsx"),
   "./components/mockups/tab-dough/TimersInline.tsx": () => import("../components/mockups/tab-dough/TimersInline.tsx"),
   "./components/mockups/tab-dough/TimersPanel.tsx": () => import("../components/mockups/tab-dough/TimersPanel.tsx"),
   "./components/mockups/tab-dough/TimersTimeline.tsx": () => import("../components/mockups/tab-dough/TimersTimeline.tsx"),
+  "./components/mockups/import-review/ImportReviewLowes.tsx": () => import("../components/mockups/import-review/ImportReviewLowes.tsx"),
+  "./components/mockups/import-review/ImportReviewProposed.tsx": () => import("../components/mockups/import-review/ImportReviewProposed.tsx"),
   "./components/mockups/tab-frontline/Frontline.tsx": () => import("../components/mockups/tab-frontline/Frontline.tsx"),
   "./components/mockups/tab-packaging/Current.tsx": () => import("../components/mockups/tab-packaging/Current.tsx"),
   "./components/mockups/tab-packaging/VariantA.tsx": () => import("../components/mockups/tab-packaging/VariantA.tsx"),
