@@ -29,15 +29,16 @@
 // import that touches @workspace/db. signToken has no DB dependency and is a
 // safe static import.
 import { spawnSync } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { sql, eq } from "drizzle-orm";
 import express, { type Express } from "express";
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signToken, verifyToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -54,6 +55,8 @@ let seedSandboxUser: () => Promise<void>;
 let sandboxUsername: string;
 let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
+// Kept at module level so the cross-environment-replay test can spy on it.
+let sandboxMod: typeof import("../lib/sandbox");
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -97,7 +100,7 @@ beforeAll(async () => {
   const routerMod = await import("./index");
   const rolesMod = await import("../lib/roles");
   const authMod = await import("../lib/auth");
-  const sandboxMod = await import("../lib/sandbox");
+  sandboxMod = await import("../lib/sandbox");
   const userValidityMod = await import("../lib/userValidity");
   const sessionBoundaryMod = await import("../lib/sessionBoundary");
 
@@ -560,5 +563,126 @@ describe("promoted-DB scenario: stale sandbox row from a dev seed", () => {
     // maps to sandbox=false. The userId is no longer treated as sandbox-flagged.
     const afterDelete = await isSandboxUser(seededUserId);
     expect(afterDelete).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-environment token replay: wrong signing secret
+//
+// A token minted in a dev environment (with its own AUTH_TOKEN_SECRET) is
+// replayed against a production instance that uses a DIFFERENT secret. This
+// describe block confirms that:
+//   1. verifyToken() itself returns null for the bogus-signed token, so the
+//      rejection happens at the signature-verification layer — not at the
+//      sandbox gate.
+//   2. isSandboxUser is never called: the requireAuth early-return at the
+//      verifyToken check fires before the sandbox check is ever reached.
+//
+// Knowing the rejection layer matters for future refactors: if verifyToken
+// were accidentally short-circuited, a cross-environment token could silently
+// reach isSandboxUser. The spy counter makes that regression visible.
+// ---------------------------------------------------------------------------
+describe("cross-environment token replay: verifyToken rejects before sandbox gate", () => {
+  // Helper: build a token whose payload is valid (correct userId, non-expired)
+  // but whose HMAC signature was computed with a completely different secret.
+  // This simulates a dev-environment token presented to a prod instance that
+  // was configured with a different AUTH_TOKEN_SECRET.
+  function mintBogusToken(userId: string): string {
+    const bogusSecret = "completely-different-secret-not-used-in-prod";
+    const now = Math.floor(Date.now() / 1000);
+    const payloadRaw = JSON.stringify({
+      sub: userId,
+      iat: now,
+      exp: now + 60 * 60 * 24 * 30,
+    });
+    const payloadB64 = Buffer.from(payloadRaw)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    const sig = createHmac("sha256", bogusSecret)
+      .update(payloadB64)
+      .digest("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    return `${payloadB64}.${sig}`;
+  }
+
+  it("verifyToken returns null for a token signed with a different secret", () => {
+    // Direct unit assertion: proves the rejection layer is the signature check,
+    // not the sandbox gate. A future refactor that accidentally skips verifyToken
+    // would break this test before any protected route could be reached.
+    const bogusToken = mintBogusToken(SANDBOX_USER_ID);
+    expect(verifyToken(bogusToken)).toBeNull();
+  });
+
+  it("requireAuth returns 401 and isSandboxUser is never called for a cross-env token", async () => {
+    const bogusToken = mintBogusToken(SANDBOX_USER_ID);
+
+    // Spy on the sandbox module to count isSandboxUser invocations.
+    // vitest rewires ESM live bindings on the module namespace, so calls from
+    // requireAuth (which imports isSandboxUser from the same module) are
+    // intercepted. A call count of 0 after the request proves requireAuth
+    // short-circuited at verifyToken before reaching the sandbox check.
+    let isSandboxUserCallCount = 0;
+    const origIsSandboxUser = isSandboxUser; // captured reference from beforeAll
+    const spy = vi
+      .spyOn(sandboxMod, "isSandboxUser")
+      .mockImplementation(async (userId: string) => {
+        isSandboxUserCallCount++;
+        return origIsSandboxUser(userId);
+      });
+
+    try {
+      process.env.NODE_ENV = "production";
+      clearSandboxCache();
+
+      const res = await fetch(`${baseUrl}/api/me`, {
+        headers: { Authorization: `Bearer ${bogusToken}` },
+      });
+
+      // The request must be rejected.
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("Unauthorized");
+
+      // The sandbox gate must never have been consulted: verifyToken returned
+      // null first, which triggers the early return in requireAuth before
+      // isSandboxUser (at line 99 of requireAuth.ts) is ever reached.
+      expect(isSandboxUserCallCount).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a cross-env token for a non-sandbox userId is also rejected at verifyToken, not the sandbox gate", async () => {
+    // Confirm the ordering holds for regular users too: a token signed with
+    // the wrong secret is always rejected at verifyToken regardless of whether
+    // the userId maps to a sandbox or live account.
+    const bogusToken = mintBogusToken(REGULAR_USER_ID);
+
+    let isSandboxUserCallCount = 0;
+    const origIsSandboxUser = isSandboxUser;
+    const spy = vi
+      .spyOn(sandboxMod, "isSandboxUser")
+      .mockImplementation(async (userId: string) => {
+        isSandboxUserCallCount++;
+        return origIsSandboxUser(userId);
+      });
+
+    try {
+      process.env.NODE_ENV = "production";
+      clearSandboxCache();
+
+      const res = await fetch(`${baseUrl}/api/me`, {
+        headers: { Authorization: `Bearer ${bogusToken}` },
+      });
+
+      expect(res.status).toBe(401);
+      expect(isSandboxUserCallCount).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
