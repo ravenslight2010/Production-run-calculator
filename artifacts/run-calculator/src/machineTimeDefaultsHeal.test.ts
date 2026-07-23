@@ -1,8 +1,9 @@
 // Machine times (mixer low/high, hopper) moved from a 0 default ("not
 // measured") to factory-typical defaults (180/330/70). A marker-guarded
 // one-time heal rewrites stored profiles and run values once so existing data
-// picks up the defaults — but AFTER the heal an operator's deliberate 0 must
-// survive reloads (auto-track then falls back to line-speed estimates).
+// picks up the defaults. In addition, loadRunValues folds any stored 0 to the
+// factory default at read time — so synced zeros from peers never render as 0
+// in the UI, regardless of whether the one-time heal marker is already set.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -44,11 +45,11 @@ describe("applyMachineTimeDefaultsHealIfNeeded", () => {
     expect(prof.hopperSec).toBe(70);
   });
 
-  it("never re-runs: a deliberate 0 saved after the heal survives reload", () => {
+  it("never re-runs: a deliberate 0 saved after the heal is folded to default on read", () => {
     applyMachineTimeDefaultsHealIfNeeded(); // sets the marker on a fresh device
     saveRunValues("r2", { ...DEFAULT_VALUES, casesNeeded: 100, mixerHighSec: 0 });
     expect(applyMachineTimeDefaultsHealIfNeeded()).toEqual([]);
-    expect(loadRunValues("r2").mixerHighSec).toBe(0);
+    expect(loadRunValues("r2").mixerHighSec).toBe(MACHINE_TIME_DEFAULTS.mixerHighSec);
   });
 
   it("leaves measured (non-zero, non-default) times untouched", () => {

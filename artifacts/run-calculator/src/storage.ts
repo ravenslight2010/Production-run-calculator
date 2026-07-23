@@ -1069,6 +1069,7 @@ export function loadRunValues(id: string): FormValues {
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const result = { ...DEFAULT_VALUES, ...parsed } as unknown as Record<string, unknown>;
+      foldMachineTimeZeros(result);
       resolvePep1Combined(result, typeof parsed.pep1Combined === "boolean");
       return normalizePepFields(result) as unknown as FormValues;
     }
