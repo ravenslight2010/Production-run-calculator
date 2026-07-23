@@ -225,6 +225,74 @@ describe("detectMissingFields", () => {
       ).toContain("doughBatchYield");
     });
   });
+
+  describe("sauceBarrelLbs derived from a frontline recipe", () => {
+    it("skips sauceBarrelLbs when the frontline recipe has rows with lbs > 0", () => {
+      const keys = keysOf({
+        frontlineRecipe: [{ ingredient: "Tomato Sauce", lbs: 450 }],
+      });
+      expect(keys).not.toContain("sauceBarrelLbs");
+    });
+
+    it("still flags sauceBarrelLbs when the frontline recipe is absent", () => {
+      expect(keysOf({})).toContain("sauceBarrelLbs");
+    });
+
+    it("still flags sauceBarrelLbs when the frontline recipe has no lbs (all zero)", () => {
+      expect(
+        keysOf({ frontlineRecipe: [{ ingredient: "Tomato Sauce", lbs: 0 }] }),
+      ).toContain("sauceBarrelLbs");
+    });
+
+    it("still flags sauceBarrelLbs when the frontline recipe array is empty", () => {
+      expect(keysOf({ frontlineRecipe: [] })).toContain("sauceBarrelLbs");
+    });
+  });
+
+  describe("appNBatchLbs derived from a cheese recipe", () => {
+    it("skips app1BatchLbs when app1CheeseRecipe has rows with lbs > 0", () => {
+      const keys = keysOf({
+        app1Type: "Mozzarella",
+        app1CheeseRecipe: [{ ingredient: "Mozz", lbs: 30 }],
+      });
+      expect(keys).not.toContain("app1BatchLbs");
+      // Other slot fields are still flagged normally.
+      expect(keys).toContain("app1OzPerPizza");
+    });
+
+    it("still flags app1BatchLbs when the cheese recipe is absent", () => {
+      const keys = keysOf({ app1Type: "Mozzarella" });
+      expect(keys).toContain("app1BatchLbs");
+    });
+
+    it("still flags app1BatchLbs when the cheese recipe has no lbs (all zero)", () => {
+      const keys = keysOf({
+        app1Type: "Mozzarella",
+        app1CheeseRecipe: [{ ingredient: "Mozz", lbs: 0 }],
+      });
+      expect(keys).toContain("app1BatchLbs");
+    });
+
+    it("skips only the affected slot's batch lbs; other slots are unaffected", () => {
+      const keys = keysOf({
+        app1Type: "Mozzarella",
+        app1CheeseRecipe: [{ ingredient: "Mozz", lbs: 30 }],
+        app2Type: "Provolone",
+      });
+      expect(keys).not.toContain("app1BatchLbs");
+      expect(keys).toContain("app2BatchLbs");
+    });
+
+    it("applies the guard for all four slots independently", () => {
+      for (const n of [1, 2, 3, 4]) {
+        const keys = keysOf({
+          [`app${n}Type`]: "Cheese",
+          [`app${n}CheeseRecipe`]: [{ ingredient: "Cheese", lbs: 40 }],
+        });
+        expect(keys).not.toContain(`app${n}BatchLbs`);
+      }
+    });
+  });
 });
 
 // ── buildProposals (source priority) ─────────────────────────────────────────
