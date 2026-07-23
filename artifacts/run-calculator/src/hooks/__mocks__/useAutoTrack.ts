@@ -49,19 +49,25 @@ export const mockAutoTrackTickRefs: UseAutoTrackReturn["tickDueRefs"] = {
   batchProd: { current: 0 as number },
 };
 
-const setAutoTrackProgress: UseAutoTrackReturn["setAutoTrackProgress"] = vi.fn();
-const autoSuppressUntilRef: UseAutoTrackReturn["autoSuppressUntilRef"] = { current: 0 as number };
-const fireAutoTrackNow: UseAutoTrackReturn["fireAutoTrackNow"]         = vi.fn();
+/** Exported so stability-contract tests can pin it via the explicit-chain assertion. */
+export const mockSetAutoTrackProgress: UseAutoTrackReturn["setAutoTrackProgress"] = vi.fn();
+
+/** Exported so stability-contract tests can pin it via the explicit-chain assertion.
+ *  Also exported for any future test that needs to mutate the suppression ref directly. */
+export const mockAutoSuppressUntilRef: UseAutoTrackReturn["autoSuppressUntilRef"] = { current: 0 as number };
+
+/** Exported so stability-contract tests can pin it via the explicit-chain assertion. */
+export const mockFireAutoTrackNow: UseAutoTrackReturn["fireAutoTrackNow"] = vi.fn();
 
 // ── Mock hook ────────────────────────────────────────────────────────────────
 
 export function useAutoTrack(): UseAutoTrackReturn {
   return {
     autoTrackProgress:    false,
-    setAutoTrackProgress,
+    setAutoTrackProgress: mockSetAutoTrackProgress,
     autoTrackSuggestion:  null,
-    autoSuppressUntilRef,
-    fireAutoTrackNow,
+    autoSuppressUntilRef: mockAutoSuppressUntilRef,
+    fireAutoTrackNow:     mockFireAutoTrackNow,
     tickDueRefs:          mockAutoTrackTickRefs,
   };
 }

@@ -30,7 +30,12 @@ import { PENDING_CLOCK_MS } from "../../hooks/useClock";
 // Direct import of the exported tickDueRefs object from the shared manual mock.
 // Mutating its slots in beforeEach is visible to the rendered TickBarProbe
 // because the mock's useAutoTrack() returns the SAME object reference.
-import { mockAutoTrackTickRefs } from "../../hooks/__mocks__/useAutoTrack";
+import {
+  mockAutoTrackTickRefs,
+  mockSetAutoTrackProgress,
+  mockAutoSuppressUntilRef,
+  mockFireAutoTrackNow,
+} from "../../hooks/__mocks__/useAutoTrack";
 import { mockSetShowBatchDue } from "../../hooks/__mocks__/useNotifications";
 
 // The symmetric guard advances fake time by this amount to cross the pending
@@ -491,6 +496,43 @@ describe("TickBar.animation — STABILITY CONTRACT: mock hooks return stable ref
     const call2 = useAutoTrack();
     expect(call1.autoTrackProgress).toBe(call2.autoTrackProgress);
     expect(call1.autoTrackSuggestion).toBe(call2.autoTrackSuggestion);
+  });
+
+  it("useAutoTrack: setAutoTrackProgress IS the exported mockSetAutoTrackProgress constant (guards a second allocation in the mock)", () => {
+    const { setAutoTrackProgress } = useAutoTrack();
+    // The two-call reference-identity check above confirms consecutive calls
+    // return the same object, but it cannot detect the case where BOTH calls
+    // return a newly allocated fn that is neither call's expected reference.
+    // This assertion closes that gap: it verifies the EXPLICIT CHAIN —
+    // mock module → useAutoTrack() return → setAutoTrackProgress — is the
+    // exact same reference as the exported constant.  If someone adds a reset
+    // helper inside the __mocks__ file that re-allocates setAutoTrackProgress
+    // (e.g. returning a fresh vi.fn() and yielding it instead of the
+    // module-scope constant), the two-call check above would still pass
+    // vacuously if the same new object is returned each time.
+    // This assertion fails immediately in that scenario.
+    expect(setAutoTrackProgress).toBe(mockSetAutoTrackProgress);
+  });
+
+  it("useAutoTrack: autoSuppressUntilRef IS the exported mockAutoSuppressUntilRef constant (guards a second allocation in the mock)", () => {
+    const { autoSuppressUntilRef } = useAutoTrack();
+    // autoSuppressUntilRef is used as a useMemo dep inside LiveRunProvider.
+    // An inline `{ current: 0 }` inside the return body would produce a new
+    // object on every render, defeating the memo.  The two-call identity
+    // check alone cannot catch the case where both calls happen to return
+    // the same freshly allocated object.  This explicit-chain assertion
+    // closes that gap by pinning the returned ref to the exported module-scope
+    // constant — the only safe allocation point.
+    expect(autoSuppressUntilRef).toBe(mockAutoSuppressUntilRef);
+  });
+
+  it("useAutoTrack: fireAutoTrackNow IS the exported mockFireAutoTrackNow constant (guards a second allocation in the mock)", () => {
+    const { fireAutoTrackNow } = useAutoTrack();
+    // fireAutoTrackNow is used as a useMemo dep inside LiveRunProvider.
+    // Same reasoning as autoSuppressUntilRef above: the explicit-chain
+    // assertion catches a re-allocation that the two-call identity check
+    // would miss if both calls happen to return the same new reference.
+    expect(fireAutoTrackNow).toBe(mockFireAutoTrackNow);
   });
 });
 
