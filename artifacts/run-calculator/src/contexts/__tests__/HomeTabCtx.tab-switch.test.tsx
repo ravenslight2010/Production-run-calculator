@@ -1455,6 +1455,13 @@ describe(
     // not accidentally re-gate the LineSetupRoleGate fieldset when isSupervisor
     // is stable.  Uses SetupRecipesProvider (manageCounter excluded from deps)
     // to mirror the Block 5b pattern exactly.
+    //
+    // Meta-guard: lineSetupCtxRenderCount is pinned to exactly 1 after every
+    // dialog cycle.  This ensures the dialog-stability property is enforced via
+    // an absolute render-count assertion, not just the fieldset.disabled value
+    // check — analogous to Block 3's COMBINED test pinning exact counts at every
+    // step.  If someone weakens the check to a relative render-count form (e.g.
+    // renderCount <= n), this exact pin will catch the regression.
     it("fieldset disabled state is unaffected by dialog state changes", async () => {
       const { rerender, getByTestId } = render(
         <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
@@ -1464,6 +1471,8 @@ describe(
 
       const fieldset = getByTestId("line-setup-role-gate-fieldset") as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(false);
+      // Exact pin: initial mount = exactly 1 render.
+      expect(lineSetupCtxRenderCount).toBe(1);
 
       // Simulate several dialog open/close cycles
       for (const counter of [1, 2, 99]) {
@@ -1476,6 +1485,9 @@ describe(
         });
         // fieldset must remain enabled throughout
         expect(fieldset.disabled).toBe(false);
+        // Exact pin: dialog cycle must NOT cause a re-render — count stays at 1.
+        // Any dialog field leaking into context deps will bump this above 1.
+        expect(lineSetupCtxRenderCount).toBe(1);
       }
     });
 
@@ -1603,6 +1615,13 @@ describe(
     // not accidentally re-gate the DoughRoleGate fieldset when isSupervisor is
     // stable.  Uses SetupRecipesProvider (manageCounter excluded from deps) to
     // mirror the Block 5b pattern exactly.
+    //
+    // Meta-guard: doughCtxRenderCount is pinned to exactly 1 after every dialog
+    // cycle.  This ensures the dialog-stability property is enforced via an
+    // absolute render-count assertion, not just the fieldset.disabled value
+    // check — analogous to Block 3's COMBINED test pinning exact counts at every
+    // step.  If someone weakens the check to a relative render-count form (e.g.
+    // renderCount <= n), this exact pin will catch the regression.
     it("fieldset disabled state is unaffected by dialog state changes", async () => {
       const { rerender, getByTestId } = render(
         <SetupRecipesProvider isSupervisor={true} manageCounter={0}>
@@ -1612,6 +1631,8 @@ describe(
 
       const fieldset = getByTestId("dough-role-gate-fieldset") as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(false);
+      // Exact pin: initial mount = exactly 1 render.
+      expect(doughCtxRenderCount).toBe(1);
 
       // Simulate several dialog open/close cycles
       for (const counter of [1, 2, 99]) {
@@ -1624,6 +1645,9 @@ describe(
         });
         // fieldset must remain enabled throughout
         expect(fieldset.disabled).toBe(false);
+        // Exact pin: dialog cycle must NOT cause a re-render — count stays at 1.
+        // Any dialog field leaking into context deps will bump this above 1.
+        expect(doughCtxRenderCount).toBe(1);
       }
     });
 
