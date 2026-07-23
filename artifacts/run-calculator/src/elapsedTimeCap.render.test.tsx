@@ -603,4 +603,177 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
       expect(minutes).toBeGreaterThan(25);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Scenario H: applyResumeToRun(freezerEmpty=false) → state → ElapsedTimeBadge
+  // full pipeline guard.
+  //
+  // This is the symmetric counterpart to Scenario G: it closes the gap left
+  // by Scenario E, which hardcodes pausedAt=null instead of deriving it via
+  // applyResumeToRun.
+  //
+  // resumeRun(freezerEmpty=false) shifts startedAt forward by the pause
+  // duration and clears pausedAt.  If a future refactor stops clearing
+  // pausedAt in the freezerEmpty=false branch, this scenario catches it
+  // immediately via the state assertion, and the rendered assertions prove
+  // why the clearing is load-bearing.
+  //
+  // Pre-resume state:
+  //   run.startedAt = START (run started T+0)
+  //   run.pausedAt  = START + 30 min (paused 30 min in, still open)
+  //
+  // Resume happens at START + 60 min (30 min real wall-clock pause).
+  //
+  // applyResumeToRun(run, freezerEmpty=false, resumeInstant):
+  //   pauseDuration = resumeInstant − pausedAt = 30 min
+  //   newStartedAt  = START + pauseDuration   = START + 30 min
+  //   pausedAt      = undefined               (explicitly cleared)
+  //
+  // Post-resume observable:
+  //   At resumeInstant (START + 60 min):
+  //     runAge = resumeInstant − newStartedAt = 30 min → "30m"
+  //   25 min after resumeInstant (START + 85 min):
+  //     runAge = 85 − 30 = 55 min → "55m"
+  //
+  // Regression sentinel: with stalePausedAt still set (broken resumeRun),
+  //   at resumeInstant:
+  //     addend = Math.min(30 min, Math.max(0, 60 min − 30 min)) = 30 min
+  //     elapsed = 30 + 30 = 60 min  ← inflated, proves clearing is required.
+  // -------------------------------------------------------------------------
+  describe("Scenario H: applyResumeToRun(freezerEmpty=false) → state → ElapsedTimeBadge pipeline", () => {
+    const START = 4_000_000_000;
+    // Run was paused 30 min after start.
+    const stalePausedAt = START + 30 * 60_000;
+    // Resume happens at START + 60 min (30 min of real wall-clock pause).
+    const resumeInstant = START + 60 * 60_000;
+
+    // Pre-resume run object (pausedAt non-null — the regression case being guarded).
+    const pausedRun = {
+      id: "run-h",
+      brand: "TestBrand",
+      flavor: "TestFlavor",
+      startedAt: START,
+      pausedAt: stalePausedAt,
+    };
+
+    // Call the real production transformation used by resumeRun in home.tsx.
+    // freezerEmpty=false: shifts startedAt forward by pauseDuration (30 min),
+    // so newStartedAt = START + 30 min = resumeInstant − 30 min.
+    const resumedRun = applyResumeToRun(pausedRun, false, resumeInstant);
+
+    // Expected post-resume startedAt: START + (resumeInstant − stalePausedAt)
+    //   = START + (60 min − 30 min) = START + 30 min.
+    const expectedNewStartedAt = START + 30 * 60_000;
+
+    // ------------------------------------------------------------------
+    // State assertions: verify the output of applyResumeToRun directly.
+    // These are the primary regression guards — they fail immediately if
+    // applyResumeToRun stops clearing pausedAt or computes the wrong
+    // newStartedAt for the freezerEmpty=false branch.
+    // ------------------------------------------------------------------
+    it("applyResumeToRun returns a non-null result for a paused run", () => {
+      expect(resumedRun).not.toBeNull();
+    });
+
+    it("post-resume run has pausedAt === undefined (cleared by the transformation)", () => {
+      expect(resumedRun!.pausedAt).toBeUndefined();
+    });
+
+    it("post-resume run has startedAt shifted forward by the pause duration (START + 30 min)", () => {
+      expect(resumedRun!.startedAt).toBe(expectedNewStartedAt);
+    });
+
+    // ------------------------------------------------------------------
+    // Rendered assertions: feed the ACTUAL post-resume state into
+    // ElapsedTimeBadge (not manually constructed constants).
+    // If applyResumeToRun sets the wrong startedAt or forgets to clear
+    // pausedAt, the rendered output below will also be wrong.
+    // ------------------------------------------------------------------
+
+    // At resumeInstant: nowMs = START + 60 min, newStartedAt = START + 30 min
+    // runAge = 30 min → "30m" (no addend since pausedAt=null).
+    it("CompactRunStrip: right at resume shows 30m (shifted startedAt, pausedAt cleared)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("30m");
+    });
+
+    it("ElapsedCard: right at resume shows 30m (shifted startedAt, pausedAt cleared)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("30m");
+    });
+
+    // 25 min after resumeInstant: nowMs = START + 85 min
+    // runAge = 85 − 30 = 55 min → "55m".
+    it("CompactRunStrip: 25 min after resume shows 55m (normal accumulation from shifted start)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumeInstant + 25 * 60_000}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("55m");
+    });
+
+    it("ElapsedCard: 25 min after resume shows 55m (normal accumulation from shifted start)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumeInstant + 25 * 60_000}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("55m");
+    });
+
+    // ------------------------------------------------------------------
+    // Regression sentinel: prove that carrying stalePausedAt forward
+    // inflates the elapsed display for freezerEmpty=false.
+    //
+    // With stalePausedAt still set (broken resumeRun):
+    //   nowMs = resumeInstant = START + 60 min
+    //   newStartedAt = START + 30 min
+    //   runAge = 30 min
+    //   addend = Math.min(30 min, Math.max(0, 60 min − 30 min))
+    //          = Math.min(30, 30) = 30 min
+    //   elapsed = 30 + 30 = 60 min  ← WRONG (doubled)
+    //
+    // With pausedAt=null (correct):
+    //   addend = 0 → elapsed = 30 min  ← correct
+    //
+    // This sentinel confirms that the pausedAt=undefined clearing in
+    // applyResumeToRun is load-bearing for the freezerEmpty=false branch.
+    // ------------------------------------------------------------------
+    it("regression sentinel: if pausedAt were not cleared, elapsed would be inflated above 30m", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="sentinel"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={stalePausedAt}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("sentinel").textContent ?? "",
+      );
+      // Stale pausedAt adds an unearned 30-min addend → 60m, not 30m.
+      expect(minutes).toBeGreaterThan(30);
+    });
+  });
 });
