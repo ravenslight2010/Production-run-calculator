@@ -461,6 +461,66 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.traysOnLine).toBeLessThan(49);
   });
 
+  it("counter-proof: without suppression the t0+36 s tick produces an incremental tray write (mirrors resume sequence)", () => {
+    // Non-vacuousness guard for the "resumes decrementing after suppression"
+    // test above. If the tray-period formula changes so that no incremental
+    // writes ever fire in the t0 → t0+36s → t0+72s window, the suppression
+    // test could silently become vacuous (traysOnLine stays 49 both with AND
+    // without suppression, making a false-pass undetectable).
+    //
+    // Same time sequence and calc as the resume-now test, but NO suppression
+    // is ever armed. The hook must decrement traysOnLine below 49 by t0+72s,
+    // confirming the tray-period formula is live in that window.
+    const t0 = Date.now();
+    const { form, values } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 50,
+      batchesReady: 10,
+    });
+    let elapsed = 10 * 60;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          // Deficit closed -> pure countdown, matching the resume-now test.
+          calc: { ...baseCalc, traysNeeded: 0, batchesNeeded: 0 },
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: elapsed, v: makeV() } },
+    );
+
+    // Mount tick: first consumption fires immediately (50 → 49).
+    expect(values.traysOnLine).toBe(49);
+
+    // t0+36 s — exactly one tray period (60/100 min = 36s): another tray consumed.
+    // No suppression armed, so THIS TICK ITSELF must produce a write.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000),
+      elapsedBatchSec: elapsed + 36,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+
+    // Assert immediately after +36s — the suppression test arms suppression
+    // across exactly this tick, so proving the write fires here (not just
+    // eventually by +72s) is the actual non-vacuousness proof.
+    expect(values.traysOnLine).toBeLessThan(49);
+
+    // t0+72 s — secondary guard: one more period, another decrement.
+    const traysAfter36 = values.traysOnLine;
+    rerender({
+      nowTime: new Date(t0 + 72 * 1000),
+      elapsedBatchSec: elapsed + 72,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+    expect(values.traysOnLine).toBeLessThan(traysAfter36);
+  });
+
   it("disabled (cast screens) never writes — no decrement, no seed", () => {
     // Wall display screens pass disabled:true; they must never mutate the
     // counters or their decrements sync back over the operator's manual edits.
