@@ -380,6 +380,111 @@ describe("isSandboxUser direct cache and DB query behaviour", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cold in-process cache after a simulated server restart
+//
+// The TTL cache is in-process memory. When the server process restarts the Map
+// is brand-new and empty — no prior requests have warmed it. The promoted-DB
+// tests (and the TTL-eviction tests above) simulate that cold state via
+// clearSandboxCache(), but they all do so against an express app that has
+// already served many requests in the same process lifetime.
+//
+// This describe block spins up a **second** express app + router (mirroring
+// what happens after a real restart) and validates that GET /api/me returns 401
+// on the very first request to that new instance when the DB still holds a
+// sandbox-flagged row. A regression that seeds the cache from a hard-coded
+// default instead of a DB read would survive the TTL-eviction tests (which
+// re-warm via clearSandboxCache + a subsequent DB call) but would be caught
+// here because the fresh server makes exactly one DB round-trip before
+// deciding — and the test inspects the outcome of that single round-trip.
+// ---------------------------------------------------------------------------
+describe("cold in-process cache after a simulated server restart", () => {
+  let restartServer: Server;
+  let restartBaseUrl: string;
+
+  // Spin up the second server after the outer beforeAll has completed (so the
+  // DB is set up and all module-level bindings are resolved).
+  beforeAll(async () => {
+    const routerMod = await import("./index");
+    const restartApp: Express = express();
+    restartApp.use(express.json({ limit: "10mb" }));
+    restartApp.use((req, _res, next) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+      next();
+    });
+    restartApp.use("/api", routerMod.default);
+    await new Promise<void>((resolve) => {
+      restartServer = restartApp.listen(0, () => resolve());
+    });
+    const addr = restartServer.address() as AddressInfo;
+    restartBaseUrl = `http://127.0.0.1:${addr.port}`;
+  }, 30_000);
+
+  afterAll(async () => {
+    if (restartServer) {
+      restartServer.closeAllConnections?.();
+      await new Promise<void>((resolve) => restartServer.close(() => resolve()));
+    }
+  }, 30_000);
+
+  it("GET /api/me returns 401 on the very first request when the cache is cold and the DB row is sandbox-flagged", async () => {
+    // The outer beforeEach has already inserted the sandbox user row in the DB.
+    // Clear the shared TTL cache to replicate the cold in-process state that
+    // exists after a real server restart (the Map is empty, no entries).
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    // This is the very first request to the fresh server instance. There is no
+    // cached entry for SANDBOX_USER_ID, so isSandboxUser() must hit the DB.
+    // If the code initialised the cache from a default (e.g. false) instead of
+    // reading the DB, this would incorrectly return 200.
+    const res = await fetch(`${restartBaseUrl}/api/me`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${signToken(SANDBOX_USER_ID)}` },
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Unauthorized");
+  });
+
+  it("non-sandbox user passes on the very first request to the freshly started server (cold cache + live DB row)", async () => {
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    // The regular user has sandbox=false in the DB. Cold-cache DB query must
+    // return false and let the request through.
+    const res = await fetch(`${restartBaseUrl}/api/me`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${signToken(REGULAR_USER_ID)}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { userId: string };
+    expect(body.userId).toBe(REGULAR_USER_ID);
+  });
+
+  it("second request to the restarted server also returns 401 (gate is not one-shot after cache warms)", async () => {
+    clearSandboxCache();
+    process.env.NODE_ENV = "production";
+
+    // First request warms the cache entry (sandbox=true from DB).
+    const res1 = await fetch(`${restartBaseUrl}/api/me`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${signToken(SANDBOX_USER_ID)}` },
+    });
+    expect(res1.status).toBe(401);
+
+    // Second request hits the now-warm cache entry; must still be 401.
+    const res2 = await fetch(`${restartBaseUrl}/api/me`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${signToken(SANDBOX_USER_ID)}` },
+    });
+    expect(res2.status).toBe(401);
+    const body2 = (await res2.json()) as { error: string };
+    expect(body2.error).toBe("Unauthorized");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Promoted-production-DB scenario
 //
 // A dev environment called seedSandboxUser() to create the well-known "test"
