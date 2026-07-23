@@ -2375,6 +2375,12 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
       return <span data-testid="s8-now">{nowTime.getTime()}</span>;
     });
 
+    // Guard: confirm the spy target exists as a named export before mount.
+    // If useLiveRun is renamed or moved to a different module, this fails
+    // immediately with a clear message rather than the post-tick spy count
+    // silently staying at 0 and the test passing vacuously.
+    expect(typeof LiveRunContextNS.useLiveRun).toBe("function");
+
     render(
       <GlanceWrapper runStatus="running" manageCounter={0}>
         <GlanceOverlaySim />
