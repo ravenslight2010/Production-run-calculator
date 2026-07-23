@@ -12,7 +12,8 @@ import {
   InventoryApiError,
 } from "@/inventoryShared";
 
-const MIN_PASSWORD_LENGTH = 6;
+/** @internal – exported only for the regression test suite. */
+export const MIN_PASSWORD_LENGTH = 6;
 /** @internal – exported only for the regression test suite. */
 export const MIN_USERNAME_LENGTH = 3;
 const USERNAME_CHECK_DEBOUNCE_MS = 400;

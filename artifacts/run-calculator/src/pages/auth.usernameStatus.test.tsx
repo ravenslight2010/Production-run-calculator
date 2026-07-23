@@ -48,6 +48,7 @@ import {
   SignInPage,
   useUsernameAvailability,
   MIN_USERNAME_LENGTH,
+  MIN_PASSWORD_LENGTH,
 } from "./auth";
 
 afterEach(() => {
@@ -680,5 +681,63 @@ describe("sign-in guard: availability check fires when the guard is bypassed (en
       unmount();
     },
     4000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Password hint: rendered text must contain the MIN_PASSWORD_LENGTH value
+//
+// The PasswordHint component inside SignUpPage renders "At least N characters"
+// where N is derived from the MIN_PASSWORD_LENGTH constant. If the constant is
+// bumped but the hard-coded string is not updated (or vice-versa), this test
+// catches it immediately because it reads the exported constant and matches
+// against the rendered output — they must agree.
+// ---------------------------------------------------------------------------
+describe("password hint: rendered text matches the MIN_PASSWORD_LENGTH constant", () => {
+  it(
+    "sign-up page renders a password hint containing the exact MIN_PASSWORD_LENGTH value",
+    async () => {
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      renderSignUpPage();
+
+      // The PasswordHint is always visible on the sign-up page (it shows once
+      // the password field exists in the DOM). Find any element whose text
+      // includes "At least <N> characters" where N equals MIN_PASSWORD_LENGTH.
+      // Using a regex anchored to the exported constant's numeric value means
+      // bumping the constant without updating the JSX causes an immediate failure.
+      const expectedPattern = new RegExp(
+        `at least\\s+${MIN_PASSWORD_LENGTH}\\s+characters`,
+        "i",
+      );
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(expectedPattern)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+    },
+    4000,
+  );
+
+  it(
+    "counter-proof: a pattern for a DIFFERENT length does not match the rendered hint",
+    () => {
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      renderSignUpPage();
+
+      // If the rendered hint matches a wrong length, our primary assertion
+      // above would be vacuously passing against an anything-goes element.
+      // This counter-proof confirms specificity: a pattern for MIN_PASSWORD_LENGTH+1
+      // must NOT appear in the rendered output.
+      const wrongLengthPattern = new RegExp(
+        `at least\\s+${MIN_PASSWORD_LENGTH + 1}\\s+characters`,
+        "i",
+      );
+
+      expect(screen.queryByText(wrongLengthPattern)).toBeNull();
+    },
   );
 });
