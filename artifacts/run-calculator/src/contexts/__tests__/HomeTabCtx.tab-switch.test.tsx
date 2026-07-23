@@ -1236,6 +1236,9 @@ describe(
       // Initially not a supervisor → real SetupRecipesRoleGate fieldset is disabled
       const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(true);
+      // One render on mount; a provider regression that causes extra renders
+      // even before isSupervisor changes would be caught here.
+      expect(setupRenderCount).toBe(1);
 
       // Manager grants supervisor role mid-session
       await act(async () => {
@@ -1248,6 +1251,8 @@ describe(
 
       // isSupervisor is now true → fieldset must be enabled
       expect(fieldset.disabled).toBe(false);
+      // Exactly one new render for the isSupervisor change — no extra renders.
+      expect(setupRenderCount).toBe(2);
     });
 
     // ─── enabled → disabled ──────────────────────────────────────────────────
@@ -1261,6 +1266,9 @@ describe(
 
       const fieldset = getByTestId("setup-recipes-fieldset") as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(false);
+      // One render on mount; a provider regression that causes extra renders
+      // even before isSupervisor changes would be caught here.
+      expect(setupRenderCount).toBe(1);
 
       await act(async () => {
         rerender(
@@ -1271,6 +1279,8 @@ describe(
       });
 
       expect(fieldset.disabled).toBe(true);
+      // Exactly one new render for the isSupervisor revocation — no extra renders.
+      expect(setupRenderCount).toBe(2);
     });
 
     // ─── dialog open does not flip disabled ───────────────────────────────────
