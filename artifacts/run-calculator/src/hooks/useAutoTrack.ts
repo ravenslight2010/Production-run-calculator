@@ -35,10 +35,12 @@ interface AutoTrackCalc {
  * (74 trays / 3 batches) and to a sane staging quantity (40 trays). Kept at
  * verbatim parity with mobile RunContext's suggestedDoughStaging.
  */
+export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
+
 export function suggestedDoughStaging(
   traysNeeded: number,
   batchesNeeded: number,
-): { trays: number | null; batches: number | null } {
+): SuggestedDoughStagingReturn {
   return {
     trays: traysNeeded > 0
       ? Math.min(74, Math.max(1, Math.round(Math.min(40, traysNeeded))))

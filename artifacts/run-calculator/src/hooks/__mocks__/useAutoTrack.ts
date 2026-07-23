@@ -36,7 +36,7 @@
 //   });
 
 import { vi } from "vitest";
-import type { UseAutoTrackReturn } from "../useAutoTrack";
+import type { SuggestedDoughStagingReturn, UseAutoTrackReturn } from "../useAutoTrack";
 
 // ── Module-scope allocations (stable refs across every useAutoTrack() call) ───
 
@@ -66,6 +66,6 @@ export function useAutoTrack(): UseAutoTrackReturn {
   };
 }
 
-export function suggestedDoughStaging() {
+export function suggestedDoughStaging(): SuggestedDoughStagingReturn {
   return { trays: null, batches: null };
 }
