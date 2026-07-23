@@ -745,23 +745,32 @@ function StatRow({
   value,
   testId,
   highlight,
+  sub,
 }: {
   label: string;
   value: string;
   testId?: string;
   highlight?: boolean;
+  sub?: string;
 }) {
   return (
     <div
-      className={`flex items-baseline justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
+      className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
     >
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span
-        className={`font-mono font-semibold text-sm tabular-nums ${highlight ? "text-primary text-base" : "text-foreground"}`}
-        data-testid={testId}
-      >
-        {value}
-      </span>
+      <div className="flex flex-col items-end gap-0.5">
+        <span
+          className={`font-mono font-semibold text-sm tabular-nums ${highlight ? "text-primary text-base" : "text-foreground"}`}
+          data-testid={testId}
+        >
+          {value}
+        </span>
+        {sub && (
+          <span className="text-xs text-muted-foreground font-normal leading-tight">
+            {sub}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -17192,6 +17201,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
                       testId="output-app1-batches"
                       highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
+                      sub={v.app1CheeseRecipeName?.trim() || undefined}
                     />
                     <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
@@ -17199,6 +17209,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
                       testId="output-app2-batches"
                       highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
+                      sub={v.app2CheeseRecipeName?.trim() || undefined}
                     />
                     {/* Pep applicators sit between App 2 and App 3, matching
                         the physical line order (and the Run tab's card order). */}
@@ -17246,6 +17257,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
                       testId="output-app3-batches"
                       highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
+                      sub={v.app3CheeseRecipeName?.trim() || undefined}
                     />
                     <div className="border-t border-border/60" aria-hidden="true" />
                     <StatRow
@@ -17253,6 +17265,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
                       testId="output-app4-batches"
                       highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
+                      sub={v.app4CheeseRecipeName?.trim() || undefined}
                     />
                   </CardContent>
                 </Card>
