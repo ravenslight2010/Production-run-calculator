@@ -2324,6 +2324,84 @@ describe("LiveTabMemo — GlanceOverlay uses useHomeTabCtx(), not useHomeCtx() (
       vi.useRealTimers();
     }
   });
+
+  // ─── strict-equal assertion teeth ─────────────────────────────────────────
+  // Guards against weakening Test 1's `expect(renderCount).toBe(1)` to a
+  // range check such as `toBeGreaterThanOrEqual(1)` or `toBeLessThanOrEqual(2)`.
+  //
+  // The regression Test 1 catches is: GlanceOverlay re-wired to useHomeCtx()
+  // instead of useHomeTabCtx(), causing dialog-field changes to trigger
+  // spurious re-renders (visible stutter while a manage panel is open).
+  //
+  // If the `.toBe(1)` assertion were softened to `.toBeGreaterThanOrEqual(1)`,
+  // a component that re-renders once on mount AND again on every dialog toggle
+  // would satisfy it — the regression would silently pass.
+  //
+  // This test demonstrates the danger by running the identical toggle sequence
+  // from Test 1 against a LOCAL variant wired to useHomeCtx() (the wrong hook).
+  // The variant re-renders on every dialog toggle, so its renderCount after
+  // three toggles is > 1.  A strict `.toBe(1)` would correctly FAIL; a
+  // `.toBeGreaterThanOrEqual(1)` would vacuously PASS — confirming that
+  // weakening the assertion would blind the guard.
+  it("strict-equal teeth: a useHomeCtx() variant re-renders on every dialog toggle, proving Test 1's toBe(1) is not vacuous", async () => {
+    let renderCount = 0;
+
+    // Variant wired to useHomeCtx() — the accidental re-wiring Test 1 guards
+    // against.  A separate counter is used so this test does not disturb any
+    // other test's render counts.
+    const WrongHookSim = memo(function WrongHookSimInner() {
+      renderCount++;
+      // WRONG: useHomeCtx() (full context) instead of useHomeTabCtx() (narrow).
+      // Any HomeCtx value change — including dialog-field changes intentionally
+      // excluded from homeTabCtxValue deps — triggers a re-render here.
+      useHomeCtx();
+      return <span data-testid="glance-wrong-hook">rendered</span>;
+    });
+
+    // Provider that DOES invalidate on dialog-field changes (opposite of the
+    // production guard).  Mirrors the DialogAwareProvider from Test 4 above.
+    function DialogAwareHomeCtxProvider({
+      dialogExtras,
+      children,
+    }: {
+      dialogExtras: Record<string, unknown>;
+      children: ReactNode;
+    }) {
+      const ctxValue = useMemo(
+        () => ({ runStatus: "running", brand: "TestBrand", ...dialogExtras }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [dialogExtras],
+      );
+      return <HomeCtx.Provider value={ctxValue}>{children}</HomeCtx.Provider>;
+    }
+
+    const emptyExtras = {};
+    const { rerender } = render(
+      <DialogAwareHomeCtxProvider dialogExtras={emptyExtras}>
+        <WrongHookSim />
+      </DialogAwareHomeCtxProvider>,
+    );
+
+    // After initial mount renderCount must be exactly 1 — just like Test 1.
+    expect(renderCount).toBe(1);
+
+    // Toggle the dialog field open — mirrors Test 1's first manageCounter bump.
+    const openExtras = { manageCategory: "mixes" };
+    await act(async () => {
+      rerender(
+        <DialogAwareHomeCtxProvider dialogExtras={openExtras}>
+          <WrongHookSim />
+        </DialogAwareHomeCtxProvider>,
+      );
+    });
+
+    // renderCount increased: useHomeCtx() delivered the HomeCtx update caused
+    // by the dialog-field toggle.  A strict toBe(1) would FAIL here —
+    // correctly catching the regression.  A toBeGreaterThanOrEqual(1) would
+    // PASS — silently hiding it.  This is the vacuousness we are guarding
+    // against.
+    expect(renderCount).toBeGreaterThan(1);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
