@@ -1047,6 +1047,115 @@ describe("buildProfileAutofillPlan — qualified dough name must not blanket the
   });
 });
 
+describe("buildProfileAutofillPlan — extra applicator slots and sauce clear", () => {
+  // Guards the two user-reported cases:
+  //   1. California pizza: no sauce on the spec, but profile has Lucia's sauce set.
+  //   2. Lowe's 5 Cheese: spec has 2 applicators, profile has 3 set.
+  // The fix: desiredFromProfile detects these "extra" fields when the spec has
+  // ≥1 applicator (confirming it's a full pizza spec) and pushes "" / 0 as the
+  // desired value so they surface as mismatches.
+
+  // Use the same brand+flavor as the plan() helper so profiles get matched.
+  function appProfile(overrides: Record<string, unknown> = {}) {
+    return {
+      brand: "Aldo's",
+      flavor: "Pepperoni",
+      applicators: [
+        { type: "cheese", ozPerPizza: 3.5, batchLbs: 50 },
+      ],
+      pepperonis: [],
+      sauceOzPerPizza: 0,
+      sauceName: "",
+      ...overrides,
+    };
+  }
+
+  it("flags an extra applicator slot the spec doesn't list as a mismatch", () => {
+    // Spec: 1 app slot. Profile has app2Type = "cheese" → extra, should be flagged.
+    const p = plan(
+      [sheet(1, 100, { profiles: [appProfile()] })],
+      values({
+        app1Type: "cheese",
+        app1OzPerPizza: 3.5,
+        app2Type: "cheese",
+        app2OzPerPizza: 2.0,
+      } as Partial<FormValues>),
+    );
+    const m2 = p.mismatches.find(m => m.field === "app2Type");
+    expect(m2).toBeDefined();
+    expect(m2?.specValue).toBe("");
+    expect(m2?.currentValue).toBe("cheese");
+    // app1Type was in the spec so should NOT be flagged as extra
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeUndefined();
+  });
+
+  it("flags sauce recipe and oz when spec has applicators but no sauce", () => {
+    // Spec: 1 applicator, no sauce. Profile has sauce recipe + oz set.
+    const p = plan(
+      [sheet(1, 100, { profiles: [appProfile()] })],
+      values({
+        frontlineRecipeName: "Lucia's Sauce",
+        sauceOzPerPizza: 3.0,
+        app1Type: "cheese",
+      } as Partial<FormValues>),
+    );
+    const mName = p.mismatches.find(m => m.field === "frontlineRecipeName");
+    expect(mName).toBeDefined();
+    expect(mName?.specValue).toBe("");
+    expect(mName?.currentValue).toBe("Lucia's Sauce");
+
+    const mOz = p.mismatches.find(m => m.field === "sauceOzPerPizza");
+    expect(mOz).toBeDefined();
+    expect(mOz?.specValue).toBe(0);
+  });
+
+  it("does NOT flag extra slots when the spec has zero applicators (not a full spec sheet)", () => {
+    // Spec has no applicators at all → could be a die/packaging-only sheet;
+    // do not clear slots based on it.
+    const p = plan(
+      [sheet(1, 100, { profiles: [{ brand: "Aldo's", flavor: "Pepperoni", applicators: [], pepperonis: [] }] })],
+      values({
+        app1Type: "cheese",
+        app2Type: "cheese",
+      } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "app1Type")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "app2Type")).toBeUndefined();
+  });
+
+  it("does NOT flag sauce when the spec has no applicators (partial sheet)", () => {
+    const p = plan(
+      [sheet(1, 100, { profiles: [{ brand: "Aldo's", flavor: "Pepperoni", applicators: [], pepperonis: [], sauceOzPerPizza: 0 }] })],
+      values({ frontlineRecipeName: "Lucia's Sauce", sauceOzPerPizza: 3.0 } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "frontlineRecipeName")).toBeUndefined();
+    expect(p.mismatches.find(m => m.field === "sauceOzPerPizza")).toBeUndefined();
+  });
+
+  it("does NOT flag sauce when the spec has sauce oz > 0", () => {
+    // Spec says there IS sauce → no clear.
+    const p = plan(
+      [sheet(1, 100, { profiles: [appProfile({ sauceOzPerPizza: 3.0, sauceName: "Red Sauce" })] })],
+      values({ frontlineRecipeName: "Red Sauce" } as Partial<FormValues>),
+    );
+    // sauce name matches → neither fill nor mismatch
+    expect(p.mismatches.find(m => m.field === "frontlineRecipeName")).toBeUndefined();
+    expect(p.fills.find(f => f.field === "frontlineRecipeName")).toBeUndefined();
+  });
+
+  it("does NOT clear sauce when the profile has mixed recipe rows (real recipe outranks name)", () => {
+    // Even if spec has no sauce, a profile with actual recipe rows is preserved.
+    const p = plan(
+      [sheet(1, 100, { profiles: [appProfile()] })],
+      values({
+        frontlineRecipeName: "Lucia's Sauce",
+        frontlineRecipe: [{ ingredient: "Tomatoes", lbs: 10 }],
+      } as Partial<FormValues>),
+    );
+    expect(p.mismatches.find(m => m.field === "frontlineRecipeName")).toBeUndefined();
+  });
+});
+
 describe("buildProfileAutofillPlan — own-brand prefix on linked recipe names", () => {
   it("does not flag a mismatch when names differ only by the profile's brand prefix", () => {
     // "Aldo's BBQ Chicken Cheese Mix" (import de-collided with a brand prefix)

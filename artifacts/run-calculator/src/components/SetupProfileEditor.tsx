@@ -832,7 +832,7 @@ export default function SetupProfileEditor({
                             <li key={e.field} className="text-xs flex items-center gap-1.5">
                               <Check className="w-3 h-3 text-primary shrink-0" />
                               <span className="text-muted-foreground">{e.label}:</span>
-                              <span className="font-semibold">{String(e.specValue)}</span>
+                              <span className="font-semibold">{String(e.specValue) || "(none)"}</span>
                             </li>
                           ))}
                         </ul>
@@ -898,8 +898,8 @@ export default function SetupProfileEditor({
                             <li key={e.field} className="text-xs flex items-center gap-2 flex-wrap rounded-md border border-border/40 bg-muted/20 px-2.5 py-1.5">
                               <span className="font-semibold">{e.label}</span>
                               <span className="text-muted-foreground">
-                                now <span className="font-semibold text-foreground">{String(e.currentValue)}</span>
-                                {" · "}import says <span className="font-semibold text-foreground">{String(e.specValue)}</span>
+                                now <span className="font-semibold text-foreground">{String(e.currentValue) || "(none)"}</span>
+                                {" · "}import says <span className="font-semibold text-foreground">{String(e.specValue) || "(none)"}</span>
                               </span>
                               <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-xs ml-auto" onClick={() => acceptMismatches([e])}>
                                 Use imported

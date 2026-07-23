@@ -318,6 +318,45 @@ function desiredFromProfile(
     }
   });
 
+  // ── Extra applicator slots & missing sauce ──────────────────────────────
+  // Only when the spec lists at least one applicator — that signals it is a
+  // full pizza spec (not a die-only or packaging-only sheet) so its silence
+  // on a slot or on sauce is meaningful. A sheet that parsed zero applicator
+  // rows may simply not contain topping information; clearing slots based on
+  // it would be a false positive.
+  const specHasApplicators = (p.applicators ?? []).length > 0;
+  if (specHasApplicators) {
+    // Any slot (1–4) the spec resolved to an EMPTY station that the current
+    // profile has filled is "extra". Surface the type as a mismatch (spec
+    // says "") so the user can accept the clear. Leaves the associated oz/
+    // recipe/batch fields alone — they become inert once the type is blank.
+    for (let slot = 1; slot <= 4; slot++) {
+      const specType = (resolvedApps[slot - 1]?.type ?? "").trim();
+      if (specType) continue; // spec fills this slot — handled above
+      if (String(cur[`app${slot}Type`] ?? "").trim()) {
+        push(`app${slot}Type`, `Applicator ${slot} Type`, "", "string");
+      }
+    }
+
+    // If the spec mentions applicators but has no sauce (oz = 0/null AND no
+    // sauce name), the pizza doesn't have sauce. Clear the profile's sauce
+    // fields — but only when there are no hand-typed mixed recipe rows (a real
+    // recipe outranks a bare name link, same rule the import uses).
+    const hasSauceOz = (p.sauceOzPerPizza ?? 0) > 0;
+    const hasSauceName = (p.sauceName ?? "").trim().length > 0;
+    if (!hasSauceOz && !hasSauceName && !hasRealRows(cur.frontlineRecipe)) {
+      if (String(cur.frontlineRecipeName ?? "").trim()) {
+        push("frontlineRecipeName", "Sauce Recipe", "", "string");
+      }
+      if (Number(cur.sauceOzPerPizza ?? 0) > 0) {
+        push("sauceOzPerPizza", "Sauce Oz Per Pizza", 0, "number");
+      }
+      if (Number(cur.sauceBarrelLbs ?? 0) > 0) {
+        push("sauceBarrelLbs", "Sauce Barrel Weight (lbs)", 0, "number");
+      }
+    }
+  }
+
   return { desired: out, namedPepCount: namedPeps.length };
 }
 
