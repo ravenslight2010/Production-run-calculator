@@ -54,9 +54,8 @@ const ALLOWED_CALLERS = new Set<string>([
   "FloorModeView",
   // GlanceOverlay was extracted to src/components/GlanceOverlay.tsx so it can
   // be tested in isolation.  It is listed in ALLOWED_FILES below instead.
-  // CompactRunStrip — persistent strip shown on non-Run tabs; displays live
-  //   counters (cases made, pace, time left) so it must subscribe to the clock
-  "CompactRunStrip",
+  // CompactRunStrip was extracted to src/components/CompactRunStrip.tsx so it
+  // can be tested in isolation.  It is listed in ALLOWED_FILES below instead.
 ]);
 
 // ── Check 2: per-file allowlist for the full src/ tree ────────────────────
@@ -79,6 +78,12 @@ const ALLOWED_FILES = new Set<string>([
   // It is the full-screen live-stats overlay that stays visible while manage
   // dialogs are open, so it genuinely needs the per-second clock subscription.
   "components/GlanceOverlay.tsx",
+
+  // CompactRunStrip.tsx — extracted from home.tsx so the real component can be
+  // imported and rendered in isolation by LiveTabMemo.snappy.test.tsx (Suite 11).
+  // It is the persistent mini status bar shown on non-Run tabs while manage
+  // dialogs are open, so it genuinely needs the per-second clock subscription.
+  "components/CompactRunStrip.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────

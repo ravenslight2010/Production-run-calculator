@@ -2,6 +2,7 @@ import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState,
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import GlanceOverlay from "../components/GlanceOverlay";
+import CompactRunStrip from "../components/CompactRunStrip";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -2386,19 +2387,6 @@ const GroupedPanel = ({
 // Extracted to src/contexts/HomeCtx.ts so integration tests can import the
 // real useHomeCtx() hook without pulling in the full home.tsx render tree.
 // (imported at top of file)
-
-// ─── HomeRunSummaryCtx: narrow run-data slice for CompactRunStrip ────────────
-// Only the run/production state CompactRunStrip actually reads. Components
-// subscribed here do NOT re-render when manage/merge/import/dialog state
-// changes — only when the run itself changes (dayState, form values, runStatus).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const HomeRunSummaryCtx = createContext<any>(null);
-function useHomeRunSummaryCtx(): any {
-  const ctx = useContext(HomeRunSummaryCtx);
-  if (!ctx) throw new Error("useHomeRunSummaryCtx must be used within HomeRunSummaryCtx.Provider");
-  return ctx;
-}
-
 
 export default function Home() {
   const {
@@ -10125,25 +10113,6 @@ export default function Home() {
   );
 
 
-  // ── Narrow context value for CompactRunStrip ────────────────────────────
-  // Always-current ref for pauseRun. The function is a plain closure (not
-  // useCallback), so we store it in a stable ref to avoid stale captures
-  // while keeping the ref object itself stable across renders.
-  const _pauseRunRef = useRef<() => void>(pauseRun);
-  _pauseRunRef.current = pauseRun;
-
-  // Memoized narrow context: only re-creates when run data actually changes.
-  // Manage/merge/import/dialog state changes do NOT appear in these deps, so
-  // they do NOT trigger a new context reference → CompactRunStrip skips
-  // the re-render entirely.
-  const homeRunSummaryCtxValue = useMemo(
-    () => ({ runStatus, currentRun, dayState, v, ve, setActiveTab, pauseRunRef: _pauseRunRef }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [runStatus, currentRun, dayState, v, ve],
-    // setActiveTab is a stable React setState dispatch; _pauseRunRef is a
-    // stable ref object — both intentionally omitted from deps.
-  );
-
   // ── Context value for extracted sub-components ──────────────────────────
   // Wrapped in useMemo so the object reference only changes when reactive
   // state actually changes.  Plain-function closures (addBrand, pauseRun,
@@ -14136,32 +14105,30 @@ export default function Home() {
   );
 
   return (
-    <HomeRunSummaryCtx.Provider value={homeRunSummaryCtxValue}>
-      <HomeCtx.Provider value={homeCtxValue}>
-        <HomeTabCtx.Provider value={homeTabCtxValue}>
-        <LiveRunProvider
-          v={v}
-          ve={ve}
-          runStatus={runStatus}
-          currentRun={currentRun}
-          currentRunId={currentRunId}
-          form={form}
-          dayState={dayState}
-          doughSubTab={doughSubTab}
-          upcomingRunLabels={upcomingRunLabels}
-          prefs={me?.notificationPrefs}
-          screenMode={screenMode}
-          externalAutoSuppressRef={autoSuppressUntilRef}
-          machine={{
-            spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
-            hopperSec: Number(v.hopperSec) || 0,
-          }}
-        >
-          {screenMode ? <ScreenModeView /> : mainContent}
-        </LiveRunProvider>
-        </HomeTabCtx.Provider>
-      </HomeCtx.Provider>
-    </HomeRunSummaryCtx.Provider>
+    <HomeCtx.Provider value={homeCtxValue}>
+      <HomeTabCtx.Provider value={homeTabCtxValue}>
+      <LiveRunProvider
+        v={v}
+        ve={ve}
+        runStatus={runStatus}
+        currentRun={currentRun}
+        currentRunId={currentRunId}
+        form={form}
+        dayState={dayState}
+        doughSubTab={doughSubTab}
+        upcomingRunLabels={upcomingRunLabels}
+        prefs={me?.notificationPrefs}
+        screenMode={screenMode}
+        externalAutoSuppressRef={autoSuppressUntilRef}
+        machine={{
+          spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
+          hopperSec: Number(v.hopperSec) || 0,
+        }}
+      >
+        {screenMode ? <ScreenModeView /> : mainContent}
+      </LiveRunProvider>
+      </HomeTabCtx.Provider>
+    </HomeCtx.Provider>
   );
 }
 
@@ -15098,6 +15065,9 @@ function FloorModeView() {
 // isolation (rendering the real component with real providers) without pulling
 // the full home.tsx dependency tree into the test environment.
 
+// CompactRunStrip is defined in src/components/CompactRunStrip.tsx and imported
+// at the top of this file.  Same rationale as GlanceOverlay above.
+
 // ─── ElapsedTimeBadge ────────────────────────────────────────────────────────
 // Pure presentational helper: given the three clock values, computes the
 // display-safe elapsed string (with forward-drift upper-bound cap) and renders
@@ -15128,171 +15098,6 @@ export function ElapsedTimeBadge({
   return <span data-testid={testId} className={className}>{fmtElapsed(runAge + addend)}</span>;
 }
 
-const CompactRunStrip = memo(function CompactRunStrip() {
-  // Narrow context: only run state. Does NOT re-render when manage/merge/import
-  // state changes — only when dayState, form values, or runStatus change.
-  // React.memo prevents re-renders from parent re-renders (e.g. Home re-rendering
-  // because manage-dialog state changed): with no prop changes + stable narrow
-  // context, this component only re-renders when run data or the live clock tick.
-  const { runStatus, currentRun, dayState, v, ve, setActiveTab, pauseRunRef } = useHomeRunSummaryCtx();
-
-  const {
-    calc, nowTime, elapsedBatchSec, casesPct, casesFreezerPct,
-  } = useLiveRun();
-
-  return (
-          <div className="print:hidden sticky top-2 z-40">
-            <div
-              className="relative rounded-lg border border-border/60 bg-card/95 backdrop-blur shadow-lg overflow-hidden cursor-pointer"
-              onClick={() => setActiveTab("run")}
-              data-testid="compact-run-strip"
-            >
-              <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
-              <div className="px-3 py-2.5 pt-3 flex items-center justify-between gap-3">
-                <div className="flex flex-col flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    {runStatus === "running" ? (
-                      <>
-                        <span className="relative flex h-2 w-2 shrink-0">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider truncate">
-                          Running{currentRun?.startedAt ? <> · <ElapsedTimeBadge data-testid="strip-elapsed" nowMs={nowTime.getTime()} startedAt={currentRun.startedAt} pausedAt={currentRun.pausedAt ?? null} /></> : ""}
-                        </span>
-                      </>
-                    ) : runStatus === "paused" ? (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
-                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Paused</span>
-                      </>
-                    ) : runStatus === "ended" ? (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Ended</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0" />
-                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Not started</span>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="text-sm font-bold text-foreground truncate">
-                      {(currentRun?.brand || currentRun?.flavor)
-                        ? <>{currentRun?.brand}{currentRun?.brand && currentRun?.flavor ? <span className="text-primary mx-1">—</span> : null}{currentRun?.flavor}</>
-                        : "Unnamed Run"}
-                    </span>
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase shrink-0 inline-flex items-center">
-                      Run {dayState.currentIndex + 1}/{dayState.runs.length}
-                      <ChevronRight className="w-3 h-3 ml-0.5" />
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end text-right shrink-0">
-                  {v.casesNeeded > 0 && (
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="text-sm font-bold font-mono tabular-nums text-foreground">{fmtComma(calc.casesCompleted)}</span>
-                      <span className="text-[10px] text-muted-foreground">/ {fmtComma(v.casesNeeded)}</span>
-                      <span className="text-[10px] font-semibold text-primary tabular-nums">
-                        {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}%
-                      </span>
-                      {calc.casesInFreezer > 0 && (
-                        <span className="text-[10px] font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</span>
-                      )}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    {calc.paceStatus !== null && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border tabular-nums ${
-                        calc.paceStatus === "behind"
-                          ? "text-red-400 bg-red-400/10 border-red-400/20"
-                          : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
-                      }`}>
-                        {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} ahead` : `▼ ${Math.abs(calc.paceDelta)} behind`}
-                        {calc.ppm > 0 ? ` · ${calc.ppm} PPM` : ""}
-                      </span>
-                    )}
-                    {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (
-                      <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
-                        Est {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {(runStatus === "running" || runStatus === "paused") && (
-                  <div className="shrink-0 border-l border-border/50 pl-3">
-                    {runStatus === "running" ? (
-                      <button
-                        type="button"
-                        title="Pause run"
-                        data-testid="strip-pause"
-                        onClick={(e: any) => { e.stopPropagation(); pauseRunRef.current(); }}
-                        className="bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
-                      >
-                        <Pause className="w-4 h-4 fill-current" />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        title="Resume on Run tab"
-                        data-testid="strip-resume"
-                        onClick={(e: any) => { e.stopPropagation(); setActiveTab("run"); }}
-                        className="bg-emerald-600/20 text-emerald-500 hover:bg-emerald-500 hover:text-black p-2.5 rounded-lg transition-colors border border-emerald-500/30"
-                      >
-                        <Play className="w-4 h-4 fill-current" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              {v.casesNeeded > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-muted/40 flex">
-                  <div className="h-full bg-primary transition-all duration-500" style={{ width: `${casesPct * 100}%` }} />
-                  {casesFreezerPct > 0 && (
-                    <div className="h-full bg-sky-400/60 transition-all duration-500" style={{ width: `${casesFreezerPct * 100}%` }} />
-                  )}
-                </div>
-              )}
-            </div>
-            {/* Compact freezer phase line — same math as the Run tab banner */}
-            {!currentRun?.endedAt && runStatus === "running" && (() => {
-              const freezerMin = Number(ve.freezerTime) || 0;
-              if (freezerMin <= 0) return null;
-              const elapsedMin = elapsedBatchSec / 60;
-              const ppm = calc.ppm;
-              if (ppm <= 0) return null;
-              const feedDoneMin =
-                v.pizzasPerCase > 0 && v.casesNeeded > 0
-                  ? (v.casesNeeded * v.pizzasPerCase) / ppm
-                  : Infinity;
-              const feedComplete = elapsedMin >= feedDoneMin;
-              const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
-              const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
-              const emptying = feedComplete && emptyRemainMin > 0;
-              if (!filling && !emptying) return null;
-              const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
-              const remainMs = Math.max(0, remainMin * 60000);
-              const mm = Math.floor(remainMs / 60000);
-              const ss = Math.floor((remainMs % 60000) / 1000);
-              const tone = filling
-                ? { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400" }
-                : { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400" };
-              return (
-                <div className={`mt-1 rounded-md border px-3 py-1.5 flex items-center justify-center gap-2 ${tone.wrap}`}>
-                  <Timer className={`w-3.5 h-3.5 shrink-0 ${tone.text}`} />
-                  <span className={`text-[11px] font-semibold ${tone.text}`}>
-                    {filling
-                      ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
-                      : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
-                  </span>
-                </div>
-              );
-            })()}
-          </div>
-  );
-});
 
 const LiveRunTabContent = memo(function LiveRunTabContent() {
   const hx = useHomeCtx();

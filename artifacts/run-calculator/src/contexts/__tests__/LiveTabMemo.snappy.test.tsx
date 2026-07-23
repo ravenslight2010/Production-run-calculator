@@ -43,6 +43,7 @@ import {
   type ReactNode,
 } from "react";
 import GlanceOverlay from "../../components/GlanceOverlay";
+import CompactRunStrip from "../../components/CompactRunStrip";
 import { render, act, cleanup } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { type FormValues, DEFAULT_VALUES } from "../../types";
@@ -2898,5 +2899,201 @@ describe("LiveTabMemo — Suite 10: real GlanceOverlay useLiveRun() call count a
     // be vacuously satisfied and Test 1's advancing-count signal would be
     // unguarded.
     expect(s10RenderCount).toBeGreaterThan(countAfterMount);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 11 — Real CompactRunStrip stays live when a manage dialog is open
+//
+// CompactRunStrip (src/components/CompactRunStrip.tsx) is a memo()-wrapped
+// component that floats persistently in the header whenever the user is on
+// any tab OTHER than the Run tab — it stays VISIBLE while manage dialogs are
+// open, exactly like GlanceOverlay.
+//
+// Subscription pattern the real component must maintain:
+//   • useHomeTabCtx() — runStatus, currentRun, dayState, v, ve, setActiveTab, pauseRun
+//   • useLiveRun()    — calc, nowTime, elapsedBatchSec, casesPct, casesFreezerPct
+//
+// Two tests mirror Suite 9/10 for GlanceOverlay:
+//
+//   1. ISOLATION  — real CompactRunStrip's data-testid="compact-run-strip" DOM
+//      node does NOT disappear and useLiveRun() spy call count advances after
+//      60 s of fake clock ticks while a manage dialog div is concurrently
+//      rendered — proving the live subscription is NOT blocked.
+//
+//   2. COUNTER-PROOF — a memo()-wrapped component that omits useLiveRun() in
+//      the same wrapper produces a flat spy call count after the same 60 s
+//      advance, proving Test 1's advancing count comes from CompactRunStrip's
+//      own subscription and not from background call sites.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Module-level stable refs so CompactRunStripWrapper re-renders (caused by
+// dialogOpen changing) don't create new object identities for LiveRunProvider
+// props — which would otherwise emit a spurious context update.
+const S11_DAY_STATE = { runs: [ACTIVE_RUN], currentIndex: 0 } as const;
+const S11_UPCOMING_LABELS: string[] = [];
+const S11_MACHINE = { spinSec: 0, hopperSec: 0 } as const;
+
+// Minimal HomeTabCtx value for CompactRunStrip.
+// Provides all fields the real component reads: runStatus, currentRun,
+// dayState, v, ve, setActiveTab, pauseRun.
+function makeCompactRunStripCtxValue(runStatus: string) {
+  return {
+    runStatus,
+    currentRun: { id: "run-live-1", brand: "TestBrand", flavor: "TestFlavor", startedAt: STARTED_AT },
+    dayState: S11_DAY_STATE,
+    v: ACTIVE_VALUES,
+    ve: ACTIVE_VALUES,
+    setActiveTab: () => {},
+    pauseRun: () => {},
+  };
+}
+
+// Wrapper: HomeTabCtx.Provider (stable on runStatus) + LiveRunProvider.
+// dialogOpen is passed as a prop so the test can toggle "manage dialog open"
+// without touching the HomeTabCtx value — HomeTabCtx stays stable, which is
+// the key isolation invariant that CompactRunStrip relies on.
+function CompactRunStripWrapper({
+  runStatus = "running",
+  dialogOpen = false,
+  children,
+}: {
+  runStatus?: string;
+  dialogOpen?: boolean;
+  children: ReactNode;
+}) {
+  const form = useForm<FormValues>({ defaultValues: ACTIVE_VALUES });
+
+  // Only runStatus in deps — dialogOpen intentionally excluded.
+  // This mirrors home.tsx: homeTabCtxValue never includes manage/dialog fields.
+  const tabCtxValue = useMemo(
+    () => makeCompactRunStripCtxValue(runStatus),
+    [runStatus],
+  );
+
+  return (
+    <HomeTabCtx.Provider value={tabCtxValue}>
+      <LiveRunProvider
+        v={ACTIVE_VALUES}
+        ve={ACTIVE_VALUES}
+        runStatus={runStatus as "running"}
+        currentRun={ACTIVE_RUN}
+        currentRunId="run-live-1"
+        form={form}
+        dayState={S11_DAY_STATE}
+        doughSubTab="dough"
+        upcomingRunLabels={S11_UPCOMING_LABELS}
+        prefs={undefined}
+        screenMode={null}
+        machine={S11_MACHINE}
+      >
+        {dialogOpen && (
+          <div data-testid="s11-manage-dialog">Manage: mixes</div>
+        )}
+        {children}
+      </LiveRunProvider>
+    </HomeTabCtx.Provider>
+  );
+}
+
+describe("LiveTabMemo — Suite 11: real CompactRunStrip useLiveRun() subscription stays live when a manage dialog is open", () => {
+  let s11NoLiveRunRenderCount = 0;
+
+  // Counter-proof component: subscribes to HomeTabCtx (like the real strip)
+  // but deliberately omits useLiveRun() — the "subscription accidentally removed"
+  // scenario.  Defined at describe-scope so its identity is stable across tests.
+  const S11NoLiveRunSubscriber = memo(function S11NoLiveRunSubscriberInner() {
+    s11NoLiveRunRenderCount++;
+    useHomeTabCtx();
+    return <span data-testid="s11-no-live-run">static</span>;
+  });
+
+  beforeEach(() => { s11NoLiveRunRenderCount = 0; vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); cleanup(); });
+
+  // ─── Test 1: LIVE CLOCK WITH MANAGE DIALOG ───────────────────────────────
+  // The real CompactRunStrip must keep calling useLiveRun() on every clock
+  // tick even while a manage dialog div is concurrently rendered.
+  //
+  // If useLiveRun() were accidentally removed from CompactRunStrip:
+  //   • the component would stop re-rendering on clock ticks
+  //   • spy.mock.calls.length would stay flat after advanceTimersByTime
+  //   • this assertion would fail — catching the freeze before it ships
+  it("real CompactRunStrip: useLiveRun() spy call count advances after 60 s while a manage dialog is rendered concurrently", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    render(
+      <CompactRunStripWrapper runStatus="running" dialogOpen={true}>
+        <CompactRunStrip />
+      </CompactRunStripWrapper>,
+    );
+
+    // Manage dialog is visible at the same time as the strip
+    expect(document.querySelector("[data-testid='s11-manage-dialog']")).not.toBeNull();
+    // Strip itself is rendered
+    expect(document.querySelector("[data-testid='compact-run-strip']")).not.toBeNull();
+
+    // At mount the real CompactRunStrip must have already called useLiveRun()
+    const countAtMount = spy.mock.calls.length;
+    expect(countAtMount).toBeGreaterThan(0);
+
+    // Advance 60 s — LiveRunProvider emits a new context value every second
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    // Call count must have increased: the live subscription was not blocked
+    // by the concurrent manage dialog render.
+    expect(spy.mock.calls.length).toBeGreaterThan(countAtMount);
+
+    spy.mockRestore();
+  });
+
+  // ─── Test 2: COUNTER-PROOF ────────────────────────────────────────────────
+  // A memo()-wrapped component that omits useLiveRun() sits in the same
+  // wrapper.  After 60 s its spy call count must be flat, proving the
+  // advancing count in Test 1 is caused by CompactRunStrip's real subscription.
+  it("counter-proof: a memo() component with no useLiveRun() subscription has a flat spy call count after 60 s of clock ticks", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    render(
+      <CompactRunStripWrapper runStatus="running" dialogOpen={true}>
+        <S11NoLiveRunSubscriber />
+      </CompactRunStripWrapper>,
+    );
+
+    const countAtMount = spy.mock.calls.length;
+
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+
+    // Without a useLiveRun() subscription the component does not re-render on
+    // clock ticks — spy count must be flat.
+    expect(spy.mock.calls.length).toBe(countAtMount);
+
+    spy.mockRestore();
+  });
+
+  // ─── Test 3: COUNTER-PROOF IS NOT A NO-OP ────────────────────────────────
+  // Confirms S11NoLiveRunSubscriber genuinely subscribes to HomeTabCtx and
+  // re-renders when it changes — so its flat useLiveRun() spy count in Test 2
+  // is meaningful (the component IS active, just not subscribed to the clock).
+  it("counter-proof liveness: S11NoLiveRunSubscriber re-renders when HomeTabCtx changes (runStatus toggle), proving it is not a no-op", async () => {
+    const { rerender } = render(
+      <CompactRunStripWrapper runStatus="running" dialogOpen={false}>
+        <S11NoLiveRunSubscriber />
+      </CompactRunStripWrapper>,
+    );
+
+    const countAfterMount = s11NoLiveRunRenderCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle runStatus: HomeTabCtx emits a new value → useHomeTabCtx() subscriber re-renders.
+    await act(async () => {
+      rerender(
+        <CompactRunStripWrapper runStatus="idle" dialogOpen={false}>
+          <S11NoLiveRunSubscriber />
+        </CompactRunStripWrapper>,
+      );
+    });
+
+    expect(s11NoLiveRunRenderCount).toBeGreaterThan(countAfterMount);
   });
 });
