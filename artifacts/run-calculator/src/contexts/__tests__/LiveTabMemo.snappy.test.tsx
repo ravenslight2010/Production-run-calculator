@@ -2599,6 +2599,7 @@ describe("LiveTabMemo — Suite 8: GlanceOverlay nowTime subscription active gua
   // even a non-trivial simulator omitting useLiveRun() would now show spy calls
   // if the spy were somehow tracking the wrong target.
   it("symmetric spy guard: spy on LiveRunContextNS.useLiveRun stays at 0 for a useHomeTabCtx()-only simulator (no useLiveRun call) over 60 s", async () => {
+    expect(typeof LiveRunContextNS.useLiveRun).toBe("function");
     const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
 
     try {
