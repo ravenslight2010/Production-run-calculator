@@ -21,76 +21,25 @@ import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
 import { useNotifications } from "../../hooks/useNotifications";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
-
 // ── Stub hooks that are not under test ──────────────────────────────────────
 // useNotifications uses browser Audio / Notification APIs unavailable in jsdom;
 // useAutoTrack does form writes and localStorage that add noise. Both are
 // correct in production — we mock them here only to keep this test focused on
 // the render-isolation guarantee.
+//
+// The closure-level stability guarantee (all refs/fns allocated once at module
+// scope, never inline) is enforced STRUCTURALLY by the shared manual mocks in:
+//   src/hooks/__mocks__/useAutoTrack.ts
+//   src/hooks/__mocks__/useNotifications.ts
+// Vitest resolves those files automatically from the no-factory vi.mock() calls
+// below.  See those files for the full explanation of why inline vi.fn() inside
+// a vi.mock factory silently defeats the liveSlice useMemo in LiveRunProvider.
+//
+// The describe block at the bottom of this file verifies the contract with
+// reference-identity assertions so a drift in the shared mocks is caught immediately.
 
-// !! STABILITY CONTRACT — DO NOT BREAK !!
-//
-// Every object and function returned by these mock factories MUST be defined
-// at closure scope (outside the inner arrow function), NOT created inline.
-//
-// WHY THIS MATTERS:
-//   LiveRunProvider wraps its hook results in a `value` useMemo whose deps
-//   include the return values of useAutoTrack() and useNotifications().
-//   If any field is an inline literal (e.g. `vi.fn()` or `{ current: 0 }`
-//   written directly in the return body), a NEW reference is produced on
-//   every call to the hook.  That makes the useMemo deps unstable, so the
-//   memo fires on every render, which silently defeats the memo()-wrapped
-//   FloorModeView isolation and causes all live tab components to re-render
-//   on every dialog/import state change.
-//
-// CORRECT (closure-level — same ref every call):
-//   const myFn = vi.fn();
-//   return { useFoo: () => ({ fn: myFn }) };
-//
-// WRONG (inline literal — new ref every call):
-//   return { useFoo: () => ({ fn: vi.fn() }) };
-//
-// The describe block at the bottom of this file enforces this contract with
-// reference-identity assertions.
-
-vi.mock("../../hooks/useNotifications", () => {
-  // Closure-level refs — stable across every call to useNotifications().
-  // Inline `vi.fn()` here would produce a new ref per call and break the
-  // liveSlice useMemo in LiveRunProvider.  See STABILITY CONTRACT above.
-  const setShowBatchDue = vi.fn();
-  return {
-    useNotifications: () => ({ showBatchDue: false, setShowBatchDue }),
-  };
-});
-
-vi.mock("../../hooks/useAutoTrack", () => {
-  // Closure-level refs — stable across every call to useAutoTrack().
-  // Every object/function here must remain at closure scope.  Moving any
-  // of these inline (e.g. `autoSuppressUntilRef: { current: 0 }` inside
-  // the return body) would silently defeat the FloorModeView isolation.
-  // See STABILITY CONTRACT above.
-  const setAutoTrackProgress = vi.fn();
-  const autoSuppressUntilRef = { current: 0 };
-  const fireAutoTrackNow = vi.fn();
-  const tickDueRefs = {
-    case:      { current: 0 },
-    tray:      { current: 0 },
-    trayProd:  { current: 0 },
-    batch:     { current: 0 },
-    batchProd: { current: 0 },
-  };
-  return {
-    useAutoTrack: () => ({
-      autoTrackProgress: false,
-      setAutoTrackProgress,
-      autoTrackSuggestion: null,
-      autoSuppressUntilRef,
-      fireAutoTrackNow,
-      tickDueRefs,
-    }),
-    suggestedDoughStaging: () => ({ trays: null, batches: null }),
-  };
-});
+vi.mock("../../hooks/useNotifications");
+vi.mock("../../hooks/useAutoTrack");
 
 // ── Minimal provider wrapper ─────────────────────────────────────────────────
 // Uses real useClock (controlled via vi.useFakeTimers) so the clock tick is

@@ -54,71 +54,21 @@ import { HomeTabCtx, useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
 import { useNotifications } from "../../hooks/useNotifications";
 import * as HomeTabCtxNS from "../../contexts/HomeTabCtx";
+// ── Shared mocks (closure-level stability enforced structurally) ─────────────
+//
+// The closure-level guarantee (all refs/fns allocated once at module scope,
+// never inline) is STRUCTURAL: the manual mock files in src/hooks/__mocks__/
+// are the single authoritative source.  Vitest resolves them automatically
+// from the no-factory vi.mock() calls below.  See those files for the full
+// explanation of why inline vi.fn() inside a vi.mock factory silently defeats
+// LiveRunProvider's liveSlice useMemo and causes all 8 memo()-wrapped live tab
+// components to re-render on every dialog/import state change.
+//
+// Suite 5 below verifies the contract with reference-identity assertions so any
+// drift in the shared mocks is caught immediately.
 
-// ── Shared mocks (same as neighbouring test files) ───────────────────────────
-
-// !! STABILITY CONTRACT — DO NOT BREAK !!
-//
-// Every object and function returned by these mock factories MUST be defined
-// at closure scope (outside the inner arrow function), NOT created inline.
-//
-// WHY THIS MATTERS:
-//   LiveRunProvider wraps its hook results in a `value` useMemo whose deps
-//   include the return values of useAutoTrack() and useNotifications().
-//   If any field is an inline literal (e.g. `vi.fn()` or `{ current: 0 }`
-//   written directly in the return body), a NEW reference is produced on
-//   every call to the hook.  That makes the useMemo deps unstable, so the
-//   memo fires on every render, which silently defeats the memo()-wrapped
-//   FloorModeView isolation and causes all live tab components to re-render
-//   on every dialog/import state change.
-//
-// CORRECT (closure-level — same ref every call):
-//   const myFn = vi.fn();
-//   return { useFoo: () => ({ fn: myFn }) };
-//
-// WRONG (inline literal — new ref every call):
-//   return { useFoo: () => ({ fn: vi.fn() }) };
-//
-// Suite 5 below enforces this contract with reference-identity assertions.
-
-vi.mock("../../hooks/useNotifications", () => {
-  // Closure-level refs — stable across every call to useNotifications().
-  // Inline `vi.fn()` here would produce a new ref per call and break the
-  // liveSlice useMemo in LiveRunProvider.  See STABILITY CONTRACT above.
-  const setShowBatchDue = vi.fn();
-  return {
-    useNotifications: () => ({ showBatchDue: false, setShowBatchDue }),
-  };
-});
-
-vi.mock("../../hooks/useAutoTrack", () => {
-  // Closure-level refs — stable across every call to useAutoTrack().
-  // Every object/function here must remain at closure scope.  Moving any
-  // of these inline (e.g. `autoSuppressUntilRef: { current: 0 }` inside
-  // the return body) would silently defeat the FloorModeView isolation.
-  // See STABILITY CONTRACT above.
-  const setAutoTrackProgress = vi.fn();
-  const autoSuppressUntilRef = { current: 0 };
-  const fireAutoTrackNow = vi.fn();
-  const tickDueRefs = {
-    case:      { current: 0 },
-    tray:      { current: 0 },
-    trayProd:  { current: 0 },
-    batch:     { current: 0 },
-    batchProd: { current: 0 },
-  };
-  return {
-    useAutoTrack: () => ({
-      autoTrackProgress: false,
-      setAutoTrackProgress,
-      autoTrackSuggestion: null,
-      autoSuppressUntilRef,
-      fireAutoTrackNow,
-      tickDueRefs,
-    }),
-    suggestedDoughStaging: () => ({ trays: null, batches: null }),
-  };
-});
+vi.mock("../../hooks/useNotifications");
+vi.mock("../../hooks/useAutoTrack");
 
 // ── Form values that give a non-zero ppm so casesInFreezer advances ──────────
 const ACTIVE_VALUES: FormValues = {

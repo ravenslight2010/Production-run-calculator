@@ -27,6 +27,10 @@ import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
 import { useNotifications } from "../../hooks/useNotifications";
 import { PENDING_CLOCK_MS } from "../../hooks/useClock";
+// Direct import of the exported tickDueRefs object from the shared manual mock.
+// Mutating its slots in beforeEach is visible to the rendered TickBarProbe
+// because the mock's useAutoTrack() returns the SAME object reference.
+import { mockAutoTrackTickRefs } from "../../hooks/__mocks__/useAutoTrack";
 
 // The symmetric guard advances fake time by this amount to cross the pending
 // clock cadence (PENDING_CLOCK_MS).  Deriving it here means that if the
@@ -35,71 +39,24 @@ import { PENDING_CLOCK_MS } from "../../hooks/useClock";
 // accidentally brings the advance back below the cadence.
 const SYMMETRIC_GUARD_ADVANCE_MS = PENDING_CLOCK_MS + 1_000;
 
-// ── Hoisted tickDueRefs — must be created with vi.hoisted() so the vi.mock()
-// factory (which is hoisted before imports) can reference them.
-const mockTickRefs = vi.hoisted(() => ({
-  case:      { current: 0 as number },
-  tray:      { current: 0 as number },
-  trayProd:  { current: 0 as number },
-  batch:     { current: 0 as number },
-  batchProd: { current: 0 as number },
-}));
+// ── Shared manual mocks ───────────────────────────────────────────────────────
+//
+// Closure-level stability is enforced STRUCTURALLY by the shared manual mock
+// files in src/hooks/__mocks__/.  Those files allocate all refs/fns once at
+// module scope and export a hook that always yields the same references —
+// preventing the inline-vi.fn() mistake that silently defeats LiveRunProvider's
+// liveSlice useMemo and freezes TickBar animation.
+//
+// Vitest resolves the __mocks__ sibling automatically from the no-factory calls
+// below.  No vi.hoisted() is needed: beforeEach mutates slots on the exported
+// mockAutoTrackTickRefs object (same reference returned by useAutoTrack()),
+// which is structurally impossible to break via an inline allocation.
+//
+// The "STABILITY CONTRACT" describe block below verifies the contract with
+// reference-identity assertions so any drift in the shared mocks is caught.
 
-// !! STABILITY CONTRACT — DO NOT BREAK !!
-//
-// Every object and function returned by these mock factories MUST be defined
-// at closure scope (outside the inner arrow function), NOT created inline.
-//
-// WHY THIS MATTERS:
-//   LiveRunProvider wraps its hook results in a `value` useMemo whose deps
-//   include the return values of useAutoTrack() and useNotifications().
-//   If any field is an inline literal (e.g. `vi.fn()` or `{ current: 0 }`
-//   written directly in the return body), a NEW reference is produced on
-//   every call to the hook.  That makes the useMemo deps unstable, so the
-//   memo fires on every render, which silently defeats memo()-based isolation
-//   and can freeze TickBar animation by corrupting nowTime propagation.
-//
-// CORRECT (closure-level — same ref every call):
-//   const myFn = vi.fn();
-//   return { useFoo: () => ({ fn: myFn }) };
-//
-// WRONG (inline literal — new ref every call):
-//   return { useFoo: () => ({ fn: vi.fn() }) };
-//
-// The "STABILITY CONTRACT" describe block below enforces this contract with
-// reference-identity assertions.
-
-vi.mock("../../hooks/useNotifications", () => {
-  // Closure-level refs — stable across every call to useNotifications().
-  // Inline `vi.fn()` here would produce a new ref per call and break the
-  // liveSlice useMemo in LiveRunProvider.  See STABILITY CONTRACT above.
-  const setShowBatchDue = vi.fn();
-  return {
-    useNotifications: () => ({ showBatchDue: false, setShowBatchDue }),
-  };
-});
-
-vi.mock("../../hooks/useAutoTrack", () => {
-  // Closure-level refs — stable across every call to useAutoTrack().
-  // Every object/function here must remain at closure scope.  Moving any
-  // of these inline (e.g. `autoSuppressUntilRef: { current: 0 }` inside
-  // the return body) would silently defeat the liveSlice useMemo isolation.
-  // See STABILITY CONTRACT above.
-  const setAutoTrackProgress = vi.fn();
-  const autoSuppressUntilRef = { current: 0 };
-  const fireAutoTrackNow = vi.fn();
-  return {
-    useAutoTrack: () => ({
-      autoTrackProgress: true,
-      setAutoTrackProgress,
-      autoSuppressUntilRef,
-      fireAutoTrackNow,
-      autoTrackSuggestion: null,
-      tickDueRefs: mockTickRefs,
-    }),
-    suggestedDoughStaging: () => ({ trays: null, batches: null }),
-  };
-});
+vi.mock("../../hooks/useNotifications");
+vi.mock("../../hooks/useAutoTrack");
 
 // ── TickBar math (mirrors home.tsx inline helpers) ───────────────────────────
 
@@ -179,11 +136,13 @@ describe("TickBar animation — regression guard", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     // Reset all due-timestamp refs so each test starts from a clean slate.
-    mockTickRefs.tray.current      = 0;
-    mockTickRefs.trayProd.current  = 0;
-    mockTickRefs.batch.current     = 0;
-    mockTickRefs.batchProd.current = 0;
-    mockTickRefs.case.current      = 0;
+    // These mutations are visible to the TickBarProbe via tickDueRefs from
+    // useLiveRun() because mockAutoTrackTickRefs IS the object the mock returns.
+    mockAutoTrackTickRefs.tray.current      = 0;
+    mockAutoTrackTickRefs.trayProd.current  = 0;
+    mockAutoTrackTickRefs.batch.current     = 0;
+    mockAutoTrackTickRefs.batchProd.current = 0;
+    mockAutoTrackTickRefs.case.current      = 0;
   });
 
   afterEach(() => {
@@ -201,7 +160,7 @@ describe("TickBar animation — regression guard", () => {
     // Arm the tray ref 36 s in the future so the bar starts near 0% and has
     // room to animate as the clock advances.
     const t0 = Date.now(); // fake-timer time at mount
-    mockTickRefs.tray.current = t0 + TRAY_PERIOD_SEC * 1000;
+    mockAutoTrackTickRefs.tray.current = t0 + TRAY_PERIOD_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const pct0  = Number(probe.getAttribute("data-tray-pct"));
@@ -235,7 +194,7 @@ describe("TickBar animation — regression guard", () => {
     );
 
     const t0 = Date.now();
-    mockTickRefs.batch.current = t0 + BATCH_QUARTER_PERIOD_SEC * 1000;
+    mockAutoTrackTickRefs.batch.current = t0 + BATCH_QUARTER_PERIOD_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const pct0  = Number(probe.getAttribute("data-batch-pct"));
@@ -262,7 +221,7 @@ describe("TickBar animation — regression guard", () => {
     // as the consumption tray bar (trayPeriodSec), so a dropped or zeroed ref
     // would leave secLeftOf returning periodSec → pct stays 0.
     const t0 = Date.now();
-    mockTickRefs.trayProd.current = t0 + TRAY_PERIOD_SEC * 1000;
+    mockAutoTrackTickRefs.trayProd.current = t0 + TRAY_PERIOD_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const pct0  = Number(probe.getAttribute("data-tray-prod-pct"));
@@ -289,7 +248,7 @@ describe("TickBar animation — regression guard", () => {
     // Arm the batchProd ref SPIN_SEC (120 s) in the future.  batchProd uses
     // spinSec as its period; a dropped or zeroed ref keeps pct at 0 forever.
     const t0 = Date.now();
-    mockTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
+    mockAutoTrackTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const pct0  = Number(probe.getAttribute("data-batch-prod-pct"));
@@ -319,7 +278,7 @@ describe("TickBar animation — regression guard", () => {
     );
 
     const t0 = Date.now();
-    mockTickRefs.tray.current = t0 + TRAY_PERIOD_SEC * 1000;
+    mockAutoTrackTickRefs.tray.current = t0 + TRAY_PERIOD_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const pct0  = Number(probe.getAttribute("data-tray-pct"));
@@ -348,8 +307,8 @@ describe("TickBar animation — regression guard", () => {
     );
 
     const t0 = Date.now();
-    mockTickRefs.trayProd.current  = t0 + TRAY_PERIOD_SEC * 1000;
-    mockTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
+    mockAutoTrackTickRefs.trayProd.current  = t0 + TRAY_PERIOD_SEC * 1000;
+    mockAutoTrackTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const trayProdPct0  = Number(probe.getAttribute("data-tray-prod-pct"));
@@ -387,8 +346,8 @@ describe("TickBar animation — regression guard", () => {
     );
 
     const t0 = Date.now();
-    mockTickRefs.trayProd.current  = t0 + TRAY_PERIOD_SEC * 1000;
-    mockTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
+    mockAutoTrackTickRefs.trayProd.current  = t0 + TRAY_PERIOD_SEC * 1000;
+    mockAutoTrackTickRefs.batchProd.current = t0 + SPIN_SEC * 1000;
 
     const probe = screen.getByTestId("probe");
     const trayProdPct0  = Number(probe.getAttribute("data-tray-prod-pct"));
@@ -418,12 +377,15 @@ describe("TickBar animation — regression guard", () => {
 //
 // These tests call each mock hook TWICE and assert that every returned
 // object/function field is the exact same reference (===) across both calls.
-// If a future developer moves a closure-level constant inline, the reference
-// changes and the relevant assertion fails here — catching the regression
-// before it silently freezes TickBar animation.
+// Because the shared __mocks__ files allocate all refs/fns at module scope,
+// this contract is STRUCTURALLY guaranteed — not per-file convention.  These
+// assertions serve as a trip-wire: if the __mocks__ file is ever edited to
+// return inline literals (e.g. vi.fn() inside the return body), the relevant
+// assertion here fails immediately, catching the regression before it silently
+// freezes TickBar animation.
 //
-// See the STABILITY CONTRACT comment block above the vi.mock factories for the
-// full explanation of WHY closure-level refs are mandatory.
+// See src/hooks/__mocks__/useAutoTrack.ts for the full explanation of WHY
+// closure-level (module-scope) refs are mandatory.
 
 describe("TickBar.animation — STABILITY CONTRACT: mock hooks return stable references across calls", () => {
   it("useNotifications: setShowBatchDue is the same function reference on every call", () => {
@@ -474,8 +436,8 @@ describe("TickBar.animation — STABILITY CONTRACT: mock hooks return stable ref
   it("useAutoTrack: each tickDueRefs slot is the same object reference on every call", () => {
     const call1 = useAutoTrack();
     const call2 = useAutoTrack();
-    // Each individual slot must also be a stable ref.  The slots in this file
-    // come from mockTickRefs (vi.hoisted), which is stable by construction.
+    // Each individual slot must also be a stable ref.  The slots come from
+    // mockAutoTrackTickRefs in the shared __mocks__ file — stable by construction.
     const slots = ["case", "tray", "trayProd", "batch", "batchProd"] as const;
     for (const slot of slots) {
       expect(call1.tickDueRefs[slot]).toBe(call2.tickDueRefs[slot]);
