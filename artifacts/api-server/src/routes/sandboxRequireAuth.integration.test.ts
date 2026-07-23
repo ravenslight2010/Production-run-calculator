@@ -68,6 +68,13 @@ type _AssertIsSandboxUserExported = (typeof sandboxMod)["isSandboxUser"];
 // Kept at module level so the DB-query-call-count test can spy on getUserById.
 let usersMod: typeof import("../lib/users");
 
+// Compile-time guard: if 'getUserById' is renamed in users.ts, TypeScript
+// will error here ("Property 'getUserById' does not exist on type ...").
+// This turns a silent spy-wiring break — where vi.spyOn(usersMod, "getUserById")
+// silently targets a missing key and all call-count assertions pass vacuously —
+// into a visible build error caught at typecheck time.
+type _AssertGetUserByIdExported = (typeof usersMod)["getUserById"];
+
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
@@ -770,6 +777,30 @@ describe("spy-wiring guard: isSandboxUser export must remain a callable function
     // the call-count tests in the cross-environment suite become obviously
     // broken rather than silently passing with vacuous zero counts.
     expect(typeof sandboxMod.isSandboxUser).toBe("function");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spy-wiring guard: getUserById export must remain a callable function
+//
+// vi.spyOn(usersMod, "getUserById") targets the export by string key. If
+// getUserById is renamed in users.ts the spyOn silently targets a missing
+// key, the spy never fires, and all call-count assertions in the
+// DB-query-call-count tests pass vacuously (0 === 0 / 2 === 2 by coincidence).
+//
+// The compile-time type assertion above (type _AssertGetUserByIdExported)
+// catches the rename at typecheck time. This runtime test is the
+// belt-and-suspenders second layer: it runs after beforeAll populates
+// usersMod, so any gap between the static type and the actual runtime
+// binding is also caught with a clear failure message.
+// ---------------------------------------------------------------------------
+describe("spy-wiring guard: getUserById export must remain a callable function", () => {
+  it("usersMod.getUserById is a function — a rename in users.ts would break vi.spyOn wiring", () => {
+    // If getUserById is renamed, typeof usersMod.getUserById is "undefined",
+    // this assertion fails immediately with a clear message, and the
+    // call-count tests in the DB-query suite become obviously broken rather
+    // than silently passing with vacuous counts.
+    expect(typeof usersMod.getUserById).toBe("function");
   });
 });
 
