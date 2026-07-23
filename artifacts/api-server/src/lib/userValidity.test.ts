@@ -48,7 +48,7 @@ vi.mock("drizzle-orm", async (orig) => {
   return { ...actual, eq: () => ({}) };
 });
 
-import { getUserSecurityState, clearUserValidityCache } from "./userValidity";
+import { getUserSecurityState, clearUserValidityCache, revokeUser } from "./userValidity";
 import * as usersMod from "./users";
 
 beforeEach(() => {
@@ -148,5 +148,90 @@ describe("getUserSecurityState — DB is actually queried on cold cache (guards 
     userRow = { id: "user-1", passwordChangedAt: changedAt };
     const result = await getUserSecurityState("user-1");
     expect(result.passwordChangedAtMs).toBe(changedAt.getTime());
+  });
+});
+
+describe("getUserSecurityState — DB-error fallback (guards against fail-open bypassing the cached value)", () => {
+  it("returns the cached { exists: false } entry when the DB throws and a stale cache entry exists", async () => {
+    // Use fake timers so we fully control Date.now() throughout this test.
+    vi.useFakeTimers();
+
+    // Warm the cache with a revoked (exists: false) entry. revokeUser writes
+    // { exists: false, at: Date.now() } directly, which is used as the stale
+    // TTL anchor. A manager removing a staff member calls this path.
+    revokeUser("user-1");
+
+    // Advance fake time past the 15-second cache TTL so the entry is stale.
+    // This is required to force getUserSecurityState PAST the early cache-hit
+    // return on line 26 (`if (cached && now - cached.at < CACHE_TTL_MS)`) and
+    // into the DB query path — and then into the catch block when throwOnQuery
+    // is true. Without this advance the function returns from the early hit and
+    // never reaches the catch block, giving a false-positive test.
+    vi.advanceTimersByTime(16_000);
+
+    // Force every DB query to throw to simulate a transient outage.
+    throwOnQuery = true;
+
+    // Spy on getUserById to prove the catch block was actually reached (DB was
+    // attempted). If the function were hardcoded to return the cold default
+    // without entering the catch block, this spy count would be 1 but exists
+    // would be true — caught by the assertion below.
+    let callCount = 0;
+    const origGetUserById = usersMod.getUserById;
+    const spy = vi.spyOn(usersMod, "getUserById").mockImplementation(async (id: string) => {
+      callCount++;
+      return origGetUserById(id);
+    });
+
+    try {
+      const result = await getUserSecurityState("user-1");
+
+      // DB must have been attempted: proves the TTL advance worked and the catch
+      // block was entered, not the early cache-hit path.
+      expect(callCount).toBe(1);
+
+      // The critical assertion: the catch block must return the stale cached
+      // { exists: false } entry, NOT the cold-cache fail-open default
+      // { exists: true, passwordChangedAtMs: 0 }. If the catch block were
+      // changed to always return the cold default (ignoring the cached entry),
+      // this assertion fails — making the bypass immediately visible.
+      expect(result.exists).toBe(false);
+
+      // Counter-proof: confirm the fail-open default was NOT returned. If it
+      // had been, exists would be true — silently re-admitting the revoked user.
+      expect(result.exists).not.toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns the cold-cache fail-open default { exists: true, passwordChangedAtMs: 0 } when the DB throws and no cache entry exists", async () => {
+    // Cache is already cleared by beforeEach — there is no prior entry for this
+    // user id. Force every DB query to throw.
+    throwOnQuery = true;
+
+    // Spy to confirm the DB was actually attempted (the catch path was reached,
+    // not an early cache-hit return). On a cold cache no early return fires, so
+    // the spy count must be 1.
+    let callCount = 0;
+    const origGetUserById = usersMod.getUserById;
+    const spy = vi.spyOn(usersMod, "getUserById").mockImplementation(async (id: string) => {
+      callCount++;
+      return origGetUserById(id);
+    });
+
+    try {
+      const result = await getUserSecurityState("user-1");
+
+      // DB must have been attempted: proves the catch block was entered.
+      expect(callCount).toBe(1);
+
+      // Without a cached entry the function must fall back to the safe-open
+      // default so a transient DB blip never logs out a legitimate user who has
+      // never been seen before.
+      expect(result).toStrictEqual({ exists: true, passwordChangedAtMs: 0 });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
