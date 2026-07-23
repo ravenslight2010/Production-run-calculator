@@ -1952,6 +1952,27 @@ export function NumField({
 const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
 
 /**
+ * Computes the `show` prop for ManualOverrideBanner from the three conditions
+ * that must ALL be true: auto-track is on, a suggestion exists, and the
+ * manual-override suppression window is still active.
+ *
+ * Exported so tests import this exact function — any future change to the
+ * conditions here (adding/removing a term) will automatically be reflected in
+ * the tests without needing a separate in-test copy of the formula.
+ */
+export function manualOverrideBannerShow(
+  autoTrackProgress: boolean,
+  autoTrackSuggestion: unknown,
+  autoSuppressUntilRefCurrent: number,
+): boolean {
+  return (
+    autoTrackProgress &&
+    !!autoTrackSuggestion &&
+    Date.now() < autoSuppressUntilRefCurrent
+  );
+}
+
+/**
  * Amber banner shown while a manual stepper override is holding auto-track
  * writes back. Renders nothing when `show` is false (suppression window
  * inactive, auto-track disabled, or no suggestion available). Exported so
@@ -16764,7 +16785,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           return (
                             <>
                               <ManualOverrideBanner
-                                show={autoTrackProgress && !!s && suppressed}
+                                show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current)}
                                 minsLeft={suppressedMinsLeft}
                                 onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                               />
@@ -17202,7 +17223,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   return (
                     <>
                       <ManualOverrideBanner
-                        show={autoTrackProgress && !!autoTrackSuggestion && suppressedNow}
+                        show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef.current)}
                         minsLeft={suppressedMinsLeftNow}
                         onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                       />

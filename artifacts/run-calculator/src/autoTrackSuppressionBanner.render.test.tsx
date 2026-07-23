@@ -8,14 +8,19 @@
 // 16968) and LiveDoughTabContent (~line 17406) in home.tsx. Both call sites
 // compose the banner's `show` prop from:
 //
-//   autoTrackProgress && !!autoTrackSuggestion && (Date.now() < autoSuppressUntilRef.current)
+//   manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef.current)
 //
-// This component test drives the three user-visible states directly
-// (show=true, show=false, onResume click) without needing to mount the
-// full 18k-line home.tsx component tree.
+// Suite 1 drives the three user-visible states directly (show=true/false,
+// onResume click) without needing to mount the full 18k-line home.tsx tree.
+//
+// Suite 2 (call-site formula guard) imports the REAL exported predicate
+// `manualOverrideBannerShow` — the identical function called by both
+// LivePackagingTabContent and LiveDoughTabContent.  Any future change to
+// its conditions (adding / removing a term) will automatically make the
+// suite-2 tests fail, making the mismatch visible before it ships.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { ManualOverrideBanner } from "./pages/home";
+import { ManualOverrideBanner, manualOverrideBannerShow } from "./pages/home";
 
 afterEach(cleanup);
 
@@ -63,5 +68,98 @@ describe("ManualOverrideBanner — manual override active banner", () => {
 
     expect(screen.queryByTestId("btn-resume-now")).toBeNull();
     expect(onResume).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 2: call-site formula guard
+//
+// These tests call `manualOverrideBannerShow` — the SAME exported function
+// used by both LivePackagingTabContent and LiveDoughTabContent — then pass the
+// result to ManualOverrideBanner exactly as the real call sites do.
+//
+// Because the tests import the real production function (not a local copy),
+// any future refactor that adds or removes a condition from
+// `manualOverrideBannerShow` is immediately reflected here: the
+// `expect(show).toBe(...)` assertions will fail before the render assertions
+// even run, giving a precise signal that the formula changed.
+// ---------------------------------------------------------------------------
+describe("ManualOverrideBanner — call-site formula guard (Suite 2)", () => {
+  // Suppression window is always well in the future for this suite.
+  const suppressUntil = Date.now() + 60_000;
+
+  it("banner is absent when autoTrackProgress=false (window active, suggestion present)", () => {
+    const show = manualOverrideBannerShow(
+      false,                        // autoTrackProgress OFF
+      { skids: 1, casesOnSkid: 2 }, // autoTrackSuggestion truthy
+      suppressUntil,                // window active
+    );
+
+    // The real predicate must return false for this combination.
+    expect(show).toBe(false);
+
+    render(<ManualOverrideBanner show={show} minsLeft={0} onResume={() => {}} />);
+    expect(screen.queryByTestId("manual-override-banner")).toBeNull();
+    expect(screen.queryByText(/Manual override active/i)).toBeNull();
+  });
+
+  it("banner is absent when autoTrackSuggestion=null (window active, progress true)", () => {
+    const show = manualOverrideBannerShow(
+      true,          // autoTrackProgress ON
+      null,          // autoTrackSuggestion falsy
+      suppressUntil, // window active
+    );
+
+    expect(show).toBe(false);
+
+    render(<ManualOverrideBanner show={show} minsLeft={0} onResume={() => {}} />);
+    expect(screen.queryByTestId("manual-override-banner")).toBeNull();
+    expect(screen.queryByText(/Manual override active/i)).toBeNull();
+  });
+
+  it("banner is absent when autoTrackSuggestion=undefined (window active, progress true)", () => {
+    const show = manualOverrideBannerShow(
+      true,
+      undefined,     // also falsy — !!undefined === false
+      suppressUntil,
+    );
+
+    expect(show).toBe(false);
+
+    render(<ManualOverrideBanner show={show} minsLeft={0} onResume={() => {}} />);
+    expect(screen.queryByTestId("manual-override-banner")).toBeNull();
+  });
+
+  it("counter-proof: banner IS shown when all three conditions are true", () => {
+    const show = manualOverrideBannerShow(
+      true,                           // autoTrackProgress ON
+      { skids: 3, casesOnSkid: 5 },   // autoTrackSuggestion truthy
+      suppressUntil,                  // window active
+    );
+
+    // Real predicate must return true.
+    expect(show).toBe(true);
+
+    const minsLeft = Math.ceil((suppressUntil - Date.now()) / 60_000);
+    render(<ManualOverrideBanner show={show} minsLeft={minsLeft} onResume={() => {}} />);
+
+    expect(screen.getByTestId("manual-override-banner")).toBeTruthy();
+    expect(screen.getByTestId("manual-override-banner").textContent).toMatch(/Manual override active/i);
+    expect(screen.getByTestId("btn-resume-now")).toBeTruthy();
+  });
+
+  it("banner is absent when suppression window has expired (both other conditions true)", () => {
+    const expiredUntil = Date.now() - 1; // window in the past
+
+    const show = manualOverrideBannerShow(
+      true,
+      { skids: 1, casesOnSkid: 1 },
+      expiredUntil,
+    );
+
+    expect(show).toBe(false);
+
+    render(<ManualOverrideBanner show={show} minsLeft={0} onResume={() => {}} />);
+    expect(screen.queryByTestId("manual-override-banner")).toBeNull();
   });
 });
