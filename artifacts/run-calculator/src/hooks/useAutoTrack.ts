@@ -128,6 +128,9 @@ interface AutoTrackResult {
   };
 }
 
+/** Exported return type — shared with __mocks__/useAutoTrack.ts for compile-time drift detection. */
+export type UseAutoTrackReturn = AutoTrackResult;
+
 // Each counter ticks at its own natural production pace, clamped to a sane
 // range: never faster than once per 2s (the app clock ticks per second) and
 // never slower than once per hour (a stalled/garbage rate must not freeze the

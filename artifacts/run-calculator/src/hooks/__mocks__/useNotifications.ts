@@ -16,9 +16,10 @@
 // every render, defeating the memo and corrupting nowTime propagation.
 
 import { vi } from "vitest";
+import type { UseNotificationsReturn } from "../useNotifications";
 
-const setShowBatchDue = vi.fn();
+const setShowBatchDue: UseNotificationsReturn["setShowBatchDue"] = vi.fn();
 
-export function useNotifications() {
+export function useNotifications(): UseNotificationsReturn {
   return { showBatchDue: false, setShowBatchDue };
 }

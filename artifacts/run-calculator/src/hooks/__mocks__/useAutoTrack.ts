@@ -36,11 +36,12 @@
 //   });
 
 import { vi } from "vitest";
+import type { UseAutoTrackReturn } from "../useAutoTrack";
 
 // ── Module-scope allocations (stable refs across every useAutoTrack() call) ───
 
 /** Exported so TickBar.animation.test.tsx can mutate slots in beforeEach. */
-export const mockAutoTrackTickRefs = {
+export const mockAutoTrackTickRefs: UseAutoTrackReturn["tickDueRefs"] = {
   case:      { current: 0 as number },
   tray:      { current: 0 as number },
   trayProd:  { current: 0 as number },
@@ -48,13 +49,13 @@ export const mockAutoTrackTickRefs = {
   batchProd: { current: 0 as number },
 };
 
-const setAutoTrackProgress = vi.fn();
-const autoSuppressUntilRef = { current: 0 as number };
-const fireAutoTrackNow     = vi.fn();
+const setAutoTrackProgress: UseAutoTrackReturn["setAutoTrackProgress"] = vi.fn();
+const autoSuppressUntilRef: UseAutoTrackReturn["autoSuppressUntilRef"] = { current: 0 as number };
+const fireAutoTrackNow: UseAutoTrackReturn["fireAutoTrackNow"]         = vi.fn();
 
 // ── Mock hook ────────────────────────────────────────────────────────────────
 
-export function useAutoTrack() {
+export function useAutoTrack(): UseAutoTrackReturn {
   return {
     autoTrackProgress:    false,
     setAutoTrackProgress,

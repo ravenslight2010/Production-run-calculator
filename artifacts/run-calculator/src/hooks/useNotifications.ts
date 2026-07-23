@@ -50,6 +50,9 @@ interface NotifResult {
   setShowBatchDue: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
+/** Exported return type — shared with __mocks__/useNotifications.ts for compile-time drift detection. */
+export type UseNotificationsReturn = NotifResult;
+
 /**
  * Fire a notification safely. Android Chrome (and other mobile browsers)
  * forbid the `new Notification()` constructor — it throws "Illegal
