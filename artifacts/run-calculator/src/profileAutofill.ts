@@ -38,7 +38,7 @@ import {
 } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import { buildNearDupNameMatcher } from "@workspace/name-match";
-import { DEFAULT_VALUES, type FormValues } from "./types";
+import { DEFAULT_VALUES, INGREDIENT_RENAMES, type FormValues } from "./types";
 import { latestSourceKeyIds } from "./savedSpecSheets";
 
 export type AutofillEntry = {
@@ -253,7 +253,7 @@ function desiredFromProfile(
   );
   resolvedApps.forEach((a, i) => {
     const slot = i + 1;
-    const type = (a.type ?? "").trim();
+    const type = INGREDIENT_RENAMES[(a.type ?? "").trim()] ?? (a.type ?? "").trim();
     if (!type) return;
     // Near-dup equivalence: a sheet blend name the slot resolvers left RAW
     // (no loose-key match anywhere) may still be the SAME blend the profile
