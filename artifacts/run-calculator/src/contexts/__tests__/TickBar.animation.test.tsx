@@ -31,6 +31,7 @@ import { PENDING_CLOCK_MS } from "../../hooks/useClock";
 // Mutating its slots in beforeEach is visible to the rendered TickBarProbe
 // because the mock's useAutoTrack() returns the SAME object reference.
 import { mockAutoTrackTickRefs } from "../../hooks/__mocks__/useAutoTrack";
+import { mockSetShowBatchDue } from "../../hooks/__mocks__/useNotifications";
 
 // The symmetric guard advances fake time by this amount to cross the pending
 // clock cadence (PENDING_CLOCK_MS).  Deriving it here means that if the
@@ -408,6 +409,22 @@ describe("TickBar.animation — STABILITY CONTRACT: mock hooks return stable ref
     const call1 = useNotifications();
     const call2 = useNotifications();
     expect(call1.showBatchDue).toBe(call2.showBatchDue);
+  });
+
+  it("useNotifications: setShowBatchDue IS the exported mockSetShowBatchDue constant (guards a second allocation in the mock)", () => {
+    const { setShowBatchDue } = useNotifications();
+    // The two-call reference-identity check above confirms consecutive calls
+    // return the same object, but it cannot detect the case where BOTH calls
+    // return a newly allocated fn that is neither call's expected reference.
+    // This assertion closes that gap: it verifies the EXPLICIT CHAIN —
+    // mock module → useNotifications() return → setShowBatchDue — is the
+    // exact same reference as the exported constant.  If someone adds a reset
+    // helper inside the __mocks__ file that re-allocates setShowBatchDue
+    // (e.g. returning a fresh vi.fn() from a reset helper and yielding it
+    // instead of the module-scope constant), the two-call check above would
+    // still pass vacuously if the same new object is returned each time.
+    // This assertion fails immediately in that scenario.
+    expect(setShowBatchDue).toBe(mockSetShowBatchDue);
   });
 
   it("useAutoTrack: setAutoTrackProgress is the same function reference on every call", () => {
