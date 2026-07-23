@@ -496,7 +496,15 @@ describe("auto-track tray/batch up/down tracking", () => {
     );
 
     // Mount tick: first consumption fires immediately (50 → 49).
+    // The batch quarter-period is 90 s, so the mount tick is also the first
+    // (and only) batch-drain write in this window — capture the value now so
+    // the batch counter-proof below has a concrete reference.
     expect(values.traysOnLine).toBe(49);
+    const batchesAfterMount = values.batchesReady;
+    // The mount tick must have already decremented batchesReady from its
+    // initial value of 10; if the batch-drain formula stopped firing writes
+    // this would equal 10 and the counter-proof would fail.
+    expect(batchesAfterMount).toBeLessThan(10);
 
     // t0+36 s — exactly one tray period (60/100 min = 36s): another tray consumed.
     // No suppression armed, so THIS TICK ITSELF must produce a write.
@@ -519,6 +527,13 @@ describe("auto-track tray/batch up/down tracking", () => {
       v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
     });
     expect(values.traysOnLine).toBeLessThan(traysAfter36);
+    // Batch counter-proof: the batch-drain path must also have produced a write
+    // by the end of the sequence. The quarter-batch period (90 s) is just beyond
+    // this window, so only the mount tick fires here — but that is enough: if
+    // the batch-drain formula stops firing writes entirely, batchesReady would
+    // remain at 10 and this assertion catches the silent suppression break,
+    // symmetric to the tray assertion above.
+    expect(values.batchesReady).toBeLessThan(10);
   });
 
   it("disabled (cast screens) never writes — no decrement, no seed", () => {
