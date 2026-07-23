@@ -3887,4 +3887,82 @@ describe("LiveTabMemo — Suite 12: real CompactRunStrip is wired to useHomeTabC
     // the re-render would call useLiveRun() and advance the spy count.
     expect(renderCount).toBeGreaterThan(countAfterMount);
   });
+
+  // ─── Test 4: SPY COUNTER-PROOF FOR TEST 1's STRICT-EQUALITY ─────────────
+  // Closes the gap left by Tests 2 and 3: proves that Test 1's
+  // `expect(spy.mock.calls.length).toBe(countAfterMount)` strict-equality
+  // assertion is NOT vacuous and CANNOT be silently weakened to `>=`.
+  //
+  // WHY THIS IS NEEDED:
+  //   Test 1 asserts the spy count stays FLAT (strict `toBe`) after a dialog
+  //   toggle — meaning zero extra useLiveRun() calls from CompactRunStrip.
+  //   If someone weakened that assertion to `>= countAfterMount`, the test
+  //   would still pass even when CompactRunStrip spuriously re-renders on
+  //   every dialog toggle — silently hiding the regression.
+  //
+  //   Test 2 proves re-renders happen (via renderCount) but does NOT use the
+  //   useLiveRun spy, so it cannot directly show that the spy advances.
+  //   Test 3 advances the spy via clock ticks, not via dialog toggles.
+  //
+  //   This test uses the SAME spy as Test 1 and the SAME dialog toggle as
+  //   Test 1, but mounts a useHomeCtx()-calling simulator instead of the real
+  //   CompactRunStrip.  When the dialog toggles:
+  //     • HomeCtx emits a new value.
+  //     • The simulator (subscribed to HomeCtx) re-renders.
+  //     • The re-render calls useLiveRun() again — advancing the spy count.
+  //   The assertion `spy.mock.calls.length > countAfterMount` MUST pass.
+  //
+  //   If Test 1's `toBe` were weakened to `>=`:
+  //     • Test 1 would pass vacuously for the wrong hook too (spy advances).
+  //     • This test's `toBeGreaterThan` would still pass (spy DID advance).
+  //     • Together they prove the weakening is distinguishable — `>=` in
+  //       Test 1 cannot catch the isolation failure that `toBe` catches.
+  //
+  //   No fake timers are used: the clock is NOT advanced, so any spy increase
+  //   is caused exclusively by the dialog-field-induced re-render.
+  it("spy counter-proof: useLiveRun() spy count IS strictly greater than mount count after a dialog toggle for a useHomeCtx() (wrong-hook) simulator (proves Test 1's toBe has teeth and cannot be weakened to >=)", async () => {
+    const spy = vi.spyOn(LiveRunContextNS, "useLiveRun");
+
+    // WRONG-HOOK simulator: calls useHomeCtx() instead of useHomeTabCtx(),
+    // exactly mirroring the regression Test 1 is designed to catch.
+    // When HomeCtx emits a new value (dialog toggle), this component re-renders
+    // and calls useLiveRun() — advancing the spy count.
+    const WrongHookSim = memo(function WrongHookSimInner() {
+      // Subscribes to HomeCtx — the WRONG context for isolation.
+      useHomeCtx();
+      // Also calls useLiveRun() so each re-render is captured by the spy.
+      useLiveRun();
+      return <span data-testid="s12-spy-counter-proof">wrong-hook</span>;
+    });
+
+    const { rerender } = render(
+      <S12Wrapper runStatus="running" dialogOpen={false}>
+        <WrongHookSim />
+      </S12Wrapper>,
+    );
+
+    // Spy must fire at mount — WrongHookSim is rendered and calls useLiveRun().
+    const countAfterMount = spy.mock.calls.length;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    // Toggle the HomeCtx dialog field — no clock advance.
+    // HomeCtx emits a new value; WrongHookSim (subscribed via useHomeCtx())
+    // re-renders and calls useLiveRun() again.
+    await act(async () => {
+      rerender(
+        <S12Wrapper runStatus="running" dialogOpen={true}>
+          <WrongHookSim />
+        </S12Wrapper>,
+      );
+    });
+
+    // Spy count MUST be strictly greater: the dialog toggle caused a re-render
+    // that called useLiveRun() an additional time.
+    // This proves that Test 1's `toBe(countAfterMount)` strict equality has
+    // real teeth: a wrong-hook component WOULD advance the spy, so `>=` in
+    // Test 1 would pass vacuously even for the regression case.
+    expect(spy.mock.calls.length).toBeGreaterThan(countAfterMount);
+
+    spy.mockRestore();
+  });
 });
