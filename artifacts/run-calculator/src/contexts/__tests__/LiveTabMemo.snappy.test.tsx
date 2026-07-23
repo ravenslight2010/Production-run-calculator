@@ -1486,6 +1486,96 @@ describe("LiveTabMemo — FloorModeView skips re-renders when manage/import dial
       vi.useRealTimers();
     }
   });
+
+  // ─── memo() removal counter-proof ─────────────────────────────────────────
+  // Closes the final gap in the isolation guard: Test 1 checks that a memo()-
+  // wrapped subscriber does NOT re-render when manageCounter changes and the
+  // provider dep array is clean.  But Test 1 would pass vacuously if memo()
+  // itself were accidentally removed — because a non-memo'd component always
+  // re-renders with its parent, so the assertion "renderCount stayed at 1"
+  // would never be reached in the first place (the component would still
+  // re-render on every parent update, but for the wrong reason — prop-driven
+  // parent re-render rather than context leakage).
+  //
+  // This counter-proof exercises exactly that scenario:
+  //   • A CLEAN TabOnlyProvider (manageCounter NOT in useMemo deps) — matching
+  //     the production contract.
+  //   • A NON-memo'd subscriber — simulating accidental memo() removal.
+  //   • Fake timers keep the LiveRun clock silent so the only source of extra
+  //     renders is the parent re-render triggered by the manageCounter prop.
+  //
+  // The non-memo'd component MUST re-render when manageCounter changes (parent
+  // re-renders → child follows unconditionally without memo()).  This proves the
+  // framework is sensitive enough to detect memo() removal: if Test 1 were run
+  // with the same non-memo'd component, the render count would increase and the
+  // "expect(renderCount).toBe(1)" assertion would fail — exactly the failure
+  // we want to catch.
+  it("non-memo'd FloorModeView simulator DOES re-render when manageCounter changes (memo() removal counter-proof)", async () => {
+    vi.useFakeTimers();
+    try {
+      let renderCount = 0;
+
+      // Clean provider: manageCounter intentionally NOT in deps.
+      // Mirrors the correct production contract (same as FloorModeWrapper's
+      // tabCtxValue memo) — the context ref is stable across manageCounter changes.
+      function TabOnlyProviderClean({
+        runStatus,
+        manageCounter,
+        children,
+      }: {
+        runStatus: string;
+        manageCounter: number;
+        children: ReactNode;
+      }) {
+        // manageCounter intentionally ABSENT from deps — clean production contract
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        const value = useMemo(() => ({ runStatus }), [runStatus]);
+        return (
+          <HomeTabCtx.Provider value={value}>
+            {manageCounter > 0 && (
+              <div data-testid="floor-memo-proof-dialog">Manage dialog #{manageCounter}</div>
+            )}
+            {children}
+          </HomeTabCtx.Provider>
+        );
+      }
+
+      // NON-memo'd simulator — no React.memo() wrapper.
+      // Mirrors FloorModeView's subscription but with memo() removed.
+      function FloorModeViewSimNoMemo() {
+        renderCount++;
+        const { runStatus } = useHomeTabCtx();
+        return <span data-testid="floor-status-nomemo">{runStatus}</span>;
+      }
+
+      const { rerender } = render(
+        <TabOnlyProviderClean runStatus="running" manageCounter={0}>
+          <FloorModeViewSimNoMemo />
+        </TabOnlyProviderClean>,
+      );
+      await act(async () => {});
+      expect(renderCount).toBe(1);
+
+      // manageCounter changes → parent re-renders → non-memo'd child re-renders
+      // unconditionally (even though the context ref is stable and runStatus
+      // did not change).  This is precisely the re-render that memo() prevents
+      // in production.
+      await act(async () => {
+        rerender(
+          <TabOnlyProviderClean runStatus="running" manageCounter={1}>
+            <FloorModeViewSimNoMemo />
+          </TabOnlyProviderClean>,
+        );
+      });
+
+      // MUST be > 1 — proves the framework detects memo() removal.
+      // If this were 1 (no re-render), the counter-proof would be vacuous and
+      // the guard would be blind to accidental memo() stripping.
+      expect(renderCount).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
