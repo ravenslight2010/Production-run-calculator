@@ -394,7 +394,49 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   // Even on a wholesale reset adoption, the delete/un-delete stamp maps are
   // factory-wide master-data history, not day-state — carry them across so a
   // reset (or a stale client's reset push) can't erase un-delete decisions.
-  if (exReset > 0 && inReset > exReset) return withMergedStamps({ ...incoming }, incoming, existing);
+  //
+  // ADDITIONAL GUARD: apply the same isBlankRunValue protection to runValues
+  // even during a wholesale reset. A rollover push (resetAt bumped forward)
+  // that fetched a stale or still-empty scheduled row can arrive with
+  // all-default run values while the live row already has real data entered
+  // by another device today (casesNeeded, line settings, etc.). Without this
+  // guard those values are erased wholesale. Mirror the per-run
+  // empty-over-populated logic from the additive path: keep the stored value
+  // and advance its stamp so the surviving value wins on every peer.
+  if (exReset > 0 && inReset > exReset) {
+    const inVals = isPlainObject(incoming.runValues) ? incoming.runValues : {};
+    const inUpd  = isPlainObject(incoming.runValuesUpdatedAt) ? incoming.runValuesUpdatedAt : {};
+    const exVals = isPlainObject(existing.runValues) ? existing.runValues : {};
+    const exUpd  = isPlainObject(existing.runValuesUpdatedAt) ? existing.runValuesUpdatedAt : {};
+    const outVals: Record<string, unknown> = {};
+    const outUpd:  Record<string, unknown> = {};
+    // Incoming run IDs are authoritative for the new day (the reset supplies
+    // the run list). Only protect values for runs the reset explicitly includes.
+    for (const id of Object.keys(inVals)) {
+      const inStamp = asNumber(inUpd[id]);
+      const exStamp = asNumber(exUpd[id]);
+      if (
+        isPlainObject(exVals[id]) &&
+        isBlankRunValue(inVals[id]) &&
+        !isBlankRunValue(exVals[id])
+      ) {
+        // Rollover brought blank/default values for a run that already has
+        // real data on this row — preserve the real data and advance the
+        // stamp so the surviving value wins the per-run LWW on every peer.
+        outVals[id] = exVals[id];
+        outUpd[id]  = Math.max(inStamp, exStamp, Date.now());
+      } else {
+        outVals[id] = inVals[id];
+        if (inStamp > 0) outUpd[id] = inStamp;
+      }
+    }
+    const base: Record<string, unknown> = {
+      ...(incoming as Record<string, unknown>),
+      runValues: outVals,
+      runValuesUpdatedAt: outUpd,
+    };
+    return withMergedStamps(base, incoming, existing);
+  }
 
   const inVals = isPlainObject(incoming.runValues) ? incoming.runValues : {};
   const inUpd = isPlainObject(incoming.runValuesUpdatedAt) ? incoming.runValuesUpdatedAt : {};
