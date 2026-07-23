@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import React from "react";
+import React, { useState } from "react";
 
 // wouter must be mocked before importing auth.tsx so useLocation resolves.
 vi.mock("wouter", () => ({
@@ -43,7 +43,7 @@ vi.mock("@/inventoryShared", async (importOriginal) => {
 });
 
 import { AuthContext, type AuthContextValue } from "@/useAuth";
-import { SignUpPage, SignInPage } from "./auth";
+import { SignUpPage, SignInPage, useUsernameAvailability } from "./auth";
 
 afterEach(() => {
   cleanup();
@@ -381,5 +381,124 @@ describe("sign-in button: unaffected by username availability", () => {
       expect(mockCheckUsernameAvailable).not.toHaveBeenCalled();
     },
     6000,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Guard proof: availability check fires when enabled is forced to true
+//
+// This is the companion to the sign-in tests above. Those tests prove the
+// mock is NEVER called when the hook runs with enabled=false (the sign-in
+// guard). This test proves the mock IS called when the same hook runs with
+// enabled=true — isolating the guard as the load-bearing suppressor, not an
+// accidental gap in the mock setup.
+//
+// A tiny test component exercises useUsernameAvailability directly with
+// enabled hardcoded to true, simulating what would happen if a future
+// refactor accidentally removed the isSignUp gate in AuthForm.
+// ---------------------------------------------------------------------------
+
+/** Minimal harness that exercises useUsernameAvailability with enabled=true. */
+function AvailabilityHookHarness({
+  initialUsername,
+}: {
+  initialUsername: string;
+}) {
+  const [username, setUsername] = useState(initialUsername);
+  const status = useUsernameAvailability(username, /* enabled= */ true);
+  return (
+    <div>
+      <input
+        aria-label="username-field"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+      />
+      <span data-testid="status">{status}</span>
+    </div>
+  );
+}
+
+describe("sign-in guard: availability check fires when the guard is bypassed (enabled forced to true)", () => {
+  it(
+    "calls checkUsernameAvailable after the debounce when enabled is forced to true — proving the guard is the load-bearing suppressor on sign-in",
+    async () => {
+      const user = userEvent.setup();
+
+      // Resolve immediately so no pending promises linger after the test.
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      // Render the harness with a valid username already in place so the hook
+      // enters "checking" state right away and fires the debounce timer.
+      render(
+        <AvailabilityHookHarness initialUsername="newstaff" />,
+      );
+
+      // The hook sets status → "checking" synchronously in the first effect
+      // run (before the 400 ms timer fires).
+      await waitFor(
+        () => {
+          expect(
+            (screen.getByTestId("status") as HTMLElement).textContent,
+          ).toBe("checking");
+        },
+        { timeout: 1000 },
+      );
+
+      // After the debounce fires the mock must have been called — the hook is
+      // not guarded by enabled=false here, so nothing suppresses the call.
+      await waitFor(
+        () => {
+          expect(mockCheckUsernameAvailable).toHaveBeenCalledWith("newstaff");
+        },
+        { timeout: 1500 },
+      );
+
+      // Status must resolve to "available" once the mock settles, confirming
+      // the full round-trip completes when enabled=true.
+      await waitFor(
+        () => {
+          expect(
+            (screen.getByTestId("status") as HTMLElement).textContent,
+          ).toBe("available");
+        },
+        { timeout: 1000 },
+      );
+    },
+    6000,
+  );
+
+  it(
+    "does NOT call checkUsernameAvailable when enabled is false — confirming the sign-in guard is what prevents the call (not the mock setup)",
+    async () => {
+      // Re-verify the negative side of the guard using the same hook directly.
+      // Typing on the sign-in page is equivalent to enabled=false here.
+      mockCheckUsernameAvailable.mockResolvedValue({ available: true });
+
+      render(
+        <AvailabilityHookHarness initialUsername="" />,
+      );
+
+      // Render a second harness with enabled forced to false to mirror sign-in.
+      // We do this via the exported hook called in a separate component.
+      function DisabledHarness() {
+        const status = useUsernameAvailability("newstaff", /* enabled= */ false);
+        return <span data-testid="disabled-status">{status}</span>;
+      }
+
+      const { unmount } = render(<DisabledHarness />);
+
+      // Wait well past the debounce window — the mock must never fire.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
+      expect(mockCheckUsernameAvailable).not.toHaveBeenCalled();
+
+      // Status must remain "idle" — the guard short-circuits the hook.
+      expect(
+        (screen.getByTestId("disabled-status") as HTMLElement).textContent,
+      ).toBe("idle");
+
+      unmount();
+    },
+    4000,
   );
 });

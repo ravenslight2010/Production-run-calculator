@@ -22,7 +22,8 @@ type UsernameStatus = "idle" | "short" | "checking" | "available" | "taken";
 // status mirrors the live password hints: neutral while empty/too short or in
 // flight, green once we know it's free, red once we know it's taken. Network
 // errors fall back to neutral so a flaky check never blocks the form.
-function useUsernameAvailability(
+/** @internal – exported only for the regression test suite. */
+export function useUsernameAvailability(
   username: string,
   enabled: boolean,
 ): UsernameStatus {
