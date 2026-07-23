@@ -776,4 +776,190 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
       expect(minutes).toBeGreaterThan(30);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Scenario I: applyResumeToRun(freezerEmpty=false) with a LARGE pause (120 min)
+  // — elapsed bounded by actual wall-clock time + counter-proof.
+  //
+  // This scenario closes the gap left by Scenario H, which only covers a
+  // 30-min pause.  A refactor that caps or truncates pauseDuration in
+  // computeResumedStartedAt (e.g. to a small maximum) would not cause the
+  // state-level startedAt assertion in Scenario H to fail if the capped value
+  // still matches a 30-min shift — but a 120-min large-pause test would expose
+  // that the cap is wrong.
+  //
+  // Pre-resume state:
+  //   run.startedAt = START (T+0)
+  //   run.pausedAt  = START + 30 min (paused after 30 min of active run time)
+  //
+  // Large wall-clock pause: 120 min.
+  // Resume happens at START + 150 min.
+  //
+  // applyResumeToRun(run, freezerEmpty=false, resumeInstant):
+  //   pauseDuration = resumeInstant − pausedAt = 120 min
+  //   newStartedAt  = START + 120 min
+  //   pausedAt      = undefined   (explicitly cleared)
+  //
+  // At resumeInstant (START + 150 min):
+  //   runAge = 150 − 120 = 30 min  → "30m"
+  //   wallClock = resumeInstant − START = 150 min
+  //   elapsed (30 min) ≤ wallClock (150 min)  ✓
+  //
+  // Counter-proof (startedAt shift capped or skipped):
+  //   brokenStartedAt = START (shift skipped entirely)
+  //   brokenElapsed   = resumeInstant − START = 150 min  (inflated; 5× the 30 min active time)
+  //   The counter-proof renders with brokenStartedAt and asserts minutes > 30m.
+  //
+  // Note: if the shift were capped at, say, 30 min instead of the full 120 min:
+  //   cappedNewStartedAt = START + 30 min
+  //   elapsed = 150 − 30 = 120 min  (inflated; 4× the 30 min active time)
+  //   120 min ≤ 150 min (wallClock), so the bound assertion does NOT catch this.
+  //   The exact "30m" assertion is the tightest guard: any cap produces the wrong
+  //   displayed value and the two counter-proof render tests below detect it.
+  // -------------------------------------------------------------------------
+  describe("Scenario I: applyResumeToRun(freezerEmpty=false) — large pause (120 min) elapsed wall-clock bound", () => {
+    const START = 5_000_000_000;
+    // Run was paused 30 min after start.
+    const stalePausedAt = START + 30 * 60_000;
+    // Large wall-clock pause: 120 min. Resume at START + 150 min.
+    const LARGE_PAUSE_MS = 120 * 60_000;
+    const resumeInstant = stalePausedAt + LARGE_PAUSE_MS; // START + 150 min
+
+    const pausedRun = {
+      id: "run-i",
+      brand: "TestBrand",
+      flavor: "TestFlavor",
+      startedAt: START,
+      pausedAt: stalePausedAt,
+    };
+
+    // Call the real production transformation.
+    // freezerEmpty=false: newStartedAt = START + 120 min (shift by full 120-min pause).
+    const resumedRun = applyResumeToRun(pausedRun, false, resumeInstant);
+
+    // Expected post-resume startedAt: START + (resumeInstant − stalePausedAt)
+    //   = START + 120 min.
+    const expectedNewStartedAt = START + LARGE_PAUSE_MS;
+
+    // Wall-clock elapsed since the run started (includes the pause period).
+    const wallClockMinutes = (resumeInstant - START) / 60_000; // 150 min
+
+    // ------------------------------------------------------------------
+    // State assertions: primary regression guards.
+    // ------------------------------------------------------------------
+    it("applyResumeToRun returns a non-null result", () => {
+      expect(resumedRun).not.toBeNull();
+    });
+
+    it("post-resume run has pausedAt === undefined (cleared)", () => {
+      expect(resumedRun!.pausedAt).toBeUndefined();
+    });
+
+    it("post-resume run has startedAt shifted forward by the full 120-min pause duration", () => {
+      expect(resumedRun!.startedAt).toBe(expectedNewStartedAt);
+    });
+
+    // ------------------------------------------------------------------
+    // Rendered assertions: elapsed ≤ wall-clock time at resumeInstant.
+    // A capped or skipped shift would produce a higher elapsed value.
+    // ------------------------------------------------------------------
+    it("CompactRunStrip: right at resume shows 30m (active run time, not wall-clock 150m)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("30m");
+    });
+
+    it("ElapsedCard: right at resume shows 30m (active run time, not wall-clock 150m)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("30m");
+    });
+
+    it("CompactRunStrip: elapsed ≤ actual wall-clock time since run started (150 min)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="strip-elapsed"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("strip-elapsed").textContent ?? "",
+      );
+      expect(minutes).toBeLessThanOrEqual(wallClockMinutes);
+    });
+
+    it("ElapsedCard: elapsed ≤ actual wall-clock time since run started (150 min)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="elapsed-card-value"
+          nowMs={resumeInstant}
+          startedAt={resumedRun!.startedAt!}
+          pausedAt={resumedRun!.pausedAt ?? null}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("elapsed-card-value").textContent ?? "",
+      );
+      expect(minutes).toBeLessThanOrEqual(wallClockMinutes);
+    });
+
+    // ------------------------------------------------------------------
+    // Counter-proof: without the startedAt shift (or with it capped),
+    // elapsed is inflated far beyond the 30 min of actual active run time.
+    //
+    // Broken case: brokenStartedAt = START (shift skipped entirely).
+    //   elapsed = resumeInstant − START = 150 min  ← 5× the true active time.
+    //
+    // This proves that the full uncapped shift in computeResumedStartedAt is
+    // load-bearing: any truncation of pauseDuration produces a value > 30m.
+    // ------------------------------------------------------------------
+    it("counter-proof: without startedAt shift, elapsed is inflated above active run time (30m)", () => {
+      render(
+        <ElapsedTimeBadge
+          data-testid="counter-proof"
+          nowMs={resumeInstant}
+          startedAt={START}
+          pausedAt={null}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("counter-proof").textContent ?? "",
+      );
+      // Without the shift, elapsed = 150 min — inflated by the 120-min pause.
+      expect(minutes).toBeGreaterThan(30);
+    });
+
+    it("counter-proof: with shift capped at 30 min (not the full 120 min), elapsed is still inflated", () => {
+      // Simulates a refactor that caps pauseDuration to, say, 30 min.
+      const cappedShift = 30 * 60_000;
+      const cappedNewStartedAt = START + cappedShift; // START + 30 min
+      render(
+        <ElapsedTimeBadge
+          data-testid="counter-proof-capped"
+          nowMs={resumeInstant}
+          startedAt={cappedNewStartedAt}
+          pausedAt={null}
+        />,
+      );
+      const minutes = toMinutes(
+        screen.getByTestId("counter-proof-capped").textContent ?? "",
+      );
+      // With a 30-min cap: elapsed = 150 − 30 = 120 min — still 4× the true active time.
+      expect(minutes).toBeGreaterThan(30);
+    });
+  });
 });
