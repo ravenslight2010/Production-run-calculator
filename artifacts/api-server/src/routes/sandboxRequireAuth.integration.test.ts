@@ -57,6 +57,14 @@ let clearUserValidityCache: () => void;
 let clearSessionBoundaryCache: () => void;
 // Kept at module level so the cross-environment-replay test can spy on it.
 let sandboxMod: typeof import("../lib/sandbox");
+
+// Compile-time guard: if 'isSandboxUser' is renamed in sandbox.ts, TypeScript
+// will error here ("Property 'isSandboxUser' does not exist on type ...").
+// This turns a silent spy-wiring break — where vi.spyOn(sandboxMod, "isSandboxUser")
+// silently targets a missing key and all call-count assertions pass vacuously —
+// into a visible build error caught at typecheck time.
+type _AssertIsSandboxUserExported = (typeof sandboxMod)["isSandboxUser"];
+
 // Kept at module level so the DB-query-call-count test can spy on getUserById.
 let usersMod: typeof import("../lib/users");
 
@@ -738,6 +746,30 @@ describe("cross-environment token replay: verifyToken rejects before sandbox gat
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spy-wiring guard: isSandboxUser export must remain a callable function
+//
+// vi.spyOn(sandboxMod, "isSandboxUser") targets the export by string key. If
+// isSandboxUser is renamed in sandbox.ts the spyOn silently targets a missing
+// key, the spy never fires, and all call-count assertions in the
+// cross-environment-replay tests pass vacuously (0 === 0 is always true).
+//
+// The compile-time type assertion above this file's module-level declarations
+// (type _AssertIsSandboxUserExported) catches the rename at typecheck time.
+// This runtime test is the belt-and-suspenders second layer: it runs after
+// beforeAll populates sandboxMod, so any gap between the static type and the
+// actual runtime binding is also caught with a clear failure message.
+// ---------------------------------------------------------------------------
+describe("spy-wiring guard: isSandboxUser export must remain a callable function", () => {
+  it("sandboxMod.isSandboxUser is a function — a rename in sandbox.ts would break vi.spyOn wiring", () => {
+    // If isSandboxUser is renamed, typeof sandboxMod.isSandboxUser is
+    // "undefined", this assertion fails immediately with a clear message, and
+    // the call-count tests in the cross-environment suite become obviously
+    // broken rather than silently passing with vacuous zero counts.
+    expect(typeof sandboxMod.isSandboxUser).toBe("function");
   });
 });
 
