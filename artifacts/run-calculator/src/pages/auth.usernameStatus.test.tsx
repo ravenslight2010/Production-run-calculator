@@ -332,6 +332,70 @@ describe("sign-up button: clearing the username field after a taken result rever
 });
 
 // ---------------------------------------------------------------------------
+// Partial-clear path: taken → backspace to 1-2 chars → "short" hint, button disabled
+// ---------------------------------------------------------------------------
+describe("sign-up button: backspacing a taken username to below the minimum shows the 'short' hint", () => {
+  it(
+    "shows the 'At least 3 characters' hint and keeps the button disabled when the user backspaces a taken username down to 1-2 characters",
+    async () => {
+      const user = userEvent.setup();
+
+      mockCheckUsernameAvailable.mockResolvedValue({ available: false });
+
+      renderSignUpPage();
+
+      // Fill all required fields other than username first.
+      const pwFields = screen.getAllByLabelText(/password/i);
+      await user.type(pwFields[0], "password123");
+      await user.type(pwFields[1], "password123");
+      await user.type(
+        screen.getByLabelText(/facility.*code|access.*code/i),
+        "valid-code",
+      );
+
+      // Step 1: type a taken username (≥3 chars so the hook fires) and wait
+      // for the "already taken" hint.
+      const usernameInput = screen.getByLabelText(/^username$/i);
+      await user.type(usernameInput, "abc");
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/already taken/i)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+
+      // Confirm the button is disabled while the username is taken.
+      const submitButton = screen.getByRole("button", {
+        name: /create.*account/i,
+      });
+      expect((submitButton as HTMLButtonElement).disabled).toBe(true);
+
+      // Step 2: backspace twice so only one character remains ("a").
+      // The hook's length < MIN_USERNAME_LENGTH branch should fire synchronously
+      // in the effect and set status → "short" without waiting for the debounce.
+      await user.keyboard("{Backspace}{Backspace}");
+
+      // The "short" hint ("At least 3 characters") must replace "already taken".
+      // Neither "taken" nor "checking" should appear.
+      await waitFor(
+        () => {
+          expect(screen.getByText(/at least\s+3\s+characters/i)).toBeTruthy();
+        },
+        { timeout: 1500 },
+      );
+      expect(screen.queryByText(/already taken/i)).toBeNull();
+      expect(screen.queryByText(/checking availability/i)).toBeNull();
+
+      // The button must remain disabled — the username is now too short so the
+      // length guard blocks submission (right reason, not the "taken" status).
+      expect((submitButton as HTMLButtonElement).disabled).toBe(true);
+    },
+    8000,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Sign-in button: must NOT be gated on username availability at all
 // ---------------------------------------------------------------------------
 describe("sign-in button: unaffected by username availability", () => {
