@@ -433,6 +433,23 @@ describe("TickBar.animation — STABILITY CONTRACT: mock hooks return stable ref
     expect(call1.tickDueRefs).toBe(call2.tickDueRefs);
   });
 
+  it("useAutoTrack: tickDueRefs IS the exported mockAutoTrackTickRefs constant (guards a second allocation in the mock)", () => {
+    const { tickDueRefs } = useAutoTrack();
+    // The two-call reference-identity check above confirms that consecutive
+    // calls return the same object, but it cannot detect the case where
+    // BOTH calls return a newly allocated object that is neither call's
+    // expected reference.  This assertion closes that gap: it verifies the
+    // EXPLICIT CHAIN — mock module → useAutoTrack() return → tickDueRefs —
+    // is the exact same object as the exported constant that TickBar tests
+    // mutate in beforeEach.  If someone adds a reset helper inside the
+    // __mocks__ file that re-allocates tickDueRefs (e.g.
+    //   export const tickDueRefsReset = { ... }  and returns it instead),
+    // the mutation in beforeEach would write to a different object, the
+    // probe would always see 0, and the fill-pct tests would pass vacuously.
+    // This assertion fails immediately in that scenario.
+    expect(tickDueRefs).toBe(mockAutoTrackTickRefs);
+  });
+
   it("useAutoTrack: each tickDueRefs slot is the same object reference on every call", () => {
     const call1 = useAutoTrack();
     const call2 = useAutoTrack();
