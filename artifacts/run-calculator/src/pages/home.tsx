@@ -9740,6 +9740,13 @@ export default function Home() {
       const keptIds = new Set(keptRuns.map(r => r.id));
       const keptRunValues: Record<string, FormValues> = {};
       for (const id of keptIds) if (existingRunValues[id]) keptRunValues[id] = existingRunValues[id];
+      // Tombstone the dropped imported runs so the server's additive union in
+      // protectRunValues doesn't resurrect them from the existing stored row
+      // (the union appends any stored run not present in the incoming list; without
+      // a tombstone, a re-import always ends up with old + new runs stacked).
+      const droppedIds = existingRuns
+        .filter(r => r.imported && !r.startedAt && !r.endedAt)
+        .map(r => r.id);
       // TODAY only: drop file rows matching runs the floor already started or
       // finished (they're preserved in keptRuns above), so a re-import that
       // includes today can't list the same run twice. One already-ran run
@@ -9777,7 +9784,14 @@ export default function Home() {
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
-        deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
+        deletedItems: (() => {
+          const base = unionDeletedItems(loadDeletedItems(), existing?.deletedItems);
+          if (droppedIds.length > 0) {
+            const prev = Array.isArray(base.runs) ? base.runs : [];
+            base.runs = [...new Set([...prev, ...droppedIds])];
+          }
+          return base;
+        })(),
         deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
         undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
       };
