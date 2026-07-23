@@ -26,6 +26,14 @@ import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
 import { useAutoTrack } from "../../hooks/useAutoTrack";
 import { useNotifications } from "../../hooks/useNotifications";
+import { PENDING_CLOCK_MS } from "../../hooks/useClock";
+
+// The symmetric guard advances fake time by this amount to cross the pending
+// clock cadence (PENDING_CLOCK_MS).  Deriving it here means that if the
+// cadence constant in useClock.ts ever changes, the advance automatically
+// stays meaningful — and the meta-guard test below will catch any edit that
+// accidentally brings the advance back below the cadence.
+const SYMMETRIC_GUARD_ADVANCE_MS = PENDING_CLOCK_MS + 1_000;
 
 // ── Hoisted tickDueRefs — must be created with vi.hoisted() so the vi.mock()
 // factory (which is hoisted before imports) can reference them.
@@ -386,10 +394,12 @@ describe("TickBar animation — regression guard", () => {
     const trayProdPct0  = Number(probe.getAttribute("data-tray-prod-pct"));
     const batchProdPct0 = Number(probe.getAttribute("data-batch-prod-pct"));
 
-    // Advance by 11 s — crosses the 10 s pending clock cadence, so the
-    // interval fires at least once and nowTime advances.
+    // Advance by SYMMETRIC_GUARD_ADVANCE_MS (PENDING_CLOCK_MS + 1_000) —
+    // crosses the pending clock cadence so the interval fires at least once
+    // and nowTime advances.  Using the derived constant instead of a literal
+    // ensures this guard stays meaningful if PENDING_CLOCK_MS ever changes.
     await act(async () => {
-      vi.advanceTimersByTime(11_000);
+      vi.advanceTimersByTime(SYMMETRIC_GUARD_ADVANCE_MS);
     });
 
     const trayProdPct1  = Number(probe.getAttribute("data-tray-prod-pct"));
@@ -477,5 +487,35 @@ describe("TickBar.animation — STABILITY CONTRACT: mock hooks return stable ref
     const call2 = useAutoTrack();
     expect(call1.autoTrackProgress).toBe(call2.autoTrackProgress);
     expect(call1.autoTrackSuggestion).toBe(call2.autoTrackSuggestion);
+  });
+});
+
+// ── META-GUARD: symmetric advance must exceed the pending clock cadence ───────
+//
+// The symmetric guard test advances fake time by SYMMETRIC_GUARD_ADVANCE_MS
+// (= PENDING_CLOCK_MS + 1_000) to cross the pending clock interval and confirm
+// nowTime actually propagates.  If a future developer edits PENDING_CLOCK_MS
+// upward (e.g. from 10 s to 30 s) without updating SYMMETRIC_GUARD_ADVANCE_MS,
+// the symmetric guard silently becomes a copy of the counter-proof — it will
+// pass even when nowTime never propagates, masking a real freeze.
+//
+// This test catches that drift: it fails as soon as SYMMETRIC_GUARD_ADVANCE_MS
+// is no longer strictly greater than PENDING_CLOCK_MS, regardless of which
+// side was edited.
+
+describe("TickBar.animation — META-GUARD: symmetric advance exceeds pending clock cadence", () => {
+  it("SYMMETRIC_GUARD_ADVANCE_MS is strictly greater than PENDING_CLOCK_MS", () => {
+    // If this assertion fails, the symmetric guard in
+    // "symmetric guard: trayProd and batchProd pcts DO change …" is no
+    // longer meaningful — its timer advance won't cross the pending clock
+    // interval and it will pass vacuously alongside the counter-proof.
+    expect(SYMMETRIC_GUARD_ADVANCE_MS).toBeGreaterThan(PENDING_CLOCK_MS);
+  });
+
+  it("SYMMETRIC_GUARD_ADVANCE_MS equals PENDING_CLOCK_MS + 1_000 (advance formula is intact)", () => {
+    // Guards against accidental constant folding or formula simplification
+    // that happens to keep the advance above the cadence but breaks the
+    // explicit +1_000 margin this file relies on.
+    expect(SYMMETRIC_GUARD_ADVANCE_MS).toBe(PENDING_CLOCK_MS + 1_000);
   });
 });
