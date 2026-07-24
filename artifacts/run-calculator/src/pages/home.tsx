@@ -14965,7 +14965,7 @@ function ScreenModeView() {
           {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
           {v.casesNeeded > 0 && (
             <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
-              {fmtComma(calc.casesLeftToRun)} <span className="text-lg">cases left</span>
+              {fmtComma(Math.max(0, calc.casesLeftToRun))} <span className="text-lg">cases left</span>
             </span>
           )}
         </div>
@@ -16289,7 +16289,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-crust-cases-left">{fmtNum(calc.casesLeftToRun, 0)}</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-crust-cases-left">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span>
                       </div>
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Total Time Left</span>
@@ -16339,7 +16339,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-dough-cases-left">{fmtNum(calc.casesLeftToRun, 0)}</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-dough-cases-left">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span>
                       </div>
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
@@ -17187,12 +17187,12 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <span className="text-2xl font-mono font-black tabular-nums text-foreground">
                                     {casesPerSkid > 0 ? (
                                       <>
-                                        {fmtNum(Math.floor(calc.casesLeftToRun / casesPerSkid), 0)}
+                                        {fmtNum(Math.floor(Math.max(0, calc.casesLeftToRun) / casesPerSkid), 0)}
                                         <span className="text-muted-foreground mx-1">/</span>
-                                        {fmtNum(calc.casesLeftToRun % casesPerSkid, 0)}
+                                        {fmtNum(Math.max(0, calc.casesLeftToRun) % casesPerSkid, 0)}
                                       </>
                                     ) : (
-                                      fmtNum(calc.casesLeftToRun, 0)
+                                      fmtNum(Math.max(0, calc.casesLeftToRun), 0)
                                     )}
                                   </span>
                                 </div>
