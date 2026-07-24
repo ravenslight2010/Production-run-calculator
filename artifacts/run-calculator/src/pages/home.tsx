@@ -12336,22 +12336,7 @@ export default function Home() {
 
               {/* ─── SAUCE ─── */}
               <TabsContent value="sauce">
-                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
-                  <CardHeader className="pb-2 pt-4 px-5">
-                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <Droplets className="w-4 h-4" /> Sauce Needs
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    <NeedsList rows={buildNeedRows(v).sauce} />
-                  </CardContent>
-                </Card>
-                <ReadOnlyRecipeCard
-                  title="Sauce Recipe"
-                  subtitle={v.frontlineRecipeName?.trim() || undefined}
-                  recipe={v.frontlineRecipe ?? []}
-                  accent="bg-red-500/70"
-                />
+                <LiveSauceTabContent />
               </TabsContent>
 
               {/* ─── FRONTLINE ─── */}
@@ -17417,19 +17402,74 @@ function BatchMadeRow({
   );
 }
 
-const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
+const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const { v, runStatus, currentRunId } = hx;
   const { calc } = useLiveRun();
 
   const [sauceMade, setSauceMade] = useState(0);
+
+  useEffect(() => { setSauceMade(0); }, [currentRunId]);
+  useEffect(() => { if (runStatus === "ended") setSauceMade(0); }, [runStatus]);
+
+  const isLive = runStatus === "running" || runStatus === "paused";
+
+  return (
+    <>
+      {calc.sauceBatches > 0 && (
+        <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
+          <div className="h-1 bg-primary w-full" />
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Droplets className="w-4 h-4" /> Sauce Batches Needed
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-5">
+            <p className="text-xs text-muted-foreground mb-4">
+              Based on{" "}
+              <span className="font-mono text-foreground">
+                {fmtNum(Math.max(0, calc.casesLeftToRun), 0)}
+              </span>{" "}
+              cases remaining ×{" "}
+              <span className="font-mono text-foreground">
+                {v.pizzasPerCase}
+              </span>{" "}
+              pizzas/case
+            </p>
+            <BatchMadeRow
+              label={v.frontlineRecipeName?.trim() || "Sauce"}
+              totalBatches={calc.sauceBatches}
+              made={sauceMade}
+              onIncrement={() => setSauceMade(n => n + 1)}
+              onDecrement={() => setSauceMade(n => Math.max(0, n - 1))}
+              isLive={isLive}
+              testId="output-sauce-batches"
+              sauceEffBarrel={calc.sauceEffBarrel}
+            />
+          </CardContent>
+        </Card>
+      )}
+      <ReadOnlyRecipeCard
+        title="Sauce Recipe"
+        subtitle={v.frontlineRecipeName?.trim() || undefined}
+        recipe={v.frontlineRecipe ?? []}
+        accent="bg-red-500/70"
+      />
+    </>
+  );
+});
+
+const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
+  const hx = useHomeTabCtx();
+  const { v, runStatus, currentRunId } = hx;
+  const { calc } = useLiveRun();
+
   const [app1Made, setApp1Made] = useState(0);
   const [app2Made, setApp2Made] = useState(0);
   const [app3Made, setApp3Made] = useState(0);
   const [app4Made, setApp4Made] = useState(0);
 
   useEffect(() => {
-    setSauceMade(0);
     setApp1Made(0);
     setApp2Made(0);
     setApp3Made(0);
@@ -17438,7 +17478,6 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
 
   useEffect(() => {
     if (runStatus === "ended") {
-      setSauceMade(0);
       setApp1Made(0);
       setApp2Made(0);
       setApp3Made(0);
@@ -17469,17 +17508,18 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       </span>{" "}
                       pizzas/case
                     </p>
-                    <BatchMadeRow
-                      label="Sauce"
-                      totalBatches={calc.sauceBatches}
-                      made={sauceMade}
-                      onIncrement={() => setSauceMade(n => n + 1)}
-                      onDecrement={() => setSauceMade(n => Math.max(0, n - 1))}
-                      isLive={isLive}
-                      testId="output-sauce-batches"
-                      sub={v.frontlineRecipeName?.trim() || undefined}
-                      sauceEffBarrel={calc.sauceEffBarrel}
-                    />
+                    {(() => {
+                      const bd = calc.sauceBatches > 0 ? sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel) : null;
+                      return (
+                        <StatRow
+                          label="Sauce"
+                          value={bd ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(calc.sauceBatches, 2) + " batches"}
+                          testId="output-sauce-batches"
+                          highlight={calc.sauceBatches > 0}
+                          sub={v.frontlineRecipeName?.trim() || undefined}
+                        />
+                      );
+                    })()}
                     <div className="border-t border-border/60" aria-hidden="true" />
                     {v.app1Type.trim().toLowerCase().includes("mix") ? (
                       <StatRow
