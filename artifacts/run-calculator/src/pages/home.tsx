@@ -14642,13 +14642,13 @@ function ScreenModeView() {
           <div className="rounded-2xl bg-card border border-border p-4 text-center">
             <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{doughSubTab === "crusts" ? "Stacks Ready" : "Trays on Line"}</p>
             <p className="text-3xl font-black tabular-nums">{v.traysOnLine > 0 ? v.traysOnLine : "—"}</p>
-            {calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.traysNeeded, 0)} needed</p>}
+            {calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.traysNeeded, 0)} still needed <span className="opacity-60">(net)</span></p>}
           </div>
           {doughSubTab !== "crusts" && (
             <div className="rounded-2xl bg-card border border-border p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batches Ready</p>
               <p className="text-3xl font-black tabular-nums">{v.batchesReady}</p>
-              {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} needed</p>}
+              {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} still needed <span className="opacity-60">(net)</span></p>}
             </div>
           )}
           {v.doughBatchYield > 0 && doughSubTab !== "crusts" && (
@@ -17828,14 +17828,34 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     </CardHeader>
                     <CardContent className="px-4 pb-4">
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-muted/20 rounded-lg p-3 text-center">
-                          <p className="text-3xl font-mono font-bold text-primary tabular-nums" data-testid="output-batches-needed">{fmtNum(calc.batchesNeeded, 2)}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Batches to mix</p>
-                        </div>
-                        <div className="bg-muted/20 rounded-lg p-3 text-center">
-                          <p className="text-3xl font-mono font-bold tabular-nums" data-testid="output-trays-needed">{fmtNum(calc.traysNeeded, 0)}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Trays needed</p>
-                        </div>
+                        {(() => {
+                          const traysOnLine = v.traysOnLine ?? 0;
+                          const batchesReady = v.batchesReady ?? 0;
+                          const hasDoughOnHand = traysOnLine > 0 || batchesReady > 0;
+                          const doughOnHandPizzas = traysOnLine * calc.perTray + batchesReady * calc.perBatch;
+                          const onHandBatches = calc.perBatch > 0 ? doughOnHandPizzas / calc.perBatch : 0;
+                          const onHandTrays = calc.perTray > 0 ? doughOnHandPizzas / calc.perTray : 0;
+                          const totalBatches = calc.batchesNeeded + onHandBatches;
+                          const totalTrays = calc.traysNeeded + onHandTrays;
+                          return (
+                            <>
+                              <div className="bg-muted/20 rounded-lg p-3 text-center">
+                                <p className="text-3xl font-mono font-bold text-primary tabular-nums" data-testid="output-batches-needed">{fmtNum(calc.batchesNeeded, 2)}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">Batches still to mix</p>
+                                {hasDoughOnHand && (
+                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{fmtNum(totalBatches, 2)} total − {fmtNum(onHandBatches, 2)} on hand</p>
+                                )}
+                              </div>
+                              <div className="bg-muted/20 rounded-lg p-3 text-center">
+                                <p className="text-3xl font-mono font-bold tabular-nums" data-testid="output-trays-needed">{fmtNum(calc.traysNeeded, 0)}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">Trays still needed</p>
+                                {hasDoughOnHand && (
+                                  <p className="text-xs text-muted-foreground/70 mt-0.5">{fmtNum(totalTrays, 0)} total − {fmtNum(onHandTrays, 0)} on hand</p>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </CardContent>
                   </Card>
