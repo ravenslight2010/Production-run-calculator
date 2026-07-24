@@ -41,6 +41,7 @@ const ALLOWED_CALLERS = new Set<string>([
   // Live-clock-dependent tab content (re-render every second is intentional)
   "LiveRunTabContent",
   "LivePackagingTabContent",
+  "LiveSauceTabContent",      // sauce batch stepper uses live casesLeftToRun
   "LiveFrontlineTabContent",
   "LiveDoughTabContent",
   "LiveSetupRecipesTabContent",
