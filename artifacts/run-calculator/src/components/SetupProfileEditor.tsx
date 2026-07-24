@@ -819,9 +819,14 @@ export default function SetupProfileEditor({
                     {autofill && autofill.sheetsAvailable > 0 && autofill.plan.matchedSheets === 0 && (
                       <p className="text-xs text-muted-foreground">Your latest imported files don't mention {brand.trim()} — {flavor.trim()}.</p>
                     )}
-                    {autofill && autofill.plan.matchedSheets > 0 && autofill.applied.length === 0 && pendingMismatches.length === 0 && (
+                    {autofill && autofill.plan.matchedSheets > 0 && autofill.applied.length === 0 && pendingMismatches.length === 0 && !autofill.plan.ambiguousDoughVariant && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                         <Check className="w-3.5 h-3.5 text-primary" /> Everything already matches your latest imports.
+                      </p>
+                    )}
+                    {autofill && autofill.plan.matchedSheets > 0 && autofill.applied.length === 0 && pendingMismatches.length === 0 && autofill.plan.ambiguousDoughVariant && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-primary" /> All other fields already match your latest imports. {autofill.plan.ambiguousDoughVariant} has multiple doughball variants — use the variant picker below to confirm the right weight for this profile.
                       </p>
                     )}
                     {(autofill?.applied.length ?? 0) > 0 && (

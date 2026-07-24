@@ -92,6 +92,13 @@ export type ProfileAutofillPlan = {
    * two = not). Applied only when a pep TYPE entry is actually accepted.
    */
   pepCombinedTarget?: boolean;
+  /**
+   * Set to the dough recipe name when the linked dough pool recipe has multiple
+   * doughball variants and no die type is available to pick one. Autofill can't
+   * verify the weight in this case — the variant picker in the editor is the
+   * right tool.
+   */
+  ambiguousDoughVariant?: string;
 };
 
 /** Minimal shape of a saved shipping/palletizing-guide snapshot (see savedShippingGuides.ts). */
@@ -729,7 +736,7 @@ function desiredFromDoughPool(
   current: FormValues,
   linkedName: string,
   effectiveDieType: string,
-): Map<string, Desired> {
+): { fields: Map<string, Desired>; hadAmbiguousVariant: boolean; chosenName: string } {
   const b = brand.trim().toLowerCase();
   const f = flavor.trim().toLowerCase();
   const out = new Map<string, Desired>();
@@ -740,7 +747,7 @@ function desiredFromDoughPool(
   };
   const enabled = recipes.filter((r) => r.enabled !== false && (r.name ?? "").trim());
   const candidates = enabled.filter(reaches);
-  if (candidates.length === 0) return out;
+  if (candidates.length === 0) return { fields: out, hadAmbiguousVariant: false, chosenName: "" };
   const wantKey = linkedName.trim() ? nameKey(linkedName) : "";
   const chosen =
     (wantKey && candidates.find((r) => nameKey(r.name) === wantKey)) || candidates[0];
@@ -760,9 +767,10 @@ function desiredFromDoughPool(
   // as a bogus mismatch on an 8.25 oz Corner Booth profile).
   const variants = normalizeDoughballVariants(chosen.doughballVariants);
   const matched = matchDoughballVariant(variants, { dieType: effectiveDieType });
+  const ambiguous = !matched && variants.length > 1;
   const wt = matched
     ? Number(matched.weightOz ?? 0)
-    : variants.length > 1
+    : ambiguous
       ? 0
       : Number(chosen.doughballWeightOz ?? 0);
   if (wt > 0) {
@@ -783,7 +791,7 @@ function desiredFromDoughPool(
       source,
     });
   }
-  return out;
+  return { fields: out, hadAmbiguousVariant: ambiguous, chosenName: chosen.name.trim() };
 }
 
 /**
@@ -949,7 +957,7 @@ export function buildProfileAutofillPlan(opts: {
     decided.get("doughRecipeName")?.value ?? cur.doughRecipeName ?? "",
   ).trim();
   const shippingDecided = desiredFromShipping(opts.shippingGuides ?? [], brand, flavor);
-  const doughDecided = desiredFromDoughPool(
+  const doughResult = desiredFromDoughPool(
     opts.doughRecipes ?? [],
     brand,
     flavor,
@@ -959,6 +967,10 @@ export function buildProfileAutofillPlan(opts: {
     // type the latest sheet states (a blank form should still match variants).
     String(cur.dieType ?? "").trim() || String(decided.get("dieType")?.value ?? "").trim(),
   );
+  const doughDecided = doughResult.fields;
+  if (doughResult.hadAmbiguousVariant && doughResult.chosenName) {
+    plan.ambiguousDoughVariant = doughResult.chosenName;
+  }
   const { cheese: cheeseDecided, mix: mixDecided } = desiredFromCheeseMixPools(
     opts.cheeseRecipes ?? [],
     opts.mixes ?? [],
