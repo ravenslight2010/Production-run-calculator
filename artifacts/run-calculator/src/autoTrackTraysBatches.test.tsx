@@ -361,7 +361,11 @@ describe("auto-track tray/batch up/down tracking", () => {
     );
 
     expect(values.traysOnLine).toBe(30);
-    expect(values.batchesReady).toBe(2);
+    // Batches stay 0: seeding trays already covers the full deficit, so the
+    // batch seed is intentionally blocked to avoid double-counting supply.
+    // The crew enters batches manually only when they have unmixed batches
+    // physically waiting in the hopper.
+    expect(values.batchesReady).toBe(0);
 
     // With the deficit still open, the next full period nets out: production
     // (+1 at 18s) balances consumption (-1 at 36s) — the seeded stock tracks

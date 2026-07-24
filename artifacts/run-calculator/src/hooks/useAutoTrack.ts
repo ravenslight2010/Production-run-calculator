@@ -568,6 +568,11 @@ export function useAutoTrack({
             if (v.traysOnLine === 0 && seed !== null) {
               form.setValue("traysOnLine", seed, { shouldDirty: true });
               traySeededThisTick = true;
+              // Trays and batches are additive in dough-on-hand, so seeding
+              // both from the same deficit doubles the counted supply. Block
+              // the batch seed so batches stay at 0 and the crew enters them
+              // manually only when they genuinely have unmixed batches waiting.
+              batchSeededRef.current = true;
             }
           }
           if (!traySeededThisTick) {
