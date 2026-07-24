@@ -527,6 +527,13 @@ export function useAutoTrack({
     // is done and the counter only counts down; whatever is left at the end
     // carries over to the next run. Dough tracking NEVER runs for an ended run
     // (drain phase is case/skid-only — the dough crew is on the next run). ──
+    // Tracks how many trays were auto-seeded this tick so the batch seed
+    // below can subtract the tray coverage from its own seed amount — trays
+    // and batches are additive in dough-on-hand, so seeding both at the
+    // full deficit would double-count the supply (only the remaining deficit
+    // after tray coverage gets seeded into batches).
+    let traysSeededAmount = 0;
+
     if (runStatus === "running" && calc.perTray > 0 && calc.ppm > 0) {
       const trayPeriodMs = clampPeriodMs((calc.perTray / calc.ppm) * 60000);
       let delta = 0;
@@ -568,11 +575,7 @@ export function useAutoTrack({
             if (v.traysOnLine === 0 && seed !== null) {
               form.setValue("traysOnLine", seed, { shouldDirty: true });
               traySeededThisTick = true;
-              // Trays and batches are additive in dough-on-hand, so seeding
-              // both from the same deficit doubles the counted supply. Block
-              // the batch seed so batches stay at 0 and the crew enters them
-              // manually only when they genuinely have unmixed batches waiting.
-              batchSeededRef.current = true;
+              traysSeededAmount = seed;
             }
           }
           if (!traySeededThisTick) {
@@ -638,7 +641,15 @@ export function useAutoTrack({
           // suggested staging on its first tick so it has stock to track.
           if (!batchSeededRef.current) {
             batchSeededRef.current = true;
-            const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).batches;
+            // If trays were auto-seeded this same tick, only seed the remaining
+            // deficit not already covered by those trays — seeding both at the
+            // full deficit would double-count dough-on-hand.
+            const remainingBatchesNeeded = traysSeededAmount > 0 && calc.traysNeeded > 0
+              ? Math.max(0, calc.batchesNeeded * (calc.traysNeeded - traysSeededAmount) / calc.traysNeeded)
+              : calc.batchesNeeded;
+            const seed = remainingBatchesNeeded > 0
+              ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded))))
+              : null;
             if (v.batchesReady === 0 && seed !== null) {
               form.setValue("batchesReady", seed, { shouldDirty: true });
               batchSeededThisTick = true;
