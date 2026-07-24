@@ -3448,7 +3448,7 @@ export function applySpecImport(
         // planner); no match = hydrate nothing rather than a bogus number.
         const poolDough = poolEntryFor("dough", dName);
         const poolVariants = normalizeDoughballVariants(poolDough?.doughballVariants);
-        const poolMatched = matchDoughballVariant(poolVariants, { dieType: values.dieType ?? "" });
+        const poolMatched = matchDoughballVariant(poolVariants, { dieType: values.dieType ?? "", brand, flavor });
         const poolWeight = poolMatched
           ? Number(poolMatched.weightOz ?? 0)
           : poolVariants.length > 1

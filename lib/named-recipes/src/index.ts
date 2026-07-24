@@ -80,6 +80,14 @@ export interface DoughballVariant {
   weightOz?: number;
   /** Doughballs per tray; 0/absent = unknown. */
   perTray?: number;
+  /**
+   * Brand+flavor pairs this variant explicitly applies to. When set, variant
+   * matching prefers this variant over a die-type match for the listed combos.
+   * An empty `flavor` string means "any flavor of this brand". Populated
+   * automatically on spec import (each profile's brand+flavor → linked
+   * variant) and editable by managers in the dough recipe editor.
+   */
+  customers?: Array<{ brand: string; flavor: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +261,46 @@ function pickBaseVariantLabel(existing: string, incoming: string): string {
  * "Corner Booth") also collapse — but ONLY when their numbers don't
  * contradict; the base (shorter) label is kept. Pure.
  */
+/** Union two customers arrays by brand+flavor key (ci). Returns null when there is nothing to add. */
+function unionVariantCustomers(
+  base: ReadonlyArray<{ brand: string; flavor: string }> | undefined,
+  incoming: ReadonlyArray<{ brand: string; flavor: string }> | undefined,
+): Array<{ brand: string; flavor: string }> | null {
+  if (!incoming || incoming.length === 0) return null;
+  const existing = base ?? [];
+  const additions = incoming.filter(
+    (c) =>
+      !existing.some(
+        (e) =>
+          e.brand.trim().toLowerCase() === c.brand.trim().toLowerCase() &&
+          e.flavor.trim().toLowerCase() === c.flavor.trim().toLowerCase(),
+      ),
+  );
+  if (additions.length === 0) return null;
+  return [...existing, ...additions];
+}
+
+/** Normalize a raw `customers` value from a DB/API record. */
+function normalizeVariantCustomers(
+  raw: unknown,
+): Array<{ brand: string; flavor: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ brand: string; flavor: string }> = [];
+  const seen = new Set<string>();
+  for (const c of raw) {
+    if (!c || typeof c !== "object") continue;
+    const cr = c as Record<string, unknown>;
+    const brand = coerceStr(cr.brand);
+    if (!brand) continue;
+    const flavor = coerceStr(cr.flavor);
+    const key = `${brand.toLowerCase()}\0${flavor.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ brand, flavor });
+  }
+  return out;
+}
+
 export function normalizeDoughballVariants(
   input: unknown,
   recipeName = "",
@@ -267,10 +315,12 @@ export function normalizeDoughballVariants(
     if (!label) continue;
     const weightOz = coerceNum(rec.weightOz, 0);
     const perTray = Math.round(coerceNum(rec.perTray, 0));
+    const customers = normalizeVariantCustomers(rec.customers);
     const v: DoughballVariant = { label };
     if (weightOz > 0) v.weightOz = weightOz;
     if (perTray > 0) v.perTray = perTray;
     if (v.weightOz === undefined && v.perTray === undefined) continue;
+    if (customers.length > 0) v.customers = customers;
     const key = doughballVariantLabelKey(label, recipeName);
     const at = byKey.get(key);
     if (at === undefined) {
@@ -286,12 +336,15 @@ export function normalizeDoughballVariants(
       out.push(v);
       continue;
     }
-    out[at] = {
+    const merged: DoughballVariant = {
       ...keep,
       label: exactLabel ? keep.label : pickBaseVariantLabel(keep.label, v.label),
       ...(keep.weightOz === undefined && v.weightOz !== undefined ? { weightOz: v.weightOz } : {}),
       ...(keep.perTray === undefined && v.perTray !== undefined ? { perTray: v.perTray } : {}),
     };
+    const unitedCustomers = unionVariantCustomers(keep.customers, v.customers);
+    if (unitedCustomers) merged.customers = unitedCustomers;
+    out[at] = merged;
   }
   return out;
 }
@@ -394,10 +447,13 @@ export function mergeNamedRecipeDoughballVariants(
         ...(v.weightOz !== undefined ? { weightOz: v.weightOz } : {}),
         ...(v.perTray !== undefined ? { perTray: v.perTray } : {}),
       };
+      const unitedCustomers = unionVariantCustomers(keep.customers, v.customers);
+      if (unitedCustomers) next.customers = unitedCustomers;
       if (
         next.label !== keep.label ||
         next.weightOz !== keep.weightOz ||
-        next.perTray !== keep.perTray
+        next.perTray !== keep.perTray ||
+        next.customers !== keep.customers
       ) {
         merged[at] = next;
         touched = true;
@@ -412,17 +468,34 @@ export function mergeNamedRecipeDoughballVariants(
  * Pick the dough family variant that best matches a product, for auto-filling
  * a blank run form. Deterministic and conservative:
  * 1. exactly ONE variant → that variant;
- * 2. the die size's leading number (e.g. `11` from `11 inch`) appears as the
+ * 2. a variant whose `customers` list includes this brand+flavor → that variant
+ *    (most explicit match; a blank flavor on a customer entry means "any flavor
+ *    of this brand");
+ * 3. the die size's leading number (e.g. `11` from `11 inch`) appears as the
  *    size number in EXACTLY ONE variant label ("11\" CRB") → that variant;
- * 3. otherwise null — the caller should offer a manual pick.
+ * 4. otherwise null — the caller should offer a manual pick.
  */
 export function matchDoughballVariant(
   variants: ReadonlyArray<DoughballVariant> | undefined,
-  opts: { dieType?: string },
+  opts: { dieType?: string; brand?: string; flavor?: string },
 ): DoughballVariant | null {
   const list = normalizeDoughballVariants(variants as unknown);
   if (list.length === 0) return null;
   if (list.length === 1) return list[0];
+  // Priority: explicit brand+flavor customer pairing.
+  const b = (opts.brand ?? "").trim().toLowerCase();
+  if (b) {
+    const f = (opts.flavor ?? "").trim().toLowerCase();
+    const hit = list.find((v) =>
+      (v.customers ?? []).some(
+        (c) =>
+          c.brand.trim().toLowerCase() === b &&
+          (c.flavor.trim() === "" || c.flavor.trim().toLowerCase() === f),
+      ),
+    );
+    if (hit) return hit;
+  }
+  // Fallback: die-type number match.
   const dieNum = (() => {
     const m = /(\d+(?:\.\d+)?)/.exec(opts.dieType ?? "");
     return m ? m[1] : "";

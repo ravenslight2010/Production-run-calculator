@@ -6938,10 +6938,10 @@ export default function Home() {
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
     if ((Number(v.targetDoughballWeight) || 0) > 0) return;
-    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand: currentRun?.brand ?? "", flavor: currentRun?.flavor ?? "" });
     const ballOz = matched?.weightOz ?? serverDoughWeightByName.get(name) ?? 0;
     if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
-  }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, serverDoughWeightByName, serverDoughVariantsByName, form]);
+  }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, currentRun?.brand, currentRun?.flavor, serverDoughWeightByName, serverDoughVariantsByName, form]);
 
   // Same self-heal for doughballs-per-tray: a form linked to a pool dough
   // recipe that knows its per-tray count, while the form still sits at 0,
@@ -6950,10 +6950,10 @@ export default function Home() {
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
     if ((Number(v.doughballsPerTray) || 0) > 0) return;
-    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand: currentRun?.brand ?? "", flavor: currentRun?.flavor ?? "" });
     const perTray = matched?.perTray ?? serverDoughTrayByName.get(name) ?? 0;
     if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
-  }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, serverDoughTrayByName, serverDoughVariantsByName, form]);
+  }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, currentRun?.brand, currentRun?.flavor, serverDoughTrayByName, serverDoughVariantsByName, form]);
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
@@ -9436,6 +9436,39 @@ export default function Home() {
               list.push(v);
               doughVariants.set(key, list);
             }
+          }
+        }
+        // Auto-tag each variant with the brand+flavor of every profile that
+        // was imported in this run. This wires the "customers" list that lets
+        // matchDoughballVariant pick the right variant by brand+flavor alone,
+        // without needing a die type (e.g. Lucia's Craft / BBQ → "Craft
+        // Bashas Ultra Thin", even when no die is set on the profile).
+        for (const { brand: tBrand, flavor: tFlavor } of touchedProfiles) {
+          const savedProfile = loadProfile(tBrand, tFlavor);
+          const dName = (savedProfile?.doughRecipeName ?? "").trim().toLowerCase();
+          if (!dName) continue;
+          const familyVariants = doughVariants.get(dName);
+          if (!familyVariants) continue;
+          // Find which variant this import linked to this family recipe.
+          const importedRecipe = appliedParsed.recipes.find(
+            (r) => r.kind === "dough" && r.name.trim().toLowerCase() === dName && r.variantLabel,
+          );
+          if (!importedRecipe?.variantLabel) continue;
+          const variantLabel = importedRecipe.variantLabel.trim();
+          const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
+          if (idx < 0) continue;
+          const variant = familyVariants[idx];
+          const existingCustomers = variant.customers ?? [];
+          const already = existingCustomers.some(
+            (c) =>
+              c.brand.trim().toLowerCase() === tBrand.trim().toLowerCase() &&
+              c.flavor.trim().toLowerCase() === tFlavor.trim().toLowerCase(),
+          );
+          if (!already) {
+            familyVariants[idx] = {
+              ...variant,
+              customers: [...existingCustomers, { brand: tBrand, flavor: tFlavor }],
+            };
           }
         }
         void pushLocalDoughSauceToServer({ doughTrays, doughVariants }).catch(() => {});

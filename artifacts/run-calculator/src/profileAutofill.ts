@@ -766,7 +766,7 @@ function desiredFromDoughPool(
   // belongs to no particular customer (e.g. CRB Dough's 13 oz would surface
   // as a bogus mismatch on an 8.25 oz Corner Booth profile).
   const variants = normalizeDoughballVariants(chosen.doughballVariants);
-  const matched = matchDoughballVariant(variants, { dieType: effectiveDieType });
+  const matched = matchDoughballVariant(variants, { dieType: effectiveDieType, brand, flavor });
   const ambiguous = !matched && variants.length > 1;
   const wt = matched
     ? Number(matched.weightOz ?? 0)

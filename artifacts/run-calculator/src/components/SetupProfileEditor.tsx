@@ -428,20 +428,20 @@ export default function SetupProfileEditor({
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
     if ((Number(v.targetDoughballWeight) || 0) > 0) return;
-    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand, flavor });
     const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === name);
     const ballOz = matched?.weightOz ?? rec?.doughballWeightOz ?? 0;
     if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
-  }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, doughRecipesList, serverDoughVariantsByName, form]);
+  }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, brand, flavor, doughRecipesList, serverDoughVariantsByName, form]);
   useEffect(() => {
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
     if ((Number(v.doughballsPerTray) || 0) > 0) return;
-    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? "") });
+    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand, flavor });
     const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === name);
     const perTray = matched?.perTray ?? rec?.doughballsPerTray ?? 0;
     if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
-  }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, doughRecipesList, serverDoughVariantsByName, form]);
+  }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, brand, flavor, doughRecipesList, serverDoughVariantsByName, form]);
   const serverSauceRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of sauceRecipesList) {
@@ -1132,7 +1132,7 @@ export default function SetupProfileEditor({
                       // else offer a manual pick below. Never overwrites a
                       // value already typed into the profile.
                       const variants = serverDoughVariantsByName.get(key) ?? [];
-                      const matched = matchDoughballVariant(variants, { dieType: String(form.getValues("dieType") ?? "") });
+                      const matched = matchDoughballVariant(variants, { dieType: String(form.getValues("dieType") ?? ""), brand, flavor });
                       const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === key);
                       const ballOz = matched?.weightOz ?? rec?.doughballWeightOz ?? 0;
                       const weightBlank = !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0);

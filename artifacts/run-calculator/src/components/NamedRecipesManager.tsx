@@ -9,6 +9,7 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
+  X,
 } from "lucide-react";
 import {
   normalizeNamedRecipe,
@@ -313,6 +314,50 @@ function NamedRecipeEditor({
     commit(next);
   }
 
+  function addVariantCustomer(variantIdx: number) {
+    setDraft((d) => ({
+      ...d,
+      doughballVariants: (d.doughballVariants ?? []).map((v, i) =>
+        i === variantIdx
+          ? { ...v, customers: [...(v.customers ?? []), { brand: "", flavor: "" }] }
+          : v,
+      ),
+    }));
+  }
+
+  function patchVariantCustomer(
+    variantIdx: number,
+    customerIdx: number,
+    p: Partial<{ brand: string; flavor: string }>,
+  ) {
+    setDraft((d) => ({
+      ...d,
+      doughballVariants: (d.doughballVariants ?? []).map((v, i) =>
+        i === variantIdx
+          ? {
+              ...v,
+              customers: (v.customers ?? []).map((c, ci) =>
+                ci === customerIdx ? { ...c, ...p } : c,
+              ),
+            }
+          : v,
+      ),
+    }));
+  }
+
+  function removeVariantCustomer(variantIdx: number, customerIdx: number) {
+    const next = {
+      ...draft,
+      doughballVariants: (draft.doughballVariants ?? []).map((v, i) =>
+        i === variantIdx
+          ? { ...v, customers: (v.customers ?? []).filter((_, ci) => ci !== customerIdx) }
+          : v,
+      ),
+    };
+    setDraft(next);
+    commit(next);
+  }
+
   function removeComponent(idx: number) {
     const next = {
       ...draft,
@@ -397,61 +442,108 @@ function NamedRecipeEditor({
               No variants yet — imports add them automatically.
             </p>
           ) : (
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2.5">
               {(draft.doughballVariants ?? []).map((variant, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={variant.label}
-                    onChange={(e) => patchVariant(idx, { label: e.target.value })}
-                    onBlur={() => commit()}
-                    disabled={disabled}
-                    placeholder={'Variant (e.g. 11" CRB)…'}
-                    className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    value={variant.weightOz ?? ""}
-                    onChange={(e) =>
-                      patchVariant(idx, {
-                        weightOz: Math.max(0, Number(e.target.value) || 0) || undefined,
-                      })
-                    }
-                    onBlur={() => commit()}
-                    disabled={disabled}
-                    placeholder="oz"
-                    title="Doughball weight (oz)"
-                    className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
-                  />
-                  <span className="text-[11px] text-muted-foreground">oz</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={variant.perTray ?? ""}
-                    onChange={(e) =>
-                      patchVariant(idx, {
-                        perTray: Math.max(0, Math.round(Number(e.target.value) || 0)) || undefined,
-                      })
-                    }
-                    onBlur={() => commit()}
-                    disabled={disabled}
-                    placeholder="tray"
-                    title="Doughballs per tray"
-                    className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
-                  />
-                  <span className="text-[11px] text-muted-foreground">/tray</span>
-                  <button
-                    type="button"
-                    onClick={() => removeVariant(idx)}
-                    disabled={disabled}
-                    title="Remove variant"
-                    className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                <div key={idx} className="rounded-md border border-border/40 bg-muted/10 p-2 space-y-1.5">
+                  {/* Variant numbers row */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={variant.label}
+                      onChange={(e) => patchVariant(idx, { label: e.target.value })}
+                      onBlur={() => commit()}
+                      disabled={disabled}
+                      placeholder={'Variant (e.g. 11" CRB)…'}
+                      className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={variant.weightOz ?? ""}
+                      onChange={(e) =>
+                        patchVariant(idx, {
+                          weightOz: Math.max(0, Number(e.target.value) || 0) || undefined,
+                        })
+                      }
+                      onBlur={() => commit()}
+                      disabled={disabled}
+                      placeholder="oz"
+                      title="Doughball weight (oz)"
+                      className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                    />
+                    <span className="text-[11px] text-muted-foreground">oz</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={variant.perTray ?? ""}
+                      onChange={(e) =>
+                        patchVariant(idx, {
+                          perTray: Math.max(0, Math.round(Number(e.target.value) || 0)) || undefined,
+                        })
+                      }
+                      onBlur={() => commit()}
+                      disabled={disabled}
+                      placeholder="tray"
+                      title="Doughballs per tray"
+                      className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                    />
+                    <span className="text-[11px] text-muted-foreground">/tray</span>
+                    <button
+                      type="button"
+                      onClick={() => removeVariant(idx)}
+                      disabled={disabled}
+                      title="Remove variant"
+                      className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {/* Per-variant customer pairings — controls which brand+flavor auto-picks this variant */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground font-medium">Applies to (Brand / Flavor):</p>
+                    {(variant.customers ?? []).map((c, cidx) => (
+                      <div key={cidx} className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={c.brand}
+                          onChange={(e) => patchVariantCustomer(idx, cidx, { brand: e.target.value })}
+                          onBlur={() => commit()}
+                          disabled={disabled}
+                          placeholder="Brand…"
+                          className="flex-1 min-w-[5rem] rounded border border-input bg-background px-1.5 py-0.5 text-[11px]"
+                        />
+                        <span className="text-[11px] text-muted-foreground shrink-0">/</span>
+                        <input
+                          type="text"
+                          value={c.flavor}
+                          onChange={(e) => patchVariantCustomer(idx, cidx, { flavor: e.target.value })}
+                          onBlur={() => commit()}
+                          disabled={disabled}
+                          placeholder="Flavor (blank = all)…"
+                          className="flex-1 min-w-[6rem] rounded border border-input bg-background px-1.5 py-0.5 text-[11px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeVariantCustomer(idx, cidx)}
+                          disabled={disabled}
+                          title="Remove pairing"
+                          className="p-0.5 rounded text-muted-foreground hover:text-red-400 disabled:opacity-50"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => addVariantCustomer(idx)}
+                      disabled={disabled}
+                      className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    >
+                      <Plus className="w-3 h-3" /> Add brand/flavor
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
