@@ -3485,12 +3485,21 @@ export function applySpecImport(
     // factory never defined as a Mixes recipe — "Hot Giardiniera Mix"). Those
     // links must count as candidates too, or a re-import finds no match and
     // clobbers the generic "Mix"/"cheese" type back to the raw sheet name.
+    // Pre-compute loose keys for all known mix names so profileLinkCandidates
+    // can guard against feeding a mix recipe name into the cheese candidate list
+    // — doing so creates a self-perpetuating cycle where a stale "cheese"-typed
+    // slot re-stamps "cheese" on every re-import even though the recipe is a mix.
+    const mixNamesLooseSet = new Set(mixCandidateNames.map(n => specImportNameMatchKey(n ?? "")));
     const profileLinkCandidates = (kind: "cheese" | "mix"): string[] => {
       const out: string[] = [];
       for (let slot = 1; slot <= 4; slot++) {
         const t = String((values as Record<string, unknown>)[`app${slot}Type`] ?? "").trim().toLowerCase();
         const link = String((values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] ?? "").trim();
-        if (link && t === kind) out.push(link);
+        if (!link || t !== kind) continue;
+        // Never feed a mix recipe name into the cheese candidate list — that
+        // creates a loop where a stale cheese-typed slot keeps re-stamping itself.
+        if (kind === "cheese" && mixNamesLooseSet.has(specImportNameMatchKey(link))) continue;
+        out.push(link);
       }
       return out;
     };
@@ -3524,6 +3533,17 @@ export function applySpecImport(
     }
     for (const link of mixLinks) {
       (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
+    }
+    // Post-correct any stale "cheese"-typed slot whose linked recipe is actually
+    // a mix (e.g. the profile predates mix-pool awareness, or a prior import ran
+    // before the premix workbook was loaded). Switch to "Mix" so the run form
+    // shows the Mix card rather than the cheese picker with a "not found" error.
+    for (let slot = 1; slot <= 4; slot++) {
+      const curType = String((values as Record<string, unknown>)[`app${slot}Type`] ?? "").trim().toLowerCase();
+      const recipeName = String((values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] ?? "").trim();
+      if (curType === "cheese" && recipeName && mixNamesLooseSet.has(specImportNameMatchKey(recipeName))) {
+        (values as Record<string, unknown>)[`app${slot}Type`] = "Mix";
+      }
     }
     const namedPeps = p.pepperonis.slice(0, 2).filter(pp => pp.type.trim());
     namedPeps.forEach((pp, i) => {

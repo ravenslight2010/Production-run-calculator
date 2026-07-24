@@ -232,12 +232,17 @@ function desiredFromProfile(
   // CURRENT profile may link a recipe that exists in neither this sheet nor
   // the pools (e.g. "Hot Giardiniera Mix"); without it the resolver finds no
   // match and the planner flags a false Type mismatch (raw name vs "Mix").
+  // Guard: never feed a mix recipe name into the cheese candidate list — that
+  // creates a self-perpetuating cycle (stale cheese-typed slot keeps re-stamping).
+  const mixNamesLooseSet = new Set(mixCandidateNames.map((n) => specImportNameMatchKey(n ?? "")));
   const profileLinkCandidates = (kind: "cheese" | "mix"): string[] => {
     const out: string[] = [];
     for (let slot = 1; slot <= 4; slot++) {
       const t = String(cur[`app${slot}Type`] ?? "").trim().toLowerCase();
       const link = String(cur[`app${slot}CheeseRecipeName`] ?? "").trim();
-      if (link && t === kind) out.push(link);
+      if (!link || t !== kind) continue;
+      if (kind === "cheese" && mixNamesLooseSet.has(specImportNameMatchKey(link))) continue;
+      out.push(link);
     }
     return out;
   };
