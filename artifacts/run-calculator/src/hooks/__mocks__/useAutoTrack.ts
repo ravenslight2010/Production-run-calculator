@@ -42,11 +42,12 @@ import type { SuggestedDoughStagingReturn, UseAutoTrackReturn } from "../useAuto
 
 /** Exported so TickBar.animation.test.tsx can mutate slots in beforeEach. */
 export const mockAutoTrackTickRefs: UseAutoTrackReturn["tickDueRefs"] = {
-  case:      { current: 0 as number },
-  tray:      { current: 0 as number },
-  trayProd:  { current: 0 as number },
-  batch:     { current: 0 as number },
-  batchProd: { current: 0 as number },
+  case:       { current: 0 as number },
+  tray:       { current: 0 as number },
+  trayProd:   { current: 0 as number },
+  batch:      { current: 0 as number },
+  batchProd:  { current: 0 as number },
+  hopperProd: { current: 0 as number },
 };
 
 /** Exported so stability-contract tests can pin it via the explicit-chain assertion. */
@@ -59,6 +60,12 @@ export const mockAutoSuppressUntilRef: UseAutoTrackReturn["autoSuppressUntilRef"
 /** Exported so stability-contract tests can pin it via the explicit-chain assertion. */
 export const mockFireAutoTrackNow: UseAutoTrackReturn["fireAutoTrackNow"] = vi.fn();
 
+/** Exported so tests can assert on dough-timer pause/resume calls. */
+export const mockPauseDoughTimers: UseAutoTrackReturn["pauseDoughTimers"] = vi.fn();
+
+/** Exported so tests can assert on dough-timer pause/resume calls. */
+export const mockResumeDoughTimers: UseAutoTrackReturn["resumeDoughTimers"] = vi.fn();
+
 // ── Mock hook ────────────────────────────────────────────────────────────────
 
 export function useAutoTrack(): UseAutoTrackReturn {
@@ -69,6 +76,9 @@ export function useAutoTrack(): UseAutoTrackReturn {
     autoSuppressUntilRef: mockAutoSuppressUntilRef,
     fireAutoTrackNow:     mockFireAutoTrackNow,
     tickDueRefs:          mockAutoTrackTickRefs,
+    isDoughTimerPaused:   false,
+    pauseDoughTimers:     mockPauseDoughTimers,
+    resumeDoughTimers:    mockResumeDoughTimers,
   };
 }
 

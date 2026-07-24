@@ -17633,6 +17633,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     showBatchDue, setShowBatchDue,
     autoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
+    isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
   } = useLiveRun();
 
   return (
@@ -17662,8 +17663,9 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   const stageLeft = spinLeft === null || spinElapsed === null
                     ? null
                     : onLowStage ? safeLow - spinElapsed : spinLeft;
-                  const hopperLeft = running && safeHopper > 0
-                    ? safeHopper - (elapsedBatchSec % safeHopper)
+                  const hopperProdDue = tickDueRefs.hopperProd.current;
+                  const hopperLeft = running && safeHopper > 0 && hopperProdDue > 0
+                    ? Math.max(0, (hopperProdDue - nowMs) / 1000)
                     : null;
                   const suppressedNow = Date.now() < autoSuppressUntilRef.current;
                   const suppressedMinsLeftNow = suppressedNow ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
@@ -17675,9 +17677,39 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                       />
                       <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                            Batch Pipeline · 3 max
-                          </p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              Batch Pipeline · 3 max
+                            </p>
+                            {running && !isDoughTimerPaused && (
+                              <button
+                                type="button"
+                                onClick={pauseDoughTimers}
+                                className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-amber-400 transition-colors"
+                                title="Pause dough timers"
+                                data-testid="btn-pause-dough-timers"
+                              >
+                                <Pause className="w-2.5 h-2.5" />
+                                Pause
+                              </button>
+                            )}
+                          </div>
+                          {isDoughTimerPaused && (
+                            <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] mb-2" data-testid="dough-timers-paused-banner">
+                              <span className="text-amber-400 font-semibold flex items-center gap-1">
+                                <PauseCircle className="w-3 h-3 shrink-0" />
+                                Timers paused
+                              </span>
+                              <button
+                                type="button"
+                                onClick={resumeDoughTimers}
+                                className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0"
+                                data-testid="btn-resume-dough-timers"
+                              >
+                                Resume timers
+                              </button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-3 gap-2">
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                               <p className="text-[9px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
@@ -17687,25 +17719,29 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
                               <p className="text-[9px] uppercase tracking-wider text-primary">2 · Spinning</p>
                               <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
-                                {spinLeft !== null ? fmtMS(spinLeft) : "—:—"}
+                                {isDoughTimerPaused ? "—:—" : spinLeft !== null ? fmtMS(spinLeft) : "—:—"}
                               </p>
                               <p className="text-[9px] text-muted-foreground mt-0.5">
-                                {spinTotalSec <= 0
-                                  ? "enter mixer times below"
-                                  : spinLeft === null
-                                    ? "counts while running"
-                                    : onLowStage
-                                      ? `low speed · ${fmtMS(stageLeft ?? 0)} to high`
-                                      : `high speed · ${fmtMS(stageLeft ?? 0)} left`}
+                                {isDoughTimerPaused
+                                  ? "timers paused"
+                                  : spinTotalSec <= 0
+                                    ? "enter mixer times below"
+                                    : spinLeft === null
+                                      ? "counts while running"
+                                      : onLowStage
+                                        ? `low speed · ${fmtMS(stageLeft ?? 0)} to high`
+                                        : `high speed · ${fmtMS(stageLeft ?? 0)} left`}
                               </p>
                             </div>
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
                               <p className="text-[9px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
                               <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">
-                                {hopperLeft !== null ? fmtMS(hopperLeft) : "—:—"}
+                                {isDoughTimerPaused ? "—:—" : hopperLeft !== null ? fmtMS(hopperLeft) : "—:—"}
                               </p>
                               <p className="text-[9px] text-muted-foreground mt-0.5">
-                                {safeHopper > 0 ? "until batch is all balls" : "enter hopper time below"}
+                                {isDoughTimerPaused
+                                  ? "timers paused"
+                                  : safeHopper > 0 ? "until batch is all balls" : "enter hopper time below"}
                               </p>
                             </div>
                           </div>

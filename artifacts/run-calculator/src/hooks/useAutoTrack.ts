@@ -127,7 +127,15 @@ interface AutoTrackResult {
     trayProd: React.MutableRefObject<number>;
     batch: React.MutableRefObject<number>;
     batchProd: React.MutableRefObject<number>;
+    /** Hopper cycle next-completion timestamp — drives the hopper countdown display. */
+    hopperProd: React.MutableRefObject<number>;
   };
+  /** True while the dough-timer independent pause is active. */
+  isDoughTimerPaused: boolean;
+  /** Freeze mixer/hopper countdown displays and suppress dough tick writes. */
+  pauseDoughTimers: () => void;
+  /** Restart dough countdowns from full duration and clear the paused state. */
+  resumeDoughTimers: () => void;
 }
 
 /** Exported return type — shared with __mocks__/useAutoTrack.ts for compile-time drift detection. */
@@ -178,6 +186,11 @@ export function useAutoTrack({
   externalAutoSuppressRef,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
+  // Independent dough-timer pause: non-zero = wall-clock ms when paused.
+  // When set, tray/batch production and consumption ticks are suppressed
+  // without affecting cases/skids or the global auto-track toggle.
+  const doughTimerPausedRef = useRef<number>(0);
+  const [isDoughTimerPaused, setIsDoughTimerPaused] = useState(false);
   const internalAutoSuppressRef = useRef<number>(0);
   // Prefer caller's ref so that suppression latches written by UI consumers
   // (e.g. Home's autoSuppressUntilRef) are seen by this hook's write loop.
@@ -192,6 +205,11 @@ export function useAutoTrack({
   // 0 = not scheduled yet (first encounter arms the schedule without writing).
   const trayProdNextDueMsRef = useRef<number>(0);
   const batchProdNextDueMsRef = useRef<number>(0);
+  // Hopper cycle "next completion" timestamp — purely for the countdown display
+  // (hopper does not write to any form field; this ref lets resumeDoughTimers()
+  // restart the displayed countdown from the full hopper duration).
+  // 0 = not yet armed; gets armed on the first tick once the run is running.
+  const hopperProdNextDueMsRef = useRef<number>(0);
   // Stable container object for tickDueRefs — initialized once so the returned
   // object identity never changes across renders (prevents LiveRunContext's
   // value useMemo from firing on every LiveRunProvider re-render).
@@ -201,6 +219,7 @@ export function useAutoTrack({
     trayProd: trayProdNextDueMsRef,
     batch: batchNextDueMsRef,
     batchProd: batchProdNextDueMsRef,
+    hopperProd: hopperProdNextDueMsRef,
   });
   // Wall-clock ms of each consumption counter's last tick — drives the
   // incremental decrement (consumption for the actual elapsed duration).
@@ -292,6 +311,7 @@ export function useAutoTrack({
     batchNextDueMsRef.current = 0;
     trayProdNextDueMsRef.current = 0;
     batchProdNextDueMsRef.current = 0;
+    hopperProdNextDueMsRef.current = 0;
     trayLastMsRef.current = 0;
     batchLastMsRef.current = 0;
     lastExpectedCasesRef.current = -1;
@@ -299,18 +319,49 @@ export function useAutoTrack({
     traySeededRef.current = false;
     batchSeededRef.current = false;
     drainFreezerRef.current = -1;
+    // Clear dough-timer pause on run change / stop so it never bleeds across runs.
+    doughTimerPausedRef.current = 0;
+    setIsDoughTimerPaused(false);
   }, []);
 
   // Cancel the wait until every counter's next tick (used by "Resume now" and
   // the Auto toggle). Unlike resetBookkeeping this keeps the expectedCases
   // baseline and last-tick timestamps, so resuming never causes a catch-up jump
-  // over a manual edit.
+  // over a manual edit. Also clears any dough-timer pause so "Resume now" on
+  // the auto-track suppression banner doesn't leave dough timers frozen.
   const fireAutoTrackNow = useCallback(() => {
     caseNextDueMsRef.current = 0;
     trayNextDueMsRef.current = 0;
     batchNextDueMsRef.current = 0;
     trayProdNextDueMsRef.current = 0;
     batchProdNextDueMsRef.current = 0;
+    hopperProdNextDueMsRef.current = 0;
+    doughTimerPausedRef.current = 0;
+    setIsDoughTimerPaused(false);
+  }, []);
+
+  // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
+  // Does not affect the cases/skids counter or the global auto-track toggle.
+  const pauseDoughTimers = useCallback(() => {
+    doughTimerPausedRef.current = Date.now();
+    setIsDoughTimerPaused(true);
+  }, []);
+
+  // Resume dough-timer countdowns, restarting each from its full duration.
+  // Resets production due refs to 0 (re-arms from current time on next tick)
+  // and consumption-tick timestamps so no catch-up decrement fires.
+  // hopperProdNextDueMsRef reset to 0 causes the hopper countdown to restart
+  // from the full hopper duration on the next second.
+  const resumeDoughTimers = useCallback(() => {
+    doughTimerPausedRef.current = 0;
+    setIsDoughTimerPaused(false);
+    trayProdNextDueMsRef.current = 0;
+    batchProdNextDueMsRef.current = 0;
+    hopperProdNextDueMsRef.current = 0;
+    trayNextDueMsRef.current = 0;
+    trayLastMsRef.current = 0;
+    batchNextDueMsRef.current = 0;
+    batchLastMsRef.current = 0;
   }, []);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
@@ -346,6 +397,17 @@ export function useAutoTrack({
   useEffect(() => {
     resetBookkeeping();
   }, [autoTrackProgress, resetBookkeeping]);
+
+  // Clear the independent dough-timer pause whenever the run becomes globally
+  // running (covers the paused → running resume transition). Without this, a
+  // dough pause set before a global run pause would stay frozen after the run
+  // is globally resumed even though the line is moving again.
+  useEffect(() => {
+    if (runStatus === "running") {
+      doughTimerPausedRef.current = 0;
+      setIsDoughTimerPaused(false);
+    }
+  }, [runStatus]);
 
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
@@ -435,7 +497,27 @@ export function useAutoTrack({
     // not an elapsed-time estimate. When the line runs slower or faster than
     // the configured speed, the real counts are what decide when dough stops
     // moving for this run; from that moment the dough crew is on the NEXT run.
+    //
+    // The independent dough-timer pause (staff pressed ⏸ on the Batch Pipeline
+    // card) suppresses all tray/batch tick WRITES without touching cases/skids.
     const doughFeedComplete = calc.pressDone;
+
+    // ── Hopper cycle display tick — purely for the countdown in the UI;
+    // arms once and cycles every hopperSec so the display can restart from
+    // full duration when dough timers are resumed. Runs BEFORE the pause
+    // guard so the ref stays armed while dough timers are paused (the UI
+    // shows "—:—" + "timers paused" anyway), and resets to 0 on resume so
+    // the next tick re-arms from the current moment (full duration restart).
+    if (runStatus === "running" && machine && machine.hopperSec > 0) {
+      const hopperMs = machine.hopperSec * 1000;
+      if (hopperProdNextDueMsRef.current === 0) {
+        hopperProdNextDueMsRef.current = nowMs + hopperMs;
+      } else if (nowMs >= hopperProdNextDueMsRef.current) {
+        hopperProdNextDueMsRef.current = nowMs + hopperMs;
+      }
+    }
+
+    if (doughTimerPausedRef.current > 0) return;
 
     // ── Trays: count up while dough is still being pressed, down as the line
     // eats it. Production (+1 tray per tray-period, offset half a period from
@@ -590,5 +672,8 @@ export function useAutoTrack({
     autoSuppressUntilRef,
     fireAutoTrackNow,
     tickDueRefs: tickDueRefsRef.current,
+    isDoughTimerPaused,
+    pauseDoughTimers,
+    resumeDoughTimers,
   };
 }

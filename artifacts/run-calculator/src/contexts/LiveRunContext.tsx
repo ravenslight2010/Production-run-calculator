@@ -94,6 +94,9 @@ export interface LiveRunContextValue {
   autoSuppressUntilRef: React.MutableRefObject<number>;
   fireAutoTrackNow: () => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
+  isDoughTimerPaused: boolean;
+  pauseDoughTimers: () => void;
+  resumeDoughTimers: () => void;
   stallPrompt: boolean;
   setStallPrompt: React.Dispatch<React.SetStateAction<boolean>>;
   stallCheck: ReturnType<typeof detectStallFromDelta>;
@@ -435,7 +438,7 @@ export function LiveRunProvider({
   calcRef.current = calc;
 
   // ── Auto-track ───────────────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs } =
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs, isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers } =
     useAutoTrack({
       runId: currentRunId,
       runStatus,
@@ -493,6 +496,7 @@ export function LiveRunProvider({
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
     }),
     [
@@ -502,6 +506,7 @@ export function LiveRunProvider({
       showBatchDue, setShowBatchDue,
       autoTrackProgress, setAutoTrackProgress,
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
+      isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
     ],
   );
