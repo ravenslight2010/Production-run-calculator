@@ -17327,13 +17327,112 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   );
 });
 
+function BatchMadeRow({
+  label,
+  totalBatches,
+  made,
+  onIncrement,
+  onDecrement,
+  isLive,
+  testId,
+  sub,
+  sauceEffBarrel,
+}: {
+  label: string;
+  totalBatches: number;
+  made: number;
+  onIncrement: () => void;
+  onDecrement: () => void;
+  isLive: boolean;
+  testId?: string;
+  sub?: string;
+  sauceEffBarrel?: number;
+}) {
+  const remaining = Math.max(0, totalBatches - made);
+  const done = remaining === 0 && made > 0;
+  let valueStr: string;
+  if (sauceEffBarrel !== undefined) {
+    const bd = remaining > 0 ? sauceBarrelBreakdown(remaining, sauceEffBarrel) : null;
+    valueStr = done
+      ? "done ✓"
+      : bd
+        ? `${fmtNum(remaining, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
+        : fmtNum(remaining, 2) + " batches";
+  } else {
+    valueStr = done ? "done ✓" : fmtNum(remaining, 2) + " batches";
+  }
+  const highlight = totalBatches > 0 && !done;
+  return (
+    <div className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : done ? "text-emerald-400" : ""}`}>
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="flex items-start gap-2">
+        {isLive && (totalBatches > 0 || made > 0) && (
+          <div className="flex items-center gap-0.5 mt-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={onDecrement}
+              className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
+              aria-label="Decrease batches made"
+            >−</button>
+            <span className="text-xs font-mono w-5 text-center tabular-nums text-muted-foreground select-none">{made}</span>
+            <button
+              type="button"
+              onClick={onIncrement}
+              className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
+              aria-label="Increase batches made"
+            >+</button>
+          </div>
+        )}
+        <div className="flex flex-col items-end gap-0.5">
+          <span
+            className={`font-mono font-semibold text-sm tabular-nums ${done ? "text-emerald-400" : highlight ? "text-primary text-base" : "text-foreground"}`}
+            data-testid={testId}
+          >
+            {valueStr}
+          </span>
+          {sub && (
+            <span className="text-xs text-muted-foreground font-normal leading-tight">{sub}</span>
+          )}
+          {made > 0 && (
+            <span className="text-xs text-muted-foreground font-normal leading-tight">{made} made so far</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const {
-    v,
-  } = hx;
-
+  const { v, runStatus, currentRunId } = hx;
   const { calc } = useLiveRun();
+
+  const [sauceMade, setSauceMade] = useState(0);
+  const [app1Made, setApp1Made] = useState(0);
+  const [app2Made, setApp2Made] = useState(0);
+  const [app3Made, setApp3Made] = useState(0);
+  const [app4Made, setApp4Made] = useState(0);
+
+  useEffect(() => {
+    setSauceMade(0);
+    setApp1Made(0);
+    setApp2Made(0);
+    setApp3Made(0);
+    setApp4Made(0);
+  }, [currentRunId]);
+
+  useEffect(() => {
+    if (runStatus === "ended") {
+      setSauceMade(0);
+      setApp1Made(0);
+      setApp2Made(0);
+      setApp3Made(0);
+      setApp4Made(0);
+    }
+  }, [runStatus]);
+
+  const isLive = runStatus === "running" || runStatus === "paused";
+
   return (
     <>
                 <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
@@ -17355,34 +17454,59 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       </span>{" "}
                       pizzas/case
                     </p>
-                    <StatRow
+                    <BatchMadeRow
                       label="Sauce"
-                      value={(() => {
-                        const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
-                        return bd
-                          ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
-                          : fmtNum(calc.sauceBatches, 2) + " batches";
-                      })()}
+                      totalBatches={calc.sauceBatches}
+                      made={sauceMade}
+                      onIncrement={() => setSauceMade(n => n + 1)}
+                      onDecrement={() => setSauceMade(n => Math.max(0, n - 1))}
+                      isLive={isLive}
                       testId="output-sauce-batches"
-                      highlight={calc.sauceBatches > 0}
                       sub={v.frontlineRecipeName?.trim() || undefined}
+                      sauceEffBarrel={calc.sauceEffBarrel}
                     />
                     <div className="border-t border-border/60" aria-hidden="true" />
-                    <StatRow
-                      label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                      value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
-                      testId="output-app1-batches"
-                      highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
-                      sub={v.app1CheeseRecipeName?.trim() || undefined}
-                    />
+                    {v.app1Type.trim().toLowerCase().includes("mix") ? (
+                      <StatRow
+                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
+                        value={fmtNum(calc.app1Lbs, 1) + " lbs"}
+                        testId="output-app1-batches"
+                        highlight={calc.app1Lbs > 0}
+                        sub={v.app1CheeseRecipeName?.trim() || undefined}
+                      />
+                    ) : (
+                      <BatchMadeRow
+                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
+                        totalBatches={calc.app1Batches}
+                        made={app1Made}
+                        onIncrement={() => setApp1Made(n => n + 1)}
+                        onDecrement={() => setApp1Made(n => Math.max(0, n - 1))}
+                        isLive={isLive}
+                        testId="output-app1-batches"
+                        sub={v.app1CheeseRecipeName?.trim() || undefined}
+                      />
+                    )}
                     <div className="border-t border-border/60" aria-hidden="true" />
-                    <StatRow
-                      label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                      value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
-                      testId="output-app2-batches"
-                      highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
-                      sub={v.app2CheeseRecipeName?.trim() || undefined}
-                    />
+                    {v.app2Type.trim().toLowerCase().includes("mix") ? (
+                      <StatRow
+                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
+                        value={fmtNum(calc.app2Lbs, 1) + " lbs"}
+                        testId="output-app2-batches"
+                        highlight={calc.app2Lbs > 0}
+                        sub={v.app2CheeseRecipeName?.trim() || undefined}
+                      />
+                    ) : (
+                      <BatchMadeRow
+                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
+                        totalBatches={calc.app2Batches}
+                        made={app2Made}
+                        onIncrement={() => setApp2Made(n => n + 1)}
+                        onDecrement={() => setApp2Made(n => Math.max(0, n - 1))}
+                        isLive={isLive}
+                        testId="output-app2-batches"
+                        sub={v.app2CheeseRecipeName?.trim() || undefined}
+                      />
+                    )}
                     {/* Pep applicators sit between App 2 and App 3, matching
                         the physical line order (and the Run tab's card order). */}
                     <div className="border-t border-border/60" aria-hidden="true" />
@@ -17424,21 +17548,47 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       </>
                     )}
                     <div className="border-t border-border/60" aria-hidden="true" />
-                    <StatRow
-                      label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                      value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
-                      testId="output-app3-batches"
-                      highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
-                      sub={v.app3CheeseRecipeName?.trim() || undefined}
-                    />
+                    {v.app3Type.trim().toLowerCase().includes("mix") ? (
+                      <StatRow
+                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                        value={fmtNum(calc.app3Lbs, 1) + " lbs"}
+                        testId="output-app3-batches"
+                        highlight={calc.app3Lbs > 0}
+                        sub={v.app3CheeseRecipeName?.trim() || undefined}
+                      />
+                    ) : (
+                      <BatchMadeRow
+                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                        totalBatches={calc.app3Batches}
+                        made={app3Made}
+                        onIncrement={() => setApp3Made(n => n + 1)}
+                        onDecrement={() => setApp3Made(n => Math.max(0, n - 1))}
+                        isLive={isLive}
+                        testId="output-app3-batches"
+                        sub={v.app3CheeseRecipeName?.trim() || undefined}
+                      />
+                    )}
                     <div className="border-t border-border/60" aria-hidden="true" />
-                    <StatRow
-                      label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                      value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
-                      testId="output-app4-batches"
-                      highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
-                      sub={v.app4CheeseRecipeName?.trim() || undefined}
-                    />
+                    {v.app4Type.trim().toLowerCase().includes("mix") ? (
+                      <StatRow
+                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                        value={fmtNum(calc.app4Lbs, 1) + " lbs"}
+                        testId="output-app4-batches"
+                        highlight={calc.app4Lbs > 0}
+                        sub={v.app4CheeseRecipeName?.trim() || undefined}
+                      />
+                    ) : (
+                      <BatchMadeRow
+                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                        totalBatches={calc.app4Batches}
+                        made={app4Made}
+                        onIncrement={() => setApp4Made(n => n + 1)}
+                        onDecrement={() => setApp4Made(n => Math.max(0, n - 1))}
+                        isLive={isLive}
+                        testId="output-app4-batches"
+                        sub={v.app4CheeseRecipeName?.trim() || undefined}
+                      />
+                    )}
                   </CardContent>
                 </Card>
                 {[
