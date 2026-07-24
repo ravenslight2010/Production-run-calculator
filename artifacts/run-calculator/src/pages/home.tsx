@@ -7101,6 +7101,21 @@ export default function Home() {
     };
   }, []);
 
+  // Re-push on tab-foreground restore so a run-start (or any action) that
+  // fired while the tab was backgrounded or the screen was off doesn't stay
+  // unsynced. The browser can cancel an in-flight fetch when a tab is hidden,
+  // and setTimeout-based retries are throttled to ≥1 min on mobile — so the
+  // tab returning to the foreground is the reliable recovery point.
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        schedulePush(dayStateRef.current, 300);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
   // The server's PUT epoch guard fails CLOSED once the scope has ever been
   // reset: any sync write that doesn't carry a current `?epoch=` is answered
   // with {ok:true, stale:true} and silently DROPPED — the client thinks it
