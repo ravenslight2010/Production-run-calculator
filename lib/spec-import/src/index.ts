@@ -2629,10 +2629,17 @@ const SPEC_NUMBER_WORD_DIGITS: Record<string, string> = {
 
 /**
  * Digit signature of a name: every digit character, in order, from the loose
- * match key, with spelled-out number words ("Six") folded to digits first.
+ * match key's PURELY-NUMERIC tokens, with spelled-out number words ("Six")
+ * folded to digits first.
  * Two names whose signatures differ are talking about DIFFERENT products
  * (7" vs 11" dies, 5-cheese vs 7-cheese blends) and must never be treated as
  * near-duplicates of each other.
+ *
+ * Only standalone numeric tokens ("7", "11", "5", "2", "07") contribute —
+ * alphanumeric brand tokens like "4hands" or "2x" do NOT, so a brand name
+ * that happens to start with a digit cannot spuriously block a cross-brand
+ * "use existing" alias (e.g. "4hands Red Hot Chicken Mix" → "Lucia's Craft
+ * Red Hot Chicken Mix") via a false digit mismatch.
  */
 export function specNameDigitSignature(name: string): string {
   const key = specImportNameMatchKey(name);
@@ -2640,8 +2647,11 @@ export function specNameDigitSignature(name: string): string {
   return key
     .split(" ")
     .map((t) => SPEC_NUMBER_WORD_DIGITS[t] ?? t)
-    .join(" ")
-    .replace(/[^0-9]/g, "");
+    // Only count digits from purely-numeric tokens ("7", "11", "5").
+    // Alphanumeric tokens like "4hands" or "2x" carry brand/model digits
+    // that do not distinguish same-kind products and must not block aliases.
+    .filter((t) => /^[0-9]+$/.test(t))
+    .join("");
 }
 
 /** Alias kinds where a digit mismatch between external and canonical = poison. */

@@ -448,4 +448,34 @@ describe("alias builders (unit)", () => {
       sanitizeSpecAliases([{ kind: "dieType", externalName: '11"', canonicalName: '12"', context: null }]),
     ).toHaveLength(0);
   });
+
+  it("sanitizer digit guard: brand-name digit prefix (alphanumeric token) does NOT block a cross-brand appType alias", () => {
+    // "4hands" is an alphanumeric brand token; the "4" is not a product-distinguishing
+    // measurement and must NOT count as a digit in the signature.  A user who
+    // explicitly picks "Use existing: Lucia's Craft Red Hot Chicken Mix" for the
+    // "4hands Red Hot Chicken Mix" slot must have that alias survive the sanitizer.
+    const alias = {
+      kind: "appType" as const,
+      externalName: "4hands Red Hot Chicken Mix",
+      canonicalName: "Lucia's Craft Red Hot Chicken Mix",
+      context: null,
+    };
+    expect(sanitizeSpecAliases([alias])).toHaveLength(1);
+  });
+
+  it("sanitizer digit guard still blocks standalone measurement-digit mismatches in appType", () => {
+    // "5 Cheese" vs "7 Cheese" — standalone numeric tokens "5" and "7" differ;
+    // these are different products and must never alias.
+    expect(
+      sanitizeSpecAliases([
+        { kind: "appType", externalName: "Corner Booth 5 Cheese Mix", canonicalName: "Corner Booth 7 Cheese Mix", context: null },
+      ]),
+    ).toHaveLength(0);
+    // Same digit count — alias survives.
+    expect(
+      sanitizeSpecAliases([
+        { kind: "appType", externalName: "Corner Booth 5-Cheese Blend", canonicalName: "Corner Booth 5 Cheese Mix", context: null },
+      ]),
+    ).toHaveLength(1);
+  });
 });
