@@ -9490,15 +9490,18 @@ export default function Home() {
             doughTrays.set(name.toLowerCase(), r.doughballsPerTray!);
           }
           if (r.kind === "dough") {
+            const key = name.toLowerCase();
+            // Always register the family key so that table variants and
+            // customer assignments can be merged in even when the AI parse
+            // of a dough PROCEDURE didn't extract doughball weights (those
+            // live in the yield table, not the ingredient body).
+            if (!doughVariants.has(key)) doughVariants.set(key, []);
             const label = (r.variantLabel ?? r.name).trim();
             const v: DoughballVariant = { label };
             if ((r.doughballOz ?? 0) > 0) v.weightOz = r.doughballOz;
             if ((r.doughballsPerTray ?? 0) > 0) v.perTray = Math.round(r.doughballsPerTray!);
             if (label && (v.weightOz !== undefined || v.perTray !== undefined)) {
-              const key = name.toLowerCase();
-              const list = doughVariants.get(key) ?? [];
-              list.push(v);
-              doughVariants.set(key, list);
+              doughVariants.get(key)!.push(v);
             }
           }
         }
