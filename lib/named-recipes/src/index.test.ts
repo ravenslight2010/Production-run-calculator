@@ -970,10 +970,33 @@ describe("applyDoughCustomerAssignmentsToVariants", () => {
     expect(hp.customers?.some((c) => c.flavor === "BBQ Chicken" && c.brand === "Lucia's Craft")).toBe(false);
   });
 
-  it("returns the same array reference when nothing changes", () => {
-    const variants: DoughballVariant[] = [{ label: "SMD", weightOz: 7.6 }];
-    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments);
-    expect(result).toBe(variants);
+  it("assigns all base assignments to a generic (non-brand-named) single variant", () => {
+    // "Brand Dough" has one variant with a generic label — the whole pool has
+    // no brand names in labels, so every base assignment is a catch-all.
+    const variants: DoughballVariant[] = [{ label: "Brand Dough 14.2 oz", weightOz: 14.2 }];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments, variants);
+    const v = result[0];
+    expect(v.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
+    expect(v.customers).toContainEqual({ brand: "Hannaford", flavor: "BBQ Chicken" });
+    expect(v.customers).toContainEqual({ brand: "Costco", flavor: "" });
+    expect(v.customers).toContainEqual({ brand: "Lowe's", flavor: "Californian" });
+  });
+
+  it("does not apply generic-pool fallback when pool has branded base variants", () => {
+    // Pool has named brands → strict only, no cross-brand bleed via fallback.
+    const variants: DoughballVariant[] = [
+      { label: "Hannaford", weightOz: 7.6 },
+      { label: "Costco", weightOz: 9.6 },
+      { label: "Generic CRB", weightOz: 7.6 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments, variants);
+    // Generic CRB: pool IS branded (Hannaford, Costco found) → no fallback
+    expect(result.find((v) => v.label === "Generic CRB")!.customers).toBeUndefined();
+    // Hannaford: strict match
+    expect(result.find((v) => v.label === "Hannaford")!.customers).toContainEqual({
+      brand: "Hannaford",
+      flavor: "Five Cheese",
+    });
   });
 
   it("returns the same array reference when assignments is empty", () => {

@@ -664,18 +664,43 @@ function assignmentsForVariant(
   const vLabelLow = variantLabel.toLowerCase();
   const vQualKey = doughVariantQualifierKey(variantLabel);
 
+  // Pre-compute once: is the base-qualifier portion of the pool "branded"?
+  // A pool is branded when at least one base-qualifier variant's label contains
+  // a base assignment's brand (e.g. a "Hannaford" or "Costco" variant). When
+  // the pool is NOT branded — all base variants have generic labels like
+  // "Brand Dough 14.2 oz" — every base assignment should apply to every base
+  // variant (the generic catch-all fallback).
+  let basePoolIsBranded: boolean | undefined;
+  function checkBasePoolBranded(): boolean {
+    if (basePoolIsBranded !== undefined) return basePoolIsBranded;
+    const baseAssignmentBrands = assignments
+      .filter((a2) => a2.qualifierKey === "")
+      .map((a2) => a2.brand.toLowerCase());
+    basePoolIsBranded = allVariants.some((v) => {
+      if (doughVariantQualifierKey(v.label) !== "") return false;
+      const vl = v.label.toLowerCase();
+      return baseAssignmentBrands.some((b) => vl.includes(b));
+    });
+    return basePoolIsBranded;
+  }
+
   return assignments.filter((a) => {
     if (a.qualifierKey !== vQualKey) return false;
     const brandLow = a.brand.toLowerCase();
 
-    // Base variants: brand must appear verbatim in the label.
-    if (a.qualifierKey === "") return vLabelLow.includes(brandLow);
-
-    // Non-base: try strict brand+qualifier match first.
+    // Step 1: strict — brand name appears verbatim in the variant label.
     if (vLabelLow.includes(brandLow)) return true;
 
-    // Fallback: brand has no label with this qualifier in the full variant pool
-    // (shared variant — brand uses another brand's named variant).
+    if (a.qualifierKey === "") {
+      // Base-qualifier fallback: if the pool has NO branded base variant (all
+      // labels are generic, like "Brand Dough 14.2 oz"), treat every base
+      // variant as a catch-all and assign every base entry to it.
+      return !checkBasePoolBranded();
+    }
+
+    // Non-base fallback: brand has no label with this qualifier in the full
+    // variant pool (shared variant — brand uses another brand's named variant,
+    // e.g. "Lucia's Craft Ultra Thin" shares "Basha's Ultra Thin").
     const brandHasDedicated = allVariants.some(
       (v) =>
         doughVariantQualifierKey(v.label) === a.qualifierKey &&
