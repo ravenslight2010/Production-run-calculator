@@ -685,15 +685,14 @@ export function parseDoughVariantTable(rows: string[][]): DoughVariantTableEntry
 /**
  * Parse the customer-assignment section at the top of a dough mixing procedure
  * sheet. Each row has the form "{Brand [qualifier]}: {flavor1, flavor2, …}"
- * where "All" means any flavor of that brand. The section ends when numeric
- * data (the ingredient/weight table) begins. Pure — no side effects.
+ * where "All" means any flavor of that brand. Scans the entire sheet — the
+ * section may appear before OR after the ingredient/yield tables. Rows
+ * without a colon, with a numeric LHS, or containing "lbs"/"oz" in the LHS
+ * are skipped. Pure — no side effects.
  */
 export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssignment[] {
   const result: DoughCustomerAssignment[] = [];
   for (const row of rows) {
-    // Stop at the ingredient/weight table: any row with a numeric value beyond
-    // the first column signals the formula table has started.
-    if (row.slice(1).some((c) => c !== "" && !Number.isNaN(Number(c)))) break;
     const cell = (row[0] ?? "").trim();
     if (!cell) continue;
     // Skip obvious header tokens (LBS, OZ, Yield, etc.)

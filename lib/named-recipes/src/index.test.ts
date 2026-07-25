@@ -839,15 +839,39 @@ describe("parseDoughCustomerSection", () => {
     expect(result[0]).toMatchObject({ brand: "Basha's", qualifierKey: "ultra thin", flavors: [""] });
   });
 
-  it("stops parsing when a numeric column appears (ingredient table started)", () => {
+  it("skips numeric rows but does NOT stop — customer section may be below the formula table", () => {
     const rows: string[][] = [
       ["Hannaford CRB: Five Cheese"],
-      ["", "45.5", "22"],   // numeric in later columns → stop
-      ["SMD CRB: All"],     // must NOT be parsed
+      ["", "45.5", "22"],   // numeric in later columns — skipped (no colon in col 0)
+      ["SMD CRB: All"],     // MUST still be parsed (customer section is after formula)
     ];
     const result = parseDoughCustomerSection(rows);
-    expect(result).toHaveLength(1);
+    expect(result).toHaveLength(2);
     expect(result[0].brand).toBe("Hannaford");
+    expect(result[1].brand).toBe("SMD");
+  });
+
+  it("parses customer assignments that appear after the yield table (bottom of sheet)", () => {
+    const rows: string[][] = [
+      // yield table header row
+      ["", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      // yield table data rows (numeric in later columns — skipped by colon guard)
+      ["Hannaford, Lowe's, & SMD", "7.6", "0.48", "673.47", "24"],
+      ["Corner Booth", "8.25", "0.52", "620.41", "24"],
+      [""],
+      // customer assignments section below the yield table
+      ["Costco: All"],
+      ["Corner Booth: All"],
+      ["Lowe's CRB: Caribbean, Five Cheese"],
+      ["Lowe's CRB Heavier: Spinach Mushroom"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(4);
+    // Brand names: qualifiers and "CRB" stripped; base entries have qualifierKey ""
+    expect(result[0]).toMatchObject({ brand: "Costco", qualifierKey: "", flavors: [""] });
+    expect(result[1]).toMatchObject({ brand: "Corner Booth", qualifierKey: "", flavors: [""] });
+    expect(result[2]).toMatchObject({ brand: "Lowe's", qualifierKey: "", flavors: ["Caribbean", "Five Cheese"] });
+    expect(result[3]).toMatchObject({ brand: "Lowe's", qualifierKey: "heavier", flavors: ["Spinach Mushroom"] });
   });
 
   it("skips rows without a colon or with empty sides", () => {
