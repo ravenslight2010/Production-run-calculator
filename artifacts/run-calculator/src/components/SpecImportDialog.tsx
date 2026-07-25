@@ -1405,6 +1405,24 @@ function RecipeRow({
             <StatusBadge tombstoned={item.tombstoned} isNew={isNew} />
           </div>
 
+          {item.orig.variantLabel ? (
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                weight variant
+              </span>
+              <span className="truncate">
+                {item.orig.variantLabel}
+                {item.orig.doughballOz != null ? ` · ${item.orig.doughballOz} oz` : ""}
+              </span>
+            </div>
+          ) : item.kind === "dough" ? (
+            <div className="mt-1">
+              <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                recipe formula
+              </span>
+            </div>
+          ) : null}
+
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {!linked && (
               <input
