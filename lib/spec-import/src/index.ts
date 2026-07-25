@@ -1335,6 +1335,13 @@ export function linkSpecImportNamedRecipesToExisting(
      * report "Auto-linked N near-duplicate recipe names" in the import summary.
      */
     autoLinkedOut?: { count: number };
+    /**
+     * When `autoApplyNearExact` is true, each auto-applied rename is pushed
+     * here as `{ importedName, existingName }` so callers can persist learned
+     * aliases for those renames — making future re-imports of the same sheet
+     * auto-link without re-triggering the near-dup scan.
+     */
+    autoLinkedRenames?: Array<{ importedName: string; existingName: string }>;
   },
 ): ParsedSpecImport {
   const match = buildNearDupNameMatcherDetailed(existingNames, {
@@ -1402,6 +1409,9 @@ export function linkSpecImportNamedRecipesToExisting(
           // formula cases. This is as safe as the exact loose-key auto-rename.
           changed = true;
           if (opts.autoLinkedOut) opts.autoLinkedOut.count += 1;
+          if (opts.autoLinkedRenames) {
+            opts.autoLinkedRenames.push({ importedName: name, existingName: nearDupCand });
+          }
           if (kind === "dough" && !r.variantLabel) {
             return { ...r, name: nearDupCand, variantLabel: name };
           }

@@ -1737,8 +1737,10 @@ export async function commitSpecImport(
   const poolNamesByKind: { dough?: string[]; sauce?: string[] } = {};
   let fullRelinked = prepared.parsed;
   // Accumulate near-exact auto-links across both kinds so the caller can
-  // surface "Auto-linked N near-duplicate recipe names" in the import summary.
+  // surface "Auto-linked N near-duplicate recipe names" in the import summary,
+  // and so the renames can be learned as aliases for future re-imports.
   const autoLinkedOut = { count: 0 };
+  const autoLinkedRenames: Array<{ kind: "dough" | "sauce"; importedName: string; existingName: string }> = [];
   for (const kind of ["dough", "sauce"] as const) {
     try {
       const livePool = await fetchNamedRecipes(kind);
@@ -1750,6 +1752,7 @@ export async function commitSpecImport(
         doughballVariants: r.doughballVariants,
       }));
       poolNamesByKind[kind] = livePool.map((r) => r.name);
+      const kindRenames: Array<{ importedName: string; existingName: string }> = [];
       fullRelinked = linkSpecImportNamedRecipesToExisting(
         fullRelinked,
         kind,
@@ -1763,6 +1766,7 @@ export async function commitSpecImport(
               })),
               autoApplyNearExact: true,
               autoLinkedOut,
+              autoLinkedRenames: kindRenames,
             }
           : {
               existingRecipes: livePools[kind]!.map((r) => ({
@@ -1771,11 +1775,27 @@ export async function commitSpecImport(
               })),
               autoApplyNearExact: true,
               autoLinkedOut,
+              autoLinkedRenames: kindRenames,
             },
       );
+      for (const r of kindRenames) autoLinkedRenames.push({ kind, ...r });
     } catch {
       // Best-effort (offline) — prepare's link result stands.
     }
+  }
+
+  // Learn the auto-applied near-exact renames as recipeName aliases so future
+  // re-imports of the same sheet auto-link without re-triggering the near-dup
+  // scan. Context is the recipe kind ("dough" / "sauce") to scope the alias
+  // within its pool — the same convention as dough/sauce "use existing" picks.
+  if (autoLinkedRenames.length) {
+    const learnedRenameAliases: SpecImportAlias[] = autoLinkedRenames.map(({ kind, importedName, existingName }) => ({
+      kind: "recipeName" as SpecAliasKind,
+      externalName: importedName,
+      canonicalName: existingName,
+      context: kind,
+    }));
+    prepared.newAliases = [...prepared.newAliases, ...learnedRenameAliases];
   }
 
   // Re-import prune: compare against the snapshot(s) saved by PREVIOUS imports
