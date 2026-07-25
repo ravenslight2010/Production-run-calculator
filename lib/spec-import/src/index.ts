@@ -1401,8 +1401,8 @@ export function linkSpecImportNamedRecipesToExisting(
       const formulaOk = (cand: string) =>
         !specImportDoughFormulasConflict(r.rows, poolRowsByKey.get(specImportNameMatchKey(cand)));
 
-      if (nearDupCand && nearDupCand !== name && formulaOk(nearDupCand)) {
-        if (opts?.autoApplyNearExact) {
+      if (nearDupCand && nearDupCand !== name) {
+        if (formulaOk(nearDupCand) && opts?.autoApplyNearExact) {
           // Auto-apply at commit time: the same ambiguity + digit + length
           // guards that protected the near-dup matcher already ran, and the
           // formula-conflict guard above rules out same-family-name, different-
@@ -1417,16 +1417,19 @@ export function linkSpecImportNamedRecipesToExisting(
           }
           return { ...r, name: nearDupCand };
         }
-        // Without autoApplyNearExact: surface as a declinable review suggestion.
+        // Surface as a declinable review suggestion in all remaining cases:
+        // (a) autoApplyNearExact is false/absent — normal review-dialog path,
+        // (b) formula conflict — the imported rows differ from the pool recipe
+        //     so the manager must decide whether to merge, keep both, or ignore.
+        //     Formula-conflict cases are NOT counted toward the auto-link toast.
         pushSuggestion(name, nearDupCand);
         return r;
       }
 
       // Family folds (distinctive-token set match, more speculative than a
       // character-level near-dup): always go to suggestions, never auto-apply.
-      const familyCand = nearDupCand
-        ? null
-        : findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
+      // Only evaluated when no near-dup candidate was found above.
+      const familyCand = findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
       if (familyCand && familyCand !== name && formulaOk(familyCand)) {
         pushSuggestion(name, familyCand);
       }

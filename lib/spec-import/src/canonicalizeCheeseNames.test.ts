@@ -564,6 +564,40 @@ describe("linkSpecImportNamedRecipesToExisting", () => {
       expect(out.count).toBe(0);
     });
 
+    it("pushes a SUGGESTION (not an auto-link) when the formula conflicts with autoApplyNearExact: true", () => {
+      // "Mystic Pizza Sause" is a near-dup (single typo) of "Mystic Pizza Sauce",
+      // but the imported recipe uses Cream while the pool has Tomato — formula conflict.
+      // The manager must decide; the review dialog must surface it.
+      const parsed: ParsedSpecImport = {
+        profiles: [],
+        recipes: [
+          {
+            kind: "sauce",
+            name: "Mystic Pizza Sause",
+            rows: [{ ingredient: "Cream", lbs: 10 }],
+          },
+        ],
+      };
+      const suggestions: SpecImportLinkSuggestion[] = [];
+      const out = { count: 0 };
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: out,
+        suggestions,
+        existingRecipes: [{ name: "Mystic Pizza Sauce", rows: [{ ingredient: "Tomato" }] }],
+      });
+      // Recipe name is NOT auto-renamed.
+      expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sause"]);
+      // Auto-link counter is NOT incremented.
+      expect(out.count).toBe(0);
+      // A suggestion IS pushed so the review dialog can surface it.
+      expect(suggestions).toContainEqual({
+        kind: "sauce",
+        importedName: "Mystic Pizza Sause",
+        existingName: "Mystic Pizza Sauce",
+      });
+    });
+
     it("profile sauceName/doughName follows the auto-applied rename", () => {
       const parsed: ParsedSpecImport = {
         profiles: [
