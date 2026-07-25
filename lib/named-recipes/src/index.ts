@@ -700,7 +700,16 @@ export function parseDoughVariantTable(rows: string[][]): DoughVariantTableEntry
 export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssignment[] {
   const result: DoughCustomerAssignment[] = [];
   for (const row of rows) {
-    const cell = (row[0] ?? "").trim();
+    // Scan across all columns for the first cell that contains a colon —
+    // the customer-assignment section may live in column 0, an indented
+    // column, or in a right-hand column alongside the yield table, depending
+    // on the workbook revision. Non-customer cells (OZ, LBS, numbers, etc.)
+    // are filtered out by the guards below.
+    let cell = "";
+    for (const c of row) {
+      const candidate = (c == null ? "" : String(c)).trim();
+      if (candidate && candidate.includes(":")) { cell = candidate; break; }
+    }
     if (!cell) continue;
     // Skip obvious header tokens (LBS, OZ, Yield, etc.)
     if (/^\s*(?:lbs?|oz|yield|per\s+tray)\s*$/i.test(cell)) continue;
