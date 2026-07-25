@@ -108,7 +108,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { fetchNamedRecipes, saveNamedRecipes, addNamedRecipesToServerIfAbsent } from "./namedRecipes";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
-import { namedRecipeFromDraft, type NamedRecipe as PoolNamedRecipe } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, parseDoughCustomerSection, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, fillSpecMixTags, type Mix } from "@workspace/mixes";
 import {
@@ -174,6 +174,16 @@ export type SpecImportPrepared = {
    */
   profilesRemovedFromWorkbook?: Array<{brand: string; flavor: string}>;
   note?: string;
+  /**
+   * Customer assignments parsed deterministically from dough mixing procedure
+   * sheet header rows (format: "{Brand [qualifier]}: {flavor, …}"). Populated
+   * on fresh parses of workbooks that contain such a section; omitted for
+   * sauce/spec-only imports. Applied at commit time to populate `customers` on
+   * doughball variants so matchDoughballVariant can auto-pick the right weight
+   * from brand+flavor alone (e.g. "Lucia's Craft BBQ Chicken → Basha's Ultra
+   * Thin variant"), without needing a die-type entry on the profile.
+   */
+  doughCustomerAssignments?: DoughCustomerAssignment[];
 };
 
 /**
@@ -1382,6 +1392,37 @@ export async function computeProfilesRemovedFromWorkbook(
 }
 
 /**
+ * Collect dough customer assignments from a set of sheet grids. Multiple
+ * sheets (or multiple files in a multi-file import) are merged: duplicate
+ * brand+qualifier entries have their flavor lists unioned. Mutates in place for
+ * efficiency; the caller owns the returned array.
+ */
+function parseDoughCustomerAssignmentsFromGrids(
+  grids: SheetGrid[],
+): DoughCustomerAssignment[] {
+  const all: DoughCustomerAssignment[] = [];
+  for (const grid of grids) {
+    for (const a of parseDoughCustomerSection(grid.rows)) {
+      const dup = all.find(
+        (e) =>
+          e.brand.toLowerCase() === a.brand.toLowerCase() &&
+          e.qualifierKey === a.qualifierKey,
+      );
+      if (dup) {
+        for (const f of a.flavors) {
+          if (!dup.flavors.some((ef) => ef.toLowerCase() === f.toLowerCase())) {
+            dup.flavors.push(f);
+          }
+        }
+      } else {
+        all.push({ ...a, flavors: [...a.flavors] });
+      }
+    }
+  }
+  return all;
+}
+
+/**
  * Full read → AI → canonicalize → summarize step. Throws on a hard failure
  * (e.g. unreadable workbook, AI unavailable/forbidden) so the UI can show why.
  */
@@ -1400,6 +1441,12 @@ export async function prepareSpecImport(
   }
 
   const grids = await readWorkbookGrids(data);
+  // Deterministic: parse the customer-assignment section from the raw grid
+  // BEFORE the AI call so it's available even if the AI parse is cached or
+  // produces no dough recipes. The raw section format is rigid enough that it
+  // never needs AI. Done outside the reuse path so a cached AI parse still
+  // gets fresh assignments on every import.
+  const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows } =
     await parseWorkbookCore(grids, known, aliases);
 
@@ -1472,6 +1519,7 @@ export async function prepareSpecImport(
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
+    ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
   };
 }
 
@@ -1513,6 +1561,10 @@ export async function prepareSpecImportMulti(
   let totalDropped = 0;
   const allTruncated: TruncatedCell[] = [];
   const allOverflow: OverflowColumnRow[] = [];
+  // Collected deterministic customer assignments from every file's header
+  // section (merged across files — a multi-workbook dough import may split
+  // the assignment list across sheets).
+  const allCustomerAssignments: DoughCustomerAssignment[] = [];
 
   for (let i = 0; i < buffers.length; i++) {
     // Name each file so a failure can say WHICH file was skipped (fall back to a
@@ -1524,6 +1576,24 @@ export async function prepareSpecImportMulti(
       // tab long enough for the browser to kill the page mid-import.
       await new Promise((r) => setTimeout(r, 0));
       const grids = await readWorkbookGrids(buffers[i]);
+      // Deterministic customer-section parse — must happen BEFORE the buffer is
+      // freed in the finally block below.
+      for (const a of parseDoughCustomerAssignmentsFromGrids(grids)) {
+        const dup = allCustomerAssignments.find(
+          (e) =>
+            e.brand.toLowerCase() === a.brand.toLowerCase() &&
+            e.qualifierKey === a.qualifierKey,
+        );
+        if (dup) {
+          for (const f of a.flavors) {
+            if (!dup.flavors.some((ef) => ef.toLowerCase() === f.toLowerCase())) {
+              dup.flavors.push(f);
+            }
+          }
+        } else {
+          allCustomerAssignments.push(a);
+        }
+      }
       const core = await parseWorkbookCore(grids, known, aliases);
       parsedList.push(core.parsed);
       parsedLabels.push(label);
@@ -1661,6 +1731,7 @@ export async function prepareSpecImportMulti(
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
+    ...(allCustomerAssignments.length > 0 ? { doughCustomerAssignments: allCustomerAssignments } : {}),
   };
 }
 

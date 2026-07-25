@@ -17,7 +17,10 @@ import {
   collapseDoughballVariantSuffixDuplicates,
   mergeNamedRecipeDoughballVariants,
   matchDoughballVariant,
+  parseDoughCustomerSection,
+  applyDoughCustomerAssignmentsToVariants,
   type DoughballVariant,
+  type DoughCustomerAssignment,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "./index";
@@ -782,5 +785,218 @@ describe("matchDoughballVariant", () => {
     expect(
       matchDoughballVariant(vs, { dieType: "", brand: "Other Brand", flavor: "BBQ" }),
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseDoughCustomerSection
+// ---------------------------------------------------------------------------
+
+describe("parseDoughCustomerSection", () => {
+  it("parses base-variant (no qualifier keyword) entries", () => {
+    const rows: string[][] = [
+      ["Hannaford CRB: Five Cheese, BBQ Chicken"],
+      ["Costco: All"],
+      ["SMD CRB: All"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toMatchObject({ brand: "Hannaford", qualifierKey: "" });
+    expect(result[0].flavors).toEqual(["Five Cheese", "BBQ Chicken"]);
+    expect(result[1]).toMatchObject({ brand: "Costco", qualifierKey: "", flavors: [""] });
+    expect(result[2]).toMatchObject({ brand: "SMD", qualifierKey: "", flavors: [""] });
+  });
+
+  it("parses qualified entries with the correct qualifier key", () => {
+    const rows: string[][] = [
+      ["Lucia's Craft CRB Ultra Thin: Sweet Chili Garden, Backyard BBQ Chicken"],
+      ["Lucia's Craft CRB Heavy Plus: Four Cheese Meltdown"],
+      ["Hannaford CRB Heavy Plus: Spicy 4 Cheese, Spinach Goat Cheese"],
+      ["Lowe's CRB Heavier: Spinach Mushroom"],
+      ["Hannaford CRB Thick: Chicken Bacon Club"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result[0]).toMatchObject({ brand: "Lucia's Craft", qualifierKey: "ultra thin" });
+    expect(result[0].flavors).toEqual(["Sweet Chili Garden", "Backyard BBQ Chicken"]);
+    expect(result[1]).toMatchObject({ brand: "Lucia's Craft", qualifierKey: "heavy plus", flavors: ["Four Cheese Meltdown"] });
+    expect(result[2]).toMatchObject({ brand: "Hannaford", qualifierKey: "heavy plus" });
+    expect(result[3]).toMatchObject({ brand: "Lowe's", qualifierKey: "heavier", flavors: ["Spinach Mushroom"] });
+    expect(result[4]).toMatchObject({ brand: "Hannaford", qualifierKey: "thick", flavors: ["Chicken Bacon Club"] });
+  });
+
+  it("treats 'All' as a catch-all empty string flavor", () => {
+    const rows: string[][] = [["Corner Booth: All"]];
+    const result = parseDoughCustomerSection(rows);
+    expect(result[0].flavors).toEqual([""]);
+  });
+
+  it("strips 'CRB' and qualifier from the brand name", () => {
+    // "Basha's Ultra Thin" → brand "Basha's", qualifierKey "ultra thin"
+    const rows: string[][] = [["Basha's Ultra Thin: All"]];
+    const result = parseDoughCustomerSection(rows);
+    expect(result[0]).toMatchObject({ brand: "Basha's", qualifierKey: "ultra thin", flavors: [""] });
+  });
+
+  it("stops parsing when a numeric column appears (ingredient table started)", () => {
+    const rows: string[][] = [
+      ["Hannaford CRB: Five Cheese"],
+      ["", "45.5", "22"],   // numeric in later columns → stop
+      ["SMD CRB: All"],     // must NOT be parsed
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0].brand).toBe("Hannaford");
+  });
+
+  it("skips rows without a colon or with empty sides", () => {
+    const rows: string[][] = [
+      ["Dough Mixing Procedure"],
+      [""],
+      [": All"],
+      ["Hannaford CRB: "],
+      ["Lowe's CRB: All"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0].brand).toBe("Lowe's");
+  });
+
+  it("skips rows whose LHS starts with a digit or contains lbs/oz", () => {
+    const rows: string[][] = [
+      ["100% Bread Flour: stuff"],   // starts with digit
+      ["Flour LBS: 45"],             // contains lbs
+      ["Hannaford CRB: All"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0].brand).toBe("Hannaford");
+  });
+
+  it("returns empty for an all-numeric workbook with no customer section", () => {
+    const rows: string[][] = [
+      ["", "50", "30"],
+      ["Flour", "100", "60"],
+    ];
+    expect(parseDoughCustomerSection(rows)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyDoughCustomerAssignmentsToVariants
+// ---------------------------------------------------------------------------
+
+describe("applyDoughCustomerAssignmentsToVariants", () => {
+  const assignments: DoughCustomerAssignment[] = [
+    { brand: "Hannaford", qualifierKey: "", flavors: ["Five Cheese", "BBQ Chicken"] },
+    { brand: "Costco", qualifierKey: "", flavors: [""] },
+    { brand: "Lowe's", qualifierKey: "", flavors: ["Californian"] },
+    { brand: "Lucia's Craft", qualifierKey: "ultra thin", flavors: ["Sweet Chili", "BBQ Chicken"] },
+    { brand: "Basha's", qualifierKey: "ultra thin", flavors: [""] },
+    { brand: "Lucia's Craft", qualifierKey: "heavy plus", flavors: ["Four Cheese Meltdown"] },
+    { brand: "Hannaford", qualifierKey: "heavy plus", flavors: ["Spicy 4 Cheese"] },
+    { brand: "Lowe's", qualifierKey: "heavier", flavors: ["Spinach Mushroom"] },
+  ];
+
+  it("populates customers on base variants by brand-name inclusion", () => {
+    const variants: DoughballVariant[] = [
+      { label: "Hannaford", weightOz: 7.6 },
+      { label: "Costco", weightOz: 9.6 },
+      { label: "SMD", weightOz: 7.6 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments);
+    const h = result.find((v) => v.label === "Hannaford")!;
+    expect(h.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
+    expect(h.customers).toContainEqual({ brand: "Hannaford", flavor: "BBQ Chicken" });
+    const c = result.find((v) => v.label === "Costco")!;
+    expect(c.customers).toContainEqual({ brand: "Costco", flavor: "" });
+    // SMD has no matching assignment → unchanged
+    expect(result.find((v) => v.label === "SMD")!.customers).toBeUndefined();
+  });
+
+  it("does not assign base customers to a qualified variant of the same brand", () => {
+    const variants: DoughballVariant[] = [
+      { label: "Lowe's", weightOz: 7.6 },
+      { label: "Lowe's CRB Heavier", weightOz: 8.5 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments);
+    const base = result.find((v) => v.label === "Lowe's")!;
+    expect(base.customers?.some((c) => c.flavor === "Californian")).toBe(true);
+    expect(base.customers?.some((c) => c.flavor === "Spinach Mushroom")).toBe(false);
+    const heavier = result.find((v) => v.label === "Lowe's CRB Heavier")!;
+    expect(heavier.customers).toContainEqual({ brand: "Lowe's", flavor: "Spinach Mushroom" });
+    expect(heavier.customers?.some((c) => c.flavor === "Californian")).toBe(false);
+  });
+
+  it("applies qualified assignments strictly when brand has a dedicated variant label", () => {
+    const variants: DoughballVariant[] = [
+      { label: "Hannaford CRB Heavy Plus", weightOz: 12 },
+      { label: "Lucia's Craft CRB Heavy Plus", weightOz: 12 },
+      { label: "Lowe's CRB Heavy Plus", weightOz: 12 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments, variants);
+    const h = result.find((v) => v.label === "Hannaford CRB Heavy Plus")!;
+    expect(h.customers).toContainEqual({ brand: "Hannaford", flavor: "Spicy 4 Cheese" });
+    expect(h.customers?.some((c) => c.brand === "Lucia's Craft")).toBe(false);
+    const l = result.find((v) => v.label === "Lucia's Craft CRB Heavy Plus")!;
+    expect(l.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" });
+    expect(l.customers?.some((c) => c.brand === "Hannaford")).toBe(false);
+    // Lowe's has no heavy-plus assignment → no customers
+    expect(result.find((v) => v.label === "Lowe's CRB Heavy Plus")!.customers).toBeUndefined();
+  });
+
+  it("uses shared-variant fallback when brand has no dedicated label for the qualifier", () => {
+    // Only "Basha's Ultra Thin" exists — Lucia's Craft has no dedicated ultra-thin
+    // variant, so both Lucia's and Basha's assignments should land here.
+    const variants: DoughballVariant[] = [
+      { label: "Basha's Ultra Thin", weightOz: 7.8 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments, variants);
+    const ut = result[0];
+    expect(ut.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "Sweet Chili" });
+    expect(ut.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "BBQ Chicken" });
+    expect(ut.customers).toContainEqual({ brand: "Basha's", flavor: "" });
+  });
+
+  it("does NOT bleed ultra-thin fallback onto a heavy-plus variant", () => {
+    const variants: DoughballVariant[] = [
+      { label: "Basha's Ultra Thin", weightOz: 7.8 },
+      { label: "Lucia's Craft CRB Heavy Plus", weightOz: 12 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments, variants);
+    const hp = result.find((v) => v.label === "Lucia's Craft CRB Heavy Plus")!;
+    // Only Four Cheese Meltdown (heavy-plus assignment) on heavy-plus
+    expect(hp.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" });
+    expect(hp.customers?.some((c) => c.flavor === "Sweet Chili")).toBe(false);
+    expect(hp.customers?.some((c) => c.flavor === "BBQ Chicken" && c.brand === "Lucia's Craft")).toBe(false);
+  });
+
+  it("returns the same array reference when nothing changes", () => {
+    const variants: DoughballVariant[] = [{ label: "SMD", weightOz: 7.6 }];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments);
+    expect(result).toBe(variants);
+  });
+
+  it("returns the same array reference when assignments is empty", () => {
+    const variants: DoughballVariant[] = [{ label: "Hannaford", weightOz: 7.6 }];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, []);
+    expect(result).toBe(variants);
+  });
+
+  it("does not duplicate customers already present", () => {
+    const variants: DoughballVariant[] = [
+      {
+        label: "Hannaford",
+        weightOz: 7.6,
+        customers: [{ brand: "Hannaford", flavor: "Five Cheese" }],
+      },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments);
+    const h = result[0];
+    const count = h.customers!.filter(
+      (c) => c.brand === "Hannaford" && c.flavor === "Five Cheese",
+    ).length;
+    expect(count).toBe(1);
+    // BBQ Chicken was new → also added
+    expect(h.customers).toContainEqual({ brand: "Hannaford", flavor: "BBQ Chicken" });
   });
 });

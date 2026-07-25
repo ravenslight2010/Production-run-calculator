@@ -543,6 +543,178 @@ export function matchDoughballVariant(
   return hits.length === 1 ? hits[0] : null;
 }
 
+// ---------------------------------------------------------------------------
+// Customer-section parsing for dough mixing procedure sheets
+// ---------------------------------------------------------------------------
+
+/**
+ * Qualifier keywords in priority order: more-specific before more-general so
+ * "heavy plus" never incorrectly matches as plain "heavy".
+ */
+const DOUGH_VARIANT_QUALIFIERS = [
+  "ultra thin",
+  "heavy plus",
+  "heavier",
+  "heavy",
+  "thick",
+  "light",
+] as const;
+
+/**
+ * Normalize a label (variant label OR customer-section LHS) to the canonical
+ * qualifier key that identifies its variant tier. Returns "" for base variants
+ * (no qualifier keyword present).
+ */
+function doughVariantQualifierKey(label: string): string {
+  const norm = label
+    .toLowerCase()
+    .replace(/\bcrb\b/g, " ")
+    .replace(/[^a-z\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  for (const q of DOUGH_VARIANT_QUALIFIERS) {
+    if (norm.includes(q)) return q;
+  }
+  return "";
+}
+
+/** Strip qualifier keywords and "crb" from a label to extract the bare brand name. */
+function doughVariantStripQualifier(lhs: string): string {
+  let s = lhs.replace(/\bcrb\b/gi, " ");
+  for (const q of DOUGH_VARIANT_QUALIFIERS) {
+    const re = new RegExp(`\\b${q.replace(/\s+/g, "\\s+")}\\b`, "gi");
+    s = s.replace(re, " ");
+  }
+  // Strip 7" / 7'' / 7-inch size indicators
+  s = s.replace(/\b7\s*["""'']{0,2}(?:\s*inch)?\b/gi, " ");
+  return s.replace(/\s+/g, " ").replace(/[,.:;]+$/, "").trim();
+}
+
+/** A parsed brand→flavor entry from a dough mixing procedure sheet header. */
+export interface DoughCustomerAssignment {
+  /** Brand name with qualifier keywords stripped (e.g. "Lucia's Craft"). */
+  brand: string;
+  /**
+   * Canonical qualifier key for variant matching. One of the
+   * DOUGH_VARIANT_QUALIFIERS values, or "" for base (no-qualifier) variants.
+   */
+  qualifierKey: string;
+  /**
+   * Specific product flavors of this brand that use the variant. An empty
+   * string means "all flavors" (parsed from the workbook's "All" entry).
+   */
+  flavors: string[];
+}
+
+/**
+ * Parse the customer-assignment section at the top of a dough mixing procedure
+ * sheet. Each row has the form "{Brand [qualifier]}: {flavor1, flavor2, …}"
+ * where "All" means any flavor of that brand. The section ends when numeric
+ * data (the ingredient/weight table) begins. Pure — no side effects.
+ */
+export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssignment[] {
+  const result: DoughCustomerAssignment[] = [];
+  for (const row of rows) {
+    // Stop at the ingredient/weight table: any row with a numeric value beyond
+    // the first column signals the formula table has started.
+    if (row.slice(1).some((c) => c !== "" && !Number.isNaN(Number(c)))) break;
+    const cell = (row[0] ?? "").trim();
+    if (!cell) continue;
+    // Skip obvious header tokens (LBS, OZ, Yield, etc.)
+    if (/^\s*(?:lbs?|oz|yield|per\s+tray)\s*$/i.test(cell)) continue;
+    const colonIdx = cell.indexOf(":");
+    if (colonIdx <= 0 || colonIdx >= cell.length - 1) continue;
+    const lhs = cell.slice(0, colonIdx).trim();
+    const rhs = cell.slice(colonIdx + 1).trim();
+    if (!lhs || !rhs) continue;
+    // Skip rows whose LHS starts with a number (formula rows, not customers)
+    // or contains ingredient-table keywords.
+    if (/^\d/.test(lhs) || /\blbs?\b|\boz\b/i.test(lhs)) continue;
+    // Parse flavors (comma-separated; "All" → catch-all = empty string)
+    const flavors = rhs
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean)
+      .map((f) => (f.toLowerCase() === "all" ? "" : f));
+    if (flavors.length === 0) continue;
+    const qualifierKey = doughVariantQualifierKey(lhs);
+    const brand = doughVariantStripQualifier(lhs);
+    if (!brand) continue;
+    result.push({ brand, qualifierKey, flavors });
+  }
+  return result;
+}
+
+/**
+ * Find which parsed customer assignments apply to a given variant label, given
+ * the full pool of all variants for this recipe family.
+ *
+ * Matching rules (qualifier must agree, then brand):
+ * 1. Base-qualifier (key=""): brand name must appear in the variant label.
+ * 2. Non-base qualifier — strict: brand name appears in the variant label.
+ * 3. Non-base qualifier — fallback: brand has NO dedicated variant for this
+ *    qualifier in the pool (e.g. "Lucia's Craft Ultra Thin" shares "Basha's
+ *    Ultra Thin" because there's no "Lucia's Craft" ultra-thin variant label).
+ */
+function assignmentsForVariant(
+  variantLabel: string,
+  assignments: DoughCustomerAssignment[],
+  allVariants: ReadonlyArray<DoughballVariant>,
+): DoughCustomerAssignment[] {
+  const vLabelLow = variantLabel.toLowerCase();
+  const vQualKey = doughVariantQualifierKey(variantLabel);
+
+  return assignments.filter((a) => {
+    if (a.qualifierKey !== vQualKey) return false;
+    const brandLow = a.brand.toLowerCase();
+
+    // Base variants: brand must appear verbatim in the label.
+    if (a.qualifierKey === "") return vLabelLow.includes(brandLow);
+
+    // Non-base: try strict brand+qualifier match first.
+    if (vLabelLow.includes(brandLow)) return true;
+
+    // Fallback: brand has no label with this qualifier in the full variant pool
+    // (shared variant — brand uses another brand's named variant).
+    const brandHasDedicated = allVariants.some(
+      (v) =>
+        doughVariantQualifierKey(v.label) === a.qualifierKey &&
+        v.label.toLowerCase().includes(brandLow),
+    );
+    return !brandHasDedicated;
+  });
+}
+
+/**
+ * Apply parsed customer assignments to a doughball variant list, returning a
+ * new list with `customers` populated where assignments match. Pure.
+ *
+ * Pass `allVariants` when the full set of variants for the recipe family is
+ * known — it enables the shared-variant fallback (rule 3 above). Omit to skip
+ * that fallback (safe when every variant has a brand-specific label entry).
+ */
+export function applyDoughCustomerAssignmentsToVariants(
+  variants: DoughballVariant[],
+  assignments: DoughCustomerAssignment[],
+  allVariants?: ReadonlyArray<DoughballVariant>,
+): DoughballVariant[] {
+  if (assignments.length === 0) return variants;
+  const pool = allVariants ?? variants;
+  let changed = false;
+  const result = variants.map((variant) => {
+    const matching = assignmentsForVariant(variant.label, assignments, pool);
+    if (matching.length === 0) return variant;
+    const newCustomers = matching.flatMap((a) =>
+      a.flavors.map((f) => ({ brand: a.brand, flavor: f })),
+    );
+    const united = unionVariantCustomers(variant.customers, newCustomers);
+    if (!united) return variant;
+    changed = true;
+    return { ...variant, customers: united };
+  });
+  return changed ? result : variants;
+}
+
 // Loose ingredient-name key for lining up component rows in a merge backfill:
 // lowercase, split on non-alphanumerics, tokens sorted then joined (word
 // reorder like "Pepperoni, Diced" vs "Diced Pepperoni" folds).

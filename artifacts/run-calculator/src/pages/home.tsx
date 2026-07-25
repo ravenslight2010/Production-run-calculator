@@ -474,7 +474,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
 import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
 
 import {
@@ -9495,6 +9495,23 @@ export default function Home() {
               ...variant,
               customers: [...existingCustomers, { brand: tBrand, flavor: tFlavor }],
             };
+          }
+        }
+        // Apply deterministic customer assignments parsed from the dough
+        // procedure sheet header (rows before the ingredient table). These
+        // carry explicit brand+qualifier→flavor mappings that the AI
+        // weight-table parse doesn't capture (e.g. "Lucia's Craft BBQ Chicken
+        // → Basha's Ultra Thin variant"), enabling matchDoughballVariant to
+        // auto-select the correct weight from brand+flavor alone — no die-type
+        // entry needed on the profile.
+        if (specImportPrepared?.doughCustomerAssignments?.length) {
+          for (const [recipeName, variants] of doughVariants) {
+            const enriched = applyDoughCustomerAssignmentsToVariants(
+              variants,
+              specImportPrepared.doughCustomerAssignments,
+              variants,
+            );
+            if (enriched !== variants) doughVariants.set(recipeName, enriched);
           }
         }
         void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
