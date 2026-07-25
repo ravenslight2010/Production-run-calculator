@@ -664,7 +664,14 @@ export function parseDoughVariantTable(rows: string[][]): DoughVariantTableEntry
     }
     blankStreak = 0;
 
-    const label = (row[labelCol] ?? "").trim();
+    // Scan leftward from labelCol: some workbooks place the label one column
+    // further left than expected (e.g. label in col 0 with a blank col 1 gap
+    // when ozCol=2), while others indent it one column to the right of col 0.
+    let label = "";
+    for (let lc = labelCol; lc >= 0; lc--) {
+      const candidate = (row[lc] ?? "").trim();
+      if (candidate) { label = candidate; break; }
+    }
     if (!label) continue;
 
     const oz = parseFloat((row[ozCol] ?? "").trim());

@@ -985,6 +985,28 @@ describe("parseDoughVariantTable", () => {
     expect(() => parseDoughVariantTable(rows)).not.toThrow();
   });
 
+  it("finds labels two columns left of OZ (CRB-style two-column gap)", () => {
+    // In CRB Dough the layout is: label in col 0, blank col 1, OZ in col 2.
+    // Some rows are indented (label in col 1), so labelCol = ozCol-1 = 1.
+    // Rows with label in col 0 must still be found via the leftward scan.
+    const rows: string[][] = [
+      // header: OZ in col 2
+      ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      // col-0 label with blank gap (Costco/Four-Hands style)
+      ["Costco", "", "9.6", "0.6", "533.17", "20"],
+      ["Hannaford CRB", "", "7.6", "0.48", "673.47", "24"],
+      ["Four Hands CRB Heavy", "", "8.7", "0.54", "588.32", "24"],
+      // indented label in col 1 (Lowe's CRB Heavier style)
+      ["", "Lowe's CRB Heavier", "13", "0.81", "393.72", "16"],
+    ];
+    const result = parseDoughVariantTable(rows);
+    expect(result).toHaveLength(4);
+    expect(result[0]).toMatchObject({ label: "Costco", weightOz: 9.6, perTray: 20 });
+    expect(result[1]).toMatchObject({ label: "Hannaford CRB", weightOz: 7.6, perTray: 24 });
+    expect(result[2]).toMatchObject({ label: "Four Hands CRB Heavy", weightOz: 8.7, perTray: 24 });
+    expect(result[3]).toMatchObject({ label: "Lowe's CRB Heavier", weightOz: 13, perTray: 16 });
+  });
+
   it("omits perTray when the tray cell is missing or non-numeric", () => {
     const rows: string[][] = [
       ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
