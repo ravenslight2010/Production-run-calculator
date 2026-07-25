@@ -449,11 +449,12 @@ describe("alias builders (unit)", () => {
     ).toHaveLength(0);
   });
 
-  it("sanitizer digit guard: brand-name digit prefix (alphanumeric token) does NOT block a cross-brand appType alias", () => {
-    // "4hands" is an alphanumeric brand token; the "4" is not a product-distinguishing
-    // measurement and must NOT count as a digit in the signature.  A user who
-    // explicitly picks "Use existing: Lucia's Craft Red Hot Chicken Mix" for the
-    // "4hands Red Hot Chicken Mix" slot must have that alias survive the sanitizer.
+  it("sanitizer digit guard: one-sided digit (brand prefix like '4hands') does NOT block a cross-brand appType alias", () => {
+    // "4hands" contains the digit "4" (extracted from the alphanumeric token),
+    // but "Lucia's Craft Red Hot Chicken Mix" has no digits — the guard only fires
+    // when BOTH sides carry digits and they differ.  A single-sided digit is a
+    // brand-name element, not a product-distinguishing measurement, so the alias
+    // from an explicit "use existing" pick must survive.
     const alias = {
       kind: "appType" as const,
       externalName: "4hands Red Hot Chicken Mix",
@@ -463,15 +464,15 @@ describe("alias builders (unit)", () => {
     expect(sanitizeSpecAliases([alias])).toHaveLength(1);
   });
 
-  it("sanitizer digit guard still blocks standalone measurement-digit mismatches in appType", () => {
-    // "5 Cheese" vs "7 Cheese" — standalone numeric tokens "5" and "7" differ;
+  it("sanitizer digit guard still blocks both-sided measurement-digit mismatches in appType", () => {
+    // "5 Cheese" vs "7 Cheese" — both sides have digits ("5" vs "7"), they differ:
     // these are different products and must never alias.
     expect(
       sanitizeSpecAliases([
         { kind: "appType", externalName: "Corner Booth 5 Cheese Mix", canonicalName: "Corner Booth 7 Cheese Mix", context: null },
       ]),
     ).toHaveLength(0);
-    // Same digit count — alias survives.
+    // Same digit count on both sides — alias survives.
     expect(
       sanitizeSpecAliases([
         { kind: "appType", externalName: "Corner Booth 5-Cheese Blend", canonicalName: "Corner Booth 5 Cheese Mix", context: null },

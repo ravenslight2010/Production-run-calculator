@@ -2629,17 +2629,10 @@ const SPEC_NUMBER_WORD_DIGITS: Record<string, string> = {
 
 /**
  * Digit signature of a name: every digit character, in order, from the loose
- * match key's PURELY-NUMERIC tokens, with spelled-out number words ("Six")
- * folded to digits first.
+ * match key, with spelled-out number words ("Six") folded to digits first.
  * Two names whose signatures differ are talking about DIFFERENT products
  * (7" vs 11" dies, 5-cheese vs 7-cheese blends) and must never be treated as
  * near-duplicates of each other.
- *
- * Only standalone numeric tokens ("7", "11", "5", "2", "07") contribute —
- * alphanumeric brand tokens like "4hands" or "2x" do NOT, so a brand name
- * that happens to start with a digit cannot spuriously block a cross-brand
- * "use existing" alias (e.g. "4hands Red Hot Chicken Mix" → "Lucia's Craft
- * Red Hot Chicken Mix") via a false digit mismatch.
  */
 export function specNameDigitSignature(name: string): string {
   const key = specImportNameMatchKey(name);
@@ -2647,11 +2640,8 @@ export function specNameDigitSignature(name: string): string {
   return key
     .split(" ")
     .map((t) => SPEC_NUMBER_WORD_DIGITS[t] ?? t)
-    // Only count digits from purely-numeric tokens ("7", "11", "5").
-    // Alphanumeric tokens like "4hands" or "2x" carry brand/model digits
-    // that do not distinguish same-kind products and must not block aliases.
-    .filter((t) => /^[0-9]+$/.test(t))
-    .join("");
+    .join(" ")
+    .replace(/[^0-9]/g, "");
 }
 
 /** Alias kinds where a digit mismatch between external and canonical = poison. */
@@ -2743,9 +2733,12 @@ export function isCrossFamilyMixCheesePair(a: string, b: string): boolean {
  * Hygiene filter for learned spec-import aliases, applied before EVERY use:
  *   1. drops appType aliases with a generic slot-type name ("Mix"/"cheese") on
  *      either side (see isGenericSlotTypeName);
- *   2. drops brand/flavor/appType/pepType aliases whose external and canonical
- *      digit signatures differ (a 7" name must never be renamed to a plain or
- *      an 11" one — those are different products, not spellings);
+ *   2. drops brand/flavor/appType/pepType aliases where BOTH sides carry a
+ *      digit signature and the signatures differ — a "7"" name must never be
+ *      silently renamed to an "11"" one (different products). An alias where
+ *      only ONE side has digits is allowed through: that digit is a brand-name
+ *      element (e.g. "4hands"), not a product-distinguishing measurement, and
+ *      the alias is an explicit user "use existing" pick;
  *   3. drops INGREDIENT-kind aliases that drop a distinguishing modifier word
  *      (token subset — "Sea Salt" → "Salt"): those are different ingredients,
  *      and ingredient aliases are learned/applied automatically with no user
@@ -2773,7 +2766,14 @@ export function sanitizeSpecAliases(
       return false;
     }
     if (DIGIT_GUARDED_ALIAS_KINDS.has(a.kind)) {
-      if (specNameDigitSignature(a.externalName) !== specNameDigitSignature(a.canonicalName)) {
+      const sigExt = specNameDigitSignature(a.externalName);
+      const sigCan = specNameDigitSignature(a.canonicalName);
+      // Block only when BOTH sides carry a digit signature and they disagree.
+      // An alias where only one side has digits (e.g. a brand name that begins
+      // with a digit like "4hands" aliasing to "Lucia's Craft") is an explicit
+      // user "use existing" pick; the digit is a brand-name element, not a
+      // product distinguisher, so it must not block the alias.
+      if (sigExt && sigCan && sigExt !== sigCan) {
         return false;
       }
     }
