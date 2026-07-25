@@ -163,6 +163,16 @@ export type SpecImportPrepared = {
    * Advisory only — the user can still clear or change the pick.
    */
   aliasLinkSuggestions?: Record<string, string>;
+  /**
+   * Pizza profiles (brand+flavor) present in the PREVIOUS saved snapshot for
+   * this file but absent from the new parse — likely renamed or removed from
+   * the customer's workbook. Surfaced in the review dialog as an unchecked
+   * "No longer in this workbook" section; checking one and confirming removes
+   * it through the normal profile-tombstone path. Only populated when a
+   * previous snapshot exists for the same file. Empty on reused-parse imports
+   * (unchanged file → no profiles can have been removed).
+   */
+  profilesRemovedFromWorkbook?: Array<{brand: string; flavor: string}>;
   note?: string;
 };
 
@@ -1247,6 +1257,8 @@ async function buildReusedPrepared(
   const reuseNote =
     "This exact file was imported before — reused the earlier read (no new AI parse), so unchanged values stay identical to the previous import.";
   const note = working.note ? `${working.note}\n${reuseNote}` : reuseNote;
+  // Reused parse = same file bytes as before → no profiles can have been
+  // removed from an unchanged workbook. Skip the snapshot comparison.
   return {
     parsed: working,
     summary,
@@ -1293,6 +1305,61 @@ async function loadSpecImportContext(): Promise<{
     return true;
   });
   return { known, aliases };
+}
+
+/**
+ * Compute the list of brand+flavor profiles that were in the PREVIOUS saved
+ * snapshot for these source files but are absent from the current parse.
+ * Best-effort — returns [] if snapshots can't be loaded or no source key is
+ * derivable. Already-tombstoned profiles are excluded (user already removed
+ * them). Alias remapping is applied to previous-snapshot names so a renamed
+ * profile doesn't falsely appear as "removed from the workbook".
+ */
+async function computeProfilesRemovedFromWorkbook(
+  names: string[],
+  aliases: SpecImportAlias[],
+  currentProfiles: ParsedProfile[],
+): Promise<Array<{brand: string; flavor: string}>> {
+  const sourceKey = deriveSourceKey(names);
+  if (!sourceKey) return [];
+  try {
+    const sheets = await fetchSavedSpecSheets();
+    const candidates = selectPruneSnapshots(sheets, sourceKey).filter((s) => s.data);
+    if (candidates.length === 0) return [];
+    const previous = mergePruneSnapshots(candidates.map((s) => s.data));
+    const previousProfiles = previous.profiles ?? [];
+    if (previousProfiles.length === 0) return [];
+
+    const profileKey = (brand: string, flavor: string) =>
+      `${(brand ?? "").trim().toLowerCase()}|${(flavor ?? "").trim().toLowerCase()}`;
+    const currentKeys = new Set(
+      currentProfiles.map((p) => profileKey(p.brand ?? "", p.flavor ?? "")),
+    );
+
+    const usable = sanitizeSpecAliases(aliases);
+    const seen = new Set<string>();
+    const result: Array<{brand: string; flavor: string}> = [];
+    for (const p of previousProfiles) {
+      const rawBrand = p.brand ?? "";
+      const rawFlavor = p.flavor ?? "";
+      const brand = (pickAlias(usable, "brand", rawBrand) ?? rawBrand).trim();
+      const flavor = (pickAlias(usable, "flavor", rawFlavor, brand) ?? rawFlavor).trim();
+      if (!brand && !flavor) continue;
+      const k = profileKey(brand, flavor);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      // Still present in the new parse — not removed.
+      if (currentKeys.has(k)) continue;
+      // Already tombstoned/deleted by the user — don't surface again.
+      if (importProfileIsTombstoned(brand, flavor)) continue;
+      result.push({ brand, flavor });
+    }
+    return result.sort(
+      (a, b) => a.brand.localeCompare(b.brand) || a.flavor.localeCompare(b.flavor),
+    );
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -1364,6 +1431,12 @@ export async function prepareSpecImport(
     await fetchCheesePoolNamesBestEffort(),
   );
 
+  // Profiles from the previous snapshot for this file that are absent from the
+  // new parse — manager can choose to tombstone them in the review dialog.
+  const profilesRemovedFromWorkbook = name
+    ? await computeProfilesRemovedFromWorkbook([name], aliases, parsed.profiles)
+    : [];
+
   return {
     parsed,
     summary,
@@ -1379,6 +1452,7 @@ export async function prepareSpecImport(
     },
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
+    ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
   };
 }
 
@@ -1545,6 +1619,13 @@ export async function prepareSpecImportMulti(
     await fetchCheesePoolNamesBestEffort(),
   );
 
+  // Profiles from the previous snapshots for these files that are absent from
+  // the new parse — manager can choose to tombstone them in the review dialog.
+  const profilesRemovedFromWorkbook =
+    (names?.length ?? 0) > 0
+      ? await computeProfilesRemovedFromWorkbook(names ?? [], aliases, parsed.profiles)
+      : [];
+
   return {
     parsed,
     summary,
@@ -1560,6 +1641,7 @@ export async function prepareSpecImportMulti(
     },
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
+    ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
   };
 }
 

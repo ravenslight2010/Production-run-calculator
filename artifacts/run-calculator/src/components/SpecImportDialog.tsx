@@ -54,8 +54,14 @@ type Props = {
    * `learnedRenames` are the step-1 brand/flavor renames turned into learnable
    * aliases — the parent folds them into the saved alias list so a re-upload of
    * the same sheet remembers the corrections.
+   * `profilesToRemove` are the brand+flavor profiles the manager checked in the
+   * "No longer in this workbook" section and confirmed for tombstoning.
    */
-  onConfirm: (parsed: ParsedSpecImport, learnedRenames: SpecImportAlias[]) => void;
+  onConfirm: (
+    parsed: ParsedSpecImport,
+    learnedRenames: SpecImportAlias[],
+    profilesToRemove: Array<{brand: string; flavor: string}>,
+  ) => void;
 };
 
 // One editable profile row in the review. `orig` keeps every field the parser
@@ -143,6 +149,15 @@ const KINDS: SpecImportDisplayKind[] = ["dough", "sauce", "cheese", "mix"];
 /** The underlying parse kind for a display kind ("mix" is stored as cheese). */
 const parseKindOf = (k: SpecImportDisplayKind): ParsedRecipe["kind"] =>
   k === "mix" ? "cheese" : k;
+
+/** A profile from the previous snapshot that is absent from the new parse. */
+type RemovedProfileItem = {
+  key: string;
+  brand: string;
+  flavor: string;
+  /** Whether the manager checked this for removal. Unchecked by default. */
+  remove: boolean;
+};
 
 function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
   const kept = prepared.parsed.profiles.map((p, i) => ({
@@ -303,6 +318,7 @@ export default function SpecImportDialog({
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
+  const [removedProfiles, setRemovedProfiles] = useState<RemovedProfileItem[]>([]);
   // Two-step review: step 1 confirms product brand/flavor names only; step 2
   // reviews everything else (recipes, die types, the diff, notes, mappings).
   const [step, setStep] = useState<1 | 2>(1);
@@ -315,10 +331,19 @@ export default function SpecImportDialog({
       // never because the parent re-rendered with a fresh options object (that
       // would wipe the user's in-progress edits).
       setRecipes(buildRecipeItems(prepared, existingRecipeNamesByKind));
+      setRemovedProfiles(
+        (prepared.profilesRemovedFromWorkbook ?? []).map((p, i) => ({
+          key: `rp${i}`,
+          brand: p.brand,
+          flavor: p.flavor,
+          remove: false,
+        })),
+      );
       setStep(1);
     } else {
       setProfiles([]);
       setRecipes([]);
+      setRemovedProfiles([]);
       setStep(1);
     }
   }, [prepared]);
@@ -666,6 +691,9 @@ export default function SpecImportDialog({
   const includedRecipes = recipes.filter((r) => r.include).length;
   const includedCount = includedProfiles + includedRecipes;
   const nothingParsed = prepared != null && profiles.length === 0 && recipes.length === 0;
+  // True when the manager has checked at least one removed profile for deletion.
+  // Used to allow Next / Apply even when the new parse has zero parseable items.
+  const anyRemovalsChecked = removedProfiles.some((p) => p.remove);
 
   // Live "would be dropped" attention count across included items.
   const attentionCount =
@@ -848,6 +876,58 @@ export default function SpecImportDialog({
                 </div>
               )}
 
+              {step === 1 && removedProfiles.length > 0 && (
+                <div className="space-y-2">
+                  <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2.5">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span className="text-xs font-semibold">No longer in this workbook</span>
+                    </div>
+                    <p className="mt-1 text-xs text-amber-700">
+                      These profiles were in the previous import but aren't in the new file —
+                      they may have been renamed or removed. Check any you'd like to delete.
+                    </p>
+                  </div>
+                  <ul className="space-y-2">
+                    {removedProfiles.map((p) => (
+                      <li
+                        key={p.key}
+                        className={`rounded-lg border p-3 ${p.remove ? "border-amber-400/60 bg-amber-500/5" : "border-border/60 opacity-70"}`}
+                        data-testid={`spec-removed-profile-${p.key}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={p.remove}
+                            onChange={() =>
+                              setRemovedProfiles((prev) =>
+                                prev.map((r) =>
+                                  r.key === p.key ? { ...r, remove: !r.remove } : r,
+                                ),
+                              )
+                            }
+                            className="mt-1 h-4 w-4 accent-amber-500"
+                            aria-label={`Remove ${p.brand} ${p.flavor}`}
+                            data-testid={`spec-removed-profile-remove-${p.key}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-sm font-medium text-foreground">
+                              {p.brand || "(no brand)"} — {p.flavor || "(no flavor)"}
+                            </span>
+                            <div className="mt-0.5 text-xs text-muted-foreground">
+                              Not found in the new file
+                            </div>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-600">
+                            removed
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {step === 2 && includedProfiles > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1011,7 +1091,7 @@ export default function SpecImportDialog({
                 applying ||
                 !!error ||
                 !prepared ||
-                nothingParsed ||
+                (nothingParsed && !anyRemovalsChecked) ||
                 includedProfileMissing
               }
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
@@ -1021,14 +1101,19 @@ export default function SpecImportDialog({
           ) : (
             <button
               type="button"
-              onClick={() => onConfirm(edited, learnedAll)}
+              onClick={() => onConfirm(
+              edited,
+              learnedAll,
+              removedProfiles
+                .filter((p) => p.remove)
+                .map((p) => ({ brand: p.brand, flavor: p.flavor })),
+            )}
               disabled={
                 loading ||
                 applying ||
                 !!error ||
                 !prepared ||
-                nothingParsed ||
-                includedCount === 0 ||
+                ((nothingParsed || includedCount === 0) && !anyRemovalsChecked) ||
                 attentionCount > 0
               }
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
@@ -1038,8 +1123,9 @@ export default function SpecImportDialog({
               ) : (
                 <CheckCircle2 className="h-4 w-4" />
               )}
-              Apply {includedCount > 0 ? includedCount : ""} item
-              {includedCount === 1 ? "" : "s"}
+              {includedCount > 0
+                ? `Apply ${includedCount} item${includedCount === 1 ? "" : "s"}`
+                : `Remove ${removedProfiles.filter((p) => p.remove).length} profile${removedProfiles.filter((p) => p.remove).length === 1 ? "" : "s"}`}
             </button>
           )}
         </div>

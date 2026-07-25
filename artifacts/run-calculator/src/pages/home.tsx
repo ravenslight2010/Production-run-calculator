@@ -9363,6 +9363,7 @@ export default function Home() {
   async function handleSpecImportConfirm(
     editedParsed: ParsedSpecImport,
     learnedRenames: SpecImportAlias[],
+    profilesToRemove: Array<{brand: string; flavor: string}> = [],
   ) {
     if (!specImportPrepared) return;
     setSpecImportApplying(true);
@@ -9383,6 +9384,15 @@ export default function Home() {
     try {
       const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles, appliedParsed } =
         await commitSpecImport(toCommit);
+      // Tombstone profiles the manager marked as removed from the workbook.
+      // Done after commit so the new profiles are written first; deletion is
+      // local-only (same tombstone path as manual brand/flavor deletion in the
+      // UI). Each deleteProfileEntry call is synchronous and best-effort.
+      if (profilesToRemove.length > 0) {
+        for (const { brand, flavor } of profilesToRemove) {
+          deleteProfileEntry(brand, flavor);
+        }
+      }
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
       // If the CURRENT run's brand+flavor profile was rewritten by this import,
