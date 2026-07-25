@@ -729,4 +729,58 @@ describe("matchDoughballVariant", () => {
       ),
     ).toBeNull();
   });
+
+  it("matches by customers brand+flavor (specific) and ignores die type", () => {
+    const vs: DoughballVariant[] = [
+      {
+        label: "Acme Thick",
+        weightOz: 13.8,
+        perTray: 16,
+        customers: [{ brand: "Acme", flavor: "BBQ Chicken" }],
+      },
+      {
+        label: "Acme Heavy",
+        weightOz: 12,
+        perTray: 16,
+        customers: [{ brand: "Acme", flavor: "" }],
+      },
+    ];
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Acme", flavor: "BBQ Chicken" })?.weightOz,
+    ).toBe(13.8);
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Acme", flavor: "Other Flavor" })?.weightOz,
+    ).toBe(12);
+  });
+
+  it("specific flavor beats catch-all regardless of array order", () => {
+    const catchAllFirst: DoughballVariant[] = [
+      {
+        label: "Brand Heavy",
+        weightOz: 12,
+        customers: [{ brand: "Brand", flavor: "" }],
+      },
+      {
+        label: "Brand Thick",
+        weightOz: 13.8,
+        customers: [{ brand: "Brand", flavor: "BBQ" }],
+      },
+    ];
+    expect(
+      matchDoughballVariant(catchAllFirst, { dieType: "", brand: "Brand", flavor: "BBQ" })?.weightOz,
+    ).toBe(13.8);
+    expect(
+      matchDoughballVariant(catchAllFirst, { dieType: "", brand: "Brand", flavor: "Other" })?.weightOz,
+    ).toBe(12);
+  });
+
+  it("returns null when brand has no matching customer entry", () => {
+    const vs: DoughballVariant[] = [
+      { label: "A Thick", weightOz: 13.8, customers: [{ brand: "Acme", flavor: "BBQ" }] },
+      { label: "A Heavy", weightOz: 12, customers: [{ brand: "Acme", flavor: "" }] },
+    ];
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Other Brand", flavor: "BBQ" }),
+    ).toBeNull();
+  });
 });

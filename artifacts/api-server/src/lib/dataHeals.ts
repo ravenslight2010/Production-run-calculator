@@ -2340,6 +2340,107 @@ async function runBrandDriftRename(): Promise<void> {
   });
 }
 
+// ── Heal: Populate customers arrays on CRB Dough Lucia's Craft variants ─────
+// Before this heal, CRB Dough doughball variants had no customers arrays —
+// only descriptive labels ("Lucia's Craft CRB Thick", "Lucia's Craft CRB
+// Heavy Plus"). matchDoughballVariant's customers-based priority therefore
+// never fired, falling through to the die-number fallback, which also fails
+// because neither label contains a die number. The result: variant matching
+// returned null, poolWeight fell back to 0, and the pKey preset root weight
+// (13 oz) was applied instead of the correct 13.8 oz for Lucia's Craft BBQ
+// and other confirmed 13.8 oz flavors.
+// This heal populates customers on the two Lucia's Craft CRB Dough variants
+// so matching correctly selects the 13.8 oz "CRB Thick" for the confirmed
+// flavor set, while the 12 oz "Heavy Plus" catches any remaining Lucia's
+// Craft flavor via a brand-level catch-all.
+
+const CRB_LUCIA_CUSTOMERS_HEAL_ID = "crb-dough-lucia-variant-customers-v1";
+
+// Known 13.8 oz Lucia's Craft CRB Dough flavors (from the 2026-07-21 audit).
+const LUCIA_CRAFT_CRB_THICK_FLAVORS = [
+  "Backyard BBQ Chicken",
+  "Four Cheese Meltdown",
+  "House DLUX",
+  "Sweet Chili Garden",
+];
+
+async function runCrbLuciaVariantCustomers(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CRB_LUCIA_CUSTOMERS_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const doughs = await tx.select().from(doughRecipesTable).for("update");
+    const crbRows = doughs.filter((d) =>
+      specImportNamedRecipeNamesEqual(d.name, "CRB Dough"),
+    );
+    if (crbRows.length === 0) {
+      logger.info({ heal: CRB_LUCIA_CUSTOMERS_HEAL_ID }, "No CRB Dough found — skipped");
+      return;
+    }
+
+    let updated = 0;
+    for (const row of crbRows) {
+      const variants = normalizeDoughballVariants(row.doughballVariants);
+      let changed = false;
+      const next = variants.map((v) => {
+        // Identify the Lucia's Craft CRB Thick variant (~13.8 oz).
+        if (
+          Math.abs(Number(v.weightOz ?? 0) - 13.8) < 0.15 &&
+          /lucia/i.test(v.label) &&
+          /thick/i.test(v.label)
+        ) {
+          const existing = v.customers ?? [];
+          const additions = LUCIA_CRAFT_CRB_THICK_FLAVORS.filter(
+            (fl) =>
+              !existing.some(
+                (c) =>
+                  c.brand.trim().toLowerCase() === "lucia's craft" &&
+                  c.flavor.trim().toLowerCase() === fl.trim().toLowerCase(),
+              ),
+          ).map((fl) => ({ brand: "Lucia's Craft", flavor: fl }));
+          if (additions.length === 0) return v;
+          changed = true;
+          return { ...v, customers: [...existing, ...additions] };
+        }
+        // Identify the Lucia's Craft CRB Heavy Plus variant (~12 oz).
+        if (
+          Math.abs(Number(v.weightOz ?? 0) - 12) < 0.15 &&
+          /lucia/i.test(v.label) &&
+          /heavy/i.test(v.label)
+        ) {
+          const existing = v.customers ?? [];
+          const hasCatchAll = existing.some(
+            (c) =>
+              c.brand.trim().toLowerCase() === "lucia's craft" &&
+              c.flavor.trim() === "",
+          );
+          if (hasCatchAll) return v;
+          changed = true;
+          return { ...v, customers: [...existing, { brand: "Lucia's Craft", flavor: "" }] };
+        }
+        return v;
+      });
+      if (!changed) continue;
+      await tx
+        .update(doughRecipesTable)
+        .set({ doughballVariants: next })
+        .where(
+          and(
+            eq(doughRecipesTable.id, row.id),
+            eq(doughRecipesTable.scope, row.scope),
+          ),
+        );
+      updated++;
+    }
+
+    logger.info({ heal: CRB_LUCIA_CUSTOMERS_HEAL_ID, updated }, "Data heal applied");
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -2364,4 +2465,5 @@ export async function runDataHeals(): Promise<void> {
   await runNaturalPepNameDepoison();
   await runBrandFanDoughDepoison();
   await runBrandDriftRename();
+  await runCrbLuciaVariantCustomers();
 }

@@ -507,14 +507,28 @@ export function matchDoughballVariant(
   const b = (opts.brand ?? "").trim().toLowerCase();
   if (b) {
     const f = (opts.flavor ?? "").trim().toLowerCase();
-    const hit = list.find((v) =>
+    // 1a: Specific brand+flavor entry always beats a catch-all (flavor === "")
+    // — prevents array order from deciding when a brand has two variants, one
+    // with specific flavor assignments and one with a catch-all fallback.
+    if (f) {
+      const specificHit = list.find((v) =>
+        (v.customers ?? []).some(
+          (c) =>
+            c.brand.trim().toLowerCase() === b &&
+            c.flavor.trim().toLowerCase() === f,
+        ),
+      );
+      if (specificHit) return specificHit;
+    }
+    // 1b: Brand + catch-all (empty flavor) fallback.
+    const catchAllHit = list.find((v) =>
       (v.customers ?? []).some(
         (c) =>
           c.brand.trim().toLowerCase() === b &&
-          (c.flavor.trim() === "" || c.flavor.trim().toLowerCase() === f),
+          c.flavor.trim() === "",
       ),
     );
-    if (hit) return hit;
+    if (catchAllHit) return catchAllHit;
   }
   // Fallback: die-type number match.
   const dieNum = (() => {

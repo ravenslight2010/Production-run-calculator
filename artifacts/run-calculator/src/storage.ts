@@ -3454,10 +3454,37 @@ export function applySpecImport(
           : poolVariants.length > 1
             ? 0
             : Number(poolDough?.doughballWeightOz ?? 0);
-        const w = pKey
-          ? Number(presets[pKey]?.doughballWeightOz ?? 0)
-          : poolWeight;
-        if (w > 0 && !(Number(values.targetDoughballWeight ?? 0) > 0)) {
+        // Variant match wins over local preset root weight: a preset stores the
+        // recipe-level (family) weight which is ambiguous for multi-variant
+        // recipes; the matched variant is the authoritative per-customer answer.
+        const w = (poolMatched && Number(poolMatched.weightOz ?? 0) > 0)
+          ? Number(poolMatched.weightOz)
+          : pKey
+            ? Number(presets[pKey]?.doughballWeightOz ?? 0)
+            : poolWeight;
+        // Was this a high-confidence customers-based match (not a die-number
+        // fallback)? A customers match is authoritative and may correct a
+        // previously-set wrong value — e.g. a prior import assigned the wrong
+        // variant before customer assignments were populated in the pool.
+        const wMatchedViaCustomers =
+          !!brand && poolMatched
+            ? (poolMatched.customers ?? []).some(
+                (c) =>
+                  c.brand.trim().toLowerCase() === brand.trim().toLowerCase() &&
+                  (c.flavor.trim() === "" ||
+                    c.flavor.trim().toLowerCase() ===
+                      (flavor ?? "").trim().toLowerCase()),
+              )
+            : false;
+        const existingWeightOz = Number(values.targetDoughballWeight ?? 0);
+        const existingMatchesVariant =
+          !wMatchedViaCustomers || !poolMatched
+            ? true
+            : Math.abs(existingWeightOz - Number(poolMatched.weightOz ?? 0)) < 0.1;
+        if (
+          w > 0 &&
+          (!(existingWeightOz > 0) || (wMatchedViaCustomers && !existingMatchesVariant))
+        ) {
           values.targetDoughballWeight = w;
         }
         // Same pool hydration for doughballs-per-tray (local presets don't
