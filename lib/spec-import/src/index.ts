@@ -1316,8 +1316,25 @@ export function linkSpecImportNamedRecipesToExisting(
      * review suggestions instead of being applied silently; when absent (e.g.
      * the commit-time backstop, where no review is possible) they are simply
      * not applied. Only exact loose-key / cleaned-key hits ever auto-rename.
+     * Family folds always go here regardless of autoApplyNearExact.
      */
     suggestions?: SpecImportLinkSuggestion[];
+    /**
+     * When true, near-exact matches (layer-2 word reorder and layer-3 single
+     * typo) from the near-dup matcher are applied automatically without going
+     * through `suggestions`. Only applies when there is exactly ONE unambiguous
+     * candidate and the formula-conflict guard passes. Family folds are NOT
+     * auto-applied — they still require review via `suggestions`. Intended for
+     * the commit-time backstop pass where no review dialog is available and the
+     * safety guards already ruled out ambiguous / formula-conflicting renames.
+     */
+    autoApplyNearExact?: boolean;
+    /**
+     * When `autoApplyNearExact` is true, this accumulator is incremented for
+     * each near-exact rename that was applied automatically. Lets callers
+     * report "Auto-linked N near-duplicate recipe names" in the import summary.
+     */
+    autoLinkedOut?: { count: number };
   },
 ): ParsedSpecImport {
   const match = buildNearDupNameMatcherDetailed(existingNames, {
@@ -1349,31 +1366,6 @@ export function linkSpecImportNamedRecipesToExisting(
     const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, nm));
     return (key && byCleanKey.get(key)) || null;
   };
-  // Beyond-exact candidate for a name: near-dup layers 2/3 first, then the
-  // kind's family fold — both gated by the formula-conflict guard (a recipe
-  // carrying its OWN ingredient rows never links onto a pool recipe whose
-  // ingredients differ: same-family NAMES over different formulas are
-  // distinct recipes, not variants).
-  const reviewCandidate = (
-    nm: string,
-    rows?: ReadonlyArray<{ ingredient?: string | null }>,
-  ): string | null => {
-    const near = match(nm);
-    const cand =
-      near && near.layer > 1
-        ? near.name
-        : findSpecImportNamedRecipeFamilyMatch(kind, nm, existingNames);
-    if (!cand) return null;
-    if (
-      specImportDoughFormulasConflict(
-        rows,
-        poolRowsByKey.get(specImportNameMatchKey(cand)),
-      )
-    ) {
-      return null;
-    }
-    return cand;
-  };
   const suggested = new Set<string>();
   const pushSuggestion = (importedName: string, existingName: string) => {
     if (!opts?.suggestions) return;
@@ -1391,13 +1383,43 @@ export function linkSpecImportNamedRecipesToExisting(
     if (r.userNamed) return r;
     const existing = matchCleaned(name);
     if (!existing) {
-      // Beyond-exact matches (reorder/typo near-dups AND family folds — an
-      // imported "Lucia Recipe" sauce or "11\" CRB recipe" dough that likely
-      // means an existing family recipe) become declinable review
-      // suggestions; accepting one links + repoints the profile through the
-      // dialog's existing plumbing, declining keeps the imported name.
-      const cand = reviewCandidate(name, r.rows);
-      if (cand && cand !== name) pushSuggestion(name, cand);
+      // Separate near-exact (layer 2/3) hits from family folds so the two
+      // paths can be handled independently: near-exact hits can be auto-applied
+      // at commit time (autoApplyNearExact) while family folds always stay as
+      // review suggestions — they are more speculative (a distinctive-token set
+      // match, not a character-level near-dup) and have cross-linked genuinely
+      // different recipes in the past ("Masa Dough (Lowes)" onto "Masa Dough").
+      const nearHit = match(name);
+      const nearDupCand = nearHit && nearHit.layer > 1 ? nearHit.name : null;
+      const formulaOk = (cand: string) =>
+        !specImportDoughFormulasConflict(r.rows, poolRowsByKey.get(specImportNameMatchKey(cand)));
+
+      if (nearDupCand && nearDupCand !== name && formulaOk(nearDupCand)) {
+        if (opts?.autoApplyNearExact) {
+          // Auto-apply at commit time: the same ambiguity + digit + length
+          // guards that protected the near-dup matcher already ran, and the
+          // formula-conflict guard above rules out same-family-name, different-
+          // formula cases. This is as safe as the exact loose-key auto-rename.
+          changed = true;
+          if (opts.autoLinkedOut) opts.autoLinkedOut.count += 1;
+          if (kind === "dough" && !r.variantLabel) {
+            return { ...r, name: nearDupCand, variantLabel: name };
+          }
+          return { ...r, name: nearDupCand };
+        }
+        // Without autoApplyNearExact: surface as a declinable review suggestion.
+        pushSuggestion(name, nearDupCand);
+        return r;
+      }
+
+      // Family folds (distinctive-token set match, more speculative than a
+      // character-level near-dup): always go to suggestions, never auto-apply.
+      const familyCand = nearDupCand
+        ? null
+        : findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
+      if (familyCand && familyCand !== name && formulaOk(familyCand)) {
+        pushSuggestion(name, familyCand);
+      }
       return r;
     }
     if (existing === name) return r;

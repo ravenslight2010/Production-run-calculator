@@ -478,6 +478,114 @@ describe("linkSpecImportNamedRecipesToExisting", () => {
     });
   });
 
+  describe("autoApplyNearExact — commit-time near-exact auto-link", () => {
+    it("auto-applies a single-typo sauce name at commit time (autoApplyNearExact: true)", () => {
+      const parsed: ParsedSpecImport = {
+        profiles: [],
+        recipes: [{ kind: "sauce", name: "Mystic Pizza Sause", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+      };
+      const out = { count: 0 };
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: out,
+      });
+      expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sauce"]);
+      expect(out.count).toBe(1);
+    });
+
+    it("auto-applies a word-reorder dough name at commit time", () => {
+      const parsed: ParsedSpecImport = {
+        profiles: [],
+        recipes: [{ kind: "dough", name: "Crust Thin Aldo", rows: [{ ingredient: "Flour", lbs: 50 }] }],
+      };
+      const out = { count: 0 };
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["Aldo Thin Crust"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: out,
+      });
+      expect(linked.recipes.map((r) => r.name)).toEqual(["Aldo Thin Crust"]);
+      expect(out.count).toBe(1);
+    });
+
+    it("does NOT auto-apply family folds even with autoApplyNearExact — they still require review", () => {
+      // "CRB Heavy Plus recipe" is a family fold (distinctive tokens "crb" match)
+      // but not a near-dup (too different for word-reorder or typo layer).
+      const parsed: ParsedSpecImport = {
+        profiles: [],
+        recipes: [{ kind: "dough", name: "CRB Heavy Plus recipe", rows: [{ ingredient: "Flour", lbs: 50 }] }],
+      };
+      const suggestions: SpecImportLinkSuggestion[] = [];
+      const out = { count: 0 };
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["CRB Dough"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: out,
+        suggestions,
+      });
+      // Family fold is NOT auto-applied — name stays unchanged.
+      expect(linked.recipes.map((r) => r.name)).toEqual(["CRB Heavy Plus recipe"]);
+      // But it IS added to suggestions so the review dialog can still offer it.
+      expect(suggestions).toContainEqual({ kind: "dough", importedName: "CRB Heavy Plus recipe", existingName: "CRB Dough" });
+      expect(out.count).toBe(0);
+    });
+
+    it("does NOT auto-apply when userNamed is set — user's explicit rename is respected", () => {
+      const parsed: ParsedSpecImport = {
+        profiles: [],
+        recipes: [{ kind: "sauce", name: "Mystic Pizza Sause", userNamed: true, rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+      };
+      const out = { count: 0 };
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: out,
+      });
+      expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sause"]);
+      expect(out.count).toBe(0);
+    });
+
+    it("does NOT auto-apply when the formula conflicts — different ingredients mean a different recipe", () => {
+      const parsed: ParsedSpecImport = {
+        profiles: [],
+        recipes: [
+          {
+            kind: "sauce",
+            name: "Mystic Pizza Sause",
+            rows: [{ ingredient: "Cream", lbs: 10 }],
+          },
+        ],
+      };
+      const out = { count: 0 };
+      // Pool recipe has DIFFERENT ingredients → formula conflict blocks the auto-link.
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: out,
+        existingRecipes: [{ name: "Mystic Pizza Sauce", rows: [{ ingredient: "Tomato" }] }],
+      });
+      expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sause"]);
+      expect(out.count).toBe(0);
+    });
+
+    it("profile sauceName/doughName follows the auto-applied rename", () => {
+      const parsed: ParsedSpecImport = {
+        profiles: [
+          {
+            brand: "Mystic",
+            flavor: "Cheese",
+            applicators: [],
+            pepperonis: [],
+            sauceName: "Mystic Pizza Sause",
+          },
+        ],
+        recipes: [{ kind: "sauce", name: "Mystic Pizza Sause", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+      };
+      const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"], {
+        autoApplyNearExact: true,
+        autoLinkedOut: { count: 0 },
+      });
+      expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sauce"]);
+      expect(linked.profiles.map((p) => p.sauceName)).toEqual(["Mystic Pizza Sauce"]);
+    });
+  });
+
   it("does NOT collapse a MEANINGFUL qualifier (Spicy) onto a different saved sauce", () => {
     const parsed: ParsedSpecImport = {
       profiles: [],

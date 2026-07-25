@@ -9382,7 +9382,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles, appliedParsed } =
+      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, appliedParsed } =
         await commitSpecImport(toCommit);
       // Tombstone profiles the manager marked as removed from the workbook.
       // Done after commit so the new profiles are written first; deletion is
@@ -9535,6 +9535,10 @@ export default function Home() {
         recipesUpdated > 0
           ? ` ${recipesUpdated} saved recipe${recipesUpdated === 1 ? "" : "s"} updated with this sheet's ingredients.`
           : "";
+      const autoLinkedNote =
+        autoLinkedRecipes > 0
+          ? ` Auto-linked ${autoLinkedRecipes} near-duplicate recipe name${autoLinkedRecipes === 1 ? "" : "s"} (word order or minor typo) to an existing recipe.`
+          : "";
       toast({
         title: "Spec sheet imported",
         description:
@@ -9543,7 +9547,8 @@ export default function Home() {
             : "Brands and flavors have been added.") +
           mixNote +
           cheeseNote +
-          updatedNote,
+          updatedNote +
+          autoLinkedNote,
       });
     } catch (err) {
       setSpecImportError(

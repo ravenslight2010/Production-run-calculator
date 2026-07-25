@@ -1673,6 +1673,14 @@ export async function commitSpecImport(
    * visible under Manage Lists → Dough/Sauce Recipes).
    */
   placeholderRecipesAdded: number;
+  /**
+   * Dough or sauce recipes whose imported name was a near-exact match
+   * (word reorder or single typo) of an existing pool entry, and were
+   * automatically linked to that entry at commit time rather than creating
+   * a duplicate. Reported so the caller can note "Auto-linked N near-duplicate
+   * recipe names" in the import summary.
+   */
+  autoLinkedRecipes: number;
   /** Brand+flavor profiles this import wrote — see applySpecImport. */
   touchedProfiles: Array<{ brand: string; flavor: string }>;
   /**
@@ -1728,6 +1736,9 @@ export async function commitSpecImport(
   } = {};
   const poolNamesByKind: { dough?: string[]; sauce?: string[] } = {};
   let fullRelinked = prepared.parsed;
+  // Accumulate near-exact auto-links across both kinds so the caller can
+  // surface "Auto-linked N near-duplicate recipe names" in the import summary.
+  const autoLinkedOut = { count: 0 };
   for (const kind of ["dough", "sauce"] as const) {
     try {
       const livePool = await fetchNamedRecipes(kind);
@@ -1750,8 +1761,17 @@ export async function commitSpecImport(
                 name: r.name,
                 rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
               })),
+              autoApplyNearExact: true,
+              autoLinkedOut,
             }
-          : undefined,
+          : {
+              existingRecipes: livePools[kind]!.map((r) => ({
+                name: r.name,
+                rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+              })),
+              autoApplyNearExact: true,
+              autoLinkedOut,
+            },
       );
     } catch {
       // Best-effort (offline) — prepare's link result stands.
@@ -2017,5 +2037,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, touchedProfiles, appliedParsed: applyParsed };
+  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, appliedParsed: applyParsed };
 }
