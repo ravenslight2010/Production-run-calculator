@@ -1315,7 +1315,7 @@ async function loadSpecImportContext(): Promise<{
  * them). Alias remapping is applied to previous-snapshot names so a renamed
  * profile doesn't falsely appear as "removed from the workbook".
  */
-async function computeProfilesRemovedFromWorkbook(
+export async function computeProfilesRemovedFromWorkbook(
   names: string[],
   aliases: SpecImportAlias[],
   currentProfiles: ParsedProfile[],
