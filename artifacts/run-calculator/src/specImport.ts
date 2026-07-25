@@ -1331,7 +1331,7 @@ async function computeProfilesRemovedFromWorkbook(
     if (previousProfiles.length === 0) return [];
 
     const profileKey = (brand: string, flavor: string) =>
-      `${(brand ?? "").trim().toLowerCase()}|${(flavor ?? "").trim().toLowerCase()}`;
+      `${specImportNameMatchKey(brand ?? "")}|${specImportNameMatchKey(flavor ?? "")}`;
     const currentKeys = new Set(
       currentProfiles.map((p) => profileKey(p.brand ?? "", p.flavor ?? "")),
     );
