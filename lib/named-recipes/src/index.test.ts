@@ -874,6 +874,23 @@ describe("parseDoughCustomerSection", () => {
     expect(result[3]).toMatchObject({ brand: "Lowe's", qualifierKey: "heavier", flavors: ["Spinach Mushroom"] });
   });
 
+  it("finds customer assignments in non-zero columns (right-hand column layout)", () => {
+    // Some workbook revisions place the customer section in a column to the
+    // right of the yield table rather than in column 0.
+    const rows: string[][] = [
+      ["", "OZ.", "LBS.", "YIELD", "PER TRAY", "", "Basha's Original: All"],
+      ["Costco", "", "9.6", "0.6", "533", "20", "Costco: All"],
+      ["Hannaford CRB", "", "7.6", "0.48", "673", "24", "Hannaford CRB: Five Cheese, BBQ Chicken"],
+      ["Four Hands CRB Heavy", "", "8.7", "0.54", "588", "24", "Lowe's CRB Heavier: Spinach Mushroom"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(4);
+    expect(result[0]).toMatchObject({ brand: "Basha's Original", qualifierKey: "", flavors: [""] });
+    expect(result[1]).toMatchObject({ brand: "Costco", qualifierKey: "", flavors: [""] });
+    expect(result[2]).toMatchObject({ brand: "Hannaford", qualifierKey: "", flavors: ["Five Cheese", "BBQ Chicken"] });
+    expect(result[3]).toMatchObject({ brand: "Lowe's", qualifierKey: "heavier", flavors: ["Spinach Mushroom"] });
+  });
+
   it("skips rows without a colon or with empty sides", () => {
     const rows: string[][] = [
       ["Dough Mixing Procedure"],
