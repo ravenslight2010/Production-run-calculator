@@ -3838,8 +3838,24 @@ export default function Home() {
      * backfills unset pool values; local presets don't carry per-tray. */
     doughTrays?: ReadonlyMap<string, number>;
     /** Learned per-VARIANT doughball numbers by lowercased FAMILY dough name
-     * (spec import) — merged additively into the pool recipe's variants list. */
+     * (spec import) — merged additively into the pool recipe's variants list,
+     * or replaced wholesale when `replaceVariants` is true. */
     doughVariants?: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>;
+    /**
+     * When true, passes upsert semantics to the dough/sauce pool writes so
+     * EXISTING pool recipes have their components updated from the local
+     * presets (which the spec import has already written). Without this flag
+     * re-importing a spec sheet that changes a recipe's ingredients has no
+     * effect on the server pool. Only set for spec-import commits; the
+     * one-time migration call leaves this unset (add-only).
+     */
+    upsertComponents?: boolean;
+    /**
+     * When true, replaces each matched dough recipe's full variants list with
+     * the incoming one rather than merging additively. Use for spec re-imports
+     * so renamed variants replace the old entry instead of piling up.
+     */
+    replaceVariants?: boolean;
   }): Promise<number> => {
     const tagFor = (map: ReadonlyMap<string, NamedRecipeTag> | undefined, name: string) =>
       map?.get(name.trim().toLowerCase());
@@ -3866,10 +3882,10 @@ export default function Home() {
       .filter((r): r is NamedRecipe => r !== null);
     const [d, s] = await Promise.all([
       doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0 || (tags?.doughTrays?.size ?? 0) > 0 || (tags?.doughVariants?.size ?? 0) > 0
-        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays, tags?.doughVariants)
+        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays, tags?.doughVariants, { upsertComponents: tags?.upsertComponents, replaceVariants: tags?.replaceVariants })
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
       sauceDrafts.length || (tags?.sauce?.size ?? 0) > 0
-        ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce)
+        ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce, undefined, undefined, undefined, { upsertComponents: tags?.upsertComponents })
         : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
     ]);
     if (d.items.length > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
@@ -9471,7 +9487,7 @@ export default function Home() {
             };
           }
         }
-        void pushLocalDoughSauceToServer({ doughTrays, doughVariants }).catch(() => {});
+        void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.

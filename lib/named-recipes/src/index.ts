@@ -394,16 +394,25 @@ export function collapseDoughballVariantSuffixDuplicates(
 }
 
 /**
- * Additively merge learned variants onto EXISTING pool dough recipes by recipe
- * NAME (ci). Per recipe: variants are merged by label (ci) — new labels append,
- * an existing label's UNSET fields are filled and set fields are updated to
- * the incoming value (a re-import states the variant's current spec numbers).
- * Variants are never removed. Returns ONLY the recipes that changed. Pure —
- * mirrors fillNamedRecipeDoughballWeights.
+ * Merge (or replace) learned variants onto EXISTING pool dough recipes by
+ * recipe NAME (ci).
+ *
+ * Additive mode (default): new labels append, an existing label's UNSET fields
+ * are filled and set fields are updated to the incoming value. Variants NOT in
+ * the incoming list are kept.
+ *
+ * Replace mode (`options.replace = true`): for every recipe that appears in
+ * `variantsByName`, its entire `doughballVariants` list is replaced by the
+ * incoming normalized list. Recipes absent from the map are left untouched.
+ * Use this for spec re-imports so a renamed variant ("Bashas Ultra Thin" →
+ * "Craft Bashas Ultra Thin") replaces the old entry instead of appending to it.
+ *
+ * Returns ONLY the recipes that changed. Pure.
  */
 export function mergeNamedRecipeDoughballVariants(
   recipes: ReadonlyArray<NamedRecipe>,
   variantsByName: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>,
+  options?: { replace?: boolean },
 ): NamedRecipe[] {
   const changed: NamedRecipe[] = [];
   for (const r of recipes) {
@@ -412,6 +421,18 @@ export function mergeNamedRecipeDoughballVariants(
       r.name,
     );
     if (incoming.length === 0) continue;
+
+    // Replace mode: swap the entire list for this recipe so a renamed variant
+    // (e.g. "Bashas Ultra Thin" → "Craft Bashas Ultra Thin") removes the old
+    // entry instead of leaving both in the pool alongside the new one.
+    if (options?.replace) {
+      const before = normalizeDoughballVariants(r.doughballVariants, r.name);
+      if (JSON.stringify(before) !== JSON.stringify(incoming)) {
+        changed.push({ ...r, doughballVariants: incoming });
+      }
+      continue;
+    }
+
     const merged = [...normalizeDoughballVariants(r.doughballVariants, r.name)];
     // Keyed by the suffix-equivalence key so a re-import whose label carries
     // the family dough name tacked on ("Corner Booth CRB Dough") UPDATES the

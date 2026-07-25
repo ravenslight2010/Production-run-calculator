@@ -96,6 +96,14 @@ export async function addNamedRecipesToServerIfAbsent(
      * false/absent the old "add-if-absent" behaviour is preserved.
      */
     upsertComponents?: boolean;
+    /**
+     * When true, the doughball variants list for each matched recipe is
+     * REPLACED by the incoming list (replace semantics) instead of being
+     * merged additively. Use for spec re-imports so renamed variants
+     * ("Bashas Ultra Thin" → "Craft Bashas Ultra Thin") remove the old entry
+     * rather than accumulating both in the pool.
+     */
+    replaceVariants?: boolean;
   },
 ): Promise<{ added: number; updated: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
@@ -193,7 +201,7 @@ export async function addNamedRecipesToServerIfAbsent(
     : merged.map((r) => existingChainById.get(r.id) ?? r);
   const varied =
     kind === "dough" && (variantsByName?.size ?? 0) > 0
-      ? mergeNamedRecipeDoughballVariants(mergedCurrent, variantsByName!)
+      ? mergeNamedRecipeDoughballVariants(mergedCurrent, variantsByName!, { replace: options?.replaceVariants })
       : [];
   if (
     added === 0 &&
