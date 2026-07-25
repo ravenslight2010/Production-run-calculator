@@ -9517,9 +9517,25 @@ export default function Home() {
           const familyVariants = doughVariants.get(dName);
           if (!familyVariants) continue;
           // Find which variant this import linked to this family recipe.
-          const importedRecipe = appliedParsed.recipes.find(
-            (r) => r.kind === "dough" && r.name.trim().toLowerCase() === dName && r.variantLabel,
-          );
+          // When the family has multiple same-named variants (one per customer
+          // weight tier), prefer the one whose doughball oz matches the
+          // profile's stored weight so each profile tags ITS OWN variant
+          // rather than always tagging whichever happens to be listed first.
+          const profileWeight = Number(savedProfile?.targetDoughballWeight ?? 0);
+          const importedRecipe =
+            (profileWeight > 0
+              ? appliedParsed.recipes.find(
+                  (r) =>
+                    r.kind === "dough" &&
+                    r.name.trim().toLowerCase() === dName &&
+                    !!r.variantLabel &&
+                    Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
+                )
+              : undefined) ??
+            appliedParsed.recipes.find(
+              (r) =>
+                r.kind === "dough" && r.name.trim().toLowerCase() === dName && !!r.variantLabel,
+            );
           if (!importedRecipe?.variantLabel) continue;
           const variantLabel = importedRecipe.variantLabel.trim();
           const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
@@ -9604,8 +9620,14 @@ export default function Home() {
       // (dough/sauce ONLY), those pickers must refetch too.
       if (cheeseRecipesAdded > 0 || cheeseOzUpdated > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
-      if (recipesUpdated > 0 || placeholderRecipesAdded > 0) {
+      // Invalidate dough recipes when server recipe rows were replaced,
+      // placeholder recipes were added, OR doughball variants were pushed
+      // to the server — so autofill and recipe pickers always see the
+      // fresh variant/customer lists without waiting for the next app load.
+      if (recipesUpdated > 0 || placeholderRecipesAdded > 0 || (importedRecipes && canManageInventory)) {
         void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
+      }
+      if (recipesUpdated > 0 || placeholderRecipesAdded > 0) {
         void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
       }
       setShowSpecImport(false);
@@ -9793,6 +9815,36 @@ export default function Home() {
       // Profiles changed in storage — refresh derived dropdowns/profiles so
       // the packaging pickers and the current form pick the values up.
       reloadMasterData();
+      // If the currently-open run's brand+flavor was patched by the shipping
+      // guide, reload its freshly-updated profile into the live form so
+      // packaging values appear immediately rather than on the next nav.
+      // Mirrors the same reload that handleSpecImportConfirm does after a spec
+      // import rewrites the active run's profile.
+      {
+        const shipLiveDay = dayStateRef.current;
+        const shipLiveRun = shipLiveDay.runs[shipLiveDay.currentIndex] ?? shipLiveDay.runs[0];
+        if (shipLiveRun?.brand || shipLiveRun?.flavor) {
+          const runB = (shipLiveRun.brand ?? "").trim().toLowerCase();
+          const runF = (shipLiveRun.flavor ?? "").trim().toLowerCase();
+          const wasPatched = rows.some((row) => {
+            if ((row.brand ?? "").trim().toLowerCase() !== runB) return false;
+            const fl = row.flavors ?? [];
+            return fl.length === 0 || fl.some((f) => f.trim().toLowerCase() === runF);
+          });
+          if (wasPatched) {
+            const shippingProfile = loadProfile(shipLiveRun.brand, shipLiveRun.flavor);
+            if (shippingProfile) {
+              const now = Date.now();
+              saveRunValues(shipLiveRun.id, shippingProfile);
+              markRunValuesUpdated(shipLiveRun.id, now);
+              lastLocalEditRef.current = now;
+              form.reset(shippingProfile);
+              resetFieldArrays(shippingProfile);
+              schedulePush(dayStateRef.current, 0);
+            }
+          }
+        }
+      }
       // Persist a durable snapshot of the reviewed guide so the Setup Profiles
       // "Auto-Fill From Imports" panel can later cross-reference what this
       // palletizing guide said against the spec sheets. Best-effort: the import
@@ -9969,6 +10021,20 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: outPayload }),
       });
+      // Mirror the same 401 guard that commitMultiDayImport uses: a session
+      // expiry at the PUT step must redirect to login, not surface as a generic
+      // "Import failed" toast that gives the user no actionable path forward.
+      if (res.status === 401) {
+        setShowImportDialog(false);
+        setImportResult(null);
+        toast({
+          variant: "destructive",
+          title: "Signed out",
+          description: "Your sign-in expired, so the schedule could not be saved. Please sign in and import the file again.",
+        });
+        reportUnauthorized();
+        return;
+      }
       ok = res.ok && !handleStaleSyncWrite(await res.clone().json().catch(() => null));
       if (ok) {
         // If this import targets today, apply it onto THIS device right away

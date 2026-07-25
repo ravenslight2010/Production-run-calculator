@@ -119,6 +119,183 @@ async function runImportPush(parsed: ParsedSpecImport): Promise<void> {
   await addNamedRecipesToServerIfAbsent("dough", drafts, undefined, weights, trays, doughVariants);
 }
 
+// ---------------------------------------------------------------------------
+// Mirrors the customer-tagging loop in home.tsx handleSpecImportConfirm:
+// given the linked parse + a profile map, assign each profile to the variant
+// whose doughball weight matches, not just the first-listed variant.
+// ---------------------------------------------------------------------------
+
+interface ProfileLike {
+  brand: string;
+  flavor: string;
+  doughRecipeName: string;
+  targetDoughballWeight: number;
+}
+
+function tagVariantCustomers(
+  linkedRecipes: ParsedRecipe[],
+  doughVariants: Map<string, DoughballVariant[]>,
+  profiles: ProfileLike[],
+): Map<string, DoughballVariant[]> {
+  // Deep-clone so the original map is not mutated.
+  const result = new Map<string, DoughballVariant[]>();
+  for (const [k, vs] of doughVariants) result.set(k, vs.map((v) => ({ ...v })));
+
+  for (const profile of profiles) {
+    const dName = profile.doughRecipeName.trim().toLowerCase();
+    if (!dName) continue;
+    const familyVariants = result.get(dName);
+    if (!familyVariants) continue;
+
+    // The FIXED logic: weight-first, first-match fallback.
+    const profileWeight = Number(profile.targetDoughballWeight ?? 0);
+    const importedRecipe =
+      (profileWeight > 0
+        ? linkedRecipes.find(
+            (r) =>
+              r.kind === "dough" &&
+              r.name.trim().toLowerCase() === dName &&
+              !!r.variantLabel &&
+              Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
+          )
+        : undefined) ??
+      linkedRecipes.find(
+        (r) =>
+          r.kind === "dough" && r.name.trim().toLowerCase() === dName && !!r.variantLabel,
+      );
+    if (!importedRecipe?.variantLabel) continue;
+
+    const variantLabel = importedRecipe.variantLabel.trim();
+    const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
+    if (idx < 0) continue;
+    const variant = familyVariants[idx]!;
+    const already = (variant.customers ?? []).some(
+      (c) =>
+        c.brand.trim().toLowerCase() === profile.brand.trim().toLowerCase() &&
+        c.flavor.trim().toLowerCase() === profile.flavor.trim().toLowerCase(),
+    );
+    if (!already) {
+      familyVariants[idx] = {
+        ...variant,
+        customers: [...(variant.customers ?? []), { brand: profile.brand, flavor: profile.flavor }],
+      };
+    }
+  }
+  return result;
+}
+
+describe("variant customer tagging — weight-based match (bug fix)", () => {
+  // Three variants of one family, each a different doughball weight.
+  const linkedRecipes: ParsedRecipe[] = [
+    {
+      kind: "dough",
+      name: FAMILY,
+      rows: [{ ingredient: "Flour", lbs: 50 }],
+      doughballOz: 10,
+      doughballsPerTray: 24,
+      variantLabel: `11" CRB Recipe`,
+    },
+    {
+      kind: "dough",
+      name: FAMILY,
+      rows: [{ ingredient: "Flour", lbs: 50 }],
+      doughballOz: 16,
+      doughballsPerTray: 18,
+      variantLabel: `14" CRB Recipe`,
+    },
+    {
+      kind: "dough",
+      name: FAMILY,
+      rows: [{ ingredient: "Flour", lbs: 50 }],
+      doughballOz: 22,
+      doughballsPerTray: 12,
+      variantLabel: `16" CRB Recipe`,
+    },
+  ];
+
+  // Build the doughVariants map (mirrors home.tsx spec-commit collection loop).
+  function buildVariants(): Map<string, DoughballVariant[]> {
+    const dv = new Map<string, DoughballVariant[]>();
+    for (const r of linkedRecipes) {
+      if (r.kind !== "dough") continue;
+      const key = r.name.trim().toLowerCase();
+      if (!dv.has(key)) dv.set(key, []);
+      const label = (r.variantLabel ?? r.name).trim();
+      const v: DoughballVariant = { label };
+      if ((r.doughballOz ?? 0) > 0) v.weightOz = r.doughballOz;
+      if ((r.doughballsPerTray ?? 0) > 0) v.perTray = Math.round(r.doughballsPerTray!);
+      if (label && (v.weightOz !== undefined || v.perTray !== undefined)) {
+        dv.get(key)!.push(v);
+      }
+    }
+    return dv;
+  }
+
+  it("each profile is tagged to its OWN weight variant, not always the first", () => {
+    const profiles: ProfileLike[] = [
+      { brand: "SmallBrand", flavor: "Cheese", doughRecipeName: FAMILY, targetDoughballWeight: 10 },
+      { brand: "MedBrand", flavor: "Pepperoni", doughRecipeName: FAMILY, targetDoughballWeight: 16 },
+      { brand: "LargeBrand", flavor: "Supreme", doughRecipeName: FAMILY, targetDoughballWeight: 22 },
+    ];
+
+    const tagged = tagVariantCustomers(linkedRecipes, buildVariants(), profiles);
+    const variants = tagged.get(FAMILY.toLowerCase())!;
+
+    const v11 = variants.find((v) => v.label === `11" CRB Recipe`)!;
+    const v14 = variants.find((v) => v.label === `14" CRB Recipe`)!;
+    const v16 = variants.find((v) => v.label === `16" CRB Recipe`)!;
+
+    // Each profile must land on the variant whose weight matches.
+    expect(v11.customers?.map((c) => c.brand)).toEqual(["SmallBrand"]);
+    expect(v14.customers?.map((c) => c.brand)).toEqual(["MedBrand"]);
+    expect(v16.customers?.map((c) => c.brand)).toEqual(["LargeBrand"]);
+  });
+
+  it("old code (first-match .find) would tag all profiles to the first variant", () => {
+    // Demonstrates the regression the fix addresses: a plain .find() without
+    // weight matching always returns the first recipe (oz=10) regardless of
+    // the profile's actual doughball weight.
+    const buggyFind = (recipes: ParsedRecipe[], dName: string) =>
+      recipes.find((r) => r.kind === "dough" && r.name.trim().toLowerCase() === dName && r.variantLabel);
+
+    const profiles: ProfileLike[] = [
+      { brand: "SmallBrand", flavor: "Cheese", doughRecipeName: FAMILY, targetDoughballWeight: 10 },
+      { brand: "MedBrand", flavor: "Pepperoni", doughRecipeName: FAMILY, targetDoughballWeight: 16 },
+    ];
+
+    // Collect which labels the buggy .find picks for each profile.
+    const buggyLabels = profiles.map((p) => {
+      const r = buggyFind(linkedRecipes, p.doughRecipeName.trim().toLowerCase());
+      return r?.variantLabel ?? null;
+    });
+
+    // Both profiles end up linked to the FIRST variant — demonstrating the bug.
+    expect(buggyLabels).toEqual([`11" CRB Recipe`, `11" CRB Recipe`]);
+  });
+
+  it("weight-based search with tolerance: 10.05 oz matches the 10 oz variant", () => {
+    // Tolerance of ±0.1 oz handles floating-point and rounding differences.
+    const profiles: ProfileLike[] = [
+      { brand: "FloatBrand", flavor: "Thin", doughRecipeName: FAMILY, targetDoughballWeight: 10.05 },
+    ];
+    const tagged = tagVariantCustomers(linkedRecipes, buildVariants(), profiles);
+    const v11 = tagged.get(FAMILY.toLowerCase())!.find((v) => v.label === `11" CRB Recipe`)!;
+    expect(v11.customers?.map((c) => c.brand)).toEqual(["FloatBrand"]);
+  });
+
+  it("falls back to first-listed variant when the profile has no stored weight", () => {
+    // A profile with no weight gets the first variant as before — the bug only
+    // manifests when there IS a known weight that should pick a specific variant.
+    const profiles: ProfileLike[] = [
+      { brand: "NoBrand", flavor: "Cheese", doughRecipeName: FAMILY, targetDoughballWeight: 0 },
+    ];
+    const tagged = tagVariantCustomers(linkedRecipes, buildVariants(), profiles);
+    const v11 = tagged.get(FAMILY.toLowerCase())!.find((v) => v.label === `11" CRB Recipe`)!;
+    // Falls back to first-listed — acceptable since no weight info is available.
+    expect(v11.customers?.map((c) => c.brand)).toEqual(["NoBrand"]);
+  });
+});
+
 describe("mock dough sheet import — one family recipe carries all variants", () => {
   it("snaps all die-size variants onto the family recipe and saves ONE recipe with ALL variants", async () => {
     // The factory already keeps ONE recipe per dough family in the pool.
