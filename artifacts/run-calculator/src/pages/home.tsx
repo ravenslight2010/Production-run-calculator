@@ -9535,29 +9535,15 @@ export default function Home() {
             };
           }
         }
-        // Apply deterministic customer assignments parsed from the dough
-        // procedure sheet header (rows before the ingredient table). These
-        // carry explicit brand+qualifier→flavor mappings that the AI
-        // weight-table parse doesn't capture (e.g. "Lucia's Craft BBQ Chicken
-        // → Basha's Ultra Thin variant"), enabling matchDoughballVariant to
-        // auto-select the correct weight from brand+flavor alone — no die-type
-        // entry needed on the profile.
-        if (specImportPrepared?.doughCustomerAssignments?.length) {
-          for (const [recipeName, variants] of doughVariants) {
-            const enriched = applyDoughCustomerAssignmentsToVariants(
-              variants,
-              specImportPrepared.doughCustomerAssignments,
-              variants,
-            );
-            if (enriched !== variants) doughVariants.set(recipeName, enriched);
-          }
-        }
         // Fold in variant-table entries parsed deterministically from the dough
         // workbook's yield table ("OZ / LBS / YIELD / PER TRAY"). The AI may
         // omit rows whose label name differs from the recipe family (e.g.
         // "CORKY'S 7" DOUGH" on a "BRAND & CORKY'S" shared-formula workbook).
         // We merge missing rows under the ONE family the AI already produced,
         // deduping by case-insensitive label so AI-parsed variants aren't doubled.
+        // IMPORTANT: this must run BEFORE customer assignments are applied so
+        // that all variants — AI-parsed AND table-parsed — receive their
+        // brand+flavor customer entries in the step below.
         if (specImportPrepared?.doughVariantsFromTable?.length) {
           const familyKeys = [...doughVariants.keys()];
           // Only merge when the AI produced exactly one dough family from this
@@ -9579,6 +9565,26 @@ export default function Home() {
             if (toAdd.length > 0) {
               doughVariants.set(familyKey, [...existing, ...toAdd]);
             }
+          }
+        }
+        // Apply deterministic customer assignments parsed from the dough
+        // procedure sheet header (rows before the ingredient table). These
+        // carry explicit brand+qualifier→flavor mappings that the AI
+        // weight-table parse doesn't capture (e.g. "Lucia's Craft BBQ Chicken
+        // → Basha's Ultra Thin variant"), enabling matchDoughballVariant to
+        // auto-select the correct weight from brand+flavor alone — no die-type
+        // entry needed on the profile. Runs AFTER the table-variant merge so
+        // that every variant (AI-parsed and table-parsed) is present when
+        // applyDoughCustomerAssignmentsToVariants resolves the full pool.
+        if (specImportPrepared?.doughCustomerAssignments?.length) {
+          for (const [recipeName, variants] of doughVariants) {
+            const allVariants = [...doughVariants.values()].flat();
+            const enriched = applyDoughCustomerAssignmentsToVariants(
+              variants,
+              specImportPrepared.doughCustomerAssignments,
+              allVariants,
+            );
+            if (enriched !== variants) doughVariants.set(recipeName, enriched);
           }
         }
         void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
