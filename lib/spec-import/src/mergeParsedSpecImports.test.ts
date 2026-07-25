@@ -146,3 +146,101 @@ describe("mergeParsedSpecImports — cross-file collisions merge, not clobber", 
     expect(out.recipes).toEqual(one.recipes);
   });
 });
+
+// ── Duplicate-prevention: overlapping multi-file batches ─────────────────────
+//
+// When two workbooks in one batch describe the same profile (same brand+flavor)
+// or the same recipe (same kind+name), the merge must produce EXACTLY ONE entry
+// regardless of minor name variations — case differences, trailing whitespace —
+// that could slip past a naive string-equality check. An equally important
+// counter-case: a profile that appears ONLY in the first file must not be
+// silently dropped because the second file omits it.
+
+describe("mergeParsedSpecImports — no duplicate profiles or recipes from overlapping files", () => {
+  it("two files with the same brand+flavor profile yield exactly one profile", () => {
+    const out = mergeParsedSpecImports([
+      fileOf([profile({ brand: "Aldo's", flavor: "Cheese", dieType: "12 inch" })]),
+      fileOf([profile({ brand: "Aldo's", flavor: "Cheese", pizzasPerCase: 8 })]),
+    ]);
+    expect(out.profiles).toHaveLength(1);
+    // Both files' data is present in the single merged profile
+    expect(out.profiles[0].dieType).toBe("12 inch");
+    expect(out.profiles[0].pizzasPerCase).toBe(8);
+  });
+
+  it("recipe name differing only in case between two files yields exactly one recipe", () => {
+    const out = mergeParsedSpecImports([
+      fileOf([], [recipe({ name: "House Dough", brand: "Aldo's", flavor: "Cheese" })]),
+      fileOf([], [recipe({ name: "HOUSE DOUGH", brand: "Basha's", flavor: "Pepperoni", rows: [{ ingredient: "Flour", lbs: 60 }] })]),
+    ]);
+    expect(out.recipes).toHaveLength(1);
+    // Both files' brand+flavor ties must be unioned into the single recipe
+    const ties = recipeTargets(out.recipes[0]);
+    expect(ties).toEqual(
+      expect.arrayContaining([
+        { brand: "Aldo's", flavor: "Cheese" },
+        { brand: "Basha's", flavor: "Pepperoni" },
+      ]),
+    );
+  });
+
+  it("recipe name differing only in surrounding whitespace between two files yields exactly one recipe", () => {
+    const out = mergeParsedSpecImports([
+      fileOf([], [recipe({ name: "House Dough ", brand: "Aldo's", flavor: "Cheese" })]),
+      fileOf([], [recipe({ name: " House Dough", brand: "Basha's", flavor: "Sausage", rows: [{ ingredient: "Flour", lbs: 55 }] })]),
+    ]);
+    expect(out.recipes).toHaveLength(1);
+    const ties = recipeTargets(out.recipes[0]);
+    expect(ties).toEqual(
+      expect.arrayContaining([
+        { brand: "Aldo's", flavor: "Cheese" },
+        { brand: "Basha's", flavor: "Sausage" },
+      ]),
+    );
+  });
+
+  it("a profile present only in file A is NOT dropped when file B omits it", () => {
+    // File A has two profiles; file B mentions only one of them.
+    // The profile absent from file B must survive the merge unchanged.
+    const profileA = profile({ brand: "Aldo's", flavor: "Cheese", dieType: "12 inch" });
+    const profileShared = profile({ brand: "Basha's", flavor: "Pepperoni", pizzasPerCase: 6 });
+    const out = mergeParsedSpecImports([
+      fileOf([profileA, profileShared]),
+      fileOf([profile({ brand: "Basha's", flavor: "Pepperoni", sauceOzPerPizza: 3 })]),
+    ]);
+    expect(out.profiles).toHaveLength(2);
+    const aldos = out.profiles.find((p) => p.brand === "Aldo's");
+    expect(aldos).toBeDefined();
+    expect(aldos?.dieType).toBe("12 inch");
+    // The shared profile picked up the update from file B
+    const bashas = out.profiles.find((p) => p.brand === "Basha's");
+    expect(bashas?.sauceOzPerPizza).toBe(3);
+    expect(bashas?.pizzasPerCase).toBe(6);
+  });
+
+  it("same brand+flavor with overlapping recipe names yields one profile and one recipe entry", () => {
+    // Both files describe the same product and point to the same dough recipe
+    // (the recipe name is identical modulo case). The final result must be
+    // exactly one profile and one recipe — no duplicates.
+    const out = mergeParsedSpecImports([
+      fileOf(
+        [profile({ brand: "Lucia", flavor: "Cheese", dieType: "10 inch" })],
+        [recipe({ kind: "dough", name: "Lucia Thin Dough", brand: "Lucia", flavor: "Cheese" })],
+      ),
+      fileOf(
+        [profile({ brand: "Lucia", flavor: "Cheese", sauceOzPerPizza: 2.5 })],
+        [recipe({ kind: "dough", name: "lucia thin dough", brand: "Lucia", flavor: "Cheese", rows: [{ ingredient: "Flour", lbs: 45 }] })],
+      ),
+    ]);
+    expect(out.profiles).toHaveLength(1);
+    expect(out.recipes).toHaveLength(1);
+    // Profile merges both files' fields
+    expect(out.profiles[0].dieType).toBe("10 inch");
+    expect(out.profiles[0].sauceOzPerPizza).toBe(2.5);
+    // Recipe keeps later file's rows, ties union to a single Lucia/Cheese entry
+    expect(out.recipes[0].rows).toEqual([{ ingredient: "Flour", lbs: 45 }]);
+    const ties = recipeTargets(out.recipes[0]);
+    const luciaCount = ties.filter((t) => t.brand === "Lucia" && t.flavor === "Cheese").length;
+    expect(luciaCount).toBe(1);
+  });
+});
