@@ -1040,3 +1040,91 @@ export function addNamedRecipesIfAbsentByName(
   }
   return { merged, added };
 }
+
+/**
+ * Upsert named recipes by name: update existing recipes' components and numeric
+ * doughball fields from the candidate when a name match is found (exact or
+ * near-dup), and append genuinely new ones.
+ *
+ * Preservation rules for matched existing recipes:
+ * - `components`: replaced wholesale when the candidate has any rows (empty
+ *   candidate list = "not stated by the file", so existing rows survive).
+ * - `doughballsPerTray`: updated when candidate provides a non-zero value.
+ * - `doughballWeightOz`: updated when candidate provides a non-zero value;
+ *   a manager-typed weight is preserved when the candidate omits it or has 0.
+ * - All other fields (`notes`, `brand`, `flavors`, `enabled`, `scope`,
+ *   `doughballVariants`) are preserved from the existing recipe.
+ *
+ * Pure. Returns the merged list plus how many were added vs. updated.
+ */
+export function upsertNamedRecipesByName(
+  existing: ReadonlyArray<NamedRecipe>,
+  candidates: ReadonlyArray<NamedRecipe>,
+): { merged: NamedRecipe[]; added: number; updated: number } {
+  const matchExisting = buildNearDupNameMatcher(existing.map((r) => r.name));
+  const nameKeyOf = (name: string): string => (name ?? "").trim().toLowerCase();
+  const byNameKey = new Map<string, NamedRecipe>();
+  for (const r of existing) {
+    const k = nameKeyOf(r.name);
+    if (k && !byNameKey.has(k)) byNameKey.set(k, r);
+  }
+  const haveNames = new Set(existing.map((r) => nameKeyOf(r.name)));
+  const haveIds = new Set(existing.map((r) => r.id));
+
+  const merged: NamedRecipe[] = [...existing];
+  let added = 0;
+  let updated = 0;
+
+  for (const c of candidates) {
+    const nameKey = nameKeyOf(c.name);
+    if (!nameKey) continue;
+
+    // Find existing match: exact name key first, then id, then near-dup.
+    let existingRecipe: NamedRecipe | undefined = byNameKey.get(nameKey);
+    if (!existingRecipe && haveIds.has(c.id)) {
+      existingRecipe = existing.find((r) => r.id === c.id);
+    }
+    if (!existingRecipe) {
+      const nearDupName = matchExisting(c.name);
+      if (nearDupName) existingRecipe = byNameKey.get(nameKeyOf(nearDupName));
+    }
+
+    if (existingRecipe) {
+      // UPDATE existing: replace components when candidate has rows, update
+      // numeric doughball fields when candidate provides non-zero values.
+      const idx = merged.findIndex((r) => r.id === existingRecipe!.id);
+      if (idx < 0) continue;
+      const updatedRecipe: NamedRecipe = {
+        ...existingRecipe,
+        ...(c.components.length > 0 ? { components: c.components } : {}),
+        ...(c.doughballsPerTray != null && c.doughballsPerTray > 0
+          ? { doughballsPerTray: c.doughballsPerTray }
+          : {}),
+        ...(c.doughballWeightOz != null && c.doughballWeightOz > 0
+          ? { doughballWeightOz: c.doughballWeightOz }
+          : {}),
+      };
+      const changed =
+        JSON.stringify(updatedRecipe.components) !==
+          JSON.stringify(existingRecipe.components) ||
+        (updatedRecipe.doughballsPerTray ?? 0) !==
+          (existingRecipe.doughballsPerTray ?? 0) ||
+        (updatedRecipe.doughballWeightOz ?? 0) !==
+          (existingRecipe.doughballWeightOz ?? 0);
+      if (changed) {
+        merged[idx] = updatedRecipe;
+        updated++;
+      }
+      continue;
+    }
+
+    // ADD: genuinely new recipe — not found by any match.
+    haveNames.add(nameKey);
+    haveIds.add(c.id);
+    byNameKey.set(nameKey, c);
+    merged.push(c);
+    added++;
+  }
+
+  return { merged, added, updated };
+}

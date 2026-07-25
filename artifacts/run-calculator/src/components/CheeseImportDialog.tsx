@@ -24,10 +24,15 @@ type Props = {
   prepared: CheeseImportPrepared | null;
   applying: boolean;
   /**
-   * Confirm with the reviewed cheese recipes plus any blend-name aliases the
-   * manual "use existing recipe" picks should be remembered as.
+   * Confirm with the reviewed cheese recipes, blend-name aliases the manual
+   * "use existing recipe" picks should be remembered as, and the ids of absent
+   * recipes the manager chose to remove.
    */
-  onConfirm: (recipesToApply: CheeseRecipe[], newAliases: SpecImportAlias[]) => void;
+  onConfirm: (
+    recipesToApply: CheeseRecipe[],
+    newAliases: SpecImportAlias[],
+    recipesToRemove: string[],
+  ) => void;
 };
 
 type Item = { key: string; candidate: CheeseImportCandidate };
@@ -49,6 +54,8 @@ export default function CheeseImportDialog({
 }: Props) {
   const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Absent-recipe ids the manager wants to remove on confirm.
+  const [removedRecipes, setRemovedRecipes] = useState<Set<string>>(new Set());
   // Keys whose proposed "link to existing recipe" the manager is accepting.
   // Defaults on for every candidate that has a suggested link.
   const [linkOn, setLinkOn] = useState<Set<string>>(new Set());
@@ -104,6 +111,7 @@ export default function CheeseImportDialog({
     } else {
       setItems([]);
       setSelected(new Set());
+      setRemovedRecipes(new Set());
       setLinkOn(new Set());
       setRedirects(new Map());
       setRenames(new Map());
@@ -252,7 +260,7 @@ export default function CheeseImportDialog({
       const rename = renameOf(it);
       if (rename) addAlias(it.candidate.recipe.name.trim(), rename, brand);
     }
-    onConfirm(included.map(resolveItem), newAliases);
+    onConfirm(included.map(resolveItem), newAliases, [...removedRecipes]);
   };
 
   return (
@@ -543,6 +551,48 @@ export default function CheeseImportDialog({
                         <span className="font-medium">{p.ingredient}</span>
                         {p.lbs > 0 ? ` — ${p.lbs} lbs` : ""}{" "}
                         <span className="text-purple-700/80">in {p.blend}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {(prepared.absentRecipes?.length ?? 0) > 0 && (
+                <div
+                  className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
+                  data-testid="cheese-absent-recipes"
+                >
+                  <p className="text-sm font-medium text-amber-700">
+                    No longer in workbook ({prepared.absentRecipes.length})
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700/80">
+                    These saved recipes share a brand with the imported file but are not
+                    in it. Check the boxes to remove them, or leave unchecked to keep them.
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {prepared.absentRecipes.map((r) => (
+                      <li key={r.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`absent-recipe-${r.id}`}
+                          checked={removedRecipes.has(r.id)}
+                          onChange={() =>
+                            setRemovedRecipes((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.id)) next.delete(r.id);
+                              else next.add(r.id);
+                              return next;
+                            })
+                          }
+                          className="h-4 w-4 rounded border-amber-400 accent-amber-600"
+                        />
+                        <label
+                          htmlFor={`absent-recipe-${r.id}`}
+                          className="text-xs text-amber-800 cursor-pointer"
+                        >
+                          {r.name}
+                          {r.brand && <> · {r.brand}</>}
+                        </label>
                       </li>
                     ))}
                   </ul>

@@ -16,6 +16,7 @@
 import {
   normalizeNamedRecipes,
   addNamedRecipesIfAbsentByName,
+  upsertNamedRecipesByName,
   fillNamedRecipeTags,
   fillNamedRecipeDoughballWeights,
   fillNamedRecipeDoughballsPerTray,
@@ -88,7 +89,15 @@ export async function addNamedRecipesToServerIfAbsent(
   weightsByName?: ReadonlyMap<string, number>,
   traysByName?: ReadonlyMap<string, number>,
   variantsByName?: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>,
-): Promise<{ added: number; items: NamedRecipe[] }> {
+  options?: {
+    /**
+     * When true, matched existing recipes have their components and numeric
+     * doughball fields updated from the candidate (upsert semantics).  When
+     * false/absent the old "add-if-absent" behaviour is preserved.
+     */
+    upsertComponents?: boolean;
+  },
+): Promise<{ added: number; updated: number; items: NamedRecipe[] }> {
   const existing = await fetchNamedRecipes(kind);
   // Family guard — the last line of defense for EVERY pool write path (spec
   // import, local→server migration/push): a candidate whose name is only a
@@ -135,17 +144,26 @@ export async function addNamedRecipesToServerIfAbsent(
       remappedTrays.set(familyKey, perTray);
     }
   }
-  const { merged, added } = addNamedRecipesIfAbsentByName(existing, filtered);
+  const mergeResult = options?.upsertComponents
+    ? upsertNamedRecipesByName(existing, filtered)
+    : { ...addNamedRecipesIfAbsentByName(existing, filtered), updated: 0 };
+  const { merged, added, updated } = mergeResult;
+  // When upsertComponents is active, `merged` already carries the updated
+  // components for existing recipes — use it as the base for the overlay chain
+  // so tag/weight/tray fills layer on top of the NEW components, not on top of
+  // the pre-upsert snapshot (`existing`). When not upserting, use `existing` as
+  // before (new additions in `merged` are folded in via existingChainById below).
+  const overlayBase = options?.upsertComponents ? merged : existing;
   const tagged =
     tagsByName && tagsByName.size > 0
-      ? fillNamedRecipeTags(existing, tagsByName)
+      ? fillNamedRecipeTags(overlayBase, tagsByName)
       : [];
   // Dough only: backfill learned doughball weights onto EXISTING pool recipes
   // whose weight is still unset (never overriding a manager's explicit value).
   const afterTags =
     tagged.length > 0
-      ? existing.map((r) => tagged.find((t) => t.id === r.id) ?? r)
-      : existing;
+      ? overlayBase.map((r) => tagged.find((t) => t.id === r.id) ?? r)
+      : overlayBase;
   const weighted =
     kind === "dough" && remappedWeights.size > 0
       ? fillNamedRecipeDoughballWeights(afterTags, remappedWeights)
@@ -164,27 +182,32 @@ export async function addNamedRecipesToServerIfAbsent(
       ? afterWeights.map((r) => trayed.find((t) => t.id === r.id) ?? r)
       : afterWeights;
   // Dough only: additively merge learned per-VARIANT doughball numbers
-  // ("11\" CRB" → weight/tray) into the family recipe's variants list — for
-  // NEW drafts too (a first import mints the family recipe and its variants
-  // together), so overlay the existing-chain onto the merged list first.
+  // ("11\" CRB" → weight/tray) into the family recipe's variants list.
+  // When upsertComponents is active, afterTrays is already based on `merged`
+  // (complete list = updated-existing + new additions), so mergedCurrent IS
+  // afterTrays. When not upserting, afterTrays is based on `existing` and we
+  // overlay it onto `merged` to re-introduce new additions.
   const existingChainById = new Map(afterTrays.map((r) => [r.id, r]));
-  const mergedCurrent = merged.map((r) => existingChainById.get(r.id) ?? r);
+  const mergedCurrent = options?.upsertComponents
+    ? afterTrays
+    : merged.map((r) => existingChainById.get(r.id) ?? r);
   const varied =
     kind === "dough" && (variantsByName?.size ?? 0) > 0
       ? mergeNamedRecipeDoughballVariants(mergedCurrent, variantsByName!)
       : [];
   if (
     added === 0 &&
+    updated === 0 &&
     tagged.length === 0 &&
     weighted.length === 0 &&
     trayed.length === 0 &&
     varied.length === 0
   )
-    return { added: 0, items: existing };
+    return { added: 0, updated: 0, items: existing };
   const variedById = new Map(varied.map((r) => [r.id, r]));
   const toSave = mergedCurrent.map((r) => variedById.get(r.id) ?? r);
   const items = await saveNamedRecipes(kind, toSave);
-  return { added, items };
+  return { added, updated, items };
 }
 
 export async function deleteNamedRecipes(

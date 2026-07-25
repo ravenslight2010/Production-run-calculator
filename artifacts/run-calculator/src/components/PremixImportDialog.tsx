@@ -21,12 +21,14 @@ type Props = {
   applying: boolean;
   /**
    * Confirm with the reviewed mixes (and their pull-note freezer settings),
-   * plus any name mappings the "use existing mix" picks should be remembered as.
+   * plus any name mappings the "use existing mix" picks should be remembered as,
+   * and the ids of absent mixes the manager chose to remove.
    */
   onConfirm: (
     mixesToApply: Mix[],
     freezerPulls: PremixFreezerPull[],
     newAliases: SpecImportAlias[],
+    mixesToRemove: string[],
   ) => void;
 };
 
@@ -59,6 +61,8 @@ export default function PremixImportDialog({
   // Editable per-mix review list and the selected (included) stable keys.
   const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Absent-mix ids the manager wants to remove on confirm.
+  const [removedMixes, setRemovedMixes] = useState<Set<string>>(new Set());
   // "Use existing mix instead" picks: stable key → existing mix id ("" = none).
   const [redirects, setRedirects] = useState<Map<string, string>>(new Map());
   // Merge-re-import rows: this sheet block's name was previously MERGED onto an
@@ -118,6 +122,7 @@ export default function PremixImportDialog({
     } else {
       setItems([]);
       setSelected(new Set());
+      setRemovedMixes(new Set());
       setRedirects(new Map());
       setMergedAwayKeys(new Set());
     }
@@ -247,7 +252,7 @@ export default function PremixImportDialog({
       }
     }
     // Prep-only blocks contribute their pull notes unconditionally.
-    onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases);
+    onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases, [...removedMixes]);
   };
 
   return (
@@ -539,6 +544,49 @@ export default function PremixImportDialog({
                             stays in mix — prep before use
                           </span>
                         )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {(prepared.absentMixes?.length ?? 0) > 0 && (
+                <div
+                  className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
+                  data-testid="premix-absent-mixes"
+                >
+                  <p className="text-sm font-medium text-amber-700">
+                    No longer in workbook ({prepared.absentMixes.length})
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700/80">
+                    These saved mixes share a brand with the imported file but are not in
+                    it. Check the boxes to remove them, or leave unchecked to keep them.
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {prepared.absentMixes.map((m) => (
+                      <li key={m.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`absent-mix-${m.id}`}
+                          checked={removedMixes.has(m.id)}
+                          onChange={() =>
+                            setRemovedMixes((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(m.id)) next.delete(m.id);
+                              else next.add(m.id);
+                              return next;
+                            })
+                          }
+                          className="h-4 w-4 rounded border-amber-400 accent-amber-600"
+                        />
+                        <label
+                          htmlFor={`absent-mix-${m.id}`}
+                          className="text-xs text-amber-800 cursor-pointer"
+                        >
+                          {m.name}
+                          {m.brand && <> · {m.brand}</>}
+                          {m.flavor && <> · {m.flavor}</>}
+                        </label>
                       </li>
                     ))}
                   </ul>

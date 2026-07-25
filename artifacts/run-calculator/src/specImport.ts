@@ -1173,12 +1173,12 @@ async function findReusableParse(
  * was first imported. newAliases/flagged stay empty: nothing new was learned
  * and any reviewer flags were already surfaced on the original import.
  */
-function buildReusedPrepared(
+async function buildReusedPrepared(
   snapshotData: ParsedSpecImport,
   known: ReturnType<typeof loadSpecImportKnown>,
   aliases: SpecImportAlias[],
   sourceHash: string | undefined,
-): SpecImportPrepared {
+): Promise<SpecImportPrepared> {
   // Remap merged/renamed-away brand+flavor names through the learned aliases
   // FIRST — a snapshot saved before a merge/rename still carries the old name,
   // which is now tombstoned and would otherwise be silently dropped (or, with
@@ -1188,7 +1188,9 @@ function buildReusedPrepared(
     importProfileIsTombstoned,
     recipeNameIsTombstoned,
   );
-  const parsed = dedupeSpecImportCheeseRecipes(
+  // Apply blend-name aliases and standard canonicalization so a reused parse
+  // sees the same name normalization as a fresh parse.
+  let working = dedupeSpecImportCheeseRecipes(
     applySpecImportBlendNameAliases(
       canonicalizeSpecImportCheeseRecipeNames(
         canonicalizeSpecImportNamedRecipeNames(kept),
@@ -1196,13 +1198,57 @@ function buildReusedPrepared(
       aliases,
     ),
   );
-  const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
-  const discrepancies = buildDiscrepancies(parsed);
+
+  // Re-run the DETERMINISTIC snap-to-existing passes against the CURRENT DB
+  // state (Step 6: dedup/link always fires, even on cached parses). The AI
+  // match pass is intentionally skipped — it ran on the original import and
+  // re-running it risks drift on unchanged data. The deterministic passes are
+  // safe to repeat: they only rename/link when the match is exact or
+  // near-exact by loose key, they never change quantities.
+  working = crossFillSpecImport(working).parsed;
+  working = linkSpecImportDieTypesToExisting(working, known.dieTypes ?? []);
+  working = canonicalizeSpecImportNamedRecipeNames(working);
+  const linkSuggestions: SpecImportLinkSuggestion[] = [];
+  let doughUniverse = known.doughRecipes ?? [];
+  let doughPoolRecipes: Array<{ name: string; rows?: Array<{ ingredient?: string | null }> }> = [];
+  try {
+    const pool = await fetchNamedRecipes("dough");
+    doughUniverse = [...new Set([...doughUniverse, ...pool.map((r) => r.name)])];
+    doughPoolRecipes = pool.map((r) => ({
+      name: r.name,
+      rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+    }));
+  } catch {
+    // Best-effort (offline) — local names still match.
+  }
+  working = linkSpecImportNamedRecipesToExisting(working, "dough", doughUniverse, {
+    existingRecipes: doughPoolRecipes,
+    suggestions: linkSuggestions,
+  });
+  let sauceUniverse = known.sauceRecipes ?? [];
+  let saucePoolRecipes: Array<{ name: string; rows?: Array<{ ingredient?: string | null }> }> = [];
+  try {
+    const pool = await fetchNamedRecipes("sauce");
+    sauceUniverse = [...new Set([...sauceUniverse, ...pool.map((r) => r.name)])];
+    saucePoolRecipes = pool.map((r) => ({
+      name: r.name,
+      rows: (r.components ?? []).map((c) => ({ ingredient: c.ingredient })),
+    }));
+  } catch {
+    // Best-effort (offline) — local names still match.
+  }
+  working = linkSpecImportNamedRecipesToExisting(working, "sauce", sauceUniverse, {
+    existingRecipes: saucePoolRecipes,
+    suggestions: linkSuggestions,
+  });
+
+  const summary = summarizeSpecImport(working, profileExistsForImport, recipeExistsForImport);
+  const discrepancies = buildDiscrepancies(working);
   const reuseNote =
     "This exact file was imported before — reused the earlier read (no new AI parse), so unchanged values stay identical to the previous import.";
-  const note = parsed.note ? `${parsed.note}\n${reuseNote}` : reuseNote;
+  const note = working.note ? `${working.note}\n${reuseNote}` : reuseNote;
   return {
-    parsed,
+    parsed: working,
     summary,
     newAliases: [],
     flagged: [],
@@ -1210,7 +1256,10 @@ function buildReusedPrepared(
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
-    aliasLinkSuggestions: buildAliasLinkSuggestions(aliases),
+    aliasLinkSuggestions: {
+      ...heuristicLinkSuggestionMap(linkSuggestions),
+      ...buildAliasLinkSuggestions(aliases),
+    },
     ...(sourceHash ? { sourceHash } : {}),
     note,
   };

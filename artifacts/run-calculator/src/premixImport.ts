@@ -89,6 +89,14 @@ export type PremixImportPrepared = {
    * pulls via `freezerPulls`.
    */
   prepItems: PremixPrepItem[];
+  /**
+   * Existing mixes whose brand appears in the imported set but whose id is NOT
+   * in the import — they were likely removed from the workbook. Shown in the
+   * review dialog so the manager can choose to remove them. An absent mix whose
+   * brand does NOT appear in the import at all is not listed (we can't infer
+   * the file's scope for that brand).
+   */
+  absentMixes: { id: string; name: string; brand: string; flavor: string }[];
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
   note?: string;
@@ -233,6 +241,19 @@ export async function preparePremixImport(
   const summary = summarizePremixImport(mixes, (id) => existingIds.has(id));
   const candidates = buildPremixCandidates(mixes, (id) => existingIds.has(id));
   const newAliases = collectPremixAliases(grounded);
+
+  // Existing mixes whose brand appears in the import but whose id is NOT in
+  // the imported set — they were likely removed from the workbook.
+  const importedBrands = new Set(mixes.map((m) => (m.brand ?? "").trim().toLowerCase()));
+  const importedMixIds = new Set(mixes.map((m) => m.id));
+  const absentMixes = existing
+    .filter(
+      (m) =>
+        importedBrands.has((m.brand ?? "").trim().toLowerCase()) &&
+        !importedMixIds.has(m.id),
+    )
+    .map((m) => ({ id: m.id, name: m.name, brand: m.brand, flavor: m.flavor }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   // Pick out the "Pull N days early" ingredient notes as freezer-pull settings
   // (keyed by the same deterministic ids the candidates carry at this point).
   const freezerPulls = collectPremixFreezerPulls(groundedMixes);
@@ -266,6 +287,7 @@ export async function preparePremixImport(
     redirectSuggestions,
     freezerPulls,
     prepItems,
+    absentMixes,
     ...(note ? { note } : {}),
   };
 }
@@ -279,30 +301,38 @@ export type PremixCommitResult = {
 
 /**
  * Apply a prepared premix import: upsert the manager-approved mixes by id,
- * set any freezer-pull settings the sheets' pull notes suggested for the
- * included mixes, then persist new aliases. `mixesToApply` is the reviewed
- * selection from the dialog (already deselected/re-matched as the manager
- * chose); `freezerPulls` is the matching reviewed pull-note selection.
+ * optionally remove mixes the manager flagged as absent, set any freezer-pull
+ * settings the sheets' pull notes suggested for the included mixes, then
+ * persist new aliases. `mixesToApply` is the reviewed selection from the
+ * dialog (already deselected/re-matched as the manager chose); `freezerPulls`
+ * is the matching reviewed pull-note selection. `mixesToRemove` is the set of
+ * mix ids the manager confirmed for removal from the absent-mixes list.
  */
 export async function commitPremixImport(
   prepared: PremixImportPrepared,
   mixesToApply: ReadonlyArray<Mix>,
   freezerPulls: ReadonlyArray<PremixFreezerPull> = [],
   extraAliases: ReadonlyArray<SpecImportAlias> = [],
+  mixesToRemove: ReadonlyArray<string> = [],
 ): Promise<PremixCommitResult> {
-  // Nothing to apply at all — no mixes AND no pull-note reminders (e.g. a
-  // prep-only sheet with no pull notes). Bail before touching the server.
-  if (mixesToApply.length === 0 && freezerPulls.length === 0)
+  // Nothing to apply at all — no mixes, no pull-note reminders, no removals.
+  if (mixesToApply.length === 0 && freezerPulls.length === 0 && mixesToRemove.length === 0)
     return { freezerPullCount: 0 };
 
   // A premix sheet can be entirely prep/pull-early rows (no per-pizza mixes).
   // In that case there are no mixes to save, but its pull-note reminders below
   // must still persist — so only the mix write is gated on having mixes.
-  if (mixesToApply.length > 0) {
+  if (mixesToApply.length > 0 || mixesToRemove.length > 0) {
     // Re-read current mixes right before writing so we merge onto the freshest
     // list (another manager may have edited mixes since prepare).
     const existing = await fetchMixes();
-    const merged = mergePremixIntoMixes(existing, mixesToApply);
+    const removeSet = new Set(mixesToRemove);
+    const afterRemoval = mixesToRemove.length > 0
+      ? existing.filter((m) => !removeSet.has(m.id))
+      : existing;
+    const merged = mixesToApply.length > 0
+      ? mergePremixIntoMixes(afterRemoval, mixesToApply)
+      : afterRemoval;
     await saveMixes(merged);
 
     // Snapshot the imported mixes server-side so the Mixes section can later

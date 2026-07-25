@@ -4534,16 +4534,16 @@ export default function Home() {
         const drafts = plans.sauce.additions
           .map((n) => namedRecipeFromDraft({ name: n, components: sauceRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "sauce" }))
           .filter((r): r is NamedRecipe => r !== null);
-        const { added, items } = await addNamedRecipesToServerIfAbsent("sauce", drafts);
-        if (added > 0) cycleCountQc.setQueryData(["sauceRecipes"], items);
+        const { added, updated, items } = await addNamedRecipesToServerIfAbsent("sauce", drafts, undefined, undefined, undefined, undefined, { upsertComponents: true });
+        if (added > 0 || updated > 0) cycleCountQc.setQueryData(["sauceRecipes"], items);
         reconcile("sauce", items.map((r) => r.name), ["sauce", "recipe"]);
       }
       if (plans.dough.additions.length > 0) {
         const drafts = plans.dough.additions
           .map((n) => namedRecipeFromDraft({ name: n, components: doughRows.get(n.trim().toLowerCase()) ?? [], idPrefix: "dough" }))
           .filter((r): r is NamedRecipe => r !== null);
-        const { added, items } = await addNamedRecipesToServerIfAbsent("dough", drafts);
-        if (added > 0) cycleCountQc.setQueryData(["doughRecipes"], items);
+        const { added, updated, items } = await addNamedRecipesToServerIfAbsent("dough", drafts, undefined, undefined, undefined, undefined, { upsertComponents: true });
+        if (added > 0 || updated > 0) cycleCountQc.setQueryData(["doughRecipes"], items);
         reconcile("dough", items.map((r) => r.name), ["dough", "recipe"]);
       }
       if (plans.cheese.additions.length > 0) {
@@ -9582,6 +9582,7 @@ export default function Home() {
     mixesToApply: Mix[],
     freezerPulls: PremixFreezerPull[],
     newAliases: SpecImportAlias[],
+    mixesToRemove: string[] = [],
   ) {
     if (!premixImportPrepared) return;
     setPremixImportApplying(true);
@@ -9591,6 +9592,7 @@ export default function Home() {
         mixesToApply,
         freezerPulls,
         newAliases,
+        mixesToRemove,
       );
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
@@ -9746,11 +9748,12 @@ export default function Home() {
   async function handleCheeseImportConfirm(
     recipesToApply: CheeseRecipe[],
     newAliases: SpecImportAlias[],
+    recipesToRemove: string[] = [],
   ) {
     if (!cheeseImportPrepared) return;
     setCheeseImportApplying(true);
     try {
-      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases);
+      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
       void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });

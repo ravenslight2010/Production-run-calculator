@@ -61,6 +61,14 @@ export type CheeseImportPrepared = {
    * dialog can offer a per-recipe "Use existing recipe instead" redirect picker.
    */
   existingPool: (CheeseLinkTarget & { brand: string })[];
+  /**
+   * Existing cheese recipes whose brand appears in the imported set but whose
+   * id is NOT in the import — they were likely removed from the workbook. Shown
+   * in the review dialog so the manager can choose to remove them. A recipe
+   * whose brand does NOT appear in the import is not listed (we can't infer the
+   * file's scope for that brand).
+   */
+  absentRecipes: (CheeseLinkTarget & { brand: string })[];
   /** Uploaded filename(s) for this import. */
   sourceNames?: string[];
   note?: string;
@@ -161,6 +169,19 @@ export async function prepareCheeseImport(
   const recipes = [...byId.values()];
   const existingIds = new Set(existing.map((r) => r.id));
   const summary = summarizeCheeseImport(recipes, (id) => existingIds.has(id));
+
+  // Existing cheese recipes whose brand appears in the imported set but whose
+  // id is NOT in the import — likely removed from the workbook.
+  const importedBrands = new Set(recipes.map((r) => (r.brand ?? "").trim().toLowerCase()));
+  const importedRecipeIds = new Set(recipes.map((r) => r.id));
+  const absentRecipes = existing
+    .filter(
+      (r) =>
+        importedBrands.has((r.brand ?? "").trim().toLowerCase()) &&
+        !importedRecipeIds.has(r.id),
+    )
+    .map((r) => ({ id: r.id, name: r.name, brand: r.brand }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   // Attach "link to existing" suggestions so a blend written in shorthand snaps
   // onto the canonical recipe a spec-sheet import already created (same brand,
   // different name), instead of forking a duplicate. The dialog lets the manager
@@ -202,6 +223,7 @@ export async function prepareCheeseImport(
     existingPool: existing
       .map((r) => ({ id: r.id, name: r.name, brand: r.brand }))
       .sort((a, b) => a.name.localeCompare(b.name)),
+    absentRecipes,
     ...(note ? { note } : {}),
   };
 }
@@ -214,17 +236,25 @@ export type CheeseCommitResult = {
 /**
  * Apply a prepared cheese import: upsert the manager-approved recipes by id
  * through the existing /api/cheese-recipes path. `recipesToApply` is the
- * reviewed selection from the dialog. Re-reads current recipes right before
- * writing so we merge onto the freshest list.
+ * reviewed selection from the dialog. `recipesToRemove` is the set of recipe
+ * ids the manager confirmed for removal from the absent-recipes list.
+ * Re-reads current recipes right before writing so we merge onto the freshest list.
  */
 export async function commitCheeseImport(
   _prepared: CheeseImportPrepared,
   recipesToApply: ReadonlyArray<CheeseRecipe>,
   newAliases: ReadonlyArray<SpecImportAlias> = [],
+  recipesToRemove: ReadonlyArray<string> = [],
 ): Promise<CheeseCommitResult> {
-  if (recipesToApply.length === 0) return { count: 0 };
+  if (recipesToApply.length === 0 && recipesToRemove.length === 0) return { count: 0 };
   const existing = await fetchCheeseRecipes();
-  const merged = mergeCheeseRecipes(existing, recipesToApply);
+  const removeSet = new Set(recipesToRemove);
+  const afterRemoval = recipesToRemove.length > 0
+    ? existing.filter((r) => !removeSet.has(r.id))
+    : existing;
+  const merged = recipesToApply.length > 0
+    ? mergeCheeseRecipes(afterRemoval, recipesToApply)
+    : afterRemoval;
   await saveCheeseRecipes(merged);
   // Remember the review's manual "use existing recipe" picks as blend-name
   // aliases so the next import of the same sheet pre-suggests the same links.

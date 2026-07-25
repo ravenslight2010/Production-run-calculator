@@ -88,6 +88,15 @@ export type ParsedProfile = {
   sauceBarrelLbs?: number;
   applicators: ParsedApplicator[];
   pepperonis: ParsedPepperoni[];
+  /**
+   * True when the parsed spec block explicitly included an `applicators` key in
+   * the AI response (even if the resulting array is empty after sanitization).
+   * Used by {@link mergeProfilePair} to distinguish "file says no applicators"
+   * from "file omitted the applicator section entirely" — an explicitly-empty
+   * list from the new file should replace the old list wholesale, while an
+   * absent key should keep the old list.
+   */
+  applicatorsStated?: boolean;
 };
 
 /** One brand+flavor profile a recipe should be tied to. */
@@ -336,7 +345,15 @@ function mergeProfilePair(
     merged.applicators = unionApplicators(prev.applicators ?? [], next.applicators ?? []);
     merged.pepperonis = unionPepperonis(prev.pepperonis ?? [], next.pepperonis ?? []);
   } else {
-    merged.applicators = next.applicators?.length ? next.applicators : prev.applicators ?? [];
+    // Replace mode: use next's applicators when it explicitly stated them (via
+    // applicatorsStated sentinel) OR when the list is non-empty. Fall back to
+    // prev only when next neither stated nor provided any applicators — an AI
+    // parse that omitted the key entirely should not blank an earlier file's
+    // applicator data.
+    merged.applicators =
+      next.applicatorsStated || next.applicators?.length
+        ? (next.applicators ?? [])
+        : (prev.applicators ?? []);
     merged.pepperonis = next.pepperonis?.length ? next.pepperonis : prev.pepperonis ?? [];
   }
   return merged;
@@ -4295,6 +4312,13 @@ export function sanitizeParsedSpecImport(
       groundingWarnings.push({ brand, flavor, message });
     }
     const applicators: ParsedApplicator[] = [];
+    // Set true when the AI response explicitly included an `applicators` key,
+    // even if the resulting array is empty after sanitization. This sentinel
+    // lets mergeProfilePair replace mode distinguish "file says no applicators"
+    // (applicatorsStated=true, empty array) from "file omitted the section"
+    // (applicatorsStated absent), so a product with its last applicator removed
+    // replaces the old list instead of silently keeping it.
+    const applicatorsStated = "applicators" in o && Array.isArray(o.applicators);
     const rawApps = Array.isArray(o.applicators) ? o.applicators : [];
     for (const a of rawApps.slice(0, lim.maxApplicators)) {
       if (!a || typeof a !== "object") continue;
@@ -4351,6 +4375,7 @@ export function sanitizeParsedSpecImport(
       });
     }
     const profile: ParsedProfile = { brand, flavor, applicators, pepperonis };
+    if (applicatorsStated) profile.applicatorsStated = true;
     const die = clampName(o.dieType, lim.maxNameChars);
     if (die) profile.dieType = die;
     const sauceOz = num(o.sauceOzPerPizza);
