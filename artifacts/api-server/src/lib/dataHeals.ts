@@ -2342,33 +2342,42 @@ async function runBrandDriftRename(): Promise<void> {
 
 // ── Heal: Populate customers arrays on CRB Dough Lucia's Craft variants ─────
 // Before this heal, CRB Dough doughball variants had no customers arrays —
-// only descriptive labels ("Lucia's Craft CRB Thick", "Lucia's Craft CRB
-// Heavy Plus"). matchDoughballVariant's customers-based priority therefore
-// never fired, falling through to the die-number fallback, which also fails
-// because neither label contains a die number. The result: variant matching
-// returned null, poolWeight fell back to 0, and the pKey preset root weight
-// (13 oz) was applied instead of the correct 13.8 oz for Lucia's Craft BBQ
-// and other confirmed 13.8 oz flavors.
-// This heal populates customers on the two Lucia's Craft CRB Dough variants
-// so matching correctly selects the 13.8 oz "CRB Thick" for the confirmed
-// flavor set, while the 12 oz "Heavy Plus" catches any remaining Lucia's
-// Craft flavor via a brand-level catch-all.
-
+// Background: after spec import, Lucia's Craft BBQ Chicken received the wrong
+// doughball weight because no customers arrays were populated on CRB Dough
+// variants, so matchDoughballVariant's customers-based priority never fired.
+//
+// v1 attempted to fix this but used wrong source data: it put BBQ Chicken and
+// Sweet Chili Garden into the 13.8 oz "CRB Thick" variant, but the actual
+// CRB Dough Mixing Procedure (Rev. 39, 07/21/2026) shows those flavors use
+// the "CRB Ultra Thin" variant (7.8 oz, labeled "Basha's Ultra Thin" in DB).
+// v1 heal ID is claimed in the DB — the function no longer exists but the ID
+// is kept here for traceability.
 const CRB_LUCIA_CUSTOMERS_HEAL_ID = "crb-dough-lucia-variant-customers-v1";
 
-// Known 13.8 oz Lucia's Craft CRB Dough flavors (from the 2026-07-21 audit).
-const LUCIA_CRAFT_CRB_THICK_FLAVORS = [
+// v2: corrected assignments sourced directly from the CRB Dough Mixing
+// Procedure (Rev. 39, 07/21/2026) and Lucia's Craft Spec Sheet (Rev. 03,
+// 07/23/2026):
+//   "Lucia's Craft CRB Ultra Thin: Sweet Chili Garden, Backyard BBQ Chicken"
+//     → 7.8 oz doughball, maps to the "Basha's Ultra Thin" label in the DB
+//   "Lucia's Craft CRB Heavy Plus: Four Cheese Meltdown"
+//     → 12 oz doughball, maps to "Lucia's Craft CRB Heavy Plus" label
+//   "Lucia's Craft CRB Thick" (13.8 oz) — NO Lucia's Craft flavors listed
+//
+// v1 damaged: added all four flavors to the 13.8 oz Thick variant. v2 undoes
+// that and places each flavor on the correct variant.
+const CRB_LUCIA_CUSTOMERS_V2_HEAL_ID = "crb-dough-lucia-variant-customers-v2";
+
+// Lucia's Craft flavors that use the CRB Ultra Thin variant (7.8 oz doughball).
+const LUCIA_CRAFT_CRB_ULTRA_THIN_FLAVORS = [
   "Backyard BBQ Chicken",
-  "Four Cheese Meltdown",
-  "House DLUX",
   "Sweet Chili Garden",
 ];
 
-async function runCrbLuciaVariantCustomers(): Promise<void> {
+async function runCrbLuciaVariantCustomersV2(): Promise<void> {
   await db.transaction(async (tx) => {
     const claimed = await tx
       .insert(dataHealsTable)
-      .values({ id: CRB_LUCIA_CUSTOMERS_HEAL_ID })
+      .values({ id: CRB_LUCIA_CUSTOMERS_V2_HEAL_ID })
       .onConflictDoNothing({ target: dataHealsTable.id })
       .returning({ id: dataHealsTable.id });
     if (claimed.length === 0) return;
@@ -2378,7 +2387,7 @@ async function runCrbLuciaVariantCustomers(): Promise<void> {
       specImportNamedRecipeNamesEqual(d.name, "CRB Dough"),
     );
     if (crbRows.length === 0) {
-      logger.info({ heal: CRB_LUCIA_CUSTOMERS_HEAL_ID }, "No CRB Dough found — skipped");
+      logger.info({ heal: CRB_LUCIA_CUSTOMERS_V2_HEAL_ID }, "No CRB Dough found — skipped");
       return;
     }
 
@@ -2387,40 +2396,75 @@ async function runCrbLuciaVariantCustomers(): Promise<void> {
       const variants = normalizeDoughballVariants(row.doughballVariants);
       let changed = false;
       const next = variants.map((v) => {
-        // Identify the Lucia's Craft CRB Thick variant (~13.8 oz).
+        // "Basha's Ultra Thin" variant (~7.8 oz): used by Lucia's Craft BBQ
+        // Chicken and Sweet Chili Garden (the "CRB Ultra Thin" variant per the
+        // mixing procedure). Add these two specific flavors.
         if (
-          Math.abs(Number(v.weightOz ?? 0) - 13.8) < 0.15 &&
-          /lucia/i.test(v.label) &&
-          /thick/i.test(v.label)
+          Math.abs(Number(v.weightOz ?? 0) - 7.8) < 0.15 &&
+          /basha|ultra[\s_-]*thin/i.test(v.label)
         ) {
-          const existing = v.customers ?? [];
-          const additions = LUCIA_CRAFT_CRB_THICK_FLAVORS.filter(
+          const withoutLucia = (v.customers ?? []).filter(
+            (c) => c.brand.trim().toLowerCase() !== "lucia's craft",
+          );
+          const additions = LUCIA_CRAFT_CRB_ULTRA_THIN_FLAVORS.filter(
             (fl) =>
-              !existing.some(
+              !withoutLucia.some(
                 (c) =>
                   c.brand.trim().toLowerCase() === "lucia's craft" &&
                   c.flavor.trim().toLowerCase() === fl.trim().toLowerCase(),
               ),
           ).map((fl) => ({ brand: "Lucia's Craft", flavor: fl }));
-          if (additions.length === 0) return v;
+          if (
+            additions.length === 0 &&
+            withoutLucia.length === (v.customers ?? []).length
+          ) {
+            return v;
+          }
           changed = true;
-          return { ...v, customers: [...existing, ...additions] };
+          return { ...v, customers: [...withoutLucia, ...additions] };
         }
-        // Identify the Lucia's Craft CRB Heavy Plus variant (~12 oz).
+        // "Lucia's Craft CRB Heavy Plus" variant (~12 oz): used only by Four
+        // Cheese Meltdown (specific entry, not a catch-all). Replace any v1
+        // catch-all with the correct specific flavor.
         if (
           Math.abs(Number(v.weightOz ?? 0) - 12) < 0.15 &&
           /lucia/i.test(v.label) &&
           /heavy/i.test(v.label)
         ) {
-          const existing = v.customers ?? [];
-          const hasCatchAll = existing.some(
+          const withoutLucia = (v.customers ?? []).filter(
+            (c) => c.brand.trim().toLowerCase() !== "lucia's craft",
+          );
+          const alreadyCorrect = withoutLucia.some(
             (c) =>
               c.brand.trim().toLowerCase() === "lucia's craft" &&
-              c.flavor.trim() === "",
+              c.flavor.trim().toLowerCase() === "four cheese meltdown",
           );
-          if (hasCatchAll) return v;
+          if (alreadyCorrect && withoutLucia.length === (v.customers ?? []).length) {
+            return v;
+          }
           changed = true;
-          return { ...v, customers: [...existing, { brand: "Lucia's Craft", flavor: "" }] };
+          return {
+            ...v,
+            customers: [
+              ...withoutLucia,
+              { brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" },
+            ],
+          };
+        }
+        // "Lucia's Craft CRB Thick" variant (~13.8 oz): NO Lucia's Craft flavor
+        // uses this variant per the mixing procedure. Remove all Lucia's Craft
+        // entries that v1 wrongly added here.
+        if (
+          Math.abs(Number(v.weightOz ?? 0) - 13.8) < 0.15 &&
+          /lucia/i.test(v.label) &&
+          /thick/i.test(v.label)
+        ) {
+          const filtered = (v.customers ?? []).filter(
+            (c) => c.brand.trim().toLowerCase() !== "lucia's craft",
+          );
+          if (filtered.length === (v.customers ?? []).length) return v;
+          changed = true;
+          return { ...v, customers: filtered };
         }
         return v;
       });
@@ -2437,7 +2481,7 @@ async function runCrbLuciaVariantCustomers(): Promise<void> {
       updated++;
     }
 
-    logger.info({ heal: CRB_LUCIA_CUSTOMERS_HEAL_ID, updated }, "Data heal applied");
+    logger.info({ heal: CRB_LUCIA_CUSTOMERS_V2_HEAL_ID, updated }, "Data heal applied");
   });
 }
 
@@ -2465,5 +2509,5 @@ export async function runDataHeals(): Promise<void> {
   await runNaturalPepNameDepoison();
   await runBrandFanDoughDepoison();
   await runBrandDriftRename();
-  await runCrbLuciaVariantCustomers();
+  await runCrbLuciaVariantCustomersV2();
 }
