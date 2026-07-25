@@ -1382,6 +1382,12 @@ export function linkSpecImportNamedRecipesToExisting(
     opts.suggestions.push({ kind, importedName, existingName });
   };
   let changed = false;
+  // Tracks near-exact renames that were auto-applied to recipes so the profile
+  // field update pass below can propagate the same rename onto any profile
+  // whose sauceName/doughName matched the old recipe name. matchCleaned only
+  // catches layer-1 (exact-loose-key) hits; near-exact auto-renames are
+  // layer-2/3 and wouldn't be caught without this map.
+  const nearExactApplied = new Map<string, string>(); // loose-key(old) → new name
   const recipes = (parsed.recipes ?? []).map((r) => {
     const name = (r.name ?? "").trim();
     if (r.kind !== kind || !name) return r;
@@ -1412,6 +1418,8 @@ export function linkSpecImportNamedRecipesToExisting(
           if (opts.autoLinkedRenames) {
             opts.autoLinkedRenames.push({ importedName: name, existingName: nearDupCand });
           }
+          const key = specImportNameMatchKey(name);
+          if (key) nearExactApplied.set(key, nearDupCand);
           if (kind === "dough" && !r.variantLabel) {
             return { ...r, name: nearDupCand, variantLabel: name };
           }
@@ -1541,7 +1549,10 @@ export function linkSpecImportNamedRecipesToExisting(
   const matchProfileName = (nm: string): string | null => {
     const full = matchCleaned(nm);
     if (full) return full;
-    const collapsed = collapsedRenames.get(specImportNameMatchKey(nm));
+    const key = specImportNameMatchKey(nm);
+    const nearApplied = key ? nearExactApplied.get(key) : undefined;
+    if (nearApplied) return nearApplied;
+    const collapsed = collapsedRenames.get(key ?? specImportNameMatchKey(nm));
     if (collapsed) return collapsed;
     if (importedKindKeys.has(specImportNameMatchKey(nm))) return null;
     // Parenthetical candidates snap on EXACT loose-key hits only — a

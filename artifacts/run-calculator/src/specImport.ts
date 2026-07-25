@@ -912,13 +912,16 @@ function adoptRelinkedNames(
   const origRecipes = original.recipes ?? [];
   const relRecipes = relinked.recipes ?? [];
   const prunedRecipes = prunedParsed.recipes ?? [];
+  const profileKey = (p: { brand?: string; flavor?: string }) =>
+    `${(p.brand ?? "").trim().toLowerCase()}\u0000${(p.flavor ?? "").trim().toLowerCase()}`;
   const profileFields = new Map<string, { doughName?: string; sauceName?: string }>();
-  for (const p of relinked.profiles ?? []) {
-    profileFields.set(
-      `${(p.brand ?? "").trim().toLowerCase()}\u0000${(p.flavor ?? "").trim().toLowerCase()}`,
-      { doughName: p.doughName, sauceName: p.sauceName },
-    );
-  }
+  for (const p of relinked.profiles ?? []) profileFields.set(profileKey(p), { doughName: p.doughName, sauceName: p.sauceName });
+  // Pre-relink profile names — used to detect whether the relink actually
+  // renamed a profile's doughName/sauceName vs it was always that value.
+  // Without this, a pruned-empty doughName (stripped as "unchanged from
+  // snapshot") would silently lose a rename that the auto-link applied.
+  const origProfileFields = new Map<string, { doughName?: string; sauceName?: string }>();
+  for (const p of original.profiles ?? []) origProfileFields.set(profileKey(p), { doughName: p.doughName, sauceName: p.sauceName });
   let changed = false;
   const recipes = prunedRecipes.map((r, i) => {
     // Index alignment sanity: the prune never reorders/removes recipes, but
@@ -941,18 +944,34 @@ function adoptRelinkedNames(
       : { ...r, name: relName, variantLabel: rel.variantLabel ?? name };
   });
   const profiles = (prunedParsed.profiles ?? []).map((p) => {
-    const rel = profileFields.get(
-      `${(p.brand ?? "").trim().toLowerCase()}\u0000${(p.flavor ?? "").trim().toLowerCase()}`,
-    );
+    const key = profileKey(p);
+    const rel = profileFields.get(key);
     if (!rel) return p;
+    const orig = origProfileFields.get(key);
     let out = p;
-    if (p.doughName?.trim() && rel.doughName && rel.doughName !== p.doughName) {
-      out = { ...out, doughName: rel.doughName };
-      changed = true;
+    if (rel.doughName && rel.doughName !== p.doughName) {
+      // Adopt when the pruned profile already has a doughName that differs
+      // (straightforward update), OR when the pruned profile has no doughName
+      // (it was stripped by the prune as "unchanged") but an auto-link rename
+      // actually occurred (original doughName ≠ relinked doughName). Without
+      // the second branch a re-import with a typo dough name that the pool
+      // relink auto-corrects silently loses the correction: the prune sees the
+      // typo unchanged and strips it, and adoptRelinkedNames can't fix it.
+      // Guard: if original and relinked are identical, no rename happened — do
+      // not propagate over a pruned-empty value (that would overwrite a user's
+      // manual clear with a value they didn't change).
+      const wasRenamed = orig?.doughName && orig.doughName !== rel.doughName;
+      if (p.doughName?.trim() || wasRenamed) {
+        out = { ...out, doughName: rel.doughName };
+        changed = true;
+      }
     }
-    if (p.sauceName?.trim() && rel.sauceName && rel.sauceName !== p.sauceName) {
-      out = { ...out, sauceName: rel.sauceName };
-      changed = true;
+    if (rel.sauceName && rel.sauceName !== p.sauceName) {
+      const wasRenamed = orig?.sauceName && orig.sauceName !== rel.sauceName;
+      if (p.sauceName?.trim() || wasRenamed) {
+        out = { ...out, sauceName: rel.sauceName };
+        changed = true;
+      }
     }
     return out;
   });
