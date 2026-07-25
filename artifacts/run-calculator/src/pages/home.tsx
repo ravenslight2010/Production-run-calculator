@@ -6947,14 +6947,38 @@ export default function Home() {
   // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
   // doughball weight, while the form still sits at 0 oz, adopts the pool
   // weight (profiles hydrated before the pool carried weights stay broken
-  // otherwise). Never overrides a non-zero value the operator typed. The
-  // family recipe's VARIANT list wins over the recipe-level value when a
-  // variant auto-matches (die size in the label, or the only variant).
+  // otherwise).
+  //
+  // Two tiers:
+  //   1. Specific brand+flavor customer match — authoritative, overrides any
+  //      stored value (corrects weights written before customer assignments
+  //      were imported, e.g. a Lucia's Craft BBQ run stuck at the generic
+  //      family weight instead of the Ultra Thin variant weight).
+  //   2. Generic pool value / die-type match — backfill-only: fills a blank
+  //      form field, never overwrites a value the operator typed.
   useEffect(() => {
     const name = v.doughRecipeName?.trim().toLowerCase();
     if (!name) return;
+    const variantList = normalizeDoughballVariants(serverDoughVariantsByName.get(name));
+    const b = (currentRun?.brand ?? "").trim().toLowerCase();
+    const f = (currentRun?.flavor ?? "").trim().toLowerCase();
+    if (b && f) {
+      const specificHit = variantList.find((vr) =>
+        (vr.customers ?? []).some(
+          (c) =>
+            c.brand.trim().toLowerCase() === b &&
+            c.flavor.trim().toLowerCase() === f,
+        ),
+      );
+      if (specificHit?.weightOz && specificHit.weightOz > 0) {
+        if (specificHit.weightOz !== (Number(v.targetDoughballWeight) || 0)) {
+          form.setValue("targetDoughballWeight", specificHit.weightOz, { shouldDirty: true });
+        }
+        return;
+      }
+    }
     if ((Number(v.targetDoughballWeight) || 0) > 0) return;
-    const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand: currentRun?.brand ?? "", flavor: currentRun?.flavor ?? "" });
+    const matched = matchDoughballVariant(variantList, { dieType: String(v.dieType ?? ""), brand: currentRun?.brand ?? "", flavor: currentRun?.flavor ?? "" });
     const ballOz = matched?.weightOz ?? serverDoughWeightByName.get(name) ?? 0;
     if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
   }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, currentRun?.brand, currentRun?.flavor, serverDoughWeightByName, serverDoughVariantsByName, form]);
@@ -7538,12 +7562,26 @@ export default function Home() {
       const rows = normalizeRecipeRowsForCompare(r.components);
       const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
       const perTray = kind === "dough" ? Number(r.doughballsPerTray ?? 0) : 0;
-      snap.set(key, JSON.stringify({ rows, weight, perTray }));
+      const variants = kind === "dough" ? normalizeDoughballVariants(r.doughballVariants) : [];
+      // Include customer-assignment fingerprint in the snap so that re-importing
+      // a dough procedure (which adds customer entries to variants) triggers the
+      // profile fan-out even when recipe rows didn't change.
+      const variantSig =
+        kind === "dough"
+          ? variants
+              .map(
+                (vr) =>
+                  `${vr.label}:${(vr.customers ?? []).map((c) => `${c.brand}|${c.flavor}`).join(",")}`,
+              )
+              .join(";")
+          : "";
+      snap.set(key, JSON.stringify({ rows, weight, perTray, variantSig }));
       byKey.set(key, {
         name: r.name,
         rows,
         ...(weight > 0 ? { doughballWeightOz: weight } : {}),
         ...(perTray > 0 ? { doughballsPerTray: perTray } : {}),
+        ...(variants.length > 0 ? { doughballVariants: variants } : {}),
       });
     }
     const prev = namedPoolSnapRef.current[kind];

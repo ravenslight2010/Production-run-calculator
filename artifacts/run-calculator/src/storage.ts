@@ -816,6 +816,46 @@ export interface NamedRecipePoolPatch {
   doughballWeightOz?: number;
   /** Dough only: doughballs per tray (> 0 = known). */
   doughballsPerTray?: number;
+  /**
+   * Dough only: normalized variant list carrying customer assignments. Used to
+   * resolve the authoritative per-flavor weight when a specific brand+flavor
+   * customer entry exists on a variant — this overrides any stored weight
+   * (including a wrong value written before customer assignments were imported).
+   */
+  doughballVariants?: unknown[];
+}
+
+/**
+ * Search a raw variant list for a specific brand+flavor customer entry and
+ * return its weightOz. Returns 0 if no specific match is found. Intentionally
+ * avoids importing @workspace/named-recipes so storage.ts stays lightweight.
+ */
+function findSpecificVariantWeight(
+  variants: unknown[] | undefined,
+  brand: string,
+  flavor: string,
+): number {
+  if (!Array.isArray(variants) || !brand || !flavor) return 0;
+  const b = brand.trim().toLowerCase();
+  const f = flavor.trim().toLowerCase();
+  if (!b || !f) return 0;
+  for (const vr of variants) {
+    if (!vr || typeof vr !== "object") continue;
+    const v = vr as { weightOz?: unknown; customers?: unknown[] };
+    const weightOz = Number(v.weightOz ?? 0);
+    if (!(weightOz > 0)) continue;
+    const customers = Array.isArray(v.customers) ? v.customers : [];
+    for (const cu of customers) {
+      if (!cu || typeof cu !== "object") continue;
+      const c = cu as { brand?: unknown; flavor?: unknown };
+      if (
+        String(c.brand ?? "").trim().toLowerCase() === b &&
+        String(c.flavor ?? "").trim().toLowerCase() === f
+      )
+        return weightOz;
+    }
+  }
+  return 0;
 }
 
 /**
@@ -862,27 +902,44 @@ export function refreshProfilesFromNamedRecipes(
         ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
         : [];
       const rowsDiffer = !recipeRowsEqual(curRows, patch.rows);
-      // Doughball weight + per-tray are PER-FLAVOR values (one dough family
-      // serves many flavors with different specs), so the pool value is
-      // backfill-only: fill a blank profile, never overwrite a set value.
-      const wantWeight = kind === "dough" ? patch.doughballWeightOz ?? 0 : 0;
+
+      // Doughball weight is PER-FLAVOR (one family serves many flavors). Two
+      // cases:
+      //   Specific match: a customer entry on a variant names this exact
+      //     brand+flavor → authoritative, overrides any stored value (corrects
+      //     weights written before customer assignments were imported).
+      //   Generic pool weight: backfill-only — fill a blank profile, never
+      //     overwrite a value the operator or a prior import set.
+      const rest = k.slice(prefix.length);
+      const sep = rest.indexOf("__");
+      const profileBrand = sep >= 0 ? rest.slice(0, sep) : rest;
+      const profileFlavor = sep >= 0 ? rest.slice(sep + 2) : "";
+      const specificWeight =
+        kind === "dough"
+          ? findSpecificVariantWeight(
+              patch.doughballVariants,
+              profileBrand,
+              profileFlavor,
+            )
+          : 0;
+      const wantWeight = kind === "dough" ? (patch.doughballWeightOz ?? 0) : 0;
+      const storedWeight = Number(obj.targetDoughballWeight ?? 0);
       const weightDiffers =
-        wantWeight > 0 && !(Number(obj.targetDoughballWeight ?? 0) > 0);
+        specificWeight > 0
+          ? specificWeight !== storedWeight
+          : wantWeight > 0 && !(storedWeight > 0);
+      const effectiveWeight = specificWeight > 0 ? specificWeight : wantWeight;
+
       const wantTray = kind === "dough" ? patch.doughballsPerTray ?? 0 : 0;
       const trayDiffers =
         wantTray > 0 && !(Number(obj.doughballsPerTray ?? 0) > 0);
       if (!rowsDiffer && !weightDiffers && !trayDiffers) continue;
       if (rowsDiffer) obj[rowsField] = patch.rows.map((r) => ({ ...r }));
-      if (weightDiffers) obj.targetDoughballWeight = wantWeight;
+      if (weightDiffers) obj.targetDoughballWeight = effectiveWeight;
       if (trayDiffers) obj.doughballsPerTray = wantTray;
       localStorage.setItem(k, JSON.stringify(obj));
       markProfileEdited(k.slice(prefix.length));
-      const rest = k.slice(prefix.length);
-      const sep = rest.indexOf("__");
-      touched.push({
-        brand: sep >= 0 ? rest.slice(0, sep) : rest,
-        flavor: sep >= 0 ? rest.slice(sep + 2) : "",
-      });
+      touched.push({ brand: profileBrand, flavor: profileFlavor });
     } catch {
       // Skip an unreadable profile — never let one bad row block the fan-out.
     }
