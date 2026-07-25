@@ -9514,6 +9514,35 @@ export default function Home() {
             if (enriched !== variants) doughVariants.set(recipeName, enriched);
           }
         }
+        // Fold in variant-table entries parsed deterministically from the dough
+        // workbook's yield table ("OZ / LBS / YIELD / PER TRAY"). The AI may
+        // omit rows whose label name differs from the recipe family (e.g.
+        // "CORKY'S 7" DOUGH" on a "BRAND & CORKY'S" shared-formula workbook).
+        // We merge missing rows under the ONE family the AI already produced,
+        // deduping by case-insensitive label so AI-parsed variants aren't doubled.
+        if (specImportPrepared?.doughVariantsFromTable?.length) {
+          const familyKeys = [...doughVariants.keys()];
+          // Only merge when the AI produced exactly one dough family from this
+          // workbook — with multiple families we can't safely decide which one
+          // the table rows belong to.
+          if (familyKeys.length === 1) {
+            const familyKey = familyKeys[0]!;
+            const existing = doughVariants.get(familyKey) ?? [];
+            const existingLow = new Set(existing.map((v) => v.label.trim().toLowerCase()));
+            const toAdd: DoughballVariant[] = [];
+            for (const tv of specImportPrepared.doughVariantsFromTable) {
+              if (existingLow.has(tv.label.trim().toLowerCase())) continue;
+              toAdd.push({
+                label: tv.label,
+                ...(tv.weightOz > 0 ? { weightOz: tv.weightOz } : {}),
+                ...(tv.perTray ? { perTray: tv.perTray } : {}),
+              });
+            }
+            if (toAdd.length > 0) {
+              doughVariants.set(familyKey, [...existing, ...toAdd]);
+            }
+          }
+        }
         void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes

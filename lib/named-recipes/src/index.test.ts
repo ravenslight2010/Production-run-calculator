@@ -18,9 +18,11 @@ import {
   mergeNamedRecipeDoughballVariants,
   matchDoughballVariant,
   parseDoughCustomerSection,
+  parseDoughVariantTable,
   applyDoughCustomerAssignmentsToVariants,
   type DoughballVariant,
   type DoughCustomerAssignment,
+  type DoughVariantTableEntry,
   type NamedRecipe,
   type NamedRecipeTag,
 } from "./index";
@@ -878,6 +880,97 @@ describe("parseDoughCustomerSection", () => {
       ["Flour", "100", "60"],
     ];
     expect(parseDoughCustomerSection(rows)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseDoughVariantTable
+// ---------------------------------------------------------------------------
+
+describe("parseDoughVariantTable", () => {
+  // Mirror of the real Brand+Corky's dough workbook rows (R31-R34).
+  const brandAndCorkysRows: string[][] = [
+    ["", "BRAND & CORKY'S DOUGH MIXING P", "", "", "", "", "", ""],
+    [],
+    ["", "", "", "LBS.", "", "04/24/2024 Rev. 8", "", ""],
+    ["", "ADM WHEAT FLOUR", "", "200", "", "", "", ""],
+    ["", "WATER", "", "103.8", "", "", "", ""],
+    ["", "CORN OIL", "", "10", "", "", "", ""],
+    ["", "TOTAL", "", "328.5", "", "", "", ""],
+    [],
+    [],
+    [],
+    ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY", "", ""],
+    ["", 'BRAND 7" DOUGH', "6.2", "0.39", "847.74", "24", "", ""],
+    ["", 'BRAND 12" DOUGH', "14.2", "0.89", "370.14", "16", "", ""],
+    ["", "CORKY'S 7\" DOUGH", "5", "0.31", "1051.2", "24", "", ""],
+    ["", "", "Acceptable range on doughballs", "", "", "", "", ""],
+  ];
+
+  it("returns all 3 variant rows from the Brand+Corky's workbook", () => {
+    const result = parseDoughVariantTable(brandAndCorkysRows);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual<DoughVariantTableEntry>({ label: 'BRAND 7" DOUGH', weightOz: 6.2, perTray: 24 });
+    expect(result[1]).toEqual<DoughVariantTableEntry>({ label: 'BRAND 12" DOUGH', weightOz: 14.2, perTray: 16 });
+    expect(result[2]).toEqual<DoughVariantTableEntry>({ label: "CORKY'S 7\" DOUGH", weightOz: 5, perTray: 24 });
+  });
+
+  it("returns empty array when no OZ/TRAY header exists", () => {
+    const rows: string[][] = [
+      ["", "ADM WHEAT FLOUR", "", "200"],
+      ["", "WATER", "", "103.8"],
+    ];
+    expect(parseDoughVariantTable(rows)).toHaveLength(0);
+  });
+
+  it("skips rows with no label or non-positive oz", () => {
+    const rows: string[][] = [
+      ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      ["", "", "6.2", "0.39", "847.74", "24"],     // no label → skip
+      ["", "My Dough", "0", "0.39", "100", "24"],  // oz=0 → skip
+      ["", "Good Dough", "7.5", "0.47", "200", "18"],
+    ];
+    const result = parseDoughVariantTable(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ label: "Good Dough", weightOz: 7.5, perTray: 18 });
+  });
+
+  it("stops after 2 consecutive blank rows past the table", () => {
+    const rows: string[][] = [
+      ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      ["", "Dough A", "6.2", "0.39", "847", "24"],
+      [],   // 1 blank — tolerated
+      ["", "Dough B", "5.0", "0.31", "1051", "24"],
+      [],
+      [],   // 2 consecutive blanks → stop
+      ["", "Dough C", "14.2", "0.89", "370", "16"],  // not reached
+    ];
+    const result = parseDoughVariantTable(rows);
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.label)).toEqual(["Dough A", "Dough B"]);
+  });
+
+  it("works when TRAY header has leading/trailing spaces", () => {
+    const rows: string[][] = [
+      ["OZ", "LBS", "YIELD", " PER TRAY "],
+      ["5.5", "0.34", "950", "20"],
+    ];
+    // labelCol = ozCol - 1 = -1 → clamped to 0 (same col as oz)
+    // Label at col 0 = "5.5" which is numeric-looking but parseDoughVariantTable only
+    // checks oz at ozCol=0 and label at labelCol=0 — let's verify it doesn't crash.
+    expect(() => parseDoughVariantTable(rows)).not.toThrow();
+  });
+
+  it("omits perTray when the tray cell is missing or non-numeric", () => {
+    const rows: string[][] = [
+      ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      ["", "Dough A", "6.2", "0.39", "847", ""],    // blank tray
+      ["", "Dough B", "5.0", "0.31", "1051", "N/A"], // non-numeric tray
+    ];
+    const result = parseDoughVariantTable(rows);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.perTray).toBeUndefined();
+    expect(result[1]!.perTray).toBeUndefined();
   });
 });
 

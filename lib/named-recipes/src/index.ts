@@ -606,6 +606,82 @@ export interface DoughCustomerAssignment {
   flavors: string[];
 }
 
+/** One entry from the doughball yield table in a dough mixing procedure. */
+export interface DoughVariantTableEntry {
+  label: string;
+  weightOz: number;
+  perTray?: number;
+}
+
+/**
+ * Parse the doughball yield/variant table from a dough mixing procedure sheet.
+ * The table is identified by a header row that contains an "OZ" column and a
+ * "TRAY" column (in that order); subsequent rows supply the label, oz, and
+ * per-tray count for each doughball variant. Pure — no side effects.
+ *
+ * Example table (rows 31-34 of a Brand+Corky's mixing workbook):
+ *   | | OZ. | LBS. | YIELD | PER TRAY |
+ *   | BRAND 7" DOUGH    | 6.2  | … | 24 |
+ *   | BRAND 12" DOUGH   | 14.2 | … | 16 |
+ *   | CORKY'S 7" DOUGH  | 5    | … | 24 |
+ */
+export function parseDoughVariantTable(rows: string[][]): DoughVariantTableEntry[] {
+  // Find the header row: a row with an "OZ" cell and a later "TRAY" cell.
+  let ozCol = -1;
+  let trayCol = -1;
+  let labelCol = -1;
+  let headerIdx = -1;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    let foundOz = -1;
+    let foundTray = -1;
+    for (let j = 0; j < row.length; j++) {
+      const cell = row[j]!.trim().toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
+      if (cell === "OZ") foundOz = j;
+      else if (/\bTRAY\b/.test(cell)) foundTray = j;
+    }
+    if (foundOz >= 0 && foundTray > foundOz) {
+      ozCol = foundOz;
+      trayCol = foundTray;
+      // Label is in the column immediately to the left of the OZ column.
+      labelCol = Math.max(0, ozCol - 1);
+      headerIdx = i;
+      break;
+    }
+  }
+
+  if (headerIdx < 0) return [];
+
+  const result: DoughVariantTableEntry[] = [];
+  let blankStreak = 0;
+
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (row.every((c) => !c.trim())) {
+      if (++blankStreak >= 2) break;
+      continue;
+    }
+    blankStreak = 0;
+
+    const label = (row[labelCol] ?? "").trim();
+    if (!label) continue;
+
+    const oz = parseFloat((row[ozCol] ?? "").trim());
+    if (!(oz > 0)) continue; // not a valid data row
+
+    const tray = parseInt((row[trayCol] ?? "").trim(), 10);
+
+    result.push({
+      label,
+      weightOz: oz,
+      ...(tray > 0 ? { perTray: tray } : {}),
+    });
+  }
+
+  return result;
+}
+
 /**
  * Parse the customer-assignment section at the top of a dough mixing procedure
  * sheet. Each row has the form "{Brand [qualifier]}: {flavor1, flavor2, …}"

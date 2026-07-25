@@ -108,7 +108,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { fetchNamedRecipes, saveNamedRecipes, addNamedRecipesToServerIfAbsent } from "./namedRecipes";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
-import { namedRecipeFromDraft, parseDoughCustomerSection, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, parseDoughCustomerSection, parseDoughVariantTable, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, fillSpecMixTags, type Mix } from "@workspace/mixes";
 import {
@@ -184,6 +184,18 @@ export type SpecImportPrepared = {
    * Thin variant"), without needing a die-type entry on the profile.
    */
   doughCustomerAssignments?: DoughCustomerAssignment[];
+  /**
+   * Doughball variant rows parsed deterministically from the yield table in the
+   * dough mixing procedure workbook (the "OZ / LBS / YIELD / PER TRAY" table).
+   * Supplements the AI-parsed recipes: on workbooks that cover multiple product
+   * families in one batch formula (e.g. "BRAND & CORKY'S DOUGH MIXING
+   * PROCEDURE"), the AI may omit variant rows whose label name doesn't match
+   * the main family (e.g. it drops "CORKY'S 7" DOUGH" from a Brand+Corky's
+   * shared-formula workbook). At commit time these entries are folded into the
+   * doughVariants map under whichever family name the AI-collapsed recipes
+   * landed on, ensuring every row in the yield table appears in the pool.
+   */
+  doughVariantsFromTable?: DoughVariantTableEntry[];
 };
 
 /**
@@ -1423,6 +1435,25 @@ function parseDoughCustomerAssignmentsFromGrids(
 }
 
 /**
+ * Collect doughball variant rows from the yield table in every sheet of the
+ * given grids. Dedups by label (case-insensitive). Pure — no AI, no side effects.
+ */
+function parseDoughVariantTableFromGrids(grids: SheetGrid[]): DoughVariantTableEntry[] {
+  const all: DoughVariantTableEntry[] = [];
+  const seen = new Set<string>();
+  for (const grid of grids) {
+    for (const v of parseDoughVariantTable(grid.rows)) {
+      const key = v.label.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        all.push(v);
+      }
+    }
+  }
+  return all;
+}
+
+/**
  * Full read → AI → canonicalize → summarize step. Throws on a hard failure
  * (e.g. unreadable workbook, AI unavailable/forbidden) so the UI can show why.
  */
@@ -1436,17 +1467,20 @@ export async function prepareSpecImport(
   // parse instead of asking the AI to re-read it (AI re-reads of the same
   // sheet can drift, and the prune would apply that drift as "changes").
   const { sourceHash, snapshot } = await findReusableParse(name ? [name] : [], [data]);
-  if (snapshot) {
-    return buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
-  }
-
+  // Always read grids for the deterministic parses (customer section, variant
+  // table) even when reusing a cached AI parse. Both are cheap (no AI calls)
+  // and must reflect the raw workbook content, not the possibly-stale snapshot.
   const grids = await readWorkbookGrids(data);
-  // Deterministic: parse the customer-assignment section from the raw grid
-  // BEFORE the AI call so it's available even if the AI parse is cached or
-  // produces no dough recipes. The raw section format is rigid enough that it
-  // never needs AI. Done outside the reuse path so a cached AI parse still
-  // gets fresh assignments on every import.
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
+  const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
+  if (snapshot) {
+    const reused = await buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
+    return {
+      ...reused,
+      ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
+      ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
+    };
+  }
   const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows } =
     await parseWorkbookCore(grids, known, aliases);
 
@@ -1520,6 +1554,7 @@ export async function prepareSpecImport(
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
+    ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
   };
 }
 
@@ -1565,6 +1600,10 @@ export async function prepareSpecImportMulti(
   // section (merged across files — a multi-workbook dough import may split
   // the assignment list across sheets).
   const allCustomerAssignments: DoughCustomerAssignment[] = [];
+  // Deterministic variant-table entries from each file's yield table, keyed by
+  // label (lower-case) to dedup when the same workbook appears more than once.
+  const allVariantsFromTableSeen = new Set<string>();
+  const allVariantsFromTable: DoughVariantTableEntry[] = [];
 
   for (let i = 0; i < buffers.length; i++) {
     // Name each file so a failure can say WHICH file was skipped (fall back to a
@@ -1592,6 +1631,14 @@ export async function prepareSpecImportMulti(
           }
         } else {
           allCustomerAssignments.push(a);
+        }
+      }
+      // Deterministic variant-table parse — accumulate across files, dedup by label.
+      for (const v of parseDoughVariantTableFromGrids(grids)) {
+        const key = v.label.toLowerCase();
+        if (!allVariantsFromTableSeen.has(key)) {
+          allVariantsFromTableSeen.add(key);
+          allVariantsFromTable.push(v);
         }
       }
       const core = await parseWorkbookCore(grids, known, aliases);
@@ -1732,6 +1779,7 @@ export async function prepareSpecImportMulti(
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(allCustomerAssignments.length > 0 ? { doughCustomerAssignments: allCustomerAssignments } : {}),
+    ...(allVariantsFromTable.length > 0 ? { doughVariantsFromTable: allVariantsFromTable } : {}),
   };
 }
 
