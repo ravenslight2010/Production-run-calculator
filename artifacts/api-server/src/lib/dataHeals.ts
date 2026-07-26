@@ -2674,6 +2674,169 @@ async function runJuly2026ProfileCorrections(): Promise<void> {
   });
 }
 
+// ── July 2026 audit corrections v2 ───────────────────────────────────────────
+// Second pass after a full prod-DB audit uncovered additional issues:
+//
+//   • Bad alias: "Al Pastor Sauce → Tikka Masala Sauce" (learned incorrectly)
+//   • brand/mr07ch24 weight 5 → 6.2 oz (7" Marriott)
+//   • brand/mr12ch14 weight 5 → 14.2 oz (12" Marriott)
+//   • hannaford/chicken tikka masala weight 0 → 11.5 oz (Naan, scratch-made)
+//   • lowe's/red hot chicken sauce "Four Hands Red Hot Recipe"
+//     → "Four Hands Red Hot Pizza Sauce" (previous heal used the wrong name)
+//   • lowe's/buffalo chicken sauce blank → "Buffalo Sauce"
+//   • lowe's/margherita sauce blank → "Lucia Pizza Sauce"
+//   • lucia's pinsa (proof)/chicken tikka masala sauce "Masala Sauce (Rasoi)"
+//     → "Tikka Masala Sauce" (resolve stored alias value to pool name)
+//   • Add "Al Pastor Sauce" to sauce_recipes pool so nob hill craft/south of
+//     the border profile sauce link resolves correctly
+const JULY_2026_AUDIT_CORRECTIONS_V2 = "july-2026-audit-corrections-v2";
+
+async function runJuly2026AuditCorrectionsV2(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: JULY_2026_AUDIT_CORRECTIONS_V2 })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1. Delete the bad "Al Pastor Sauce → Tikka Masala Sauce" alias.
+    //    Al Pastor and Tikka Masala are completely different sauces; this was
+    //    a mis-learned AI correction.
+    const deletedAliases = await tx
+      .delete(specImportAliasesTable)
+      .where(
+        and(
+          eq(specImportAliasesTable.kind, "recipeName"),
+          eq(sql`lower(${specImportAliasesTable.externalName})`, "al pastor sauce"),
+          eq(sql`lower(${specImportAliasesTable.canonicalName})`, "tikka masala sauce"),
+        ),
+      )
+      .returning({ id: specImportAliasesTable.id });
+
+    // 2. Profile corrections.
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let healedProfiles = 0;
+
+    for (const p of profiles) {
+      const values = { ...(p.values as Record<string, unknown>) };
+      let changed = false;
+      const brand = p.brand.toLowerCase();
+      const flavor = p.flavor.toLowerCase();
+
+      // brand / mr07ch24 — 7" Marriott: weight 5 → 6.2 oz.
+      if (brand === "brand" && flavor === "mr07ch24") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5) < 0.05) {
+          values.targetDoughballWeight = 6.2;
+          changed = true;
+        }
+      }
+
+      // brand / mr12ch14 — 12" Marriott: weight 5 → 14.2 oz.
+      if (brand === "brand" && flavor === "mr12ch14") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5) < 0.05) {
+          values.targetDoughballWeight = 14.2;
+          changed = true;
+        }
+      }
+
+      // hannaford / chicken tikka masala — Naan Dough (scratch-made): weight 0 → 11.5 oz.
+      if (brand === "hannaford" && flavor === "chicken tikka masala") {
+        if (!(Number(values.targetDoughballWeight ?? 0) > 0)) {
+          values.targetDoughballWeight = 11.5;
+          changed = true;
+        }
+      }
+
+      // lowe's / red hot chicken — previous heal wrote the wrong pool name.
+      // "Four Hands Red Hot Recipe" → "Four Hands Red Hot Pizza Sauce".
+      if (brand === "lowe's" && flavor === "red hot chicken") {
+        if (String(values.frontlineRecipeName ?? "").trim() === "Four Hands Red Hot Recipe") {
+          values.frontlineRecipeName = "Four Hands Red Hot Pizza Sauce";
+          changed = true;
+        }
+      }
+
+      // lowe's / buffalo chicken — sauce was blank.
+      if (brand === "lowe's" && flavor === "buffalo chicken") {
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Buffalo Sauce";
+          changed = true;
+        }
+      }
+
+      // lowe's / margherita — sauce was blank.
+      if (brand === "lowe's" && flavor === "margherita") {
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Lucia Pizza Sauce";
+          changed = true;
+        }
+      }
+
+      // lucia's pinsa (proof) / chicken tikka masala — sauce stored as the
+      // raw alias value; resolve to the pool name "Tikka Masala Sauce".
+      if (
+        brand === "lucia's pinsa (proof)" &&
+        flavor === "chicken tikka masala"
+      ) {
+        if (
+          String(values.frontlineRecipeName ?? "").toLowerCase().includes("masala sauce (rasoi)")
+        ) {
+          values.frontlineRecipeName = "Tikka Masala Sauce";
+          changed = true;
+        }
+      }
+
+      if (!changed) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    // 3. Add "Al Pastor Sauce" to the sauce_recipes pool so the
+    //    nob hill craft / south of the border profile sauce link resolves.
+    //    Empty components — manager fills in the recipe via the UI.
+    const existingAlPastor = await tx
+      .select({ id: sauceRecipesTable.id })
+      .from(sauceRecipesTable)
+      .where(
+        eq(sql`lower(${sauceRecipesTable.name})`, "al pastor sauce"),
+      );
+    let addedSauces = 0;
+    if (existingAlPastor.length === 0) {
+      await tx.insert(sauceRecipesTable).values({
+        id: "al-pastor-sauce",
+        scope: "live",
+        name: "Al Pastor Sauce",
+        notes: "",
+        components: [],
+        enabled: true,
+        brand: "",
+        flavors: [],
+      });
+      addedSauces = 1;
+    }
+
+    logger.info(
+      {
+        heal: JULY_2026_AUDIT_CORRECTIONS_V2,
+        healedProfiles,
+        deletedAliases: deletedAliases.length,
+        addedSauces,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -2700,4 +2863,5 @@ export async function runDataHeals(): Promise<void> {
   await runBrandDriftRename();
   await runCrbLuciaVariantCustomersV2();
   await runJuly2026ProfileCorrections();
+  await runJuly2026AuditCorrectionsV2();
 }
