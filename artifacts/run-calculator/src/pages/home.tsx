@@ -9538,6 +9538,22 @@ export default function Home() {
                 (ev) => doughballVariantLabelKey(ev.label, familyKey) === tvKey,
               );
               if (labelDuplicate) continue;
+              // Secondary dedup: when exactly ONE existing variant carries the
+              // same weight+perTray, the table entry describes the same doughball
+              // under a different label (e.g. AI "Aldo's Dough" 7.7oz/24 vs
+              // yield-table "12'' Aldo" 7.7oz/24). Skip it — the weight uniquely
+              // identifies the existing variant so there is no ambiguity.
+              // When MULTIPLE existing variants share the same weight (e.g. two
+              // same-weight Margherita variants for Lowe's and Hannaford), the
+              // weight alone is ambiguous and we keep the table entry.
+              if (tv.weightOz > 0 && (tv.perTray ?? 0) > 0) {
+                const sameWeightCount = existing.filter(
+                  (ev) =>
+                    Math.abs((ev.weightOz ?? 0) - tv.weightOz) <= 0.05 &&
+                    (ev.perTray ?? 0) === (tv.perTray ?? 0),
+                ).length;
+                if (sameWeightCount === 1) continue;
+              }
               toAdd.push({
                 label: tv.label,
                 ...(tv.weightOz > 0 ? { weightOz: tv.weightOz } : {}),
