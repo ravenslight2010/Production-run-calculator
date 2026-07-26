@@ -9420,7 +9420,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, appliedParsed } =
+      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed } =
         await commitSpecImport(toCommit);
       // Tombstone profiles the manager marked as removed from the workbook.
       // Done after commit so the new profiles are written first; deletion is
@@ -9461,6 +9461,28 @@ export default function Home() {
           lastLocalEditRef.current = now;
           form.reset(profile);
           resetFieldArrays(profile);
+          // If this profile is a purchased-crust product (no die type, crust-named
+          // doughName), automatically switch the run's Line Type to "Crust" so the
+          // operator doesn't have to toggle it manually. Mirrors the manual button
+          // handler at the "Crust" toggle (resolveCrustLineDefaults + subTab update).
+          const isImportedCrust = crustProfiles.some(
+            (c) =>
+              c.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
+              c.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
+          );
+          if (isImportedCrust && doughSubTab !== "crusts") {
+            setDoughSubTab("crusts");
+            const updatedRuns = dayStateRef.current.runs.map((r: any, i: any) =>
+              i === dayStateRef.current.currentIndex ? { ...r, subTab: "crusts" as const } : r,
+            );
+            const updatedDs = { ...dayStateRef.current, runs: updatedRuns };
+            setDayState(updatedDs);
+            saveDayState(updatedDs);
+            const fills = resolveCrustLineDefaults(form.getValues());
+            for (const [k, val] of Object.entries(fills)) {
+              form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
+            }
+          }
           schedulePush(dayStateRef.current, 0);
         }
       }

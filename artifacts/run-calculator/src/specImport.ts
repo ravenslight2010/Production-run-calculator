@@ -1822,6 +1822,12 @@ export async function commitSpecImport(
   /** Brand+flavor profiles this import wrote — see applySpecImport. */
   touchedProfiles: Array<{ brand: string; flavor: string }>;
   /**
+   * Subset of touchedProfiles that are purchased-crust products (no die type
+   * + crust-named doughName). The caller uses this to auto-switch any matching
+   * run's Line Type toggle to "Crust" so the operator doesn't have to.
+   */
+  crustProfiles: Array<{ brand: string; flavor: string }>;
+  /**
    * The parse that was actually APPLIED: prune + commit-time pool relink
    * (dough family collapse included) applied on top of the review-edited
    * parse. Post-commit collects (dough variant labels, "who it goes to"
@@ -1988,7 +1994,7 @@ export async function commitSpecImport(
   }
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
-  const touchedProfiles = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides);
+  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides);
 
   // For the SERVER-POOL collects below only: backfill "who it goes to"
   // brand/flavor targets onto cheese-kind recipes that arrived unscoped, from
@@ -2195,5 +2201,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, appliedParsed: applyParsed };
+  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed };
 }

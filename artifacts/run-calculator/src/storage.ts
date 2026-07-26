@@ -3159,8 +3159,14 @@ export function applySpecImport(
    * and best-effort — when absent the built-in map still applies.
    */
   dieLineDefaultOverrides?: DieLineDefaultsOverrides,
-): Array<{ brand: string; flavor: string }> {
-  if (typeof localStorage === "undefined") return [];
+): { touchedProfiles: Array<{ brand: string; flavor: string }>; crustProfiles: Array<{ brand: string; flavor: string }> } {
+  if (typeof localStorage === "undefined") return { touchedProfiles: [], crustProfiles: [] };
+
+  // Matches a purchased pre-made crust product name (Bonici/Pedone/pinsa etc.).
+  // Mirrors the PURCHASED_CRUST_NAME_RE / INHOUSE_CRUST_NAME_RE pair from
+  // @workspace/spec-import's stripPurchasedCrustDie — kept in sync manually.
+  const IMPORTED_PURCHASED_CRUST_RE = /\bcrusts?\b/i;
+  const IMPORTED_INHOUSE_CRUST_RE = /\b(?:doughs?|recipes?|dies?)\b/i;
 
   // ── Server-pool lookups (dough/sauce master-data lives server-side) ──
   // Local presets only mirror recipes this device saved; a profile can point
@@ -3358,6 +3364,9 @@ export function applySpecImport(
   // the post-loop cheese-mirror pass revisits each to fill any cheese applicator
   // left blank by a single-blend spec.
   const touchedProfiles = new Map<string, { brand: string; flavor: string }>();
+  // Profiles identified as purchased-crust runs (no dieType + crust-named
+  // doughName): the caller uses this to auto-switch the run's subTab to "crusts".
+  const crustProfilesList: Array<{ brand: string; flavor: string }> = [];
   // Spec-named dough/sauce with no backing recipe anywhere — candidates for the
   // caller's empty-placeholder pool push (filtered against this import's
   // recipes and the local presets at the end of this function).
@@ -3414,6 +3423,15 @@ export function applySpecImport(
     markTouched(brand, flavor);
     const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
     if (p.dieType) values.dieType = p.dieType;
+    // Detect purchased-crust profiles (no die + crust-named doughName) so the
+    // caller can auto-switch the run's Line Type to "Crust" instead of "Dough".
+    // Uses the same pattern as stripPurchasedCrustDie in @workspace/spec-import.
+    if (!p.dieType) {
+      const rawDough = (p.doughName ?? "").trim();
+      if (rawDough && IMPORTED_PURCHASED_CRUST_RE.test(rawDough) && !IMPORTED_INHOUSE_CRUST_RE.test(rawDough)) {
+        crustProfilesList.push({ brand, flavor });
+      }
+    }
     // Allergen read from the spec sheet (egg/soy or any new allergen the sheet
     // named); already a normalized lower-case token from the parser. Present
     // only when the sheet designated one, so this never clobbers with "none".
@@ -4000,7 +4018,7 @@ export function applySpecImport(
   // profile — otherwise the stale form re-saves the pre-import values over the
   // freshly imported profile on the next navigation/autosave (the "re-imported
   // my specs but nothing changed" clobber).
-  return [...touchedProfiles.values()];
+  return { touchedProfiles: [...touchedProfiles.values()], crustProfiles: crustProfilesList };
 }
 
 /** Re-export so the importer glue can pass the alias type through to clients. */

@@ -1638,4 +1638,4 @@ export function upsertNamedRecipesByName(
   return { merged, added, updated };
 }
 
-export { SPEC_STATIC_CUSTOMER_ASSIGNMENTS } from "./spec-customer-assignments.js";
+export { SPEC_STATIC_CUSTOMER_ASSIGNMENTS } from "./spec-customer-assignments";
