@@ -530,6 +530,9 @@ export function matchDoughballVariant(
   if (list.length === 1) return list[0];
   // Priority: explicit brand+flavor customer pairing.
   const b = (opts.brand ?? "").trim().toLowerCase();
+  // Qualifier tier implied by the profile's die type — used to distinguish
+  // size-tier catch-alls (e.g. "Lowe's 7 Inch") from base-tier ones.
+  const profileQual = doughVariantQualifierKey(opts.dieType ?? "");
   if (b) {
     const f = (opts.flavor ?? "").trim().toLowerCase();
     // 1a: Specific brand+flavor entry always beats a catch-all (flavor === "")
@@ -546,14 +549,63 @@ export function matchDoughballVariant(
       if (specificHit) return specificHit;
     }
     // 1b: Brand + catch-all (empty flavor) fallback.
-    const catchAllHit = list.find((v) =>
-      (v.customers ?? []).some(
-        (c) =>
-          c.brand.trim().toLowerCase() === b &&
-          c.flavor.trim() === "",
-      ),
+    //
+    // When the sole catch-all sits on a die-SIZE tier (e.g. "seveninch") that
+    // does NOT match the profile's die-type context, it means the catch-all
+    // covers "all flavors of the 7-inch product", not "all orders for this
+    // brand". In that case, prefer a base-tier variant that already carries
+    // any assignment for this brand — avoiding "Lowe's 7 Inch" being returned
+    // for a plain Lowe's profile with no 7-inch die context.
+    const catchAllList = list.filter((v) =>
+      (v.customers ?? []).some((c) => c.brand.trim().toLowerCase() === b && c.flavor.trim() === ""),
     );
+    let catchAllHit: DoughballVariant | undefined;
+    if (catchAllList.length === 1) {
+      const solo = catchAllList[0];
+      const vQual = doughVariantQualifierKey(solo.label);
+      if (DOUGH_SIZE_QUALIFIERS.has(vQual) && vQual !== profileQual) {
+        // Size-tier catch-all doesn't match profile context — prefer a base
+        // variant that has ANY assignment for this brand (specific or catch-all).
+        const baseWithBrand = list.find(
+          (v) =>
+            doughVariantQualifierKey(v.label) === "" &&
+            (v.customers ?? []).some((c) => c.brand.trim().toLowerCase() === b),
+        );
+        catchAllHit = baseWithBrand ?? solo;
+      } else {
+        catchAllHit = solo;
+      }
+    } else if (catchAllList.length > 1) {
+      // Multiple catch-alls: prefer the tier that matches the profile's die
+      // type, then prefer the base tier as a safe default.
+      catchAllHit =
+        catchAllList.find((v) => doughVariantQualifierKey(v.label) === profileQual) ??
+        catchAllList.find((v) => doughVariantQualifierKey(v.label) === "") ??
+        catchAllList[0];
+    }
     if (catchAllHit) return catchAllHit;
+
+    // 1.5: Initials catch-all — handles brand abbreviations such as
+    // "Show Me Dough" (profile) matching a customer entry stored as "SMD"
+    // (from a workbook row like "SMD CRB: All").
+    // Only applied to catch-all (flavor = "") entries to minimise false
+    // positives. Requires ≥ 2 initials and the initials must differ from the
+    // full brand name (i.e. the brand is multi-word, not already abbreviated).
+    const profileInitials = b
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => w[0] ?? "")
+      .join("");
+    if (profileInitials.length >= 2 && profileInitials !== b) {
+      const initialsHit = list.find((v) =>
+        (v.customers ?? []).some(
+          (c) =>
+            c.flavor.trim() === "" &&
+            c.brand.trim().toLowerCase() === profileInitials,
+        ),
+      );
+      if (initialsHit) return initialsHit;
+    }
   }
   // Fallback: die-type number match.
   const dieNum = (() => {
@@ -575,8 +627,16 @@ export function matchDoughballVariant(
 /**
  * Qualifier keywords in priority order: more-specific before more-general so
  * "heavy plus" never incorrectly matches as plain "heavy".
+ *
+ * "seveninch" is a synthetic sentinel (never appears in raw text) produced by
+ * doughVariantQualifierKey when it sees "7\"" / "7''" / "7 inch" patterns in a
+ * label before the digit-stripping step. It identifies the 7-inch die-size tier
+ * and is kept distinct from recipe-weight qualifiers so that a 7-inch catch-all
+ * customer entry does not shadow base-tier variants for profiles that carry no
+ * 7-inch die context.
  */
 const DOUGH_VARIANT_QUALIFIERS = [
+  "seveninch",
   "ultra thin",
   "heavy plus",
   "heavier",
@@ -586,14 +646,33 @@ const DOUGH_VARIANT_QUALIFIERS = [
 ] as const;
 
 /**
+ * Qualifiers that represent a die SIZE rather than a recipe weight. When the
+ * only catch-all customer entry for a brand sits on one of these tiers but the
+ * run profile has no matching die-type context, matchDoughballVariant falls
+ * back to a base-tier variant rather than returning the size-tier one.
+ */
+const DOUGH_SIZE_QUALIFIERS = new Set<string>(["seveninch"]);
+
+/**
  * Normalize a label (variant label OR customer-section LHS) to the canonical
  * qualifier key that identifies its variant tier. Returns "" for base variants
  * (no qualifier keyword present).
+ *
+ * 7-inch die-size designations ("7\"" / "7''" / "7 inch") are normalised to the
+ * synthetic sentinel "seveninch" BEFORE the digit-stripping step so that the
+ * numeric character "7" is not lost by /[^a-z\s]/g.
  */
 function doughVariantQualifierKey(label: string): string {
-  const norm = label
-    .toLowerCase()
-    .replace(/\bcrb\b/g, " ")
+  let norm = label.toLowerCase().replace(/\bcrb\b/g, " ");
+  // Normalise 7-inch die-size patterns to the sentinel "seveninch" BEFORE the
+  // step that strips digits / punctuation. Two cases:
+  //   1. "7 inch" / "7inches"  → word-boundary on both sides.
+  //   2. "7\"" / "7''" etc.   → "7" followed by any non-word/non-space
+  //      punctuation that is NOT immediately trailed by a digit (excludes
+  //      decimal weights like "7.6").
+  norm = norm.replace(/\b7\s*inch(?:es)?\b/gi, " seveninch ");
+  norm = norm.replace(/\b7\s*[^\w\s]+(?!\d)/g, " seveninch ");
+  norm = norm
     .replace(/[^a-z\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -610,8 +689,11 @@ function doughVariantStripQualifier(lhs: string): string {
     const re = new RegExp(`\\b${q.replace(/\s+/g, "\\s+")}\\b`, "gi");
     s = s.replace(re, " ");
   }
-  // Strip 7" / 7'' / 7-inch size indicators
-  s = s.replace(/\b7\s*["""'']{0,2}(?:\s*inch)?\b/gi, " ");
+  // Strip 7-inch die-size indicators using the same two-step approach as
+  // doughVariantQualifierKey so that all quote styles (straight, curly) and
+  // "7 inch" are handled uniformly without leaving trailing quote chars.
+  s = s.replace(/\b7\s*inch(?:es)?\b/gi, " ");
+  s = s.replace(/\b7\s*[^\w\s]+(?!\d)/g, " ");
   return s.replace(/\s+/g, " ").replace(/[,.:;]+$/, "").trim();
 }
 

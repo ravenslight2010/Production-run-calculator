@@ -962,6 +962,95 @@ describe("matchDoughballVariant", () => {
       matchDoughballVariant(vs, { dieType: "", brand: "Other Brand", flavor: "BBQ" }),
     ).toBeNull();
   });
+
+  it("Lowe's 7-inch catch-all does not shadow the base tier when no die-type context", () => {
+    // Real CRB scenario:
+    //   "Hannaford, Lowe's, & SMD" (7.6 oz) — base tier, has specific Lowe's flavors
+    //   "Lowe's 7 Inch" (5.7 oz) — seveninch tier, catch-all "All" from "Lowe's 7\": All"
+    //
+    // A Lowe's profile with no specific flavor AND no 7-inch die context should land
+    // on the base (7.6 oz) variant, NOT the 5.7 oz 7-inch variant.
+    const vs: DoughballVariant[] = [
+      {
+        label: "Hannaford, Lowe's, & SMD",
+        weightOz: 7.6,
+        customers: [
+          { brand: "Lowe's", flavor: "Californian" },
+          { brand: "Lowe's", flavor: "Grilled Vegetable" },
+          { brand: "SMD", flavor: "" },
+        ],
+      },
+      {
+        label: "Lowe's 7 Inch",
+        weightOz: 5.7,
+        customers: [{ brand: "Lowe's", flavor: "" }],
+      },
+    ];
+    // No die-type context → must prefer the base variant because the only Lowe's
+    // catch-all lives on a 7-inch (size) tier, not the base tier.
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Lowe's", flavor: "" })?.weightOz,
+    ).toBe(7.6);
+    // Specific flavor → still hits the base via Priority 1a.
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Lowe's", flavor: "Californian" })?.weightOz,
+    ).toBe(7.6);
+    // Explicit 7-inch die type → returns the 7-inch variant via the catch-all.
+    expect(
+      matchDoughballVariant(vs, { dieType: "7 inch", brand: "Lowe's", flavor: "" })?.weightOz,
+    ).toBe(5.7);
+  });
+
+  it("SMD abbreviation matches Show Me Dough profile via initials (Priority 1.5)", () => {
+    // The workbook stores "SMD CRB: All" so the customer entry brand is "SMD".
+    // A profile that has brand "Show Me Dough" (full name) must still match.
+    const vs: DoughballVariant[] = [
+      {
+        label: "Hannaford, Lowe's, & SMD",
+        weightOz: 7.6,
+        customers: [{ brand: "SMD", flavor: "" }],
+      },
+      { label: "Costco", weightOz: 9.6, customers: [{ brand: "Costco", flavor: "" }] },
+    ];
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Show Me Dough", flavor: "" })?.weightOz,
+    ).toBe(7.6);
+    // Exact "SMD" brand still works too.
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "SMD", flavor: "" })?.weightOz,
+    ).toBe(7.6);
+  });
+
+  it("7'' and 7-inch labels parse to the seveninch qualifier tier correctly", () => {
+    // "FSD 7'' CRB" customer-section LHS must produce qualifierKey seveninch so
+    // it only lands on the 7'' FSD variant (5.5 oz), not a base variant.
+    const vs: DoughballVariant[] = [
+      {
+        label: "Hannaford, Lowe's, & SMD",
+        weightOz: 7.6,
+        customers: [
+          { brand: "Hannaford", flavor: "Five Cheese" },
+          { brand: "SMD", flavor: "" },
+        ],
+      },
+      {
+        label: "7'' FSD",
+        weightOz: 5.5,
+        customers: [
+          { brand: "FSD", flavor: "Cheese" },
+          { brand: "FSD", flavor: "M/L" },
+        ],
+      },
+    ];
+    // FSD specific flavor → correct 7'' variant
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "FSD", flavor: "Cheese" })?.weightOz,
+    ).toBe(5.5);
+    // Hannaford not contaminated by FSD assignments
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Hannaford", flavor: "Five Cheese" })?.weightOz,
+    ).toBe(7.6);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1011,6 +1100,21 @@ describe("parseDoughCustomerSection", () => {
     const rows: string[][] = [["Basha's Ultra Thin: All"]];
     const result = parseDoughCustomerSection(rows);
     expect(result[0]).toMatchObject({ brand: "Basha's", qualifierKey: "ultra thin", flavors: [""] });
+  });
+
+  it("parses 7-inch die-size entries to qualifierKey seveninch and strips the size from the brand", () => {
+    // "Lowe's 7\": All" and "FSD 7'' CRB: Cheese, M/L" are die-size rows.
+    // qualifierKey must be "seveninch" (not "") so they don't shadow base-tier assignments.
+    const rows: string[][] = [
+      ["Lowe's CRB: Californian, Grilled Vegetable"],
+      ['Lowe\'s 7": All'],
+      ["FSD 7'' CRB: Cheese, M/L, Pepperoni"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toMatchObject({ brand: "Lowe's", qualifierKey: "", flavors: ["Californian", "Grilled Vegetable"] });
+    expect(result[1]).toMatchObject({ brand: "Lowe's", qualifierKey: "seveninch", flavors: [""] });
+    expect(result[2]).toMatchObject({ brand: "FSD", qualifierKey: "seveninch", flavors: ["Cheese", "M/L", "Pepperoni"] });
   });
 
   it("skips numeric rows but does NOT stop — customer section may be below the formula table", () => {

@@ -39,9 +39,33 @@ Family-collapse rekeyed candidate variants under the family key, but the caller 
 **Bug 3b — "&"-joined multi-brand entries not split**:  
 "Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean" was emitted as a single brand string. Fix: after `doughVariantStripQualifier`, split by ` & ` and emit one customer entry per brand.
 
+## Bug 4 — Lowe's 7" weight picks the wrong variant (wrong qualifier key)
+
+**Symptom:** "Lowe's 7\"" customer entry in a dough sheet was assigned the same `qualifierKey: ""` as the base Lowe's variant, so `matchDoughballVariant` picked the base-tier weight (7.6 oz) instead of the 5.7 oz die-size variant, or fell back to the initials path.
+
+**Root cause:** `doughVariantQualifierKey` used `/\b7\s*["""'']+.../` which relies on curly-quote chars (U+201C/D, U+2018/9). Workbook cells use U+0022 (straight double quote), which wasn't in the class, so the regex matched zero quote chars and only stripped the digit "7" — leaving the "seveninch" sentinel never written. `doughVariantStripQualifier` had the same char-class gap, leaving a trailing `"` in the brand name ("Lowe's \"" instead of "Lowe's").
+
+**Fix (lib/named-recipes/src/index.ts):**
+1. `DOUGH_VARIANT_QUALIFIERS` — added `"seveninch"` sentinel.
+2. `DOUGH_SIZE_QUALIFIERS = new Set(["seveninch"])` — distinguishes die-size tiers from recipe-weight tiers in Priority 1b catch-all logic.
+3. `doughVariantQualifierKey` — two-step normalization:
+   - `/\b7\s*inch(?:es)?\b/gi` → `" seveninch "`
+   - `/\b7\s*[^\w\s]+(?!\d)/g` → `" seveninch "` (any punctuation after 7 that isn't followed by a digit; covers `"`, `''`, curly quotes; `(?!\d)` guards against decimal weights like "7.6")
+4. `doughVariantStripQualifier` — same two-step replaces the old char-class strip so trailing `"` doesn't survive.
+5. `matchDoughballVariant` Priority 1b — when the sole catch-all variant is a `DOUGH_SIZE_QUALIFIERS` tier but the profile has no die context, fall back to the base-tier brand match.
+
+**Why `\b` at end failed:** after a non-word char like `"` at end-of-string, `\b` requires the last char to be `\w` — it isn't, so the match silently zero-quantified the quote group and matched only "7". The fix uses `(?!\d)` lookahead (not a trailing `\b`) to exclude decimal weights.
+
+## Bug 5 — SMD not matching Show Me Dough (initials mismatch)
+
+**Symptom:** `{brand: "SMD"}` (initials abbreviation) in the customers array failed to match the pool entry "Show Me Dough", so the profile was left blank instead of getting the correct weight.
+
+**Fix:** `matchDoughballVariant` Priority 1.5 — initials-based catch-all. Compute initials of each pool variant's label (e.g. "Show Me Dough" → "smd"); if the normalized customer brand equals those initials, treat it as a match.
+
 ## Sharp edges
 
 - `unionVariantCustomers(base, incoming)` is directional — `incoming` is the NEW set, `base` is what already exists. When you want to PRESERVE existing and optional-ADD incoming, you must not use this helper with incoming=existing; write the filter manually.
 - Profiles for Lucia's Craft are localStorage-only (no rows in `brand_profiles` DB table) — server heals that operate on `brand_profiles` never touched them. The customers fix + import override is the only path to correct wrong weights on these profiles.
 - Other label-named variants (Hannaford, Lowe's, Nob Hill Craft) still have no customers arrays — they rely on the die-number fallback. Add customers for those too if those brands start showing wrong weights.
 - The "never clobber" rule still applies when `wMatchedViaCustomers=false` (die fallback or no match) — only high-confidence customers matches may override.
+- Regex character class `["""'']` in JS source files may silently exclude U+0022/U+0027 depending on how the editor encoded the curly quotes. Prefer `[^\w\s]+(?!\d)` for "any punctuation after a digit, excluding decimal weights".
