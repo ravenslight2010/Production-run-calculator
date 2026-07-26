@@ -1625,6 +1625,39 @@ describe("applyDoughCustomerAssignmentsToVariants", () => {
     expect(melts.customers?.some((c) => c.brand === "FSD")).toBe(false);
   });
 
+  it("assigns Naan Dough static entries correctly — Lucia's Craft+4Hands to 12oz, Hannaford to 11.5oz (regression)", () => {
+    // The Naan workbook has NO colon-separated customer section; brand names
+    // appear only in the yield-table row labels. The static assignments must
+    // carry the full brand→variant mapping. This test mirrors the real pool:
+    //   "NAAN DOUGH MIXING"                       11.5 oz (generic base)
+    //   "Lucia's Craft & 4Hands Naan (Masala Pizza)" 12 oz
+    //   "Hannaford (Masala Pizza)"                11.5 oz
+    const naanVariants: DoughballVariant[] = [
+      { label: "NAAN DOUGH MIXING", weightOz: 11.5, perTray: 16 },
+      { label: "Lucia's Craft & 4Hands Naan (Masala Pizza)", weightOz: 12, perTray: 16 },
+      { label: "Hannaford (Masala Pizza)", weightOz: 11.5, perTray: 16 },
+    ];
+    const staticAssignments: DoughCustomerAssignment[] = [
+      { brand: "Lucia's Craft", qualifierKey: "", flavors: ["Masala Pizza"] },
+      { brand: "4Hands", qualifierKey: "", flavors: ["Masala Pizza"] },
+      { brand: "Hannaford", qualifierKey: "", flavors: ["Tikka Masala"] },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(naanVariants, staticAssignments, naanVariants);
+    const base = result.find((v) => v.label === "NAAN DOUGH MIXING")!;
+    const lucias = result.find((v) => v.label === "Lucia's Craft & 4Hands Naan (Masala Pizza)")!;
+    const hford = result.find((v) => v.label === "Hannaford (Masala Pizza)")!;
+    // Base generic variant gets nothing — pool IS branded (Lucia's Craft + Hannaford labels)
+    expect(base.customers).toBeUndefined();
+    // Lucia's Craft and 4Hands land on the 12 oz variant
+    expect(lucias.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "Masala Pizza" });
+    expect(lucias.customers).toContainEqual({ brand: "4Hands", flavor: "Masala Pizza" });
+    expect(lucias.customers?.some((c) => c.brand === "Hannaford")).toBe(false);
+    // Hannaford lands on its own 11.5 oz variant
+    expect(hford.customers).toContainEqual({ brand: "Hannaford", flavor: "Tikka Masala" });
+    expect(hford.customers?.some((c) => c.brand === "Lucia's Craft")).toBe(false);
+    expect(hford.customers?.some((c) => c.brand === "4Hands")).toBe(false);
+  });
+
   it("returns the same array reference when assignments is empty", () => {
     const variants: DoughballVariant[] = [{ label: "Hannaford", weightOz: 7.6 }];
     const result = applyDoughCustomerAssignmentsToVariants(variants, []);

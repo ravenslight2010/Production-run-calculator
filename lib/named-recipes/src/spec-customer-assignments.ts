@@ -66,16 +66,25 @@ export const SPEC_STATIC_CUSTOMER_ASSIGNMENTS: ReadonlyMap<
   ],
 
   // ─── Naan Dough ──────────────────────────────────────────────────────────
-  // Workbook customer section covers Lucia's Craft & 4Hands Naan (confirmed).
-  // Verified: Lucia_Craft_Pizza_Recipe_Specs_-_03_*.xlsx does NOT list any Naan
-  // flavors — the dough workbook is the only source for that assignment. No
-  // static entry for Lucia's Craft is needed here; parseDoughCustomerSection
-  // handles it from the workbook's own customer section.
-  // Hannaford / Tikka Masala assignment from spec — not in workbook section.
-  // "Hannaford (Masala Pizza)" variant label contains "Hannaford" → strict match.
+  // The Naan workbook (Naan_Dough_Mixing_Procedure_-_12.xlsx) has NO
+  // colon-separated customer-assignment section. The brand names appear ONLY
+  // in the yield-table row labels ("Lucia's Craft & 4Hands Naan (Masala Pizza)",
+  // "Hannaford (Masala Pizza)"). parseDoughCustomerSection produces nothing from
+  // this workbook; all assignments must be static here.
+  //
+  // "Lucia's Craft & 4Hands Naan (Masala Pizza)" → 12 oz / 16 per tray.
+  //   Brands: "Lucia's Craft" and "4Hands"; both use the Masala Pizza product.
+  //   Substring match: "lucia's craft & 4hands naan (masala pizza)" ⊇ "lucia's craft" ✓
+  //                    "lucia's craft & 4hands naan (masala pizza)" ⊇ "4hands" ✓
+  // "Hannaford (Masala Pizza)" → 11.5 oz / 16 per tray.
+  //   Brand: "Hannaford"; flavor from spec sheet = "Tikka Masala".
   [
     "naan dough",
-    [{ brand: "Hannaford", qualifierKey: "", flavors: ["Tikka Masala"] }],
+    [
+      { brand: "Lucia's Craft", qualifierKey: "", flavors: ["Masala Pizza"] },
+      { brand: "4Hands", qualifierKey: "", flavors: ["Masala Pizza"] },
+      { brand: "Hannaford", qualifierKey: "", flavors: ["Tikka Masala"] },
+    ],
   ],
 
   // ─── Masa Dough ──────────────────────────────────────────────────────────
