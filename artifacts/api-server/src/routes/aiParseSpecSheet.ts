@@ -134,12 +134,17 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "duplicated); otherwise return the workbook's name as-is (a new one will be " +
     "created). QUALIFIER EXCEPTION: qualifiers that change WHICH product or recipe " +
     "variant a name refers to are part of the identity — never snap to a shorter " +
-    "known name by dropping them. Examples: sheet 'Pepperoni Stick - NATURAL' does " +
-    "NOT collapse to known 'Pepperoni Stick'; sheet 'Masa Dough Natural' does NOT " +
+    "known name by dropping them. This applies to BRANDS too: a size suffix " +
+    "like '7 Inch', '7in', '11in', '12\"' in a brand name means it is a DIFFERENT " +
+    "brand from the unsized one — 'Lowe\\'s 7 Inch' does NOT collapse to known " +
+    "'Lowe\\'s' (they carry different dough weights and specs). Use the sheet's " +
+    "full name. Other examples: sheet 'Pepperoni Stick - NATURAL' does NOT " +
+    "collapse to known 'Pepperoni Stick'; sheet 'Masa Dough Natural' does NOT " +
     "collapse to known 'Masa Dough'. Only snap when the omitted words are generic " +
     "filler ('Recipe', 'Mix', 'Procedure', 'Dough', 'Sauce') — not when they are " +
-    "meaningful product qualifiers (NATURAL, CURED, Spicy, Heavy, Light, Original, " +
-    "Whole Milk, or any word that distinguishes one variant from another). " +
+    "meaningful product qualifiers (size suffixes, NATURAL, CURED, Spicy, Heavy, " +
+    "Light, Original, Whole Milk, or any word that distinguishes one variant from " +
+    "another). " +
     "Use the provided ALIASES as authoritative label→canonical mappings. " +
     "A SINGLE recipe often applies to MANY brand+flavor profiles — typically a " +
     "list of 'Brand: flavors' header rows sitting above ONE shared ingredient " +

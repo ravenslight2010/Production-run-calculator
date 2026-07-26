@@ -85,6 +85,11 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
   it("tells the model qualifier words override the snap-to-known-name rule", () => {
     const { system } = buildParseSpecSheetPrompt(input());
     expect(system).toContain("QUALIFIER EXCEPTION");
+    // Size suffixes in brand names must not be stripped.
+    expect(system).toContain("7 Inch");
+    expect(system).toContain("7in");
+    expect(system).toContain("Lowe");
+    // Product qualifiers.
     expect(system).toContain("'Pepperoni Stick - NATURAL' does NOT collapse to known 'Pepperoni Stick'");
     expect(system).toContain("'Masa Dough Natural' does NOT collapse to known 'Masa Dough'");
     // The pep type rule itself must reinforce that it overrides the known-name rule.
