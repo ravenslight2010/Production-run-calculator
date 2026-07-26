@@ -3684,6 +3684,29 @@ const STICK_PEP_NAME_RE = /pepp?eroni|pep\s*stick|(?:cheese|mozz\w*)\s*stick/i;
  * a stick pep type — the ONE pepperoni exception that stays a cheese recipe. Pure. */
 const DICED_RE = /diced/i;
 
+/** Matches an applicator NAME that is itself just "diced pep / diced pepperoni" —
+ * a raw topping ingredient that the AI occasionally surfaces as a standalone
+ * cheese applicator slot rather than an ingredient inside a blend. */
+const DICED_PEP_STANDALONE_NAME_RE = /diced[\s-]*(?:pep\b|pepperoni)/i;
+
+/**
+ * True when a CHEESE-kind recipe is really just a raw diced-pepperoni topping
+ * advertised as a standalone applicator by the AI — e.g., a slot named
+ * "Diced Pep" or "Diced Pepperoni" with 0–1 ingredient rows.
+ *
+ * Distinct from isStickPepOnlyCheeseRecipe: that guard fires on INGREDIENT
+ * content (every row is a stick pep); this guard fires on the RECIPE NAME.
+ * A genuine cheese blend that CONTAINS diced pepperoni among multiple
+ * ingredients is not affected — it has 2+ rows so the ≤1-row guard passes
+ * it through. Pure.
+ */
+export function isDicedPepStandaloneApplicator(
+  name: string,
+  rows: ReadonlyArray<RecipeRow>,
+): boolean {
+  return DICED_PEP_STANDALONE_NAME_RE.test(name) && rows.length <= 1;
+}
+
 /**
  * True when a CHEESE-kind recipe is really just stick-applied pep — pepperoni
  * STICKS or CHEESE STICKS — a pep TYPE, not a cheese/topping blend. Sticks are
@@ -4586,6 +4609,11 @@ export function sanitizeParsedSpecImport(
     // recipe whose ingredients are purely such sticks so it never imports as a
     // bogus "cheese recipe".
     if (kind === "cheese" && isStickPepOnlyCheeseRecipe(rows)) continue;
+    // A standalone "Diced Pep" / "Diced Pepperoni" applicator is a raw topping
+    // ingredient, not a cheese blend. Drop it so it never creates a bogus
+    // cheese or mix recipe. (Real blends that CONTAIN diced pep among multiple
+    // ingredients have 2+ rows and pass through.)
+    if (kind === "cheese" && isDicedPepStandaloneApplicator(name ?? "", rows)) continue;
     const recipe: ParsedRecipe = { kind, name, rows };
     // Grounding backstop for RECIPE brands, same semantics as profiles: a
     // paraphrased recipe brand silently attaches a dough/sauce/cheese recipe

@@ -3159,6 +3159,14 @@ export function applySpecImport(
    * and best-effort — when absent the built-in map still applies.
    */
   dieLineDefaultOverrides?: DieLineDefaultsOverrides,
+  /**
+   * Set of profile keys (`"${brand.toLowerCase()}\u0000${flavor.toLowerCase()}"`)
+   * for which blank-fill guards are BYPASSED — the sheet's dough name, sauce name,
+   * and doughball weight overwrite whatever is currently stored. Used by the
+   * step-2 "Force update" toggle to let a manager correct a previously bad import
+   * without hunting through the recipe manager.
+   */
+  forceUpdateProfileKeys?: ReadonlySet<string>,
 ): { touchedProfiles: Array<{ brand: string; flavor: string }>; crustProfiles: Array<{ brand: string; flavor: string }> } {
   if (typeof localStorage === "undefined") return { touchedProfiles: [], crustProfiles: [] };
 
@@ -3421,6 +3429,12 @@ export function applySpecImport(
     if (!brand || !flavor) continue;
     registerBrandFlavor(brand, flavor);
     markTouched(brand, flavor);
+    // When the manager checked "Force update" for this profile in the step-2
+    // review, bypass blank-fill guards below so the sheet's values OVERWRITE
+    // whatever is stored (dough name, sauce name, doughball weight).
+    const isForced =
+      forceUpdateProfileKeys?.has(`${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`) ??
+      false;
     const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
     if (p.dieType) values.dieType = p.dieType;
     // Detect purchased-crust profiles (no die + crust-named doughName) so the
@@ -3463,7 +3477,7 @@ export function applySpecImport(
       placeholderCandidates.push({ kind: "sauce", name: specSauceName, brand, flavor });
     }
     const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    if (specSauceName && !hasMixedSauce && !(values.frontlineRecipeName ?? "").trim()) {
+    if (specSauceName && !hasMixedSauce && (isForced || !(values.frontlineRecipeName ?? "").trim())) {
       values.frontlineRecipeName = specSauceName;
     }
     // The sheet may name a sauce whose recipe already exists in the library
@@ -3499,7 +3513,7 @@ export function applySpecImport(
       placeholderCandidates.push({ kind: "dough", name: specDoughName, brand, flavor });
     }
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    if (specDoughName && !hasMixedDough && !(values.doughRecipeName ?? "").trim()) {
+    if (specDoughName && !hasMixedDough && (isForced || !(values.doughRecipeName ?? "").trim())) {
       values.doughRecipeName = specDoughName;
     }
     // Same library hydration for dough: an assigned dough name whose recipe
@@ -3558,7 +3572,7 @@ export function applySpecImport(
             : Math.abs(existingWeightOz - Number(poolMatched.weightOz ?? 0)) < 0.1;
         if (
           w > 0 &&
-          (!(existingWeightOz > 0) || (wMatchedViaCustomers && !existingMatchesVariant))
+          (isForced || !(existingWeightOz > 0) || (wMatchedViaCustomers && !existingMatchesVariant))
         ) {
           values.targetDoughballWeight = w;
         }

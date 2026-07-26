@@ -61,6 +61,7 @@ type Props = {
     parsed: ParsedSpecImport,
     learnedRenames: SpecImportAlias[],
     profilesToRemove: Array<{brand: string; flavor: string}>,
+    forceUpdateProfileKeys: ReadonlySet<string>,
   ) => void;
 };
 
@@ -89,6 +90,13 @@ type ProfileItem = {
   dieTouched: boolean;
   include: boolean;
   tombstoned: boolean;
+  /**
+   * When true, bypass blank-fill guards in applySpecImport for this profile:
+   * the sheet's dough name, sauce name, and doughball weight OVERWRITE whatever
+   * is currently stored. Used to fix a previously bad import without having to
+   * manually edit the recipe manager.
+   */
+  forceUpdate: boolean;
 };
 
 // One editable recipe row. `orig` keeps rows/targets/doughballOz/app; name + kind
@@ -170,6 +178,7 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
     dieTouched: false,
     include: true,
     tombstoned: false,
+    forceUpdate: false,
   }));
   const skipped = prepared.skipped.profiles.map((p, i) => ({
     key: `ps${i}`,
@@ -181,8 +190,48 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
     dieTouched: false,
     include: false,
     tombstoned: true,
+    forceUpdate: false,
   }));
   return [...kept, ...skipped];
+}
+
+/**
+ * Advisory warnings for spec-import profiles based on pool availability.
+ * Flags a dough/sauce name that the current pool doesn't contain yet — it will
+ * create a placeholder on commit but the data (recipe rows, weight) won't fill
+ * until the manager adds it. Pure function, no side effects.
+ */
+function computeSpecImportPoolWarnings(
+  profiles: ProfileItem[],
+  doughPoolNames: string[],
+  saucePoolNames: string[],
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  const doughSet = new Set(doughPoolNames.map((n) => n.trim().toLowerCase()));
+  const sauceSet = new Set(saucePoolNames.map((n) => n.trim().toLowerCase()));
+  // Mirror the purchased-crust detection from applySpecImport so a "Bonici
+  // Parbake Crust" profile isn't incorrectly flagged for a missing dough recipe.
+  const PURCHASED_CRUST_RE = /\bcrusts?\b/i;
+  const INHOUSE_CRUST_RE = /\b(?:doughs?|recipes?|dies?)\b/i;
+  for (const p of profiles) {
+    if (!p.include) continue;
+    const key = warnKey(p.orig.brand, p.orig.flavor);
+    const warns: string[] = [];
+    const doughName = (p.orig.doughName ?? "").trim();
+    const sauceName = (p.orig.sauceName ?? "").trim();
+    const isPurchasedCrust =
+      doughName
+        ? PURCHASED_CRUST_RE.test(doughName) && !INHOUSE_CRUST_RE.test(doughName)
+        : false;
+    if (doughName && !isPurchasedCrust && !doughSet.has(doughName.toLowerCase())) {
+      warns.push(`Dough "${doughName}" not in pool — will import as a placeholder`);
+    }
+    if (sauceName && !sauceSet.has(sauceName.toLowerCase())) {
+      warns.push(`Sauce "${sauceName}" not in pool — will import as a placeholder`);
+    }
+    if (warns.length > 0) map.set(key, warns);
+  }
+  return map;
 }
 
 function buildRecipeItems(
@@ -677,8 +726,20 @@ export default function SpecImportDialog({
       const k = warnKey(w.brand, w.flavor);
       map.set(k, [...(map.get(k) ?? []), w.message]);
     }
+    // Step-2 pool-link warnings: flag dough/sauce names not yet in the factory pool.
+    // These appear inline on each profile row so the manager sees them before Apply.
+    if (step === 2) {
+      const poolWarns = computeSpecImportPoolWarnings(
+        profiles,
+        existingRecipeNamesByKind.dough ?? [],
+        existingRecipeNamesByKind.sauce ?? [],
+      );
+      for (const [k, ws] of poolWarns) {
+        map.set(k, [...(map.get(k) ?? []), ...ws]);
+      }
+    }
     return map;
-  }, [prepared]);
+  }, [prepared, profiles, step, existingRecipeNamesByKind]);
 
   if (!open) return null;
 
@@ -943,11 +1004,12 @@ export default function SpecImportDialog({
                           mode="die"
                           brands={brands}
                           flavorsByBrand={flavorsByBrand}
-                          warnings={[]}
+                          warnings={warningsByProfile.get(warnKey(p.orig.brand, p.orig.flavor)) ?? []}
                           onToggle={() => setProfile(p.key, { include: !p.include })}
                           onBrand={(brand) => setProfile(p.key, { brand })}
                           onFlavor={(flavor) => setProfile(p.key, { flavor })}
                           onDieType={(dieType) => setProfile(p.key, { dieType, dieTouched: true })}
+                          onForceUpdate={(forceUpdate) => setProfile(p.key, { forceUpdate })}
                         />
                       ))}
                   </ul>
@@ -1107,6 +1169,11 @@ export default function SpecImportDialog({
               removedProfiles
                 .filter((p) => p.remove)
                 .map((p) => ({ brand: p.brand, flavor: p.flavor })),
+              new Set(
+                profiles
+                  .filter((p) => p.include && p.forceUpdate)
+                  .map((p) => `${p.brand.trim().toLowerCase()}\u0000${p.flavor.trim().toLowerCase()}`),
+              ),
             )}
               disabled={
                 loading ||
@@ -1169,6 +1236,7 @@ function ProfileRow({
   onBrand,
   onFlavor,
   onDieType,
+  onForceUpdate,
 }: {
   item: ProfileItem;
   /** "names" = step 1 (include + brand/flavor + grounding); "die" = step 2 die-only. */
@@ -1180,6 +1248,8 @@ function ProfileRow({
   onBrand: (v: string) => void;
   onFlavor: (v: string) => void;
   onDieType: (v: string) => void;
+  /** Step-2 only: called when the "force update" checkbox changes. */
+  onForceUpdate?: (v: boolean) => void;
 }) {
   const brand = item.brand.trim();
   const flavor = item.flavor.trim();
@@ -1239,6 +1309,29 @@ function ProfileRow({
         )}
         {summary && (
           <div className="mt-1.5 text-xs text-muted-foreground">Read: {summary}</div>
+        )}
+        {warnings.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {warnings.map((w, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-xs text-amber-600">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                {w}
+              </li>
+            ))}
+          </ul>
+        )}
+        {onForceUpdate && (
+          <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={item.forceUpdate}
+              onChange={(e) => onForceUpdate(e.target.checked)}
+              className="h-3.5 w-3.5 accent-primary"
+              aria-label={`Force update existing data for ${brand} ${flavor}`}
+              data-testid={`spec-profile-force-${item.key}`}
+            />
+            Override existing dough / sauce / weight with sheet values
+          </label>
         )}
       </li>
     );

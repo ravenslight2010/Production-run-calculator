@@ -37,7 +37,7 @@ const { parseSpy, saveSheetSpy, fetchSheetsSpy, applySpy, aliasesRef } = vi.hois
   }),
   saveSheetSpy: vi.fn(async () => {}),
   fetchSheetsSpy: vi.fn(async () => [] as unknown[]),
-  applySpy: vi.fn(),
+  applySpy: vi.fn(() => ({ touchedProfiles: [], crustProfiles: [] })),
   aliasesRef: { current: [] as unknown[] },
 }));
 

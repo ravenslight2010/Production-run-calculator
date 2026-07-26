@@ -41,9 +41,9 @@ describe("applySpecImport brand canonicalization onto existing spellings", () =>
     saveBrandFlavors({ "Aldo's": ["SAUSAGE"] });
     saveProfile("Aldo's", "SAUSAGE", { ...DEFAULT_VALUES });
 
-    const touched = applySpecImport(typoBrandImport());
+    const { touchedProfiles } = applySpecImport(typoBrandImport());
 
-    expect(touched).toEqual([{ brand: "Aldo's", flavor: "SAUSAGE" }]);
+    expect(touchedProfiles).toEqual([{ brand: "Aldo's", flavor: "SAUSAGE" }]);
     const prof = loadProfile("Aldo's", "SAUSAGE");
     expect(prof?.sauceOzPerPizza).toBe(4);
     expect(prof?.frontlineRecipeName).toBe("Aldo Pizza Sauce");

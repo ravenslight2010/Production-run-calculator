@@ -95,7 +95,7 @@ vi.mock("./storage", () => ({
   recipeExistsForImport: () => false,
   importProfileIsTombstoned: () => false,
   recipeNameIsTombstoned: () => false,
-  applySpecImport: () => {},
+  applySpecImport: () => ({ touchedProfiles: [], crustProfiles: [] }),
 }));
 vi.mock("./specImportAliases", () => ({
   // The learned blend-name link from a past "Use existing recipe" pick, plus a

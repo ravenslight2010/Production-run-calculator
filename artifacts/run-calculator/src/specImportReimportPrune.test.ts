@@ -49,7 +49,7 @@ function fixtureParse(): ParsedSpecImport {
 }
 
 const { applySpy, saveSheetSpy, fetchSheetsSpy } = vi.hoisted(() => ({
-  applySpy: vi.fn(),
+  applySpy: vi.fn(() => ({ touchedProfiles: [], crustProfiles: [] })),
   saveSheetSpy: vi.fn(async () => {}),
   fetchSheetsSpy: vi.fn(async () => [] as unknown[]),
 }));

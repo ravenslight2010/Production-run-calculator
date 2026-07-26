@@ -38,7 +38,7 @@ vi.mock("./storage", () => ({
   recipeExistsForImport: () => false,
   importProfileIsTombstoned: () => false,
   recipeNameIsTombstoned: () => false,
-  applySpecImport: () => {},
+  applySpecImport: () => ({ touchedProfiles: [], crustProfiles: [] }),
 }));
 vi.mock("./specImportAliases", () => ({
   fetchSpecImportAliases: async () => [],

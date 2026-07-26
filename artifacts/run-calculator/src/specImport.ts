@@ -1790,6 +1790,12 @@ export async function prepareSpecImportMulti(
  */
 export async function commitSpecImport(
   prepared: SpecImportPrepared,
+  /**
+   * Profile keys (`"${brand}\u0000${flavor}"` lower-cased) for which blank-fill
+   * guards in applySpecImport are bypassed — the sheet's values overwrite stored
+   * ones. Sourced from the step-2 "Force update" checkboxes in SpecImportDialog.
+   */
+  forceUpdateProfileKeys?: ReadonlySet<string>,
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
@@ -1994,7 +2000,7 @@ export async function commitSpecImport(
   }
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
-  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides);
+  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys);
 
   // For the SERVER-POOL collects below only: backfill "who it goes to"
   // brand/flavor targets onto cheese-kind recipes that arrived unscoped, from
