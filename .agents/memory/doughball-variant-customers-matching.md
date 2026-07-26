@@ -39,6 +39,12 @@ Family-collapse rekeyed candidate variants under the family key, but the caller 
 **Bug 3b — "&"-joined multi-brand entries not split**:  
 "Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean" was emitted as a single brand string. Fix: after `doughVariantStripQualifier`, split by ` & ` and emit one customer entry per brand.
 
+**Bug 3c — "&" in single brand name creates phantom parts**:  
+"Lucia's New & Improved: All" is ONE brand, but the `&` split produced phantom brands "Lucia's New" and "Improved". `matchDoughballVariant` searched for exact brand name "Lucia's New & Improved" and found nothing. Fix: when `brandParts.length > 1`, also push the full pre-split compound brand as an additional assignment so the exact-name lookup in Priority 1b succeeds.
+
+**Bug 4b — Priority 1b size-tier/base-tier tiebreaker uses wrong signal**:  
+When a profile has no `dieType` but a SPECIFIC FLAVOR that is NOT listed in the base-tier's customers for its brand, the old code always returned the base-tier variant. E.g. a "Lowe's / Seven Cheese" profile (not in base customer list) would get 7.6 oz instead of 5.7 oz. Fix: in the `DOUGH_SIZE_QUALIFIERS && vQual !== profileQual` branch, check if the profile's flavor appears in the base variant's customers for this brand. If the flavor is absent (and the profile has a specific flavor), prefer the size-tier catch-all. If no specific flavor, keep the base as safe default.
+
 ## Bug 4 — Lowe's 7" weight picks the wrong variant (wrong qualifier key)
 
 **Symptom:** "Lowe's 7\"" customer entry in a dough sheet was assigned the same `qualifierKey: ""` as the base Lowe's variant, so `matchDoughballVariant` picked the base-tier weight (7.6 oz) instead of the 5.7 oz die-size variant, or fell back to the initials path.

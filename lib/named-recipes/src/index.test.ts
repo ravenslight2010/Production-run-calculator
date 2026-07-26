@@ -1001,6 +1001,46 @@ describe("matchDoughballVariant", () => {
     ).toBe(5.7);
   });
 
+  it("prefers size-tier catch-all when profile flavor is absent from base tier (Bug 4 flavor tiebreaker)", () => {
+    // Real CRB scenario: Lowe's has a base-tier catch-all on "Hannaford, Lowe's, & SMD"
+    // with SPECIFIC flavors (Californian, Grilled Vegetable) and a size-tier catch-all
+    // on "Lowe's 7 Inch" (flavor ""). A profile with a flavor NOT listed in the base tier
+    // (e.g. "Seven Cheese") and no dieType should land on the size-tier variant because
+    // the catch-all "Lowe's 7\": All" covers all 7-inch flavors including unlisted ones.
+    const vs: DoughballVariant[] = [
+      {
+        label: "Hannaford, Lowe's, & SMD",
+        weightOz: 7.6,
+        customers: [
+          { brand: "Lowe's", flavor: "Californian" },
+          { brand: "Lowe's", flavor: "Grilled Vegetable" },
+          { brand: "SMD", flavor: "" },
+        ],
+      },
+      {
+        label: "Lowe's 7 Inch",
+        weightOz: 5.7,
+        customers: [{ brand: "Lowe's", flavor: "" }],
+      },
+    ];
+    // Flavor listed in base tier → base (7.6 oz) via Priority 1a
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Lowe's", flavor: "Californian" })?.weightOz,
+    ).toBe(7.6);
+    // Flavor NOT in base tier customers → prefer size-tier catch-all (5.7 oz)
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Lowe's", flavor: "Seven Cheese" })?.weightOz,
+    ).toBe(5.7);
+    // No flavor, no die-type → safe default is base (7.6 oz), unchanged from before
+    expect(
+      matchDoughballVariant(vs, { dieType: "", brand: "Lowe's", flavor: "" })?.weightOz,
+    ).toBe(7.6);
+    // Explicit 7-inch die → size-tier (5.7 oz), unchanged from before
+    expect(
+      matchDoughballVariant(vs, { dieType: "7 inch", brand: "Lowe's", flavor: "" })?.weightOz,
+    ).toBe(5.7);
+  });
+
   it("SMD abbreviation matches Show Me Dough profile via initials (Priority 1.5)", () => {
     // The workbook stores "SMD CRB: All" so the customer entry brand is "SMD".
     // A profile that has brand "Show Me Dough" (full name) must still match.
@@ -1226,12 +1266,40 @@ describe("parseDoughCustomerSection", () => {
       ["Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean"],
     ];
     const result = parseDoughCustomerSection(rows);
-    expect(result).toHaveLength(2);
+    // Expect 3: "Lowe's", "Lucia's Craft" (the split parts) AND "Lowe's & Lucia's Craft"
+    // (the compound entry so matchDoughballVariant can find it by full brand name).
+    expect(result).toHaveLength(3);
     expect(result).toContainEqual(
       expect.objectContaining({ brand: "Lowe's", qualifierKey: "heavy plus", flavors: ["Caribbean"] }),
     );
     expect(result).toContainEqual(
       expect.objectContaining({ brand: "Lucia's Craft", qualifierKey: "heavy plus", flavors: ["Caribbean"] }),
+    );
+    // Full compound name also stored so profiles named "Lowe's & Lucia's Craft" match.
+    expect(result).toContainEqual(
+      expect.objectContaining({ brand: "Lowe's & Lucia's Craft", qualifierKey: "heavy plus", flavors: ["Caribbean"] }),
+    );
+  });
+
+  it("also stores the full compound name for single brands that contain '&' (Bug 3c: Lucia's New & Improved)", () => {
+    // "Lucia's New & Improved" is a SINGLE brand whose name happens to contain "&".
+    // The "&" split produces phantom parts ("Lucia's New", "Improved") that can't be
+    // found by matchDoughballVariant using the full brand name. The compound entry
+    // ensures the full-name lookup succeeds.
+    const rows: string[][] = [
+      ["Lucia's New & Improved: All"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    // 3 entries: "Lucia's New", "Improved", and "Lucia's New & Improved"
+    expect(result).toHaveLength(3);
+    expect(result).toContainEqual(
+      expect.objectContaining({ brand: "Lucia's New & Improved", qualifierKey: "", flavors: [""] }),
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({ brand: "Lucia's New", qualifierKey: "", flavors: [""] }),
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({ brand: "Improved", qualifierKey: "", flavors: [""] }),
     );
   });
 

@@ -565,13 +565,34 @@ export function matchDoughballVariant(
       const vQual = doughVariantQualifierKey(solo.label);
       if (DOUGH_SIZE_QUALIFIERS.has(vQual) && vQual !== profileQual) {
         // Size-tier catch-all doesn't match profile context — prefer a base
-        // variant that has ANY assignment for this brand (specific or catch-all).
+        // variant that has ANY assignment for this brand (specific or catch-all),
+        // UNLESS the profile's specific flavor is not listed in the base tier's
+        // customers for this brand. If the flavor is absent from the base tier
+        // (meaning it wasn't explicitly mapped there) but the size-tier has a
+        // catch-all for this brand, the flavor is more likely a size-tier product.
         const baseWithBrand = list.find(
           (v) =>
             doughVariantQualifierKey(v.label) === "" &&
             (v.customers ?? []).some((c) => c.brand.trim().toLowerCase() === b),
         );
-        catchAllHit = baseWithBrand ?? solo;
+        if (!baseWithBrand) {
+          catchAllHit = solo;
+        } else {
+          const f = (opts.flavor ?? "").trim().toLowerCase();
+          const baseHasThisFlavor =
+            !f ||
+            (baseWithBrand.customers ?? []).some(
+              (c) =>
+                c.brand.trim().toLowerCase() === b &&
+                c.flavor.trim().toLowerCase() === f,
+            );
+          // If the profile has a specific flavor that IS in the base tier →
+          // this is a base-tier product → prefer base.
+          // If the flavor is absent from the base tier (or no flavor) →
+          // prefer the size-tier catch-all (it covers all flavors of this
+          // size-tier product, including ones not explicitly enumerated).
+          catchAllHit = baseHasThisFlavor ? baseWithBrand : solo;
+        }
       } else {
         catchAllHit = solo;
       }
@@ -845,6 +866,16 @@ export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssign
     const brandParts = strippedBrand.split(/\s*&\s*/).map((b) => b.trim()).filter(Boolean);
     for (const brand of brandParts) {
       result.push({ brand, qualifierKey, flavors });
+    }
+    // Also push the FULL pre-split compound brand so matchDoughballVariant can
+    // find the variant by the exact full brand name. The "&" split above handles
+    // genuine two-brand entries ("Lowe's & Lucia's Craft"), but can also produce
+    // phantom parts for single brands that contain "&" in their name
+    // (e.g. "Lucia's New & Improved" → parts "Lucia's New" + "Improved").
+    // Storing the original ensures matchDoughballVariant's customer-name lookup
+    // succeeds when the profile brand is the full compound string.
+    if (brandParts.length > 1) {
+      result.push({ brand: strippedBrand, qualifierKey, flavors });
     }
   }
   return result;
