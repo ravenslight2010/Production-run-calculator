@@ -2585,7 +2585,15 @@ export interface NamedRecipeComponent {
 }
 
 /**
- * One dough family variant's doughball numbers. label is the variant's original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown.
+ * A brand+flavor pair that uses this doughball variant. flavor may be empty ("") meaning all varieties for the brand.
+ */
+export interface DoughballVariantCustomer {
+  brand: string;
+  flavor: string;
+}
+
+/**
+ * One dough family variant's doughball numbers. label is the variant's original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.
  */
 export interface DoughballVariant {
   label: string;
@@ -2593,6 +2601,8 @@ export interface DoughballVariant {
   weightOz?: number;
   /** Doughballs per tray; 0/absent = unknown. */
   perTray?: number;
+  /** Brand+flavor pairs that use this variant; absent/empty = unknown. */
+  customers?: DoughballVariantCustomer[];
 }
 
 /**

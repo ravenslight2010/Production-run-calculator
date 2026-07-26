@@ -60,6 +60,7 @@ export * from './dieLineDefaultsEntry';
 export * from './dieLineDefaultsList';
 export * from './dieTypeList';
 export * from './doughballVariant';
+export * from './doughballVariantCustomer';
 export * from './facilityKnowledge';
 export * from './facilityKnowledgeList';
 export * from './fillMissingContextItem';

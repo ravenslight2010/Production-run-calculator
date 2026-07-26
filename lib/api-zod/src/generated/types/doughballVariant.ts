@@ -5,9 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DoughballVariantCustomer } from './doughballVariantCustomer';
 
 /**
- * One dough family variant's doughball numbers. label is the variant's original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown.
+ * One dough family variant's doughball numbers. label is the variant's original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent/empty means unknown.
  */
 export interface DoughballVariant {
   label: string;
@@ -15,4 +16,6 @@ export interface DoughballVariant {
   weightOz?: number;
   /** Doughballs per tray; 0/absent = unknown. */
   perTray?: number;
+  /** Brand+flavor pairs that use this variant; absent/empty = unknown. */
+  customers?: DoughballVariantCustomer[];
 }

@@ -7885,12 +7885,27 @@ components:
           items:
             $ref: "#/components/schemas/DoughballVariant"
 
+    DoughballVariantCustomer:
+      type: object
+      description: >-
+        A brand+flavor pair that uses this doughball variant. flavor may be
+        empty ("") meaning all varieties for the brand.
+      required:
+        - brand
+        - flavor
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+
     DoughballVariant:
       type: object
       description: >-
         One dough family variant's doughball numbers. label is the variant's
         original sheet name (e.g. 11" CRB); weightOz/perTray 0/absent =
-        unknown.
+        unknown. customers lists the brand+flavor pairs that use this variant;
+        absent/empty means unknown.
       required:
         - label
       properties:
@@ -7902,6 +7917,11 @@ components:
         perTray:
           type: number
           description: Doughballs per tray; 0/absent = unknown.
+        customers:
+          type: array
+          description: Brand+flavor pairs that use this variant; absent/empty = unknown.
+          items:
+            $ref: "#/components/schemas/DoughballVariantCustomer"
 
     NamedRecipeList:
       type: object

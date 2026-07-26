@@ -2578,8 +2578,12 @@ export const ListDoughRecipesResponse = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
@@ -2605,8 +2609,12 @@ export const SaveDoughRecipesBody = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
@@ -2627,8 +2635,12 @@ export const SaveDoughRecipesResponse = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
@@ -2658,8 +2670,12 @@ export const DeleteDoughRecipesResponse = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
@@ -2685,8 +2701,12 @@ export const ListSauceRecipesResponse = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
@@ -2712,8 +2732,12 @@ export const SaveSauceRecipesBody = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
 })
 
@@ -2734,8 +2758,12 @@ export const SaveSauceRecipesResponse = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
@@ -2765,8 +2793,12 @@ export const DeleteSauceRecipesResponse = zod.object({
   "doughballVariants": zod.array(zod.object({
   "label": zod.string(),
   "weightOz": zod.number().optional().describe('Target doughball weight in ounces; 0\/absent = unknown.'),
-  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.')
-}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
+  "perTray": zod.number().optional().describe('Doughballs per tray; 0\/absent = unknown.'),
+  "customers": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+}).describe('A brand+flavor pair that uses this doughball variant. flavor may be empty (\"\") meaning all varieties for the brand.')).optional().describe('Brand+flavor pairs that use this variant; absent\/empty = unknown.')
+}).describe('One dough family variant\'s doughball numbers. label is the variant\'s original sheet name (e.g. 11\" CRB); weightOz\/perTray 0\/absent = unknown. customers lists the brand+flavor pairs that use this variant; absent\/empty means unknown.')).optional().describe('Dough recipes only — per-variant doughball weights \/ per-tray counts this one family recipe covers (one recipe per dough family; label = the variant\'s original sheet name). Merged additively by label on re-import. Sauce recipes never set it.')
 }).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Like cheese\/mixes it can carry a display-only brand\/flavor tag (\"who it goes to\"). The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
 })
 
