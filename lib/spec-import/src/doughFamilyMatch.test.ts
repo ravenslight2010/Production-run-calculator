@@ -397,6 +397,43 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     expect(noRowsSugs).toContainEqual(expected);
   });
 
+  it("prefers the MORE SPECIFIC pool recipe when both match — natural masa over plain masa", () => {
+    // Pool has "Masa Dough" AND "Masa Dough, Natural, (Lowe's)". A spec sheet
+    // profile or recipe named "Natural Masa Dough" should snap to the natural
+    // variant, NOT to plain "Masa Dough". Without paren-stripping in
+    // doughFamilyDistinctiveTokens, "Masa Dough, Natural, (Lowe's)" has
+    // distinctive tokens {masa, natural, lowe} — "lowe" is missing from the
+    // candidate "natural masa dough" so it fails the subset check and plain
+    // "Masa Dough" ({masa} ⊆ {natural, masa} ✓) wins incorrectly. With
+    // paren-stripping the natural variant tokenizes to {masa, natural} which
+    // wins over {masa} by specificity (count=2 vs count=1).
+    const result = findSpecImportDoughFamilyMatch("Natural Masa Dough", [
+      "Masa Dough",
+      "Masa Dough, Natural, (Lowe's)",
+    ]);
+    expect(result).toBe("Masa Dough, Natural, (Lowe's)");
+  });
+
+  it("profile doughName snaps to the natural masa variant when both pool entries exist", () => {
+    const parsed = {
+      profiles: [
+        {
+          brand: "Lowe's",
+          flavor: "South of the Border",
+          dieType: "11in",
+          applicators: [],
+          doughName: "Natural Masa Dough",
+        },
+      ],
+      recipes: [],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", [
+      "Masa Dough",
+      "Masa Dough, Natural, (Lowe's)",
+    ]);
+    expect(linked.profiles?.[0]?.doughName).toBe("Masa Dough, Natural, (Lowe's)");
+  });
+
   it("does not family-collapse sauce names", () => {
     const sauceParsed = {
       profiles: [

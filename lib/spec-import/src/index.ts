@@ -969,7 +969,16 @@ const DOUGH_FAMILY_GENERIC_TOKENS = new Set([
 const DOUGH_UNIT_TOKEN_RE = /^(?:in|inch|inches)$/;
 
 function doughFamilyDistinctiveTokens(name: string): string[] {
-  return specImportNameMatchKey(name)
+  // Strip parenthetical groups before tokenizing. A pool recipe like
+  // "Masa Dough, Natural, (Lowe's)" carries "(Lowe's)" as a customer label,
+  // not as a formula identifier. Without stripping, the "lowe" token
+  // inflates the specificity requirement — a spec-sheet candidate saying
+  // "Natural Masa Dough" can't satisfy {masa, natural, lowe} ⊆ {natural,
+  // masa} and falls back to plain "Masa Dough" instead of preferring the
+  // more-specific natural variant. Stripping parens gives "Masa Dough,
+  // Natural" → {masa, natural} ⊆ {natural, masa} → correct winner.
+  const stripped = name.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  return specImportNameMatchKey(stripped)
     .split(" ")
     .filter(
       (t) =>
