@@ -154,7 +154,15 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "flavor-less) header to each KNOWN flavor of that brand from the flavors-by-" +
     "brand list; if that brand has no known flavors, add ONE whole-brand target with " +
     "the `flavor` LEFT EMPTY (never invent a specific flavor) and mention the " +
-    "uncertainty in `note`. Use the " +
+    "uncertainty in `note`. BRAND EXPANSION IS EXACT-MATCH ONLY: when expanding a " +
+    "brand's known flavors into targets, the brand name must match the flavors-by-" +
+    "brand list EXACTLY — never expand to flavors of a DIFFERENT brand that merely " +
+    "shares a prefix or contains the same words. 'Lucia\\'s Morning Melts' and " +
+    "'Lucia\\'s' are DIFFERENT brands — a target for 'Lucia\\'s Morning Melts' must " +
+    "NEVER pull in flavors belonging to 'Lucia\\'s' (e.g. Americano, Italiano, " +
+    "Mexicano, Parisian). If no known flavors exist for the EXACT brand name, leave " +
+    "`flavor` EMPTY; never borrow flavors from a brand that merely resembles it. " +
+    "Use the " +
     "singular `brand`/`flavor` fields only when a recipe ties to exactly one profile. " +
     "Be AGGRESSIVE about populating `targets`: whenever a recipe could reasonably " +
     "serve more than one brand+flavor (any header listing several names, a shared " +
@@ -306,23 +314,47 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "recipe's `name`, so the app can link the applicator to its recipe. Only " +
     "fall back to a generic type when the workbook truly never names the blend " +
     "anywhere. " +
-    "NAMED DOUGH VARIANTS: a dough sheet's doughball/yield table sometimes lists " +
-    "NAMED dough variants (e.g. rows or columns labeled 'Heavy', 'Heavy Plus', " +
-    "'Light') with their own doughball weights or per-tray counts, all sharing " +
-    "ONE mixing table. Emit ONE dough recipe PER NAMED VARIANT: each named for " +
-    "the variant (e.g. \"<Brand> Heavy Plus\"), each carrying the SAME ingredient " +
-    "rows, and each with its OWN `doughballOz`/`doughballsPerTray`/" +
-    "`doughBatchYield` and its own `targets` (the customers/products that yield " +
-    "row serves). Never collapse named variants into one recipe or drop a " +
-    "variant name — a profile's `doughName` may reference the variant (e.g. " +
-    "'CRB Heavy Plus') and must find a recipe with that exact name. " +
-    "EMIT EVERY ROW: output ONE dough recipe per ROW of the doughball/yield " +
-    "table — if the table lists 12 rows, emit 12 dough recipes. NEVER merge " +
-    "several rows/customers into one recipe with a combined label (e.g. do NOT " +
-    "turn separate 'Hannaford', 'Lowe's', and 'SMD' rows into one " +
-    "'Hannaford, Lowe's, & SMD' recipe), even when their weights or per-tray " +
-    "counts are identical — keep each row's own label verbatim. Extracting " +
-    "only a subset of the rows is ALWAYS wrong. NEVER return a 'sample', " +
+    "DOUGH YIELD TABLE — TWO ROW TYPES: a doughball/yield table can contain two " +
+    "fundamentally different kinds of rows, and you MUST tell them apart before " +
+    "naming any recipe. " +
+    "(A) VARIANT DESCRIPTOR ROWS: the row label is a short descriptor word or " +
+    "phrase that names a physical dough type — 'Heavy', 'Heavy Plus', 'Light', " +
+    "'Original', 'Standard', '7 Inch', 'Thin'. These mean the procedure produces " +
+    "MULTIPLE distinct dough variants that share one mixing formula. Emit ONE " +
+    "dough recipe PER VARIANT: each recipe named for the variant (e.g. " +
+    "\"<Procedure Name> Heavy Plus\" or \"<Brand> Heavy Plus\"), each carrying " +
+    "the SAME ingredient rows, each with its OWN `doughballOz`/ " +
+    "`doughballsPerTray`/`doughBatchYield`, and its own `targets` (the " +
+    "customers/products that variant serves). Never collapse variants into one " +
+    "recipe or drop a variant label — a profile's `doughName` references the " +
+    "variant and must find an exact match. " +
+    "(B) CUSTOMER / PRODUCT TARGET ROWS: the row label is a customer brand or " +
+    "product name — 'Hannaford', 'Lowe\\'s', 'SMD', 'Lucia\\'s Craft Bacon " +
+    "Burger Supreme'. These rows specify which products use THIS procedure and at " +
+    "what doughball weight. They are NOT variant names. The recipe name comes " +
+    "from the PROCEDURE TITLE on the sheet (e.g. 'French Fry Dough', 'Lucia\\'s " +
+    "French Fry Dough') — NEVER from the customer/product row label. Each such " +
+    "row becomes a `targets` entry (brand = the customer, flavor = the " +
+    "parenthesized product if one is written; otherwise flavor EMPTY). Emit one " +
+    "recipe per UNIQUE doughball weight in the table (rows that share a weight " +
+    "are all targets of the same recipe); when all rows share the same weight, " +
+    "emit ONE recipe with all rows as targets. " +
+    "(C) SELF-REFERENTIAL ROWS: the row label is the SAME as (or essentially " +
+    "matches) the procedure/recipe title — e.g. a 'Malted Barley Dough' yield " +
+    "row inside the 'Malted Barley Dough' procedure. This row is not a separate " +
+    "variant and not a customer target: it simply states the recipe's own " +
+    "doughball weight. Set `doughballOz`, `doughballsPerTray`, and " +
+    "`doughBatchYield` DIRECTLY on the recipe whose name matches; do NOT emit " +
+    "a second recipe with the same name. " +
+    "CRITICAL DISTINCTION: if you are unsure whether a label is a variant " +
+    "descriptor or a customer name, check whether it matches a known brand " +
+    "(from the known brands list). A match → customer row (type B). A short " +
+    "descriptor that does NOT resemble any brand → variant row (type A). A " +
+    "label that matches the procedure title → self-referential (type C). " +
+    "EMIT EVERY ROW: regardless of type, capture EVERY row of the yield table — " +
+    "never sample, summarize, or abbreviate. If the table lists 12 rows, all " +
+    "12 must appear as either variant recipes (type A) or target entries (type " +
+    "B). Extracting only a subset is ALWAYS wrong. NEVER return a 'sample', " +
     "'representative', or abbreviated extraction of ANY table — not for yield " +
     "tables, ingredient tables, or spec grids: enumerate EVERY row exhaustively " +
     "even when the output gets long or repetitive. If your `note` would say you " +

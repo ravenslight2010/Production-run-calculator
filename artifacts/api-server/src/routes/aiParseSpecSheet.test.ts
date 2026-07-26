@@ -108,6 +108,60 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
   });
 });
 
+// Regression guard for the dough yield table row-type distinction. Customer/
+// product rows in a yield table (e.g. "Lucia's Craft Bacon Burger Supreme")
+// must NOT become the recipe name — the procedure title is the recipe name and
+// the row label goes into targets. Only short variant descriptors (Heavy, Light)
+// go into the recipe name.
+describe("buildParseSpecSheetPrompt dough yield table row types", () => {
+  it("distinguishes variant descriptor rows from customer/product target rows", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("TWO ROW TYPES");
+    expect(system).toContain("VARIANT DESCRIPTOR ROWS");
+    expect(system).toContain("CUSTOMER / PRODUCT TARGET ROWS");
+  });
+
+  it("tells the model customer/product row labels go into targets, not the recipe name", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    // The recipe name comes from the procedure title, not the customer row label.
+    expect(system).toContain("recipe name comes from the PROCEDURE TITLE");
+    // Concrete anti-example: Lucia's Craft Bacon Burger Supreme is a target row.
+    expect(system).toContain("Lucia");
+    expect(system).toContain("Bacon Burger Supreme");
+  });
+
+  it("tells the model variant descriptor rows go into the recipe name", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("Heavy Plus");
+    expect(system).toContain("Procedure Name");
+  });
+
+  // Regression guard: when a yield table row label matches the procedure name
+  // itself (e.g. "Malted Barley Dough" row inside the "Malted Barley Dough"
+  // procedure), the AI was emitting a second recipe with the same name instead
+  // of setting the doughball weight directly on the existing recipe. The prompt
+  // must identify this as a self-referential row (type C).
+  it("tells the model self-referential rows set doughball weight on the recipe, not a new variant", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("SELF-REFERENTIAL ROWS");
+    expect(system).toContain("Malted Barley Dough");
+    expect(system).toContain("do NOT emit a second recipe with the same name");
+  });
+
+  // Regression guard: "Lucia's Morning Melts" target was pulling in the known
+  // flavors of the different brand "Lucia's" (Americano, Italiano, etc.) via
+  // the brand-expansion rule, creating non-existent variants. The prompt must
+  // require exact brand name matching for flavor expansion.
+  it("tells the model brand flavor expansion is exact-match only, never cross-brand", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("EXACT-MATCH ONLY");
+    expect(system).toContain("Lucia");
+    expect(system).toContain("Morning Melts");
+    expect(system).toContain("Americano");
+    expect(system).toContain("never borrow flavors from a brand that merely resembles it");
+  });
+});
+
 // Regression guard for the standalone-procedure rule. A sheet that is one whole
 // sauce/dough/cheese procedure for a single product line (brand in the title,
 // no per-flavor grid) must produce a brand-only recipe (flavor + targets EMPTY)
