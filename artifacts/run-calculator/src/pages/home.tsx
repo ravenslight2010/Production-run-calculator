@@ -9505,74 +9505,16 @@ export default function Home() {
             }
           }
         }
-        // Auto-tag each variant with the brand+flavor of every profile that
-        // was imported in this run. This wires the "customers" list that lets
-        // matchDoughballVariant pick the right variant by brand+flavor alone,
-        // without needing a die type (e.g. Lucia's Craft / BBQ → "Craft
-        // Bashas Ultra Thin", even when no die is set on the profile).
-        for (const { brand: tBrand, flavor: tFlavor } of touchedProfiles) {
-          const savedProfile = loadProfile(tBrand, tFlavor);
-          const dName = (savedProfile?.doughRecipeName ?? "").trim().toLowerCase();
-          if (!dName) continue;
-          const familyVariants = doughVariants.get(dName);
-          if (!familyVariants) continue;
-          // Find which variant this import linked to this family recipe.
-          // When the family has multiple same-named variants (one per customer
-          // weight tier), prefer the one whose doughball oz matches the
-          // profile's stored weight so each profile tags ITS OWN variant
-          // rather than always tagging whichever happens to be listed first.
-          const profileWeight = Number(savedProfile?.targetDoughballWeight ?? 0);
-          // When there are multiple variants for this family, we must match by
-          // weight so we don't blindly tag whichever variant happens to be first
-          // in the AI-parsed list (e.g. "CORKY'S 7\" DOUGH" getting assigned to
-          // "Brand/MR07CH24" just because it came first). Only fall through to
-          // the unweighted find when there is exactly ONE variant (no ambiguity).
-          const familyVariantCount = familyVariants.length;
-          const importedRecipe =
-            (profileWeight > 0
-              ? appliedParsed.recipes.find(
-                  (r) =>
-                    r.kind === "dough" &&
-                    r.name.trim().toLowerCase() === dName &&
-                    !!r.variantLabel &&
-                    Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
-                )
-              : undefined) ??
-            (familyVariantCount <= 1
-              ? appliedParsed.recipes.find(
-                  (r) =>
-                    r.kind === "dough" &&
-                    r.name.trim().toLowerCase() === dName &&
-                    !!r.variantLabel,
-                )
-              : undefined);
-          if (!importedRecipe?.variantLabel) continue;
-          const variantLabel = importedRecipe.variantLabel.trim();
-          const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
-          if (idx < 0) continue;
-          const variant = familyVariants[idx];
-          const existingCustomers = variant.customers ?? [];
-          const already = existingCustomers.some(
-            (c) =>
-              c.brand.trim().toLowerCase() === tBrand.trim().toLowerCase() &&
-              c.flavor.trim().toLowerCase() === tFlavor.trim().toLowerCase(),
-          );
-          if (!already) {
-            familyVariants[idx] = {
-              ...variant,
-              customers: [...existingCustomers, { brand: tBrand, flavor: tFlavor }],
-            };
-          }
-        }
         // Fold in variant-table entries parsed deterministically from the dough
         // workbook's yield table ("OZ / LBS / YIELD / PER TRAY"). The AI may
         // omit rows whose label name differs from the recipe family (e.g.
         // "CORKY'S 7" DOUGH" on a "BRAND & CORKY'S" shared-formula workbook).
         // We merge missing rows under the ONE family the AI already produced,
         // deduping by case-insensitive label so AI-parsed variants aren't doubled.
-        // IMPORTANT: this must run BEFORE customer assignments are applied so
-        // that all variants — AI-parsed AND table-parsed — receive their
-        // brand+flavor customer entries in the step below.
+        // IMPORTANT: this must run BEFORE the touchedProfiles customer-tagging
+        // loop below AND before customer assignments are applied so that all
+        // variants — AI-parsed AND table-parsed — are present when we decide
+        // which variant a profile belongs to.
         if (specImportPrepared?.doughVariantsFromTable?.length) {
           const familyKeys = [...doughVariants.keys()];
           // Only merge when the AI produced exactly one dough family from this
@@ -9608,6 +9550,68 @@ export default function Home() {
             if (toAdd.length > 0) {
               doughVariants.set(familyKey, [...existing, ...toAdd]);
             }
+          }
+        }
+        // Auto-tag each variant with the brand+flavor of every profile that
+        // was imported in this run. This wires the "customers" list that lets
+        // matchDoughballVariant pick the right variant by brand+flavor alone,
+        // without needing a die type (e.g. Lucia's Craft / BBQ → "Craft
+        // Bashas Ultra Thin", even when no die is set on the profile).
+        // IMPORTANT: runs AFTER the table-variant merge above so all variants
+        // (AI-parsed AND table-parsed) are present. This prevents blindly
+        // tagging the first AI-parsed variant (e.g. "CORKY'S 7\" DOUGH") when
+        // other variants from the yield table would be the correct target.
+        for (const { brand: tBrand, flavor: tFlavor } of touchedProfiles) {
+          const savedProfile = loadProfile(tBrand, tFlavor);
+          const dName = (savedProfile?.doughRecipeName ?? "").trim().toLowerCase();
+          if (!dName) continue;
+          const familyVariants = doughVariants.get(dName);
+          if (!familyVariants) continue;
+          // Find which variant this import linked to this family recipe.
+          // When the family has multiple same-named variants (one per customer
+          // weight tier), prefer the one whose doughball oz matches the
+          // profile's stored weight so each profile tags ITS OWN variant
+          // rather than always tagging whichever happens to be listed first.
+          const profileWeight = Number(savedProfile?.targetDoughballWeight ?? 0);
+          // Only fall through to the unweighted find when there is exactly
+          // one variant in the full (AI + table-merged) pool — with multiple
+          // variants and no stored weight we cannot know which one is correct,
+          // so we skip rather than guess.
+          const familyVariantCount = familyVariants.length;
+          const importedRecipe =
+            (profileWeight > 0
+              ? appliedParsed.recipes.find(
+                  (r) =>
+                    r.kind === "dough" &&
+                    r.name.trim().toLowerCase() === dName &&
+                    !!r.variantLabel &&
+                    Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
+                )
+              : undefined) ??
+            (familyVariantCount <= 1
+              ? appliedParsed.recipes.find(
+                  (r) =>
+                    r.kind === "dough" &&
+                    r.name.trim().toLowerCase() === dName &&
+                    !!r.variantLabel,
+                )
+              : undefined);
+          if (!importedRecipe?.variantLabel) continue;
+          const variantLabel = importedRecipe.variantLabel.trim();
+          const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
+          if (idx < 0) continue;
+          const variant = familyVariants[idx];
+          const existingCustomers = variant.customers ?? [];
+          const already = existingCustomers.some(
+            (c) =>
+              c.brand.trim().toLowerCase() === tBrand.trim().toLowerCase() &&
+              c.flavor.trim().toLowerCase() === tFlavor.trim().toLowerCase(),
+          );
+          if (!already) {
+            familyVariants[idx] = {
+              ...variant,
+              customers: [...existingCustomers, { brand: tBrand, flavor: tFlavor }],
+            };
           }
         }
         // Apply deterministic customer assignments parsed from the dough
