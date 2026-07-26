@@ -1593,6 +1593,38 @@ describe("applyDoughCustomerAssignmentsToVariants", () => {
     });
   });
 
+  it("assigns a size-interrupted brand name only to its own variant, not siblings (Microwavable Lucia's bug)", () => {
+    // "Lucia's 7'' Morning Melts" and "7'' FSD" are the two seveninch variants.
+    // The workbook has "7'' Lucia's Morning Melts: All" which strips to brand
+    // "Lucia's Morning Melts" with qualifierKey "seveninch". The verbatim
+    // includes("lucia's morning melts") fails on "lucia's 7'' morning melts"
+    // because "7''" interrupts the string. Without the qualifier-stripped check,
+    // brandHasDedicated=false fires the shared-variant fallback and adds
+    // "Lucia's Morning Melts" to BOTH variants. With the fix, the stripped label
+    // "lucia's morning melts" matches only variant 1.
+    const assignments: DoughCustomerAssignment[] = [
+      {
+        brand: "Lucia's Morning Melts",
+        qualifierKey: "seveninch",
+        flavors: [""],
+      },
+      { brand: "FSD", qualifierKey: "seveninch", flavors: ["Breakfast"] },
+    ];
+    const variants: DoughballVariant[] = [
+      { label: "Lucia's 7'' Morning Melts", weightOz: 5.5, perTray: 24 },
+      { label: "7'' FSD", weightOz: 5.5, perTray: 24 },
+    ];
+    const result = applyDoughCustomerAssignmentsToVariants(variants, assignments, variants);
+    const melts = result.find((v) => v.label === "Lucia's 7'' Morning Melts")!;
+    const fsd = result.find((v) => v.label === "7'' FSD")!;
+    // Lucia's Morning Melts catch-all → variant 1 only
+    expect(melts.customers).toContainEqual({ brand: "Lucia's Morning Melts", flavor: "" });
+    expect(fsd.customers?.some((c) => c.brand === "Lucia's Morning Melts")).toBe(false);
+    // FSD Breakfast → variant 2 only
+    expect(fsd.customers).toContainEqual({ brand: "FSD", flavor: "Breakfast" });
+    expect(melts.customers?.some((c) => c.brand === "FSD")).toBe(false);
+  });
+
   it("returns the same array reference when assignments is empty", () => {
     const variants: DoughballVariant[] = [{ label: "Hannaford", weightOz: 7.6 }];
     const result = applyDoughCustomerAssignmentsToVariants(variants, []);

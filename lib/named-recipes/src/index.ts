@@ -920,7 +920,21 @@ function assignmentsForVariant(
   allVariants: ReadonlyArray<DoughballVariant>,
 ): DoughCustomerAssignment[] {
   const vLabelLow = variantLabel.toLowerCase();
+  // Qualifier-stripped label: size tokens like "7''" that sit WITHIN the brand
+  // name portion are removed so the brand substring check can succeed even when
+  // a size qualifier interrupts the name. For example, label
+  // "Lucia's 7'' Morning Melts" strips to "Lucia's Morning Melts", which then
+  // correctly matches the brand "Lucia's Morning Melts".
+  const vLabelStrippedLow = doughVariantStripQualifier(variantLabel).toLowerCase();
   const vQualKey = doughVariantQualifierKey(variantLabel);
+
+  /** True when brandLow appears in the label (raw or qualifier-stripped). */
+  function labelContainsBrand(label: string, brandLow: string): boolean {
+    const raw = label.toLowerCase();
+    if (raw.includes(brandLow)) return true;
+    const stripped = doughVariantStripQualifier(label).toLowerCase();
+    return stripped.includes(brandLow);
+  }
 
   // Pre-compute once: is the base-qualifier portion of the pool "branded"?
   // A pool is branded when at least one base-qualifier variant's label contains
@@ -936,8 +950,7 @@ function assignmentsForVariant(
       .map((a2) => a2.brand.toLowerCase());
     basePoolIsBranded = allVariants.some((v) => {
       if (doughVariantQualifierKey(v.label) !== "") return false;
-      const vl = v.label.toLowerCase();
-      return baseAssignmentBrands.some((b) => vl.includes(b));
+      return baseAssignmentBrands.some((b) => labelContainsBrand(v.label, b));
     });
     return basePoolIsBranded;
   }
@@ -946,8 +959,11 @@ function assignmentsForVariant(
     if (a.qualifierKey !== vQualKey) return false;
     const brandLow = a.brand.toLowerCase();
 
-    // Step 1: strict — brand name appears verbatim in the variant label.
-    if (vLabelLow.includes(brandLow)) return true;
+    // Step 1: strict — brand name appears in the variant label, either verbatim
+    // or after stripping size-qualifier tokens (e.g. "7''" in "Lucia's 7''
+    // Morning Melts" that would otherwise break a substring match against the
+    // brand "Lucia's Morning Melts").
+    if (vLabelLow.includes(brandLow) || vLabelStrippedLow.includes(brandLow)) return true;
 
     if (a.qualifierKey === "") {
       // Base-qualifier fallback: if the pool has NO branded base variant (all
@@ -958,11 +974,14 @@ function assignmentsForVariant(
 
     // Non-base fallback: brand has no label with this qualifier in the full
     // variant pool (shared variant — brand uses another brand's named variant,
-    // e.g. "Lucia's Craft Ultra Thin" shares "Basha's Ultra Thin").
+    // e.g. "Lucia's Craft Ultra Thin" shares "Basha's Ultra Thin"). Uses the
+    // same brand-in-label check (raw + stripped) so a label like "Lucia's 7''
+    // Morning Melts" is recognised as a dedicated variant for "Lucia's Morning
+    // Melts" and the fallback does NOT fire onto sibling variants.
     const brandHasDedicated = allVariants.some(
       (v) =>
         doughVariantQualifierKey(v.label) === a.qualifierKey &&
-        v.label.toLowerCase().includes(brandLow),
+        labelContainsBrand(v.label, brandLow),
     );
     return !brandHasDedicated;
   });
