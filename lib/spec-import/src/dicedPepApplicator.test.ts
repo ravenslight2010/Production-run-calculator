@@ -6,12 +6,23 @@ describe("isDicedPepStandaloneApplicator", () => {
     expect(isDicedPepStandaloneApplicator("Diced Pep", [])).toBe(true);
   });
 
-  it("drops a standalone 'Diced Pepperoni' slot with one row", () => {
+  it("drops a standalone 'Diced Pepperoni' slot with one zero-weight row", () => {
+    // A phantom applicator column sometimes carries a single row with lbs=0.
     expect(
       isDicedPepStandaloneApplicator("Diced Pepperoni", [
-        { ingredient: "Diced Pepperoni", lbs: 4 },
+        { ingredient: "Diced Pepperoni", lbs: 0 },
       ]),
     ).toBe(true);
+  });
+
+  it("does NOT drop a real single-ingredient diced pep recipe with positive weight", () => {
+    // A genuine "Diced Pepperoni" cheese/topping recipe with 1 row and real
+    // lbs is kept — it is not a phantom applicator slot.
+    expect(
+      isDicedPepStandaloneApplicator("Diced Pepperoni", [
+        { ingredient: "Diced Pepperoni", lbs: 6 },
+      ]),
+    ).toBe(false);
   });
 
   it("drops hyphenated 'Diced-Pep' variant", () => {

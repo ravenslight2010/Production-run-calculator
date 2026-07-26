@@ -2837,6 +2837,66 @@ async function runJuly2026AuditCorrectionsV2(): Promise<void> {
   });
 }
 
+const JULY_2026_AUDIT_CORRECTIONS_V3 = "july-2026-audit-corrections-v3";
+
+async function runJuly2026AuditCorrectionsV3(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: JULY_2026_AUDIT_CORRECTIONS_V3 })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let healedProfiles = 0;
+
+    for (const p of profiles) {
+      const values = { ...(p.values as Record<string, unknown>) };
+      let changed = false;
+      const brand = p.brand.toLowerCase();
+      const flavor = p.flavor.toLowerCase();
+
+      // All "Thick Malted Barley recipe" profiles came in with weight=0 because
+      // the spec sheet didn't carry a weight for that dough family and the pool
+      // row had no default. Correct value is 13.8 oz (confirmed by manager).
+      if (
+        String(values.doughRecipeName ?? "").trim() === "Thick Malted Barley recipe" &&
+        !(Number(values.targetDoughballWeight ?? 0) > 0)
+      ) {
+        values.targetDoughballWeight = 13.8;
+        changed = true;
+      }
+
+      // lowe's / spinach & mushroom — sauce was blank; should be Lucia's Sauce.
+      if (brand === "lowe's" && flavor === "spinach & mushroom") {
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Lucia's Sauce";
+          changed = true;
+        }
+      }
+
+      if (!changed) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    logger.info(
+      { heal: JULY_2026_AUDIT_CORRECTIONS_V3, healedProfiles },
+      "Data heal applied",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -2864,4 +2924,5 @@ export async function runDataHeals(): Promise<void> {
   await runCrbLuciaVariantCustomersV2();
   await runJuly2026ProfileCorrections();
   await runJuly2026AuditCorrectionsV2();
+  await runJuly2026AuditCorrectionsV3();
 }

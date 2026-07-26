@@ -3692,19 +3692,23 @@ const DICED_PEP_STANDALONE_NAME_RE = /diced[\s-]*(?:pep\b|pepperoni)/i;
 /**
  * True when a CHEESE-kind recipe is really just a raw diced-pepperoni topping
  * advertised as a standalone applicator by the AI — e.g., a slot named
- * "Diced Pep" or "Diced Pepperoni" with 0–1 ingredient rows.
+ * "Diced Pep" or "Diced Pepperoni" with no ingredient rows that carry a
+ * positive weight.
  *
  * Distinct from isStickPepOnlyCheeseRecipe: that guard fires on INGREDIENT
  * content (every row is a stick pep); this guard fires on the RECIPE NAME.
- * A genuine cheese blend that CONTAINS diced pepperoni among multiple
- * ingredients is not affected — it has 2+ rows so the ≤1-row guard passes
- * it through. Pure.
+ * A genuine cheese/topping recipe that IS named "Diced Pepperoni" and has a
+ * positive-weight row is kept — it is a real recipe, not a phantom applicator
+ * column. Pure.
  */
 export function isDicedPepStandaloneApplicator(
   name: string,
   rows: ReadonlyArray<RecipeRow>,
 ): boolean {
-  return DICED_PEP_STANDALONE_NAME_RE.test(name) && rows.length <= 1;
+  return (
+    DICED_PEP_STANDALONE_NAME_RE.test(name) &&
+    !rows.some((r) => (r.lbs ?? 0) > 0)
+  );
 }
 
 /**
