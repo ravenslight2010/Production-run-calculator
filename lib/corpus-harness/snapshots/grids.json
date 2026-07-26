@@ -257,7 +257,7 @@
       "doughFamilyHint": "Brand Dough"
     },
     {
-      "file": "CRB_Dough_Mixing_Procedure_-_38.xlsx",
+      "file": "CRB_Dough_Mixing_Procedure_-_39.xlsx",
       "sheets": [
         {
           "name": "Sheet1",
@@ -283,7 +283,7 @@
       "doughFamilyHint": "Lowe's French Fry Dough"
     },
     {
-      "file": "Lucia's_French_Fry_Dough_Mixing_Procedure_-_05.xlsx",
+      "file": "Lucia's_French_Fry_Dough_Mixing_Procedure_-_06.xlsx",
       "sheets": [
         {
           "name": "Sheet1",
@@ -296,11 +296,11 @@
       "doughFamilyHint": "Lucia's French Fry Dough"
     },
     {
-      "file": "Malted_Barley_Dough_Mixing_Procedure_-_28.xlsx",
+      "file": "Malted_Barley_Dough_Mixing_Procedure_-_29.xlsx",
       "sheets": [
         {
           "name": "Sheet1",
-          "rows": 45
+          "rows": 37
         }
       ],
       "sanityIssue": null,

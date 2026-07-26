@@ -474,7 +474,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/ch
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
 import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
 
 import {
@@ -9527,20 +9527,17 @@ export default function Home() {
             const toAdd: DoughballVariant[] = [];
             for (const tv of specImportPrepared.doughVariantsFromTable) {
               if (existingLow.has(tv.label.trim().toLowerCase())) continue;
-              // Skip table entries whose weight+perTray exactly match an existing
-              // variant even when the label differs. This prevents a duplicate when
-              // the AI names the base variant "Brand Dough" (14.2oz/16) and the
-              // yield table also emits "BRAND 12\" DOUGH" (14.2oz/16) — they are
-              // the same doughball described two different ways.
-              const sameWeight =
-                tv.weightOz > 0 &&
-                existing.some(
-                  (ev) =>
-                    Math.abs((ev.weightOz ?? 0) - tv.weightOz) <= 0.05 &&
-                    (ev.perTray ?? 0) === (tv.perTray ?? 0) &&
-                    (ev.perTray ?? 0) > 0,
-                );
-              if (sameWeight) continue;
+              // Skip table entries whose LABEL KEY matches an existing variant.
+              // "Brand Dough" and "BRAND 12\" DOUGH" have the same label key on
+              // the "brand dough" family (both reduce to "brand") so the AI-named
+              // duplicate is suppressed. But "LOWE'S MARGHERITA DOUGH" and
+              // "HANNAFORD MARGHERITA DOUGH" have distinct keys even though they
+              // share the same weight (11oz/16), so they are kept as two variants.
+              const tvKey = doughballVariantLabelKey(tv.label, familyKey);
+              const labelDuplicate = existing.some(
+                (ev) => doughballVariantLabelKey(ev.label, familyKey) === tvKey,
+              );
+              if (labelDuplicate) continue;
               toAdd.push({
                 label: tv.label,
                 ...(tv.weightOz > 0 ? { weightOz: tv.weightOz } : {}),
@@ -9633,6 +9630,23 @@ export default function Home() {
             );
             if (enriched !== variants) doughVariants.set(recipeName, enriched);
           }
+        }
+        // Apply static customer assignments derived from spec sheets for dough
+        // families whose workbooks have no customer-assignment section (or need
+        // supplemental entries not present in the workbook section). Applied
+        // unconditionally and ADDITIVELY alongside the workbook-parsed assignments
+        // above so that matchDoughballVariant can auto-select the correct weight
+        // from brand+flavor alone across all 13 dough families.
+        for (const [recipeName, variants] of doughVariants) {
+          const staticAssignments = SPEC_STATIC_CUSTOMER_ASSIGNMENTS.get(recipeName);
+          if (!staticAssignments?.length) continue;
+          const allVariants = [...doughVariants.values()].flat();
+          const enriched = applyDoughCustomerAssignmentsToVariants(
+            variants,
+            staticAssignments,
+            allVariants,
+          );
+          if (enriched !== variants) doughVariants.set(recipeName, enriched);
         }
         void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
       }

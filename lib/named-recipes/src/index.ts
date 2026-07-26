@@ -797,7 +797,11 @@ export function parseDoughVariantTable(rows: string[][]): DoughVariantTableEntry
     // when ozCol=2), while others indent it one column to the right of col 0.
     let label = "";
     for (let lc = labelCol; lc >= 0; lc--) {
-      const candidate = (row[lc] ?? "").trim();
+      // Normalize embedded newlines (literal \n / \r in cell text produced by
+      // multi-line Excel cells) to spaces so the label is a single clean line
+      // (e.g. "LOWE'S, HANNAFORD, LUCIA CRAFT, \nNOB HILL CRAFT Thick (Argus)"
+      // → "LOWE'S, HANNAFORD, LUCIA CRAFT, NOB HILL CRAFT Thick (Argus)").
+      const candidate = (row[lc] ?? "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
       if (candidate) { label = candidate; break; }
     }
     if (!label) continue;
@@ -1596,3 +1600,5 @@ export function upsertNamedRecipesByName(
 
   return { merged, added, updated };
 }
+
+export { SPEC_STATIC_CUSTOMER_ASSIGNMENTS } from "./spec-customer-assignments.js";
