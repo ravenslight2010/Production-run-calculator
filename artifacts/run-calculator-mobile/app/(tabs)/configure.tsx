@@ -23,6 +23,7 @@ import {
   type RunSettings,
 } from "@/context/RunContext";
 import { computeCheesePull } from "@workspace/inventory-math";
+import { findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual } from "@workspace/spec-import";
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { useMixes } from "@/hooks/useMixes";
@@ -467,20 +468,30 @@ export default function ConfigureScreen() {
     ],
     [sauceRecipesList],
   );
-  const doughRecipeNameOptions = React.useMemo(
-    () =>
-      [...new Set([...serverDoughNames, ...doughNames].map((n) => n.trim()).filter(Boolean))].sort(
-        (a, b) => a.localeCompare(b),
-      ),
-    [serverDoughNames, doughNames],
-  );
-  const frontlineRecipeNameOptions = React.useMemo(
-    () =>
-      [...new Set([...serverSauceNames, ...frontlineNames].map((n) => n.trim()).filter(Boolean))].sort(
-        (a, b) => a.localeCompare(b),
-      ),
-    [serverSauceNames, frontlineNames],
-  );
+  const doughRecipeNameOptions = React.useMemo(() => {
+    const server = serverDoughNames.map((n) => n.trim()).filter(Boolean);
+    const uncoveredLocal = doughNames
+      .map((n) => n.trim())
+      .filter(
+        (n) =>
+          n &&
+          !server.some((p) => specImportNamedRecipeNamesEqual(p, n)) &&
+          !findSpecImportNamedRecipeFamilyMatch("dough", n, server),
+      );
+    return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b));
+  }, [serverDoughNames, doughNames]);
+  const frontlineRecipeNameOptions = React.useMemo(() => {
+    const server = serverSauceNames.map((n) => n.trim()).filter(Boolean);
+    const uncoveredLocal = frontlineNames
+      .map((n) => n.trim())
+      .filter(
+        (n) =>
+          n &&
+          !server.some((p) => specImportNamedRecipeNamesEqual(p, n)) &&
+          !findSpecImportNamedRecipeFamilyMatch("sauce", n, server),
+      );
+    return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b));
+  }, [serverSauceNames, frontlineNames]);
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;

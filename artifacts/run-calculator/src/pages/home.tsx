@@ -3709,12 +3709,38 @@ export default function Home() {
   // Run-form dropdown options: the server pool names unioned with any locally
   // known recipe names (backward compat for names still only in the synced
   // list), sorted for a stable browse order.
+  // Local names that are already covered by the server pool — via loose-equal
+  // OR family match (e.g. "Thick Malted Barley recipe" covered by the pool's
+  // "Malted Barley recipe") — are suppressed so the user never sees
+  // near-duplicate options. The server pool name is authoritative.
   const doughRecipeNameOptions = useMemo(
-    () => [...new Set([...serverDoughNames, ...doughRecipeNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => {
+      const server = serverDoughNames.map((n) => n.trim()).filter(Boolean);
+      const uncoveredLocal = doughRecipeNames
+        .map((n) => n.trim())
+        .filter(
+          (n) =>
+            n &&
+            !server.some((p) => specImportNamedRecipeNamesEqual(p, n)) &&
+            !findSpecImportNamedRecipeFamilyMatch("dough", n, server),
+        );
+      return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b));
+    },
     [serverDoughNames, doughRecipeNames],
   );
   const frontlineRecipeNameOptions = useMemo(
-    () => [...new Set([...serverSauceNames, ...frontlineRecipeNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => {
+      const server = serverSauceNames.map((n) => n.trim()).filter(Boolean);
+      const uncoveredLocal = frontlineRecipeNames
+        .map((n) => n.trim())
+        .filter(
+          (n) =>
+            n &&
+            !server.some((p) => specImportNamedRecipeNamesEqual(p, n)) &&
+            !findSpecImportNamedRecipeFamilyMatch("sauce", n, server),
+        );
+      return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b));
+    },
     [serverSauceNames, frontlineRecipeNames],
   );
   // "Use my existing recipe" options for the spec-import review, per kind. Dough,
