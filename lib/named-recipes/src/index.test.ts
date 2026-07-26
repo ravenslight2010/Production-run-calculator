@@ -1438,6 +1438,51 @@ describe("parseDoughVariantTable", () => {
     expect(result[0]!.perTray).toBeUndefined();
     expect(result[1]!.perTray).toBeUndefined();
   });
+
+  it("multi-line cell regression: a literal \\n mid-label produces ONE variant, not two", () => {
+    // Malted Barley Rev 29 has a label cell whose text contains a literal \n:
+    // "LOWE'S, HANNAFORD, LUCIA CRAFT, \nNOB HILL CRAFT Thick (Argus)"
+    // The normalizer must collapse \r/\n to a space so the compound label
+    // lands as a single variant. Without the normalization the \n would split
+    // the label at the newline boundary, creating a truncated first variant
+    // ("LOWE'S, HANNAFORD, LUCIA CRAFT,") and a phantom second variant
+    // ("NOB HILL CRAFT Thick (Argus)") — and customer assignments would target
+    // the wrong entry.
+    const labelWithNewline = "LOWE'S, HANNAFORD, LUCIA CRAFT, \nNOB HILL CRAFT Thick (Argus)";
+    const rows: string[][] = [
+      ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      ["", labelWithNewline, "13.8", "0.86", "370", "16"],
+    ];
+    const result = parseDoughVariantTable(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.label).toBe("LOWE'S, HANNAFORD, LUCIA CRAFT, NOB HILL CRAFT Thick (Argus)");
+    expect(result[0]!.weightOz).toBe(13.8);
+    expect(result[0]!.perTray).toBe(16);
+  });
+
+  it("label-key dedup regression: two entries with the same weight but different label keys are kept as distinct variants", () => {
+    // Margherita regression: two variants that share the same oz weight but have
+    // genuinely different label keys (e.g. "Margherita" vs "Margherita Classic")
+    // must NOT be folded — parseDoughVariantTable returns raw entries without any
+    // dedup, so both must survive. Deduplication only happens in
+    // normalizeDoughballVariants (which uses doughballVariantLabelKey to fold
+    // suffix-equivalent labels), not in the table parser itself.
+    const rows: string[][] = [
+      ["", "", "OZ.", "LBS.", "YIELD", "PER TRAY"],
+      ["", "Margherita", "8.25", "0.52", "620", "24"],
+      ["", "Margherita Classic", "8.25", "0.52", "620", "20"],
+    ];
+    const result = parseDoughVariantTable(rows);
+    expect(result).toHaveLength(2);
+    expect(result[0]!.label).toBe("Margherita");
+    expect(result[1]!.label).toBe("Margherita Classic");
+    // Same weight — both survive because they have different labels
+    expect(result[0]!.weightOz).toBe(8.25);
+    expect(result[1]!.weightOz).toBe(8.25);
+    // Different perTray distinguishes them further
+    expect(result[0]!.perTray).toBe(24);
+    expect(result[1]!.perTray).toBe(20);
+  });
 });
 
 // ---------------------------------------------------------------------------
