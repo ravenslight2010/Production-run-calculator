@@ -2485,6 +2485,195 @@ async function runCrbLuciaVariantCustomersV2(): Promise<void> {
   });
 }
 
+// ── July 2026 import corrections ─────────────────────────────────────────────
+// Eleven profiles came in with wrong weights or missing sauces from the first
+// bulk spec-sheet upload. Two alias bugs also need cleaning:
+//   • "Masa recipe → Masa recipe natural" mapped to a non-existent pool entry.
+//   • "Naan recipe" was stored as a doughRecipeName but pool entry is "Naan Dough".
+// A "Naan recipe → Naan Dough" recipeName alias is added so future re-imports
+// auto-link without needing another manual patch.
+const JULY_2026_PROFILE_CORRECTIONS_V1 = "july-2026-profile-corrections-v1";
+
+async function runJuly2026ProfileCorrections(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: JULY_2026_PROFILE_CORRECTIONS_V1 })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let healedProfiles = 0;
+
+    for (const p of profiles) {
+      const values = { ...(p.values as Record<string, unknown>) };
+      let changed = false;
+      const brand = p.brand.toLowerCase();
+      const flavor = p.flavor.toLowerCase();
+
+      // 11" Hannaford / Chicken Tikka Masala — dough name was "Naan recipe"
+      // (not in pool); pool entry is "Naan Dough".
+      if (brand === '11" hannaford' && flavor === "chicken tikka masala") {
+        if (String(values.doughRecipeName ?? "").trim() === "Naan recipe") {
+          values.doughRecipeName = "Naan Dough";
+          changed = true;
+        }
+      }
+
+      // Brand / mr07ch24 — import picked up the 12" variant weight (14.2 oz)
+      // instead of the 7" variant (6.2 oz).
+      if (brand === "brand" && flavor === "mr07ch24") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 14.2) < 0.05) {
+          values.targetDoughballWeight = 6.2;
+          changed = true;
+        }
+      }
+
+      // Basha's Ultra Thin Crust (all flavors) — all four flavors got the 7"
+      // doughball weight (5.7 oz) instead of the thin 11" weight (7.8 oz).
+      if (brand === "basha's ultra thin crust") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5.7) < 0.05) {
+          values.targetDoughballWeight = 7.8;
+          changed = true;
+        }
+      }
+
+      // Lowe's / Spinach & Mushroom — weight 5.7 → 13 (CRB "Lowe's CRB Heavier"
+      // variant), sauce was blank.
+      if (brand === "lowe's" && flavor === "spinach & mushroom") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5.7) < 0.05) {
+          values.targetDoughballWeight = 13;
+          changed = true;
+        }
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Lucia Pizza Sauce";
+          changed = true;
+        }
+      }
+
+      // Nob Hill Craft Pizzas / Caribbean — weight 5.7 → 12.1 (CRB "Nob Hill
+      // Craft Heavy Plus" variant), sauce was blank.
+      if (brand === "nob hill craft pizzas" && flavor === "caribbean") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5.7) < 0.05) {
+          values.targetDoughballWeight = 12.1;
+          changed = true;
+        }
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Sweet n Sour Sauce";
+          changed = true;
+        }
+      }
+
+      // Lowe's / Bacon Cheeseburger — sauce was blank.
+      if (brand === "lowe's" && flavor === "bacon cheeseburger") {
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Cheeseburger Sauce";
+          changed = true;
+        }
+      }
+
+      // Lowe's / Caribbean — sauce was blank.
+      if (brand === "lowe's" && flavor === "caribbean") {
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Sweet n Sour Sauce";
+          changed = true;
+        }
+      }
+
+      // Lowe's / Red Hot Chicken — sauce was blank.
+      if (brand === "lowe's" && flavor === "red hot chicken") {
+        if (!String(values.frontlineRecipeName ?? "").trim()) {
+          values.frontlineRecipeName = "Four Hands Red Hot Recipe";
+          changed = true;
+        }
+      }
+
+      // Hannaford / Four Cheese with Sweet & Spicy Chili Sauce — weight 5.7 → 12.
+      if (
+        brand === "hannaford" &&
+        flavor === "four cheese with sweet & spicy chili sauce"
+      ) {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5.7) < 0.05) {
+          values.targetDoughballWeight = 12;
+          changed = true;
+        }
+      }
+
+      // Lucia's Craft / House Dlux — weight 5.7 → 12.
+      if (brand === "lucia's craft" && flavor === "house dlux") {
+        if (Math.abs(Number(values.targetDoughballWeight ?? 0) - 5.7) < 0.05) {
+          values.targetDoughballWeight = 12;
+          changed = true;
+        }
+      }
+
+      if (!changed) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    // Delete poisoned alias: "Masa recipe" → "Masa recipe natural".
+    // "Masa recipe natural" does not exist in the dough pool; future imports
+    // that say "Masa recipe" would have tried to link to a ghost recipe.
+    const deletedAliases = await tx
+      .delete(specImportAliasesTable)
+      .where(
+        and(
+          eq(specImportAliasesTable.kind, "recipeName"),
+          eq(sql`lower(${specImportAliasesTable.externalName})`, "masa recipe"),
+          eq(
+            sql`lower(${specImportAliasesTable.canonicalName})`,
+            "masa recipe natural",
+          ),
+        ),
+      )
+      .returning({ id: specImportAliasesTable.id });
+
+    // Ensure "Naan recipe → Naan Dough" alias exists so future re-imports of
+    // the 11" Hannaford sheet auto-link without needing another manual patch.
+    const existingNaan = await tx
+      .select({ id: specImportAliasesTable.id })
+      .from(specImportAliasesTable)
+      .where(
+        and(
+          eq(specImportAliasesTable.kind, "recipeName"),
+          eq(sql`lower(${specImportAliasesTable.externalName})`, "naan recipe"),
+        ),
+      );
+    let addedAliases = 0;
+    if (existingNaan.length === 0) {
+      await tx.insert(specImportAliasesTable).values({
+        scope: "live",
+        kind: "recipeName",
+        externalName: "Naan recipe",
+        canonicalName: "Naan Dough",
+        context: "dough",
+      });
+      addedAliases = 1;
+    }
+
+    logger.info(
+      {
+        heal: JULY_2026_PROFILE_CORRECTIONS_V1,
+        healedProfiles,
+        deletedAliases: deletedAliases.length,
+        addedAliases,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -2510,4 +2699,5 @@ export async function runDataHeals(): Promise<void> {
   await runBrandFanDoughDepoison();
   await runBrandDriftRename();
   await runCrbLuciaVariantCustomersV2();
+  await runJuly2026ProfileCorrections();
 }
