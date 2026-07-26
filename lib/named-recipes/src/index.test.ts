@@ -749,6 +749,126 @@ describe("mergeNamedRecipeDoughballVariants", () => {
     expect(hannaford?.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
     expect(hannaford?.customers).toContainEqual({ brand: "Hannaford", flavor: "BBQ Chicken" });
   });
+
+  it("Bug 2 regression: variants keyed by family (remapped) name land on the correct pool recipe", () => {
+    // Simulate what happens AFTER the Bug 2 remap in addNamedRecipesToServerIfAbsent:
+    // parse produced "CRB Dough Procedure", pool has "CRB Dough".
+    // The remap step re-keys "crb dough procedure" → "crb dough" before calling
+    // mergeNamedRecipeDoughballVariants.  If that remap didn't happen, the map
+    // lookup (pool key "crb dough" vs map key "crb dough procedure") would miss,
+    // and no variants would ever be stored.
+    const pool = [
+      makeNamed({
+        id: "d1",
+        name: "CRB Dough", // pool recipe name
+        doughballVariants: [],
+      }),
+    ];
+    // effectiveVariants uses the POOL name as key (post-remap), not the parse name
+    const incoming = new Map<string, DoughballVariant[]>([
+      ["crb dough", [ // remapped from "crb dough procedure"
+        {
+          label: "Hannaford",
+          weightOz: 7.6,
+          customers: [{ brand: "Hannaford", flavor: "Five Cheese" }],
+        },
+      ]],
+    ]);
+    const changed = mergeNamedRecipeDoughballVariants(pool, incoming, { replace: false });
+    expect(changed).toHaveLength(1);
+    expect(changed[0].name).toBe("CRB Dough");
+    const hannaford = changed[0].doughballVariants?.find((v) => v.label === "Hannaford");
+    expect(hannaford?.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
+  });
+
+  it("full re-import-after-heal scenario: customers set by a data heal survive repeated re-imports", () => {
+    // Simulates the full round-trip:
+    // 1. Data heal writes customers onto pool variants.
+    // 2. Manager re-imports dough workbook (replace:true) — customers NOT in the parse.
+    // 3. Customers must survive (Bug 1 fix).
+    // 4. A second re-import must ALSO survive.
+    // 5. A re-import that adds NEW customers keeps existing + adds new (additive union).
+
+    const poolAfterHeal = [
+      makeNamed({
+        id: "d1",
+        name: "CRB Dough",
+        doughballVariants: [
+          {
+            label: "Lucia's Craft CRB Thick",
+            weightOz: 13.8,
+            customers: [
+              { brand: "Lucia's Craft", flavor: "BBQ Chicken" },
+              { brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" },
+            ],
+          },
+          {
+            label: "Lucia's Craft CRB Heavy Plus",
+            weightOz: 12,
+            customers: [{ brand: "Lucia's Craft", flavor: "" }],
+          },
+        ],
+      }),
+    ];
+
+    // Re-import 1: same weights, NO customers in incoming (typical workbook re-import)
+    const reimport1 = new Map<string, DoughballVariant[]>([
+      ["crb dough", [
+        { label: "Lucia's Craft CRB Thick", weightOz: 13.8 },
+        { label: "Lucia's Craft CRB Heavy Plus", weightOz: 12 },
+      ]],
+    ]);
+    const afterReimport1 = mergeNamedRecipeDoughballVariants(poolAfterHeal, reimport1, { replace: true });
+    // No structural change (weights identical, customers preserved → enriched matches before)
+    // so changed may be empty — that is correct behaviour. Apply result to pool.
+    const pool1 = afterReimport1.length > 0
+      ? poolAfterHeal.map((r) => afterReimport1.find((c) => c.id === r.id) ?? r)
+      : poolAfterHeal;
+
+    // Re-import 2: updated weight to force a change, still NO customers
+    const reimport2 = new Map<string, DoughballVariant[]>([
+      ["crb dough", [
+        { label: "Lucia's Craft CRB Thick", weightOz: 13.9 }, // updated weight
+        { label: "Lucia's Craft CRB Heavy Plus", weightOz: 12.1 },
+      ]],
+    ]);
+    const afterReimport2 = mergeNamedRecipeDoughballVariants(pool1, reimport2, { replace: true });
+    expect(afterReimport2).toHaveLength(1);
+    const thick2 = afterReimport2[0].doughballVariants?.find(
+      (v) => v.label === "Lucia's Craft CRB Thick",
+    );
+    expect(thick2?.weightOz).toBe(13.9);
+    expect(thick2?.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "BBQ Chicken" });
+    expect(thick2?.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" });
+    const heavy2 = afterReimport2[0].doughballVariants?.find(
+      (v) => v.label === "Lucia's Craft CRB Heavy Plus",
+    );
+    expect(heavy2?.weightOz).toBe(12.1);
+    expect(heavy2?.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "" });
+
+    // Re-import 3: new import ALSO carries a new customer → union, not replace
+    const pool2 = pool1.map((r) => afterReimport2.find((c) => c.id === r.id) ?? r);
+    const reimport3 = new Map<string, DoughballVariant[]>([
+      ["crb dough", [
+        {
+          label: "Lucia's Craft CRB Thick",
+          weightOz: 13.9,
+          customers: [{ brand: "Lucia's Craft", flavor: "House DLUX" }], // new flavor
+        },
+        { label: "Lucia's Craft CRB Heavy Plus", weightOz: 12.1 },
+      ]],
+    ]);
+    const afterReimport3 = mergeNamedRecipeDoughballVariants(pool2, reimport3, { replace: true });
+    expect(afterReimport3).toHaveLength(1);
+    const thick3 = afterReimport3[0].doughballVariants?.find(
+      (v) => v.label === "Lucia's Craft CRB Thick",
+    );
+    // Original heal customers still present
+    expect(thick3?.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "BBQ Chicken" });
+    expect(thick3?.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "Four Cheese Meltdown" });
+    // New customer added from re-import 3
+    expect(thick3?.customers).toContainEqual({ brand: "Lucia's Craft", flavor: "House DLUX" });
+  });
 });
 
 describe("matchDoughballVariant", () => {
