@@ -1158,7 +1158,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "18";
+export const SPEC_PARSE_VERSION = "19";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
