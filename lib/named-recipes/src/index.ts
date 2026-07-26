@@ -425,10 +425,35 @@ export function mergeNamedRecipeDoughballVariants(
     // Replace mode: swap the entire list for this recipe so a renamed variant
     // (e.g. "Bashas Ultra Thin" → "Craft Bashas Ultra Thin") removes the old
     // entry instead of leaving both in the pool alongside the new one.
+    // IMPORTANT: union existing per-variant customers into the incoming list —
+    // if the import produced no parsed customers (e.g. the workbook section
+    // changed format), replacing wholesale would wipe customers that were
+    // populated by a previous import or by the manager editor.
     if (options?.replace) {
       const before = normalizeDoughballVariants(r.doughballVariants, r.name);
-      if (JSON.stringify(before) !== JSON.stringify(incoming)) {
-        changed.push({ ...r, doughballVariants: incoming });
+      const existingByKey = new Map<string, DoughballVariant>(
+        before.map((v) => [doughballVariantLabelKey(v.label, r.name), v]),
+      );
+      const enriched = incoming.map((v) => {
+        const prev = existingByKey.get(doughballVariantLabelKey(v.label, r.name));
+        if (!prev?.customers?.length) return v;
+        // Carry over existing customers not already present in the incoming list.
+        // unionVariantCustomers only works when the second arg (incoming) is
+        // non-empty; handle the common case (incoming has no customers) directly.
+        const vCustomers = v.customers ?? [];
+        const toAdd = prev.customers.filter(
+          (e) =>
+            !vCustomers.some(
+              (c) =>
+                c.brand.trim().toLowerCase() === e.brand.trim().toLowerCase() &&
+                c.flavor.trim().toLowerCase() === e.flavor.trim().toLowerCase(),
+            ),
+        );
+        if (toAdd.length === 0) return v;
+        return { ...v, customers: [...vCustomers, ...toAdd] };
+      });
+      if (JSON.stringify(before) !== JSON.stringify(enriched)) {
+        changed.push({ ...r, doughballVariants: enriched });
       }
       continue;
     }
@@ -718,9 +743,10 @@ export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssign
     const lhs = cell.slice(0, colonIdx).trim();
     const rhs = cell.slice(colonIdx + 1).trim();
     if (!lhs || !rhs) continue;
-    // Skip rows whose LHS starts with a number (formula rows, not customers)
-    // or contains ingredient-table keywords.
-    if (/^\d/.test(lhs) || /\blbs?\b|\boz\b/i.test(lhs)) continue;
+    // Skip rows whose LHS starts with a plain number (formula/percentage rows
+    // like "100% Bread Flour: 45") but NOT brand names that start with a digit
+    // followed immediately by a letter (e.g. "4Hand's CRB Heavy").
+    if (/^\d[^a-zA-Z]/i.test(lhs) || /\blbs?\b|\boz\b/i.test(lhs)) continue;
     // Parse flavors (comma-separated; "All" → catch-all = empty string)
     const flavors = rhs
       .split(",")
@@ -729,9 +755,15 @@ export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssign
       .map((f) => (f.toLowerCase() === "all" ? "" : f));
     if (flavors.length === 0) continue;
     const qualifierKey = doughVariantQualifierKey(lhs);
-    const brand = doughVariantStripQualifier(lhs);
-    if (!brand) continue;
-    result.push({ brand, qualifierKey, flavors });
+    const strippedBrand = doughVariantStripQualifier(lhs);
+    if (!strippedBrand) continue;
+    // Split "&"-joined multi-brand entries into individual assignments so each
+    // brand name can be matched against variant labels independently.
+    // E.g. "Lowe's & Lucia's Craft CRB Heavy Plus" → "Lowe's" + "Lucia's Craft"
+    const brandParts = strippedBrand.split(/\s*&\s*/).map((b) => b.trim()).filter(Boolean);
+    for (const brand of brandParts) {
+      result.push({ brand, qualifierKey, flavors });
+    }
   }
   return result;
 }

@@ -119,6 +119,11 @@ export async function addNamedRecipesToServerIfAbsent(
   // it onto the family recipe it collapsed into (fills only unset weights).
   const remappedWeights = new Map<string, number>(weightsByName ?? []);
   const remappedTrays = new Map<string, number>(traysByName ?? []);
+  // Bug 2 fix: when a candidate is family-collapsed onto a pool recipe with a
+  // DIFFERENT name (e.g. parse produced "Craft CRB" but pool has "CRB Dough"),
+  // the variantsByName key is the PARSE name, not the pool name. Collect the
+  // mapping so we can remap variant lookups to the pool recipe name below.
+  const variantKeyRemap = new Map<string, string>(); // candKey → familyKey
   for (const c of candidates) {
     const family = findSpecImportNamedRecipeFamilyMatch(kind, c.name ?? "", existingNames);
     if (family === null) {
@@ -151,6 +156,33 @@ export async function addNamedRecipesToServerIfAbsent(
     if (kind === "dough" && perTray > 0 && !remappedTrays.has(familyKey)) {
       remappedTrays.set(familyKey, perTray);
     }
+    // Collect variant key remap for mismatched parse vs pool names.
+    if (kind === "dough" && familyKey !== candKey && variantsByName?.has(candKey)) {
+      variantKeyRemap.set(candKey, familyKey);
+    }
+  }
+  // Build effectiveVariants: a copy of variantsByName with any parse-name keys
+  // that were family-collapsed also registered under the pool recipe name.
+  // Without this remap, mergeNamedRecipeDoughballVariants would look up pool
+  // recipe names in the map and find nothing (key mismatch → customers never set).
+  let effectiveVariants = variantsByName;
+  if (kind === "dough" && variantsByName && variantKeyRemap.size > 0) {
+    const remapped = new Map<string, ReadonlyArray<DoughballVariant>>(variantsByName);
+    for (const [candKey, familyKey] of variantKeyRemap) {
+      const candVariants = variantsByName.get(candKey)!;
+      if (!remapped.has(familyKey)) {
+        remapped.set(familyKey, candVariants);
+      } else {
+        // Union: merge incoming onto existing (don't clobber existing entries)
+        const cur = [...remapped.get(familyKey)!];
+        const curLabels = new Set(cur.map((v) => v.label.toLowerCase()));
+        for (const v of candVariants) {
+          if (!curLabels.has(v.label.toLowerCase())) cur.push(v);
+        }
+        remapped.set(familyKey, cur);
+      }
+    }
+    effectiveVariants = remapped;
   }
   const mergeResult = options?.upsertComponents
     ? upsertNamedRecipesByName(existing, filtered)
@@ -200,8 +232,8 @@ export async function addNamedRecipesToServerIfAbsent(
     ? afterTrays
     : merged.map((r) => existingChainById.get(r.id) ?? r);
   const varied =
-    kind === "dough" && (variantsByName?.size ?? 0) > 0
-      ? mergeNamedRecipeDoughballVariants(mergedCurrent, variantsByName!, { replace: options?.replaceVariants })
+    kind === "dough" && (effectiveVariants?.size ?? 0) > 0
+      ? mergeNamedRecipeDoughballVariants(mergedCurrent, effectiveVariants!, { replace: options?.replaceVariants })
       : [];
   if (
     added === 0 &&

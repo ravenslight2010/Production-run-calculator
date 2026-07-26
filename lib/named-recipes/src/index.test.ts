@@ -695,6 +695,60 @@ describe("mergeNamedRecipeDoughballVariants", () => {
       { label: "New", weightOz: 9 },
     ]);
   });
+
+  it("replace mode preserves existing customers when incoming has none (Bug 1 regression)", () => {
+    // Scenario: re-import with updated weight but no parsed customers → customers
+    // must survive, not be wiped. The incoming has a DIFFERENT weight so a real
+    // change occurs, giving us a result to assert on.
+    const pool = [
+      makeNamed({
+        id: "d1",
+        name: "CRB Dough",
+        doughballVariants: [
+          { label: "Hannaford", weightOz: 7.6, customers: [{ brand: "Hannaford", flavor: "Five Cheese" }] },
+          { label: "Costco", weightOz: 9.6, customers: [{ brand: "Costco", flavor: "" }] },
+        ],
+      }),
+    ];
+    const incoming = new Map<string, DoughballVariant[]>([
+      ["crb dough", [
+        { label: "Hannaford", weightOz: 7.7 }, // updated weight, no customers
+        { label: "Costco", weightOz: 9.7 },    // updated weight, no customers
+      ]],
+    ]);
+    const changed = mergeNamedRecipeDoughballVariants(pool, incoming, { replace: true });
+    expect(changed).toHaveLength(1);
+    const hannaford = changed[0].doughballVariants?.find((v) => v.label === "Hannaford");
+    expect(hannaford?.weightOz).toBe(7.7);
+    expect(hannaford?.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
+    const costco = changed[0].doughballVariants?.find((v) => v.label === "Costco");
+    expect(costco?.weightOz).toBe(9.7);
+    expect(costco?.customers).toContainEqual({ brand: "Costco", flavor: "" });
+  });
+
+  it("replace mode unions existing customers with newly-imported customers", () => {
+    // Incoming has customers (BBQ Chicken), existing has customers (Five Cheese) →
+    // both must appear after replace.
+    const pool = [
+      makeNamed({
+        id: "d1",
+        name: "CRB Dough",
+        doughballVariants: [
+          { label: "Hannaford", weightOz: 7.6, customers: [{ brand: "Hannaford", flavor: "Five Cheese" }] },
+        ],
+      }),
+    ];
+    const incoming = new Map<string, DoughballVariant[]>([
+      ["crb dough", [
+        { label: "Hannaford", weightOz: 7.7, customers: [{ brand: "Hannaford", flavor: "BBQ Chicken" }] },
+      ]],
+    ]);
+    const changed = mergeNamedRecipeDoughballVariants(pool, incoming, { replace: true });
+    expect(changed).toHaveLength(1);
+    const hannaford = changed[0].doughballVariants?.find((v) => v.label === "Hannaford");
+    expect(hannaford?.customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
+    expect(hannaford?.customers).toContainEqual({ brand: "Hannaford", flavor: "BBQ Chicken" });
+  });
 });
 
 describe("matchDoughballVariant", () => {
@@ -921,6 +975,63 @@ describe("parseDoughCustomerSection", () => {
       ["Flour", "100", "60"],
     ];
     expect(parseDoughCustomerSection(rows)).toHaveLength(0);
+  });
+
+  it("parses brand names that start with a digit followed by a letter (Bug 3a regression)", () => {
+    const rows: string[][] = [
+      ["4Hand's CRB Heavy: Seven Cheese"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ brand: "4Hand's", qualifierKey: "heavy", flavors: ["Seven Cheese"] });
+  });
+
+  it("still skips rows whose LHS starts with a digit followed by a non-letter (formula rows)", () => {
+    const rows: string[][] = [
+      ["100% Bread Flour: stuff"],
+      ["45.5 lbs: something"],
+      ["Hannaford CRB: All"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(1);
+    expect(result[0].brand).toBe("Hannaford");
+  });
+
+  it("splits '&'-joined multi-brand LHS into separate assignments (Bug 3b regression)", () => {
+    const rows: string[][] = [
+      ["Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    expect(result).toHaveLength(2);
+    expect(result).toContainEqual(
+      expect.objectContaining({ brand: "Lowe's", qualifierKey: "heavy plus", flavors: ["Caribbean"] }),
+    );
+    expect(result).toContainEqual(
+      expect.objectContaining({ brand: "Lucia's Craft", qualifierKey: "heavy plus", flavors: ["Caribbean"] }),
+    );
+  });
+
+  it("produces two assignments from the real CRB workbook '& ' compound row", () => {
+    // Mirrors actual row from CRB_Dough_Mixing_Procedure_-_38:
+    // "Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean"
+    const rows: string[][] = [
+      ["Basha's Original: All"],
+      ["Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean"],
+      ["SMD CRB: All"],
+    ];
+    const result = parseDoughCustomerSection(rows);
+    const brands = result.map((r) => r.brand);
+    expect(brands).toContain("Basha's Original");
+    expect(brands).toContain("Lowe's");
+    expect(brands).toContain("Lucia's Craft");
+    expect(brands).toContain("SMD");
+    // Each of the two split brands shares the same qualifier + flavor
+    const lowes = result.find((r) => r.brand === "Lowe's");
+    const lucias = result.find((r) => r.brand === "Lucia's Craft");
+    expect(lowes?.qualifierKey).toBe("heavy plus");
+    expect(lowes?.flavors).toEqual(["Caribbean"]);
+    expect(lucias?.qualifierKey).toBe("heavy plus");
+    expect(lucias?.flavors).toEqual(["Caribbean"]);
   });
 });
 

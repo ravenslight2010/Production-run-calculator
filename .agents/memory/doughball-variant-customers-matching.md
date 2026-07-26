@@ -23,8 +23,25 @@ Doughball variants need a `customers` array to be matched via `matchDoughballVar
    - "Lucia's Craft CRB Thick" (13.8 oz) → specific flavors: BBQ Chicken, Four Cheese Meltdown, House DLUX, Sweet Chili Garden
    - "Lucia's Craft CRB Heavy Plus" (12 oz) → catch-all `{flavor: ""}` for remaining Lucia's Craft flavors
 
+## Three-bug fix (re-import customer survival)
+
+Three bugs caused "Applies to (Brand / Flavor)" entries to be wiped on re-import:
+
+**Bug 1 — replace mode wipes customers** (`lib/named-recipes/src/index.ts`, `mergeNamedRecipeDoughballVariants` replace branch):  
+`unionVariantCustomers(existing, incoming)` returns `null` when `incoming` is undefined/empty — using it in the replace enrichment loop meant no-customers incoming left the existing customers unpreserved. Fix: inline the union manually: collect existing customers not already in the incoming list and spread them in.
+
+**Bug 2 — key mismatch in addNamedRecipesToServerIfAbsent** (`artifacts/run-calculator/src/namedRecipes.ts`):  
+Family-collapse rekeyed candidate variants under the family key, but the caller still passed the candidate (variant-label) key to `mergeNamedRecipeDoughballVariants`. Fix: collect a `variantKeyRemap` Map during family-collapse; build `effectiveVariants` from it before calling the merge.
+
+**Bug 3a — digit-start regex false positive** (`parseDoughCustomerSection`):  
+`/^\d/` matched "4Hand's CRB Heavy" (brand starting with a digit), discarding it as a section-end sentinel. Fix: change to `/^\d[^a-zA-Z]/i` so only pure numeric prefixes (die numbers like "7", "13.8") fire the sentinel.
+
+**Bug 3b — "&"-joined multi-brand entries not split**:  
+"Lowe's & Lucia's Craft CRB Heavy Plus: Caribbean" was emitted as a single brand string. Fix: after `doughVariantStripQualifier`, split by ` & ` and emit one customer entry per brand.
+
 ## Sharp edges
 
+- `unionVariantCustomers(base, incoming)` is directional — `incoming` is the NEW set, `base` is what already exists. When you want to PRESERVE existing and optional-ADD incoming, you must not use this helper with incoming=existing; write the filter manually.
 - Profiles for Lucia's Craft are localStorage-only (no rows in `brand_profiles` DB table) — server heals that operate on `brand_profiles` never touched them. The customers fix + import override is the only path to correct wrong weights on these profiles.
 - Other label-named variants (Hannaford, Lowe's, Nob Hill Craft) still have no customers arrays — they rely on the die-number fallback. Add customers for those too if those brands start showing wrong weights.
 - The "never clobber" rule still applies when `wMatchedViaCustomers=false` (die fallback or no match) — only high-confidence customers matches may override.
