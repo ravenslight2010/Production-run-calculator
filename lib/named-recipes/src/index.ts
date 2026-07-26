@@ -646,6 +646,15 @@ export function matchDoughballVariant(
 // ---------------------------------------------------------------------------
 
 /**
+ * Single-token words that, when found alone as a part of an "&"-split,
+ * indicate the "&" is a conjunction WITHIN a brand name rather than a
+ * separator BETWEEN two brand names. E.g. "Lucia's New & Improved" is one
+ * brand — "Improved" alone is not a valid standalone brand name.
+ */
+const BRAND_AMP_CONTINUATION_WORDS = new Set(["improved"]);
+
+
+/**
  * Qualifier keywords in priority order: more-specific before more-general so
  * "heavy plus" never incorrectly matches as plain "heavy".
  *
@@ -867,17 +876,26 @@ export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssign
     // Split "&"-joined multi-brand entries into individual assignments so each
     // brand name can be matched against variant labels independently.
     // E.g. "Lowe's & Lucia's Craft CRB Heavy Plus" → "Lowe's" + "Lucia's Craft"
-    const brandParts = strippedBrand.split(/\s*&\s*/).map((b) => b.trim()).filter(Boolean);
+    //
+    // Guard: if any part of the split is a lone continuation word (a single
+    // token that cannot be a standalone brand name), the "&" is part of the
+    // brand name itself (e.g. "Lucia's New & Improved") — skip the split and
+    // treat the whole string as one brand. The full compound is still pushed
+    // separately below so matchDoughballVariant can find the variant by the
+    // exact profile brand string even for genuine two-brand entries.
+    const rawAmpParts = strippedBrand.split(/\s*&\s*/).map((b) => b.trim()).filter(Boolean);
+    const ampSplitHasContinuation =
+      rawAmpParts.length > 1 &&
+      rawAmpParts.some(
+        (p) => !p.includes(" ") && BRAND_AMP_CONTINUATION_WORDS.has(p.toLowerCase()),
+      );
+    const brandParts = ampSplitHasContinuation ? [strippedBrand] : rawAmpParts;
     for (const brand of brandParts) {
       result.push({ brand, qualifierKey, flavors });
     }
     // Also push the FULL pre-split compound brand so matchDoughballVariant can
-    // find the variant by the exact full brand name. The "&" split above handles
-    // genuine two-brand entries ("Lowe's & Lucia's Craft"), but can also produce
-    // phantom parts for single brands that contain "&" in their name
-    // (e.g. "Lucia's New & Improved" → parts "Lucia's New" + "Improved").
-    // Storing the original ensures matchDoughballVariant's customer-name lookup
-    // succeeds when the profile brand is the full compound string.
+    // find the variant by the exact full brand name when the profile stores the
+    // full compound string (e.g. brand="Lucia's New & Improved").
     if (brandParts.length > 1) {
       result.push({ brand: strippedBrand, qualifierKey, flavors });
     }

@@ -1281,26 +1281,16 @@ describe("parseDoughCustomerSection", () => {
     );
   });
 
-  it("also stores the full compound name for single brands that contain '&' (Bug 3c: Lucia's New & Improved)", () => {
-    // "Lucia's New & Improved" is a SINGLE brand whose name happens to contain "&".
-    // The "&" split produces phantom parts ("Lucia's New", "Improved") that can't be
-    // found by matchDoughballVariant using the full brand name. The compound entry
-    // ensures the full-name lookup succeeds.
+  it("treats '&' within a brand name as part of the name, not a brand separator (Lucia's New & Improved)", () => {
+    // "Lucia's New & Improved" is a SINGLE brand whose name contains "&".
+    // "Improved" alone is a continuation word (in BRAND_AMP_CONTINUATION_WORDS),
+    // so the "&" split is suppressed and exactly one assignment is produced.
     const rows: string[][] = [
       ["Lucia's New & Improved: All"],
     ];
     const result = parseDoughCustomerSection(rows);
-    // 3 entries: "Lucia's New", "Improved", and "Lucia's New & Improved"
-    expect(result).toHaveLength(3);
-    expect(result).toContainEqual(
-      expect.objectContaining({ brand: "Lucia's New & Improved", qualifierKey: "", flavors: [""] }),
-    );
-    expect(result).toContainEqual(
-      expect.objectContaining({ brand: "Lucia's New", qualifierKey: "", flavors: [""] }),
-    );
-    expect(result).toContainEqual(
-      expect.objectContaining({ brand: "Improved", qualifierKey: "", flavors: [""] }),
-    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ brand: "Lucia's New & Improved", qualifierKey: "", flavors: [""] });
   });
 
   it("produces two assignments from the real CRB workbook '& ' compound row", () => {
