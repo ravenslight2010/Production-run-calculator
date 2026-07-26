@@ -9522,6 +9522,12 @@ export default function Home() {
           // profile's stored weight so each profile tags ITS OWN variant
           // rather than always tagging whichever happens to be listed first.
           const profileWeight = Number(savedProfile?.targetDoughballWeight ?? 0);
+          // When there are multiple variants for this family, we must match by
+          // weight so we don't blindly tag whichever variant happens to be first
+          // in the AI-parsed list (e.g. "CORKY'S 7\" DOUGH" getting assigned to
+          // "Brand/MR07CH24" just because it came first). Only fall through to
+          // the unweighted find when there is exactly ONE variant (no ambiguity).
+          const familyVariantCount = familyVariants.length;
           const importedRecipe =
             (profileWeight > 0
               ? appliedParsed.recipes.find(
@@ -9532,10 +9538,14 @@ export default function Home() {
                     Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
                 )
               : undefined) ??
-            appliedParsed.recipes.find(
-              (r) =>
-                r.kind === "dough" && r.name.trim().toLowerCase() === dName && !!r.variantLabel,
-            );
+            (familyVariantCount <= 1
+              ? appliedParsed.recipes.find(
+                  (r) =>
+                    r.kind === "dough" &&
+                    r.name.trim().toLowerCase() === dName &&
+                    !!r.variantLabel,
+                )
+              : undefined);
           if (!importedRecipe?.variantLabel) continue;
           const variantLabel = importedRecipe.variantLabel.trim();
           const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
@@ -9575,6 +9585,20 @@ export default function Home() {
             const toAdd: DoughballVariant[] = [];
             for (const tv of specImportPrepared.doughVariantsFromTable) {
               if (existingLow.has(tv.label.trim().toLowerCase())) continue;
+              // Skip table entries whose weight+perTray exactly match an existing
+              // variant even when the label differs. This prevents a duplicate when
+              // the AI names the base variant "Brand Dough" (14.2oz/16) and the
+              // yield table also emits "BRAND 12\" DOUGH" (14.2oz/16) — they are
+              // the same doughball described two different ways.
+              const sameWeight =
+                tv.weightOz > 0 &&
+                existing.some(
+                  (ev) =>
+                    Math.abs((ev.weightOz ?? 0) - tv.weightOz) <= 0.05 &&
+                    (ev.perTray ?? 0) === (tv.perTray ?? 0) &&
+                    (ev.perTray ?? 0) > 0,
+                );
+              if (sameWeight) continue;
               toAdd.push({
                 label: tv.label,
                 ...(tv.weightOz > 0 ? { weightOz: tv.weightOz } : {}),
