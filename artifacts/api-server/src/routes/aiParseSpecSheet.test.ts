@@ -76,6 +76,31 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
     expect(system).toContain("type 'Pepperoni Stick - NATURAL'");
     expect(system).toContain("NEVER emit a bare qualifier");
   });
+
+  // Regression guard: "Pepperoni Stick - NATURAL" was being snapped to the
+  // shorter known name "Pepperoni Stick" because the known-name verbatim rule
+  // was not explicitly carved out for qualifier differences. The prompt must
+  // tell the model that product qualifiers (NATURAL, CURED, etc.) override the
+  // snap-to-known-name rule.
+  it("tells the model qualifier words override the snap-to-known-name rule", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("QUALIFIER EXCEPTION");
+    expect(system).toContain("'Pepperoni Stick - NATURAL' does NOT collapse to known 'Pepperoni Stick'");
+    expect(system).toContain("'Masa Dough Natural' does NOT collapse to known 'Masa Dough'");
+    // The pep type rule itself must reinforce that it overrides the known-name rule.
+    expect(system).toContain("This rule OVERRIDES the known-name verbatim rule");
+  });
+
+  // Regression guard: recipe names ("Masa Dough Natural", "Malted Barley
+  // recipe") had "Natural" and distinguishing words dropped to match a shorter
+  // known name. The prompt must explicitly require full recipe names including
+  // qualifiers.
+  it("tells the model to keep qualifiers in recipe names (Natural, Spicy, etc.)", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("RECIPE NAME QUALIFIERS");
+    expect(system).toContain("'Masa Dough Natural' stays 'Masa Dough Natural'");
+    expect(system).toContain("'Malted Barley recipe' stays 'Malted Barley recipe'");
+  });
 });
 
 // Regression guard for the standalone-procedure rule. A sheet that is one whole

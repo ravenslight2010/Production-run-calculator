@@ -132,7 +132,15 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "name closely matches one of the provided KNOWN canonical names, RETURN THE " +
     "KNOWN NAME VERBATIM (so existing profiles/recipes are updated, not " +
     "duplicated); otherwise return the workbook's name as-is (a new one will be " +
-    "created). Use the provided ALIASES as authoritative label→canonical mappings. " +
+    "created). QUALIFIER EXCEPTION: qualifiers that change WHICH product or recipe " +
+    "variant a name refers to are part of the identity — never snap to a shorter " +
+    "known name by dropping them. Examples: sheet 'Pepperoni Stick - NATURAL' does " +
+    "NOT collapse to known 'Pepperoni Stick'; sheet 'Masa Dough Natural' does NOT " +
+    "collapse to known 'Masa Dough'. Only snap when the omitted words are generic " +
+    "filler ('Recipe', 'Mix', 'Procedure', 'Dough', 'Sauce') — not when they are " +
+    "meaningful product qualifiers (NATURAL, CURED, Spicy, Heavy, Light, Original, " +
+    "Whole Milk, or any word that distinguishes one variant from another). " +
+    "Use the provided ALIASES as authoritative label→canonical mappings. " +
     "A SINGLE recipe often applies to MANY brand+flavor profiles — typically a " +
     "list of 'Brand: flavors' header rows sitting above ONE shared ingredient " +
     "table (very common for dough mixing procedures). In that case return ONE " +
@@ -214,13 +222,23 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "ingredients are only such sticks. THE ONE EXCEPTION IS DICED PEPPERONI: " +
     "diced pepperoni is a topping and stays part of a CHEESE/topping recipe, NOT " +
     "a profile pepperoni. " +
+    "RECIPE NAME QUALIFIERS: a recipe's `name` must be captured IN FULL as written " +
+    "on the sheet, including any distinguishing qualifier (e.g. 'Natural', " +
+    "'Spicy', 'Whole Milk', 'Heavy', 'Light'). A qualifier makes it a DIFFERENT " +
+    "recipe variant — never drop it to match a shorter known name. 'Masa Dough " +
+    "Natural' stays 'Masa Dough Natural', NOT 'Masa Dough'; 'Malted Barley recipe' " +
+    "stays 'Malted Barley recipe', NOT 'Barley recipe'. The known-name VERBATIM " +
+    "rule applies only when the qualifier words are generic filler (see QUALIFIER " +
+    "EXCEPTION above). " +
     "PEP TYPE NAMES: a `pepperonis` entry's `type` must be the FULL product name " +
     "as written on the sheet, keeping any qualifier like NATURAL or CURED attached " +
     "to the product name, and dropping only a trailing vendor/item-code " +
     "parenthetical. Example: 'Pepperoni Stick - NATURAL (Hormel - 24878)' → type " +
     "'Pepperoni Stick - NATURAL'; 'Pepperoni Stick (Cured Sugardale - 01874)' → " +
     "type 'Pepperoni Stick'. NEVER emit a bare qualifier such as 'NATURAL' or " +
-    "'Cured' alone as the type. " +
+    "'Cured' alone as the type. This rule OVERRIDES the known-name verbatim rule — " +
+    "'Pepperoni Stick - NATURAL' on the sheet must NOT snap to a known " +
+    "'Pepperoni Stick': they are different products. " +
     "APPLICATOR STATIONS: the physical line runs Applicator 1, Applicator 2, then " +
     "the pep/stick applicators, then Applicator 3, Applicator 4 — the pep " +
     "applicators sit BETWEEN stations 2 and 3. The sheet's layout IS the line " +
