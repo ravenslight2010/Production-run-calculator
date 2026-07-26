@@ -67,6 +67,10 @@ export const SPEC_STATIC_CUSTOMER_ASSIGNMENTS: ReadonlyMap<
 
   // ─── Naan Dough ──────────────────────────────────────────────────────────
   // Workbook customer section covers Lucia's Craft & 4Hands Naan (confirmed).
+  // Verified: Lucia_Craft_Pizza_Recipe_Specs_-_03_*.xlsx does NOT list any Naan
+  // flavors — the dough workbook is the only source for that assignment. No
+  // static entry for Lucia's Craft is needed here; parseDoughCustomerSection
+  // handles it from the workbook's own customer section.
   // Hannaford / Tikka Masala assignment from spec — not in workbook section.
   // "Hannaford (Masala Pizza)" variant label contains "Hannaford" → strict match.
   [
