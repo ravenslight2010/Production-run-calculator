@@ -328,6 +328,20 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "customers/products that variant serves). Never collapse variants into one " +
     "recipe or drop a variant label — a profile's `doughName` references the " +
     "variant and must find an exact match. " +
+    "COMPOUND BRAND+SIZE LABELS (sub-case of Type A): sometimes a row label " +
+    "is '{Brand} {Size} DOUGH' or '{Brand} {Size}\" DOUGH' — e.g. 'mr07ch24 " +
+    "7\" DOUGH', 'Lucia\\'s 7\" Dough', 'ACME 12\" DOUGH'. The BRAND prefix " +
+    "is a known customer brand; the SIZE suffix (7\", 12\", 7 Inch, etc.) is the " +
+    "variant descriptor. Treat these as Type A variant rows: the recipe name " +
+    "still comes from the PROCEDURE TITLE (not the row label). Crucially, " +
+    "POPULATE `targets` for this variant recipe with the brand extracted from " +
+    "the row label — {brand: '<the brand prefix>', flavor: null}. Do NOT leave " +
+    "`targets` empty just because the size is part of the label. Example: a " +
+    "yield table with rows 'mr07ch24 7\" DOUGH' (6.2 oz, 24/tray) and " +
+    "'mr12ch14 12\" DOUGH' (14.2 oz, 16/tray) under procedure 'Standard Dough' " +
+    "should produce two variant recipes — 'Standard Dough 7\"' targeting " +
+    "{brand:'mr07ch24'} and 'Standard Dough 12\"' targeting {brand:'mr12ch14'} " +
+    "— never two recipes with empty targets. " +
     "(B) CUSTOMER / PRODUCT TARGET ROWS: the row label is a customer brand or " +
     "product name — 'Hannaford', 'Lowe\\'s', 'SMD', 'Lucia\\'s Craft Bacon " +
     "Burger Supreme'. These rows specify which products use THIS procedure and at " +
@@ -350,7 +364,9 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "descriptor or a customer name, check whether it matches a known brand " +
     "(from the known brands list). A match → customer row (type B). A short " +
     "descriptor that does NOT resemble any brand → variant row (type A). A " +
-    "label that matches the procedure title → self-referential (type C). " +
+    "label that matches the procedure title → self-referential (type C). A " +
+    "label that STARTS WITH a known brand followed by a size → compound " +
+    "brand+size row (Type A sub-case): set `targets` to that brand. " +
     "EMIT EVERY ROW: regardless of type, capture EVERY row of the yield table — " +
     "never sample, summarize, or abbreviate. If the table lists 12 rows, all " +
     "12 must appear as either variant recipes (type A) or target entries (type " +

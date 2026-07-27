@@ -160,6 +160,19 @@ describe("buildParseSpecSheetPrompt dough yield table row types", () => {
     expect(system).toContain("Americano");
     expect(system).toContain("never borrow flavors from a brand that merely resembles it");
   });
+
+  // Regression guard: compound 'Brand Size" DOUGH' row labels (e.g.
+  // "mr07ch24 7" DOUGH", "mr12ch14 12" DOUGH") were creating Type A variant
+  // recipes with empty `targets`, so the weights never linked to any profile.
+  // The prompt must instruct the AI to extract the brand prefix and populate
+  // `targets` with it for these compound brand+size rows.
+  it("tells the model compound brand+size rows must populate targets with the brand", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("COMPOUND BRAND+SIZE LABELS");
+    expect(system).toContain("mr07ch24");
+    expect(system).toContain("mr12ch14");
+    expect(system).toContain("POPULATE `targets` for this variant recipe with the brand extracted from");
+  });
 });
 
 // Regression guard for the standalone-procedure rule. A sheet that is one whole
