@@ -536,5 +536,49 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
     runValuesUpdatedAt: outUpd,
   };
   if (outDay) out.dayState = outDay;
+
+  // ── Additive union for master-data name registries ────────────────────────
+  // These fields are maintained as additive name lists that grow as items are
+  // added across devices. A fresh device (no localStorage) pushes empty arrays,
+  // which would otherwise overwrite the server's populated lists via the
+  // `...incoming` spread above — every other device would then see all their
+  // brands/recipes vanish on the next SSE receive.
+  //
+  // Union-merge: include names from BOTH the incoming push AND the stored row.
+  // The client already applies tombstones (deletedItems) on receive, so deleted
+  // names are filtered out in the UI even if they persist in the union. The
+  // brand→flavor map is merged per-brand with the same union semantics.
+  const exData = existing as Record<string, unknown>;
+  const ADDITIVE_LIST_FIELDS = [
+    "brands",
+    "ingredientTypes",
+    "pepTypes",
+    "cheeseRecipeNames",
+    "mixRecipeNames",
+    "doughRecipeNames",
+    "frontlineRecipeNames",
+  ] as const;
+  for (const field of ADDITIVE_LIST_FIELDS) {
+    const inArr = asArray(out[field]).filter((s): s is string => typeof s === "string");
+    const exArr = asArray(exData[field]).filter((s): s is string => typeof s === "string");
+    if (exArr.length > 0) {
+      // Union: deduplicate, case-sensitive (client normalises display).
+      out[field] = [...new Set([...inArr, ...exArr])];
+    }
+  }
+  // BrandFlavors: Record<brand, flavor[]> — union per-brand flavor arrays.
+  const outBf = isPlainObject(out.brandFlavors) ? (out.brandFlavors as Record<string, unknown>) : {};
+  const exBf  = isPlainObject(exData.brandFlavors) ? (exData.brandFlavors as Record<string, unknown>) : {};
+  if (Object.keys(exBf).length > 0) {
+    const mergedBf: Record<string, string[]> = {};
+    const allBrands = new Set([...Object.keys(outBf), ...Object.keys(exBf)]);
+    for (const brand of allBrands) {
+      const inFlavors = Array.isArray(outBf[brand]) ? (outBf[brand] as unknown[]).filter((s): s is string => typeof s === "string") : [];
+      const exFlavors = Array.isArray(exBf[brand]) ? (exBf[brand] as unknown[]).filter((s): s is string => typeof s === "string") : [];
+      mergedBf[brand] = [...new Set([...inFlavors, ...exFlavors])];
+    }
+    out.brandFlavors = mergedBf;
+  }
+
   return withMergedStamps(out, incoming, existing);
 }

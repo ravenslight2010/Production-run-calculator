@@ -406,6 +406,111 @@ describe("protectRunValues run-list lifecycle LWW (metaUpdatedAt)", () => {
   });
 });
 
+describe("protectRunValues additive list union (brands / name registries)", () => {
+  const base = { dayState: { runs: [], resetAt: 0 }, runValues: {}, runValuesUpdatedAt: {} };
+
+  it("preserves existing brands when a fresh device pushes empty brands", () => {
+    const existing = { ...base, brands: ["Lucia's Craft", "Corner Booth", "FSD"] };
+    const incoming = { ...base, brands: [] }; // fresh device — no localStorage
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.brands).toEqual(
+      expect.arrayContaining(["Lucia's Craft", "Corner Booth", "FSD"]),
+    );
+    expect((out.brands as string[]).length).toBe(3);
+  });
+
+  it("unions partial incoming brands with existing brands", () => {
+    const existing = { ...base, brands: ["Brand A", "Brand B", "Brand C"] };
+    const incoming = { ...base, brands: ["Brand B", "Brand D"] };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.brands).toEqual(
+      expect.arrayContaining(["Brand A", "Brand B", "Brand C", "Brand D"]),
+    );
+    expect((out.brands as string[]).length).toBe(4);
+  });
+
+  it("uses incoming-only when existing is empty (first write for a new day)", () => {
+    const existing = { ...base, brands: [] };
+    const incoming = { ...base, brands: ["Brand X", "Brand Y"] };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.brands).toEqual(expect.arrayContaining(["Brand X", "Brand Y"]));
+  });
+
+  it("deduplicates brands in the union", () => {
+    const existing = { ...base, brands: ["Alpha", "Beta"] };
+    const incoming = { ...base, brands: ["Beta", "Gamma"] };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect((out.brands as string[]).length).toBe(3);
+    expect(out.brands).toEqual(expect.arrayContaining(["Alpha", "Beta", "Gamma"]));
+  });
+
+  it("unions cheeseRecipeNames, mixRecipeNames, doughRecipeNames, frontlineRecipeNames the same way", () => {
+    const existing = {
+      ...base,
+      cheeseRecipeNames: ["Mozz Blend", "4 Cheese"],
+      mixRecipeNames: ["Veggie Mix", "Pepper Mix"],
+      doughRecipeNames: ["NY Style"],
+      frontlineRecipeNames: ["House Sauce"],
+    };
+    const incoming = { ...base }; // fresh device: no list fields at all
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    expect(out.cheeseRecipeNames).toEqual(expect.arrayContaining(["Mozz Blend", "4 Cheese"]));
+    expect(out.mixRecipeNames).toEqual(expect.arrayContaining(["Veggie Mix", "Pepper Mix"]));
+    expect(out.doughRecipeNames).toEqual(expect.arrayContaining(["NY Style"]));
+    expect(out.frontlineRecipeNames).toEqual(expect.arrayContaining(["House Sauce"]));
+  });
+
+  it("preserves existing brandFlavors when fresh device pushes empty object", () => {
+    const existing = {
+      ...base,
+      brandFlavors: { "Lucia's Craft": ["Pepperoni", "Supreme"], "FSD": ["Cheese"] },
+    };
+    const incoming = { ...base, brandFlavors: {} };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const bf = out.brandFlavors as Record<string, string[]>;
+    expect(bf["Lucia's Craft"]).toEqual(expect.arrayContaining(["Pepperoni", "Supreme"]));
+    expect(bf["FSD"]).toEqual(expect.arrayContaining(["Cheese"]));
+  });
+
+  it("unions brandFlavors per-brand when both sides have flavors", () => {
+    const existing = {
+      ...base,
+      brandFlavors: { "Brand A": ["Flavor 1", "Flavor 2"], "Brand B": ["Flavor 3"] },
+    };
+    const incoming = {
+      ...base,
+      brandFlavors: { "Brand A": ["Flavor 2", "Flavor 4"], "Brand C": ["Flavor 5"] },
+    };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const bf = out.brandFlavors as Record<string, string[]>;
+    expect(bf["Brand A"]).toEqual(expect.arrayContaining(["Flavor 1", "Flavor 2", "Flavor 4"]));
+    expect(bf["Brand A"].length).toBe(3);
+    expect(bf["Brand B"]).toEqual(expect.arrayContaining(["Flavor 3"]));
+    expect(bf["Brand C"]).toEqual(expect.arrayContaining(["Flavor 5"]));
+  });
+
+  it("list union does NOT apply during a wholesale daily reset (fresh-day wipe is intentional)", () => {
+    // exReset > 0 && inReset > exReset → wholesale adopt path, no union protection.
+    const existing = {
+      ...base,
+      dayState: { runs: [], resetAt: 100 },
+      brands: ["Old Brand"],
+      brandFlavors: { "Old Brand": ["Flavor X"] },
+    };
+    const incoming = {
+      ...base,
+      dayState: { runs: [], resetAt: 200 }, // strictly newer → wholesale adopt
+      brands: [],
+      brandFlavors: {},
+    };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    // Wholesale reset: incoming wins; brands may be empty (intentional reset)
+    // The test confirms the union guard does NOT fire here.
+    // (The existing reset path returns before reaching the union block.)
+    expect((out.brands as string[]).length).toBe(0);
+  });
+});
+
 describe("protectRunValues delete/un-delete stamp preservation", () => {
   const base = { dayState: { runs: [], resetAt: 0 }, runValues: {}, runValuesUpdatedAt: {} };
   const ns = "flavor:lucia's craft";

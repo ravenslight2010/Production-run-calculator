@@ -2897,6 +2897,104 @@ async function runJuly2026AuditCorrectionsV3(): Promise<void> {
   });
 }
 
+// ── Sync-row name-registry restore ───────────────────────────────────────────
+// A fresh device (no localStorage) pushes empty arrays for brands,
+// cheeseRecipeNames, mixRecipeNames, doughRecipeNames, frontlineRecipeNames,
+// and brandFlavors. Before 2026-07-27 the server's sync merge adopted those
+// empty arrays wholesale (protectRunValues only protected run VALUES), so the
+// live daily_sync row lost all name-registry lists. This heal repopulates the
+// live scope's today-row from the authoritative server pools (brand_profiles,
+// cheese_recipes, mixes, dough_recipes, sauce_recipes). It runs exactly once
+// per database (heal marker). protectRunValues now union-merges these fields so
+// the wipe cannot recur.
+const SYNC_ROW_BRAND_RESTORE_ID = "sync-row-name-registry-restore-v1";
+
+async function runSyncRowNameRegistryRestore(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: SYNC_ROW_BRAND_RESTORE_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Gather today's date string (UTC — server-side heal runs once and we just
+    // need the row that's currently "today" in production).
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const [row] = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, today), eq(dailySyncTable.scope, "live")));
+
+    if (!row) {
+      logger.info({ heal: SYNC_ROW_BRAND_RESTORE_ID }, "No live sync row for today — skipped");
+      return;
+    }
+
+    const data = (row.data ?? {}) as Record<string, unknown>;
+    const existingBrands = Array.isArray(data.brands) ? data.brands as string[] : [];
+    if (existingBrands.length > 0) {
+      logger.info({ heal: SYNC_ROW_BRAND_RESTORE_ID }, "brands already populated — skipped");
+      return;
+    }
+
+    // Read pool tables for live scope.
+    const profiles = await tx.select().from(brandProfilesTable).where(eq(brandProfilesTable.scope, "live"));
+    const cheeseRows = await tx.select().from(cheeseRecipesTable).where(eq(cheeseRecipesTable.scope, "live"));
+    const mixRows = await tx.select().from(mixesTable).where(eq(mixesTable.scope, "live"));
+    const doughRows = await tx.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, "live"));
+    const sauceRows = await tx.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, "live"));
+
+    const brandSet = new Set<string>();
+    const brandFlavors: Record<string, string[]> = {};
+    for (const p of profiles) {
+      if (!p.brand) continue;
+      brandSet.add(p.brand);
+      if (p.flavor) {
+        const arr = brandFlavors[p.brand] ?? [];
+        arr.push(p.flavor);
+        brandFlavors[p.brand] = arr;
+      }
+    }
+    for (const bf of Object.values(brandFlavors)) bf.sort((a, b) => a.localeCompare(b));
+
+    const brands = [...brandSet].sort((a, b) => a.localeCompare(b));
+    const cheeseRecipeNames = [...new Set(cheeseRows.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const mixRecipeNames = [...new Set(mixRows.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const doughRecipeNames = [...new Set(doughRows.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const frontlineRecipeNames = [...new Set(sauceRows.map((r) => r.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+    const restored: Record<string, unknown> = {
+      ...data,
+      brands,
+      brandFlavors,
+      cheeseRecipeNames,
+      mixRecipeNames,
+      doughRecipeNames,
+      frontlineRecipeNames,
+    };
+
+    await tx
+      .update(dailySyncTable)
+      .set({ data: restored as any, updatedAt: new Date() })
+      .where(and(eq(dailySyncTable.date, today), eq(dailySyncTable.scope, "live")));
+
+    logger.info(
+      {
+        heal: SYNC_ROW_BRAND_RESTORE_ID,
+        brands: brands.length,
+        cheeseRecipeNames: cheeseRecipeNames.length,
+        mixRecipeNames: mixRecipeNames.length,
+        doughRecipeNames: doughRecipeNames.length,
+        frontlineRecipeNames: frontlineRecipeNames.length,
+      },
+      "Data heal applied",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -2925,4 +3023,5 @@ export async function runDataHeals(): Promise<void> {
   await runJuly2026ProfileCorrections();
   await runJuly2026AuditCorrectionsV2();
   await runJuly2026AuditCorrectionsV3();
+  await runSyncRowNameRegistryRestore();
 }
