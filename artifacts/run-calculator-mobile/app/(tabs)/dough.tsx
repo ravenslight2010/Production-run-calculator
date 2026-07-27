@@ -271,6 +271,16 @@ export default function DoughScreen() {
                 batches needed
               </Text>
             </View>
+            {run.settings.doughballWeightOz > 0 && (
+              <Text style={[styles.doughballWeight, { color: colors.mutedForeground }]}>
+                <Text style={[styles.doughballWeightNum, { color: colors.foreground }]}>
+                  {run.settings.doughballWeightOz % 1 === 0
+                    ? run.settings.doughballWeightOz.toString()
+                    : run.settings.doughballWeightOz.toFixed(2)}
+                </Text>{" "}
+                oz / doughball
+              </Text>
+            )}
             <ReadOnlyRecipe rows={run.settings.doughRecipe ?? []} scalable />
           </Card>
         ) : null}
@@ -393,6 +403,15 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   recipeBatchesNum: {
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
+  },
+  doughballWeight: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    marginBottom: 10,
+  },
+  doughballWeightNum: {
     fontFamily: FONTS.mono,
     fontVariant: ["tabular-nums"],
   },
