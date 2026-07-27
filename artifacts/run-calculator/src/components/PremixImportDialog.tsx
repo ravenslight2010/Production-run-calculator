@@ -332,9 +332,34 @@ export default function PremixImportDialog({
                 </div>
               </div>
 
-              {items.length > 0 && (
-                <ul className="space-y-2">
-                  {items.map((it) => {
+              {items.length > 0 && (() => {
+                // Group items by resolved brand so each customer's mixes are
+                // shown together under a heading — the same pattern cheese import
+                // uses for customer tabs. Unbranded items go in a trailing group.
+                const grouped: { brand: string; items: typeof items }[] = [];
+                const brandOrder: string[] = [];
+                const byBrand = new Map<string, typeof items>();
+                for (const it of items) {
+                  const b = it.candidate.mix.brand.trim() || "";
+                  if (!byBrand.has(b)) {
+                    byBrand.set(b, []);
+                    brandOrder.push(b);
+                  }
+                  byBrand.get(b)!.push(it);
+                }
+                for (const b of brandOrder) grouped.push({ brand: b, items: byBrand.get(b)! });
+                const showHeadings = grouped.length > 1 || (grouped[0]?.brand ?? "") !== "";
+                return (
+                  <div className="space-y-4">
+                    {grouped.map(({ brand, items: groupItems }) => (
+                      <div key={brand || "__no_brand__"}>
+                        {showHeadings && (
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {brand || "No customer"}
+                          </p>
+                        )}
+                        <ul className="space-y-2">
+                          {groupItems.map((it) => {
                     const c = it.candidate;
                     const m = c.mix;
                     const isSel = selected.has(it.key);
@@ -516,8 +541,12 @@ export default function PremixImportDialog({
                       </li>
                     );
                   })}
-                </ul>
-              )}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {prepared.prepItems.length > 0 && (
                 <div

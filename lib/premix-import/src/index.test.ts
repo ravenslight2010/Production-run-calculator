@@ -380,6 +380,46 @@ describe("name grounding", () => {
     const g = groundPremix(parsed, KNOWN, []);
     expect(g.productResolved).toBe(false);
   });
+
+  // Tab-name brand fallback: when the mix name has no brand prefix but the
+  // tab name IS a known brand, groundPremix must use the tab brand.
+  it("uses the tab name as brand when mix name has no brand prefix", () => {
+    const grid: SheetGrid = {
+      name: "Bobo's",
+      rows: [
+        ["Herb Mix", "", "", "# OF MIXES"],
+        ["", "Per Pizza", "Per Batch", "1"],
+        ["Spinach", "0.3", "12"],
+        ["Total", "0.3", "12"],
+      ],
+    };
+    const [parsed] = parsePremixWorkbook([grid]);
+    expect(parsed.sheetName).toBe("Bobo's");
+    // "Herb Mix" has no brand prefix — fallback must use the tab name.
+    const g = groundPremix(parsed, KNOWN, []);
+    expect(g.mix.brand).toBe("Bobo's");
+  });
+
+  it("resolves a brand-renamed tab via learned aliases when the old name is no longer in known.brands", () => {
+    // Simulate: "OldCo" was renamed to "Bobo's". The alias map carries this
+    // mapping but KNOWN.brands no longer lists "OldCo". The tab still says
+    // "OldCo" (stale workbook). groundPremix must alias-resolve it to "Bobo's".
+    const grid: SheetGrid = {
+      name: "OldCo",
+      rows: [
+        ["Supreme Mix", "", "", "# OF MIXES"],
+        ["", "Per Pizza", "Per Batch", "1"],
+        ["Basil", "0.1", "4"],
+        ["Total", "0.1", "4"],
+      ],
+    };
+    const [parsed] = parsePremixWorkbook([grid]);
+    const aliases = [
+      { kind: "brand" as const, externalName: "OldCo", canonicalName: "Bobo's", context: null },
+    ];
+    const g = groundPremix(parsed, KNOWN, aliases);
+    expect(g.mix.brand).toBe("Bobo's");
+  });
 });
 
 describe("AI match sanitizer", () => {

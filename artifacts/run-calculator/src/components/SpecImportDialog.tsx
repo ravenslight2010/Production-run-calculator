@@ -478,8 +478,38 @@ export default function SpecImportDialog({
       return next;
     });
 
+    // Step-1 brand propagation: for cheese/mix recipes that are still unscoped
+    // (AI didn't attach a brand target), fill brand from the confirmed profile
+    // whose applicator slot names this recipe. This is the client-side mirror of
+    // fillSpecCheeseTargetsFromProfiles — it runs at the step-1→2 boundary so
+    // the brand is already set when the user reviews recipes in step 2 and is
+    // carried through to the commit path.
+    const applicatorKeyToBrand = new Map<string, string>();
+    for (const p of profiles) {
+      if (!p.include) continue;
+      const confirmedBrand = p.brand.trim();
+      if (!confirmedBrand) continue;
+      for (const a of p.baseOrig.applicators ?? []) {
+        const k = specImportNameMatchKey(cleanSpecCheeseRecipeName(a.type ?? ""));
+        if (k && !applicatorKeyToBrand.has(k)) {
+          applicatorKeyToBrand.set(k, confirmedBrand);
+        }
+      }
+    }
+    const finalRecipes =
+      applicatorKeyToBrand.size === 0
+        ? nextRecipes
+        : nextRecipes.map((r): RecipeItem => {
+            if (r.brandTouched) return r;
+            if (r.kind !== "cheese" && r.kind !== "mix") return r;
+            if (r.brand.trim()) return r; // already has a brand from AI or remap
+            const k = specImportNameMatchKey(cleanSpecCheeseRecipeName(r.orig.name ?? ""));
+            const backfill = k ? applicatorKeyToBrand.get(k) : undefined;
+            return backfill ? { ...r, brand: backfill } : r;
+          });
+
     setProfiles(nextProfiles);
-    setRecipes(nextRecipes);
+    setRecipes(finalRecipes);
     setStep(2);
   };
 
@@ -1513,6 +1543,14 @@ function RecipeRow({
               <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 recipe formula
               </span>
+            </div>
+          ) : (item.kind === "cheese" || item.kind === "mix") ? (
+            <div className="mt-1 text-xs text-muted-foreground" data-testid={`spec-recipe-brand-${item.key}`}>
+              {item.brand.trim() ? (
+                <>Customer: <span className="text-foreground">{item.brand.trim()}</span></>
+              ) : (
+                <span className="text-muted-foreground/60">no brand — won't match a customer</span>
+              )}
             </div>
           ) : null}
 

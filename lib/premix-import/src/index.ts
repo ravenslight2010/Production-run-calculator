@@ -531,14 +531,42 @@ export function groundPremix(
   aliases: ReadonlyArray<SpecImportAlias>,
 ): GroundedPremix {
   const guess = splitPremixName(parsed.name, parsed.sheetName, known.brands);
-  const brandRes = canonicalize(guess.brand, known.brands, aliases, "brand");
-  const brand = brandRes.value;
-  const brandFlavors = known.flavorsByBrand[brand] ?? [];
+  let brandRes = canonicalize(guess.brand, known.brands, aliases, "brand");
+  let brand = brandRes.value;
+  let brandFlavors = known.flavorsByBrand[brand] ?? [];
   let flavorRes = canonicalize(guess.flavor, brandFlavors, aliases, "flavor", brand || null);
   if (flavorRes.source === "new" && guess.flavor) {
     const sub = matchFlavorBySubsequence(guess.flavor, brandFlavors);
     if (sub) flavorRes = { value: sub, source: "fuzzy", externalName: guess.flavor };
   }
+
+  // Tab-name brand fallback: when the mix name (and the tab prefix match) didn't
+  // resolve a known brand — e.g. because the tab still carries an OLD customer
+  // name that lives only in the learned alias map, not in the current known-brands
+  // list — try canonicalising the raw tab name directly through aliases. This
+  // covers the renamed-customer case that splitPremixName misses (it checks the
+  // known-brands list directly, not aliases). Also fires when the tab name IS
+  // exactly the brand but no mix inside has the brand as a name prefix.
+  if (!brand) {
+    const tabRaw = stripSheetDedupeSuffix(parsed.sheetName ?? "").trim();
+    if (tabRaw) {
+      const tabBrandRes = canonicalize(tabRaw, known.brands, aliases, "brand");
+      if (tabBrandRes.value && tabBrandRes.source !== "new") {
+        brandRes = tabBrandRes;
+        brand = tabBrandRes.value;
+        brandFlavors = known.flavorsByBrand[brand] ?? [];
+        // Re-derive flavor from the mix name alone (no tab contribution) —
+        // e.g. tab = "Lucia's", mix = "Herb Mix" → flavor guess = "Herb".
+        const nameOnlyGuess = splitPremixName(parsed.name, "", known.brands);
+        flavorRes = canonicalize(nameOnlyGuess.flavor, brandFlavors, aliases, "flavor", brand);
+        if (flavorRes.source === "new" && nameOnlyGuess.flavor) {
+          const sub = matchFlavorBySubsequence(nameOnlyGuess.flavor, brandFlavors);
+          if (sub) flavorRes = { value: sub, source: "fuzzy", externalName: nameOnlyGuess.flavor };
+        }
+      }
+    }
+  }
+
   const flavor = flavorRes.value;
 
   const components = parsed.components.map((c) => ({
