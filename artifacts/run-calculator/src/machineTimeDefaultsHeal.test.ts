@@ -13,6 +13,7 @@ import {
   isAllDefaultRunValue,
 } from "./storage";
 import { DEFAULT_VALUES, MACHINE_TIME_DEFAULTS, RUN_KEY, PROFILE_KEY } from "./types";
+const { mixerLowSec: LOW, mixerHighSec: HIGH, hopperSec: HOPPER } = MACHINE_TIME_DEFAULTS;
 
 const MARKER = "run-calc-machine-time-defaults-v1";
 
@@ -40,9 +41,9 @@ describe("applyMachineTimeDefaultsHealIfNeeded", () => {
     expect(run.casesNeeded).toBe(200);
 
     const prof = JSON.parse(localStorage.getItem(PROFILE_KEY("Aldo's", "Cheese"))!);
-    expect(prof.mixerLowSec).toBe(180);
-    expect(prof.mixerHighSec).toBe(330);
-    expect(prof.hopperSec).toBe(70);
+    expect(prof.mixerLowSec).toBe(LOW);
+    expect(prof.mixerHighSec).toBe(HIGH);
+    expect(prof.hopperSec).toBe(HOPPER);
   });
 
   it("never re-runs: a deliberate 0 saved after the heal is folded to default on read", () => {

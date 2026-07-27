@@ -15694,7 +15694,8 @@ function FloorModeView() {
                     type="button"
                     onClick={() => {
                       navigator.vibrate?.(15);
-                      autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
+                      autoSuppressUntilRef.current = 0;
+                      fireAutoTrackNow();
                       form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
                       form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
@@ -17502,7 +17503,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   type="button"
                                   onClick={() => {
                                     navigator.vibrate?.(15);
-                                    autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
+                                    autoSuppressUntilRef.current = 0;
+                                    fireAutoTrackNow();
                                     form.setValue("skidsCompleted", skids + 1, { shouldDirty: true });
                                     form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                                   }}

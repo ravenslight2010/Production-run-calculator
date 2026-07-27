@@ -381,7 +381,7 @@ export default function PackagingScreen() {
             <Pressable
               onPress={() => {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                suppressAutoTrack();
+                resumeAutoTrack();
                 updateProgress({
                   skidsCompleted: run.progress.skidsCompleted + 1,
                   casesOnCurrentSkid: 0,
