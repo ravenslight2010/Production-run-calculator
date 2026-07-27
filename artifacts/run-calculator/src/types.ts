@@ -40,12 +40,12 @@ export const formSchema = z.object({
   traysOnLine: z.coerce.number().min(0).default(0),
   batchesReady: z.coerce.number().min(0).default(0),
   // Measured machine times (seconds). Defaults are the factory's typical
-  // times (low 180 / high 330 / hopper 70); operators can overwrite them with
+  // times (low 330 / high 180 / hopper 70); operators can overwrite them with
   // measured values. A saved/cleared 0 is folded back to the default on read
   // (see MACHINE_TIME_DEFAULTS). Mixer runs low then high speed
   // back-to-back; total spin = low + high. Hopper = one batch → doughballs.
-  mixerLowSec: z.coerce.number().min(0).default(180),
-  mixerHighSec: z.coerce.number().min(0).default(330),
+  mixerLowSec: z.coerce.number().min(0).default(330),
+  mixerHighSec: z.coerce.number().min(0).default(180),
   hopperSec: z.coerce.number().min(0).default(70),
   carryOverDone: z.boolean().default(false),
   sauceOzPerPizza: z.coerce.number().min(0).default(0),
@@ -148,8 +148,8 @@ export type DoughRecipePreset = { rows: RecipeRow[]; doughballWeightOz?: number 
 // dough tab shows usable times everywhere. Keep in lockstep with the zod
 // defaults above AND the server's blank-run template (protectRunValues.ts).
 export const MACHINE_TIME_DEFAULTS = {
-  mixerLowSec: 180,
-  mixerHighSec: 330,
+  mixerLowSec: 330,
+  mixerHighSec: 180,
   hopperSec: 70,
 } as const;
 

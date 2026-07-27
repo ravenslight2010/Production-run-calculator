@@ -205,8 +205,8 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
-  mixerLowSec: 180,
-  mixerHighSec: 330,
+  mixerLowSec: 330,
+  mixerHighSec: 180,
   hopperSec: 70,
   carryOverDone: false,
   sauceOzPerPizza: 0,
@@ -285,8 +285,8 @@ const LEGACY_PEP_BATCH_FIELDS = [
 // the client saved it — normalize 0 to the current default before comparing.
 // Keep in lockstep with the web's MACHINE_TIME_DEFAULTS (types.ts).
 const MACHINE_TIME_DEFAULTS: Record<string, number> = {
-  mixerLowSec: 180,
-  mixerHighSec: 330,
+  mixerLowSec: 330,
+  mixerHighSec: 180,
   hopperSec: 70,
 };
 
