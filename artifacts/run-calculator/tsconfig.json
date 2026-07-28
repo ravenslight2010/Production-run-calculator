@@ -38,6 +38,9 @@
     },
     {
       "path": "../../lib/schedule-move"
+    },
+    {
+      "path": "../../lib/recipe-guide-import"
     }
   ]
 }

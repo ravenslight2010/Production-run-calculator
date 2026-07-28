@@ -450,8 +450,14 @@ import { exportSpecRecipes, type ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
+import { SauceGuideImportDialog, DoughGuideImportDialog } from "@/components/RecipeGuideImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
 import { prepareShippingImport, commitShippingImport, type ShippingImportPrepared } from "@/shippingImport";
+import {
+  prepareSauceGuideImport, commitSauceGuideImport,
+  prepareDoughGuideImport, commitDoughGuideImport,
+  type SauceGuideImportPrepared, type DoughGuideImportPrepared,
+} from "@/recipeGuideImport";
 import type { ShippingPatch } from "@workspace/shipping-import";
 import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
 import { deriveSourceKey } from "@/savedSpecSheets";
@@ -6143,6 +6149,18 @@ export default function Home() {
   const [shippingImportError, setShippingImportError] = useState<string | null>(null);
   const [shippingImportPrepared, setShippingImportPrepared] = useState<ShippingImportPrepared | null>(null);
   const shippingImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [showSauceGuideImport, setShowSauceGuideImport] = useState(false);
+  const [sauceGuideImportLoading, setSauceGuideImportLoading] = useState(false);
+  const [sauceGuideImportApplying, setSauceGuideImportApplying] = useState(false);
+  const [sauceGuideImportError, setSauceGuideImportError] = useState<string | null>(null);
+  const [sauceGuideImportPrepared, setSauceGuideImportPrepared] = useState<SauceGuideImportPrepared | null>(null);
+  const sauceGuideImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [showDoughGuideImport, setShowDoughGuideImport] = useState(false);
+  const [doughGuideImportLoading, setDoughGuideImportLoading] = useState(false);
+  const [doughGuideImportApplying, setDoughGuideImportApplying] = useState(false);
+  const [doughGuideImportError, setDoughGuideImportError] = useState<string | null>(null);
+  const [doughGuideImportPrepared, setDoughGuideImportPrepared] = useState<DoughGuideImportPrepared | null>(null);
+  const doughGuideImportInputRef = useRef<HTMLInputElement | null>(null);
   const [showCheeseImport, setShowCheeseImport] = useState(false);
   const [cheeseImportLoading, setCheeseImportLoading] = useState(false);
   const [cheeseImportApplying, setCheeseImportApplying] = useState(false);
@@ -9558,6 +9576,8 @@ export default function Home() {
   const cheeseImportGenRef = useRef(0);
   const shippingImportGenRef = useRef(0);
   const shippingImportFileNameRef = useRef<string>("");
+  const sauceGuideImportGenRef = useRef(0);
+  const doughGuideImportGenRef = useRef(0);
 
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
@@ -10171,6 +10191,88 @@ export default function Home() {
       );
     } finally {
       setShippingImportApplying(false);
+    }
+  }
+
+  // ── Sauce Guide importer (Joe's Sauce Guide .docx) ──────────────────────────
+  async function handleSauceGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const gen = ++sauceGuideImportGenRef.current;
+    setSauceGuideImportPrepared(null);
+    setSauceGuideImportError(null);
+    setSauceGuideImportLoading(true);
+    setShowSauceGuideImport(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const prepared = await prepareSauceGuideImport(buffer);
+      if (gen !== sauceGuideImportGenRef.current) return;
+      setSauceGuideImportPrepared(prepared);
+    } catch (err) {
+      if (gen !== sauceGuideImportGenRef.current) return;
+      setSauceGuideImportError(err instanceof Error ? err.message : "Could not read the sauce guide.");
+    } finally {
+      if (gen === sauceGuideImportGenRef.current) setSauceGuideImportLoading(false);
+    }
+  }
+
+  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number }[]) {
+    setSauceGuideImportApplying(true);
+    try {
+      const result = commitSauceGuideImport(rows);
+      reloadMasterData();
+      setShowSauceGuideImport(false);
+      setSauceGuideImportPrepared(null);
+      toast({
+        title: "Sauce guide imported",
+        description: `Sauce assignments updated for ${result.rowsApplied} row${result.rowsApplied === 1 ? "" : "s"} (${result.profilesUpdated} profile${result.profilesUpdated === 1 ? "" : "s"}).`,
+      });
+    } catch (err) {
+      setSauceGuideImportError(err instanceof Error ? err.message : "Import failed. Please try again.");
+    } finally {
+      setSauceGuideImportApplying(false);
+    }
+  }
+
+  // ── Dough Guide importer (Pizza to Dough Recipes .xlsx) ──────────────────────
+  async function handleDoughGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const gen = ++doughGuideImportGenRef.current;
+    setDoughGuideImportPrepared(null);
+    setDoughGuideImportError(null);
+    setDoughGuideImportLoading(true);
+    setShowDoughGuideImport(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const prepared = await prepareDoughGuideImport(buffer);
+      if (gen !== doughGuideImportGenRef.current) return;
+      setDoughGuideImportPrepared(prepared);
+    } catch (err) {
+      if (gen !== doughGuideImportGenRef.current) return;
+      setDoughGuideImportError(err instanceof Error ? err.message : "Could not read the dough recipe guide.");
+    } finally {
+      if (gen === doughGuideImportGenRef.current) setDoughGuideImportLoading(false);
+    }
+  }
+
+  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string }[]) {
+    setDoughGuideImportApplying(true);
+    try {
+      const result = commitDoughGuideImport(rows);
+      reloadMasterData();
+      setShowDoughGuideImport(false);
+      setDoughGuideImportPrepared(null);
+      toast({
+        title: "Dough recipe guide imported",
+        description: `Dough assignments updated for ${result.rowsApplied} row${result.rowsApplied === 1 ? "" : "s"} (${result.profilesUpdated} profile${result.profilesUpdated === 1 ? "" : "s"}).`,
+      });
+    } catch (err) {
+      setDoughGuideImportError(err instanceof Error ? err.message : "Import failed. Please try again.");
+    } finally {
+      setDoughGuideImportApplying(false);
     }
   }
 
@@ -12287,6 +12389,20 @@ export default function Home() {
                         <Upload className="w-4 h-4" /> Import Shipping &amp; Palletizing Guide
                       </button>
                     )}
+                    {isManager && (
+                      <button type="button" onClick={() => { noteBreadcrumb("Import Sauce Guide clicked"); sauceGuideImportInputRef.current?.click(); }}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
+                        data-testid="button-import-sauce-guide">
+                        <Upload className="w-4 h-4" /> Import Sauce Guide
+                      </button>
+                    )}
+                    {isManager && (
+                      <button type="button" onClick={() => { noteBreadcrumb("Import Dough Recipe Guide clicked"); doughGuideImportInputRef.current?.click(); }}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
+                        data-testid="button-import-dough-guide">
+                        <Upload className="w-4 h-4" /> Import Dough Recipe Guide
+                      </button>
+                    )}
                     <button type="button" onClick={() => { noteBreadcrumb("Import Excel clicked (picker opening)"); importInputRef.current?.click(); }}
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted">
                       <Upload className="w-4 h-4" /> Import Excel
@@ -14092,6 +14208,24 @@ export default function Home() {
             onChange={handleShippingImportFile}
           />
         )}
+        {isManager && (
+          <input
+            ref={sauceGuideImportInputRef}
+            type="file"
+            accept=".docx,.doc,.txt"
+            className="hidden"
+            onChange={handleSauceGuideImportFile}
+          />
+        )}
+        {isManager && (
+          <input
+            ref={doughGuideImportInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleDoughGuideImportFile}
+          />
+        )}
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
@@ -14207,6 +14341,40 @@ export default function Home() {
           prepared={shippingImportPrepared}
           applying={shippingImportApplying}
           onConfirm={handleShippingImportConfirm}
+        />
+
+        {/* ── Sauce Guide Import Dialog ─────────────────────────────────────── */}
+        <SauceGuideImportDialog
+          open={showSauceGuideImport}
+          onClose={() => {
+            sauceGuideImportGenRef.current++;
+            setShowSauceGuideImport(false);
+            setSauceGuideImportPrepared(null);
+            setSauceGuideImportError(null);
+            setSauceGuideImportLoading(false);
+          }}
+          loading={sauceGuideImportLoading}
+          error={sauceGuideImportError}
+          prepared={sauceGuideImportPrepared}
+          applying={sauceGuideImportApplying}
+          onConfirm={handleSauceGuideImportConfirm}
+        />
+
+        {/* ── Dough Recipe Guide Import Dialog ─────────────────────────────── */}
+        <DoughGuideImportDialog
+          open={showDoughGuideImport}
+          onClose={() => {
+            doughGuideImportGenRef.current++;
+            setShowDoughGuideImport(false);
+            setDoughGuideImportPrepared(null);
+            setDoughGuideImportError(null);
+            setDoughGuideImportLoading(false);
+          }}
+          loading={doughGuideImportLoading}
+          error={doughGuideImportError}
+          prepared={doughGuideImportPrepared}
+          applying={doughGuideImportApplying}
+          onConfirm={handleDoughGuideImportConfirm}
         />
 
         {/* ── Cheese Mix Recipe Specs Import Dialog ────────────────────────── */}

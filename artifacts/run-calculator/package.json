@@ -110,6 +110,7 @@
     "@workspace/production-rules": "workspace:*",
     "@workspace/profile-cleanup": "workspace:*",
     "@workspace/recipe-apply": "workspace:*",
+    "@workspace/recipe-guide-import": "workspace:*",
     "@workspace/schedule-move": "workspace:*",
     "@workspace/scheduled-recipe-check": "workspace:*",
     "@workspace/shipping-import": "workspace:*",
