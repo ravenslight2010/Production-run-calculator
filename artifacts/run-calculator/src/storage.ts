@@ -2576,6 +2576,84 @@ export function rewriteDieTypeInProfiles(oldName: string, newName: string): void
 }
 
 /**
+ * Rewrite pep type references (pep1Type, pep1TypeB, pep2Type, pep2TypeB) in all
+ * saved profiles. Called on a pep-type merge so profiles don't re-introduce the
+ * merged-away name next time they are applied.
+ */
+export function rewritePepTypeInProfiles(oldName: string, newName: string): void {
+  if (typeof localStorage === "undefined") return;
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from || !to || from === to) return;
+  const pepFields = ["pep1Type", "pep1TypeB", "pep2Type", "pep2TypeB"] as const;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj) continue;
+      let changed = false;
+      for (const field of pepFields) {
+        if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
+          obj[field] = to;
+          changed = true;
+        }
+      }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
+    }
+  }
+}
+
+/**
+ * Rewrite applicator type references (app1Type–app4Type) in all saved profiles.
+ * Called on an applicator-type merge so profiles don't re-introduce the
+ * merged-away name next time they are applied.
+ */
+export function rewriteAppTypeInProfiles(oldName: string, newName: string): void {
+  if (typeof localStorage === "undefined") return;
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from || !to || from === to) return;
+  const appFields = ["app1Type", "app2Type", "app3Type", "app4Type"] as const;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj) continue;
+      let changed = false;
+      for (const field of appFields) {
+        if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
+          obj[field] = to;
+          changed = true;
+        }
+      }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
+    }
+  }
+}
+
+/**
  * Delete the saved profile (dough + crust) for a single brand+flavor. Called on
  * flavor deletion for the same reason as deleteProfilesForBrand: without it the
  * profile entry orphans and can resurrect stale data on a later re-import.

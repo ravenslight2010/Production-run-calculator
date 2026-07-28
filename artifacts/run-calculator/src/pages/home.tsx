@@ -182,6 +182,8 @@ import {
   healPackagingFromProfiles,
   normalizePackagingFields,
   rewriteDieTypeInProfiles,
+  rewritePepTypeInProfiles,
+  rewriteAppTypeInProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
@@ -2848,6 +2850,43 @@ export default function Home() {
     // so a spec-sheet re-import maps the old applicator type onto the new name
     // instead of resurrecting it. Best-effort, fire-and-forget.
     maybeLearnTypeRename("appType", oldName, trimmed);
+  }
+
+  function mergeIngredientType(from: string, into: string) {
+    const trimmed = into.trim();
+    if (!trimmed || trimmed === from) return;
+    // Remove source, ensure target is present, re-sort.
+    const updated = Array.from(
+      new Set(ingredientTypes.map(n => (n === from ? trimmed : n))),
+    ).sort((a, b) => a.localeCompare(b));
+    setIngredientTypes(updated);
+    saveList(INGREDIENT_TYPES_KEY, updated);
+    tombstoneDeleted("ingredientTypes", from);
+    clearDeleted("ingredientTypes", trimmed);
+    // Rewrite all run values referencing the merged-away type.
+    const now = Date.now();
+    const ds = dayStateRef.current;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      const appFields = ["app1Type", "app2Type", "app3Type", "app4Type"] as const;
+      const needsUpdate = appFields.some(f => vals[f] === from);
+      if (needsUpdate) {
+        const newVals = { ...vals };
+        for (const f of appFields) { if (newVals[f] === from) newVals[f] = trimmed; }
+        saveRunValues(run.id, newVals);
+        markRunValuesUpdated(run.id, now);
+        if (run.id === currentRunId) {
+          for (const f of appFields) { if (vals[f] === from) form.setValue(f, trimmed); }
+        }
+      }
+    }
+    // Rewrite saved profiles so they don't re-introduce the merged-away type.
+    rewriteAppTypeInProfiles(from, trimmed);
+    schedulePush(dayStateRef.current);
+    // Merge catalog entries so recipe rows referencing the old ingredient id
+    // get redirected to the surviving name's catalog entry.
+    void mergeCatalogEntries([from], trimmed);
+    maybeLearnTypeRename("appType", from, trimmed);
   }
 
   // ── Ingredient catalog dual-write (Task #102) ──────────────────────────────
@@ -8438,6 +8477,42 @@ export default function Home() {
     maybeLearnTypeRename("pepType", oldName, trimmed);
   }
 
+  function mergePepType(from: string, into: string) {
+    if (DEFAULT_PEP_TYPES.includes(from)) return;
+    const trimmed = into.trim();
+    if (!trimmed || trimmed === from) return;
+    // Remove source, ensure target is present, re-sort.
+    const updated = Array.from(
+      new Set(pepTypes.map(n => (n === from ? trimmed : n))),
+    ).sort((a, b) => a.localeCompare(b));
+    setPepTypes(updated);
+    saveList(PEP_TYPES_KEY, updated);
+    tombstoneDeleted("pepTypes", from);
+    clearDeleted("pepTypes", trimmed);
+    // Rewrite all run values referencing the merged-away pep type.
+    const now = Date.now();
+    const ds = dayStateRef.current;
+    const pepFields = ["pep1Type", "pep1TypeB", "pep2Type", "pep2TypeB"] as const;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      const needsUpdate = pepFields.some(f => vals[f] === from);
+      if (needsUpdate) {
+        const newVals = { ...vals };
+        for (const f of pepFields) { if (newVals[f] === from) newVals[f] = trimmed; }
+        saveRunValues(run.id, newVals);
+        markRunValuesUpdated(run.id, now);
+        if (run.id === currentRunId) {
+          for (const f of pepFields) { if (vals[f] === from) form.setValue(f, trimmed); }
+        }
+      }
+    }
+    // Rewrite saved profiles so they don't re-introduce the merged-away type.
+    rewritePepTypeInProfiles(from, trimmed);
+    schedulePush(dayStateRef.current);
+    void mergeCatalogEntries([from], trimmed);
+    maybeLearnTypeRename("pepType", from, trimmed);
+  }
+
   function renameDieType(oldName: string, newName: string) {
     if (DEFAULT_DIE_TYPES.includes(oldName)) return;
     const trimmed = newName.trim();
@@ -11384,13 +11459,18 @@ export default function Home() {
           fn(o, n);
           noteChange("rename", `Renamed "${o}" to "${n}" in ${label}`, before);
         };
-        type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; };
+        const histMerge = (label: string, fn: (from: string, into: string) => void) => (from: string, into: string) => {
+          const before = captureMasterDataSnapshot();
+          fn(from, into);
+          noteChange("rename", `Merged "${from}" into "${into}" in ${label}`, before);
+        };
+        type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; onMerge?: (from: string, into: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: histAdd("Brands", addBrand), onRemove: histRemove("Brands", removeBrand), onRename: histRename("Brands", renameBrand) },
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: histAdd("Flavors", (v) => addFlavor(v, manageBrandFilter)), onRemove: histRemove("Flavors", (v) => removeFlavor(v, manageBrandFilter)), onRename: histRename("Flavors", (o, n) => renameFlavor(o, n, manageBrandFilter)) },
-          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: histAdd("Applicator Types", addIngredientType), onRemove: histRemove("Applicator Types", removeIngredientType), onRename: histRename("Applicator Types", renameIngredientType) },
-          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: histAdd("Pep Types", addPepType), onRemove: histRemove("Pep Types", removePepType), onRename: histRename("Pep Types", renamePepType) },
-          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: histAdd("Die Types", addDieType), onRemove: histRemove("Die Types", removeDieType), onRename: histRename("Die Types", renameDieType) },
+          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: histAdd("Applicator Types", addIngredientType), onRemove: histRemove("Applicator Types", removeIngredientType), onRename: histRename("Applicator Types", renameIngredientType), onMerge: histMerge("Applicator Types", mergeIngredientType) },
+          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: histAdd("Pep Types", addPepType), onRemove: histRemove("Pep Types", removePepType), onRename: histRename("Pep Types", renamePepType), onMerge: histMerge("Pep Types", mergePepType) },
+          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: histAdd("Die Types", addDieType), onRemove: histRemove("Die Types", removeDieType), onRename: histRename("Die Types", renameDieType), onMerge: histMerge("Die Types", renameDieType) },
           { key: "ingredient-weights", label: "Ingredient Weights", items: [], onAdd: () => {}, onRemove: () => {} },
           { key: "merge", label: "Merge", items: [], onAdd: () => {}, onRemove: () => {} },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
@@ -12063,7 +12143,7 @@ export default function Home() {
                       setMergeConfirming(false);
                       setMergeError("");
                       setManageCategory("merge");
-                    } : undefined}
+                    } : standaloneTab.onMerge}
                   />
                 )}
 
