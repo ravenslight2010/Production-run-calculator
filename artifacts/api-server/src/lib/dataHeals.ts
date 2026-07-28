@@ -2995,6 +2995,56 @@ async function runSyncRowNameRegistryRestore(): Promise<void> {
   });
 }
 
+// ── Brand duplicate purge ─────────────────────────────────────────────────────
+// Between 2026-07-26 and 2026-07-27 every brand acquired a lowercase shadow
+// (e.g. "Aldo's" → "Aldo's" + "aldo's") because the server's additive brands
+// union used a case-sensitive new Set(). This heal deduplicates the brands
+// array in ALL daily_sync rows, keeping the better-cased version for each name
+// (uppercase letters sort before lowercase in ASCII, so "Aldo's" wins over
+// "aldo's" with our sort order). Runs once per database instance.
+const BRAND_DUPLICATE_PURGE_ID = "brand-duplicate-purge-v1";
+
+async function runBrandDuplicatePurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: BRAND_DUPLICATE_PURGE_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx.select().from(dailySyncTable);
+    let healed = 0;
+    for (const row of rows) {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const existing = Array.isArray(data.brands) ? (data.brands as unknown[]).filter((b): b is string => typeof b === "string") : [];
+      if (existing.length === 0) continue;
+      // Case-insensitive dedup: prefer the better-cased version (uppercase
+      // letters have lower code points than lowercase, so plain sort puts
+      // "Aldo's" before "aldo's" and DISTINCT-first keeps it).
+      const seen = new Map<string, string>();
+      for (const b of [...existing].sort((a, z) => a.localeCompare(z))) {
+        const k = b.trim().toLowerCase();
+        if (!seen.has(k)) seen.set(k, b.trim());
+      }
+      const deduped = [...seen.values()].sort((a, b) => a.localeCompare(b));
+      if (deduped.length === existing.length) continue;
+      const fixed = { ...data, brands: deduped };
+      await tx
+        .update(dailySyncTable)
+        .set({ data: fixed })
+        .where(
+          and(
+            eq(dailySyncTable.date, row.date),
+            eq(dailySyncTable.scope, row.scope),
+          ),
+        );
+      healed++;
+    }
+    logger.info({ heal: BRAND_DUPLICATE_PURGE_ID, healedRows: healed }, "Data heal applied");
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -3024,4 +3074,5 @@ export async function runDataHeals(): Promise<void> {
   await runJuly2026AuditCorrectionsV2();
   await runJuly2026AuditCorrectionsV3();
   await runSyncRowNameRegistryRestore();
+  await runBrandDuplicatePurge();
 }

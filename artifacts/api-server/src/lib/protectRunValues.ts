@@ -562,8 +562,16 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
     const inArr = asArray(out[field]).filter((s): s is string => typeof s === "string");
     const exArr = asArray(exData[field]).filter((s): s is string => typeof s === "string");
     if (exArr.length > 0) {
-      // Union: deduplicate, case-sensitive (client normalises display).
-      out[field] = [...new Set([...inArr, ...exArr])];
+      // Case-insensitive union: prefer the first-seen casing for each name
+      // (inArr = incoming push, which comes from the client and has correct
+      // capitalisation). A plain new Set() is case-sensitive and would keep
+      // both "Aldo's" and "aldo's" as separate entries.
+      const seen = new Map<string, string>();
+      for (const s of [...inArr, ...exArr]) {
+        const k = s.trim().toLowerCase();
+        if (!seen.has(k)) seen.set(k, s.trim());
+      }
+      out[field] = [...seen.values()];
     }
   }
   // BrandFlavors: Record<brand, flavor[]> — union per-brand flavor arrays.

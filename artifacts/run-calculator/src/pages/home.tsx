@@ -2757,12 +2757,28 @@ export default function Home() {
 
   const [brands, setBrands] = useState<string[]>(() => {
     const raw: string[] = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
-    const deduped = [...new Set(raw)].sort((a, b) => a.localeCompare(b));
-    // Self-heal: if duplicates were found, write the clean list back to storage
-    // so they don't reappear after a page reload or sync push.
+    // Trim + case-insensitive dedup: catches trailing spaces and mixed-case
+    // duplicates that would survive a plain Set check.
+    const seen = new Map<string, string>();
+    for (const b of raw) { const k = b.trim().toLowerCase(); if (!seen.has(k)) seen.set(k, b.trim()); }
+    const deduped = [...seen.values()].sort((a, b) => a.localeCompare(b));
+    // Self-heal: if duplicates were found, write the clean list back to storage.
     if (deduped.length !== raw.length) saveList(BRANDS_KEY, deduped);
     return deduped;
   });
+  // HMR-safe heal: dedup the live React state on every mount so duplicates that
+  // survived across a hot-swap (useState doesn't re-run on HMR) are removed.
+  useEffect(() => {
+    setBrands(prev => {
+      const seen = new Map<string, string>();
+      for (const b of prev) { const k = b.trim().toLowerCase(); if (!seen.has(k)) seen.set(k, b.trim()); }
+      const deduped = [...seen.values()].sort((a, b) => a.localeCompare(b));
+      if (deduped.length === prev.length && deduped.every((v, i) => v === prev[i])) return prev;
+      saveList(BRANDS_KEY, deduped);
+      return deduped;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
   // Custom allergens (beyond the built-in egg/soy) currently assigned to any
   // saved brand/flavor profile — e.g. a NEW allergen a spec-sheet import wrote.
@@ -3247,7 +3263,10 @@ export default function Home() {
   // directly to storage, so the Setup dropdowns reflect the new options
   // immediately without a reload. Mirrors each list's initializer above.
   function reloadMasterData() {
-    setBrands([...loadList(BRANDS_KEY, [])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b)));
+    const reloadRaw = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
+    const reloadSeen = new Map<string, string>();
+    for (const b of reloadRaw) { const k = b.trim().toLowerCase(); if (!reloadSeen.has(k)) reloadSeen.set(k, b.trim()); }
+    setBrands([...reloadSeen.values()].sort((a, b) => a.localeCompare(b)));
     setBrandFlavors(loadBrandFlavors());
     setIngredientTypes([...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b)));
     setPepTypes(() => {
@@ -6752,11 +6771,17 @@ export default function Home() {
       if (payload.brands && payload.brands.length > 0) {
         const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
         const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
-        const merged = dropDeleted(
-          [...new Set([...local, ...remoteSanitized])],
-          deletedMap,
-          "brands",
-        ).sort((a, b) => a.localeCompare(b));
+        // Trim+case-insensitive dedup before the deletion-tombstone filter so
+        // trailing-space near-duplicates from an old import can't survive.
+        const preDrop = (() => {
+          const seen = new Map<string, string>();
+          for (const b of [...local, ...remoteSanitized]) {
+            const k = b.trim().toLowerCase();
+            if (!seen.has(k)) seen.set(k, b.trim());
+          }
+          return [...seen.values()];
+        })();
+        const merged = dropDeleted(preDrop, deletedMap, "brands").sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
         setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
       }
