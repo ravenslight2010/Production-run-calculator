@@ -2755,9 +2755,14 @@ export default function Home() {
     return Math.round(ppms.reduce((a, b) => a + b, 0) / ppms.length);
   }, [history]);
 
-  const [brands, setBrands] = useState<string[]>(() =>
-    [...loadList(BRANDS_KEY, [])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b))
-  );
+  const [brands, setBrands] = useState<string[]>(() => {
+    const raw: string[] = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
+    const deduped = [...new Set(raw)].sort((a, b) => a.localeCompare(b));
+    // Self-heal: if duplicates were found, write the clean list back to storage
+    // so they don't reappear after a page reload or sync push.
+    if (deduped.length !== raw.length) saveList(BRANDS_KEY, deduped);
+    return deduped;
+  });
   const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
   // Custom allergens (beyond the built-in egg/soy) currently assigned to any
   // saved brand/flavor profile — e.g. a NEW allergen a spec-sheet import wrote.
@@ -8086,8 +8091,13 @@ export default function Home() {
 
   function addBrand(name: string) {
     const trimmed = name.trim();
-    if (!trimmed || brands.includes(trimmed)) return trimmed ? trimmed : brands[0];
-    const updated = [...brands, trimmed].sort((a, b) => a.localeCompare(b));
+    if (!trimmed) return brands[0];
+    // Read the authoritative list from storage so back-to-back addBrand calls
+    // in a loop (e.g. import) can't slip duplicates past the React state that
+    // hasn't updated yet between synchronous calls.
+    const current: string[] = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
+    if (current.includes(trimmed)) return trimmed;
+    const updated = [...new Set([...current, trimmed])].sort((a, b) => a.localeCompare(b));
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
     clearDeleted("brands", trimmed);
