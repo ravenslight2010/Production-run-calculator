@@ -16256,6 +16256,60 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 </button>
               </div>
             )}
+                  {/* Freezer status — filling at run start, emptying at run end.
+                      Auto-hidden whenever the tunnel is in steady state. */}
+                  {!currentRun?.endedAt && runStatus === "running" && (() => {
+                    const freezerMin = Number(ve.freezerTime) || 0;
+                    if (freezerMin <= 0) return null;
+                    const elapsedMin = elapsedBatchSec / 60;
+                    const ppm = calc.ppm;
+                    // No line speed yet → no product moving through the tunnel, so
+                    // neither phase is meaningful.
+                    if (ppm <= 0) return null;
+                    const feedDoneMin =
+                      v.pizzasPerCase > 0 && v.casesNeeded > 0
+                        ? (v.casesNeeded * v.pizzasPerCase) / ppm
+                        : Infinity;
+                    const feedComplete = elapsedMin >= feedDoneMin;
+                    const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
+                    const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
+                    const emptying = feedComplete && emptyRemainMin > 0;
+                    if (!filling && !emptying) return null;
+                    const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
+                    const remainMs = Math.max(0, remainMin * 60000);
+                    const mm = Math.floor(remainMs / 60000);
+                    const ss = Math.floor((remainMs % 60000) / 1000);
+                    const pct = Math.max(0, Math.min(1, 1 - remainMin / freezerMin));
+                    const tone = filling
+                      ? { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400", bar: "bg-sky-500" }
+                      : { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400", bar: "bg-amber-500" };
+                    return (
+                      <div className="mb-4 rounded-lg border overflow-hidden">
+                        <div className={`flex items-start gap-2.5 px-4 py-3 ${tone.wrap}`}>
+                          <Timer className={`w-4 h-4 shrink-0 mt-0.5 ${tone.text}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm font-semibold ${tone.text}`}>
+                              {filling
+                                ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
+                                : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {filling
+                                ? `Product is still travelling the ${fmtMins(freezerMin)} freezer tunnel — the completed count starts climbing once it clears.`
+                                : `Dough feed is done — the tunnel is draining the last cases.`}
+                            </p>
+                            <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-1000 ${tone.bar}`}
+                                style={{ width: `${pct * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* KPI tiles — completion, pace, estimated finish */}
                   {(v.casesNeeded > 0 || calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -16489,60 +16543,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">{headline}</p>
                         <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Freezer status — filling at run start, emptying at run end.
-                    Auto-hidden whenever the tunnel is in steady state. */}
-                {!currentRun?.endedAt && runStatus === "running" && (() => {
-                  const freezerMin = Number(ve.freezerTime) || 0;
-                  if (freezerMin <= 0) return null;
-                  const elapsedMin = elapsedBatchSec / 60;
-                  const ppm = calc.ppm;
-                  // No line speed yet → no product moving through the tunnel, so
-                  // neither phase is meaningful.
-                  if (ppm <= 0) return null;
-                  const feedDoneMin =
-                    v.pizzasPerCase > 0 && v.casesNeeded > 0
-                      ? (v.casesNeeded * v.pizzasPerCase) / ppm
-                      : Infinity;
-                  const feedComplete = elapsedMin >= feedDoneMin;
-                  const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
-                  const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
-                  const emptying = feedComplete && emptyRemainMin > 0;
-                  if (!filling && !emptying) return null;
-                  const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
-                  const remainMs = Math.max(0, remainMin * 60000);
-                  const mm = Math.floor(remainMs / 60000);
-                  const ss = Math.floor((remainMs % 60000) / 1000);
-                  const pct = Math.max(0, Math.min(1, 1 - remainMin / freezerMin));
-                  const tone = filling
-                    ? { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400", bar: "bg-sky-500" }
-                    : { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400", bar: "bg-amber-500" };
-                  return (
-                    <div className="mb-4 rounded-lg border overflow-hidden">
-                      <div className={`flex items-start gap-2.5 px-4 py-3 ${tone.wrap}`}>
-                        <Timer className={`w-4 h-4 shrink-0 mt-0.5 ${tone.text}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-semibold ${tone.text}`}>
-                            {filling
-                              ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
-                              : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {filling
-                              ? `Product is still travelling the ${fmtMins(freezerMin)} freezer tunnel — the completed count starts climbing once it clears.`
-                              : `Dough feed is done — the tunnel is draining the last cases.`}
-                          </p>
-                          <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-1000 ${tone.bar}`}
-                              style={{ width: `${pct * 100}%` }}
-                            />
-                          </div>
-                        </div>
                       </div>
                     </div>
                   );
