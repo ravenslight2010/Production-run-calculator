@@ -651,7 +651,15 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
         opts?.warehouse && blendName && (isMix || lower.includes("cheese"))
           ? `${a.type} — ${blendName}`
           : a.type;
-      if (isMix && a.lbs > 0) add(label, a.lbs, "lbs");
+      if (isMix && a.lbs > 0) {
+        add(label, a.lbs, "lbs");
+        // Also emit the specific blend name as a separate alias row so
+        // managers can tag individual mix names (e.g. "Italian Blend") in the
+        // freezer-pull config instead of just the generic "Mix" type.
+        if (!opts?.warehouse && blendName && blendName.toLowerCase() !== lower) {
+          add(blendName, a.lbs, "lbs");
+        }
+      }
       else if (!isMix && a.batches > 0) add(label, a.batches, "batches");
     };
     for (const a of appsFront) addApp(a);
@@ -12342,6 +12350,17 @@ export default function Home() {
                 {manageCategory === "freezer" && canManageInventory && (
                   <FreezerPullItemsManager
                     suggestions={[
+                      // Top-level need-row labels that aggregateNeedRows emits.
+                      "Dough",
+                      "Sauce",
+                      // Named sauce recipes (ready-made / bought-as-is sauces
+                      // appear by their recipe name in need rows).
+                      ...frontlineRecipeNames,
+                      // Specific mix recipe names (emitted as alias rows
+                      // alongside the generic type by aggregateNeedRows).
+                      ...mixes.map(m => m.name),
+                      // Individual sub-ingredients from dough, sauce, and mix
+                      // recipes — these now appear in the expanded need rows.
                       ...doughIngredients,
                       ...frontlineIngredients,
                       ...cheeseIngredients,
@@ -12958,9 +12977,31 @@ export default function Home() {
                           casesNeeded: r.casesNeeded,
                           ...(r.dieType ? { dieType: r.dieType } : {}),
                         };
-                        const needRows = [
+                        const needRows: NeedRow[] = [
                           ...aggregateNeedRows([vals]),
                           ...aggregatePackagingNeeds([vals]),
+                          // Individual dough recipe sub-ingredients (e.g.
+                          // "Butter", "SAF Yeast") so managers can tag frozen
+                          // dough components for early pull.
+                          ...(vals.doughRecipe ?? [])
+                            .filter(r => r.ingredient?.trim() && Number(r.lbs ?? 0) > 0)
+                            .map(r => ({ label: r.ingredient.trim(), value: fmtNum(Number(r.lbs), 1), sub: "lbs" })),
+                          // Individual frontline/sauce recipe sub-ingredients.
+                          ...(vals.frontlineRecipe ?? [])
+                            .filter(r => r.ingredient?.trim() && Number(r.lbs ?? 0) > 0)
+                            .map(r => ({ label: r.ingredient.trim(), value: fmtNum(Number(r.lbs), 1), sub: "lbs" })),
+                          // Mix component ingredients — looked up from the
+                          // factory mix library by the mix name linked to each
+                          // applicator slot so individual frozen components can
+                          // be tagged (e.g. "Basil Pesto" inside "Veggie Mix").
+                          ...([vals.app1CheeseRecipeName, vals.app2CheeseRecipeName, vals.app3CheeseRecipeName, vals.app4CheeseRecipeName] as (string | undefined)[])
+                            .filter((n): n is string => Boolean(n?.trim()))
+                            .flatMap(mixName => {
+                              const components = serverMixRowsByName.get(mixName.trim().toLowerCase()) ?? [];
+                              return components
+                                .filter(c => c.ingredient?.trim())
+                                .map(c => ({ label: c.ingredient.trim(), value: "", sub: "" }));
+                            }),
                         ];
                         return {
                           date: day.date,
