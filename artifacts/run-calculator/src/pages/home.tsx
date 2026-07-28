@@ -2337,7 +2337,7 @@ function mergeRunDefaults(raw: Partial<FormValues> | undefined): FormValues {
 // the rename text, and instantly dismissing the delete-confirm popover.
 const ListPanel = ({
   items, onAdd, onRemove, placeholder, protected: protectedItems,
-  inputVal, setInputVal, onRename, onEdit, selectedItem, onMove, moveTargets,
+  inputVal, setInputVal, onRename, onEdit, selectedItem, onMove, moveTargets, onMerge,
 }: {
   items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
   placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
@@ -2346,17 +2346,31 @@ const ListPanel = ({
   selectedItem?: string | null;
   onMove?: (name: string, targetKey: string) => void;
   moveTargets?: { key: string; label: string }[];
+  onMerge?: (from: string, into: string) => void;
 }) => {
-  const [renamingItem, setRenamingItem] = useState<string | null>(null);
+  const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
-  const [movingItem, setMovingItem] = useState<string | null>(null);
-  function beginRename(item: string) { setRenamingItem(item); setRenameVal(item); }
-  function commitRename() {
-    if (renamingItem && renameVal.trim() && renameVal.trim() !== renamingItem) {
-      onRename!(renamingItem, renameVal.trim());
+  const [mergeIntoVal, setMergeIntoVal] = useState("");
+  const [mergeConfirmingInline, setMergeConfirmingInline] = useState(false);
+
+  function toggleExpand(item: string) {
+    if (expandedItem === item) {
+      setExpandedItem(null); setRenameVal(""); setMergeIntoVal(""); setMergeConfirmingInline(false);
+    } else {
+      setExpandedItem(item); setRenameVal(item); setMergeIntoVal(""); setMergeConfirmingInline(false);
     }
-    setRenamingItem(null); setRenameVal("");
   }
+  function commitRename(item: string) {
+    if (renameVal.trim() && renameVal.trim() !== item) onRename!(item, renameVal.trim());
+    setExpandedItem(null); setRenameVal("");
+  }
+  function commitMerge(from: string) {
+    const into = mergeIntoVal.trim();
+    if (!into || into === from) return;
+    onMerge!(from, into);
+    setExpandedItem(null); setMergeIntoVal(""); setMergeConfirmingInline(false);
+  }
+
   return (
   <div className="space-y-2">
     <div className="flex gap-2">
@@ -2377,44 +2391,105 @@ const ListPanel = ({
     </div>
     {items.length === 0
       ? <p className="text-xs text-muted-foreground text-center py-3">No items yet.</p>
-      : <ul className="space-y-1 max-h-48 overflow-y-auto overscroll-contain">
+      : <ul className="space-y-1 max-h-64 overflow-y-auto overscroll-contain">
           {items.map(item => {
             const isProt = protectedItems?.includes(item);
-            const isRenaming = renamingItem === item;
             const isSelected = selectedItem === item;
+            const isExpanded = expandedItem === item;
+            const mergeId = `merge-opts-${item.replace(/[^a-z0-9]/gi, "-")}`;
             return (
-              <li key={item} className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-md transition-colors ${isSelected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-muted/30 hover:bg-muted/50"}`}>
-                {isRenaming ? (
-                  <input
-                    autoFocus
-                    type="text"
-                    value={renameVal}
-                    onChange={e => setRenameVal(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setRenamingItem(null); setRenameVal(""); } }}
-                    onBlur={commitRename}
-                    className="flex-1 border border-primary rounded px-2 py-0.5 text-sm bg-background focus:outline-none"
-                  />
-                ) : (
+              <li key={item}>
+                {/* Row — click to expand / collapse tray */}
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(item)}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-left ${isExpanded ? "bg-primary/10 ring-1 ring-primary/20" : isSelected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-muted/30 hover:bg-muted/50"}`}
+                >
                   <span className="text-sm flex-1 min-w-0 break-words">{item}</span>
+                  {isProt && <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide shrink-0">default</span>}
+                  {onEdit && (
+                    <span role="button" title="View / edit recipe"
+                      onClick={e => { e.stopPropagation(); onEdit(item); }}
+                      className={`shrink-0 ${isSelected ? "text-primary" : "text-muted-foreground/60 hover:text-foreground"}`}>
+                      <ClipboardList className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                  <ChevronDown className={`w-3 h-3 text-muted-foreground/40 shrink-0 transition-transform duration-150 ${isExpanded ? "rotate-180" : ""}`} />
+                </button>
+
+                {/* Inline action tray */}
+                {isExpanded && (
+                  <div className="mt-0.5 ml-3 rounded-b-md border border-t-0 border-border/60 bg-card px-3 py-3 space-y-3">
+
+                    {/* Rename */}
+                    {onRename && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Rename</p>
+                        <div className="flex gap-2">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={renameVal}
+                            onChange={e => setRenameVal(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") commitRename(item); if (e.key === "Escape") setExpandedItem(null); }}
+                            className="flex-1 border border-input rounded px-2 py-1 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <button type="button" onClick={() => commitRename(item)}
+                            disabled={!renameVal.trim() || renameVal.trim() === item}
+                            className="px-2.5 py-1 rounded bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 shrink-0">Save</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Merge into — only for non-protected items when onMerge is provided */}
+                    {!isProt && onMerge && items.length > 1 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Merge into…</p>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">Replace "{item}" everywhere with another item, then remove it.</p>
+                        <div className="flex gap-2">
+                          <input
+                            list={mergeId}
+                            type="text"
+                            value={mergeIntoVal}
+                            onChange={e => { setMergeIntoVal(e.target.value); setMergeConfirmingInline(false); }}
+                            placeholder="Pick or type a name to keep…"
+                            className="flex-1 border border-input rounded px-2 py-1 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <datalist id={mergeId}>
+                            {items.filter(i => i !== item).map(i => <option key={i} value={i} />)}
+                          </datalist>
+                          {!mergeConfirmingInline
+                            ? <button type="button" onClick={() => setMergeConfirmingInline(true)}
+                                disabled={!mergeIntoVal.trim() || mergeIntoVal.trim() === item}
+                                className="px-2.5 py-1 rounded border border-border text-xs font-semibold hover:bg-muted disabled:opacity-40 shrink-0 whitespace-nowrap">Merge…</button>
+                            : <button type="button" onClick={() => commitMerge(item)}
+                                className="px-2.5 py-1 rounded bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 shrink-0 whitespace-nowrap">Confirm</button>
+                          }
+                        </div>
+                        {mergeConfirmingInline && mergeIntoVal.trim() && mergeIntoVal.trim() !== item && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                            "{item}" → "{mergeIntoVal.trim()}" — this can't be undone.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Remove — only for non-protected items */}
+                    {!isProt && (
+                      <ConfirmDeleteButton
+                        onConfirm={() => { onRemove(item); setExpandedItem(null); }}
+                        title={`Remove "${item}"?`}
+                        description="This removes it from your saved list. You can undo master-data changes from Change History."
+                        confirmLabel="Remove"
+                      >
+                        <button type="button"
+                          className="px-2.5 py-1 rounded border border-destructive/30 text-destructive text-xs font-semibold hover:bg-destructive/10 transition-colors">
+                          Remove
+                        </button>
+                      </ConfirmDeleteButton>
+                    )}
+                  </div>
                 )}
-                {isProt
-                  ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
-                  : isRenaming
-                  ? <button type="button" onClick={commitRename} className="text-primary hover:text-primary/80 shrink-0"><Check className="w-3.5 h-3.5" /></button>
-                  : movingItem === item && onMove && moveTargets
-                  ? <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Move to</span>
-                      {moveTargets.map(t => (
-                        <button key={t.key} type="button" onClick={() => { setMovingItem(null); onMove(item, t.key); }} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-primary/15 text-primary hover:bg-primary/25">{t.label}</button>
-                      ))}
-                      <button type="button" title="Cancel" onClick={() => setMovingItem(null)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
-                    </div>
-                  : <div className="flex items-center gap-1 shrink-0">
-                      {onEdit && <button type="button" title="View / edit recipe" onClick={() => onEdit(item)} className={`${isSelected ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}><ClipboardList className="w-3.5 h-3.5" /></button>}
-                      {onMove && moveTargets && moveTargets.length > 0 && <button type="button" title="Move to another category" onClick={() => setMovingItem(item)} className="text-muted-foreground hover:text-foreground"><ArrowRightLeft className="w-3 h-3" /></button>}
-                      {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
-                      <ConfirmDeleteButton onConfirm={() => onRemove(item)} title={`Remove "${item}"?`} description="This removes it from your saved list. You can undo master-data changes from Change History." confirmLabel="Remove"><button type="button" title="Remove" className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button></ConfirmDeleteButton>
-                    </div>}
               </li>
             );
           })}
@@ -11343,6 +11418,55 @@ export default function Home() {
         const groupedTab = groupedTabs.find(t => t.key === manageCategory);
         const standaloneTab = standaloneTabs.find(t => t.key === manageCategory);
 
+        // ── 2-level navigation: section pills → sub-tabs ──────────────────────
+        const tabLabel: Record<string, string> = {
+          dough: "Dough", sauce: "Sauce", cheeseRecipes: "Cheese", mixes: "Mixes",
+          brands: "Brands", flavors: "Flavors", ingredientTypes: "Applicator Types",
+          pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
+          rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
+          cycleCount: "Cycle Counts", staff: "Staff", pin: "Change PIN",
+          import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
+        };
+        const sectionDefs = ([
+          {
+            key: "recipes",
+            label: "Recipes",
+            subTabs: [
+              "dough", "sauce",
+              ...(canManageInventory ? ["cheeseRecipes", "mixes"] : []),
+            ],
+          },
+          {
+            key: "lists",
+            label: "Lists",
+            subTabs: ["brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights"],
+          },
+          {
+            key: "settings",
+            label: "Settings",
+            subTabs: [
+              ...(canEditRules ? ["rules"] : []),
+              ...(canManageInventory ? ["dieDefaults", "freezer", "cycleCount"] : []),
+              ...(canManageStaff || canApproveResets ? ["staff"] : []),
+              "pin",
+            ],
+          },
+          {
+            key: "tools",
+            label: "Tools",
+            subTabs: ["import", ...(isSupervisor ? ["setupProfiles"] : []), "merge"],
+          },
+        ] as { key: string; label: string; subTabs: string[] }[]).filter(s => s.subTabs.length > 0);
+        const sectionForTab: Record<string, string> = {};
+        for (const s of sectionDefs) for (const t of s.subTabs) sectionForTab[t] = s.key;
+        const manageSectionKey = sectionForTab[manageCategory] ?? "lists";
+        function selectSection(sectionKey: string) {
+          const sec = sectionDefs.find(s => s.key === sectionKey);
+          if (!sec) return;
+          const first = sec.subTabs[0];
+          if (first) { setManageCategory(first); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }
+        }
+
         // Preset config per grouped tab: ingredient list + load/save helpers
         const presetConfig = (() => {
           const base: Record<string, { ingOptions: string[]; load: (n: string) => RecipeRow[]; save: (n: string, rows: RecipeRow[]) => void }> = {
@@ -11434,28 +11558,32 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Tab row — grouped first, then standalone */}
-              <div className="flex gap-1 flex-wrap px-5 py-3 border-b border-border shrink-0">
-                {groupedTabs.map(t => (
-                  <button key={t.key} type="button"
-                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
-                  >{t.label}</button>
-                ))}
-                <span className="w-px bg-border/60 self-stretch mx-1" />
-                {standaloneTabs.map(t => (
-                  <button key={t.key} type="button"
-                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
-                  >{t.label}</button>
-                ))}
-                {settingsTabs.length > 0 && <span className="w-px bg-border/60 self-stretch mx-1" />}
-                {settingsTabs.map(t => (
-                  <button key={t.key} type="button"
-                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
-                  >{t.label}</button>
-                ))}
+              {/* Two-row navigation: section pills + sub-tabs */}
+              <div className="border-b border-border shrink-0">
+                {/* Top row: section category pills */}
+                <div className="flex gap-1.5 px-5 pt-3 pb-2">
+                  {sectionDefs.map(section => (
+                    <button key={section.key} type="button"
+                      onClick={() => { if (manageSectionKey !== section.key) selectSection(section.key); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${manageSectionKey === section.key ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                    >{section.label}</button>
+                  ))}
+                </div>
+                {/* Bottom row: sub-tabs for active section */}
+                {(() => {
+                  const active = sectionDefs.find(s => s.key === manageSectionKey);
+                  if (!active || active.subTabs.length <= 1) return null;
+                  return (
+                    <div className="flex gap-1 flex-wrap px-5 pb-2.5">
+                      {active.subTabs.map(key => (
+                        <button key={key} type="button"
+                          onClick={() => { setManageCategory(key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
+                          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${manageCategory === key ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "text-muted-foreground hover:text-foreground hover:bg-muted/40"}`}
+                        >{tabLabel[key] ?? key}</button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Content */}
@@ -11500,6 +11628,16 @@ export default function Home() {
                         placeholder={`Add flavor for ${manageBrandFilter}…`}
                         inputVal={mgStandaloneInput}
                         setInputVal={setMgStandaloneInput}
+                        onMerge={(from, into) => {
+                          setMergeCategory("brandflavor");
+                          setMergeBfMode("flavors");
+                          setMergeBfBrand(manageBrandFilter);
+                          setMergeSources([from]);
+                          setMergeTarget(into);
+                          setMergeConfirming(false);
+                          setMergeError("");
+                          setManageCategory("merge");
+                        }}
                       />
                     )}
                   </div>
@@ -11917,6 +12055,15 @@ export default function Home() {
                     protected={standaloneTab.protected}
                     inputVal={mgStandaloneInput}
                     setInputVal={setMgStandaloneInput}
+                    onMerge={manageCategory === "brands" ? (from, into) => {
+                      setMergeCategory("brandflavor");
+                      setMergeBfMode("brands");
+                      setMergeSources([from]);
+                      setMergeTarget(into);
+                      setMergeConfirming(false);
+                      setMergeError("");
+                      setManageCategory("merge");
+                    } : undefined}
                   />
                 )}
 
