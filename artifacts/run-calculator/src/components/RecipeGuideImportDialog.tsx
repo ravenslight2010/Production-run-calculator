@@ -237,11 +237,18 @@ export function SauceGuideImportDialog({
                                 {brands.map((b) => <option key={b} value={b}>{b}</option>)}
                               </select>
                             )}
-                            {!c.brand && (
+                            {/* Show guide brand whenever it differs from the matched brand —
+                                covers both unmatched rows (amber) and fuzzy-matched sub-brands
+                                like "Lucia's Craft" → "Lucia's" (muted info note). */}
+                            {c.guideBrandName !== (c.brand ?? c.guideBrandName) ? (
+                              <span className="text-[11px] text-muted-foreground italic">
+                                guide: "{c.guideBrandName}"
+                              </span>
+                            ) : !c.brand ? (
                               <span className="text-[11px] text-amber-600">
                                 Guide: "{c.guideBrandName}"
                               </span>
-                            )}
+                            ) : null}
                           </div>
                           {/* Recipe row */}
                           <div className="flex items-center gap-2 flex-wrap">
@@ -453,9 +460,13 @@ export function DoughGuideImportDialog({
                                 {brands.map((b) => <option key={b} value={b}>{b}</option>)}
                               </select>
                             )}
-                            {!c.brand && (
+                            {c.guideBrandName !== (c.brand ?? c.guideBrandName) ? (
+                              <span className="text-[11px] text-muted-foreground italic">
+                                guide: "{c.guideBrandName}"
+                              </span>
+                            ) : !c.brand ? (
                               <span className="text-[11px] text-amber-600">Guide: "{c.guideBrandName}"</span>
-                            )}
+                            ) : null}
                           </div>
                           {/* Recipe row */}
                           <div className="flex items-center gap-2 flex-wrap">

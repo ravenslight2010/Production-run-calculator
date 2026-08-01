@@ -13,10 +13,17 @@ const lc = (s: string) => s.toLowerCase();
  * Match a guide name label against the app's known names using:
  *   exact (case-insensitive) → loose key → near-duplicate.
  * Returns null when no confident single match is found.
+ *
+ * Pass `allowExtraToken: true` for brand matching: the dough/sauce guides
+ * often label sub-brands with a one-word qualifier (e.g. "Lucia's Craft",
+ * "Basha's Original") that the app stores under the base brand.  The extra-
+ * token layer collapses those safely — the digit guard still blocks numeric
+ * size qualifiers like "Lowe's 7"" from matching "Lowe's".
  */
 export function matchGuideName(
   guideName: string,
   known: ReadonlyArray<string>,
+  options?: { allowExtraToken?: boolean },
 ): string | null {
   const want = lc(norm(guideName));
   if (!want) return null;
@@ -27,7 +34,9 @@ export function matchGuideName(
     if (hits.length === 1) return hits[0];
     if (hits.length > 1) return null; // ambiguous
   }
-  const matcher = buildNearDupNameMatcher(known as string[]);
+  const matcher = buildNearDupNameMatcher(known as string[], {
+    allowExtraToken: options?.allowExtraToken ?? false,
+  });
   return matcher(guideName);
 }
 
@@ -55,7 +64,9 @@ export function buildSauceCandidates(
   return rows.map((row, i) => ({
     id: `sauce-${i}`,
     guideBrandName: row.brand,
-    brand: matchGuideName(row.brand, brands),
+    // allowExtraToken: guide sub-brands like "Lucia's Craft" fold to the
+    // base brand "Lucia's"; digit guard blocks size qualifiers like "7\"".
+    brand: matchGuideName(row.brand, brands, { allowExtraToken: true }),
     guideName: row.recipeName,
     matchedRecipeName: matchGuideName(row.recipeName, sauceRecipeNames),
     flavors: row.flavors,
@@ -87,7 +98,9 @@ export function buildDoughCandidates(
   return rows.map((row, i) => ({
     id: `dough-${i}`,
     guideBrandName: row.brand,
-    brand: matchGuideName(row.brand, brands),
+    // allowExtraToken: guide sub-brands like "Lucia's Craft" fold to the
+    // base brand "Lucia's"; digit guard blocks size qualifiers like "7\"".
+    brand: matchGuideName(row.brand, brands, { allowExtraToken: true }),
     guideName: row.doughRecipeName,
     matchedDoughRecipeName: matchGuideName(row.doughRecipeName, doughRecipeNames),
     flavors: row.flavors,
