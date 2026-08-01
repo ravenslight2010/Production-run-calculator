@@ -3,6 +3,18 @@ import { X, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from 
 import type { SauceGuideCandidate, DoughGuideCandidate } from "@workspace/recipe-guide-import";
 import type { SauceGuideImportPrepared, DoughGuideImportPrepared } from "@/recipeGuideImport";
 
+/**
+ * Returns true when a candidate has no confident match on EITHER side (brand
+ * and recipe are both null).  These rows need manual resolution before they
+ * can be applied — otherwise every brand profile would get a wrong recipe.
+ */
+function isBothUnmatched(
+  c: SauceGuideCandidate | DoughGuideCandidate,
+): boolean {
+  if ("matchedRecipeName" in c) return c.brand === null && c.matchedRecipeName === null;
+  return c.brand === null && c.matchedDoughRecipeName === null;
+}
+
 // ─── Shared sub-components ───────────────────────────────────────────────────
 
 function MatchBadge({ matched, guide }: { matched: string | null; guide: string }) {
@@ -106,7 +118,7 @@ type SauceProps = {
   prepared: SauceGuideImportPrepared | null;
   applying: boolean;
   onConfirm: (
-    rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number }[],
+    rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[],
   ) => void;
 };
 
@@ -163,7 +175,19 @@ export function SauceGuideImportDialog({
     setFlavorPicks((prev) => { const n = { ...prev }; delete n[id]; return n; });
 
   const applyRows = candidates
-    .filter((c) => selected.has(c.id) && (brandPicks[c.id] ?? "").trim() && (recipePicks[c.id] ?? "").trim())
+    .filter((c) => {
+      if (!selected.has(c.id)) return false;
+      if (!(brandPicks[c.id] ?? "").trim()) return false;
+      if (!(recipePicks[c.id] ?? "").trim()) return false;
+      // Rows where BOTH brand and recipe were unmatched need at least one side
+      // to be resolved to a known pool name before they can be applied.
+      if (isBothUnmatched(c)) {
+        const recipeResolved = sauceRecipeNames.includes(recipePicks[c.id] ?? "");
+        const brandResolved = c.brand !== null;
+        if (!recipeResolved && !brandResolved) return false;
+      }
+      return true;
+    })
     .map((c) => {
       const guideFlavors = c.flavors ?? [];
       const picks = [...(flavorPicks[c.id] ?? new Set())];
@@ -172,6 +196,8 @@ export function SauceGuideImportDialog({
         flavors: picks.length > 0 ? picks : guideFlavors,
         recipeName: recipePicks[c.id].trim(),
         ozPerPizza: c.ozPerPizza,
+        wasNullBrand: c.brand === null,
+        wasNullRecipe: c.matchedRecipeName === null,
       };
     });
 
@@ -286,6 +312,11 @@ export function SauceGuideImportDialog({
                           {!c.brand && !brand && (
                             <p className="text-[11px] text-amber-600">Pick a brand to include this row.</p>
                           )}
+                          {isBothUnmatched(c) && brand && !sauceRecipeNames.includes(recipePicks[c.id] ?? "") && (
+                            <p className="text-[11px] text-destructive font-medium">
+                              Neither brand nor sauce recipe was auto-matched — pick a known sauce recipe above before applying.
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -330,7 +361,7 @@ type DoughProps = {
   prepared: DoughGuideImportPrepared | null;
   applying: boolean;
   onConfirm: (
-    rows: { brand: string; flavors: string[]; doughRecipeName: string }[],
+    rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[],
   ) => void;
 };
 
@@ -387,7 +418,19 @@ export function DoughGuideImportDialog({
     setFlavorPicks((prev) => { const n = { ...prev }; delete n[id]; return n; });
 
   const applyRows = candidates
-    .filter((c) => selected.has(c.id) && (brandPicks[c.id] ?? "").trim() && (recipePicks[c.id] ?? "").trim())
+    .filter((c) => {
+      if (!selected.has(c.id)) return false;
+      if (!(brandPicks[c.id] ?? "").trim()) return false;
+      if (!(recipePicks[c.id] ?? "").trim()) return false;
+      // Rows where BOTH brand and recipe were unmatched need at least one side
+      // to be resolved to a known pool name before they can be applied.
+      if (isBothUnmatched(c)) {
+        const recipeResolved = doughRecipeNames.includes(recipePicks[c.id] ?? "");
+        const brandResolved = c.brand !== null;
+        if (!recipeResolved && !brandResolved) return false;
+      }
+      return true;
+    })
     .map((c) => {
       const guideFlavors = c.flavors ?? [];
       const picks = [...(flavorPicks[c.id] ?? new Set())];
@@ -395,6 +438,8 @@ export function DoughGuideImportDialog({
         brand: brandPicks[c.id],
         flavors: picks.length > 0 ? picks : guideFlavors,
         doughRecipeName: recipePicks[c.id].trim(),
+        wasNullBrand: c.brand === null,
+        wasNullRecipe: c.matchedDoughRecipeName === null,
       };
     });
 
@@ -501,6 +546,11 @@ export function DoughGuideImportDialog({
                           )}
                           {!c.brand && !brand && (
                             <p className="text-[11px] text-amber-600">Pick a brand to include this row.</p>
+                          )}
+                          {isBothUnmatched(c) && brand && !doughRecipeNames.includes(recipePicks[c.id] ?? "") && (
+                            <p className="text-[11px] text-destructive font-medium">
+                              Neither brand nor dough recipe was auto-matched — pick a known dough recipe above before applying.
+                            </p>
                           )}
                         </div>
                       </div>

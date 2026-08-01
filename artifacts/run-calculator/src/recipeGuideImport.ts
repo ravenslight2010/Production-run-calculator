@@ -209,26 +209,67 @@ export async function prepareDoughGuideImport(
 export type RecipeGuideCommitResult = {
   rowsApplied: number;
   profilesUpdated: number;
+  /** Number of rows skipped because both brand and recipe were unmatched. */
+  rowsSkippedBothUnmatched: number;
+};
+
+export type SauceGuideCommitRow = {
+  brand: string;
+  flavors?: readonly string[];
+  recipeName: string;
+  ozPerPizza: number;
+  /**
+   * True when the original candidate had no confident brand match.
+   * When this AND wasNullRecipe are both true the row is refused — the manager
+   * must resolve at least one side before the row can be applied.
+   */
+  wasNullBrand: boolean;
+  /**
+   * True when the original candidate had no confident recipe-name match.
+   * When this AND wasNullBrand are both true the row is refused.
+   */
+  wasNullRecipe: boolean;
+};
+
+export type DoughGuideCommitRow = {
+  brand: string;
+  flavors?: readonly string[];
+  doughRecipeName: string;
+  /**
+   * True when the original candidate had no confident brand match.
+   * When this AND wasNullRecipe are both true the row is refused.
+   */
+  wasNullBrand: boolean;
+  /**
+   * True when the original candidate had no confident dough-recipe match.
+   * When this AND wasNullBrand are both true the row is refused.
+   */
+  wasNullRecipe: boolean;
 };
 
 /**
  * Apply reviewed sauce guide rows — writes `frontlineRecipeName` +
  * `sauceOzPerPizza` to every matched brand+flavor profile.
+ *
+ * Rows where **both** `wasNullBrand` and `wasNullRecipe` are true are skipped:
+ * they have no confident match on either side and writing them would silently
+ * overwrite every brand profile with a wrong recipe.
  */
 export function commitSauceGuideImport(
-  rows: ReadonlyArray<{
-    brand: string;
-    flavors?: readonly string[];
-    recipeName: string;
-    ozPerPizza: number;
-  }>,
+  rows: ReadonlyArray<SauceGuideCommitRow>,
 ): RecipeGuideCommitResult {
   const flavorsByBrand = loadBrandFlavors();
   let rowsApplied = 0;
   let profilesUpdated = 0;
+  let rowsSkippedBothUnmatched = 0;
   for (const row of rows) {
     const brand = row.brand.trim();
     if (!brand || !row.recipeName.trim() || !(row.ozPerPizza > 0)) continue;
+    // Refuse rows with no confident match on either brand or recipe.
+    if (row.wasNullBrand && row.wasNullRecipe) {
+      rowsSkippedBothUnmatched++;
+      continue;
+    }
     const picked = (row.flavors ?? []).map((f) => f.trim()).filter(Boolean);
     const targets = picked.length > 0 ? picked : ["", ...(flavorsByBrand[brand] ?? [])];
     for (const flavor of targets) {
@@ -240,26 +281,30 @@ export function commitSauceGuideImport(
     }
     rowsApplied++;
   }
-  return { rowsApplied, profilesUpdated };
+  return { rowsApplied, profilesUpdated, rowsSkippedBothUnmatched };
 }
 
 /**
  * Apply reviewed dough guide rows — writes `doughRecipeName` to every
  * matched brand+flavor profile.
+ *
+ * Rows where **both** `wasNullBrand` and `wasNullRecipe` are true are skipped.
  */
 export function commitDoughGuideImport(
-  rows: ReadonlyArray<{
-    brand: string;
-    flavors?: readonly string[];
-    doughRecipeName: string;
-  }>,
+  rows: ReadonlyArray<DoughGuideCommitRow>,
 ): RecipeGuideCommitResult {
   const flavorsByBrand = loadBrandFlavors();
   let rowsApplied = 0;
   let profilesUpdated = 0;
+  let rowsSkippedBothUnmatched = 0;
   for (const row of rows) {
     const brand = row.brand.trim();
     if (!brand || !row.doughRecipeName.trim()) continue;
+    // Refuse rows with no confident match on either brand or recipe.
+    if (row.wasNullBrand && row.wasNullRecipe) {
+      rowsSkippedBothUnmatched++;
+      continue;
+    }
     const picked = (row.flavors ?? []).map((f) => f.trim()).filter(Boolean);
     const targets = picked.length > 0 ? picked : ["", ...(flavorsByBrand[brand] ?? [])];
     for (const flavor of targets) {
@@ -270,5 +315,5 @@ export function commitDoughGuideImport(
     }
     rowsApplied++;
   }
-  return { rowsApplied, profilesUpdated };
+  return { rowsApplied, profilesUpdated, rowsSkippedBothUnmatched };
 }

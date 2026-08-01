@@ -10218,16 +10218,19 @@ export default function Home() {
     }
   }
 
-  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number }[]) {
+  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[]) {
     setSauceGuideImportApplying(true);
     try {
       const result = commitSauceGuideImport(rows);
       reloadMasterData();
       setShowSauceGuideImport(false);
       setSauceGuideImportPrepared(null);
+      const skippedNote = result.rowsSkippedBothUnmatched > 0
+        ? ` (${result.rowsSkippedBothUnmatched} row${result.rowsSkippedBothUnmatched === 1 ? "" : "s"} skipped — unresolved match)`
+        : "";
       toast({
         title: "Sauce guide imported",
-        description: `Sauce assignments updated for ${result.rowsApplied} row${result.rowsApplied === 1 ? "" : "s"} (${result.profilesUpdated} profile${result.profilesUpdated === 1 ? "" : "s"}).`,
+        description: `Sauce assignments updated for ${result.rowsApplied} row${result.rowsApplied === 1 ? "" : "s"} (${result.profilesUpdated} profile${result.profilesUpdated === 1 ? "" : "s"})${skippedNote}.`,
       });
     } catch (err) {
       setSauceGuideImportError(err instanceof Error ? err.message : "Import failed. Please try again.");
@@ -10259,16 +10262,19 @@ export default function Home() {
     }
   }
 
-  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string }[]) {
+  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[]) {
     setDoughGuideImportApplying(true);
     try {
       const result = commitDoughGuideImport(rows);
       reloadMasterData();
       setShowDoughGuideImport(false);
       setDoughGuideImportPrepared(null);
+      const skippedNote = result.rowsSkippedBothUnmatched > 0
+        ? ` (${result.rowsSkippedBothUnmatched} row${result.rowsSkippedBothUnmatched === 1 ? "" : "s"} skipped — unresolved match)`
+        : "";
       toast({
         title: "Dough recipe guide imported",
-        description: `Dough assignments updated for ${result.rowsApplied} row${result.rowsApplied === 1 ? "" : "s"} (${result.profilesUpdated} profile${result.profilesUpdated === 1 ? "" : "s"}).`,
+        description: `Dough assignments updated for ${result.rowsApplied} row${result.rowsApplied === 1 ? "" : "s"} (${result.profilesUpdated} profile${result.profilesUpdated === 1 ? "" : "s"})${skippedNote}.`,
       });
     } catch (err) {
       setDoughGuideImportError(err instanceof Error ? err.message : "Import failed. Please try again.");
