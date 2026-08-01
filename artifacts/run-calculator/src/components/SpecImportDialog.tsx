@@ -12,6 +12,7 @@ import {
   isGenericSlotTypeName,
   blendLinkSuggestionKey,
   recipeLinkSuggestionKey,
+  crossFamilyRoutingSuggestionKey,
   repointProfileNamedRecipes,
   specImportNameMatchKey,
   type NamedRecipeRename,
@@ -259,9 +260,34 @@ function buildRecipeItems(
       (n) => n.trim().toLowerCase() === suggested.trim().toLowerCase(),
     );
   };
+  // Cross-family routing hint: a recipe the AI routed to one display kind
+  // (cheese/mix) that the user previously reclassified to the other family.
+  // Encoded as "targetKind:linkedRecipeName" in the suggestion map.
+  const suggestCrossFamily = (
+    name: string,
+    parsedKind: SpecImportDisplayKind,
+  ): { kind: SpecImportDisplayKind; linkExisting: string } | undefined => {
+    const value = suggestions[crossFamilyRoutingSuggestionKey(name)];
+    if (!value) return undefined;
+    const colonIdx = value.indexOf(":");
+    if (colonIdx < 0) return undefined;
+    const targetKind = value.slice(0, colonIdx) as SpecImportDisplayKind;
+    const linkName = value.slice(colonIdx + 1).trim();
+    // Only apply when the hint actually crosses a family boundary.
+    if (targetKind === parsedKind) return undefined;
+    if (targetKind !== "cheese" && targetKind !== "mix") return undefined;
+    if (!linkName) return undefined;
+    // Verify the linked recipe still exists in the target kind's pool.
+    const exists = (existingByKind?.[targetKind] ?? []).find(
+      (n) => n.trim().toLowerCase() === linkName.toLowerCase(),
+    );
+    return exists ? { kind: targetKind, linkExisting: exists } : undefined;
+  };
   const kept = prepared.parsed.recipes.map((r, i): RecipeItem => {
     const kind = specImportRecipeDisplayKind(r);
     const linkExisting = suggestLink(r.name ?? "", kind, r.brand ?? "");
+    // Cross-family hint is only applied when no same-family link was remembered.
+    const crossFamily = !linkExisting ? suggestCrossFamily(r.name ?? "", kind) : undefined;
     return {
       key: `rk${i}`,
       orig: r,
@@ -269,10 +295,11 @@ function buildRecipeItems(
       brandTouched: false,
       flavorTouched: false,
       name: r.name ?? "",
-      kind,
+      kind: crossFamily?.kind ?? kind,
       brand: r.brand ?? "",
       flavor: r.flavor ?? "",
       ...(linkExisting ? { linkExisting } : {}),
+      ...(crossFamily ? { linkExisting: crossFamily.linkExisting } : {}),
       include: true,
       tombstoned: false,
     };
@@ -549,6 +576,22 @@ export default function SpecImportDialog({
         // side: such an alias renames every blend to one garbage record on
         // the next import (and the poison then re-learns itself on Apply).
         if (isGenericSlotTypeName(external) || isGenericSlotTypeName(linked)) continue;
+        // Cross-family routing hint: when the user reclassified this recipe
+        // from its AI-parsed display kind (e.g. "mix") to the other family
+        // (e.g. "cheese"), save a crossFamilyRouting alias so a future import
+        // of the same workbook pre-selects that family tab and linked recipe.
+        // This is a SEPARATE alias kind that bypasses the isCrossFamilyMixCheesePair
+        // guard on appType — the guard only applies to appType aliases (which
+        // auto-apply to applicator slots) not to these explicit user-confirmed picks.
+        const parsedKind = specImportRecipeDisplayKind(r.baseOrig);
+        if (parsedKind !== r.kind) {
+          out.push({
+            kind: "crossFamilyRouting",
+            externalName: external,
+            canonicalName: linked,
+            context: r.kind, // "cheese" or "mix" — the TARGET display kind
+          });
+        }
         // Two rows: the context-free one keeps the legacy factory-wide
         // fallback working, the brand-scoped one (context = brand) lets each
         // brand remember its OWN pick for a generic blend name instead of the

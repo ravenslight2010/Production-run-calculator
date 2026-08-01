@@ -2457,7 +2457,8 @@ export type SpecAliasKind =
   | "doughIngredient"
   | "sauceIngredient"
   | "recipeName"
-  | "dieType";
+  | "dieType"
+  | "crossFamilyRouting";
 
 export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
   "brand",
@@ -2478,6 +2479,16 @@ export const SPEC_ALIAS_KINDS: SpecAliasKind[] = [
   // remembered or a spec re-import resurrects the old die name as a new
   // picklist entry. Context-free.
   "dieType",
+  // A cross-family routing hint: when the user re-classifies a parsed recipe
+  // from "mix" to "cheese" display kind (or vice versa) by using "Link to
+  // Existing [Cheese/Mix] Recipe" in the import dialog, this alias records the
+  // intended target family and linked recipe so that future imports of the same
+  // workbook pre-select that family tab and recipe (suggestion, not force).
+  // `externalName` is the sheet recipe name, `canonicalName` is the linked
+  // recipe name, `context` is the target display kind ("cheese" or "mix").
+  // This kind deliberately bypasses the isCrossFamilyMixCheesePair guard that
+  // blocks appType aliases from crossing the mix ↔ cheese family line.
+  "crossFamilyRouting",
 ];
 
 /**
@@ -2503,6 +2514,17 @@ export function recipeLinkSuggestionKey(displayKind: string, name: string): stri
  */
 export function blendLinkSuggestionKey(brand: string, name: string): string {
   return `blend\u0000${brand.trim().toLowerCase()}\u0000${name.trim().toLowerCase()}`;
+}
+
+/**
+ * Lookup key for a cross-family routing hint in the aliasLinkSuggestions map.
+ * Used when the user re-classifies a parsed recipe from "mix" to "cheese" (or
+ * vice versa) in the import review dialog — the hint is stored as a
+ * "crossFamilyRouting" alias and surfaced as a pre-selection on the next
+ * import of the same workbook.
+ */
+export function crossFamilyRoutingSuggestionKey(name: string): string {
+  return `crossfamily\u0000${name.trim().toLowerCase()}`;
 }
 
 /**

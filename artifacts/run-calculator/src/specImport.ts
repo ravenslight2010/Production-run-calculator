@@ -14,6 +14,7 @@ import * as XLSX from "xlsx";
 import {
   applyNameMatches,
   blendLinkSuggestionKey,
+  crossFamilyRoutingSuggestionKey,
   canonicalize,
   collectMatchCandidates,
   collectSpecAliases,
@@ -231,6 +232,16 @@ export function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<st
       if (!ext || !canon || !kindCtx) continue;
       if (ext.toLowerCase() === canon.toLowerCase()) continue;
       out[recipeLinkSuggestionKey(kindCtx, ext)] = canon;
+    } else if (a.kind === "crossFamilyRouting") {
+      // Cross-family routing hints: a recipe the AI routed to one display
+      // kind (cheese/mix) that the user manually reclassified to the other.
+      // Encoded as "targetKind:linkedRecipeName" so the review dialog can
+      // restore both pieces from a single suggestion-map entry.
+      const ext = a.externalName.trim();
+      const linkName = canon; // canonicalName = linked recipe name
+      const targetKind = (a.context ?? "").trim(); // "cheese" or "mix"
+      if (!ext || !linkName || (targetKind !== "cheese" && targetKind !== "mix")) continue;
+      out[crossFamilyRoutingSuggestionKey(ext)] = `${targetKind}:${linkName}`;
     }
   }
   return out;

@@ -184,6 +184,7 @@ import {
   rewriteDieTypeInProfiles,
   rewritePepTypeInProfiles,
   rewriteAppTypeInProfiles,
+  rewriteRecipeNameInProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
@@ -8208,9 +8209,9 @@ export default function Home() {
     saveDayState(newDs);
     schedulePush(newDs);
     // Server-backed master-data + learned import aliases (best-effort, mirrors
-    // the brand MERGE path): re-point cheese/mix pool rows still naming the old
-    // brand, and learn a spec-import alias so re-importing an old workbook
-    // updates the renamed brand instead of resurrecting the old name.
+    // the brand MERGE path): re-point cheese/mix/dough/sauce pool rows still
+    // naming the old brand, and learn a spec-import alias so re-importing an old
+    // workbook updates the renamed brand instead of resurrecting the old name.
     void (async () => {
       try {
         await learnSpecImportAliasesForNameChange("brand", [oldName], trimmed);
@@ -8231,6 +8232,24 @@ export default function Home() {
           cycleCountQc.setQueryData(["mixes"], saved);
         }
       } catch { /* non-fatal: rename itself already succeeded */ }
+      // Dough and sauce named-recipe pools also carry a `brand` field for
+      // owner-brand tagging. Re-point any rows that still name the old brand so
+      // pool management screens and spec-import suggestions stay consistent.
+      for (const kind of ["dough", "sauce"] as const) {
+        try {
+          const recipes = await fetchNamedRecipes(kind);
+          const changed = recipes
+            .filter((r) => (r.brand ?? "").trim().toLowerCase() === oldName.toLowerCase())
+            .map((r) => ({ ...r, brand: trimmed }));
+          if (changed.length > 0) {
+            const saved = await saveNamedRecipes(kind, changed);
+            cycleCountQc.setQueryData(
+              [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
+              saved,
+            );
+          }
+        } catch { /* non-fatal: rename itself already succeeded */ }
+      }
     })();
   }
 
@@ -8366,6 +8385,10 @@ export default function Home() {
     moveRecipePresetKey(loadDoughRecipePresets, saveDoughRecipePresets, oldName, trimmed);
     tombstoneDeleted("doughRecipeNames", oldName);
     clearDeleted("doughRecipeNames", trimmed);
+    // Fan out to saved profiles: any profile referencing the old dough recipe
+    // name gets its doughRecipeName rewritten to the new name so "Recipe Setup
+    // Needed" warnings and re-import mismatches don't linger.
+    rewriteRecipeNameInProfiles("dough", oldName, trimmed);
     schedulePush(dayStateRef.current);
     // Learn the rename so spec re-imports link the old sheet name to the
     // renamed dough recipe (kind "recipeName", context "dough"). Best-effort.
@@ -8381,6 +8404,9 @@ export default function Home() {
     moveRecipePresetKey(loadFrontlineRecipePresets, saveFrontlineRecipePresets, oldName, trimmed);
     tombstoneDeleted("frontlineRecipeNames", oldName);
     clearDeleted("frontlineRecipeNames", trimmed);
+    // Fan out to saved profiles: any profile referencing the old sauce recipe
+    // name gets its frontlineRecipeName rewritten to the new name.
+    rewriteRecipeNameInProfiles("sauce", oldName, trimmed);
     schedulePush(dayStateRef.current);
     // Learn the rename so spec re-imports link the old sheet name to the
     // renamed sauce recipe (kind "recipeName", context "sauce"). Best-effort.
@@ -8396,6 +8422,9 @@ export default function Home() {
     moveRecipePresetKey(loadCheeseRecipePresets, saveCheeseRecipePresets, oldName, trimmed);
     tombstoneDeleted("cheeseRecipeNames", oldName);
     clearDeleted("cheeseRecipeNames", trimmed);
+    // Fan out to saved profiles: any profile slot referencing the old cheese
+    // recipe name (app1–4CheeseRecipeName) gets rewritten to the new name.
+    rewriteRecipeNameInProfiles("cheese", oldName, trimmed);
     schedulePush(dayStateRef.current);
     // Learn the rename as an appType blend alias (brand-scoped when the
     // renamed recipe has a server pool row) so cheese/spec re-imports map the

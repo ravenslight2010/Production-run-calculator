@@ -22,4 +22,5 @@ export const SpecImportAliasKind = {
   sauceIngredient: 'sauceIngredient',
   recipeName: 'recipeName',
   dieType: 'dieType',
+  crossFamilyRouting: 'crossFamilyRouting',
 } as const;

@@ -3521,9 +3521,31 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         for (const [k, v] of Object.entries(map)) {
           copy[k === oldName ? n : k] = v;
         }
+        // Fan out: rewrite recipe name references in all saved profiles so that
+        // a renamed dough/sauce/cheese recipe doesn't leave stale pointers behind
+        // (which causes "Recipe Setup Needed" warnings and re-import mismatches).
+        const brandProfiles = { ...prev.brandProfiles };
+        const profileFields =
+          kind === "dough"
+            ? ["doughRecipeName"]
+            : kind === "sauce"
+              ? ["frontlineRecipeName"]
+              : ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"];
+        for (const key of Object.keys(brandProfiles)) {
+          const prof = brandProfiles[key] as Record<string, unknown>;
+          let changed = false;
+          const nextProf: Record<string, unknown> = { ...prof };
+          for (const field of profileFields) {
+            if (typeof prof[field] === "string" && (prof[field] as string).trim() === oldName.trim()) {
+              nextProf[field] = n;
+              changed = true;
+            }
+          }
+          if (changed) brandProfiles[key] = nextProf as RunProfile;
+        }
         const next = withChangeRecord(
           prev,
-          { ...prev, [mapKey]: copy },
+          { ...prev, [mapKey]: copy, brandProfiles },
           "rename",
           `Renamed ${kind} recipe "${oldName}" to "${n}"`,
         );

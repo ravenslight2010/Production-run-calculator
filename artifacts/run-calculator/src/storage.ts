@@ -2654,6 +2654,61 @@ export function rewriteAppTypeInProfiles(oldName: string, newName: string): void
 }
 
 /**
+ * Rewrite recipe name references in all saved profiles after a recipe is
+ * renamed. Scans every dough and crust profile blob in localStorage and
+ * rewrites the relevant name field(s) when they match the old name
+ * (case-sensitive equality — names are stored as typed). Mirrors the
+ * `rewriteDieTypeInProfiles` / `rewriteAppTypeInProfiles` pattern.
+ *
+ * `kind` controls which fields are checked:
+ *   "dough"  → doughRecipeName
+ *   "sauce"  → frontlineRecipeName
+ *   "cheese" → app1–4CheeseRecipeName (each slot independently)
+ */
+export function rewriteRecipeNameInProfiles(
+  kind: "dough" | "sauce" | "cheese",
+  oldName: string,
+  newName: string,
+): void {
+  if (typeof localStorage === "undefined") return;
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from || !to || from === to) return;
+  const fields =
+    kind === "dough"
+      ? ["doughRecipeName"]
+      : kind === "sauce"
+        ? ["frontlineRecipeName"]
+        : ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj) continue;
+      let changed = false;
+      for (const field of fields) {
+        if (typeof obj[field] === "string" && (obj[field] as string).trim() === from) {
+          obj[field] = to;
+          changed = true;
+        }
+      }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        markProfileEdited(
+          k.startsWith("run-calc-crust-profile-")
+            ? k.slice("run-calc-crust-profile-".length)
+            : k.slice("run-calc-profile-".length),
+        );
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
+    }
+  }
+}
+
+/**
  * Delete the saved profile (dough + crust) for a single brand+flavor. Called on
  * flavor deletion for the same reason as deleteProfilesForBrand: without it the
  * profile entry orphans and can resurrect stale data on a later re-import.
