@@ -191,6 +191,83 @@ describe("parseSauceGuide — flavor narrowing", () => {
   });
 });
 
+describe("parseSauceGuide — parenthetical size qualifiers in flavor names", () => {
+  it("keeps parenthetical qualifier attached to its flavor name", () => {
+    // "Classic (9in)" is ONE flavor; the parenthetical must not be split off
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in) at 4oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic (9in)"]);
+    expect(rows[0].ozPerPizza).toBe(4);
+  });
+
+  it("does not leak the parenthetical size into the oz value", () => {
+    // Regression: "(9in)" must not confuse the oz parser; oz should still be 4
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in), Deluxe at 4oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ozPerPizza).toBe(4);
+  });
+
+  it("preserves parenthetical qualifier on the first flavor while splitting remaining flavors", () => {
+    // "Classic (9in)" is the first flavor; ", Deluxe" is the second
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in), Deluxe at 4oz",
+    );
+    expect(rows[0].flavors).toEqual(["Classic (9in)", "Deluxe"]);
+  });
+
+  it("preserves parenthetical qualifier on a trailing flavor", () => {
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic, Deluxe (Large) at 3.5oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic", "Deluxe (Large)"]);
+    expect(rows[0].ozPerPizza).toBe(3.5);
+  });
+
+  it("handles multiple flavors all with parenthetical qualifiers", () => {
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in), Deluxe (12in) at 4oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic (9in)", "Deluxe (12in)"]);
+    expect(rows[0].ozPerPizza).toBe(4);
+  });
+
+  it("handles a multi-word flavor with a parenthetical", () => {
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic Original (9in), House Special at 4oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic Original (9in)", "House Special"]);
+    expect(rows[0].ozPerPizza).toBe(4);
+  });
+
+  it("correctly parses oz when the only flavor has a parenthetical", () => {
+    // Ensures the main regex captures oz=3 not something inside the parens
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (Large Size) at 3oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ozPerPizza).toBe(3);
+    expect(rows[0].flavors).toEqual(["Classic (Large Size)"]);
+  });
+
+  it("handles parenthetical qualifier in a multi-oz continuation flavor", () => {
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in) at 4oz and on Deluxe (12in) at 3.5oz",
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0].flavors).toEqual(["Classic (9in)"]);
+    expect(rows[0].ozPerPizza).toBe(4);
+    expect(rows[1].flavors).toEqual(["Deluxe (12in)"]);
+    expect(rows[1].ozPerPizza).toBe(3.5);
+  });
+});
+
 describe("parseSauceGuide — unmatched / invalid rows", () => {
   it("returns empty array for entirely empty input", () => {
     expect(parseSauceGuide("")).toEqual([]);
