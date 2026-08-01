@@ -43,9 +43,10 @@ import type {
 
 // ── Mobile component loader (strip-imports -> transpile-to-CJS -> evaluate) ────
 const here = path.dirname(fileURLToPath(import.meta.url));
+// Mobile app is archived — parity test paused. Path updated to archived location.
 const MOBILE_FILE = path.resolve(
   here,
-  "../../../../run-calculator-mobile/components/SpecImportModal.tsx",
+  "../../../../../_archived/mobile/components/SpecImportModal.tsx",
 );
 
 // Stubs for the symbols the stripped imports used to provide. Everything the

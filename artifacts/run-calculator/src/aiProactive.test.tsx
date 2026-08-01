@@ -52,7 +52,8 @@ type UseProactiveAlertFn = (args: {
 // fetch URLs (base "http://test") match the same routes the web copy uses, and
 // saveFacilityKnowledge a no-op so a dismissal write never hits the network.
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/context/aiProactive.ts");
+// Mobile app is archived — parity test paused. Path updated to archived location.
+const MOBILE_FILE = path.resolve(here, "../../../_archived/mobile/context/aiProactive.ts");
 
 async function loadStrippedMobileHook(file: string): Promise<UseProactiveAlertFn> {
   const ts = (await import("typescript")).default;

@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MOBILE_FILE = path.resolve(
   here,
-  "../../run-calculator-mobile/utils/importCaseUpdates.ts",
+  "../../../_archived/mobile/utils/importCaseUpdates.ts",
 );
 
 // The only import the module has is `showConfirm` from "@/utils/notify".

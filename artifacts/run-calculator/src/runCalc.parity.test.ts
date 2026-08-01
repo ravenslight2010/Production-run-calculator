@@ -52,7 +52,7 @@ import { computeSummaryStats, sauceBarrelBreakdown as webSauceBarrelBreakdown } 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MOBILE_FILE = path.resolve(
   here,
-  "../../run-calculator-mobile/context/RunContext.tsx",
+  "../../../_archived/mobile/context/RunContext.tsx",
 );
 
 // Stubs for every symbol the mobile module imports. Only `createContext` is

@@ -40,7 +40,7 @@ type CalloutFn = (props: {
 
 // ── Mobile component loader (strip-imports -> transpile-to-CJS -> evaluate) ──
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/app/master-data.tsx");
+const MOBILE_FILE = path.resolve(here, "../../../_archived/mobile/app/master-data.tsx");
 
 // Stubs evaluated in the module scope. React is injected separately so the
 // component shares this test's React instance. Only module-eval-time symbols

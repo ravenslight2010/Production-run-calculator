@@ -183,7 +183,7 @@ describe("web prepareSpecImportMulti — warning labels name the right file", ()
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/context/specImport.ts");
+const MOBILE_FILE = path.resolve(here, "../../../_archived/mobile/context/specImport.ts");
 
 const MOBILE_PRELUDE = `
 const {

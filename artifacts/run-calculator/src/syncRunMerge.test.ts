@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAPPING_FILE = path.resolve(
   here,
-  "../../run-calculator-mobile/context/sync/mapping.ts",
+  "../../../_archived/mobile/context/sync/mapping.ts",
 );
 const TODAY = "2026-06-25";
 

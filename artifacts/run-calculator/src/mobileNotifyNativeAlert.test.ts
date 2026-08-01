@@ -22,7 +22,7 @@ import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_UTILS = path.resolve(here, "../../run-calculator-mobile/utils");
+const MOBILE_UTILS = path.resolve(here, "../../../_archived/mobile/utils");
 const NOTIFY_FILE = path.join(MOBILE_UTILS, "notify.ts");
 
 declare global {

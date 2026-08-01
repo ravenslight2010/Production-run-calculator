@@ -242,7 +242,7 @@ describe("web spec-import — one named dough/sauce recipe across flavors does n
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/context/specImport.ts");
+const MOBILE_FILE = path.resolve(here, "../../../_archived/mobile/context/specImport.ts");
 
 const MOBILE_PRELUDE = `
 const {

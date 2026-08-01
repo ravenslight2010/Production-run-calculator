@@ -60,7 +60,7 @@ type SuggestionCardFn = (props: {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MOBILE_FILE = path.resolve(
   here,
-  "../../run-calculator-mobile/app/(tabs)/assistant.tsx",
+  "../../../_archived/mobile/app/(tabs)/assistant.tsx",
 );
 
 // Prelude of stubs evaluated in the module scope. React is injected separately so

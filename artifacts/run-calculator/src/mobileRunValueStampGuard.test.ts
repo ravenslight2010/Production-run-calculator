@@ -34,7 +34,8 @@ import path from "path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-const MOBILE_ROOT = path.resolve(__dirname, "..", "..", "run-calculator-mobile");
+// Mobile app is archived — path updated to archived location.
+const MOBILE_ROOT = path.resolve(__dirname, "..", "..", "..", "_archived", "mobile");
 const MOBILE_FILE = path.join(MOBILE_ROOT, "context", "RunContext.tsx");
 const MAPPING_FILE = path.join("context", "sync", "mapping.ts");
 

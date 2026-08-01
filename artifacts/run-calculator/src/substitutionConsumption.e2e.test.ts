@@ -48,7 +48,7 @@ import { computeRunConsumptionLines as webConsumptionLines } from "./inventorySh
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MOBILE_FILE = path.resolve(
   here,
-  "../../run-calculator-mobile/context/inventoryShared.ts",
+  "../../../_archived/mobile/context/inventoryShared.ts",
 );
 
 // The mobile glue's imported symbols are all used INSIDE functions (never at

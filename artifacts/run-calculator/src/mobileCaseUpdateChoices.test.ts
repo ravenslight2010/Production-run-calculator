@@ -21,7 +21,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_DIR = path.resolve(here, "../../run-calculator-mobile");
+const MOBILE_DIR = path.resolve(here, "../../../_archived/mobile");
 const UTIL_FILE = path.join(MOBILE_DIR, "utils/importCaseUpdates.ts");
 const SCHEDULE_FILE = path.join(MOBILE_DIR, "app/schedule.tsx");
 const SUMMARY_FILE = path.join(MOBILE_DIR, "app/(tabs)/summary.tsx");

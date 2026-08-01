@@ -197,7 +197,7 @@ describe("web premix import — junk files are skipped BEFORE parse/AI-matcher",
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/context/premixImport.ts");
+const MOBILE_FILE = path.resolve(here, "../../../_archived/mobile/context/premixImport.ts");
 
 const MOBILE_PRELUDE = `
 const {

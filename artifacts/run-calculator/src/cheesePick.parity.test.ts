@@ -347,7 +347,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB_FILE = path.resolve(HERE, "./pages/home.tsx");
 const MOBILE_FILE = path.resolve(
   HERE,
-  "../../run-calculator-mobile/app/(tabs)/configure.tsx",
+  "../../../_archived/mobile/app/(tabs)/configure.tsx",
 );
 
 // Normalize away benign differences: the mobile `React.` prefix on hooks, all

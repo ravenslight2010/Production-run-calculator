@@ -208,7 +208,7 @@ describe("caseUpdateWarningLine — lowered-target warning text", () => {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MOBILE_FILE = path.resolve(
   here,
-  "../../run-calculator-mobile/utils/importCaseUpdates.ts",
+  "../../../_archived/mobile/utils/importCaseUpdates.ts",
 );
 
 const STUB_PRELUDE = `
