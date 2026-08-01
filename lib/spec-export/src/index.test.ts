@@ -11,13 +11,14 @@ import {
   buildSpecExportGrids,
   buildMixExportGrids,
   sanitizeSheetName,
+  type SheetGrid,
   type SpecExportInput,
   type SpecExportSelection,
 } from "./index";
 
 const ALL: SpecExportSelection = { profiles: true, dough: true, sauce: true, cheese: true };
 
-function findSheet(grids: { name: string; rows: string[][] }[], name: string) {
+function findSheet(grids: SheetGrid[], name: string) {
   const g = grids.find((x) => x.name === name);
   if (!g) throw new Error(`missing sheet ${name}`);
   return g;
@@ -73,12 +74,66 @@ describe("buildSpecExportGrids", () => {
     // dough/sauce recipe name columns (the product's assigned types)
     expect(row[4]).toBe("Standard Dough");
     expect(row[5]).toBe("Pizza Sauce");
+    // applicator 1 (only slot in use across these profiles)
     expect(row[6]).toBe("Mozzarella");
     expect(row[7]).toBe("3.5");
-    // pep 1 type/sticks/oz
-    expect(row[14]).toBe("Sliced Pepperoni");
-    expect(row[15]).toBe("2");
-    expect(row[16]).toBe("1.5");
+    // pep 1 type/sticks/oz — now immediately after the used applicator slots
+    // (cols 8/9/10 not 14/15/16 — trimming removed the empty app 2/3/4 slots)
+    expect(row[8]).toBe("Sliced Pepperoni");
+    expect(row[9]).toBe("2");
+    expect(row[10]).toBe("1.5");
+  });
+
+  it("uses spelled-out column headers (Applicator, Pepperoni, oz/pizza)", () => {
+    const grids = buildSpecExportGrids(input, ALL);
+    const header = findSheet(grids, "Profiles").rows[0]!;
+    // No "App" abbreviation — must say "Applicator"
+    expect(header.some((h) => /^App \d/.test(h))).toBe(false);
+    expect(header).toContain("Applicator 1 Type");
+    expect(header).toContain("Applicator 1 oz/pizza");
+    // No "Pep" abbreviation — must say "Pepperoni"
+    expect(header.some((h) => /^Pep \d/.test(h))).toBe(false);
+    expect(header).toContain("Pepperoni 1 Type");
+    expect(header).toContain("Pepperoni 1 Sticks");
+    expect(header).toContain("Pepperoni 1 oz/pizza");
+    // Sauce column shortened
+    expect(header).toContain("Sauce oz/pizza");
+    expect(header.some((h) => h === "Sauce oz per pizza")).toBe(false);
+  });
+
+  it("trims unused applicator/pep slot columns — 2-app 1-pep set yields 11 columns", () => {
+    // input has 2 profiles; together they use 1 applicator slot and 1 pep slot.
+    // 6 base + 1 app×2 + 1 pep×3 = 11 columns (not 20).
+    const grids = buildSpecExportGrids(input, ALL);
+    const header = findSheet(grids, "Profiles").rows[0]!;
+    expect(header.length).toBe(11);
+  });
+
+  it("emits zero applicator/pep columns when no profile uses any", () => {
+    const bare: SpecExportInput = {
+      profiles: [{ brand: "Acme", flavor: "Cheese", applicators: [], pepperonis: [], doughRecipeName: "CRB" }],
+      doughRecipes: [{ name: "CRB", rows: [{ ingredient: "Flour", lbs: 10 }] }],
+      sauceRecipes: [],
+      cheeseRecipes: [],
+    };
+    const header = findSheet(buildSpecExportGrids(bare, { profiles: true, dough: false, sauce: false, cheese: false }), "Profiles").rows[0]!;
+    // Only the 6 base columns
+    expect(header.length).toBe(6);
+    expect(header).toEqual(["Brand", "Flavor", "Die Type", "Sauce oz/pizza", "Dough Recipe", "Sauce Recipe"]);
+  });
+
+  it("marks the header row bold on the Profiles sheet", () => {
+    const grids = buildSpecExportGrids(input, ALL);
+    const profiles = findSheet(grids, "Profiles");
+    expect(profiles.boldRows).toContain(0);
+  });
+
+  it("marks Recipe: rows bold on recipe sheets", () => {
+    const grids = buildSpecExportGrids(input, ALL);
+    const dough = findSheet(grids, "Dough Recipes");
+    const recipeRowIdx = dough.rows.findIndex((r) => r[0]?.startsWith("Recipe:"));
+    expect(recipeRowIdx).toBeGreaterThanOrEqual(0);
+    expect(dough.boldRows).toContain(recipeRowIdx);
   });
 
   it("emits recipe blocks with Brand: flavor targets and ingredient tables", () => {

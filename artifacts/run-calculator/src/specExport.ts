@@ -132,6 +132,18 @@ function downloadWorkbook(grids: SheetGrid[], filename: string): void {
   const wb = XLSX.utils.book_new();
   for (const g of grids) {
     const ws = XLSX.utils.aoa_to_sheet(g.rows);
+    // Apply bold styling to rows that the lib flagged (header row, recipe labels).
+    if (g.boldRows && g.boldRows.length > 0) {
+      const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
+      for (const rowIdx of g.boldRows) {
+        if (rowIdx < 0 || rowIdx > range.e.r) continue;
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const addr = XLSX.utils.encode_cell({ r: rowIdx, c });
+          if (!ws[addr]) continue;
+          ws[addr].s = { font: { bold: true } };
+        }
+      }
+    }
     // Sheet names are already sanitised + de-duped by the lib.
     XLSX.utils.book_append_sheet(wb, ws, g.name);
   }

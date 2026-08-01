@@ -122,7 +122,7 @@ function dedupeSheetNames(grids: SheetGrid[]): SheetGrid[] {
       n++;
     }
     seen.add(candidate.toLowerCase());
-    return { name: candidate, rows: g.rows };
+    return { ...g, name: candidate };
   });
 }
 
@@ -205,35 +205,51 @@ function tieRecipes(
 
 // ── Profiles sheet ───────────────────────────────────────────────────────────
 
-const PROFILE_HEADER = [
-  "Brand",
-  "Flavor",
-  "Die Type",
-  "Sauce oz per pizza",
-  "Dough Recipe",
-  "Sauce Recipe",
-  "App 1 Type",
-  "App 1 oz per pizza",
-  "App 2 Type",
-  "App 2 oz per pizza",
-  "App 3 Type",
-  "App 3 oz per pizza",
-  "App 4 Type",
-  "App 4 oz per pizza",
-  "Pep 1 Type",
-  "Pep 1 Sticks",
-  "Pep 1 oz per pizza",
-  "Pep 2 Type",
-  "Pep 2 Sticks",
-  "Pep 2 oz per pizza",
-];
-
+/**
+ * Build the dynamic Profiles sheet header. Only emits columns for the
+ * applicator / pepperoni slots that are actually in use — a factory using
+ * 2 applicators and 1 pep type gets ~12 columns instead of always 20.
+ * Abbreviations are spelled out ("Applicator", "Pepperoni") so the sheet
+ * is readable without knowing the import format.
+ */
 function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
-  const rows: string[][] = [PROFILE_HEADER.slice()];
   const sorted = [...profiles].sort(
     (a, b) =>
       a.brand.localeCompare(b.brand) || a.flavor.localeCompare(b.flavor),
   );
+
+  // Scan to find the highest slot index that has at least one non-empty value
+  // across all exported profiles, so trailing empty columns are omitted.
+  let maxAppSlot = -1;
+  let maxPepSlot = -1;
+  for (const p of sorted) {
+    const apps = p.applicators ?? [];
+    for (let i = 0; i < apps.length; i++) {
+      if (text(apps[i]?.type)) maxAppSlot = Math.max(maxAppSlot, i);
+    }
+    const peps = (p.pepperonis ?? []).filter((pp) => text(pp.type));
+    if (peps.length > 0) maxPepSlot = Math.max(maxPepSlot, peps.length - 1);
+  }
+  const appSlots = maxAppSlot + 1; // 0 when no applicators used
+  const pepSlots = maxPepSlot + 1; // 0 when no peps used
+
+  // Build the header row for only the slots in use.
+  const header: string[] = [
+    "Brand",
+    "Flavor",
+    "Die Type",
+    "Sauce oz/pizza",
+    "Dough Recipe",
+    "Sauce Recipe",
+  ];
+  for (let i = 0; i < appSlots; i++) {
+    header.push(`Applicator ${i + 1} Type`, `Applicator ${i + 1} oz/pizza`);
+  }
+  for (let i = 0; i < pepSlots; i++) {
+    header.push(`Pepperoni ${i + 1} Type`, `Pepperoni ${i + 1} Sticks`, `Pepperoni ${i + 1} oz/pizza`);
+  }
+
+  const rows: string[][] = [header];
   for (const p of sorted) {
     const brand = text(p.brand);
     const flavor = text(p.flavor);
@@ -252,19 +268,19 @@ function buildProfilesGrid(profiles: ReadonlyArray<ExportProfile>): SheetGrid {
       text(p.doughRecipeName),
       text(p.sauceRecipeName),
     ];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < appSlots; i++) {
       const a = apps[i];
       const type = text(a?.type);
       row.push(type, type ? num(a?.ozPerPizza) : "");
     }
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < pepSlots; i++) {
       const pp = peps[i];
       const type = text(pp?.type);
       row.push(type, type ? num(pp?.sticks) : "", type ? num(pp?.ozPerPizza) : "");
     }
     rows.push(row);
   }
-  return { name: "Profiles", rows };
+  return { name: "Profiles", rows, boldRows: [0] };
 }
 
 // ── Recipe sheets ────────────────────────────────────────────────────────────
@@ -290,11 +306,13 @@ function buildRecipeGrid(
   ties: Map<string, RecipeTie>,
 ): SheetGrid {
   const rows: string[][] = [];
+  const boldRows: number[] = [];
   const sorted = [...recipes].sort((a, b) => a.name.localeCompare(b.name));
   for (const r of sorted) {
     const name = text(r.name);
     const ingredientRows = (r.rows ?? []).filter((row) => text(row.ingredient));
     if (!name || ingredientRows.length === 0) continue;
+    boldRows.push(rows.length); // mark the "Recipe: X" label row as bold
     rows.push([`Recipe: ${name}`]);
     const tie = ties.get(name.toLowerCase());
     if (tie) {
@@ -334,7 +352,7 @@ function buildRecipeGrid(
     }
     rows.push([]); // spacer between blocks
   }
-  return { name: sheetName, rows };
+  return { name: sheetName, rows, boldRows };
 }
 
 /**

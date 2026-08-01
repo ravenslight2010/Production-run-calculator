@@ -3125,7 +3125,15 @@ export function mergeSpecAliases(
 
 // ── Workbook → compact prompt text ───────────────────────────────────────────
 
-export type SheetGrid = { name: string; rows: string[][] };
+export type SheetGrid = {
+  name: string;
+  rows: string[][];
+  /**
+   * Zero-based row indices that the xlsx writer should render bold.
+   * Optional — callers that don't need styling omit it.
+   */
+  boldRows?: number[];
+};
 
 export type GridTextLimits = {
   maxSheets?: number;
