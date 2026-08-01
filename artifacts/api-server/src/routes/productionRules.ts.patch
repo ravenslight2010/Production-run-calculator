@@ -1,0 +1,59 @@
+--- a/artifacts/api-server/src/routes/productionRules.ts
++++ b/artifacts/api-server/src/routes/productionRules.ts
+@@ -4,6 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
+ import { db, productionRulesTable, type ProductionRuleRow } from "@workspace/db";
+ import { SaveProductionRulesBody, DeleteProductionRulesBody } from "@workspace/api-zod";
+ import { normalizeRule, type ProductionRule } from "@workspace/production-rules";
++import { logAuditEvent } from "./auditLogs";
+ import { requireCapability } from "../middlewares/requireCapability";
+ import { currentScope } from "../lib/requestScope";
+ 
+@@ -82,6 +83,7 @@ router.post(
+   "/production-rules",
+   requireCapability("edit-production-rules"),
+   async (req: Request, res: Response) => {
++    const actor = (req as any).user?.username || "unknown";
+     const parsed = SaveProductionRulesBody.safeParse(req.body);
+     if (!parsed.success) {
+       res.status(400).json({ error: "Invalid input" });
+@@ -125,6 +127,14 @@ router.post(
+       }
+       const rules = await listAll();
++      
++      // Log the audit event
++      await logAuditEvent(
++        currentScope(),
++        actor,
++        'production_rules_updated',
++        'production_rules',
++        { rule_count: byId.size }
++      );
++      
+       res.json({ rules });
+     } catch (err) {
+       req.log.error({ err }, "failed to save production rules");
+@@ -135,6 +145,7 @@ router.post(
+ router.delete(
+   "/production-rules",
+   requireCapability("edit-production-rules"),
+   async (req: Request, res: Response) => {
++    const actor = (req as any).user?.username || "unknown";
+     const parsed = DeleteProductionRulesBody.safeParse(req.body);
+     if (!parsed.success) {
+       res.status(400).json({ error: "Invalid input" });
+@@ -160,6 +171,14 @@ router.delete(
+       }
+       const rules = await listAll();
++      
++      // Log the audit event
++      await logAuditEvent(
++        currentScope(),
++        actor,
++        'production_rules_deleted',
++        'production_rules',
++        { deleted_ids: ids }
++      );
++      
+       res.json({ rules });
+     } catch (err) {
+       req.log.error({ err }, "failed to delete production rules");

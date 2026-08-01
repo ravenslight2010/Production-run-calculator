@@ -1,0 +1,55 @@
+--- a/artifacts/api-server/src/routes/sync.ts
++++ b/artifacts/api-server/src/routes/sync.ts
+@@ -1,6 +1,7 @@
+ import { Router, type IRouter, type Request, type Response } from "express";
+ import {
+   db,
++  auditLogsTable,
+   dailySyncTable,
+   dataResetTable,
+   brandProfilesTable,
+@@ -43,6 +44,7 @@
+ import { and, eq, gt, asc, sql } from "drizzle-orm";
+ import { currentScope, type Scope } from "../lib/requestScope";
+ import { protectRunValues } from "../lib/protectRunValues";
++import { logAuditEvent } from "./auditLogs";
+ import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
+ import { requireCapability } from "../middlewares/requireCapability";
+ 
+@@ -416,9 +418,28 @@ router.post(
+   "/sync/reset",
+   requireCapability("manage-staff"),
+   async (_req: Request, res: Response): Promise<void> => {
+     const scope = currentScope();
++    const actor = (_req as any).user?.username || "unknown";
+     const epoch = await db.transaction(async (tx) => {
+-      await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
++      const result = await tx
++        .delete(dailySyncTable)
++        .where(eq(dailySyncTable.scope, scope));
++      const deletedCount = result.count ?? 0;
++      
+       const [row] = await tx
+         .insert(dataResetTable)
+         .values({ scope, epoch: 1, resetAt: new Date() })
+@@ -428,9 +449,19 @@ router.post(
+         })
+         .returning();
+       return row?.epoch ?? 0;
+     });
++    
++    // Log the audit event
++    await logAuditEvent(
++      scope,
++      actor,
++      'factory_reset',
++      'daily_sync',
++      { deleted_days: deletedCount },
++      _req.ip,
++      _req.headers['user-agent'] as string | undefined
++    );
++    
+     broadcastReset(scope, epoch);
+     res.json({ ok: true, epoch });
+   },
+)

@@ -1,0 +1,3 @@
+// Add these exports to lib/db/src/schema/index.ts:
+export * from './auditLog';
+export * from './syncConflictLog';

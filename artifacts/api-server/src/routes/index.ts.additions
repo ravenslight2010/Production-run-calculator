@@ -1,0 +1,7 @@
+// Add these imports at the top of artifacts/api-server/src/routes/index.ts:
+import auditLogsRouter from './auditLogs';
+import { aiCostLimit } from '../middleware/costLimitMiddleware';
+
+// Add these route registrations in the main router setup:
+router.use(auditLogsRouter);
+router.use('/ai', aiCostLimit);

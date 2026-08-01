@@ -4,6 +4,8 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { enhancedErrorMessages } from "./middleware/errorMessagesEnhanced";
+import healthzRouter from "./routes/healthz";
 
 // CORS is scoped to known dev/preview origins plus any configured production
 // domains. The mobile app's expo-web preview is served from a separate
@@ -98,35 +100,13 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
+// Health check endpoint (Docker + load balancer ready)
+app.use(healthzRouter);
+
 app.use("/api", router);
 
-// Central JSON error handler. WITHOUT this, a thrown route error — or a
-// body-parser PayloadTooLargeError / JSON SyntaxError — falls through to
-// Express's DEFAULT handler, which responds with an HTML stack-trace page.
-// Every client parses error responses as JSON (`res.json().error`), so an HTML
-// body leaves them with only the bare status code and the real reason is lost:
-// a failed schedule import then surfaces as an undiagnosable "error 500" toast
-// with no cause. Return a JSON `{ error }` with an appropriate status and log
-// the underlying cause (with request correlation) so failures are debuggable.
-app.use((err: unknown, req: Request, res: Response, _next: NextFunction): void => {
-  const e = (err ?? {}) as { status?: number; statusCode?: number; type?: string; message?: string };
-  const status = typeof e.status === "number" ? e.status : typeof e.statusCode === "number" ? e.statusCode : 500;
-  // User-facing message. For known 4xx body-parser failures give a plain-language
-  // reason; never echo a raw 5xx message (could leak internal detail).
-  const message =
-    status === 413
-      ? "The data was too large to save. Try importing fewer days at once."
-      : e.type === "entity.parse.failed"
-        ? "The request body was not valid JSON."
-        : status >= 400 && status < 500 && typeof e.message === "string" && e.message
-          ? e.message
-          : "Something went wrong on the server.";
-  (req.log ?? logger).error(
-    { err, status, method: req.method, url: req.url?.split("?")[0] },
-    "request errored",
-  );
-  if (res.headersSent) return;
-  res.status(status).json({ error: message });
-});
+// Enhanced error handler: provides actionable messages for common failures.
+// Must be the LAST middleware registered so it catches all errors.
+app.use(enhancedErrorMessages);
 
 export default app;

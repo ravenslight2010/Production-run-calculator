@@ -1,0 +1,116 @@
+/**
+ * Example: How to wire tracing + resilience into an AI route.
+ * This shows how to integrate the new observability + resilience patterns.
+ */
+
+import { Router, Request, Response } from 'express';
+import { db, incidentsTable } from '@workspace/db';
+import { logger } from '../lib/logger';
+import { logAiMetric, extractTraceContext } from '../lib/tracing';
+import { callOpenAiJsonWithResilience } from '../lib/openAiClient';
+import { eq } from 'drizzle-orm';
+
+const router = Router();
+
+// Example: Cluster incidents with tracing + resilience
+router.post('/ai/cluster-incidents', async (req: Request, res: Response) => {
+  const trace = extractTraceContext(req);
+  const startMs = Date.now();
+  const { lookbackDays = 30 } = req.body as { lookbackDays?: number };
+
+  try {
+    // Fetch recent incidents
+    const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+    const incidents = await db
+      .select()
+      .from(incidentsTable)
+      .where(eq(incidentsTable.scope, (req as any).scope))
+      // Filter by cutoff...
+      ;
+
+    // Too few to cluster — return empty result
+    if (incidents.length < 3) {
+      logAiMetric(
+        {
+          endpoint: 'cluster-incidents',
+          model: 'gpt-4-turbo',
+          durationMs: Date.now() - startMs,
+          inputTokens: 0,
+          outputTokens: 0,
+          status: 'success',
+          metadata: { incidentCount: incidents.length, reason: 'too_few' },
+        },
+        req.log
+      );
+
+      res.json({
+        clusters: [],
+        totalIncidents: incidents.length,
+        note: 'Not enough incidents to cluster',
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    // Build prompt and call OpenAI with resilience (retry + circuit breaker)
+    const prompt = `Cluster these incidents: ${JSON.stringify(incidents)}`;
+
+    const aiResponse = await callOpenAiJsonWithResilience(
+      'You are an expert at root cause analysis. Cluster incidents by common patterns.',
+      prompt,
+      'gpt-4-turbo',
+      { maxTokens: 2048 }
+    );
+
+    const usage = aiResponse.usage;
+    const clusters = JSON.parse(aiResponse.choices[0]?.message?.content || '{}');
+
+    // Log success metrics
+    logAiMetric(
+      {
+        endpoint: 'cluster-incidents',
+        model: 'gpt-4-turbo',
+        durationMs: Date.now() - startMs,
+        inputTokens: usage?.prompt_tokens ?? 0,
+        outputTokens: usage?.completion_tokens ?? 0,
+        status: 'success',
+        metadata: {
+          incidentCount: incidents.length,
+          clusterCount: clusters.length ?? 0,
+        },
+      },
+      req.log
+    );
+
+    res.json({
+      clusters,
+      totalIncidents: incidents.length,
+      generatedAt: Date.now(),
+      aiGenerated: true,
+    });
+  } catch (err) {
+    // Log error metrics
+    logAiMetric(
+      {
+        endpoint: 'cluster-incidents',
+        model: 'gpt-4-turbo',
+        durationMs: Date.now() - startMs,
+        status: 'error',
+        errorCode: (err as any).code || 'unknown',
+        errorMessage: (err as any).message || String(err),
+      },
+      req.log
+    );
+
+    // Graceful degradation: return empty clusters instead of failing
+    req.log.error({ err, trace }, 'AI clustering failed, returning fallback');
+    res.json({
+      clusters: [],
+      totalIncidents: 0,
+      note: 'AI analysis unavailable, please try again later',
+      aiGenerated: false,
+    });
+  }
+});
+
+export default router;
