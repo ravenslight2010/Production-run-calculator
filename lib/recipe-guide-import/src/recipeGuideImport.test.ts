@@ -438,6 +438,65 @@ describe("parseDoughGuide — unmatched / invalid rows", () => {
   });
 });
 
+describe("parseDoughGuide — parenthetical commas inside flavor names", () => {
+  it("keeps a flavor with a comma inside parentheses as one name, not two fragments", () => {
+    // "Classic (Thin, Crispy)" is ONE flavor — the comma is inside parens and
+    // must not be treated as a flavor-list separator.
+    const rows = parseDoughGuide([grid(["Acme (Classic (Thin, Crispy)) = CRB Thin"])]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic (Thin, Crispy)"]);
+    expect(rows[0].doughRecipeName).toBe("CRB Thin");
+    expect(rows[0].brand).toBe("Acme");
+  });
+
+  it("does not silently drop a row whose only flavor contains a parenthetical comma", () => {
+    // Regression: the naive [^)]+ regex stops at the first ')' inside the parens
+    // and then fails to match \)\s*$ because more text follows, dropping the row.
+    const rows = parseDoughGuide([grid(["Acme (Classic (Thin, Crispy)) = CRB Thin"])]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("splits top-level commas while preserving commas inside parentheses", () => {
+    // "Classic (Thin, Crispy)" is one flavor; "Deluxe" is a second — the comma
+    // between them is at depth 0 so it IS a separator.
+    const rows = parseDoughGuide([
+      grid(["Acme (Classic (Thin, Crispy), Deluxe) = CRB Thick"]),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic (Thin, Crispy)", "Deluxe"]);
+    expect(rows[0].doughRecipeName).toBe("CRB Thick");
+  });
+
+  it("handles multiple flavors all with parenthetical commas", () => {
+    const rows = parseDoughGuide([
+      grid(["Acme (Classic (Thin, Crispy), Deluxe (Pan, Stuffed)) = CRB Thin"]),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual([
+      "Classic (Thin, Crispy)",
+      "Deluxe (Pan, Stuffed)",
+    ]);
+  });
+
+  it("preserves the raw source line when the flavor has a parenthetical comma", () => {
+    const cell = "Acme (Classic (Thin, Crispy)) = CRB Thin";
+    const rows = parseDoughGuide([grid([cell])]);
+    expect(rows[0].sourceLine).toBe(cell);
+  });
+
+  it("still produces null flavors for (all) even when other rows have parenthetical commas", () => {
+    const rows = parseDoughGuide([
+      grid([
+        "Acme (all) = CRB Thin",
+        "Acme (Classic (Thin, Crispy)) = CRB Thick",
+      ]),
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].flavors).toBeNull();
+    expect(rows[1].flavors).toEqual(["Classic (Thin, Crispy)"]);
+  });
+});
+
 // ─── matchGuideName ───────────────────────────────────────────────────────────
 
 describe("matchGuideName", () => {
