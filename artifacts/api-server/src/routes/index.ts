@@ -34,6 +34,7 @@ import supervisorPinRouter from "./supervisorPin";
 import dieTypesRouter from "./dieTypes";
 import dieLineDefaultsRouter from "./dieLineDefaults";
 import sandboxRouter from "./sandbox";
+import auditLogsRouter from "./auditLogs";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
 
@@ -91,5 +92,6 @@ router.use(supervisorPinRouter);
 router.use(dieTypesRouter);
 router.use(dieLineDefaultsRouter);
 router.use(sandboxRouter);
+router.use(auditLogsRouter);
 
 export default router;

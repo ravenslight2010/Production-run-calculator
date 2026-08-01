@@ -41,3 +41,5 @@ export * from "./ingredients";
 export * from "./dieTypes";
 export * from "./dieLineDefaults";
 export * from "./brandProfiles";
+export * from "./auditLog";
+export * from "./syncConflictLog";

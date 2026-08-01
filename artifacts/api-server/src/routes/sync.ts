@@ -39,10 +39,12 @@ import {
   productionRunsTable,
   qualityChecksTable,
   proactiveAlertSettingsTable,
+  auditLogsTable,
 } from "@workspace/db";
 import { and, eq, gt, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues } from "../lib/protectRunValues";
+import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
 
@@ -418,6 +420,7 @@ router.post(
   requireCapability("manage-staff"),
   async (_req: Request, res: Response): Promise<void> => {
     const scope = currentScope();
+    const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
       const [row] = await tx
@@ -430,6 +433,16 @@ router.post(
         .returning();
       return row?.epoch ?? 0;
     });
+    // Best-effort audit log — never fails the reset
+    void logAuditEvent(
+      scope,
+      actor,
+      "factory_reset",
+      "daily_sync",
+      { scope },
+      _req.ip,
+      _req.headers["user-agent"] as string | undefined,
+    );
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
   },

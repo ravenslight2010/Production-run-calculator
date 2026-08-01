@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db, productionRulesTable, type ProductionRuleRow } from "@workspace/db";
 import { SaveProductionRulesBody, DeleteProductionRulesBody } from "@workspace/api-zod";
 import { normalizeRule, type ProductionRule } from "@workspace/production-rules";
+import { logAuditEvent } from "./auditLogs";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 
@@ -124,6 +125,16 @@ router.post(
           });
       }
       const rules = await listAll();
+      const actor = (req as any).user?.username || "unknown";
+      await logAuditEvent(
+        currentScope(),
+        actor,
+        "production_rules_updated",
+        "production_rules",
+        { rule_count: byId.size },
+        req.ip,
+        req.headers["user-agent"] as string | undefined,
+      );
       res.json({ rules });
     } catch (err) {
       req.log.error({ err }, "failed to save production rules");
@@ -159,6 +170,16 @@ router.delete(
           );
       }
       const rules = await listAll();
+      const actor = (req as any).user?.username || "unknown";
+      await logAuditEvent(
+        currentScope(),
+        actor,
+        "production_rules_deleted",
+        "production_rules",
+        { deleted_ids: ids },
+        req.ip,
+        req.headers["user-agent"] as string | undefined,
+      );
       res.json({ rules });
     } catch (err) {
       req.log.error({ err }, "failed to delete production rules");
