@@ -41,11 +41,30 @@ function parseFlavors(raw: string): string[] | null {
   // "all varieties", "all other varieties", "all other 12" varieties", etc.
   if (/^all(\s+(other\s+)?(\d+["'"]?\s*)?(varieties|sizes?|flavors?|9"|12"))?$/i.test(t)) return null;
   if (/^all\s+other/i.test(t)) return null;
-  // Split by commas and & (ignore empty segments)
-  return t
-    .split(/[,&]/)
-    .map((f) => norm(f))
-    .filter(Boolean);
+  // Split by commas and & that are NOT inside balanced parentheses, then trim.
+  // A flavor like "Classic (9in, 12in)" must stay as one token.
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "(") {
+      depth++;
+      current += ch;
+    } else if (ch === ")") {
+      depth--;
+      current += ch;
+    } else if ((ch === "," || ch === "&") && depth === 0) {
+      const seg = norm(current);
+      if (seg) parts.push(seg);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  const last = norm(current);
+  if (last) parts.push(last);
+  return parts.length ? parts : [];
 }
 
 /**

@@ -266,6 +266,27 @@ describe("parseSauceGuide — parenthetical size qualifiers in flavor names", ()
     expect(rows[1].flavors).toEqual(["Deluxe (12in)"]);
     expect(rows[1].ozPerPizza).toBe(3.5);
   });
+
+  it("keeps a flavor with a comma inside parentheses as one name, not two fragments", () => {
+    // "Classic (9in, 12in)" must be ONE flavor — the comma is inside parens
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in, 12in) at 4oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic (9in, 12in)"]);
+    expect(rows[0].ozPerPizza).toBe(4);
+  });
+
+  it("splits top-level commas while preserving commas inside parentheses", () => {
+    // "Classic (9in, 12in)" is one flavor; "Deluxe" is a second — comma between
+    // them is at depth 0 so it IS a separator
+    const rows = parseSauceGuide(
+      "Brand uses Sauce on Classic (9in, 12in), Deluxe at 4oz",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].flavors).toEqual(["Classic (9in, 12in)", "Deluxe"]);
+    expect(rows[0].ozPerPizza).toBe(4);
+  });
 });
 
 describe("parseSauceGuide — unmatched / invalid rows", () => {
