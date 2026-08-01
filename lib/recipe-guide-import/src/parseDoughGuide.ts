@@ -29,6 +29,55 @@ export type DoughGuideRow = {
 const norm = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 
 /**
+ * Given a string that ends with ")", find the outermost matching "(" by
+ * walking backwards, and return { brand, inner } where brand is the text
+ * before the opening "(" (trimmed) and inner is the text between the outer
+ * parens.  Returns null if no balanced outer parens are found.
+ *
+ * Handles nested parens, e.g.:
+ *   "Acme (Classic (Thin, Crispy))"  →  brand="Acme", inner="Classic (Thin, Crispy)"
+ */
+function extractOuterParens(
+  s: string,
+): { brand: string; inner: string } | null {
+  if (!s.endsWith(")")) return null;
+  let depth = 0;
+  for (let i = s.length - 1; i >= 0; i--) {
+    if (s[i] === ")") depth++;
+    else if (s[i] === "(") {
+      depth--;
+      if (depth === 0) {
+        const brand = s.slice(0, i).trim();
+        const inner = s.slice(i + 1, s.length - 1);
+        return { brand, inner };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Split a comma-separated flavor list at depth-0 commas only.
+ * Commas that appear inside balanced parentheses are NOT treated as
+ * separators, so "Classic (Thin, Crispy)" stays as one token.
+ */
+function splitOnTopLevelCommas(s: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")") depth--;
+    else if (s[i] === "," && depth === 0) {
+      parts.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
+/**
  * Parse the Pizza-to-Dough workbook into structured rows.
  * Accepts an array of SheetGrids; scans every sheet, picks rows that match
  * the "Brand (flavors) = Recipe" format.
@@ -60,18 +109,25 @@ export function parseDoughGuide(grids: ReadonlyArray<SheetGrid>): DoughGuideRow[
       if (!recipeName) continue;
 
       // Extract brand and flavor list: "Brand (f1, f2)" or "Brand 7" (all)"
-      const parenMatch = leftPart.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
-      if (!parenMatch) continue;
+      //
+      // The flavor list may contain nested parentheses, e.g.:
+      //   "Acme (Classic (Thin, Crispy)) = Recipe"
+      // The naive [^)]+ regex would stop at the first ')' and either
+      // mismatch or drop the row entirely.  Instead, find the outermost
+      // '(' by walking backwards from the end of leftPart (which ends with ')').
+      const extracted = extractOuterParens(leftPart);
+      if (!extracted) continue;
 
-      const brandRaw = parenMatch[1].trim();
-      const flavorPart = norm(parenMatch[2]);
+      const brandRaw = extracted.brand;
+      const flavorPart = norm(extracted.inner);
 
-      // Split on commas only — "&" in this file is part of flavor names
-      // (e.g. "S&P", "Alfredo Chicken & Spinach"), never a list separator.
+      // Split on commas at depth 0 only — "&" in this file is part of flavor
+      // names (e.g. "S&P", "Alfredo Chicken & Spinach"), never a list separator.
+      // Commas inside nested parens (e.g. "Classic (Thin, Crispy)") must be
+      // treated as part of the flavor name, not as list separators.
       const flavors = /^all$/i.test(flavorPart)
         ? null
-        : flavorPart
-            .split(",")
+        : splitOnTopLevelCommas(flavorPart)
             .map((f) => norm(f))
             .filter(Boolean);
 
