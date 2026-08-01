@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { createHash } from "crypto";
 import {
   db,
   dailySyncTable,
@@ -40,6 +41,7 @@ import {
   qualityChecksTable,
   proactiveAlertSettingsTable,
   auditLogsTable,
+  syncConflictLogsTable,
 } from "@workspace/db";
 import { and, eq, gt, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
@@ -208,35 +210,165 @@ function canonicalizePepNames(merged: unknown): void {
   }
 }
 
+// ── Sync conflict detection ──────────────────────────────────────────────────
+// Compares incoming vs merged payloads to find fields where the protective
+// merge kept the stored value instead of the incoming one. Conflicts include:
+//   - run values that were overridden (blank-over-populated or stale-stamp)
+//   - runs appended from the stored row that the push omitted (run-list union)
+// Returns null when no merge protection was actually applied.
+function shortHash(v: unknown): string {
+  return createHash("sha256")
+    .update(JSON.stringify(v) ?? "")
+    .digest("hex")
+    .slice(0, 16);
+}
+
+interface ConflictInfo {
+  fieldsWithConflicts: string[];
+  conflictCount: number;
+  clientStateHash: string;
+  serverStateHash: string;
+  mergedStateHash: string;
+}
+
+function detectConflicts(
+  incoming: unknown,
+  existing: unknown,
+  merged: unknown,
+): ConflictInfo | null {
+  if (
+    !incoming || typeof incoming !== "object" ||
+    !existing || typeof existing !== "object" ||
+    !merged || typeof merged !== "object"
+  ) {
+    return null;
+  }
+
+  const inObj  = incoming as Record<string, unknown>;
+  const merObj = merged   as Record<string, unknown>;
+
+  const fields: string[] = [];
+
+  // Run values that the merge overrode (blank-over-populated or stale stamp).
+  const inVals  = (inObj.runValues  && typeof inObj.runValues  === "object" && !Array.isArray(inObj.runValues))  ? inObj.runValues  as Record<string, unknown> : {};
+  const merVals = (merObj.runValues && typeof merObj.runValues === "object" && !Array.isArray(merObj.runValues)) ? merObj.runValues as Record<string, unknown> : {};
+  for (const id of Object.keys(inVals)) {
+    if (JSON.stringify(inVals[id]) !== JSON.stringify(merVals[id])) {
+      fields.push(`runValues:${id}`);
+    }
+  }
+
+  // Index incoming run objects by id so we can compare against the merged list.
+  const inRunMap = new Map<string, unknown>();
+  for (const r of (Array.isArray((inObj.dayState as any)?.runs)
+    ? (inObj.dayState as any).runs as unknown[]
+    : [])
+  ) {
+    if (r && typeof r === "object") {
+      const id = (r as Record<string, unknown>).id;
+      if (typeof id === "string" && id) inRunMap.set(id, r);
+    }
+  }
+
+  // Walk merged run list to find two kinds of protective outcomes:
+  //   1. Appended runs: present in merged but absent from incoming (server rescued them).
+  //   2. Meta-LWW overrides: same id in both but objects differ, meaning the stored
+  //      copy had a strictly-newer metaUpdatedAt and replaced the incoming one.
+  const merRuns: unknown[] = Array.isArray((merObj.dayState as any)?.runs)
+    ? (merObj.dayState as any).runs as unknown[]
+    : [];
+  let appendedCount = 0;
+  for (const r of merRuns) {
+    if (!r || typeof r !== "object") continue;
+    const id = (r as Record<string, unknown>).id;
+    if (typeof id !== "string" || !id) continue;
+    if (!inRunMap.has(id)) {
+      appendedCount++;
+    } else if (JSON.stringify(r) !== JSON.stringify(inRunMap.get(id))) {
+      // Stored run object replaced the incoming one via the metaUpdatedAt LWW.
+      fields.push(`dayState.runs.meta:${id}`);
+    }
+  }
+  if (appendedCount > 0) {
+    fields.push(`dayState.runs:appended(${appendedCount})`);
+  }
+
+  if (fields.length === 0) return null;
+
+  return {
+    fieldsWithConflicts: fields,
+    conflictCount: fields.length,
+    clientStateHash: shortHash(incoming),
+    serverStateHash: shortHash(existing),
+    mergedStateHash: shortHash(merged),
+  };
+}
+
+// Best-effort: insert a sync_conflict_logs row when the protective merge
+// actually changed the incoming payload. Never throws — a logging failure
+// must never block the sync response.
+async function recordSyncConflict(
+  scope: Scope,
+  date: string,
+  info: ConflictInfo,
+  clientIp: string | undefined,
+): Promise<void> {
+  try {
+    await db.insert(syncConflictLogsTable).values({
+      scope,
+      date,
+      fieldsWithConflicts: info.fieldsWithConflicts,
+      conflictCount: info.conflictCount,
+      resolution: "additive-union",
+      clientStateHash: info.clientStateHash,
+      serverStateHash: info.serverStateHash,
+      mergedStateHash: info.mergedStateHash,
+      clientIp: clientIp ?? null,
+    });
+  } catch {
+    // best-effort: log failures must never break the sync write
+  }
+}
+
 async function upsertProtected(
   date: string,
   scope: Scope,
   payload: unknown,
   clientTodayDate: string,
+  clientIp?: string,
 ): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await db.transaction(async (tx) => {
+      let existingData: unknown = undefined;
+      const merged = await db.transaction(async (tx) => {
         const [existing] = await tx
           .select()
           .from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
-        const merged = protectRunValues(payload, existing?.data);
-        canonicalizePepNames(merged);
-        applyResetBoundary(merged, existing?.data, date === clientTodayDate);
+        existingData = existing?.data;
+        const m = protectRunValues(payload, existing?.data);
+        canonicalizePepNames(m);
+        applyResetBoundary(m, existing?.data, date === clientTodayDate);
         if (existing) {
           await tx
             .update(dailySyncTable)
-            .set({ data: merged as any, updatedAt: new Date() })
+            .set({ data: m as any, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
         } else {
           await tx
             .insert(dailySyncTable)
-            .values({ date, scope, data: merged as any, updatedAt: new Date() });
+            .values({ date, scope, data: m as any, updatedAt: new Date() });
         }
-        return merged;
+        return m;
       });
+      // Conflict detection and logging happen outside the transaction so a
+      // logging failure can never roll back the actual sync write.
+      const conflict = detectConflicts(payload, existingData, merged);
+      if (conflict) {
+        void recordSyncConflict(scope, date, conflict, clientIp);
+      }
+      return merged;
     } catch (e) {
       // A concurrent first writer created the row between our select and insert;
       // retry so we merge against it rather than failing or clobbering.
@@ -292,7 +424,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic read-merge-write so an incoming empty-with-real-stamp push can't wipe a
   // populated stored run value (see upsertProtected / protectRunValues).
-  const merged = await upsertProtected(today, scope, payload, today);
+  const merged = await upsertProtected(today, scope, payload, today, req.ip);
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   broadcast(merged, senderId, scope, today);
@@ -388,7 +520,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic per-run protective merge (see /sync/today): an empty run value can't
   // clobber a populated stored one on scheduled days either.
-  const merged = await upsertProtected(date, scope, payload, clientToday(req));
+  const merged = await upsertProtected(date, scope, payload, clientToday(req), req.ip);
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (date === clientToday(req)) {

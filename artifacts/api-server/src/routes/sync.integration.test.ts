@@ -19,6 +19,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
 
 let adminPool: pg.Pool;
@@ -58,6 +59,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
+  syncConflictLogsTable = dbMod.syncConflictLogsTable;
   usersTable = dbMod.usersTable;
 
   const app: Express = express();
@@ -101,7 +103,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${syncConflictLogsTable}, ${usersTable} RESTART IDENTITY CASCADE`);
   await db.insert(usersTable).values([{ id: USER, username: "user", passwordHash: "x" }]);
   // Three consecutive dates well clear of any real "today" so the assertions
   // don't depend on when the suite runs.
@@ -504,6 +506,119 @@ describe("/sync/events — date-scoped broadcasts", () => {
     ctrl.abort();
     await Promise.allSettled([p]);
     expect(events).not.toContain("future-importer");
+  });
+});
+
+describe("/sync — conflict logging to sync_conflict_logs", () => {
+  // Each protective merge outcome must write a row to sync_conflict_logs so
+  // managers can detect whether offline-first merges are converging or
+  // accumulating drift over time.
+  const DATE = "2030-09-01";
+  function put(payload: unknown) {
+    return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+  }
+  async function conflictRows() {
+    return db.select().from(syncConflictLogsTable);
+  }
+
+  it("inserts a conflict row when a blank-over-populated run value is rejected", async () => {
+    // Seed a populated run value, then push a blank value (same stamp) — the
+    // merge keeps the stored value. A conflict row must be written.
+    await put({
+      dayState: { runs: [{ id: "r1", brand: "A", flavor: "B" }], resetAt: 1000 },
+      runValues: { r1: { casesNeeded: 120 } },
+      runValuesUpdatedAt: { r1: 1000 },
+    });
+    await put({
+      dayState: { runs: [{ id: "r1", brand: "A", flavor: "B" }], resetAt: 1000 },
+      runValues: { r1: {} },
+      runValuesUpdatedAt: { r1: 1000 },
+    });
+    // recordSyncConflict is fire-and-forget (void); give the background insert
+    // a moment to commit before querying.
+    await new Promise((r) => setTimeout(r, 150));
+    const rows = await conflictRows();
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    const last = rows[rows.length - 1];
+    expect(last.scope).toBe("live");
+    expect(last.date).toBe(DATE);
+    expect(last.conflictCount).toBeGreaterThan(0);
+    expect(last.fieldsWithConflicts).toContain("runValues:r1");
+    expect(last.resolution).toBe("additive-union");
+    expect(last.clientStateHash).toBeTruthy();
+    expect(last.serverStateHash).toBeTruthy();
+    expect(last.mergedStateHash).toBeTruthy();
+  });
+
+  it("inserts a conflict row when a stored run is appended to the merge", async () => {
+    // Seed two runs. Push a payload containing only one — the server must
+    // preserve both and log the appended run as a conflict.
+    const run = (id: string) => ({ id, brand: "X", flavor: id });
+    await put({
+      dayState: { runs: [run("a"), run("b")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 } },
+      runValuesUpdatedAt: { a: 1, b: 1 },
+    });
+    const beforeCount = (await conflictRows()).length;
+    await put({
+      dayState: { runs: [run("a")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { a: 1 },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const rows = await conflictRows();
+    expect(rows.length).toBe(beforeCount + 1);
+    const last = rows[rows.length - 1];
+    expect(last.fieldsWithConflicts.some((f) => f.startsWith("dayState.runs:appended"))).toBe(true);
+  });
+
+  it("inserts a conflict row when the stored run object wins the metaUpdatedAt LWW", async () => {
+    // Seed a run with a high metaUpdatedAt (simulating a started run). Push an
+    // older copy of the same run — the server must keep the newer stored object.
+    const run = (id: string, meta: number, status?: string) => ({
+      id, brand: "Y", flavor: "Z", metaUpdatedAt: meta, ...(status ? { status } : {}),
+    });
+    await put({
+      dayState: { runs: [run("r1", 5000, "started")], resetAt: 1000 },
+      runValues: { r1: { casesNeeded: 50 } },
+      runValuesUpdatedAt: { r1: 1 },
+    });
+    const beforeCount = (await conflictRows()).length;
+    // Push a STALE copy of r1 (lower metaUpdatedAt) — stored version must win.
+    await put({
+      dayState: { runs: [run("r1", 100)], resetAt: 1000 },
+      runValues: { r1: { casesNeeded: 50 } },
+      runValuesUpdatedAt: { r1: 1 },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const rows = await conflictRows();
+    expect(rows.length).toBe(beforeCount + 1);
+    const last = rows[rows.length - 1];
+    expect(last.fieldsWithConflicts.some((f) => f.startsWith("dayState.runs.meta:"))).toBe(true);
+  });
+
+  it("does NOT insert a conflict row for a clean push with no protective overrides", async () => {
+    // A first push to a new date has nothing to protect against — no conflict row.
+    const D = "2030-09-02";
+    const beforeCount = (await conflictRows()).length;
+    await fetch(`${baseUrl}/api/sync/today?today=${D}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "c1",
+        payload: {
+          dayState: { runs: [{ id: "r1", brand: "A", flavor: "B" }], resetAt: 1000 },
+          runValues: { r1: { casesNeeded: 50 } },
+          runValuesUpdatedAt: { r1: 1 },
+        },
+      }),
+    });
+    const rows = await conflictRows();
+    expect(rows.length).toBe(beforeCount); // no new row
   });
 });
 
