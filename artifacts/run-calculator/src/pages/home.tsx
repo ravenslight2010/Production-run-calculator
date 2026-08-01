@@ -8360,17 +8360,26 @@ export default function Home() {
     moveRecipePresetKey(loadCheeseRecipePresets, saveCheeseRecipePresets, oldName, trimmed);
     tombstoneDeleted("mixRecipeNames", oldName);
     clearDeleted("mixRecipeNames", trimmed);
+    // Fan out to saved profiles: any profile slot referencing the old mix name
+    // (app1Type–app4Type) gets rewritten to the new name so "Recipe Setup Needed"
+    // warnings and stale run setups don't linger after a mix rename.
+    rewriteAppTypeInProfiles(oldName, trimmed);
     schedulePush(dayStateRef.current);
-    // Learn the rename as a spec-import alias (appType blend namespace, brand
-    // scoped when the renamed mix has a server pool row) so a re-imported
-    // workbook maps the old name onto the renamed mix instead of resurrecting
-    // it. Best-effort, fire-and-forget.
+    // Rename server mix row + learn spec-import alias. Look up the old row by
+    // its current (pre-rename) name so we capture the brand for alias scoping,
+    // then update the server name field and learn the appType alias. Best-effort.
     void (async () => {
       let brand: string | undefined;
       try {
-        brand = (await fetchMixes()).find(
-          (m) => m.name.trim().toLowerCase() === trimmed.toLowerCase(),
-        )?.brand?.trim() || undefined;
+        const mixes = await fetchMixes();
+        const row = mixes.find(
+          (m) => m.name.trim().toLowerCase() === oldName.trim().toLowerCase(),
+        );
+        brand = row?.brand?.trim() || undefined;
+        if (row) {
+          const saved = await saveMixes([{ ...row, name: trimmed }]);
+          cycleCountQc.setQueryData(["mixes"], saved);
+        }
       } catch {}
       await learnRecipeNameChangeAliases("mixes", [oldName], trimmed, brand);
     })().catch(() => {});

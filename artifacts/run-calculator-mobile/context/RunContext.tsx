@@ -78,6 +78,9 @@ import { collectMergeAliases } from "@workspace/merge-suggest";
 import { moveEntries } from "@workspace/schedule-move";
 import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type MergeSuggestCategory } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
+import { fetchMixes, saveMixes } from "./mixes";
+import { saveSpecImportAliases } from "./specImportAliases";
+import type { SpecImportAlias } from "@workspace/spec-import";
 import { useQuery } from "@tanstack/react-query";
 import {
   buildIngredientIndex,
@@ -3522,15 +3525,20 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           copy[k === oldName ? n : k] = v;
         }
         // Fan out: rewrite recipe name references in all saved profiles so that
-        // a renamed dough/sauce/cheese recipe doesn't leave stale pointers behind
-        // (which causes "Recipe Setup Needed" warnings and re-import mismatches).
+        // a renamed recipe doesn't leave stale pointers behind (which causes
+        // "Recipe Setup Needed" warnings and re-import mismatches).
+        // Mix renames update app1Type–app4Type (the applicator type fields where
+        // mix names live); dough/sauce/cheese update their dedicated recipe-name
+        // fields.
         const brandProfiles = { ...prev.brandProfiles };
         const profileFields =
           kind === "dough"
             ? ["doughRecipeName"]
-            : kind === "sauce"
+            : kind === "frontline"
               ? ["frontlineRecipeName"]
-              : ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"];
+              : kind === "mix"
+                ? ["app1Type", "app2Type", "app3Type", "app4Type"]
+                : ["app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"];
         for (const key of Object.keys(brandProfiles)) {
           const prof = brandProfiles[key] as Record<string, unknown>;
           let changed = false;
@@ -3552,6 +3560,29 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persist(next);
         return next;
       });
+      // For mix renames: rename the server mix row (so the DB name stays current)
+      // and learn a spec-import alias so re-importing the premix workbook maps
+      // the old name onto the renamed mix. Best-effort, fire-and-forget.
+      if (kind === "mix" && n && n !== oldName) {
+        void (async () => {
+          let brand: string | undefined;
+          try {
+            const mixes = await fetchMixes();
+            const row = mixes.find(
+              (m) => m.name.trim().toLowerCase() === oldName.trim().toLowerCase(),
+            );
+            brand = row?.brand?.trim() || undefined;
+            if (row) await saveMixes([{ ...row, name: n }]);
+          } catch {}
+          try {
+            const aliases: SpecImportAlias[] = [
+              { kind: "appType", externalName: oldName.trim(), canonicalName: n, context: null },
+              ...(brand ? [{ kind: "appType", externalName: oldName.trim(), canonicalName: n, context: brand } as SpecImportAlias] : []),
+            ];
+            await saveSpecImportAliases(aliases);
+          } catch {}
+        })().catch(() => {});
+      }
     },
     [persist],
   );
