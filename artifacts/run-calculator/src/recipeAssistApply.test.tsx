@@ -26,11 +26,8 @@
 //  4. Once the 6s window elapses the Undo affordance is gone and the change is
 //     permanent (UNDO_WINDOW_MS is real and identical across platforms).
 
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import * as React from "react";
 
 import { SuggestionCard as WebSuggestionCard } from "./components/AssistantTab";
@@ -46,88 +43,6 @@ type SuggestionCardFn = (props: {
   applyTargets: { id: string; label: string }[];
   defaultTargetId: string;
 }) => React.ReactElement | null;
-
-// ── Mobile component loader (strip-imports -> transpile-to-CJS -> evaluate) ────
-// The mobile copy lives behind a React Native / Expo import graph that can't load
-// in node. We strip its imports, transpile to CommonJS, and evaluate the result
-// in a `new Function` scope that INJECTS the test's own React (the SAME instance
-// @testing-library/react renders with — a second copy would break the hook
-// dispatcher) plus a prelude of tiny host-element stubs standing in for the React
-// Native primitives and custom UI the stripped imports used to provide. Only the
-// handful of symbols SuggestionCard renders with are stubbed; everything else is
-// referenced only inside functions this test never calls, so it stays a harmless
-// free identifier under strict mode.
-const here = path.dirname(fileURLToPath(import.meta.url));
-const MOBILE_FILE = path.resolve(
-  here,
-  "../../../_archived/mobile/app/(tabs)/assistant.tsx",
-);
-
-// Prelude of stubs evaluated in the module scope. React is injected separately so
-// the component shares this test's React instance. The stubs render plain host
-// elements jsdom understands: View/Card -> div, Text -> span, Button -> a real
-// <button> wired to onPress so fireEvent.click drives it, and the rest -> nothing.
-const STUB_PRELUDE = `
-const FONTS = new Proxy({}, { get: () => "System" });
-const StyleSheet = { create: (s) => s, flatten: (s) => s, hairlineWidth: 1 };
-const View = (p) => React.createElement("div", null, p && p.children);
-const ScrollView = (p) => React.createElement("div", null, p && p.children);
-const Pressable = (p) => React.createElement("div", { onClick: p && p.onPress }, p && p.children);
-const Text = (p) => React.createElement("span", null, p && p.children);
-const TextInput = () => null;
-const ActivityIndicator = () => null;
-const Feather = () => null;
-const ReviewBadge = () => null;
-const Card = (p) => React.createElement("div", null, p && p.children);
-const SelectField = (p) =>
-  React.createElement("div", { "data-testid": "select-field" }, p && p.label);
-const Button = (p) =>
-  React.createElement(
-    "button",
-    { onClick: p && p.disabled ? undefined : p && p.onPress, disabled: !!(p && p.disabled) },
-    p && p.label,
-  );
-const useColors = () => ({
-  background: "#000",
-  primary: "#111",
-  foreground: "#222",
-  mutedForeground: "#333",
-  card: "#444",
-  border: "#555",
-  muted: "#666",
-});
-`;
-
-function loadMobileSuggestionCard(): SuggestionCardFn {
-  const ts = require("typescript") as typeof import("typescript");
-  const raw = fs.readFileSync(MOBILE_FILE, "utf8");
-  // Drop every `import ... from "...";` (incl. multiline + `import type`). The
-  // symbols they provided come from STUB_PRELUDE or the injected React.
-  const withoutImports = raw.replace(/import[\s\S]*?from\s*['"][^'"]*['"]\s*;?/g, "");
-  const { outputText } = ts.transpileModule(STUB_PRELUDE + withoutImports, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      jsx: ts.JsxEmit.React,
-      isolatedModules: true,
-    },
-  });
-  const factory = new Function("exports", "require", "React", outputText);
-  const mod: { SuggestionCard?: SuggestionCardFn } = {};
-  factory(
-    mod,
-    () => ({}),
-    React,
-  );
-  if (!mod.SuggestionCard) throw new Error("mobile SuggestionCard export not found");
-  return mod.SuggestionCard;
-}
-
-let MobileSuggestionCard: SuggestionCardFn;
-
-beforeAll(() => {
-  MobileSuggestionCard = loadMobileSuggestionCard();
-});
 
 // ── A representative run's recipe store + the real apply contract ─────────────
 // Stands in for the run-data write path (web applyRecipeSuggestion in pages/home
@@ -268,4 +183,4 @@ function defineSuite(label: string, getCard: () => SuggestionCardFn) {
 }
 
 defineSuite("web", () => WebSuggestionCard as unknown as SuggestionCardFn);
-defineSuite("mobile", () => MobileSuggestionCard);
+
