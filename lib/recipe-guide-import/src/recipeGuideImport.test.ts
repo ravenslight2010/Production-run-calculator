@@ -243,9 +243,17 @@ describe("parseDoughGuide — basic parsing", () => {
     });
   });
 
-  it("accepts ampersand-separated flavors", () => {
+  it("treats ampersand as part of a flavor name, not a separator", () => {
+    // In the real dough guide file, & appears inside flavor names (e.g. "S&P",
+    // "Alfredo Chicken & Spinach") — it is never used as a list separator.
+    // Only commas separate flavors.
     const rows = parseDoughGuide([grid(["Acme (Classic & Deluxe) = CRB Recipe"])]);
-    expect(rows[0].flavors).toEqual(["Classic", "Deluxe"]);
+    expect(rows[0].flavors).toEqual(["Classic & Deluxe"]);
+  });
+
+  it("splits flavors on commas even when names contain ampersands", () => {
+    const rows = parseDoughGuide([grid(["Acme (S&P, Meat Lovers) = CRB Recipe"])]);
+    expect(rows[0].flavors).toEqual(["S&P", "Meat Lovers"]);
   });
 
   it("preserves the raw source line", () => {

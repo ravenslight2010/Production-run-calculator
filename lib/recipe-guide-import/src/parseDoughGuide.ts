@@ -44,12 +44,19 @@ export function parseDoughGuide(grids: ReadonlyArray<SheetGrid>): DoughGuideRow[
       if (/^pizza\s+(to\s+)?dough/i.test(cell)) continue;
 
       // Pattern: "Brand (flavor list) = Recipe Name"
-      // Split on " = " (with spaces) at first occurrence
-      const eqIdx = cell.indexOf(" = ");
-      if (eqIdx < 0) continue;
+      //
+      // The file is inconsistent about whitespace around "=":
+      //   "Aldo's (all) = Aldo's Recipe"   ← space on both sides  (most rows)
+      //   "SMD (all)= CRB Recipe"          ← no space before =
+      //
+      // Strategy: require the left side to end with ")" then tolerate any
+      // amount of whitespace around the "=".  This avoids splitting on "="
+      // inside a recipe name like "Malted Barley Recipe (Thick)".
+      const splitMatch = cell.match(/^(.+\))\s*=\s*(.+)$/);
+      if (!splitMatch) continue;
 
-      const leftPart = cell.slice(0, eqIdx).trim();
-      const recipeName = cell.slice(eqIdx + 3).trim();
+      const leftPart = splitMatch[1].trim();
+      const recipeName = splitMatch[2].trim();
       if (!recipeName) continue;
 
       // Extract brand and flavor list: "Brand (f1, f2)" or "Brand 7" (all)"
@@ -59,10 +66,12 @@ export function parseDoughGuide(grids: ReadonlyArray<SheetGrid>): DoughGuideRow[
       const brandRaw = parenMatch[1].trim();
       const flavorPart = norm(parenMatch[2]);
 
+      // Split on commas only — "&" in this file is part of flavor names
+      // (e.g. "S&P", "Alfredo Chicken & Spinach"), never a list separator.
       const flavors = /^all$/i.test(flavorPart)
         ? null
         : flavorPart
-            .split(/[,&]/)
+            .split(",")
             .map((f) => norm(f))
             .filter(Boolean);
 
