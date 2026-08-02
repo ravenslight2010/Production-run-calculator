@@ -16403,28 +16403,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <Maximize2 className="w-3 h-3" />
                   </button>
                 )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setTemplateSaveMode(false); setTemplateNameInput(""); setShowTemplatesDialog(true); }}
-                  title="Run templates — save or load run settings"
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  <Bookmark className="w-3 h-3" />
-                  <span className="hidden sm:inline">Templates</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={copyRun}
-                  disabled={dayState.runs.length >= MAX_RUNS}
-                  title="Duplicate this run's settings into a new run"
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  Copy
-                </Button>
                 <button
                   type="button"
                   onClick={addRun}
