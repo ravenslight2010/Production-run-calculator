@@ -1,5 +1,6 @@
 import { AiSuggestMergesBody } from "@workspace/api-zod";
 import { sanitizeMergeSuggestions, type MergeSuggestion } from "@workspace/merge-suggest";
+import { type AiCorrection } from "@workspace/ai-memory";
 import * as z from "zod";
 
 // Bounds so a single request can't blow up cost/latency. Mirrors the photo /
@@ -67,6 +68,57 @@ export function validateSuggestMergesBody(body: unknown): SuggestMergesValidatio
 // degenerate groups, dedupes, and bounds counts. Never throws.
 export function sanitizeSuggestMerges(raw: unknown, names: string[]): MergeSuggestion[] {
   return sanitizeMergeSuggestions(raw, names);
+}
+
+// Post-filter: remove any source→target pair that already has a matching
+// correction in the DB. The AI is told about known pairs in the prompt, but
+// this deterministic check guarantees they never leak through regardless of
+// model behaviour. Works case-insensitively. Sources with a known correction
+// are dropped from their group; groups with no remaining sources are dropped
+// entirely.
+export function filterKnownMerges(
+  suggestions: MergeSuggestion[],
+  corrections: AiCorrection[],
+): MergeSuggestion[] {
+  if (corrections.length === 0) return suggestions;
+  // Build a Set of "from\x00to" (lowercased) for O(1) lookup.
+  const knownPairs = new Set<string>();
+  for (const c of corrections) {
+    knownPairs.add(`${c.fromText.toLowerCase()}\x00${c.toText.toLowerCase()}`);
+  }
+  const filtered: MergeSuggestion[] = [];
+  for (const s of suggestions) {
+    const remainingSources = s.sources.filter(
+      (src) => !knownPairs.has(`${src.toLowerCase()}\x00${s.target.toLowerCase()}`),
+    );
+    if (remainingSources.length > 0) {
+      filtered.push(
+        remainingSources.length === s.sources.length ? s : { ...s, sources: remainingSources },
+      );
+    }
+  }
+  return filtered;
+}
+
+// Build a compact "ALREADY KNOWN MERGES" note to prepend to the prompt.
+// Lists the source→target pairs from corrections whose names appear in the
+// current name list, so the model can skip them and focus on genuinely new
+// candidates. Returns an empty string when no corrections are relevant (so
+// the prompt is unchanged and no tokens are wasted).
+export function buildKnownPairsNote(
+  corrections: AiCorrection[],
+  names: string[],
+): string {
+  const nameSet = new Set(names.map((n) => n.toLowerCase()));
+  const relevant = corrections.filter(
+    (c) => nameSet.has(c.fromText.toLowerCase()) && nameSet.has(c.toText.toLowerCase()),
+  );
+  if (relevant.length === 0) return "";
+  const lines = relevant.map((c) => `  - "${c.fromText}" → "${c.toText}"`);
+  return (
+    "ALREADY-KNOWN MERGES (these pairs are already confirmed — do not re-propose them):\n" +
+    lines.join("\n")
+  );
 }
 
 // Per-category wording for the "what kind of thing are these names" + "what

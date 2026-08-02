@@ -63,6 +63,8 @@ import {
 import { recipeTargets } from "@workspace/spec-import";
 import {
   buildSuggestMergesPrompt,
+  buildKnownPairsNote,
+  filterKnownMerges,
   sanitizeSuggestMerges,
   validateSuggestMergesBody,
 } from "./aiSuggestMerges";
@@ -2144,7 +2146,19 @@ router.post(
     }
 
     const { system, user } = buildSuggestMergesPrompt(validation.data);
-    const userPrompt = await groundPromptWithMemory(req.log, user, {
+
+    // Load corrections now so we can (a) add a prompt hint listing already-
+    // known pairs (saves tokens, helps the model skip them) and (b) apply a
+    // deterministic post-filter after the AI responds that guarantees known
+    // pairs are never returned regardless of model behaviour.
+    const corrections = await loadCorrections(req.log);
+    const knownPairsNote = buildKnownPairsNote(corrections, validation.data.names);
+    const userWithHint = knownPairsNote ? `${user}\n\n${knownPairsNote}` : user;
+
+    // groundPromptWithMemory will also append the full corrections block
+    // (facility memory + all confirmed name equivalences), so the model sees
+    // both the targeted "skip these" note AND the wider corrections context.
+    const userPrompt = await groundPromptWithMemory(req.log, userWithHint, {
       correctionDomains: ["ingredient", "die"],
     });
 
@@ -2177,7 +2191,12 @@ router.post(
     }
     const raw: unknown = result.raw;
 
-    const suggestions = sanitizeSuggestMerges(raw, validation.data.names);
+    // Deterministic post-filter: drop any source→target pair that already has
+    // a confirmed correction, so known renames never re-appear as suggestions.
+    const suggestions = filterKnownMerges(
+      sanitizeSuggestMerges(raw, validation.data.names),
+      corrections,
+    );
     const note =
       raw && typeof raw === "object" && typeof (raw as { note?: unknown }).note === "string"
         ? (raw as { note: string }).note.trim().slice(0, 500)
