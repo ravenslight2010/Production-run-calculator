@@ -421,7 +421,6 @@ import {
   Blend,
   ClipboardCheck,
   Users,
-  ArrowRightLeft,
   Truck,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
@@ -6814,9 +6813,8 @@ export default function Home() {
         }
       }
 
-      // Templates are no longer reconciled from the sync payload — they are now
-      // facility-wide server master-data (see useRunTemplates). Merging them out
-      // of the additive day-state union here would resurrect server-deleted
+      // Templates are no longer reconciled from the sync payload — merging them
+      // out of the additive day-state union here would resurrect server-deleted
       // templates, so we intentionally ignore payload.templates on receive.
 
       // ── Simple list merges (union, no deletions) ──
