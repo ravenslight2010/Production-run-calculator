@@ -206,7 +206,6 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
     expect(byName("writeProgress").length, "voice setRunProgress").toBeGreaterThan(0);
     expect(byName("renameDoughIngredient").length, "master-data rename write").toBeGreaterThan(0);
     expect(byName("updateDrainingRunValues").length, "draining-run write").toBeGreaterThan(0);
-    expect(byName("copyRun").length, "copy-run write").toBeGreaterThan(0);
     // Rollover pull-up + sync receive adopt REMOTE stamps rather than local ones.
     expect(homeSites.filter((s) => s.verdict === "stamped-remote").length).toBeGreaterThanOrEqual(2);
     // And the file still has a meaningful number of write sites overall.

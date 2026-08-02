@@ -9374,35 +9374,6 @@ export default function Home() {
     setShowScheduleDialog(true);
   }
 
-  function copyRun() {
-    const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
-      }
-    }
-    const newId = genId();
-    const newIndex = dayState.runs.length;
-    // Copy meta (brand/flavor) but clear timing
-    const newMeta: RunMeta = { id: newId, brand: currentRun?.brand ?? "", flavor: currentRun?.flavor ?? "" };
-    const newDs = { ...dayState, runs: [...dayState.runs, newMeta], currentIndex: newIndex };
-    setDayState(newDs);
-    saveDayState(newDs);
-    // Copy all form values except progress fields
-    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false, tempFreezerTime: 0, tempCrustsPerCycle: 0, tempCycleSpeed: 0 };
-    saveRunValues(newId, copied);
-    // Stamp the new run's copied values: form.reset(copied) re-emits values
-    // equal to what we just saved, so the autosave guard skips and the copy
-    // would push unstamped (losing the per-run LWW merge to any stale peer).
-    const now = Date.now();
-    markRunValuesUpdated(newId, now);
-    lastLocalEditRef.current = now;
-    form.reset(copied);
-    resetFieldArrays(copied);
-    schedulePush(newDs, 0);
-  }
-
   function updateRunMeta(id: string, patch: Partial<RunMeta>) {
     const newRuns = dayState.runs.map(r => r.id === id ? { ...r, ...patch } : r);
     const newDs = { ...dayState, runs: newRuns };
@@ -10988,7 +10959,7 @@ export default function Home() {
     cheeseIngredients, cheeseNameBrandTags, cheeseNamesForRun, cheeseRecipeNames, cheeseRecipesList, circles,
     circlesList, clearMergedAwayBoth, clearSubstitutions, clientId, collectMergeSurfaces, collectRecipeNameSurfaces,
     commitExcelImport, commitMissingField, commitMultiDayImport, confirmDeleteBrand, confirmDeleteBrandRef, confirmDeleteFlavor,
-    confirmDeleteFlavorRef, confirmDeleteStopId, confirmRemoveBlanks, confirmRemoveRun, copiedSummary, copyRun,
+    confirmDeleteFlavorRef, confirmDeleteStopId, confirmRemoveBlanks, confirmRemoveRun, copiedSummary,
     currentMixPresets, currentRun, currentRunId, currentRunIdRef, customAllergens, cycleCountQc,
     cycleCountSchedules, dayState, dayStateRef, dedupSorted, deleteCatalogEntryByName, deleteScheduledDay,
     deleteStop, dieLineDefaultOverrides, dieTypes, dismissGetStarted, dismissProactiveAlert,
@@ -16095,7 +16066,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     autoSuppressUntilRef, blankRunIds, blockingViolations, brandFlavors,
     brandInput, brandScrollKeep, brands, checklistAcks, checklistSatisfied,
     confirmDeleteBrand, confirmDeleteBrandRef, confirmDeleteFlavor,
-    confirmDeleteFlavorRef, confirmRemoveBlanks, confirmRemoveRun, copyRun,
+    confirmDeleteFlavorRef, confirmRemoveBlanks, confirmRemoveRun,
     currentRun, customAllergens, dayState, dieLineDefaultOverrides, dieTypes,
     doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
     initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
