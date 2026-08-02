@@ -14,7 +14,6 @@ import {
   type DayState,
   type SyncPayload,
   type HistoryDay,
-  type RunTemplate,
   DEFAULT_VALUES,
   PACKAGING_FIELDS,
   DAY_KEY,
@@ -58,7 +57,6 @@ import {
   CHEESE_RECIPE_NAMES_KEY,
   MIX_RECIPE_NAMES_KEY,
   MAX_RUNS,
-  MAX_TEMPLATES,
   BRANDS_KEY,
   HISTORY_KEY,
   MAX_HISTORY_DAYS,
@@ -112,8 +110,6 @@ import {
   dropTombstonedPresetKeys,
   dropTombstonesForAliveNames,
   clearRecipeNameSelections,
-  loadTemplates,
-  saveTemplates,
   loadProfile,
   backfillFromProfile,
   saveProfile,
@@ -215,9 +211,7 @@ import { TickBar } from "../components/TickBar";
 import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../components/DoughRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
-import { useRunTemplates } from "../hooks/useRunTemplates";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
-import { saveRunTemplates, deleteRunTemplates } from "../runTemplatesApi";
 import { updateSupervisorPin } from "../supervisorPinApi";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import MixesManager from "../components/MixesManager";
@@ -400,8 +394,6 @@ import {
   MessageSquare,
   Monitor,
   ExternalLink,
-  Bookmark,
-  BookmarkCheck,
   OctagonX,
   TrendingDown,
   CircleDot,
@@ -3317,7 +3309,6 @@ export default function Home() {
   function refreshAfterMerge() {
     reloadMasterData();
     setMergedAwayTomb(loadMergedAway());
-    setTemplates(loadTemplates());
     setHistory(loadHistory());
     const ds = loadDayState();
     setDayState(ds);
@@ -3592,7 +3583,6 @@ export default function Home() {
   // storage, so they never followed the facility; the server is now the source
   // of truth, with localStorage kept only as an offline fallback / migration
   // seed.
-  const { templates: serverTemplates, isSuccess: templatesLoaded } = useRunTemplates();
   const { pin: serverPin } = useSupervisorPin();
   // Factory-wide mixes (open to all signed-in users) — drives the Mixes
   // make-day plan and the manager Mixes editor.
@@ -4410,36 +4400,6 @@ export default function Home() {
   const [floorDimmed, setFloorDimmed] = useState(false);
 
 
-  // ── Templates ─────────────────────────────────────────────────────────────
-  const [templates, setTemplates] = useState<RunTemplate[]>(() => loadTemplates());
-  const [showTemplatesDialog, setShowTemplatesDialog] = useState(false);
-  const [templateNameInput, setTemplateNameInput] = useState("");
-  const [templateSaveMode, setTemplateSaveMode] = useState(false);
-  // Server is the source of truth for templates. Once the list loads, reflect it
-  // into local display + cache. One-time migration: if the server has none but
-  // this device has local templates, seed the server from local (best-effort).
-  const templatesMigratedRef = useRef(false);
-  useEffect(() => {
-    if (!templatesLoaded) return;
-    if (!templatesMigratedRef.current) {
-      templatesMigratedRef.current = true;
-      const local = loadTemplates();
-      if (serverTemplates.length === 0 && local.length > 0) {
-        saveRunTemplates(local)
-          .then((saved) => {
-            setTemplates(saved);
-            saveTemplates(saved);
-            cycleCountQc.setQueryData(["runTemplates"], saved);
-          })
-          .catch(() => {});
-        return;
-      }
-    }
-    setTemplates((prev) =>
-      JSON.stringify(prev) === JSON.stringify(serverTemplates) ? prev : serverTemplates,
-    );
-    saveTemplates(serverTemplates);
-  }, [templatesLoaded, serverTemplates, cycleCountQc]);
   // Keep the local PIN cache fresh as an offline fallback for checkPin(). We
   // persist an empty string too: "" is a valid facility value ("no gate"), so a
   // PIN cleared on another device must survive a reload/offline session here, or
@@ -5136,9 +5096,6 @@ export default function Home() {
           if (obj && typeof obj === "object") settingsObjects.push(obj as Record<string, unknown>);
         } catch {}
       }
-    }
-    for (const t of loadTemplates()) {
-      if (t.values) settingsObjects.push(t.values as unknown as Record<string, unknown>);
     }
     for (const day of loadHistory()) {
       for (const vals of Object.values(day.runValues ?? {})) {
@@ -7464,7 +7421,6 @@ export default function Home() {
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
       ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
-      templates: loadTemplates(),
       history: loadHistory(),
       pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
       dieTypes: loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
@@ -9418,60 +9374,6 @@ export default function Home() {
     setShowScheduleDialog(true);
   }
 
-  // ── Templates ─────────────────────────────────────────────────────────────
-  function saveAsTemplate(name: string) {
-    const cur = form.getValues();
-    const trimmedName = name.trim();
-    const template: RunTemplate = {
-      id: genId(),
-      name: trimmedName,
-      values: cur,
-      brand: currentRun?.brand,
-      flavor: currentRun?.flavor,
-      createdAt: todayStr(),
-    };
-    const updated = [template, ...templates.filter(t => t.name !== trimmedName)].slice(0, MAX_TEMPLATES);
-    setTemplates(updated);
-    saveTemplates(updated);
-    cycleCountQc.setQueryData(["runTemplates"], updated);
-    saveRunTemplates(updated)
-      .then((saved) => {
-        setTemplates(saved);
-        saveTemplates(saved);
-        cycleCountQc.setQueryData(["runTemplates"], saved);
-      })
-      .catch(() => {});
-  }
-
-  function deleteTemplate(id: string) {
-    const updated = templates.filter(t => t.id !== id);
-    setTemplates(updated);
-    saveTemplates(updated);
-    cycleCountQc.setQueryData(["runTemplates"], updated);
-    deleteRunTemplates([id])
-      .then((saved) => {
-        setTemplates(saved);
-        saveTemplates(saved);
-        cycleCountQc.setQueryData(["runTemplates"], saved);
-      })
-      .catch(() => {});
-  }
-
-  function applyTemplate(t: RunTemplate) {
-    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false, tempFreezerTime: 0, tempCrustsPerCycle: 0, tempCycleSpeed: 0 };
-    form.reset(clean);
-    resetFieldArrays(clean);
-    saveRunValues(currentRunId, clean);
-    // Stamp + push: saveRunValues above makes the form-watch autosave's
-    // loadRunValues===v guard skip, so without this the applied template never
-    // stamps or pushes and loses the per-run LWW merge to a peer's stale copy.
-    const now = Date.now();
-    markRunValuesUpdated(currentRunId, now);
-    lastLocalEditRef.current = now;
-    schedulePush(dayStateRef.current, 0);
-    setShowTemplatesDialog(false);
-  }
-
   function copyRun() {
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
@@ -11076,7 +10978,7 @@ export default function Home() {
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
     appendCheese1, appendCheese2, appendCheese3, appendCheese4, appendDough, appendFrontline,
     applyCaseUpdateChoices, applyForecast, applyLearnedBatchLbs, applyMergeSuggestion, applyNamedPoolChange, applyOptimizeAction,
-    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef, applyTemplate, applyVoiceCommand,
+    applyRecipeSuggestion, applyScheduleOrder, applySelectedSuggestions, applySyncCallbackRef, applyVoiceCommand,
     autoSandboxResetRef, autoSuppressUntilRef, batchWeightCandidatesSig, batchWeightSaveChainRef, batchWeightsLoaded, blankRunIds,
     blockingViolations, brandFlavors, brandInput, brandScrollKeep, brands, buildRunCsvRow,
     buildSyncPayload, buildVoiceHandlers, canApproveResets, canEditRules, canManageInventory, canManageStaff,
@@ -11089,7 +10991,7 @@ export default function Home() {
     confirmDeleteFlavorRef, confirmDeleteStopId, confirmRemoveBlanks, confirmRemoveRun, copiedSummary, copyRun,
     currentMixPresets, currentRun, currentRunId, currentRunIdRef, customAllergens, cycleCountQc,
     cycleCountSchedules, dayState, dayStateRef, dedupSorted, deleteCatalogEntryByName, deleteScheduledDay,
-    deleteStop, deleteTemplate, dieLineDefaultOverrides, dieTypes, dismissGetStarted, dismissProactiveAlert,
+    deleteStop, dieLineDefaultOverrides, dieTypes, dismissGetStarted, dismissProactiveAlert,
     doFetch, doughFields, doughIngredients, doughPoolDrift, doughRecipeNameOptions, doughRecipeNames,
     doughRecipesList, doughSauceMigratedRef, doughSubTab, doughVariantPick, downtimeDays, editingStop,
     enabledCheeseRecipes, endRun, endStop, existingImportRecipeNames, expandedHistoryDay, expandedScheduleDay,
@@ -11131,13 +11033,13 @@ export default function Home() {
     renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
     replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin, resumeDialog,
     resumeRun, revalidate, role, ruleViolations, runStatus, runToTime,
-    saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveAsTemplate, saveCatalogEntry, saveScheduledDay,
+    saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
     scheduleEditorLoadedRunIdsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
     scheduleMoving, schedulePush, scheduleSaving, scheduleView, scheduledDays, screenMode,
     serverCheeseByName, serverCheeseNames, serverCheeseRowsByName, serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
     serverDoughVariantsByName, serverDoughWeightByName, serverMixNames, serverMixRowsByName, serverPin, serverSauceNames,
-    serverSauceRowsByName, serverTemplates, setActiveStopId, setActiveTab, setBrandFlavors, setBrandInput,
+    serverSauceRowsByName, setActiveStopId, setActiveTab, setBrandFlavors, setBrandInput,
     setBrands, setCaseUpdateAccepted, setCaseUpdatePrompt, setChangeHistory, setChecklistAcks, setCheeseImportApplying,
     setCheeseImportError, setCheeseImportLoading, setCheeseImportPrepared, setCheeseImportProgress, setCheeseIngredients, setCheeseRecipeNames,
     setCircles, setConfirmDeleteBrand, setConfirmDeleteFlavor, setConfirmDeleteStopId, setConfirmRemoveBlanks, setConfirmRemoveRun,
@@ -11161,22 +11063,22 @@ export default function Home() {
     setShowBrandDrop, setShowCheeseImport, setShowEditReasonsDialog, setShowFlavorDrop, setShowFloorMode, setShowGetStarted,
     setShowGlance, setShowImportDialog, setShowManageDialog, setShowManualStopDialog, setShowMobileQrDialog, setShowPasswordDialog,
     setShowPinDialog, setShowPremixImport, setShowReorderDialog, setShowReportIssue, setShowScheduleDialog, setShowScreensDialog,
-    setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTemplatesDialog, setShowTour, setSkidStacking,
+    setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setTemplateNameInput, setTemplateSaveMode, setTemplates, setUndoBusy, setWriteError, setupEditorBrand,
+    setUndoBusy, setWriteError, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
     showGetStarted, showGlance, showImportDialog, showManageDialog, showManualStopDialog, showMobileQrDialog,
     showPasswordDialog, showPinDialog, showPremixImport, showReorderDialog, showReportIssue, showScheduleDialog,
-    showScreensDialog, showShippingImport, showSpecImport, showStopDialog, showTemplatesDialog, showTour,
+    showScreensDialog, showShippingImport, showSpecImport, showStopDialog, showTour,
     signOut, skidStacking, skidStackingList, slotHealRanRef, specImportApplying, specImportError,
     specImportGenRef, specImportInputRef, specImportLoading, specImportPrepared, specImportProgress, specReconcileSignal,
     staleCleanupSuggestions, startCast, startRun, stopCast, stopNotes, stopReason,
     stopReasonsList, strictViolations, swipeCue, swipeCueTimer, swipeState, switchMergeCategory,
-    switchToRun, syncConnected, syncPushFailed, templateNameInput, templateSaveMode, templates,
-    templatesLoaded, templatesMigratedRef, toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
+    switchToRun, syncConnected, syncPushFailed,
+    toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
     v, ve, writeError,
@@ -11232,7 +11134,7 @@ export default function Home() {
     serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
     serverDoughVariantsByName, serverDoughWeightByName,
     serverMixNames, serverMixRowsByName, serverPin,
-    serverSauceNames, serverSauceRowsByName, serverTemplates,
+    serverSauceNames, serverSauceRowsByName,
     setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
     shipper, shipperList, shippingImportApplying, shippingImportError,
     shippingImportLoading, shippingImportPrepared,
@@ -11241,13 +11143,12 @@ export default function Home() {
     showManageDialog, showManualStopDialog, showMobileQrDialog, showPasswordDialog,
     showPinDialog, showPremixImport, showReorderDialog, showReportIssue,
     showScheduleDialog, showScreensDialog, showShippingImport, showSpecImport,
-    showStopDialog, showTemplatesDialog, showTour,
+    showStopDialog, showTour,
     skidStacking, skidStackingList,
     specImportApplying, specImportError, specImportLoading,
     specImportPrepared, specImportProgress, specReconcileSignal,
     staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
     swipeCue, syncConnected, syncPushFailed,
-    templateNameInput, templateSaveMode, templates, templatesLoaded,
     undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount, upcomingRunLabels,
     v, ve, writeError,
   ]);
@@ -11300,7 +11201,7 @@ export default function Home() {
       serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
       serverDoughVariantsByName, serverDoughWeightByName,
       serverMixNames, serverMixRowsByName, serverSauceNames, serverSauceRowsByName,
-      serverTemplates, setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
+      setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
       // ── Dialog state that IS needed by live production tabs ──
       // (showManageDialog, showImportDialog, merge*, *Import* are intentionally omitted)
       showAlertSettings, showFloorMode, showGetStarted, showGlance,
@@ -11308,7 +11209,7 @@ export default function Home() {
       skidStacking, skidStackingList,
       staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
       swipeCue, syncConnected, syncPushFailed,
-      templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
+      undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
       upcomingRunLabels, v, ve, writeError,
     ]
   );
@@ -15186,91 +15087,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Templates Dialog ──────────────────────────────────────────────── */}
-        {showTemplatesDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatesDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto overscroll-contain" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center gap-2">
-                <Bookmark className="w-5 h-5 text-primary shrink-0" />
-                <h2 className="text-base font-bold">Run Templates</h2>
-                <button type="button" onClick={() => setShowTemplatesDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
-              </div>
-
-              {/* Save current as template */}
-              {templateSaveMode ? (
-                <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-                  <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Save current run settings as template</p>
-                  <input
-                    type="text"
-                    value={templateNameInput}
-                    onChange={e => setTemplateNameInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && templateNameInput.trim()) { saveAsTemplate(templateNameInput); setTemplateSaveMode(false); setTemplateNameInput(""); } }}
-                    placeholder="Template name…"
-                    autoFocus
-                    className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setTemplateSaveMode(false)} className="flex-1 px-3 py-1.5 rounded-md border border-border text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
-                    <button
-                      type="button"
-                      disabled={!templateNameInput.trim()}
-                      onClick={() => { saveAsTemplate(templateNameInput); setTemplateSaveMode(false); setTemplateNameInput(""); }}
-                      className="flex-1 px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors disabled:opacity-40"
-                    >
-                      <BookmarkCheck className="w-3.5 h-3.5 inline mr-1" />Save
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => { setTemplateSaveMode(true); setTemplateNameInput(currentRun?.brand && currentRun?.flavor ? `${currentRun.brand} – ${currentRun.flavor}` : ""); }}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Save current run as template
-                </button>
-              )}
-
-              {templates.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No templates saved yet. Save the current run's settings to reuse them later.</p>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{templates.length} saved template{templates.length !== 1 ? "s" : ""}</p>
-                  {templates.map(t => (
-                    <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-card/60 px-4 py-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{t.name}</p>
-                        <p className="text-xs text-muted-foreground">{t.brand && t.flavor ? `${t.brand} – ${t.flavor}` : t.brand || t.flavor || "—"} · saved {t.createdAt}</p>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => applyTemplate(t)}
-                          className="px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors"
-                        >
-                          Apply
-                        </button>
-                        <ConfirmDeleteButton
-                          onConfirm={() => deleteTemplate(t.id)}
-                          title="Delete this template?"
-                          description="This removes the saved template. This can't be undone."
-                        >
-                          <button
-                            type="button"
-                            title="Delete template"
-                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </ConfirmDeleteButton>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
       </div>
     </div>
@@ -16290,8 +16106,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     setFlavorInput, setManageCategory, setManageInput, setPinChangeMsg,
     setResumeDialog, setRunBrandFlavor, setShowBrandDrop, setShowFlavorDrop,
     setShowGlance, setShowManageDialog, setShowReorderDialog, setShowStopDialog,
-    setShowTemplatesDialog, setStopNotes, setStopReason, setTemplateNameInput,
-    setTemplateSaveMode, showBrandDrop, showFlavorDrop, startRun, swipeCue,
+    setStopNotes, setStopReason, showBrandDrop, showFlavorDrop, startRun, swipeCue,
     switchToRun, toggleAck, upcomingRunLabels, v, ve,
   } = hx;
 

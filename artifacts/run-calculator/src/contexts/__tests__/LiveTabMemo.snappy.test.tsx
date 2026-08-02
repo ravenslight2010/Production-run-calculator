@@ -520,7 +520,6 @@ const DIALOG_REGISTRY: ReadonlyArray<{ field: string; openValue: unknown }> = [
   { field: "showScheduleDialog",       openValue: true                 },
   { field: "showPasswordDialog",       openValue: true                 },
   { field: "showPinDialog",            openValue: true                 },
-  { field: "showTemplatesDialog",      openValue: true                 },
   { field: "showMobileQrDialog",       openValue: true                 },
   { field: "showScreensDialog",        openValue: true                 },
   { field: "showEditReasonsDialog",    openValue: true                 },
@@ -584,7 +583,6 @@ const DIALOG_REGISTRY: ReadonlyArray<{ field: string; openValue: unknown }> = [
   { field: "mgNamesInput",             openValue: "Cheese Blend"       },
   { field: "mgIngInput",               openValue: "Parmesan"           },
   { field: "mgStandaloneInput",        openValue: "new entry"          },
-  { field: "templateNameInput",        openValue: "My Template"        },
   // NOTE: "newReasonInput" is a live-tab dep (stop-reason editing), NOT dialog-only
   { field: "brandInput",               openValue: "Acme"               },
   { field: "flavorInput",              openValue: "Plain"              },
