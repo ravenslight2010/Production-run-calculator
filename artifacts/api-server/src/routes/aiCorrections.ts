@@ -5,6 +5,7 @@ import { SaveAiCorrectionsBody } from "@workspace/api-zod";
 import { correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@workspace/ai-memory";
 import { isModifierDropNamePair } from "@workspace/spec-import";
 import { currentScope } from "../lib/requestScope";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -14,9 +15,10 @@ const router: IRouter = Router();
 // a spreadsheet match, a spec-sheet label, a photo-identified item) and fed back
 // into every name-resolving AI prompt so a fix learned once is honored
 // everywhere. Additive: each helper keeps its own specialized alias table too.
-// Sits behind the router-level requireAuth, so any signed-in user (operators
-// included) can read and contribute — matching the import/spec/merge alias
-// precedent.
+// GET sits behind the router-level requireAuth, so any signed-in user can read
+// the pool. POST (and future DELETE) require the manage-staff capability so
+// that only managers can write to the factory-wide corrections store — arbitrary
+// writes by line-workers would silently bias every AI feature's output.
 
 const MAX_BATCH = 1000;
 
@@ -42,7 +44,7 @@ router.get("/ai-corrections", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/ai-corrections", async (req: Request, res: Response) => {
+router.post("/ai-corrections", requireCapability("manage-staff"), async (req: Request, res: Response) => {
   const parsed = SaveAiCorrectionsBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
