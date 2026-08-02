@@ -12,6 +12,7 @@ import {
   type FacilityKnowledge,
 } from "@workspace/ai-memory";
 import { INCIDENT_MEMORY_DOMAIN } from "./incidentsAi";
+import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 
 // Shared AI-memory context builder — the single seam every AI prompt uses to get
 // grounded by what the facility (and, in a conversation, the user) has learned.
@@ -150,10 +151,19 @@ export function appendConversationBlock(
   return block ? `${userPrompt}\n\n${block}` : userPrompt;
 }
 
-// Convenience: load both pools and ground a prompt in one call — the "one shared
-// context builder" every AI feature can lean on. Facility memory is appended
-// always; conversation history only when a userId is supplied (i.e. the feature
-// is conversational). Fully fail-safe via the loaders above.
+// Convenience: load all context pools and ground a prompt in one call — the
+// "one shared context builder" every AI feature can lean on.
+//
+// Order: facility memory → corrections → conversation history (most recent last
+// so the model sees the freshest signal closest to the query).
+//
+// Facility memory is always appended. Corrections (factory-wide confirmed
+// name equivalences — merges, renames) are appended by default so every AI
+// feature automatically knows "Old Name" = "New Name"; pass
+// `correctionDomains: false` for the rare intentionally un-grounded route that
+// must not receive this context, or a string array to restrict to those domains.
+// Conversation history is only appended when a userId is supplied (conversational
+// features). Fully fail-safe via the individual loaders above.
 export async function groundPromptWithMemory(
   log: ContextLogger,
   userPrompt: string,
@@ -162,6 +172,11 @@ export async function groundPromptWithMemory(
     userId?: string;
     conversationLimit?: number;
     allowPrivilegedFacilityDomains?: boolean;
+    // Corrections to include in the grounded prompt:
+    //   undefined (default) = all domains — every confirmed merge/rename
+    //   string[]            = only those domains (targeted import/match AIs)
+    //   false               = skip corrections (intentionally un-grounded route)
+    correctionDomains?: string[] | false;
   } = {},
 ): Promise<string> {
   const knowledge = await loadFacilityKnowledge(log);
@@ -171,6 +186,10 @@ export async function groundPromptWithMemory(
     opts.facilityDomains,
     opts.allowPrivilegedFacilityDomains ?? true,
   );
+  if (opts.correctionDomains !== false) {
+    const corrections = await loadCorrections(log);
+    grounded = appendCorrectionsBlock(grounded, corrections, opts.correctionDomains);
+  }
   if (opts.userId) {
     const turns = await loadConversationTurns(log, opts.userId, opts.conversationLimit);
     grounded = appendConversationBlock(grounded, turns);

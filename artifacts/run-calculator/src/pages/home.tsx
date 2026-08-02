@@ -2874,6 +2874,9 @@ export default function Home() {
     clearDeleted("ingredientTypes", trimmed);
     schedulePush(dayStateRef.current);
     void renameCatalogEntry(oldName, trimmed, "general");
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
     // Learn the rename as a spec-import appType alias (chain re-point inside)
     // so a spec-sheet re-import maps the old applicator type onto the new name
     // instead of resurrecting it. Best-effort, fire-and-forget.
@@ -5640,6 +5643,18 @@ export default function Home() {
     try {
       if (mergeBfMode === "brands") mergeBrands(srcs, tgt);
       else mergeFlavors(mergeBfBrand, srcs, tgt);
+      // Record each confirmed source→target as a factory-wide AI correction
+      // (brand or flavor domain) so every name-resolving AI feature knows the
+      // merged-away names map to the survivor. Best-effort, fire-and-forget.
+      void saveAiCorrections(
+        srcs
+          .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
+          .map((src) => ({
+            domain: mergeBfMode === "brands" ? "brand" : "flavor",
+            fromText: src,
+            toText: tgt,
+          })),
+      );
       // Persist the confirmed merge as a learned alias, scoped to this
       // category ("brand", or "flavor" scoped to the one brand it happened
       // within) so it feeds the AI suggester and "previously merged" list for
@@ -5759,6 +5774,14 @@ export default function Home() {
       // Rewrite every localStorage surface, then refresh React state in place so
       // the merged data shows immediately and the sync push carries it.
       const affectedRunIds = applyRecipeNameMerge(category, map);
+      // Record each confirmed source→target as a factory-wide AI correction
+      // (recipe domain) so every AI feature knows the old recipe name maps to
+      // the new one. Best-effort, fire-and-forget.
+      void saveAiCorrections(
+        Object.keys(map)
+          .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
+          .map((src) => ({ domain: "recipe", fromText: src, toText: tgt })),
+      );
       // Persist the confirmed merge as a learned alias scoped to this recipe-
       // name category so it feeds the AI suggester and "previously merged"
       // list for this tab's own pool only.
@@ -8162,6 +8185,9 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old brand name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "brand", fromText: oldName, toText: trimmed }]);
     // Server-backed master-data + learned import aliases (best-effort, mirrors
     // the brand MERGE path): re-point cheese/mix/dough/sauce pool rows still
     // naming the old brand, and learn a spec-import alias so re-importing an old
@@ -8258,6 +8284,9 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old flavor name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "flavor", fromText: oldName, toText: trimmed }]);
     // Server-backed master-data + learned import aliases (best-effort, mirrors
     // the flavor MERGE path): re-point cheese/mix pool rows still naming the old
     // flavor under this brand, and learn a brand-scoped spec-import alias so a
@@ -8319,6 +8348,9 @@ export default function Home() {
     // warnings and stale run setups don't linger after a mix rename.
     rewriteAppTypeInProfiles(oldName, trimmed);
     schedulePush(dayStateRef.current);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old recipe name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "recipe", fromText: oldName, toText: trimmed }]);
     // Rename server mix row + learn spec-import alias. Look up the old row by
     // its current (pre-rename) name so we capture the brand for alias scoping,
     // then update the server name field and learn the appType alias. Best-effort.
@@ -8353,6 +8385,9 @@ export default function Home() {
     // Needed" warnings and re-import mismatches don't linger.
     rewriteRecipeNameInProfiles("dough", oldName, trimmed);
     schedulePush(dayStateRef.current);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old recipe name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "recipe", fromText: oldName, toText: trimmed }]);
     // Learn the rename so spec re-imports link the old sheet name to the
     // renamed dough recipe (kind "recipeName", context "dough"). Best-effort.
     void learnRecipeNameChangeAliases("dough", [oldName], trimmed).catch(() => {});
@@ -8371,6 +8406,9 @@ export default function Home() {
     // name gets its frontlineRecipeName rewritten to the new name.
     rewriteRecipeNameInProfiles("sauce", oldName, trimmed);
     schedulePush(dayStateRef.current);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old recipe name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "recipe", fromText: oldName, toText: trimmed }]);
     // Learn the rename so spec re-imports link the old sheet name to the
     // renamed sauce recipe (kind "recipeName", context "sauce"). Best-effort.
     void learnRecipeNameChangeAliases("sauce", [oldName], trimmed).catch(() => {});
@@ -8389,6 +8427,9 @@ export default function Home() {
     // recipe name (app1–4CheeseRecipeName) gets rewritten to the new name.
     rewriteRecipeNameInProfiles("cheese", oldName, trimmed);
     schedulePush(dayStateRef.current);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old recipe name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "recipe", fromText: oldName, toText: trimmed }]);
     // Learn the rename as an appType blend alias (brand-scoped when the
     // renamed recipe has a server pool row) so cheese/spec re-imports map the
     // old name onto the renamed recipe. Best-effort, fire-and-forget.
@@ -8425,6 +8466,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old ingredient name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
     // Learn the rename as a spec-import doughIngredient alias so a spec
     // re-import maps the old row name onto the new one. Best-effort.
     maybeLearnIngredientRename(["doughIngredient"], oldName, trimmed);
@@ -8451,6 +8495,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old ingredient name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
     // Frontline IS the sauce recipe — spec sauce rows canonicalize under the
     // sauceIngredient kind. Best-effort.
     maybeLearnIngredientRename(["sauceIngredient"], oldName, trimmed);
@@ -8480,6 +8527,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old ingredient name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
     // Learn the rename as a spec-import cheeseIngredient alias. Best-effort.
     maybeLearnIngredientRename(["cheeseIngredient"], oldName, trimmed);
   }
@@ -8508,6 +8558,9 @@ export default function Home() {
     }
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old ingredient name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
     // Mix recipe rows canonicalize under the cheese kind in spec parses
     // (mixes ride the cheese recipe kind), so learn cheeseIngredient.
     maybeLearnIngredientRename(["cheeseIngredient"], oldName, trimmed);
@@ -8525,6 +8578,9 @@ export default function Home() {
     tombstoneDeleted("pepTypes", oldName);
     clearDeleted("pepTypes", trimmed);
     schedulePush(dayStateRef.current);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old pep type name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
     // Learn the rename as a spec-import pepType alias (chain re-point inside)
     // so a spec-sheet re-import maps the old pep type onto the new name
     // instead of resurrecting it. Best-effort, fire-and-forget.
@@ -8609,6 +8665,9 @@ export default function Home() {
     });
     lastLocalEditRef.current = now;
     schedulePush(ds);
+    // Record the rename as a factory-wide AI correction so every AI feature
+    // knows the old die type name maps to the new one. Best-effort, fire-and-forget.
+    void saveAiCorrections([{ domain: "die", fromText: oldName, toText: trimmed }]);
     // Learn the rename as a spec-import dieType alias (chain re-point inside)
     // so a spec-sheet re-import maps the old die name onto the new spelling
     // instead of resurrecting it in the picklist. The sanitizer's digit guard

@@ -341,9 +341,8 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildOptimizePrompt(validation.data);
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    const userPrompt = await groundPromptWithMemory(req.log, user);
 
     let content = "";
     try {
@@ -676,17 +675,11 @@ router.post(
     }
 
     const { system, user } = buildRecipeAssistPrompt(validation.data);
-    // Ground the prompt in the shared name-corrections (so substitutions honor
-    // fixes staff already made) and the facility memory. Read-only and fail-safe.
-    const corrections = await loadCorrections(req.log);
-    const withCorrections = appendCorrectionsBlock(user, corrections, [
-      "ingredient",
-      "brand",
-      "flavor",
-      "die",
-    ]);
-    const grounded = await groundPromptWithMemory(req.log, withCorrections, {
+    // Ground the prompt in facility memory and the shared name-corrections pool
+    // (so substitutions honor fixes staff already made). Read-only and fail-safe.
+    const grounded = await groundPromptWithMemory(req.log, user, {
       facilityDomains: ["ingredient", "general"],
+      correctionDomains: ["ingredient", "brand", "flavor", "die", "recipe"],
     });
 
     // The model may only target a recipe we actually sent: collect the ids so a
@@ -1160,14 +1153,13 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildProactivePrompt(
       validation.data,
       flaggedAtRisk,
       lowStock,
       incidentPatterns,
     );
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    const userPrompt = await groundPromptWithMemory(req.log, user);
 
     let content = "";
     try {
@@ -1319,7 +1311,13 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
+    // Load facility knowledge and corrections in parallel: knowledge is needed
+    // for both the accuracy-trend calculation and the prompt; corrections are
+    // appended to the prompt so the model knows factory-wide name equivalences.
+    const [knowledge, corrections] = await Promise.all([
+      loadFacilityKnowledge(req.log),
+      loadCorrections(req.log),
+    ]);
     // Surface how recent forecasts actually performed (graded from previously-
     // recorded forecasts vs. the finished history this request carries) as an
     // explicit prompt section so the model self-corrects known over-/under-
@@ -1337,7 +1335,7 @@ router.post(
     );
 
     const { system, user } = buildForecastPrompt(validation.data, accuracyGrounding);
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    const userPrompt = appendCorrectionsBlock(appendFacilityMemoryBlock(user, knowledge), corrections);
 
     // A malformed reply here is user-visible data loss (the manager gets no
     // forecast at all), so retry once before falling back to the empty result.
@@ -1451,12 +1449,14 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildSummaryPrompt(stats);
     // Open to all signed-in staff (see comment above), so exclude the
     // privileged facility-memory domains (forecast/proactive-alerts) — same
-    // reasoning as /ai/ask.
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge, undefined, false);
+    // reasoning as /ai/ask. Corrections (name equivalences) are included by
+    // default via groundPromptWithMemory so the summary honors merges/renames.
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      allowPrivilegedFacilityDomains: false,
+    });
 
     let content = "";
     try {
@@ -1557,12 +1557,14 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildAnomalyPrompt(result);
     // Open to all signed-in staff (see comment above), so exclude the
     // privileged facility-memory domains (forecast/proactive-alerts) — same
-    // reasoning as /ai/ask.
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge, undefined, false);
+    // reasoning as /ai/ask. Corrections included by default so anomaly
+    // narration honors factory-wide name equivalences.
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      allowPrivilegedFacilityDomains: false,
+    });
 
     let content = "";
     try {
@@ -1663,9 +1665,8 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildSchedulePrompt(result);
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    const userPrompt = await groundPromptWithMemory(req.log, user);
 
     let content = "";
     try {
@@ -1775,15 +1776,10 @@ router.post(
       return;
     }
 
-    const [corrections, knowledge] = await Promise.all([
-      loadCorrections(req.log),
-      loadFacilityKnowledge(req.log),
-    ]);
     const { system, user } = buildFillMissingPrompt(validation.data);
-    const userPrompt = appendFacilityMemoryBlock(
-      appendCorrectionsBlock(user, corrections, ["brand", "flavor", "die", "item", "ingredient"]),
-      knowledge,
-    );
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      correctionDomains: ["brand", "flavor", "die", "item", "ingredient", "recipe"],
+    });
 
     // A malformed reply here is user-visible data loss (the fill-missing panel
     // shows nothing to apply), so retry once before the empty fallback.
@@ -1860,15 +1856,10 @@ router.post(
       return;
     }
 
-    const [corrections, knowledge] = await Promise.all([
-      loadCorrections(req.log),
-      loadFacilityKnowledge(req.log),
-    ]);
     const { system, user } = buildMatchImportPrompt(validation.data);
-    const userPrompt = appendFacilityMemoryBlock(
-      appendCorrectionsBlock(user, corrections, ["brand", "flavor"]),
-      knowledge,
-    );
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      correctionDomains: ["brand", "flavor"],
+    });
 
     // A malformed reply here is user-visible data loss (an Excel import loses
     // all its name matches), so retry once before the empty fallback.
@@ -1979,15 +1970,10 @@ router.post(
       return;
     }
 
-    const [corrections, knowledge] = await Promise.all([
-      loadCorrections(req.log),
-      loadFacilityKnowledge(req.log),
-    ]);
     const { system, user } = buildParseSpecSheetPrompt(validation.data);
-    const userPrompt = appendFacilityMemoryBlock(
-      appendCorrectionsBlock(user, corrections, ["brand", "flavor", "die", "ingredient"]),
-      knowledge,
-    );
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      correctionDomains: ["brand", "flavor", "die", "ingredient", "recipe"],
+    });
 
     // The model occasionally truncates/malforms its JSON mid-response even for
     // small sheets; the shared bounded retry (fetchModelJsonWithRetry) absorbs
@@ -2086,15 +2072,10 @@ router.post(
       return;
     }
 
-    const [corrections, knowledge] = await Promise.all([
-      loadCorrections(req.log),
-      loadFacilityKnowledge(req.log),
-    ]);
     const { system, user } = buildMatchPremixPrompt(validation.data);
-    const userPrompt = appendFacilityMemoryBlock(
-      appendCorrectionsBlock(user, corrections, ["brand", "flavor"]),
-      knowledge,
-    );
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      correctionDomains: ["brand", "flavor"],
+    });
 
     // A malformed reply here is user-visible data loss (a premix import loses
     // all its product matches), so retry once before the empty fallback.
@@ -2162,15 +2143,10 @@ router.post(
       return;
     }
 
-    const [corrections, knowledge] = await Promise.all([
-      loadCorrections(req.log),
-      loadFacilityKnowledge(req.log),
-    ]);
     const { system, user } = buildSuggestMergesPrompt(validation.data);
-    const userPrompt = appendFacilityMemoryBlock(
-      appendCorrectionsBlock(user, corrections, ["ingredient", "die"]),
-      knowledge,
-    );
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      correctionDomains: ["ingredient", "die"],
+    });
 
     // A malformed reply here is user-visible data loss (the user asked for
     // merge suggestions and gets none), so retry once before the empty fallback.

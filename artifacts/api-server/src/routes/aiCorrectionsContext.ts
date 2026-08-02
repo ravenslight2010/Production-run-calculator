@@ -37,13 +37,20 @@ export async function loadCorrections(log: ContextLogger): Promise<AiCorrection[
   }
 }
 
-// Append the domain-relevant corrections block to a built user prompt. When no
-// corrections apply, the prompt is returned unchanged.
+// Append the domain-relevant corrections block to a built user prompt. When
+// `domains` is given only that subset is included; omitting `domains` (or
+// passing an empty array) includes all corrections — used by general-purpose
+// AI features that need the full name-equivalence picture. When no corrections
+// apply, the prompt is returned unchanged.
 export function appendCorrectionsBlock(
   userPrompt: string,
   corrections: AiCorrection[],
-  domains: string[],
+  domains?: string[],
 ): string {
-  const block = buildCorrectionsBlock(filterCorrectionsByDomain(corrections, domains));
+  const relevant =
+    domains && domains.length > 0
+      ? filterCorrectionsByDomain(corrections, domains)
+      : corrections;
+  const block = buildCorrectionsBlock(relevant);
   return block ? `${userPrompt}\n\n${block}` : userPrompt;
 }

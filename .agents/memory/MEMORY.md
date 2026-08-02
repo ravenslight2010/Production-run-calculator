@@ -33,6 +33,7 @@
 - [Spec/recipe/mix Excel export](spec-export.md) — mirror of the importers; TWO workbooks (AI spec vs deterministic premix, never combine); pure @workspace/spec-export; pep-B slots omitted; web-only (parity paused).
 - [Learned-memory pattern](learned-memory-pattern.md) + [import aliases](learned-import-aliases.md) — server-persisted correction memory (ci-upsert, best-effort); aliases auto-apply, priority alias>AI>fuzzy.
 - [AI reviewer + corrections memory](ai-reviewer-and-corrections.md) — 2nd-pass reviewer AI (ok/warn/reject, advisory/fail-safe, strip id at wire) + factory-wide name-corrections pool written on merge/match/spec confirms; web+mobile.
+- [AI corrections full coverage](ai-corrections-full-coverage.md) — groundPromptWithMemory loads corrections for all AIs (correctionDomains opt-in/opt-out); every rename/merge writes corrections; new "recipe" domain for recipe-name changes.
 - [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded; gate dough trays/batches decrement on front-of-line feed completion; web+mobile.
