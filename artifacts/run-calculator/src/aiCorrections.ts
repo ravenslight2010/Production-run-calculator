@@ -16,6 +16,30 @@ import { inventoryClientId } from "./inventoryShared";
 
 export type { AiCorrection };
 
+// Server response shape includes `id` for deletion.
+export interface AiCorrectionWithId extends AiCorrection {
+  id: number;
+}
+
+export async function fetchAiCorrections(): Promise<AiCorrectionWithId[]> {
+  const res = await fetch("/api/ai-corrections", {
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`Failed to fetch corrections: ${res.status}`);
+  const data = await res.json();
+  return (data.corrections ?? []) as AiCorrectionWithId[];
+}
+
+export async function deleteAiCorrection(id: number): Promise<AiCorrectionWithId[]> {
+  const res = await fetch(`/api/ai-corrections/${id}`, {
+    method: "DELETE",
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`Failed to delete correction: ${res.status}`);
+  const data = await res.json();
+  return (data.corrections ?? []) as AiCorrectionWithId[];
+}
+
 export async function saveAiCorrections(corrections: AiCorrection[]): Promise<void> {
   if (corrections.length === 0) return;
   try {

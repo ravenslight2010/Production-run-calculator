@@ -198,6 +198,7 @@ import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
+import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ProductionRulesManager from "../components/ProductionRulesManager";
 import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
 import CycleCountManager from "../components/CycleCountManager";
@@ -11612,6 +11613,7 @@ export default function Home() {
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
           ...(canManageStaff ? [{ key: "audit", label: "Audit Log" }] : []),
+          ...(canManageStaff ? [{ key: "ai-corrections", label: "AI Memory" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
         const isGrouped = groupedTabs.some(t => t.key === manageCategory);
@@ -11626,6 +11628,7 @@ export default function Home() {
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
           cycleCount: "Cycle Counts", staff: "Staff", audit: "Audit Log", pin: "Change PIN",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
+          "ai-corrections": "AI Memory",
         };
         const sectionDefs = ([
           {
@@ -11648,7 +11651,7 @@ export default function Home() {
               ...(canEditRules ? ["rules"] : []),
               ...(canManageInventory ? ["dieDefaults", "freezer", "cycleCount"] : []),
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
-              ...(canManageStaff ? ["audit"] : []),
+              ...(canManageStaff ? ["audit", "ai-corrections"] : []),
               "pin",
             ],
           },
@@ -12519,8 +12522,11 @@ export default function Home() {
                 {/* Audit log — manager-only read-only event history */}
                 {manageCategory === "audit" && canManageStaff && <AuditLogCard />}
 
+                {/* AI corrections memory — manager-only view + delete */}
+                {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}
+
                 {/* Recent changes: local per-device undo trail for master-data edits */}
-                {!["pin", "import", "rules", "staff", "audit", "setupProfiles"].includes(manageCategory) && (
+                {!["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles"].includes(manageCategory) && (
                   <div className="mt-6 pt-4 border-t border-border">
                     <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
                     <p className="text-[11px] text-muted-foreground mb-3">
