@@ -1044,7 +1044,7 @@ function CheeseRecipeCard({
   }
 
   return (
-    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
@@ -1221,7 +1221,7 @@ export function CheesePickCard({
   }
 
   return (
-    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
@@ -1349,7 +1349,7 @@ export function MixRecipeCard({
   }
 
   return (
-    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-purple-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex items-center justify-between">
@@ -1412,7 +1412,7 @@ export function DoughRecipeCard({
   const yieldDiff = runYield - recipeYield;
 
   return (
-    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-orange-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
@@ -1647,7 +1647,7 @@ export function FrontlineRecipeCard({
   }
 
   return (
-    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-red-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
@@ -1688,7 +1688,7 @@ function ReadOnlyRecipeCard({
   ];
   const [scale, setScale] = useState(1);
   return (
-    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
+    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
       <div className={`h-1 ${accent} w-full`} />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex items-center gap-2 justify-between">
@@ -12966,7 +12966,7 @@ export default function Home() {
                 </div>
 
                 {/* Packaging Settings */}
-                <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
+                <details className="group rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden mb-4">
                   <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                     <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                       <Package className="w-3.5 h-3.5" />
@@ -13192,32 +13192,32 @@ export default function Home() {
                       {plan.map((group) => (
                         <Card
                           key={group.date}
-                          className="bg-sky-950/30 border-sky-700/40 shadow-md"
+                          className="border-border/50 bg-card/60 shadow-md"
                           data-testid={`freezer-pull-${group.date}`}
                         >
                           <CardHeader className="pb-2 pt-4 px-5">
-                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
+                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                               <Snowflake className="w-4 h-4" /> Pull Out Freezer for {group.date}
-                              <span className="ml-1 font-normal normal-case text-xs text-sky-400/80">
+                              <span className="ml-1 font-normal normal-case text-xs text-muted-foreground/70">
                                 ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
                               </span>
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="px-4 pb-4 space-y-3">
                             {group.runs.map((run, ri) => (
-                              <div key={ri} className="rounded-md border border-sky-800/40 bg-sky-950/20 p-3">
-                                <div className="font-semibold text-sm text-sky-100 mb-1.5 truncate">
+                              <div key={ri} className="rounded-xl border border-border/50 bg-background/50 p-3">
+                                <div className="font-semibold text-sm text-foreground mb-1.5 truncate">
                                   {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
                                 </div>
                                 <div className="space-y-1">
                                   {run.items.map((it, ii) => (
                                     <div key={ii} className="flex items-baseline justify-between gap-2 text-sm">
-                                      <span className="text-sky-200/90 min-w-0 truncate">
+                                      <span className="text-muted-foreground min-w-0 truncate">
                                         {it.name}
-                                        <span className="ml-1.5 text-[11px] text-sky-400/70">pull {it.daysEarly}d early</span>
+                                        <span className="ml-1.5 text-[11px] text-amber-500/70">pull {it.daysEarly}d early</span>
                                       </span>
-                                      <span className="font-bold tabular-nums whitespace-nowrap text-sky-50">
-                                        {it.quantity} <span className="font-normal text-sky-300/80">{it.unit}</span>
+                                      <span className="font-bold tabular-nums whitespace-nowrap text-foreground">
+                                        {it.quantity} <span className="font-normal text-muted-foreground/70">{it.unit}</span>
                                       </span>
                                     </div>
                                   ))}
@@ -13243,13 +13243,13 @@ export default function Home() {
                   if (due.length === 0) return null;
                   return (
                     <Card
-                      className="bg-amber-950/30 border-amber-700/40 shadow-md mb-4"
+                      className="border-border/50 border-l-4 border-l-amber-500 bg-card/60 shadow-md mb-4"
                       data-testid="cycle-count-due"
                     >
                       <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                           <ClipboardCheck className="w-4 h-4" /> Time to Count
-                          <span className="ml-1 font-normal normal-case text-xs text-amber-400/80">
+                          <span className="ml-1 font-normal normal-case text-xs text-amber-500/80">
                             ({due.length} section{due.length !== 1 ? "s" : ""} due)
                           </span>
                         </CardTitle>
@@ -13258,13 +13258,13 @@ export default function Home() {
                         {due.map((d) => (
                           <div
                             key={d.id}
-                            className="flex items-center justify-between gap-2 rounded-md border border-amber-800/40 bg-amber-950/20 p-3"
+                            className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-background/50 p-3"
                           >
                             <div className="min-w-0">
-                              <div className="font-semibold text-sm text-amber-100 truncate">
+                              <div className="font-semibold text-sm text-foreground truncate">
                                 {d.section}
                               </div>
-                              <div className="text-[11px] text-amber-400/80">
+                              <div className="text-[11px] text-muted-foreground">
                                 {d.daysSince === null
                                   ? `Never counted · every ${d.cadenceDays}d`
                                   : `Last counted ${d.lastCountedAt} · ${d.daysSince}d ago${d.overdueDays > 0 ? ` (${d.overdueDays}d over)` : ""}`}
@@ -13274,7 +13274,7 @@ export default function Home() {
                               type="button"
                               onClick={() => markCountedMutation.mutate(d.id)}
                               disabled={markCountedMutation.isPending}
-                              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-600 text-amber-50 text-xs font-semibold disabled:opacity-50"
+                              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs font-semibold disabled:opacity-50"
                             >
                               <ClipboardCheck className="w-3.5 h-3.5" /> Mark counted
                             </button>
@@ -13338,7 +13338,7 @@ export default function Home() {
                   const pkg = aggregatePackagingNeeds(valsList);
                   return (
                     <>
-                      <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                      <Card className="bg-card/60 border-border/50 shadow-md mb-4">
                         <CardHeader className="pb-2 pt-4 px-5">
                           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                             <Warehouse className="w-4 h-4" /> Total Ingredient Needs — All Runs
@@ -13349,7 +13349,7 @@ export default function Home() {
                         </CardContent>
                       </Card>
                       {pkg.length > 0 && (
-                        <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                        <Card className="bg-card/60 border-border/50 shadow-md mb-4">
                           <CardHeader className="pb-2 pt-4 px-5">
                             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                               <Package className="w-4 h-4" /> Packaging Needs — All Runs
@@ -13371,7 +13371,7 @@ export default function Home() {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);
                   if (activeRuns.length === 0) return null;
                   return (
-                    <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                    <Card className="bg-card/60 border-border/50 shadow-md mb-4">
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                           <ListChecks className="w-4 h-4" /> What Each Run Needs
@@ -13430,7 +13430,7 @@ export default function Home() {
                     </Card>
                   );
                 })()}
-                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                <Card className="bg-card/60 border-border/50 shadow-md mb-4">
                   <CardHeader className="pb-2 pt-4 px-5">
                     <div className="flex items-center justify-between gap-2">
                       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -15237,7 +15237,7 @@ export default function Home() {
                 <div className="space-y-2">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{templates.length} saved template{templates.length !== 1 ? "s" : ""}</p>
                   {templates.map(t => (
-                    <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+                    <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-card/60 px-4 py-3">
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm truncate">{t.name}</p>
                         <p className="text-xs text-muted-foreground">{t.brand && t.flavor ? `${t.brand} – ${t.flavor}` : t.brand || t.flavor || "—"} · saved {t.createdAt}</p>
@@ -17137,7 +17137,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 
                 {/* Run Details (moved from Dough tab) — sub-view aware */}
                 {doughSubTab === "crusts" ? (
-                  <div className="rounded-xl border border-border/60 bg-card/50 shadow-md mt-4 overflow-hidden">
+                  <div className="rounded-xl border border-border/60 bg-card/60 shadow-md mt-4 overflow-hidden">
                     <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
                       <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
                     </div>
@@ -17187,7 +17187,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-border/60 bg-card/50 shadow-md mt-4 overflow-hidden">
+                  <div className="rounded-xl border border-border/60 bg-card/60 shadow-md mt-4 overflow-hidden">
                     <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
                       <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
                     </div>
@@ -17291,7 +17291,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 
                 {/* Run navigation — prev / dots / next (graduated mockup) */}
                 {dayState.runs.length > 1 && (
-                  <div className="mt-4 rounded-xl border border-border/50 bg-card/50 px-3 py-2">
+                  <div className="mt-4 rounded-xl border border-border/50 bg-card/60 px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
               {dayState.currentIndex > 0 ? (
                 <button
@@ -17369,7 +17369,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   const upcoming = dayState.runs.slice(dayState.currentIndex + 1);
                   if (upcoming.length === 0) return null;
                   return (
-                    <div className="mt-4 rounded-xl border border-border/40 bg-card/50 p-4">
+                    <div className="mt-4 rounded-xl border border-border/40 bg-card/60 p-4">
                       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Upcoming Runs</p>
                       <div className="space-y-2">
                         {upcoming.map((r: any, i: any) => {
@@ -17391,7 +17391,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   );
                 })()}
 
-                <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
+                <details className="group rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                       <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                         <Settings className="w-3.5 h-3.5" />
@@ -18273,7 +18273,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   return (
     <>
       {calc.sauceBatches > 0 && (
-        <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
+        <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-primary w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -18345,7 +18345,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
 
   return (
     <>
-                <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
+                <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
                   <div className="h-1 bg-primary w-full" />
                   <CardHeader className="pb-2 pt-4 px-5">
                     <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -18587,7 +18587,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         minsLeft={suppressedMinsLeftNow}
                         onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                       />
-                      <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
+                      <div className="rounded-lg border border-border/50 bg-card/60 px-4 py-3 mb-3">
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                               Batch Pipeline · 3 max
@@ -18606,7 +18606,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             )}
                           </div>
                           {isDoughTimerPaused && (
-                            <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] mb-2" data-testid="dough-timers-paused-banner">
+                            <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-card/60 border border-amber-500/20 border-l-4 border-l-amber-500 text-[10px] mb-2" data-testid="dough-timers-paused-banner">
                               <span className="text-amber-400 font-semibold flex items-center gap-1">
                                 <PauseCircle className="w-3 h-3 shrink-0" />
                                 Timers paused
@@ -18677,7 +18677,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             </p>
                           )}
                         </div>
-                      <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2 mb-3">
+                      <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2 mb-3">
                         <div className="flex items-center justify-between gap-2 mb-1.5">
                           <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
                             <Timer className="w-2.5 h-2.5" /> Machine Times
@@ -18703,7 +18703,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 {/* ── Crust run ── */}
                 {doughSubTab === "crusts" && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
                       <div className="h-1 bg-sky-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -18730,7 +18730,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 {doughSubTab === "dough" && (
                   <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-                  <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                  <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
                     <div className="h-1 bg-primary w-full" />
                     <CardHeader className="pb-2 pt-4 px-5">
                       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -18915,7 +18915,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           };
                           const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
                           return (
-                            <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/50" : "border-amber-600/30 bg-amber-950/10"}`}>
+                            <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
                               <div className="flex items-center justify-between mb-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                                   Packaging — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
@@ -19015,7 +19015,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     ? Math.min(spinSecCard, Math.max(0, (dueMs - nowTime.getTime()) / 1000))
                     : null;
                   return (
-                    <div className={`mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/50"}`}>
+                    <div className={`mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/60"}`}>
                       <div className="px-4 py-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
@@ -19082,7 +19082,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
                   );
                   return (
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-0">
+                    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mt-0">
                       <div className="h-1 bg-amber-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -19172,7 +19172,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
                   );
                   return (
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-0">
+                    <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mt-0">
                       <div className="h-1 bg-sky-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -19235,7 +19235,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 
                 {/* Extra Info — trays/skid, trays/batch, batches/skid (graduated mockup) */}
                 {doughSubTab === "dough" && (
-                  <div className="mt-4 rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden">
+                  <div className="mt-4 rounded-xl border border-border/50 bg-card/60 shadow-md overflow-hidden">
                     <div className="bg-muted/30 px-4 py-2.5 border-b border-border/40">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Extra Info</p>
                     </div>
@@ -19440,7 +19440,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                       </div>
                     </div>
                   )}
-                  <Card className="bg-card/50 border-border/50 shadow-md">
+                  <Card className="bg-card/60 border-border/50 shadow-md">
                     <button
                       type="button"
                       onClick={() => setSauceWeightsOpen((o: any) => !o)}
@@ -20226,7 +20226,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                   const todayPpm = todayNetSec > 0 && todayTotalPizzas > 0 ? Math.round(todayTotalPizzas / (todayNetSec / 60)) : null;
                   const benchDiff = todayPpm !== null && histBenchmarkPpm !== null ? todayPpm - histBenchmarkPpm : null;
                   return (
-                    <div className="mb-5 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
+                    <div className="mb-5 rounded-xl border border-border/50 bg-card/60 overflow-hidden">
                       <div className="px-5 py-3 border-b border-border/30 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-primary shrink-0" />
                         <span className="text-sm font-bold">Today's Shift</span>
@@ -20303,7 +20303,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
 
                     return (
                       <Card
-                        className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/50"}`}
+                        className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"}`}
                         onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
                       >
                         <CardHeader className="pb-2 pt-4 px-5">

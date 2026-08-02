@@ -21,8 +21,8 @@ export default function Landing() {
           staff. Sign in to get started.
         </p>
 
-        <div className="mt-8 overflow-hidden rounded-2xl border border-border/50 bg-card/50 shadow-md">
-          <div className="h-1 w-full bg-amber-500/70" />
+        <div className="mt-8 overflow-hidden rounded-2xl border border-border/50 bg-card/60 shadow-md">
+          <div className="h-1 w-full bg-gradient-to-r from-amber-600 via-amber-500 to-amber-400" />
           <div className="flex flex-col gap-3 p-6">
             <Button
               size="lg"
@@ -34,7 +34,7 @@ export default function Landing() {
             <Button
               size="lg"
               variant="outline"
-              className="w-full"
+              className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 hover:border-amber-500/50"
               onClick={() => setLocation("/sign-up")}
             >
               Create staff account
