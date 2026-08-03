@@ -399,6 +399,11 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "sauces come as-is and have no mixing recipe in the workbook, so the name is the " +
     "only way the app can identify what to pull. Omit `sauceName` when the sheet just " +
     "says a generic 'sauce' without naming one. " +
+    "A sauce row often embeds a specific brand or product name in a parenthetical — " +
+    "e.g. 'BBQ Sauce (Hoosier Daddy Sweet & Sassy)' names the sauce " +
+    "'Hoosier Daddy Sweet & Sassy', not the generic 'BBQ Sauce'. " +
+    "Always prefer the parenthetical product name over the generic category label " +
+    "when both are present on the same sauce row. " + +
     "Likewise, when a spec sheet NAMES a specific dough or crust for a product (e.g. " +
     "'Ultra Thin Dough', a 'Dough'/'Crust' row or column naming one), capture that name " +
     "as the profile's `doughName` — even when this workbook carries no dough mixing " +
