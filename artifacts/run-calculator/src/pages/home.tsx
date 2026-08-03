@@ -17751,7 +17751,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           const s = autoTrackSuggestion;
                           const suppressed = Date.now() < autoSuppressUntilRef.current;
                           const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                          const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
+                          const onManual = () => {
+                            autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
+                            markRunValuesUpdated(currentRunId, Date.now());
+                          };
                           const skidNearlyFull =
                             casesPerSkid > 0 && casesOnSkid > 0 &&
                             casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
@@ -18606,7 +18609,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   {(() => {
                     const s = autoTrackSuggestion;
                     const suppressed = Date.now() < autoSuppressUntilRef.current;
-                    const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
+                    const onManual = () => {
+                      autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
+                      markRunValuesUpdated(currentRunId, Date.now());
+                    };
                     const { trays: suggestedTrays, batches: suggestedBatches } =
                       suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
                     const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
@@ -18725,6 +18731,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             // need (run may over-produce). Auto-track still stops
                             // at casesNeeded on its own.
                             const total = Math.max(0, t);
+                            // Stamp the run BEFORE writing so any in-flight SSE
+                            // echo (which carries the previous stamp) is treated
+                            // as stale and can't overwrite the manual edit.
+                            markRunValuesUpdated(currentRunId, Date.now());
                             form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
                             form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
                             onManual();
@@ -18733,10 +18743,12 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           // can't be combined into one total — bump each field
                           // directly instead (same as the old plain steppers).
                           const bumpSkids = (d: number) => {
+                            markRunValuesUpdated(currentRunId, Date.now());
                             form.setValue("skidsCompleted", Math.max(0, packedSkids + d), { shouldDirty: true });
                             onManual();
                           };
                           const bumpCases = (d: number) => {
+                            markRunValuesUpdated(currentRunId, Date.now());
                             form.setValue("casesOnCurrentSkid", Math.max(0, packedCasesOnSkid + d), { shouldDirty: true });
                             onManual();
                           };
