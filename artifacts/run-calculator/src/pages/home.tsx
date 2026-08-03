@@ -18721,10 +18721,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           const packOnPace = packGapCases <= 2;
                           const packBehindSec = packGapCases * casePeriodSec;
                           const setPackedTotal = (t: number) => {
-                            // Same upper bound as the old steppers: never past
-                            // the run's total case need (when one is set).
-                            const maxTotal = v.casesNeeded > 0 ? v.casesNeeded : Infinity;
-                            const total = Math.min(maxTotal, Math.max(0, t));
+                            // No upper cap: manual counts can exceed the planned
+                            // need (run may over-produce). Auto-track still stops
+                            // at casesNeeded on its own.
+                            const total = Math.max(0, t);
                             form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
                             form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
                             onManual();
@@ -18810,7 +18810,6 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             control={form.control}
                             name="skidsCompleted"
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
-                            max={v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
                             onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
                             onManualChange={onManual}
