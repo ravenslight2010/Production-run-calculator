@@ -4,6 +4,23 @@ import { db, brandProfilesTable, type BrandProfileRow } from "@workspace/db";
 import { SaveBrandProfilesBody, DeleteBrandProfilesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 
+// Plain generic sauce category labels that imply the spec-sheet parenthetical
+// product name was silently dropped during import (e.g. a row reading
+// "BBQ Sauce (Hoosier Daddy Sweet & Sassy)" stored only "BBQ Sauce").
+// Compared case-insensitively against the stored frontlineRecipeName.
+export const GENERIC_SAUCE_NAMES = [
+  "BBQ Sauce",
+  "Ranch",
+  "Garlic Sauce",
+  "Alfredo Sauce",
+  "Buffalo Sauce",
+  "Hot Sauce",
+  "White Sauce",
+  "Honey Mustard",
+  "Pesto Sauce",
+  "Pesto",
+];
+
 // Factory-wide brand+flavor SETUP PROFILES (the saved run form for a product).
 // Moved out of the per-day sync payload — where they travelled as an unstamped
 // map and last-push-won — into their own master-data pool like Cheese / Dough /
@@ -112,6 +129,39 @@ router.get("/brand-profiles", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "failed to list brand profiles");
     res.status(500).json({ error: "Failed to list brand profiles" });
+  }
+});
+
+// Returns profiles whose stored frontlineRecipeName is a plain generic sauce
+// category label (e.g. "BBQ Sauce", "Ranch") rather than a specific product
+// name — a sign the spec-sheet parenthetical was dropped during import.
+// Managers can use this list to identify profiles that need a re-import.
+router.get("/brand-profiles/stale-sauce-names", async (req: Request, res: Response) => {
+  try {
+    const scope = currentScope();
+    // Build a SQL expression matching any GENERIC_SAUCE_NAMES value
+    // case-insensitively against the stored frontlineRecipeName JSON field.
+    const lowerNames = GENERIC_SAUCE_NAMES.map((n) => n.toLowerCase());
+    const rows = await db
+      .select({
+        key: brandProfilesTable.key,
+        brand: brandProfilesTable.brand,
+        flavor: brandProfilesTable.flavor,
+        sauceName: sql<string>`${brandProfilesTable.values}->>'frontlineRecipeName'`,
+      })
+      .from(brandProfilesTable)
+      .where(
+        and(
+          eq(brandProfilesTable.scope, scope),
+          sql`lower(${brandProfilesTable.values}->>'frontlineRecipeName') = ANY(${sql.raw(
+            `ARRAY[${lowerNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(",")}]`,
+          )})`,
+        ),
+      );
+    res.json({ items: rows });
+  } catch (err) {
+    req.log.error({ err }, "failed to list stale-sauce-name profiles");
+    res.status(500).json({ error: "Failed to list stale sauce name profiles" });
   }
 });
 

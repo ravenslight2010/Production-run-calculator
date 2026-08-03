@@ -28,6 +28,7 @@ import {
 } from "@workspace/spec-reconcile";
 import {
   fetchSavedSpecSheets,
+  fetchStaleSauceProfiles,
   reconcileSpecSheet,
   deleteSpecSheet,
   loadCurrentReconcileRecipes,
@@ -35,6 +36,7 @@ import {
   currentReconcileProfile,
   latestSourceKeyIds,
   type SavedSpecSheet,
+  type StaleSauceProfile,
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
@@ -178,13 +180,21 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
   const [aiResult, setAiResult] = useState<SpecReconcileResult | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
 
+  const [staleProfiles, setStaleProfiles] = useState<StaleSauceProfile[]>([]);
+  const [staleExpanded, setStaleExpanded] = useState(false);
+
   const prevSignalRef = useRef(-1);
 
   async function refresh() {
     setLoading(true);
     setListError(null);
     try {
-      setSheets(await fetchSavedSpecSheets());
+      const [nextSheets, nextStale] = await Promise.all([
+        fetchSavedSpecSheets(),
+        fetchStaleSauceProfiles(),
+      ]);
+      setSheets(nextSheets);
+      setStaleProfiles(nextStale);
     } catch {
       setListError("Couldn't load saved spec sheets.");
     } finally {
@@ -313,6 +323,62 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
           the newest marked "Latest". Cross-reference all at once to see which recipes
           match the spec, or check a single sheet for an AI-written plain-language summary.
         </p>
+
+        {/* Stale sauce name warning — profiles whose frontlineRecipeName is a
+            generic category label (e.g. "BBQ Sauce") rather than a specific
+            product name, meaning the parenthetical was dropped during an older
+            import. Managers should re-import those spec sheets to pick up the
+            correct sauce name. */}
+        {staleProfiles.length > 0 && (
+          <div
+            className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3 space-y-2"
+            data-testid="stale-sauce-profiles-warning"
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 text-left text-amber-600"
+              onClick={() => setStaleExpanded((v) => !v)}
+              data-testid="button-stale-sauce-profiles"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span className="flex-1 text-sm font-medium">
+                {staleProfiles.length} profile{staleProfiles.length !== 1 ? "s" : ""} may have a generic sauce name
+              </span>
+              {staleExpanded ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+              )}
+            </button>
+            {staleExpanded && (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-700">
+                  These profiles have a generic sauce category label (e.g. "BBQ Sauce", "Ranch") instead
+                  of a specific product name. This happens when a spec sheet's sauce row lists a brand
+                  name in parentheses — e.g. "BBQ Sauce (Hoosier Daddy Sweet &amp; Sassy)" — and the
+                  parenthetical was dropped during an earlier import. Re-importing the original spec sheet
+                  will replace it with the correct sauce name.
+                </p>
+                <ul className="space-y-1" data-testid="stale-sauce-profiles-list">
+                  {staleProfiles.map((p) => (
+                    <li
+                      key={p.key}
+                      className="flex items-center gap-2 text-xs"
+                      data-testid={`stale-sauce-profile-${p.key}`}
+                    >
+                      <span className="font-medium text-foreground">
+                        {p.brand} — {p.flavor}
+                      </span>
+                      <span className="text-amber-700 shrink-0">
+                        Sauce: "{p.sauceName}"
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>

@@ -284,6 +284,43 @@ export async function reconcileSpecSheet(sheet: SavedSpecSheet): Promise<SpecRec
 }
 
 /**
+ * A profile whose stored frontlineRecipeName is a plain generic sauce category
+ * label (e.g. "BBQ Sauce", "Ranch") — a sign the spec-sheet parenthetical
+ * product name was dropped during import. Re-importing the original spec sheet
+ * will replace it with the specific product name.
+ */
+export type StaleSauceProfile = {
+  key: string;
+  brand: string;
+  flavor: string;
+  sauceName: string;
+};
+
+/**
+ * Fetch profiles whose frontlineRecipeName is a generic sauce category label
+ * (no brand/product qualifier). Returns an empty array when none are found or
+ * on network error — this is advisory only and must never block the import UI.
+ */
+export async function fetchStaleSauceProfiles(): Promise<StaleSauceProfile[]> {
+  try {
+    const res = await fetch("/api/brand-profiles/stale-sauce-names");
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items?: unknown[] };
+    const items = Array.isArray(data.items) ? data.items : [];
+    return items.filter(
+      (x): x is StaleSauceProfile =>
+        x !== null &&
+        typeof x === "object" &&
+        typeof (x as StaleSauceProfile).brand === "string" &&
+        typeof (x as StaleSauceProfile).flavor === "string" &&
+        typeof (x as StaleSauceProfile).sauceName === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Build a short, human-friendly label for an auto-saved import snapshot. When the
  * uploaded filename(s) are known they lead the label so distinct files (each kept
  * to its two most recent versions) are easy to tell apart.
