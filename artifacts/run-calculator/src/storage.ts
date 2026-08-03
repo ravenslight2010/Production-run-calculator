@@ -3610,7 +3610,12 @@ export function applySpecImport(
       placeholderCandidates.push({ kind: "sauce", name: specSauceName, brand, flavor });
     }
     const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    if (specSauceName && !hasMixedSauce && (isForced || !(values.frontlineRecipeName ?? "").trim())) {
+    // Update the sauce name when the spec carries one and it differs from what's
+    // stored — the spec sheet is authoritative (covers first-import blanks AND
+    // corrections of values that a previous bad import set incorrectly).
+    // Mixed-sauce recipes always win over a bare name; the recipe-tie loop
+    // below further overwrites with actual row data when available.
+    if (specSauceName && !hasMixedSauce && (isForced || specSauceName !== (values.frontlineRecipeName ?? "").trim())) {
       values.frontlineRecipeName = specSauceName;
     }
     // The sheet may name a sauce whose recipe already exists in the library
@@ -3646,7 +3651,8 @@ export function applySpecImport(
       placeholderCandidates.push({ kind: "dough", name: specDoughName, brand, flavor });
     }
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    if (specDoughName && !hasMixedDough && (isForced || !(values.doughRecipeName ?? "").trim())) {
+    // Same principle as sauce above: spec sheet is authoritative for dough name.
+    if (specDoughName && !hasMixedDough && (isForced || specDoughName !== (values.doughRecipeName ?? "").trim())) {
       values.doughRecipeName = specDoughName;
     }
     // Same library hydration for dough: an assigned dough name whose recipe
