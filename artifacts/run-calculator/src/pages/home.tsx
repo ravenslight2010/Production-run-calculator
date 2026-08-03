@@ -16108,6 +16108,7 @@ function FloorModeView() {
                     type="button"
                     onClick={() => {
                       navigator.vibrate?.(15);
+                      markRunValuesUpdated(currentRunId, Date.now());
                       autoSuppressUntilRef.current = 0;
                       fireAutoTrackNow();
                       form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
@@ -17882,6 +17883,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   type="button"
                                   onClick={() => {
                                     navigator.vibrate?.(10);
+                                    markRunValuesUpdated(currentRunId, Date.now());
                                     form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
                                     form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
                                   }}
@@ -17897,6 +17899,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   type="button"
                                   onClick={() => {
                                     navigator.vibrate?.(15);
+                                    markRunValuesUpdated(currentRunId, Date.now());
                                     autoSuppressUntilRef.current = 0;
                                     fireAutoTrackNow();
                                     form.setValue("skidsCompleted", skids + 1, { shouldDirty: true });
@@ -18739,7 +18742,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
                               max={74}
                               suggestion={!trayAutoActive ? suggestedTrays : null}
-                              onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
+                              onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true }); }}
                               onManualChange={onManual}
                             />
                             {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
@@ -18778,7 +18781,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
                                 max={3}
                                 suggestion={!batchAutoActive ? suggestedBatches : null}
-                                onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
+                                onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true }); }}
                                 onManualChange={onManual}
                               />
                               {v.batchesReady >= 3 && (
@@ -18927,7 +18930,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             name="skidsCompleted"
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                            onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                            onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
                             onManualChange={() => {
                               onManual();
                               // Detect drift for crust mode (or dough mode without casesPerSkid)
@@ -18943,7 +18946,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
                             max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                            onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                            onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
                             onManualChange={() => {
                               onManual();
                               const cs = Number(form.getValues("skidsCompleted")) || 0;
