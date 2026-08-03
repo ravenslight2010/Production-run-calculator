@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Brain, Trash2, RefreshCw } from "lucide-react";
+import { Loader2, Brain, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { fetchAiCorrections, deleteAiCorrection, type AiCorrectionWithId } from "@/aiCorrections";
@@ -24,6 +24,35 @@ function domainBadgeClass(domain: string): string {
     case "die":        return "bg-orange-500/15 text-orange-400";
     default:           return "bg-muted text-muted-foreground";
   }
+}
+
+// Returns the set of IDs that would be dropped by dropConflictingCorrections —
+// i.e. entries whose fromText or toText appears on BOTH sides of the pool for
+// their domain. These are stale chains/cycles that the AI silently ignores.
+function computeConflictedIds(corrections: AiCorrectionWithId[]): Set<number> {
+  const dl = (s: string) => s.trim().toLowerCase();
+  const froms = new Map<string, Set<string>>();
+  const tos   = new Map<string, Set<string>>();
+  for (const c of corrections) {
+    const d = dl(c.domain);
+    let f = froms.get(d);
+    if (!f) froms.set(d, (f = new Set()));
+    f.add(dl(c.fromText));
+    let t = tos.get(d);
+    if (!t) tos.set(d, (t = new Set()));
+    t.add(dl(c.toText));
+  }
+  const conflictedIds = new Set<number>();
+  for (const c of corrections) {
+    const d = dl(c.domain);
+    const f = froms.get(d);
+    const t = tos.get(d);
+    const isConflicted = (name: string) => !!f && !!t && f.has(name) && t.has(name);
+    if (isConflicted(dl(c.fromText)) || isConflicted(dl(c.toText))) {
+      conflictedIds.add(c.id);
+    }
+  }
+  return conflictedIds;
 }
 
 // Group corrections by domain, sorted alphabetically by domain then fromText.
@@ -64,6 +93,7 @@ export default function AiCorrectionsCard() {
   });
 
   const corrections = data ?? [];
+  const conflictedIds = computeConflictedIds(corrections);
   const groups = groupByDomain(corrections);
 
   return (
@@ -88,6 +118,9 @@ export default function AiCorrectionsCard() {
           Corrections the AI has learned — whenever a name is renamed or merged, an entry is
           recorded here so every AI feature treats the old name as equal to the new one.
           Delete an entry to stop the AI from applying that substitution.
+          Entries marked with <AlertTriangle className="inline w-3 h-3 text-amber-400 mx-0.5 mb-0.5" /> are
+          part of a chain or cycle and are currently <strong>ignored by the AI</strong> — delete the
+          stale entries to restore them.
         </p>
       </CardHeader>
       <CardContent>
@@ -116,35 +149,48 @@ export default function AiCorrectionsCard() {
                   <span className="text-[11px] text-muted-foreground">{items.length} {items.length === 1 ? "entry" : "entries"}</span>
                 </div>
                 <div className="space-y-1">
-                  {items.map((c) => (
-                    <div
-                      key={c.id}
-                      className="flex items-center gap-2 px-3 py-2 rounded border border-border bg-background/40"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs font-medium text-muted-foreground truncate" title={c.fromText}>
-                          {c.fromText}
-                        </span>
-                        <span className="mx-1.5 text-[10px] text-muted-foreground">→</span>
-                        <span className="text-xs font-semibold truncate" title={c.toText}>
-                          {c.toText}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={deletingId === c.id || deleteMutation.isPending}
-                        onClick={() => deleteMutation.mutate(c.id)}
-                        className="shrink-0 p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40"
-                        title="Remove this equivalence"
+                  {items.map((c) => {
+                    const isConflicted = conflictedIds.has(c.id);
+                    return (
+                      <div
+                        key={c.id}
+                        className={`flex items-center gap-2 px-3 py-2 rounded border bg-background/40 ${
+                          isConflicted
+                            ? "border-amber-500/40 bg-amber-500/5"
+                            : "border-border"
+                        }`}
                       >
-                        {deletingId === c.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
+                        {isConflicted && (
+                          <AlertTriangle
+                            className="shrink-0 w-3.5 h-3.5 text-amber-400"
+                            title="This entry is part of a rename chain or cycle and is currently ignored by the AI. Delete the stale entry to restore it."
+                          />
                         )}
-                      </button>
-                    </div>
-                  ))}
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-medium text-muted-foreground truncate" title={c.fromText}>
+                            {c.fromText}
+                          </span>
+                          <span className="mx-1.5 text-[10px] text-muted-foreground">→</span>
+                          <span className="text-xs font-semibold truncate" title={c.toText}>
+                            {c.toText}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={deletingId === c.id || deleteMutation.isPending}
+                          onClick={() => deleteMutation.mutate(c.id)}
+                          className="shrink-0 p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40"
+                          title="Remove this equivalence"
+                        >
+                          {deletingId === c.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}

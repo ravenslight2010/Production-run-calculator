@@ -126,9 +126,44 @@ router.post(
           toApply.set(correctionKey(c.domain, c.fromText), c);
         }
 
+        const dl = (s: string) => s.trim().toLowerCase();
+
+        // Build a lookup: domain → list of existing rows, for chain-forwarding.
+        const byDomain = new Map<string, AiCorrectionRow[]>();
+        for (const row of existing) {
+          const d = dl(row.domain);
+          const rows = byDomain.get(d) ?? [];
+          rows.push(row);
+          byDomain.set(d, rows);
+        }
+
         const inserts: AiCorrection[] = [];
         for (const [key, c] of toApply) {
           const prior = byKey.get(key);
+
+          // Chain-forwarding: when writing from→to, find all existing corrections
+          // in the same domain where toText == from (the "predecessor" entries).
+          // Update them to point directly to `to`, collapsing the chain and
+          // preventing dropConflictingCorrections from silently dropping them.
+          // Example: if "OldName→MiddleName" exists and we write "MiddleName→NewName",
+          // update "OldName→MiddleName" to "OldName→NewName" so the pool stays clean.
+          const predecessors = (byDomain.get(dl(c.domain)) ?? []).filter(
+            (row) => dl(row.toText) === dl(c.fromText) && dl(row.fromText) !== dl(c.fromText),
+          );
+          for (const pred of predecessors) {
+            if (dl(pred.fromText) === dl(c.toText)) {
+              // Forwarding would produce a self-mapping (cycle collapse); delete it.
+              await db
+                .delete(aiCorrectionsTable)
+                .where(eq(aiCorrectionsTable.id, pred.id));
+            } else {
+              await db
+                .update(aiCorrectionsTable)
+                .set({ toText: c.toText, updatedAt: new Date() })
+                .where(eq(aiCorrectionsTable.id, pred.id));
+            }
+          }
+
           if (!prior) {
             inserts.push(c);
           } else if (prior.toText !== c.toText) {

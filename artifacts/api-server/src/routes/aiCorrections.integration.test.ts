@@ -1,0 +1,255 @@
+// Integration tests for POST /ai-corrections chain-forwarding (Task #536).
+//
+// When a name is renamed again after a correction is already recorded, the write
+// path must collapse the chain so the AI memory pool never accumulates A→B + B→C
+// entries that dropConflictingCorrections would silently discard.
+//
+// @workspace/db binds its pool to process.env.DATABASE_URL at import time, so
+// the throwaway DB is created and DATABASE_URL is repointed BEFORE the router is
+// imported — hence dynamic imports inside beforeAll.
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
+import { sql } from "drizzle-orm";
+import express, { type Express } from "express";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import pg from "pg";
+import { signToken } from "../lib/auth";
+
+// The router imports AI routes at load time; mock the provider so no real
+// requests are made and pickModel / AI_MODELS remain resolvable.
+vi.mock("@workspace/integrations-openai-ai-server", () => {
+  const AI_MODELS = { full: "gpt-5.4", cheap: "gpt-5-mini" } as const;
+  return {
+    openai: {
+      chat: { completions: { create: async () => ({ choices: [{ message: { content: "{}" } }] }) } },
+    },
+    AI_MODELS,
+    pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
+  };
+});
+
+type DbModule = typeof import("@workspace/db");
+let db: DbModule["db"];
+let pool: DbModule["pool"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let rolesTable: DbModule["rolesTable"];
+let aiCorrectionsTable: DbModule["aiCorrectionsTable"];
+let seedRoles: () => Promise<void>;
+let clearUserValidityCache: () => void;
+
+let adminPool: pg.Pool;
+let testDbName: string;
+let originalDatabaseUrl: string | undefined;
+let server: Server;
+let baseUrl: string;
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+
+beforeAll(async () => {
+  originalDatabaseUrl = process.env.DATABASE_URL;
+  if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
+
+  adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
+  adminPool.on("error", () => {});
+  testDbName = `helium_aicorrections_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  await adminPool.query(`CREATE DATABASE "${testDbName}"`);
+
+  const testUrl = new URL(originalDatabaseUrl);
+  testUrl.pathname = `/${testDbName}`;
+  const testUrlStr = testUrl.toString();
+
+  const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
+    cwd: repoRoot,
+    env: { ...process.env, DATABASE_URL: testUrlStr },
+    encoding: "utf8",
+  });
+  if (push.status !== 0) {
+    throw new Error(`drizzle push failed:\n${push.stdout}\n${push.stderr}`);
+  }
+
+  process.env.DATABASE_URL = testUrlStr;
+  const dbMod = await import("@workspace/db");
+  const routerMod = await import("./index");
+  const userValidityMod = await import("../lib/userValidity");
+  clearUserValidityCache = userValidityMod.clearUserValidityCache;
+  db = dbMod.db;
+  pool = dbMod.pool;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  rolesTable = dbMod.rolesTable;
+  aiCorrectionsTable = dbMod.aiCorrectionsTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
+  pool.on("error", () => {});
+
+  const app: Express = express();
+  app.use(express.json({ limit: "10mb" }));
+  app.use((req, _res, next) => {
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    next();
+  });
+  app.use("/api", routerMod.default);
+
+  await new Promise<void>((resolve) => { server = app.listen(0, () => resolve()); });
+  const addr = server.address() as AddressInfo;
+  baseUrl = `http://127.0.0.1:${addr.port}`;
+}, 60_000);
+
+afterAll(async () => {
+  if (server) {
+    await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections?.(); });
+  }
+  if (pool) await pool.end();
+  if (adminPool) {
+    if (testDbName) await adminPool.query(`DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`);
+    await adminPool.end();
+  }
+  process.env.DATABASE_URL = originalDatabaseUrl;
+}, 60_000);
+
+beforeEach(async () => {
+  clearUserValidityCache();
+  await db.execute(
+    sql`TRUNCATE ${aiCorrectionsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+  );
+  await seedRoles();
+});
+
+let nextUser = 0;
+async function freshManager(): Promise<string> {
+  const id = `manager-${nextUser++}-${Math.floor(Math.random() * 1e6)}`;
+  await db.insert(usersTable).values({ id, username: id, passwordHash: "x" });
+  await db.insert(userRolesTable).values({ userId: id, role: "manager" });
+  clearUserValidityCache();
+  return id;
+}
+
+async function post(userId: string, corrections: unknown[]): Promise<Response> {
+  return fetch(`${baseUrl}/api/ai-corrections`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${signToken(userId)}`,
+    },
+    body: JSON.stringify({ corrections }),
+  });
+}
+
+async function listCorrections(userId: string): Promise<Array<{ id: number; domain: string; fromText: string; toText: string }>> {
+  const res = await fetch(`${baseUrl}/api/ai-corrections`, {
+    headers: { authorization: `Bearer ${signToken(userId)}` },
+  });
+  const body = await res.json() as { corrections: Array<{ id: number; domain: string; fromText: string; toText: string }> };
+  return body.corrections;
+}
+
+describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", () => {
+  it("collapses A→B + B→C into A→C when B is renamed to C", async () => {
+    // Core scenario: OldName→MiddleName recorded, then MiddleName→NewName recorded.
+    // Without chain-forwarding both entries would be in the pool and
+    // dropConflictingCorrections would silently drop them both.
+    const mgr = await freshManager();
+
+    // Step 1: record OldName → MiddleName
+    const r1 = await post(mgr, [{ domain: "ingredient", fromText: "OldName", toText: "MiddleName" }]);
+    expect(r1.status).toBe(200);
+
+    // Step 2: rename MiddleName → NewName
+    const r2 = await post(mgr, [{ domain: "ingredient", fromText: "MiddleName", toText: "NewName" }]);
+    expect(r2.status).toBe(200);
+
+    const corrections = await listCorrections(mgr);
+    const byFrom = Object.fromEntries(corrections.map((c) => [c.fromText, c.toText]));
+
+    // OldName must now point directly to NewName (chain collapsed).
+    expect(byFrom["OldName"]).toBe("NewName");
+    // MiddleName → NewName also survives (it is itself a valid correction).
+    expect(byFrom["MiddleName"]).toBe("NewName");
+
+    // No entry has toText == some other entry's fromText in the same domain
+    // (which is the exact condition that triggers dropConflictingCorrections).
+    const froms = new Set(corrections.map((c) => c.fromText.toLowerCase()));
+    const tos   = new Set(corrections.map((c) => c.toText.toLowerCase()));
+    const conflicts = corrections.filter(
+      (c) => froms.has(c.toText.toLowerCase()) || tos.has(c.fromText.toLowerCase()),
+    );
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it("handles a three-hop chain: A→B, B→C, C→D all collapse to the terminal", async () => {
+    const mgr = await freshManager();
+
+    await post(mgr, [{ domain: "brand", fromText: "A", toText: "B" }]);
+    await post(mgr, [{ domain: "brand", fromText: "B", toText: "C" }]);
+    await post(mgr, [{ domain: "brand", fromText: "C", toText: "D" }]);
+
+    const corrections = await listCorrections(mgr);
+    const byFrom = Object.fromEntries(corrections.map((c) => [c.fromText, c.toText]));
+
+    expect(byFrom["A"]).toBe("D");
+    expect(byFrom["B"]).toBe("D");
+    expect(byFrom["C"]).toBe("D");
+
+    // No cross-side conflicts remain.
+    const froms = new Set(corrections.map((c) => c.fromText.toLowerCase()));
+    const tos   = new Set(corrections.map((c) => c.toText.toLowerCase()));
+    const conflicts = corrections.filter(
+      (c) => froms.has(c.toText.toLowerCase()) || tos.has(c.fromText.toLowerCase()),
+    );
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it("removes a predecessor that would become a self-mapping after forwarding (cycle collapse)", async () => {
+    // A→B exists. Writing B→A would normally create A→B + B→A (a cycle).
+    // The write should remove A→B (forwarding would turn it into A→A, a self-map).
+    const mgr = await freshManager();
+
+    await post(mgr, [{ domain: "flavor", fromText: "Alpha", toText: "Beta" }]);
+    await post(mgr, [{ domain: "flavor", fromText: "Beta", toText: "Alpha" }]);
+
+    const corrections = await listCorrections(mgr);
+    // Alpha→Beta must have been deleted (forwarding Alpha→Beta with Beta→Alpha
+    // would produce Alpha→Alpha, a self-map — so it is deleted).
+    const alphaToBeta = corrections.find((c) => c.fromText === "Alpha" && c.toText === "Beta");
+    expect(alphaToBeta).toBeUndefined();
+
+    // Beta→Alpha is the surviving correction (the most recent write wins).
+    const betaToAlpha = corrections.find((c) => c.fromText === "Beta" && c.toText === "Alpha");
+    expect(betaToAlpha).toBeDefined();
+  });
+
+  it("does NOT collapse chains across different domains", async () => {
+    // A→B in 'ingredient' and B→C in 'brand' are independent — no forwarding.
+    const mgr = await freshManager();
+
+    await post(mgr, [{ domain: "ingredient", fromText: "A", toText: "B" }]);
+    await post(mgr, [{ domain: "brand",      fromText: "B", toText: "C" }]);
+
+    const corrections = await listCorrections(mgr);
+    const ingredient = corrections.find((c) => c.domain === "ingredient");
+    expect(ingredient?.fromText).toBe("A");
+    expect(ingredient?.toText).toBe("B"); // unchanged; different domain
+
+    const brand = corrections.find((c) => c.domain === "brand");
+    expect(brand?.fromText).toBe("B");
+    expect(brand?.toText).toBe("C");
+  });
+
+  it("is case-insensitive when detecting chain predecessors", async () => {
+    const mgr = await freshManager();
+
+    // Predecessor uses different casing.
+    await post(mgr, [{ domain: "recipe", fromText: "oldrecipe", toText: "MidRecipe" }]);
+    await post(mgr, [{ domain: "recipe", fromText: "midrecipe", toText: "NewRecipe" }]);
+
+    const corrections = await listCorrections(mgr);
+    const byFrom = Object.fromEntries(
+      corrections.map((c) => [c.fromText.toLowerCase(), c.toText]),
+    );
+    expect(byFrom["oldrecipe"]).toBe("NewRecipe");
+    expect(byFrom["midrecipe"]).toBe("NewRecipe");
+  });
+});
