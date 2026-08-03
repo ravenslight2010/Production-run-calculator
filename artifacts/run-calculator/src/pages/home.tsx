@@ -8902,6 +8902,32 @@ export default function Home() {
       };
     }
 
+    if (action.kind === "adjust_line_speed") {
+      const newValue = action.newValue;
+      if (!newValue || !Number.isFinite(newValue) || newValue <= 0) {
+        return { ok: false, message: "Invalid speed value" };
+      }
+      const isCrust = action.isCrustMode ?? false;
+      const field = isCrust ? "approxLineSpeed" : "speedAdjustment";
+      const prevValue = form.getValues(field) as number;
+      const writeSpeed = (val: number) => {
+        const now = Date.now();
+        form.setValue(field, val, { shouldDirty: true });
+        saveRunValues(currentRunId, form.getValues());
+        markRunValuesUpdated(currentRunId, now);
+        lastLocalEditRef.current = now;
+        schedulePush(dayStateRef.current, 0);
+      };
+      writeSpeed(newValue);
+      return {
+        ok: true,
+        message: isCrust
+          ? `Approximate Line Speed set to ${newValue}`
+          : `Speed Adjustment set to ${newValue}`,
+        undo: () => writeSpeed(prevValue),
+      };
+    }
+
     // reorder_run
     const runId = action.runId ?? "";
     const fromIdx = dayState.runs.findIndex((r) => r.id === runId);
@@ -18381,7 +18407,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
 const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const hx = useHomeTabCtx();
   const {
-    autoSuppressUntilRef, dayState, dayStateRef, doughSubTab,
+    autoSuppressUntilRef, currentRunId, dayState, dayStateRef, doughSubTab,
     form, isSupervisor, runStatus, runToTime,
     schedulePush, setDayState, setRunToTime, v,
   } = hx;
@@ -18393,6 +18419,64 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     fireAutoTrackNow, tickDueRefs,
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
   } = useLiveRun();
+
+  // ── Speed drift detection ─────────────────────────────────────────────────
+  // Tracks manual case/skid corrections and suggests a Speed Adjustment (or
+  // Approximate Line Speed for crust mode) when the line consistently runs
+  // faster or slower than the configured prediction.
+  const speedDriftRunRef = useRef<string>("");
+  const speedCorrectionHistoryRef = useRef<Array<{ ts: number; delta: number }>>([]);
+  const speedNudgeDismissedRef = useRef<boolean>(false);
+  const speedNudgeLastAcceptRef = useRef<number>(0);
+  const [speedNudge, setSpeedNudge] = useState<{
+    value: number; isCrust: boolean; direction: "faster" | "slower";
+  } | null>(null);
+
+  // Reset detection bookkeeping synchronously (ref mutations are fine in render)
+  // and clear the nudge card state via effect (must not call setState during render).
+  if (speedDriftRunRef.current !== currentRunId) {
+    speedDriftRunRef.current = currentRunId;
+    speedCorrectionHistoryRef.current = [];
+    speedNudgeDismissedRef.current = false;
+  }
+  useEffect(() => { setSpeedNudge(null); }, [currentRunId]);
+
+  function detectSpeedDrift(newTotal: number) {
+    if (speedNudgeDismissedRef.current) return;
+    if (Date.now() < speedNudgeLastAcceptRef.current + 30_000) return;
+    if (!autoTrackProgress || runStatus !== "running") return;
+    const expectedTotal = autoTrackSuggestion?.expectedCases ?? null;
+    if (expectedTotal === null || expectedTotal <= 0) return;
+    const elapsedNetMin = elapsedBatchSec / 60;
+    if (elapsedNetMin < 1) return; // Need at least a minute of data
+    const ppc = v.pizzasPerCase;
+    if (ppc <= 0 || calc.ppm <= 0) return;
+    const delta = newTotal - expectedTotal;
+    if (Math.abs(delta) < 1) return; // Ignore sub-case corrections
+    const history = speedCorrectionHistoryRef.current;
+    history.push({ ts: Date.now(), delta });
+    if (history.length > 10) history.splice(0, history.length - 10);
+    const positives = history.filter(c => c.delta > 0).length;
+    const negatives = history.filter(c => c.delta < 0).length;
+    if (positives < 2 && negatives < 2) return; // Need ≥2 corrections in same direction
+    const observedPpm = (newTotal * ppc) / elapsedNetMin;
+    const driftRatio = observedPpm / calc.ppm;
+    if (Math.abs(driftRatio - 1.0) < 0.10) return; // < 10% drift — not significant
+    const direction: "faster" | "slower" = driftRatio > 1.0 ? "faster" : "slower";
+    if (direction === "faster" && positives < 2) return;
+    if (direction === "slower" && negatives < 2) return;
+    const isCrust = doughSubTab === "crusts";
+    let suggestedValue: number;
+    if (isCrust) {
+      // Crust mode: suggest new Approximate Line Speed (direct ppm observation)
+      suggestedValue = Math.round(observedPpm * 100) / 100;
+    } else {
+      // Dough mode: suggest new Speed Adjustment = current × drift ratio
+      suggestedValue = Math.max(0.01, Math.min(9.99,
+        Math.round(v.speedAdjustment * driftRatio * 100) / 100));
+    }
+    setSpeedNudge({ value: suggestedValue, isCrust, direction });
+  }
 
   return (
     <>
@@ -18755,6 +18839,9 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
                             form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
                             onManual();
+                            // Check whether this correction indicates a persistent
+                            // drift from the predicted line speed.
+                            detectSpeedDrift(total);
                           };
                           // Without a cases-per-skid setting the two counters
                           // can't be combined into one total — bump each field
@@ -18841,7 +18928,14 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
                             onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={onManual}
+                            onManualChange={() => {
+                              onManual();
+                              // Detect drift for crust mode (or dough mode without casesPerSkid)
+                              const cs = Number(form.getValues("skidsCompleted")) || 0;
+                              const cc = Number(form.getValues("casesOnCurrentSkid")) || 0;
+                              const cps = v.casesPerSkid > 0 ? v.casesPerSkid : 0;
+                              detectSpeedDrift(cps > 0 ? cs * cps + cc : cs);
+                            }}
                           />
                           <StepperField
                             control={form.control}
@@ -18850,9 +18944,64 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
                             onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={onManual}
+                            onManualChange={() => {
+                              onManual();
+                              const cs = Number(form.getValues("skidsCompleted")) || 0;
+                              const cc = Number(form.getValues("casesOnCurrentSkid")) || 0;
+                              const cps = v.casesPerSkid > 0 ? v.casesPerSkid : 0;
+                              detectSpeedDrift(cps > 0 ? cs * cps + cc : cs);
+                            }}
                           />
                         </div>
+                        )}
+                        {/* Speed adjustment nudge — appears when repeated manual corrections
+                            indicate the configured line speed is off by ≥10%. */}
+                        {speedNudge && (
+                          <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-950/15 px-4 py-3" data-testid="speed-nudge-card">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-1.5">
+                              Line Speed Suggestion
+                            </p>
+                            <p className="text-xs text-foreground mb-2.5">
+                              Line running <span className="font-semibold text-amber-300">{speedNudge.direction}</span> than
+                              predicted — adjust{" "}
+                              <span className="font-medium">
+                                {speedNudge.isCrust ? "Approximate Line Speed" : "Speed Adjustment"}
+                              </span>{" "}
+                              to <span className="font-mono font-bold">{speedNudge.value.toFixed(2)}</span>?
+                            </p>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                data-testid="speed-nudge-accept"
+                                onClick={() => {
+                                  const now = Date.now();
+                                  const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
+                                  form.setValue(field, speedNudge.value, { shouldDirty: true });
+                                  markRunValuesUpdated(currentRunId, now);
+                                  hx.lastLocalEditRef.current = now;
+                                  schedulePush(dayStateRef.current, 0);
+                                  speedNudgeLastAcceptRef.current = now;
+                                  // Clear correction history so the next drift episode starts fresh
+                                  speedCorrectionHistoryRef.current = [];
+                                  setSpeedNudge(null);
+                                }}
+                                className="flex-1 rounded-md bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold py-1.5 transition-colors"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="speed-nudge-dismiss"
+                                onClick={() => {
+                                  speedNudgeDismissedRef.current = true;
+                                  setSpeedNudge(null);
+                                }}
+                                className="flex-1 rounded-md border border-border/50 bg-muted/40 hover:bg-muted text-muted-foreground text-xs py-1.5 transition-colors"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </>
                     );

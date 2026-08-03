@@ -61,7 +61,7 @@ export type OptimizeInput = {
   reorderDemandByKey?: Record<string, number>;
 };
 
-export type OptimizeActionKind = "set_target_time" | "set_run_target" | "reorder_run";
+export type OptimizeActionKind = "set_target_time" | "set_run_target" | "reorder_run" | "adjust_line_speed";
 
 export type OptimizeAction = {
   kind: OptimizeActionKind;
@@ -70,6 +70,10 @@ export type OptimizeAction = {
   runId?: string;
   casesNeeded?: number;
   beforeRunId?: string | null;
+  /** New speed value for adjust_line_speed: speedAdjustment multiplier or approxLineSpeed ppm. */
+  newValue?: number;
+  /** True when the current run uses Approximate Line Speed (crust mode) instead of cycle-speed math. */
+  isCrustMode?: boolean;
 };
 
 export type OptimizeRecommendation = {
