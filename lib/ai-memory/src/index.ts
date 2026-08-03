@@ -78,6 +78,97 @@ export function dropConflictingCorrections(
   });
 }
 
+// Collapse multi-hop correction chains and remove cycles so the pool stays
+// consistent without manual manager intervention.
+//
+// Given a pool for one domain:
+//   A→B + B→C  (chain)  → becomes  A→C + B→C  (B→C unchanged; A now points to
+//                                    the terminal so B no longer straddles both
+//                                    sides and dropConflictingCorrections passes)
+//   A→B + B→A  (cycle)  → both deleted (no valid unambiguous correction exists)
+//
+// Works per-domain. Returns the collapsed pool — the caller is responsible for
+// persisting the diff (updating changed entries, deleting removed ones). Pure
+// and side-effect-free.
+export function collapseChains(corrections: ReadonlyArray<AiCorrection>): AiCorrection[] {
+  const dl = (s: string) => s.trim().toLowerCase();
+
+  // Group by domain (lowercase key).
+  const byDomain = new Map<string, AiCorrection[]>();
+  for (const c of corrections) {
+    const d = dl(c.domain);
+    if (!byDomain.has(d)) byDomain.set(d, []);
+    byDomain.get(d)!.push(c);
+  }
+
+  const result: AiCorrection[] = [];
+
+  for (const entries of byDomain.values()) {
+    // Map: lowercase fromText → correction (last write per key wins, mirrors
+    // normalizeCorrections dedup).
+    const fromMap = new Map<string, AiCorrection>();
+    for (const c of entries) {
+      fromMap.set(dl(c.fromText), c);
+    }
+
+    // ---- Cycle detection via iterative DFS ----
+    // Track which lowercase names participate in a cycle so we can drop them.
+    const inCycle = new Set<string>();
+    const globalVisited = new Set<string>();
+
+    for (const startNode of fromMap.keys()) {
+      if (globalVisited.has(startNode)) continue;
+
+      const path: string[] = [];
+      const onPath = new Set<string>();
+      let node = startNode;
+
+      while (true) {
+        if (onPath.has(node)) {
+          // Cycle: mark every node from where the cycle begins back to `node`.
+          const cycleStart = path.lastIndexOf(node);
+          for (let i = cycleStart; i < path.length; i++) inCycle.add(path[i]);
+          break;
+        }
+        if (globalVisited.has(node) || !fromMap.has(node)) break;
+        path.push(node);
+        onPath.add(node);
+        node = dl(fromMap.get(node)!.toText);
+      }
+      for (const n of path) globalVisited.add(n);
+    }
+
+    // ---- Resolve each non-cycle entry to its chain terminal ----
+    for (const c of entries) {
+      const fromLower = dl(c.fromText);
+      if (inCycle.has(fromLower)) continue; // part of a cycle → drop
+
+      // Follow the chain until we reach a terminal (not a fromText key) or a
+      // cycle entry. Guard against infinite loops with a visited set.
+      let terminalToText = c.toText;
+      let curLower = dl(c.toText);
+      const seen = new Set<string>([fromLower]);
+
+      while (fromMap.has(curLower) && !inCycle.has(curLower) && !seen.has(curLower)) {
+        seen.add(curLower);
+        const next = fromMap.get(curLower)!;
+        terminalToText = next.toText;
+        curLower = dl(next.toText);
+      }
+
+      if (dl(terminalToText) === dl(c.toText)) {
+        // Already pointing to the terminal — no change.
+        result.push(c);
+      } else {
+        // Intermediate hop: rewrite to point directly to the terminal.
+        result.push({ domain: c.domain, fromText: c.fromText, toText: terminalToText });
+      }
+    }
+  }
+
+  return result;
+}
+
 // Keep only corrections whose domain is in the allow-list (case-insensitive).
 export function filterCorrectionsByDomain(
   corrections: ReadonlyArray<AiCorrection>,

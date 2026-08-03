@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Brain, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fetchAiCorrections, deleteAiCorrection, type AiCorrectionWithId } from "@/aiCorrections";
+import { fetchAiCorrections, deleteAiCorrection, collapseAiCorrectionChains, type AiCorrectionWithId } from "@/aiCorrections";
 
 // Domain display labels — falls back to the raw domain string for unknown ones.
 const DOMAIN_LABELS: Record<string, string> = {
@@ -92,9 +92,17 @@ export default function AiCorrectionsCard() {
     onSettled: () => setDeletingId(null),
   });
 
+  const collapseMutation = useMutation({
+    mutationFn: collapseAiCorrectionChains,
+    onSuccess: (updated) => {
+      qc.setQueryData(["ai-corrections"], updated);
+    },
+  });
+
   const corrections = data ?? [];
   const conflictedIds = computeConflictedIds(corrections);
   const groups = groupByDomain(corrections);
+  const hasConflicts = conflictedIds.size > 0;
 
   return (
     <Card>
@@ -104,23 +112,42 @@ export default function AiCorrectionsCard() {
             <Brain className="w-4 h-4 text-primary" />
             Name Equivalences
           </CardTitle>
-          <button
-            type="button"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="p-1.5 rounded hover:bg-muted transition-colors disabled:opacity-50"
-            title="Refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground ${isFetching ? "animate-spin" : ""}`} />
-          </button>
+          <div className="flex items-center gap-1">
+            {hasConflicts && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => collapseMutation.mutate()}
+                disabled={collapseMutation.isPending}
+                className="h-7 px-2 text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                title="Automatically resolve stale chains and cycles in the AI memory"
+              >
+                {collapseMutation.isPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <AlertTriangle className="w-3 h-3" />
+                )}
+                Fix stale entries
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="p-1.5 rounded hover:bg-muted transition-colors disabled:opacity-50"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground ${isFetching ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
           Corrections the AI has learned — whenever a name is renamed or merged, an entry is
           recorded here so every AI feature treats the old name as equal to the new one.
           Delete an entry to stop the AI from applying that substitution.
           Entries marked with <AlertTriangle className="inline w-3 h-3 text-amber-400 mx-0.5 mb-0.5" /> are
-          part of a chain or cycle and are currently <strong>ignored by the AI</strong> — delete the
-          stale entries to restore them.
+          part of a chain or cycle and are currently <strong>ignored by the AI</strong> — use
+          "Fix stale entries" to auto-resolve them, or delete manually.
         </p>
       </CardHeader>
       <CardContent>

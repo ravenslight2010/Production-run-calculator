@@ -40,6 +40,16 @@ export async function deleteAiCorrection(id: number): Promise<AiCorrectionWithId
   return (data.corrections ?? []) as AiCorrectionWithId[];
 }
 
+export async function collapseAiCorrectionChains(): Promise<AiCorrectionWithId[]> {
+  const res = await fetch("/api/ai-corrections/collapse-chains", {
+    method: "POST",
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`Failed to collapse correction chains: ${res.status}`);
+  const data = await res.json();
+  return (data.corrections ?? []) as AiCorrectionWithId[];
+}
+
 export async function saveAiCorrections(corrections: AiCorrection[]): Promise<void> {
   if (corrections.length === 0) return;
   try {
