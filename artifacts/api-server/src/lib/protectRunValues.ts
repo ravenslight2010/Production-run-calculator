@@ -511,6 +511,24 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
         // Genuine, strictly-newer edit.
         outVals[id] = inVals[id];
         outUpd[id] = inStamp;
+        // Field-level preservation: casesNeeded is the planned production target,
+        // set once from the schedule and never modified during a live run. A peer
+        // that synced the run without the schedule will have casesNeeded=0, and
+        // any edit by that peer — even a genuine one — carries a 0 that would
+        // silently wipe the target on every device. isBlankRunValue only blocks
+        // a FULLY all-default run, not a partially-populated one. Protect
+        // casesNeeded specifically: if the incoming edit has it at 0 but the
+        // stored value has a positive target, preserve the stored target.
+        if (
+          exHas &&
+          asNumber((inVals[id] as Record<string, unknown>).casesNeeded) === 0 &&
+          asNumber((exVals[id] as Record<string, unknown>).casesNeeded) > 0
+        ) {
+          outVals[id] = {
+            ...(outVals[id] as Record<string, unknown>),
+            casesNeeded: asNumber((exVals[id] as Record<string, unknown>).casesNeeded),
+          };
+        }
       }
     } else if (exHas) {
       // Keep stored: preserves runs the push omitted and rejects equal/older

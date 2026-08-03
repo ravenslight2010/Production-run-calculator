@@ -228,12 +228,17 @@ describe("protectRunValues", () => {
     expect(out.runValuesUpdatedAt.r1).toBe(2000);
   });
 
-  it("treats a LONE pep 25 (not all four) as real data — a newer-stamped push wins", () => {
+  it("treats a LONE pep 25 (not all four) as real data — a newer-stamped push wins, but casesNeeded is preserved", () => {
+    // lone25 carries pep1BatchLbs=25 (a real edit, not the legacy-blank four-at-25
+    // signature) but has casesNeeded=0 because this peer never received the schedule.
+    // The incoming edit is genuine and wins the LWW merge, BUT the casesNeeded field
+    // must be patched back from the stored value so the planned target is never silently
+    // zeroed by a peer who doesn't have the schedule.
     const lone25 = { ...CURRENT_BLANK, pep1BatchLbs: 25 };
     const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
     const incoming: Payload = { runValues: { r1: lone25 }, runValuesUpdatedAt: { r1: 2000 } };
     const out = protectRunValues(incoming, existing) as Payload;
-    expect(out.runValues.r1).toEqual(lone25);
+    expect(out.runValues.r1).toEqual({ ...lone25, casesNeeded: 240 });
     expect(out.runValuesUpdatedAt.r1).toBe(2000);
   });
 
@@ -270,6 +275,29 @@ describe("protectRunValues", () => {
     const out = protectRunValues(incoming, existing) as Payload;
     expect(out.runValues.r1).toEqual({ casesNeeded: 999 });
     expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("preserves stored casesNeeded when a peer's newer edit carries casesNeeded=0", () => {
+    // A peer without the schedule has casesNeeded=0 but enters real line settings,
+    // so the run is not all-blank. Their newer stamp wins the LWW check, but
+    // casesNeeded must be patched back from the stored value so the planned
+    // production target is never silently zeroed.
+    const peerWithLineSettings = { ...CURRENT_BLANK, crustsPerCycle: 14, cycleSpeed: 4 };
+    const existing: Payload = { runValues: { r1: { casesNeeded: 240, crustsPerCycle: 14, cycleSpeed: 4 } }, runValuesUpdatedAt: { r1: 1000 } };
+    const incoming: Payload = { runValues: { r1: peerWithLineSettings }, runValuesUpdatedAt: { r1: 2000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect((out.runValues.r1 as Record<string, unknown>).casesNeeded).toBe(240);
+    expect((out.runValues.r1 as Record<string, unknown>).crustsPerCycle).toBe(14);
+    expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("allows casesNeeded=0 from a peer when stored also has casesNeeded=0 (no schedule on either side)", () => {
+    const noSchedule = { ...CURRENT_BLANK, crustsPerCycle: 14 };
+    const existing: Payload = { runValues: { r1: { ...CURRENT_BLANK, crustsPerCycle: 12 } }, runValuesUpdatedAt: { r1: 1000 } };
+    const incoming: Payload = { runValues: { r1: noSchedule }, runValuesUpdatedAt: { r1: 2000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect((out.runValues.r1 as Record<string, unknown>).casesNeeded).toBe(0);
+    expect((out.runValues.r1 as Record<string, unknown>).crustsPerCycle).toBe(14);
   });
 
   it("accepts a bumped-stamp HEAL re-push that carries the good value (empty stored -> good wins)", () => {

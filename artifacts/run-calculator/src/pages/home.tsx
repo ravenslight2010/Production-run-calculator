@@ -6547,7 +6547,15 @@ export default function Home() {
             rejectedStale = true;
             continue;
           }
-          saveRunValues(id, vals as FormValues);
+          // Field-level preservation: casesNeeded is the planned target, set
+          // once from the schedule. A peer without the schedule carries
+          // casesNeeded=0; if they make any real edit their newer stamp wins
+          // the LWW check above, but we must NOT let their 0 wipe our target.
+          const acceptedVals: FormValues =
+            (vals as FormValues).casesNeeded === 0 && localVals.casesNeeded > 0
+              ? { ...(vals as FormValues), casesNeeded: localVals.casesNeeded }
+              : (vals as FormValues);
+          saveRunValues(id, acceptedVals);
           if (rTs > lTs) mergedUpd[id] = rTs;
         }
         saveRunValuesUpdated(mergedUpd);
@@ -6763,6 +6771,15 @@ export default function Home() {
           // empty-over-populated corruption guarded on the run-values loop above).
           && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
           const merged = mergeRunDefaults(payload.runValues[currentId] as FormValues);
+          // Field-level preservation (mirrors the run-values loop above):
+          // never reset the form's casesNeeded to 0 when the stored copy still
+          // carries a positive planned target (a peer without the schedule
+          // pushed casesNeeded=0, which was patched in saveRunValues but the
+          // form reset reads the raw payload directly).
+          const storedCasesNeeded = loadRunValues(currentId).casesNeeded;
+          if (merged.casesNeeded === 0 && storedCasesNeeded > 0) {
+            merged.casesNeeded = storedCasesNeeded;
+          }
           // Skip the reset entirely when the merged remote values equal what
           // the form already shows (idle SSE reconnect echo). An unnecessary
           // form.reset() re-emits through form.watch(), which retriggers the
