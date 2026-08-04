@@ -2905,6 +2905,14 @@ export function loadSpecImportKnown(): {
     cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
     doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
     sauceIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
+    // Existing dough recipe names: the name list (all registered dough recipe
+    // names) unioned with presets that have ingredient rows.
+    doughNames: [
+      ...new Set([
+        ...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES),
+        ...Object.keys(loadDoughRecipePresets()),
+      ]),
+    ],
     // Existing sauce/frontline recipe names: the selectable Sauce Recipe
     // options list (which carries ready-made sauce names like "BBQ Sauce")
     // unioned with the mixed-recipe preset names. Grounds a parsed profile's

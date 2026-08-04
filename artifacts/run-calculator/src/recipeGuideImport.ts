@@ -198,7 +198,11 @@ export async function prepareDoughGuideImport(
   }
   const known = loadSpecImportKnown();
   const flavorsByBrand = loadBrandFlavors();
-  const doughRecipeNames = known.doughRecipes ?? [];
+  // All dough recipe names: name list (all registered names) PLUS presets with
+  // ingredient rows. Previously used known.doughRecipes (presets only), which
+  // dropped names that are registered but don't have rows yet.
+  const doughRecipeNames = [...new Set([...(known.doughNames ?? []), ...(known.doughRecipes ?? [])])]
+    .sort((a, b) => a.localeCompare(b));
 
   return {
     candidates: buildDoughCandidates(rows, known.brands, doughRecipeNames),
