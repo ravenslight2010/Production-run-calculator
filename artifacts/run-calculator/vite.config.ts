@@ -7,25 +7,18 @@ import { VitePWA } from "vite-plugin-pwa";
 
 const rawPort = process.env.PORT;
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
+// PORT is only used for server.port / preview.port, which are both ignored
+// during `vite build`.  Allow it to be absent (e.g. in the deployment build
+// step) so the build doesn't fail on a variable that has no effect there.
+const port = rawPort ? Number(rawPort) : 5173;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
+// BASE_PATH affects the `base` option which IS relevant during builds.
+// Default to "/" (the production root) when not explicitly provided.
+const basePath = process.env.BASE_PATH ?? "/";
 
 // Dev-only (Replit). The preview runs inside an HTTPS-proxied iframe where
 // Vite's HMR websocket can't stay connected — it drops every so often, and
