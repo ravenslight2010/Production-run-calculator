@@ -164,8 +164,12 @@ export async function prepareSauceGuideImport(
   const known = loadSpecImportKnown();
   const flavorsByBrand = loadBrandFlavors();
 
-  // Sauce recipe names from server pool
-  const sauceRecipeNames = known.sauceRecipes ?? [];
+  // All sauce recipe names the factory uses: ready-made names (BBQ Sauce,
+  // Marinara, etc.) PLUS mixed/custom presets that have ingredient rows.
+  // Previously this used known.sauceRecipes (presets only), which silently
+  // dropped all the plain ready-made sauce options from the reassign dropdown.
+  const sauceRecipeNames = [...new Set([...(known.sauceNames ?? []), ...(known.sauceRecipes ?? [])])]
+    .sort((a, b) => a.localeCompare(b));
 
   return {
     candidates: buildSauceCandidates(rows, known.brands, sauceRecipeNames),
