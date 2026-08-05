@@ -116,8 +116,22 @@ export function loadList(key: string, fallback: string[]): string[] {
   return fallback;
 }
 
+// ── Factory KV write-through hook ────────────────────────────────────────────
+// Registered by home.tsx once on mount.  Every save function below calls
+// notifyKv() so migrated factory keys are automatically synced to the server
+// without touching individual call sites.
+type KvMutation = { key: string; value: unknown };
+let _kvMutationHook: ((m: KvMutation) => void) | null = null;
+export function setKvMutationHook(fn: (m: KvMutation) => void): void {
+  _kvMutationHook = fn;
+}
+function notifyKv(key: string, value: unknown): void {
+  _kvMutationHook?.({ key, value });
+}
+
 export function saveList(key: string, list: string[]): void {
   try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+  notifyKv(key, list);
 }
 
 // ── Merge tombstones ────────────────────────────────────────────────────────
@@ -163,6 +177,7 @@ export function loadDeletedItems(): Record<string, string[]> {
 }
 export function saveDeletedItems(map: Record<string, string[]>): void {
   try { localStorage.setItem(DELETED_ITEMS_KEY, JSON.stringify(map)); } catch {}
+  notifyKv(DELETED_ITEMS_KEY, map);
 }
 // ── Delete/un-delete stamps (namespace → lowercased name → epoch ms) ────────
 // The deletedItems tombstones sync via a pure union, so a deliberate RE-ADD of
@@ -186,9 +201,11 @@ export function loadDeletedStamps(): StampMap { return loadStampMap(DELETED_STAM
 export function loadUndeletedStamps(): StampMap { return loadStampMap(UNDELETED_STAMPS_KEY); }
 export function saveDeletedStamps(map: StampMap): void {
   try { localStorage.setItem(DELETED_STAMPS_KEY, JSON.stringify(map)); } catch {}
+  notifyKv(DELETED_STAMPS_KEY, map);
 }
 export function saveUndeletedStamps(map: StampMap): void {
   try { localStorage.setItem(UNDELETED_STAMPS_KEY, JSON.stringify(map)); } catch {}
+  notifyKv(UNDELETED_STAMPS_KEY, map);
 }
 function setStamp(key: string, namespace: string, nameLower: string, ts: number): void {
   const map = loadStampMap(key);
@@ -310,6 +327,7 @@ export function loadBrandFlavors(): Record<string, string[]> {
 
 export function saveBrandFlavors(bf: Record<string, string[]>): void {
   try { localStorage.setItem(BRAND_FLAVORS_KEY, JSON.stringify(bf)); } catch {}
+  notifyKv(BRAND_FLAVORS_KEY, bf);
 }
 
 // Fields that are run-specific and must never carry over via a brand/flavor profile
@@ -1408,6 +1426,7 @@ export function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
 }
 export function saveDoughRecipePresets(p: Record<string, DoughRecipePreset>): void {
   try { localStorage.setItem(DOUGH_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+  notifyKv(DOUGH_RECIPE_PRESETS_KEY, p);
 }
 
 export function loadFrontlineRecipePresets(): Record<string, RecipeRow[]> {
@@ -1415,6 +1434,7 @@ export function loadFrontlineRecipePresets(): Record<string, RecipeRow[]> {
 }
 export function saveFrontlineRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(FRONTLINE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+  notifyKv(FRONTLINE_RECIPE_PRESETS_KEY, p);
 }
 
 export function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
@@ -1422,6 +1442,7 @@ export function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
 }
 export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+  notifyKv(CHEESE_RECIPE_PRESETS_KEY, p);
 }
 
 export const SEED_MIX_RECIPE_NAMES = new Set(MIX_SEED.mixRecipeNames);

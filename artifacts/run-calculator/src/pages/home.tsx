@@ -163,6 +163,7 @@ import {
   saveUndeletedStamps,
   mergeStampMaps,
   flavorNamespace,
+  setKvMutationHook,
   captureMasterDataSnapshot,
   recordMasterDataChange,
   loadChangeHistory,
@@ -175,7 +176,6 @@ import {
   specImportCheeseRecipeIsMix,
   healDieTypesFromProfiles,
   scanProfileDieTypes,
-  healPackagingFromProfiles,
   normalizePackagingFields,
   rewriteDieTypeInProfiles,
   rewritePepTypeInProfiles,
@@ -184,6 +184,15 @@ import {
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
+import {
+  fetchFactoryData,
+  hydrateFromServer,
+  putFactoryKey,
+  getStopReasons,
+  getPackagingSettings,
+  stampLocalWrite,
+  FACTORY_KV_CACHED_KEYS,
+} from "../factoryDataSync";
 import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import {
   fetchServerDieTypes,
@@ -3065,18 +3074,10 @@ export default function Home() {
   // grip-sheets). Add/remove/persist/sync/tombstone exactly like die types; the
   // seeded defaults are removable (no DEFAULT guard) since they are user-owned.
   // Not part of the ingredient merge universe, so no clearMergedAwayBoth. ──────
-  const [circles, setCircles] = useState<string[]>(() =>
-    healPackagingFromProfiles(CIRCLES_KEY, DEFAULT_CIRCLES, "circles", "circles")
-  );
-  const [shipper, setShipper] = useState<string[]>(() =>
-    healPackagingFromProfiles(SHIPPER_KEY, DEFAULT_SHIPPERS, "shipper", "shipper")
-  );
-  const [skidStacking, setSkidStacking] = useState<string[]>(() =>
-    healPackagingFromProfiles(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, "skidStacking", "skidStacking")
-  );
-  const [gripSheets, setGripSheets] = useState<string[]>(() =>
-    healPackagingFromProfiles(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, "gripSheets", "gripSheets")
-  );
+  const [circles, setCircles] = useState<string[]>(() => getPackagingSettings().circles);
+  const [shipper, setShipper] = useState<string[]>(() => getPackagingSettings().shipper);
+  const [skidStacking, setSkidStacking] = useState<string[]>(() => getPackagingSettings().skidStacking);
+  const [gripSheets, setGripSheets] = useState<string[]>(() => getPackagingSettings().gripSheets);
 
   function makePackagingList(
     list: string[],
@@ -3090,16 +3091,16 @@ export default function Home() {
         if (!trimmed || list.some(t => t.toLowerCase() === trimmed.toLowerCase())) return;
         const updated = [...list, trimmed].sort((a, b) => a.localeCompare(b));
         setList(updated);
-        saveList(key, updated);
+        // Packaging settings are server-only — no localStorage copy; push to server.
+        putFactoryKey(key, updated);
         clearDeleted(namespace, trimmed);
-        schedulePush(dayStateRef.current);
       },
       remove(name: string) {
         const updated = list.filter(t => t !== name);
         setList(updated);
-        saveList(key, updated);
+        // Packaging settings are server-only — no localStorage copy; push to server.
+        putFactoryKey(key, updated);
         tombstoneDeleted(namespace, name);
-        schedulePush(dayStateRef.current);
       },
     };
   }
@@ -3289,10 +3290,13 @@ export default function Home() {
       return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
     });
     setDieTypes(healDieTypesFromProfiles());
-    setCircles(healPackagingFromProfiles(CIRCLES_KEY, DEFAULT_CIRCLES, "circles", "circles"));
-    setShipper(healPackagingFromProfiles(SHIPPER_KEY, DEFAULT_SHIPPERS, "shipper", "shipper"));
-    setSkidStacking(healPackagingFromProfiles(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, "skidStacking", "skidStacking"));
-    setGripSheets(healPackagingFromProfiles(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, "gripSheets", "gripSheets"));
+    // Packaging settings are server-only (no localStorage copy); keep whatever
+    // the startup fetch already put into module/React state.
+    const _pkg = getPackagingSettings();
+    setCircles(_pkg.circles);
+    setShipper(_pkg.shipper);
+    setSkidStacking(_pkg.skidStacking);
+    setGripSheets(_pkg.gripSheets);
     setCheeseIngredients([...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setDoughIngredients([...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setDoughRecipeNames([...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b)));
@@ -4425,10 +4429,7 @@ export default function Home() {
   });
   const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
-  const [stopReasonsList, setStopReasonsList] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(STOP_REASONS_KEY) ?? "null") ?? DEFAULT_STOP_REASONS; }
-    catch { return DEFAULT_STOP_REASONS; }
-  });
+  const [stopReasonsList, setStopReasonsList] = useState<string[]>(() => getStopReasons());
   const [editingStop, setEditingStop] = useState<Stoppage | null>(null);
   const [showManualStopDialog, setShowManualStopDialog] = useState(false);
   // "+ Add pep type" reveal toggles for the optional additional pep type on each
@@ -7013,6 +7014,41 @@ export default function Home() {
     })();
   }, []);
 
+  // ── Factory KV: startup fetch + write-through hook registration ──
+  // Fetch all migrated factory-wide keys from the server on login, hydrate
+  // localStorage (for cached keys) and module state (for server-only keys:
+  // stop reasons, packaging settings), then refresh React state.  After that,
+  // register the storage mutation hook so every subsequent localStorage write
+  // for a cached key also fires a server write-through PUT.
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await fetchFactoryData();
+        hydrateFromServer(data);
+        // Refresh server-only keys in React state
+        setStopReasonsList(getStopReasons());
+        const pkg = getPackagingSettings();
+        setCircles(pkg.circles);
+        setShipper(pkg.shipper);
+        setSkidStacking(pkg.skidStacking);
+        setGripSheets(pkg.gripSheets);
+        // Reload cached keys from localStorage (hydrateFromServer just wrote them)
+        reloadMasterData();
+      } catch {
+        // Offline / error — keep whatever is in localStorage already
+      }
+    })();
+    // Register write-through: every storage mutation for a cached factory key
+    // bumps the local stamp and fires a server PUT.
+    setKvMutationHook(({ key, value }) => {
+      if (FACTORY_KV_CACHED_KEYS.has(key)) {
+        stampLocalWrite(key);
+        putFactoryKey(key, value);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Brand+flavor profile pool reconcile (boot + 60s poll) ──
   // Profiles live in their own factory-wide server pool with per-profile
   // last-write-wins stamps (they are no longer part of the sync payload —
@@ -7453,35 +7489,15 @@ export default function Home() {
     }
     // Brand+flavor profiles are NOT in the sync payload anymore — they live in
     // their own stamped factory-wide server pool (see profileServerSync.ts).
+    // Name lists, presets, tombstones, packaging settings, and stop reasons are
+    // NOT in the sync payload anymore — they live in the factory KV store
+    // (/api/factory-data) and are replicated via write-through PUTs + startup
+    // fetch (see factoryDataSync.ts).
     return {
       dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
       runValues,
       runValuesUpdatedAt,
-      brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
-      brandFlavors: loadBrandFlavors(),
-      ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
       history: loadHistory(),
-      pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
-      dieTypes: loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
-      circles: loadList(CIRCLES_KEY, DEFAULT_CIRCLES),
-      shipper: loadList(SHIPPER_KEY, DEFAULT_SHIPPERS),
-      skidStacking: loadList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING),
-      gripSheets: loadList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS),
-      cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
-      doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
-      frontlineIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
-      mixIngredients: loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS),
-      doughRecipeNames: loadList(DOUGH_RECIPE_NAMES_KEY, []),
-      doughRecipePresets: loadDoughRecipePresets(),
-      frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !SEED_MIX_RECIPE_NAMES.has(n)),
-      frontlineRecipePresets: loadFrontlineRecipePresets(),
-      cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
-      mixRecipeNames: loadList(MIX_RECIPE_NAMES_KEY, []),
-      cheeseRecipePresets: loadCheeseRecipePresets(),
-      mergedAway: loadMergedAway(),
-      deletedItems: loadDeletedItems(),
-      deletedStamps: loadDeletedStamps(),
-      undeletedStamps: loadUndeletedStamps(),
     };
   }
 
@@ -14143,7 +14159,7 @@ export default function Home() {
                       onClick={() => {
                         const updated = stopReasonsList.filter((_, j) => j !== i);
                         setStopReasonsList(updated);
-                        localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(updated));
+                        putFactoryKey(STOP_REASONS_KEY, updated);
                       }}
                       className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
                     >
@@ -14161,7 +14177,7 @@ export default function Home() {
                     if (e.key === "Enter" && newReasonInput.trim()) {
                       const updated = [...stopReasonsList, newReasonInput.trim()];
                       setStopReasonsList(updated);
-                      localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(updated));
+                      putFactoryKey(STOP_REASONS_KEY, updated);
                       setNewReasonInput("");
                     }
                   }}
@@ -14174,7 +14190,7 @@ export default function Home() {
                   onClick={() => {
                     const updated = [...stopReasonsList, newReasonInput.trim()];
                     setStopReasonsList(updated);
-                    localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(updated));
+                    putFactoryKey(STOP_REASONS_KEY, updated);
                     setNewReasonInput("");
                   }}
                   className="px-4 py-2 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors disabled:opacity-40"
@@ -14186,7 +14202,7 @@ export default function Home() {
                 type="button"
                 onClick={() => {
                   setStopReasonsList(DEFAULT_STOP_REASONS);
-                  localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(DEFAULT_STOP_REASONS));
+                  putFactoryKey(STOP_REASONS_KEY, DEFAULT_STOP_REASONS);
                 }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground text-center transition-colors"
               >
