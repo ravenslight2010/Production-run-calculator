@@ -192,7 +192,15 @@ import {
   getPackagingSettings,
   stampLocalWrite,
   FACTORY_KV_CACHED_KEYS,
+  runFactoryKvMigration,
+  runTemplatesMigration,
 } from "../factoryDataSync";
+import {
+  useRunTemplates,
+  saveRunTemplateApi,
+  deleteRunTemplatesApi,
+  RUN_TEMPLATES_QUERY_KEY,
+} from "../hooks/useRunTemplates";
 import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
 import {
   fetchServerDieTypes,
@@ -3590,6 +3598,7 @@ export default function Home() {
   // storage, so they never followed the facility; the server is now the source
   // of truth, with localStorage kept only as an offline fallback / migration
   // seed.
+  const { templates: serverTemplates, isLoaded: templatesLoaded } = useRunTemplates();
   const { pin: serverPin } = useSupervisorPin();
   // Factory-wide mixes (open to all signed-in users) — drives the Mixes
   // make-day plan and the manager Mixes editor.
@@ -3943,6 +3952,24 @@ export default function Home() {
   // signed-in user (floor staff perform the counts).
   const { schedules: cycleCountSchedules } = useCycleCountSchedules();
   const cycleCountQc = useQueryClient();
+  // Template create/delete — call the API then update the React Query cache
+  // directly so the UI updates without waiting for the next background refetch.
+  async function saveServerTemplate(tpl: import("../types").RunTemplate): Promise<void> {
+    try {
+      const updated = await saveRunTemplateApi(tpl);
+      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
+    } catch {
+      void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
+    }
+  }
+  async function deleteServerTemplate(id: string): Promise<void> {
+    try {
+      const updated = await deleteRunTemplatesApi([id]);
+      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
+    } catch {
+      void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
+    }
+  }
   const markCountedMutation = useMutation({
     mutationFn: (id: string) => markCycleCountCounted(id),
     onSuccess: (saved) =>
@@ -7034,6 +7061,11 @@ export default function Home() {
         setGripSheets(pkg.gripSheets);
         // Reload cached keys from localStorage (hydrateFromServer just wrote them)
         reloadMasterData();
+        // One-time migration heals: push localStorage data to the server for
+        // devices that had data before the factory-KV migration. Best-effort —
+        // failures leave the marker unset so the heal retries on the next load.
+        void runFactoryKvMigration(data);
+        void runTemplatesMigration();
       } catch {
         // Offline / error — keep whatever is in localStorage already
       }
@@ -11174,6 +11206,7 @@ export default function Home() {
     staleCleanupSuggestions, startCast, startRun, stopCast, stopNotes, stopReason,
     stopReasonsList, strictViolations, swipeCue, swipeCueTimer, swipeState, switchMergeCategory,
     switchToRun, syncConnected, syncPushFailed,
+    deleteServerTemplate, saveServerTemplate, serverTemplates, templatesLoaded,
     toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
@@ -11245,6 +11278,7 @@ export default function Home() {
     specImportPrepared, specImportProgress, specReconcileSignal,
     staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
     swipeCue, syncConnected, syncPushFailed,
+    serverTemplates, templatesLoaded,
     undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount, upcomingRunLabels,
     v, ve, writeError,
   ]);
@@ -11297,7 +11331,7 @@ export default function Home() {
       serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
       serverDoughVariantsByName, serverDoughWeightByName,
       serverMixNames, serverMixRowsByName, serverSauceNames, serverSauceRowsByName,
-      setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
+      serverTemplates, setupEditorBrand, setupEditorFlavor, setupEditorOpen, sheetListSignal,
       // ── Dialog state that IS needed by live production tabs ──
       // (showManageDialog, showImportDialog, merge*, *Import* are intentionally omitted)
       showAlertSettings, showFloorMode, showGetStarted, showGlance,
@@ -11305,7 +11339,7 @@ export default function Home() {
       skidStacking, skidStackingList,
       staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
       swipeCue, syncConnected, syncPushFailed,
-      undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
+      templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
       upcomingRunLabels, v, ve, writeError,
     ]
   );

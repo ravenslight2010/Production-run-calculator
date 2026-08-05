@@ -328,3 +328,123 @@ export function resetFactoryDataSyncForTests(): void {
   _stopReasons = null;
   _packagingSettings = null;
 }
+
+// ── One-time migration heals ──────────────────────────────────────────────────
+
+/**
+ * runFactoryKvMigration — marker-guarded one-time heal.
+ * Marker: "run-calc-factory-kv-migrated-v1"
+ *
+ * For each of the 20 cached factory-KV keys: if the server already has a
+ * value, skip; otherwise read from localStorage and PUT to the server.
+ * For the 5 server-only keys (stop reasons + packaging settings): same push
+ * logic, then remove the stale localStorage copy.
+ *
+ * Call this AFTER fetchFactoryData() + hydrateFromServer() so serverData
+ * reflects the true server state.
+ */
+const FACTORY_KV_MIGRATION_MARKER = "run-calc-factory-kv-migrated-v1";
+
+export async function runFactoryKvMigration(serverData: FactoryDataMap): Promise<void> {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(FACTORY_KV_MIGRATION_MARKER)) return;
+
+    // Cached keys (name lists, presets, tombstones): push if server lacks them.
+    for (const key of FACTORY_KV_CACHED_KEYS) {
+      if (serverData[key]) continue; // server already has a value — skip
+      try {
+        const local = localStorage.getItem(key);
+        if (local !== null) putFactoryKey(key, JSON.parse(local));
+      } catch {}
+    }
+
+    // Server-only keys (stop reasons + packaging settings): push if absent,
+    // then always remove the stale localStorage copy.
+    const serverOnlyEntries: string[] = [
+      STOP_REASONS_KEY,
+      CIRCLES_KEY,
+      SHIPPER_KEY,
+      SKID_STACKING_KEY,
+      GRIP_SHEETS_KEY,
+    ];
+    for (const key of serverOnlyEntries) {
+      if (!serverData[key]) {
+        try {
+          const local = localStorage.getItem(key);
+          if (local !== null) putFactoryKey(key, JSON.parse(local));
+        } catch {}
+      }
+      // Remove stale localStorage copy whether or not we pushed.
+      try { localStorage.removeItem(key); } catch {}
+    }
+
+    localStorage.setItem(FACTORY_KV_MIGRATION_MARKER, "1");
+  } catch {
+    // Fail safely — marker left unset so the heal retries next load.
+  }
+}
+
+/**
+ * runTemplatesMigration — marker-guarded one-time heal.
+ * Marker: "run-calc-run-templates-migrated-v1"
+ *
+ * GETs /api/run-templates; if the server list is empty, reads the
+ * TEMPLATES_KEY localStorage value and POSTs each template to the API.
+ * Writes the marker on success so the heal never repeats.
+ *
+ * Guard: re-checks the GET response before pushing — if another device
+ * already seeded the server list, skips the push to avoid duplicates.
+ */
+const TEMPLATES_MIGRATION_MARKER = "run-calc-run-templates-migrated-v1";
+// Inline constant to avoid importing types.ts here (would create a circular
+// dependency chain via storage.ts).
+const TEMPLATES_LOCAL_KEY = "run-calc-templates";
+
+export async function runTemplatesMigration(): Promise<void> {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(TEMPLATES_MIGRATION_MARKER)) return;
+
+    // Check if the server already has templates.
+    const res = await fetch("/api/run-templates");
+    if (!res.ok) return; // Don't mark; retry on next load.
+
+    const body = (await res.json()) as { templates?: unknown[] };
+    const serverTemplates = body.templates ?? [];
+
+    // Guard: server already has templates — no push needed.
+    if (serverTemplates.length > 0) {
+      localStorage.setItem(TEMPLATES_MIGRATION_MARKER, "1");
+      return;
+    }
+
+    // Read local templates.
+    const localRaw = localStorage.getItem(TEMPLATES_LOCAL_KEY);
+    if (!localRaw) {
+      localStorage.setItem(TEMPLATES_MIGRATION_MARKER, "1");
+      return;
+    }
+
+    let localTemplates: unknown[];
+    try {
+      const parsed = JSON.parse(localRaw);
+      localTemplates = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      localTemplates = [];
+    }
+
+    if (localTemplates.length > 0) {
+      const pushRes = await fetch("/api/run-templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templates: localTemplates }),
+      });
+      if (!pushRes.ok) return; // Don't mark; retry on next load.
+    }
+
+    localStorage.setItem(TEMPLATES_MIGRATION_MARKER, "1");
+  } catch {
+    // Fail safely — marker left unset so the heal retries next load.
+  }
+}
