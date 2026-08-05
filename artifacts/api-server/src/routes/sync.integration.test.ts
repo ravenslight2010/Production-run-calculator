@@ -524,6 +524,21 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
   async function conflictRows() {
     return db.select().from(syncConflictLogsTable);
   }
+  // Poll until predicate is satisfied or 2 s elapses.  recordSyncConflict is
+  // fire-and-forget (void), so under heavy parallel suite load the background
+  // insert may take longer than a fixed 150 ms sleep.
+  async function pollConflictRows(
+    predicate: (rows: Awaited<ReturnType<typeof conflictRows>>) => boolean,
+    timeoutMs = 2000,
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    let rows = await conflictRows();
+    while (!predicate(rows) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+      rows = await conflictRows();
+    }
+    return rows;
+  }
 
   it("inserts a conflict row when a blank-over-populated run value is rejected", async () => {
     // Seed a populated run value, then push a blank value (same stamp) — the
@@ -538,10 +553,9 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
       runValues: { r1: {} },
       runValuesUpdatedAt: { r1: 1000 },
     });
-    // recordSyncConflict is fire-and-forget (void); give the background insert
-    // a moment to commit before querying.
-    await new Promise((r) => setTimeout(r, 150));
-    const rows = await conflictRows();
+    // recordSyncConflict is fire-and-forget (void); poll until the background
+    // insert commits (up to 2 s) so this doesn't flake under suite-wide load.
+    const rows = await pollConflictRows((rs) => rs.length >= 1);
     expect(rows.length).toBeGreaterThanOrEqual(1);
     const last = rows[rows.length - 1];
     expect(last.scope).toBe("live");
@@ -569,8 +583,7 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
       runValues: { a: { casesNeeded: 10 } },
       runValuesUpdatedAt: { a: 1 },
     });
-    await new Promise((r) => setTimeout(r, 150));
-    const rows = await conflictRows();
+    const rows = await pollConflictRows((rs) => rs.length > beforeCount);
     expect(rows.length).toBe(beforeCount + 1);
     const last = rows[rows.length - 1];
     expect(last.fieldsWithConflicts.some((f) => f.startsWith("dayState.runs:appended"))).toBe(true);
@@ -594,8 +607,7 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
       runValues: { r1: { casesNeeded: 50 } },
       runValuesUpdatedAt: { r1: 1 },
     });
-    await new Promise((r) => setTimeout(r, 150));
-    const rows = await conflictRows();
+    const rows = await pollConflictRows((rs) => rs.length > beforeCount);
     expect(rows.length).toBe(beforeCount + 1);
     const last = rows[rows.length - 1];
     expect(last.fieldsWithConflicts.some((f) => f.startsWith("dayState.runs.meta:"))).toBe(true);
