@@ -43,3 +43,4 @@ export * from "./dieLineDefaults";
 export * from "./brandProfiles";
 export * from "./auditLog";
 export * from "./syncConflictLog";
+export * from "./factoryKv";

@@ -19,6 +19,7 @@ export const CAPABILITIES = [
   "approve-password-resets",
   "review-incidents",
   "use-ai-tools",
+  "manage-factory-settings",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
