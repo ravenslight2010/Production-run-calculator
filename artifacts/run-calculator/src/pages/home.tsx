@@ -10218,8 +10218,12 @@ export default function Home() {
     setSauceGuideImportLoading(true);
     setShowSauceGuideImport(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const prepared = await prepareSauceGuideImport(buffer);
+      const [buffer, serverSauceRecipes] = await Promise.all([
+        file.arrayBuffer(),
+        fetchNamedRecipes("sauce").catch(() => [] as NamedRecipe[]),
+      ]);
+      const extraSauceNames = serverSauceRecipes.map((r) => r.name).filter(Boolean);
+      const prepared = await prepareSauceGuideImport(buffer, extraSauceNames);
       if (gen !== sauceGuideImportGenRef.current) return;
       setSauceGuideImportPrepared(prepared);
     } catch (err) {
@@ -10262,8 +10266,12 @@ export default function Home() {
     setDoughGuideImportLoading(true);
     setShowDoughGuideImport(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const prepared = await prepareDoughGuideImport(buffer);
+      const [buffer, serverDoughRecipes] = await Promise.all([
+        file.arrayBuffer(),
+        fetchNamedRecipes("dough").catch(() => [] as NamedRecipe[]),
+      ]);
+      const extraDoughNames = serverDoughRecipes.map((r) => r.name).filter(Boolean);
+      const prepared = await prepareDoughGuideImport(buffer, extraDoughNames);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
     } catch (err) {

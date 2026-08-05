@@ -149,9 +149,14 @@ function decodeXmlEntities(s: string): string {
 /**
  * Read a sauce guide .docx buffer → parse → match brands and recipe names.
  * Throws with a plain-language message when the file is unreadable or empty.
+ *
+ * @param extraSauceNames  Additional sauce recipe names from the server pool
+ *   (named-recipes "sauce" kind).  Merged in so server-only recipes appear in
+ *   the reassign dropdown even when they haven't been pushed to localStorage.
  */
 export async function prepareSauceGuideImport(
   buffer: ArrayBuffer,
+  extraSauceNames: string[] = [],
 ): Promise<SauceGuideImportPrepared> {
   const text = await readDocxText(buffer);
   const rows = parseSauceGuide(text);
@@ -165,11 +170,15 @@ export async function prepareSauceGuideImport(
   const flavorsByBrand = loadBrandFlavors();
 
   // All sauce recipe names the factory uses: ready-made names (BBQ Sauce,
-  // Marinara, etc.) PLUS mixed/custom presets that have ingredient rows.
-  // Previously this used known.sauceRecipes (presets only), which silently
-  // dropped all the plain ready-made sauce options from the reassign dropdown.
-  const sauceRecipeNames = [...new Set([...(known.sauceNames ?? []), ...(known.sauceRecipes ?? [])])]
-    .sort((a, b) => a.localeCompare(b));
+  // Marinara, etc.) PLUS mixed/custom presets that have ingredient rows PLUS
+  // any server-pool names passed in by the caller.
+  const sauceRecipeNames = [
+    ...new Set([
+      ...(known.sauceNames ?? []),
+      ...(known.sauceRecipes ?? []),
+      ...extraSauceNames,
+    ]),
+  ].sort((a, b) => a.localeCompare(b));
 
   return {
     candidates: buildSauceCandidates(rows, known.brands, sauceRecipeNames),
@@ -182,9 +191,14 @@ export async function prepareSauceGuideImport(
 /**
  * Read a pizza-to-dough recipe guide .xlsx buffer → parse → match.
  * Throws when the file is unreadable or not the dough guide.
+ *
+ * @param extraDoughNames  Additional dough recipe names from the server pool
+ *   (named-recipes "dough" kind).  Merged in so server-only recipes appear in
+ *   the reassign dropdown even when they haven't been pushed to localStorage.
  */
 export async function prepareDoughGuideImport(
   buffer: ArrayBuffer,
+  extraDoughNames: string[] = [],
 ): Promise<DoughGuideImportPrepared> {
   const grids = await readWorkbookGrids(buffer);
   const sanity = gridSanityIssue(grids);
@@ -199,10 +213,14 @@ export async function prepareDoughGuideImport(
   const known = loadSpecImportKnown();
   const flavorsByBrand = loadBrandFlavors();
   // All dough recipe names: name list (all registered names) PLUS presets with
-  // ingredient rows. Previously used known.doughRecipes (presets only), which
-  // dropped names that are registered but don't have rows yet.
-  const doughRecipeNames = [...new Set([...(known.doughNames ?? []), ...(known.doughRecipes ?? [])])]
-    .sort((a, b) => a.localeCompare(b));
+  // ingredient rows PLUS any server-pool names passed in by the caller.
+  const doughRecipeNames = [
+    ...new Set([
+      ...(known.doughNames ?? []),
+      ...(known.doughRecipes ?? []),
+      ...extraDoughNames,
+    ]),
+  ].sort((a, b) => a.localeCompare(b));
 
   return {
     candidates: buildDoughCandidates(rows, known.brands, doughRecipeNames),
