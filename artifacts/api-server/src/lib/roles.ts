@@ -62,19 +62,39 @@ export const ROLE_SEEDS: readonly RoleSeed[] = [
   { name: "inventory", capabilities: ["manage-inventory"], builtin: false },
 ] as const;
 
-// Seed the roles table additively. onConflictDoNothing keeps an admin's later
-// edits to a role's capabilities — we never overwrite an existing role on boot.
+// Seed the roles table additively.
+//
+// Built-in roles (manager, operator, …) have code-defined capability sets that
+// must always stay in sync with the CAPABILITIES array — e.g. when a new
+// capability is shipped, the manager row must be updated or its users get 403.
+// We therefore upsert built-in roles on conflict (capabilities + builtin cols).
+//
+// Custom roles (builtin: false) are admin-managed; their capabilities are left
+// untouched on conflict so that a manager's later edits are never overwritten.
 export async function seedRoles(): Promise<void> {
-  await db
-    .insert(rolesTable)
-    .values(
-      ROLE_SEEDS.map((r) => ({
-        name: r.name,
-        capabilities: r.capabilities,
-        builtin: r.builtin,
-      })),
-    )
-    .onConflictDoNothing({ target: rolesTable.name });
+  // Insert custom roles (skip if already present).
+  const customSeeds = ROLE_SEEDS.filter((r) => !r.builtin);
+  if (customSeeds.length > 0) {
+    await db
+      .insert(rolesTable)
+      .values(customSeeds.map((r) => ({ name: r.name, capabilities: r.capabilities, builtin: r.builtin })))
+      .onConflictDoNothing({ target: rolesTable.name });
+  }
+
+  // Upsert built-in roles — always sync capabilities to the code definition.
+  const builtinSeeds = ROLE_SEEDS.filter((r) => r.builtin);
+  if (builtinSeeds.length > 0) {
+    await db
+      .insert(rolesTable)
+      .values(builtinSeeds.map((r) => ({ name: r.name, capabilities: r.capabilities, builtin: r.builtin })))
+      .onConflictDoUpdate({
+        target: rolesTable.name,
+        set: {
+          capabilities: sql`excluded.capabilities`,
+          builtin: sql`excluded.builtin`,
+        },
+      });
+  }
 }
 
 // ---------------------------------------------------------------------------
