@@ -16256,6 +16256,30 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     stallPrompt, setStallPrompt, stallCheck,
   } = useLiveRun();
 
+  // Confirm before starting a run that is not the next unstarted run in the
+  // schedule, so an accidental tap on the wrong run can be caught before it
+  // stamps a start time and forces a redo.
+  function handleStartRun() {
+    const firstPendingIdx = dayState.runs.findIndex((r) => !r.startedAt);
+    if (firstPendingIdx !== -1 && firstPendingIdx !== dayState.currentIndex) {
+      const nextRun = dayState.runs[firstPendingIdx];
+      const nextLabel =
+        [nextRun.brand, nextRun.flavor].filter(Boolean).join(" – ") ||
+        `Run ${firstPendingIdx + 1}`;
+      const thisRun = dayState.runs[dayState.currentIndex];
+      const thisLabel =
+        [thisRun?.brand, thisRun?.flavor].filter(Boolean).join(" – ") ||
+        `Run ${dayState.currentIndex + 1}`;
+      if (
+        !window.confirm(
+          `"${nextLabel}" is next in the schedule.\n\nStart "${thisLabel}" out of order instead?`,
+        )
+      )
+        return;
+    }
+    startRun();
+  }
+
   return (
     <>
                 {/* ─── Run cockpit — identity, status & KPIs (graduated ManagerHub mockup) ─── */}
@@ -16573,7 +16597,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   {runStatus === "pending" && (
                     <button
                       type="button"
-                      onClick={startRun}
+                      onClick={handleStartRun}
                       disabled={blockingViolations.length > 0}
                       title={
                         blockingViolations.length > 0
