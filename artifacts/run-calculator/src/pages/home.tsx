@@ -16259,8 +16259,14 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   // Confirm before starting a run that is not the next unstarted run in the
   // schedule, so an accidental tap on the wrong run can be caught before it
   // stamps a start time and forces a redo.
+  //
+  // Only named runs (brand or flavor set) count as "pending" for the purposes
+  // of the check — blank placeholder runs have no meaningful order and should
+  // not trigger a false-positive warning.
   function handleStartRun() {
-    const firstPendingIdx = dayState.runs.findIndex((r) => !r.startedAt);
+    const firstPendingIdx = dayState.runs.findIndex(
+      (r) => !r.startedAt && (r.brand || r.flavor),
+    );
     if (firstPendingIdx !== -1 && firstPendingIdx !== dayState.currentIndex) {
       const nextRun = dayState.runs[firstPendingIdx];
       const nextLabel =
