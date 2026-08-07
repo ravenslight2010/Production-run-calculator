@@ -37,6 +37,9 @@ const STAMPS_KEY = "run-calc-profilesync-stamps-v1";
 const SYNCED_KEY = "run-calc-profilesync-synced-v1";
 const QUEUE_KEY = "run-calc-profilesync-queue-v1";
 const MIGRATED_KEY = "run-calc-profiles-server-migrated-v1";
+// Marker for the one-time migration that injects legacy :subtab fast-access
+// keys into the dough profile blobs so the server-pool sync distributes them.
+const SUBTAB_MIGRATION_MARKER = "run-calc-subtab-blob-migration-v1";
 
 /** Canonical profile key `${brandLc}__${flavorLc}` — identical to the suffix of PROFILE_KEY. */
 export function canonicalProfileKey(brand: string, flavor: string): string {
@@ -453,6 +456,69 @@ export async function reconcileProfilesFromServer(): Promise<boolean> {
 
   writeMap(STAMPS_KEY, stamps);
   writeMap(SYNCED_KEY, synced);
+
+  // One-time: inject legacy :subtab preferences into dough profile blobs so
+  // the server pool carries them to fresh tablets. Runs here — after server
+  // items are already merged into localStorage — so the check never races
+  // against a newer server _subTab value.
+  injectSubTabIntoProfileBlobsIfNeeded(stamps);
+
   void flushProfileQueue();
   return changed;
+}
+
+/**
+ * One-time migration that embeds the fast-access `<key>:subtab` preference
+ * into the dough profile blob as `_subTab`, then enqueues the profile for a
+ * server push. Must be called AFTER the server reconcile loop has written any
+ * newer server blobs, so the local blob reflects authoritative server state
+ * before we inspect it. If the blob already carries the right `_subTab` (from
+ * a prior toggle or a server-adopted value), the profile is skipped and no
+ * stamp is bumped. Marker-guarded: runs exactly once per device.
+ */
+function injectSubTabIntoProfileBlobsIfNeeded(stamps: Record<string, number>): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(SUBTAB_MIGRATION_MARKER)) return;
+    // Collect :subtab keys in a first pass (avoid mutating while iterating).
+    const subtabEntries: Array<{ canonicalKey: string; subTab: "dough" | "crusts" }> = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.endsWith(":subtab")) continue;
+      const v = localStorage.getItem(k);
+      if (v !== "dough" && v !== "crusts") continue;
+      // The canonical key is everything before the trailing ":subtab".
+      subtabEntries.push({
+        canonicalKey: k.slice(0, -":subtab".length),
+        subTab: v,
+      });
+    }
+    for (const { canonicalKey, subTab } of subtabEntries) {
+      try {
+        const doughBlobKey = DOUGH_PREFIX + canonicalKey;
+        const raw = localStorage.getItem(doughBlobKey);
+        const blob: Record<string, unknown> = raw
+          ? (JSON.parse(raw) as Record<string, unknown>)
+          : {};
+        // Skip when the blob already carries the right value — the server-
+        // reconcile loop just wrote it (or a prior toggle already embedded it).
+        if (blob._subTab === subTab) continue;
+        blob._subTab = subTab;
+        localStorage.setItem(doughBlobKey, JSON.stringify(blob));
+        // Bump the stamp and enqueue so the server receives this preference.
+        // Using the same monotonic logic as markProfileEdited so the upload
+        // stamp is always > any previously-adopted server stamp for this key.
+        stamps[canonicalKey] = Math.max(Date.now(), (stamps[canonicalKey] ?? 0) + 1);
+        enqueue({ t: "up", key: canonicalKey });
+      } catch {
+        // Skip unreadable blobs — one bad entry must never block the rest.
+      }
+    }
+    // Persist updated stamps so the enqueued writes carry the right values.
+    writeMap(STAMPS_KEY, stamps);
+    localStorage.setItem(SUBTAB_MIGRATION_MARKER, "1");
+  } catch {
+    // localStorage unavailable — marker left unset, retry on next successful
+    // reconcile.
+  }
 }
