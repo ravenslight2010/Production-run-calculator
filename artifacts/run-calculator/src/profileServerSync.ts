@@ -416,6 +416,14 @@ export async function reconcileProfilesFromServer(): Promise<boolean> {
         stamps[item.key] = item.updatedAt;
         synced[item.key] = item.updatedAt;
         changed = true;
+        // Seed the fast-access :subtab key from the embedded _subTab field so
+        // loadProfileSubTab() can return the correct mode without parsing the
+        // full profile blob on every call. This is the mechanism that propagates
+        // a manager's Dough/Crust toggle to all other tablets.
+        const subTab = (item.values as Record<string, unknown> | undefined)?._subTab;
+        if (subTab === "dough" || subTab === "crusts") {
+          try { localStorage.setItem(item.key + ":subtab", subTab); } catch {}
+        }
       } catch {}
     } else if (localStamp > item.updatedAt) {
       if (!pending.has(item.key)) enqueue({ t: "up", key: item.key });

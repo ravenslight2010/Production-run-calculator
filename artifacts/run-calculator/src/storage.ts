@@ -693,8 +693,27 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   // for the selected brand+flavor — and unlike the previous guard, this refuses the
   // write even when the existing profile briefly looks empty (race during heal).
   if (!profileObjHasRealData(values as unknown as Record<string, unknown>)) return false;
-  const { dough, crust } = extractProfileBlobs(values);
+  const { dough: rawDough, crust } = extractProfileBlobs(values);
   const key = canonicalProfileKey(brand, flavor);
+
+  // Preserve _subTab: this metadata field is written by saveProfileSubTab (not part
+  // of FormValues) and must survive ordinary profile saves. extractProfileBlobs only
+  // serialises FormValues fields, so without this step a normal autosave or nav-save
+  // would erase _subTab from the blob, removing the cross-tablet sync anchor.
+  let dough = rawDough;
+  try {
+    const existingRaw = localStorage.getItem(PROFILE_KEY(brand, flavor));
+    if (existingRaw) {
+      const existing = JSON.parse(existingRaw) as Record<string, unknown>;
+      const subTab = existing._subTab;
+      if (subTab === "dough" || subTab === "crusts") {
+        const parsed = JSON.parse(rawDough) as Record<string, unknown>;
+        parsed._subTab = subTab;
+        dough = JSON.stringify(parsed);
+      }
+    }
+  } catch {}
+
   // Change detection — profiles are now a factory-wide server pool with
   // per-profile last-write-wins stamps, so an unchanged nav-save must not mint
   // a fresh stamp (it would outrank a genuinely newer edit from another device):
@@ -732,6 +751,12 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
  * Persist the line-type preference (dough / crusts) for a brand+flavor pair.
  * Written whenever the user manually switches the Line Type toggle so that
  * future runs for the same identity automatically start in the correct mode.
+ *
+ * In addition to the fast-access `:subtab` localStorage key, the preference is
+ * embedded as `_subTab` inside the dough profile blob so that the existing
+ * brand-profiles server-pool sync carries it to every other tablet. Other
+ * devices pick it up the next time they reconcile profiles from the server
+ * (see profileServerSync.ts → reconcileProfilesFromServer).
  */
 export function saveProfileSubTab(
   brand: string,
@@ -739,23 +764,56 @@ export function saveProfileSubTab(
   subTab: "dough" | "crusts",
 ): void {
   if (!brand && !flavor) return;
-  const key = canonicalProfileKey(brand, flavor) + ":subtab";
-  try { localStorage.setItem(key, subTab); } catch {}
+  const profileKey = canonicalProfileKey(brand, flavor);
+  const subtabStorageKey = profileKey + ":subtab";
+  // 1. Fast-access local key for synchronous reads within this session.
+  try { localStorage.setItem(subtabStorageKey, subTab); } catch {}
+  // 2. Embed in the dough profile blob so the server-pool sync distributes it.
+  try {
+    const doughKey = PROFILE_KEY(brand, flavor);
+    const raw = localStorage.getItem(doughKey);
+    const blob: Record<string, unknown> = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    if (blob._subTab !== subTab) {
+      blob._subTab = subTab;
+      localStorage.setItem(doughKey, JSON.stringify(blob));
+      // Trigger a server-pool push so other tablets receive the update.
+      markProfileEdited(profileKey);
+    }
+  } catch {}
 }
 
 /**
  * Return the saved Line Type preference for a brand+flavor pair, or null when
  * none has been explicitly recorded (caller defaults to "dough").
+ *
+ * Checks the fast-access `:subtab` key first; falls back to `_subTab` inside
+ * the dough profile blob (populated on devices that reconciled a server update
+ * but have not yet toggled the line type locally).
  */
 export function loadProfileSubTab(
   brand: string,
   flavor: string,
 ): "dough" | "crusts" | null {
-  const key = canonicalProfileKey(brand, flavor) + ":subtab";
+  const subtabStorageKey = canonicalProfileKey(brand, flavor) + ":subtab";
   try {
-    const v = localStorage.getItem(key);
-    return v === "dough" || v === "crusts" ? v : null;
+    const v = localStorage.getItem(subtabStorageKey);
+    if (v === "dough" || v === "crusts") return v;
   } catch { return null; }
+  // Fallback: read _subTab from the dough profile blob (set by server reconcile
+  // on tablets that haven't toggled locally yet).
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
+    if (raw) {
+      const blob = JSON.parse(raw) as Record<string, unknown>;
+      const embedded = blob._subTab;
+      if (embedded === "dough" || embedded === "crusts") {
+        // Seed the fast-access key so subsequent calls don't need to parse.
+        try { localStorage.setItem(subtabStorageKey, embedded); } catch {}
+        return embedded;
+      }
+    }
+  } catch {}
+  return null;
 }
 
 /**
