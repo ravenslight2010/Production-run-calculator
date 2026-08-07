@@ -729,6 +729,36 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
 }
 
 /**
+ * Persist the line-type preference (dough / crusts) for a brand+flavor pair.
+ * Written whenever the user manually switches the Line Type toggle so that
+ * future runs for the same identity automatically start in the correct mode.
+ */
+export function saveProfileSubTab(
+  brand: string,
+  flavor: string,
+  subTab: "dough" | "crusts",
+): void {
+  if (!brand && !flavor) return;
+  const key = canonicalProfileKey(brand, flavor) + ":subtab";
+  try { localStorage.setItem(key, subTab); } catch {}
+}
+
+/**
+ * Return the saved Line Type preference for a brand+flavor pair, or null when
+ * none has been explicitly recorded (caller defaults to "dough").
+ */
+export function loadProfileSubTab(
+  brand: string,
+  flavor: string,
+): "dough" | "crusts" | null {
+  const key = canonicalProfileKey(brand, flavor) + ":subtab";
+  try {
+    const v = localStorage.getItem(key);
+    return v === "dough" || v === "crusts" ? v : null;
+  } catch { return null; }
+}
+
+/**
  * Merge a few packaging fields into the stored profile for brand+flavor,
  * creating the profile blob when absent. Used by the Shipping & Palletizing
  * Guide importer: it deliberately bypasses saveProfile's "has real data"

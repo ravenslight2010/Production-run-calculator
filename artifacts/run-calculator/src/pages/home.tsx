@@ -181,6 +181,8 @@ import {
   rewritePepTypeInProfiles,
   rewriteAppTypeInProfiles,
   rewriteRecipeNameInProfiles,
+  saveProfileSubTab,
+  loadProfileSubTab,
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer } from "../profileServerSync";
@@ -7327,7 +7329,15 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
+              // Apply the saved line-type (dough/crusts) preference to each run
+              // that has no subTab set — so brands always scheduled as "crusts"
+              // start in the right mode without a manual toggle every morning.
+              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
+                if (r.subTab) return r;
+                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
+                return pref ? { ...r, subTab: pref } : r;
+              });
+              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
               // Scheduled run values are a snapshot from scheduling time; blank
               // sauce fields backfill from the CURRENT profile (mobile parity —
               // its pull-up spreads the live profile).
@@ -8123,12 +8133,14 @@ export default function Home() {
       }
     }
     const newId = genId();
+    const preferredSubTab = loadProfileSubTab(brand, flavor);
     const newDs = {
-      runs: [...dayState.runs, { id: newId, brand, flavor }],
+      runs: [...dayState.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
       currentIndex: dayState.runs.length,
     };
     setDayState(newDs);
     saveDayState(newDs);
+    if (preferredSubTab) setDoughSubTab(preferredSubTab);
     const profile = loadProfile(brand, flavor);
     if (profile) {
       // Strip mix recipe names from sauce fields — they belong in the applicator mix field
@@ -8156,13 +8168,19 @@ export default function Home() {
       }
     }
 
-    // Update run meta
+    // Update run meta — also carry the saved line-type preference so the run
+    // starts in Dough or Crust mode automatically, without needing the user to
+    // toggle it every time they assign this brand+flavor.
+    const preferredSubTab = loadProfileSubTab(brand, flavor);
     const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, brand, flavor } : r
+      i === dayState.currentIndex
+        ? { ...r, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }
+        : r
     );
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
+    if (preferredSubTab) setDoughSubTab(preferredSubTab);
 
     // Load profile for new brand+flavor if it exists
     const profile = loadProfile(brand, flavor);
@@ -10891,7 +10909,15 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
+              // Apply the saved line-type (dough/crusts) preference to each run
+              // that has no subTab set — so brands always scheduled as "crusts"
+              // start in the right mode without a manual toggle every morning.
+              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
+                if (r.subTab) return r;
+                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
+                return pref ? { ...r, subTab: pref } : r;
+              });
+              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
               // Scheduled run values are a snapshot from scheduling time; blank
               // sauce fields backfill from the CURRENT profile (mobile parity —
               // its pull-up spreads the live profile).
@@ -17373,6 +17399,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                               const newDs = { ...dayState, runs: newRuns };
                               setDayState(newDs);
                               saveDayState(newDs);
+                              saveProfileSubTab(currentRun?.brand ?? "", currentRun?.flavor ?? "", "dough");
                             }}
                             className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                           >
@@ -17386,6 +17413,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                               const newDs = { ...dayState, runs: newRuns };
                               setDayState(newDs);
                               saveDayState(newDs);
+                              saveProfileSubTab(currentRun?.brand ?? "", currentRun?.flavor ?? "", "crusts");
                               // Pre-fill crust-run line settings — blank-fill only,
                               // never overwriting a value the user already changed
                               // (see dieDefaults.ts). crustsPerCase/Stack stay 0.
