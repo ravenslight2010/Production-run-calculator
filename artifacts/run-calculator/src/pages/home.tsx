@@ -16772,13 +16772,17 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     // No line speed yet → no product moving through the tunnel, so
                     // neither phase is meaningful.
                     if (ppm <= 0) return null;
-                    const feedDoneMin =
-                      v.pizzasPerCase > 0 && v.casesNeeded > 0
-                        ? (v.casesNeeded * v.pizzasPerCase) / ppm
-                        : Infinity;
-                    const feedComplete = elapsedMin >= feedDoneMin;
-                    const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
-                    const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
+                    // Use the actual case-count signal (pressDone), NOT elapsed time vs
+                    // theoretical press time. The time formula fires too early when the
+                    // line runs behind pace: elapsed > feedDoneMin while cases are still
+                    // being pressed, spuriously showing "Freezer emptying" on an active run.
+                    const feedComplete = !!calc.pressDone;
+                    const filling = !feedComplete && elapsedMin > 0 && elapsedMin < freezerMin;
+                    // Drain countdown: how long until the cases already in the tunnel exit.
+                    const emptyRemainMin =
+                      feedComplete && ppm > 0 && v.pizzasPerCase > 0
+                        ? (calc.casesInFreezer * v.pizzasPerCase) / ppm
+                        : 0;
                     const emptying = feedComplete && emptyRemainMin > 0;
                     if (!filling && !emptying) return null;
                     const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
