@@ -18114,17 +18114,25 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               <div className="space-y-2">
                                 <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
                                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
-                                  <span className="text-2xl font-mono font-black tabular-nums text-foreground">
-                                    {casesPerSkid > 0 ? (
-                                      <>
-                                        {fmtNum(Math.floor(Math.max(0, calc.casesLeftToRun) / casesPerSkid), 0)}
-                                        <span className="text-muted-foreground mx-1">/</span>
-                                        {fmtNum(Math.max(0, calc.casesLeftToRun) % casesPerSkid, 0)}
-                                      </>
-                                    ) : (
-                                      fmtNum(Math.max(0, calc.casesLeftToRun), 0)
-                                    )}
-                                  </span>
+                                  {/* Total cases still to PUT ON SKIDS = casesNeeded − casesCompleted.
+                                      Previously used casesLeftToRun which subtracts the ~50 cases already
+                                      in the freezer tunnel, understating what packaging still has to do. */}
+                                  {(() => {
+                                    const toPackage = Math.max(0, v.casesNeeded - calc.casesCompleted);
+                                    return (
+                                      <span className="text-2xl font-mono font-black tabular-nums text-foreground">
+                                        {casesPerSkid > 0 ? (
+                                          <>
+                                            {fmtNum(Math.floor(toPackage / casesPerSkid), 0)}
+                                            <span className="text-muted-foreground mx-1">/</span>
+                                            {fmtNum(toPackage % casesPerSkid, 0)}
+                                          </>
+                                        ) : (
+                                          fmtNum(toPackage, 0)
+                                        )}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                                 <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
                                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Cases Done</span>
