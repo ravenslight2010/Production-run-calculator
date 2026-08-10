@@ -17688,6 +17688,88 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     fireAutoTrackNow,
   } = useLiveRun();
 
+  // ── Auto-tick skid/case counter for the prior run draining through the
+  // freezer tunnel while the NEXT run is already active on the form.
+  // useAutoTrack only drives the CURRENT form run; once endRun() advances
+  // currentIndex the ended run's counter stops. This effect replays the same
+  // drain-delta logic for the "Draining Prior Run" panel so cases keep
+  // flowing from "in freezer" to "cased" automatically. ────────────────────
+  const priorDrainFreezerRef = useRef<{ id: string; cases: number }>({ id: "", cases: -1 });
+  useEffect(() => {
+    if (!autoTrackProgress) return;
+    const nowMs = nowTime.getTime();
+
+    // Identify the draining prior run — identical filter to the panel above.
+    let drainingRun: (typeof dayState.runs)[number] | undefined;
+    let dv: ReturnType<typeof withTempOverrides> | undefined;
+    for (const r of dayState.runs) {
+      if (!r.endedAt || r.id === currentRunId) continue;
+      const rv = withTempOverrides(loadRunValues(r.id));
+      const rfT = Number(rv.freezerTime) || 0;
+      if (rfT <= 0 || nowMs >= r.endedAt + rfT * 60000) continue;
+      const cps = Number(rv.casesPerSkid) || 0;
+      const cn = Number(rv.casesNeeded) || 0;
+      const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
+      if (cn > 0 && Math.max(0, cn - cDone) <= 0) continue;
+      if (!drainingRun?.endedAt || r.endedAt > drainingRun.endedAt) {
+        drainingRun = r;
+        dv = rv;
+      }
+    }
+
+    if (!drainingRun || !dv) {
+      priorDrainFreezerRef.current = { id: "", cases: -1 };
+      return;
+    }
+
+    // Compute cases still in the tunnel for this run.
+    const subTab = drainingRun.subTab ?? "dough";
+    const ppm =
+      Math.round(
+        (subTab === "crusts"
+          ? (Number(dv.approxLineSpeed) || 0)
+          : (Number(dv.crustsPerCycle) || 0) *
+            (Number(dv.cycleSpeed) || 0) *
+            (Number(dv.speedAdjustment) || 1)) * 100,
+      ) / 100;
+    const curFreezer = Math.max(0, Math.floor(computeCasesInFreezer({
+      startedAt: drainingRun.startedAt ?? undefined,
+      endedAt: drainingRun.endedAt ?? undefined,
+      pausedAt: drainingRun.pausedAt ?? undefined,
+      stoppages: drainingRun.stoppages,
+      now: nowMs,
+      ppm,
+      pizzasPerCase: Number(dv.pizzasPerCase) || 0,
+      freezerTimeMin: Number(dv.freezerTime) || 0,
+    })));
+
+    const prev = priorDrainFreezerRef.current;
+    // First tick for this run — just baseline, don't back-fill a catch-up jump.
+    if (prev.id !== drainingRun.id) {
+      priorDrainFreezerRef.current = { id: drainingRun.id, cases: curFreezer };
+      return;
+    }
+    priorDrainFreezerRef.current = { id: drainingRun.id, cases: curFreezer };
+
+    const exited = Math.max(0, prev.cases - curFreezer);
+    if (exited <= 0) return;
+
+    const cps = Number(dv.casesPerSkid) || 0;
+    if (cps <= 0) return;
+    const casesNeeded = Number(dv.casesNeeded) || 0;
+    const curTotal =
+      (Number(dv.skidsCompleted) || 0) * cps + (Number(dv.casesOnCurrentSkid) || 0);
+    const target = curTotal + exited;
+    const newTotal =
+      casesNeeded > 0 ? Math.min(target, Math.max(curTotal, casesNeeded)) : target;
+    if (newTotal !== curTotal) {
+      updateDrainingRunValues(drainingRun.id, {
+        skidsCompleted: Math.floor(newTotal / cps),
+        casesOnCurrentSkid: newTotal % cps,
+      });
+    }
+  }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, updateDrainingRunValues]);
+
   return (
     <>
                 <div className="flex flex-col">
