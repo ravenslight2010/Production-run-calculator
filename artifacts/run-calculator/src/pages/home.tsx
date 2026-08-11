@@ -639,35 +639,62 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
         : vals.doughBatchYield;
     if (effYield > 0 && vals.targetDoughballWeight > 0) {
       const batches = Math.ceil(s.totalPizzas / effYield);
-      if (batches > 0) add("Dough", batches, "batches");
+      if (batches > 0) {
+        if (opts?.warehouse && dRecipeLbs > 0) {
+          // Warehouse: expand dough to per-ingredient lbs so pullers see
+          // "Hamburger — 142 lbs" instead of an unusable batch count.
+          for (const r of vals.doughRecipe ?? []) {
+            const ing = (r.ingredient ?? "").trim();
+            const rowLbs = Number(r.lbs ?? 0);
+            if (ing && rowLbs > 0) add(ing, rowLbs * batches, "lbs");
+          }
+        } else {
+          add("Dough", batches, "batches");
+        }
+      }
     }
     // Named bought/ready-made sauce (name, no mixed recipe rows) is pulled
     // as-is by name in LBS — mirrors computeRunLines in @workspace/inventory-math.
-    // Warehouse view skips sauce entirely: the sauce maker owns pulling sauce.
-    if (!opts?.warehouse) {
+    // Warehouse view: sauces WITH recipe rows expand to per-ingredient lbs;
+    // bought-as-is sauces (no recipe rows) stay suppressed (warehouse doesn't pull those).
+    {
       const sauceName = (vals.frontlineRecipeName ?? "").trim();
-      const hasSauceRecipe = (vals.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-      if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
-        if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
-      } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+      const sauceRecipeRows = (vals.frontlineRecipe ?? []).filter(r => Number(r.lbs ?? 0) > 0);
+      const hasSauceRecipe = sauceRecipeRows.length > 0;
+      if (opts?.warehouse) {
+        if (hasSauceRecipe && s.sauceBatches > 0) {
+          // Expand sauce to per-ingredient lbs for warehouse pullers.
+          for (const r of sauceRecipeRows) {
+            const ing = (r.ingredient ?? "").trim();
+            const rowLbs = Number(r.lbs ?? 0);
+            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs");
+          }
+        }
+        // Bought-as-is sauces (no recipe rows) stay suppressed in warehouse view.
+      } else {
+        if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
+          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
+        } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+      }
     }
     // Physical line order: App 1, App 2, then the pep applicators (they sit
     // between stations 2 and 3 on the line), then App 3, App 4.
     const appsFront = [
-      { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches, name: vals.app1CheeseRecipeName },
-      { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches, name: vals.app2CheeseRecipeName },
+      { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches, name: vals.app1CheeseRecipeName, recipe: vals.app1CheeseRecipe },
+      { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches, name: vals.app2CheeseRecipeName, recipe: vals.app2CheeseRecipe },
     ];
     const appsBack = [
-      { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches, name: vals.app3CheeseRecipeName },
-      { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches, name: vals.app4CheeseRecipeName },
+      { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches, name: vals.app3CheeseRecipeName, recipe: vals.app3CheeseRecipe },
+      { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches, name: vals.app4CheeseRecipeName, recipe: vals.app4CheeseRecipe },
     ];
-    const addApp = (a: { type: string; lbs: number; batches: number; name?: string }) => {
+    const addApp = (a: { type: string; lbs: number; batches: number; name?: string; recipe?: readonly RecipeRow[] }) => {
       if (!a.type) return;
       const lower = a.type.trim().toLowerCase();
       const isMix = lower.includes("mix");
+      const isCheese = lower.includes("cheese");
       const blendName = (a.name ?? "").trim();
       const label =
-        opts?.warehouse && blendName && (isMix || lower.includes("cheese"))
+        opts?.warehouse && blendName && (isMix || isCheese)
           ? `${a.type} — ${blendName}`
           : a.type;
       if (isMix && a.lbs > 0) {
@@ -677,6 +704,17 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
         // freezer-pull config instead of just the generic "Mix" type.
         if (!opts?.warehouse && blendName && blendName.toLowerCase() !== lower) {
           add(blendName, a.lbs, "lbs");
+        }
+      } else if (!isMix && isCheese && opts?.warehouse && a.batches > 0) {
+        // Warehouse: expand cheese applicators to per-ingredient lbs using the
+        // blend recipe rows, so pullers see "Provolone — 38 lbs" not batch counts.
+        const pull = computeCheesePull(a.recipe, a.batches);
+        const expandedRows = pull.rows.filter(r => r.ingredient && r.lbs > 0);
+        if (expandedRows.length > 0) {
+          for (const r of expandedRows) add(r.ingredient, r.lbs, "lbs");
+        } else {
+          // No recipe rows — fall back to batch count so display degrades gracefully.
+          add(label, a.batches, "batches");
         }
       }
       else if (!isMix && a.batches > 0) add(label, a.batches, "batches");
