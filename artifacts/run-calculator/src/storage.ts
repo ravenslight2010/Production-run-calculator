@@ -977,6 +977,15 @@ function findSpecificVariantWeight(
 export function refreshProfilesFromNamedRecipes(
   kind: "dough" | "sauce",
   changed: ReadonlyArray<NamedRecipePoolPatch>,
+  opts?: {
+    /**
+     * When true, only update profiles whose recipe rows are currently EMPTY —
+     * i.e. the name is set but no rows have ever been stored. Profiles that
+     * already carry rows are skipped so this is safe to call on every page
+     * load without overwriting valid existing data.
+     */
+    emptyRowsOnly?: boolean;
+  },
 ): { brand: string; flavor: string }[] {
   if (typeof localStorage === "undefined" || changed.length === 0) return [];
   const byName = new Map<string, NamedRecipePoolPatch>();
@@ -1007,6 +1016,9 @@ export function refreshProfilesFromNamedRecipes(
       const curRows = Array.isArray(obj[rowsField])
         ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
         : [];
+      // emptyRowsOnly: skip profiles that already have rows stored — the full
+      // diff path handles them when the pool actually changes.
+      if (opts?.emptyRowsOnly && curRows.length > 0) continue;
       const rowsDiffer = !recipeRowsEqual(curRows, patch.rows);
 
       // Doughball weight is PER-FLAVOR (one family serves many flavors). Two
@@ -1051,6 +1063,64 @@ export function refreshProfilesFromNamedRecipes(
     }
   }
   return touched;
+}
+
+/**
+ * Fan a cheese or mix recipe's rows out to every saved profile whose
+ * app1–4 applicator slot is linked to the given recipe name. Mirrors
+ * refreshProfilesFromNamedRecipes for the cheese/mix pool (those recipes live
+ * in `app{n}CheeseRecipeName` link fields rather than a dedicated name field).
+ *
+ * Called after a recipe-name merge (applyRecipeNameMerge rewrote the name
+ * fields but not the row arrays) and on the one-time boot heal to correct
+ * profiles that accumulated stale rows from earlier merges.
+ *
+ * @param opts.emptyRowsOnly  When true, skip slots that already have rows —
+ *   safe for ongoing empty-row healing without overwriting valid data.
+ */
+export function refreshCheeseOrMixProfileRows(
+  targetName: string,
+  targetRows: ReadonlyArray<{ ingredient: string; lbs: number }>,
+  opts?: { emptyRowsOnly?: boolean },
+): void {
+  if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return;
+  const nameLc = targetName.trim().toLowerCase();
+  const prefixes = ["run-calc-profile-", "run-calc-crust-profile-"];
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && prefixes.some((p) => k.startsWith(p))) keys.push(k);
+  }
+  for (const k of keys) {
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (!obj || typeof obj !== "object") continue;
+      let changed = false;
+      for (const slot of [1, 2, 3, 4] as const) {
+        const nameField = `app${slot}CheeseRecipeName`;
+        const rowsField = `app${slot}CheeseRecipe`;
+        const linked =
+          typeof obj[nameField] === "string"
+            ? (obj[nameField] as string).trim().toLowerCase()
+            : "";
+        if (linked !== nameLc) continue;
+        const curRows = Array.isArray(obj[rowsField])
+          ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
+          : [];
+        if (opts?.emptyRowsOnly && curRows.length > 0) continue;
+        if (recipeRowsEqual(curRows, targetRows)) continue;
+        obj[rowsField] = targetRows.map((r) => ({ ingredient: r.ingredient, lbs: r.lbs }));
+        changed = true;
+      }
+      if (changed) {
+        localStorage.setItem(k, JSON.stringify(obj));
+        const profilePrefix = prefixes.find((p) => k.startsWith(p)) ?? prefixes[0];
+        markProfileEdited(k.slice(profilePrefix.length));
+      }
+    } catch {
+      // Skip unreadable profiles — never let one bad entry block the fan-out.
+    }
+  }
 }
 
 export function freshDayState(): DayState {

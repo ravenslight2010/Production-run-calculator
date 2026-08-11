@@ -117,6 +117,7 @@ import {
   recipeRowsEqual,
   normalizeRecipeRowsForCompare,
   refreshProfilesFromNamedRecipes,
+  refreshCheeseOrMixProfileRows,
   type NamedRecipePoolPatch,
   resolvePep1Combined,
   loadBrandFlavors,
@@ -5934,6 +5935,14 @@ export default function Home() {
               const enriched = backfillCheeseRecipeFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveCheeseRecipes([enriched]);
             }
+            // Fan the target's current rows out to every profile whose app{n}
+            // slot was just re-pointed to the target by applyRecipeNameMerge.
+            // The name fields were already rewritten; without this the profiles
+            // keep the old recipe's ingredient rows under the new name.
+            if (targetRow) {
+              const tRows = normalizeRecipeRowsForCompare(targetRow.components);
+              if (tRows.length > 0) refreshCheeseOrMixProfileRows(tgt, tRows);
+            }
             const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
               cycleCountQc.setQueryData(["cheeseRecipes"], await deleteCheeseRecipes(ids));
@@ -5962,6 +5971,11 @@ export default function Home() {
               const enriched = backfillMixFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveMixes([enriched]);
             }
+            // Fan the target mix's rows to profiles (same reason as cheese above).
+            if (targetRow) {
+              const tRows = normalizeRecipeRowsForCompare(targetRow.components);
+              if (tRows.length > 0) refreshCheeseOrMixProfileRows(tgt, tRows);
+            }
             const ids = sourceRows.map((m) => m.id);
             if (ids.length > 0) {
               cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids));
@@ -5989,6 +6003,19 @@ export default function Home() {
             if (targetRow && sourceRows.length > 0) {
               const enriched = backfillNamedRecipeFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveNamedRecipes(category, [enriched]);
+            }
+            // Fan the target recipe's rows to every profile that now references
+            // it. applyNamedPoolChange's diff path won't fire here because the
+            // TARGET recipe's rows didn't change in the pool — only a source was
+            // deleted. Without this, profiles keep the old source's rows under
+            // the target name until the server recipe itself changes.
+            if (targetRow) {
+              const tRows = normalizeRecipeRowsForCompare(targetRow.components);
+              if (tRows.length > 0) {
+                refreshProfilesFromNamedRecipes(category as "dough" | "sauce", [
+                  { name: tgt, rows: tRows },
+                ]);
+              }
             }
             const ids = sourceRows.map((r) => r.id);
             if (ids.length > 0) {
@@ -7875,7 +7902,23 @@ export default function Home() {
     }
     const prev = namedPoolSnapRef.current[kind];
     namedPoolSnapRef.current[kind] = snap;
-    if (prev === null) return;
+    if (prev === null) {
+      // First load: run a one-time full heal so profiles whose rows are wrong
+      // or empty (e.g. from a pre-fix recipe merge) are corrected immediately.
+      // After the marker is set on this device, subsequent page loads only fill
+      // profiles with empty rows (the fast ongoing-safe path).
+      const patches = [...byKey.values()].filter((p) => p.rows.length > 0);
+      if (patches.length > 0) {
+        const markerKey = `run-calc-${kind}-row-heal-v1`;
+        if (!localStorage.getItem(markerKey)) {
+          refreshProfilesFromNamedRecipes(kind, patches);
+          localStorage.setItem(markerKey, "1");
+        } else {
+          refreshProfilesFromNamedRecipes(kind, patches, { emptyRowsOnly: true });
+        }
+      }
+      return;
+    }
     const changed: NamedRecipePoolPatch[] = [];
     for (const [key, sig] of snap) {
       if (prev.get(key) !== undefined && prev.get(key) !== sig) changed.push(byKey.get(key)!);
@@ -7929,6 +7972,39 @@ export default function Home() {
     applyNamedPoolChange("sauce", sauceRecipesList);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sauceRecipesList]);
+
+  // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
+  // healing. Cheese and mix pools don't have a diff-and-update watcher like
+  // dough/sauce, so profiles whose rows are wrong or empty from a past merge
+  // would never self-correct without this. Strategy mirrors applyNamedPoolChange:
+  //   • First load after the fix: full heal (any stale rows corrected), set marker.
+  //   • Subsequent loads: empty-rows-only pass so a profile with no rows still
+  //     gets filled even after the marker is set.
+  const cheeseMixHealDoneRef = useRef(false);
+  useEffect(() => {
+    if (cheeseMixHealDoneRef.current) return;
+    const markerKey = "run-calc-cheese-mix-row-heal-v1";
+    const markerSet = !!localStorage.getItem(markerKey);
+    // Wait until at least one pool has data before running the one-time full
+    // heal — pools start as [] while the server responds. After the marker is
+    // set the ongoing emptyRowsOnly pass can run immediately (it's cheap).
+    if (!markerSet && cheeseRecipesList.length === 0 && mixes.length === 0) return;
+    cheeseMixHealDoneRef.current = true;
+    for (const r of cheeseRecipesList) {
+      if (r.enabled === false || !r.name.trim()) continue;
+      const rows = normalizeRecipeRowsForCompare(r.components);
+      if (rows.length === 0) continue;
+      refreshCheeseOrMixProfileRows(r.name, rows, markerSet ? { emptyRowsOnly: true } : undefined);
+    }
+    for (const m of mixes) {
+      if (!m.name.trim()) continue;
+      const rows = normalizeRecipeRowsForCompare(m.components);
+      if (rows.length === 0) continue;
+      refreshCheeseOrMixProfileRows(m.name, rows, markerSet ? { emptyRowsOnly: true } : undefined);
+    }
+    if (!markerSet) localStorage.setItem(markerKey, "1");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cheeseRecipesList, mixes]);
 
   // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
   // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
