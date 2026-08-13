@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 // One-time server-side data heals. Each heal is a targeted, code-shipped data
 // correction that must run EXACTLY ONCE per database (dev and production each
@@ -13,6 +13,7 @@ import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 export const dataHealsTable = pgTable("data_heals", {
   id: text("id").primaryKey(),
   appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+  result: jsonb("result"),
 });
 
 export type DataHeal = typeof dataHealsTable.$inferSelect;

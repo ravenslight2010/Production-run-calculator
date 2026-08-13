@@ -167,6 +167,10 @@ async function runCheesePoisonCleanup(): Promise<void> {
       clearedPicks += result.clearedPicks;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { deletedRows, healedRows, clearedPicks } })
+      .where(eq(dataHealsTable.id, CHEESE_POISON_HEAL_ID));
     logger.info(
       { heal: CHEESE_POISON_HEAL_ID, deletedRows, healedRows, clearedPicks },
       "Data heal applied",
@@ -232,6 +236,10 @@ async function runSpecAliasHygienePurge(): Promise<void> {
       deletedRows += a.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, deletedRows } })
+      .where(eq(dataHealsTable.id, SPEC_ALIAS_HYGIENE_HEAL_ID));
     logger.info(
       { heal: SPEC_ALIAS_HYGIENE_HEAL_ID, scanned: rows.length, deletedRows },
       "Data heal applied",
@@ -329,6 +337,10 @@ async function runGenericMixPoisonPurge(): Promise<void> {
       deletedMixes += a.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { deletedAliases, deletedCorrections, deletedMixes } })
+      .where(eq(dataHealsTable.id, GENERIC_MIX_POISON_HEAL_ID));
     logger.info(
       { heal: GENERIC_MIX_POISON_HEAL_ID, deletedAliases, deletedCorrections, deletedMixes },
       "Data heal applied",
@@ -378,6 +390,10 @@ async function runCheeseMixCrossoverPurge(): Promise<void> {
       deletedMixes += a.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: mixes.length, deletedMixes } })
+      .where(eq(dataHealsTable.id, CHEESE_MIX_CROSSOVER_HEAL_ID));
     logger.info(
       { heal: CHEESE_MIX_CROSSOVER_HEAL_ID, scanned: mixes.length, deletedMixes },
       "Data heal applied",
@@ -453,6 +469,10 @@ async function runCheeseDuplicateNamePurge(): Promise<void> {
       deletedRows += a.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, deletedRows } })
+      .where(eq(dataHealsTable.id, CHEESE_DUP_HEAL_ID));
     logger.info(
       { heal: CHEESE_DUP_HEAL_ID, scanned: rows.length, deletedRows },
       "Data heal applied",
@@ -499,6 +519,10 @@ async function runCheeseShareBackfill(): Promise<void> {
       updatedRows++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, updatedRows } })
+      .where(eq(dataHealsTable.id, CHEESE_SHARE_BACKFILL_HEAL_ID));
     logger.info(
       { heal: CHEESE_SHARE_BACKFILL_HEAL_ID, scanned: rows.length, updatedRows },
       "Data heal applied",
@@ -548,6 +572,10 @@ async function runCheeseOzDepoison(): Promise<void> {
       updatedRows++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, updatedRows } })
+      .where(eq(dataHealsTable.id, CHEESE_OZ_DEPOISON_HEAL_ID));
     logger.info(
       { heal: CHEESE_OZ_DEPOISON_HEAL_ID, scanned: rows.length, updatedRows },
       "Data heal applied",
@@ -725,6 +753,10 @@ async function runNamedRecipeNameCleanup(): Promise<void> {
       }
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { renamedRows, repointedProfiles, repointedDays } })
+      .where(eq(dataHealsTable.id, NAMED_RECIPE_NAME_CLEANUP_HEAL_ID));
     logger.info(
       {
         heal: NAMED_RECIPE_NAME_CLEANUP_HEAL_ID,
@@ -794,6 +826,10 @@ async function runDoughYieldDepoison(): Promise<void> {
       updated++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: profiles.length, updated } })
+      .where(eq(dataHealsTable.id, DOUGH_YIELD_DEPOISON_HEAL_ID));
     logger.info(
       { heal: DOUGH_YIELD_DEPOISON_HEAL_ID, scanned: profiles.length, updated },
       "Data heal applied",
@@ -834,6 +870,10 @@ async function runDoughFamilyWeightDepoison(): Promise<void> {
       }))
       .filter((d) => d.variants.length > 1);
     if (families.length === 0) {
+      await tx
+        .update(dataHealsTable)
+        .set({ result: { updated: 0, skipped: "no family dough recipes" } })
+        .where(eq(dataHealsTable.id, DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID));
       logger.info(
         { heal: DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID, updated: 0 },
         "Data heal applied (no family dough recipes)",
@@ -889,6 +929,10 @@ async function runDoughFamilyWeightDepoison(): Promise<void> {
       updated++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: profiles.length, updated } })
+      .where(eq(dataHealsTable.id, DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID));
     logger.info(
       { heal: DOUGH_FAMILY_WEIGHT_DEPOISON_HEAL_ID, scanned: profiles.length, updated },
       "Data heal applied",
@@ -978,6 +1022,10 @@ async function runSmdPepCheeseRestore(): Promise<void> {
       updatedRows++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, updatedRows } })
+      .where(eq(dataHealsTable.id, SMD_PEP_CHEESE_RESTORE_HEAL_ID));
     logger.info(
       { heal: SMD_PEP_CHEESE_RESTORE_HEAL_ID, scanned: rows.length, updatedRows },
       "Data heal applied",
@@ -1054,6 +1102,10 @@ async function runBogusMergeAliasPurge(): Promise<void> {
       deletedCorrections += del.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: aliases.length, deletedAliases, deletedCorrections } })
+      .where(eq(dataHealsTable.id, BOGUS_MERGE_ALIAS_HEAL_ID));
     logger.info(
       {
         heal: BOGUS_MERGE_ALIAS_HEAL_ID,
@@ -1173,6 +1225,10 @@ async function runSeaSaltAliasUndo(): Promise<void> {
       renamedRecipes++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { deletedRows, renamedRecipes } })
+      .where(eq(dataHealsTable.id, SEA_SALT_HEAL_ID));
     logger.info(
       { heal: SEA_SALT_HEAL_ID, deletedRows, renamedRecipes },
       "Data heal applied",
@@ -1277,6 +1333,10 @@ async function runMixDuplicateNamePurge(): Promise<void> {
       deletedRows += a.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, deletedRows } })
+      .where(eq(dataHealsTable.id, MIX_DUP_HEAL_ID));
     logger.info(
       { heal: MIX_DUP_HEAL_ID, scanned: rows.length, deletedRows },
       "Data heal applied",
@@ -1336,6 +1396,10 @@ async function runPurchasedCrustDieDepoison(): Promise<void> {
       updated++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: profiles.length, updated } })
+      .where(eq(dataHealsTable.id, PURCHASED_CRUST_DIE_HEAL_ID));
     logger.info(
       { heal: PURCHASED_CRUST_DIE_HEAL_ID, scanned: profiles.length, updated },
       "Data heal applied",
@@ -1389,6 +1453,10 @@ async function runDoughVariantSuffixDedupe(): Promise<void> {
       removedVariants += before.length - collapsed.length;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, updatedRows, removedVariants } })
+      .where(eq(dataHealsTable.id, DOUGH_VARIANT_SUFFIX_DEDUPE_HEAL_ID));
     logger.info(
       {
         heal: DOUGH_VARIANT_SUFFIX_DEDUPE_HEAL_ID,
@@ -1529,6 +1597,10 @@ async function runDoughMergeVanishRestore(): Promise<void> {
       repointedDays++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { restored, repointTo, repointedDays } })
+      .where(eq(dataHealsTable.id, DOUGH_MERGE_VANISH_HEAL_ID));
     logger.info(
       { heal: DOUGH_MERGE_VANISH_HEAL_ID, restored, repointTo, repointedDays },
       "Data heal applied",
@@ -1571,6 +1643,10 @@ async function runCrosslinkedSavedParsePurge(): Promise<void> {
       )
       .returning({ id: savedSpecSheetsTable.id });
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { deletedRows: deleted.length } })
+      .where(eq(dataHealsTable.id, CROSSLINK_PARSE_HEAL_ID));
     logger.info(
       { heal: CROSSLINK_PARSE_HEAL_ID, deletedRows: deleted.length },
       "Data heal applied",
@@ -1751,6 +1827,10 @@ async function runAldoCheeseOzDepoison(): Promise<void> {
       healedDays++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedSheets, healedProfiles, healedDays } })
+      .where(eq(dataHealsTable.id, ALDO_CHEESE_OZ_HEAL_ID));
     logger.info(
       {
         heal: ALDO_CHEESE_OZ_HEAL_ID,
@@ -1886,6 +1966,10 @@ async function runBoboCrossFamilyAliasUndo(): Promise<void> {
       healedSheets++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scannedAliases: rows.length, deletedAliases, deletedCorrections: corrections.length, healedSheets } })
+      .where(eq(dataHealsTable.id, BOBO_CROSS_FAMILY_HEAL_ID));
     logger.info(
       {
         heal: BOBO_CROSS_FAMILY_HEAL_ID,
@@ -2068,6 +2152,10 @@ async function runNaturalPepNameDepoison(): Promise<void> {
       healedDays++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedSheets, healedProfiles, healedDays } })
+      .where(eq(dataHealsTable.id, NATURAL_PEP_HEAL_ID));
     logger.info(
       {
         heal: NATURAL_PEP_HEAL_ID,
@@ -2213,6 +2301,10 @@ async function runBrandFanDoughDepoison(): Promise<void> {
       healedDays++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedProfiles, healedDays, healedRuns } })
+      .where(eq(dataHealsTable.id, BRAND_FAN_HEAL_ID));
     logger.info(
       { heal: BRAND_FAN_HEAL_ID, healedProfiles, healedDays, healedRuns },
       "Data heal applied",
@@ -2328,6 +2420,10 @@ async function runBrandDriftRename(): Promise<void> {
       }
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { renamedRows, repointedAliases, learnedAliases } })
+      .where(eq(dataHealsTable.id, BRAND_DRIFT_HEAL_ID));
     logger.info(
       {
         heal: BRAND_DRIFT_HEAL_ID,
@@ -2387,6 +2483,10 @@ async function runCrbLuciaVariantCustomersV2(): Promise<void> {
       specImportNamedRecipeNamesEqual(d.name, "CRB Dough"),
     );
     if (crbRows.length === 0) {
+      await tx
+        .update(dataHealsTable)
+        .set({ result: { updated: 0, skipped: "no CRB Dough found" } })
+        .where(eq(dataHealsTable.id, CRB_LUCIA_CUSTOMERS_V2_HEAL_ID));
       logger.info({ heal: CRB_LUCIA_CUSTOMERS_V2_HEAL_ID }, "No CRB Dough found — skipped");
       return;
     }
@@ -2481,6 +2581,10 @@ async function runCrbLuciaVariantCustomersV2(): Promise<void> {
       updated++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { updated } })
+      .where(eq(dataHealsTable.id, CRB_LUCIA_CUSTOMERS_V2_HEAL_ID));
     logger.info({ heal: CRB_LUCIA_CUSTOMERS_V2_HEAL_ID, updated }, "Data heal applied");
   });
 }
@@ -2662,6 +2766,10 @@ async function runJuly2026ProfileCorrections(): Promise<void> {
       addedAliases = 1;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedProfiles, deletedAliases: deletedAliases.length, addedAliases } })
+      .where(eq(dataHealsTable.id, JULY_2026_PROFILE_CORRECTIONS_V1));
     logger.info(
       {
         heal: JULY_2026_PROFILE_CORRECTIONS_V1,
@@ -2825,6 +2933,10 @@ async function runJuly2026AuditCorrectionsV2(): Promise<void> {
       addedSauces = 1;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedProfiles, deletedAliases: deletedAliases.length, addedSauces } })
+      .where(eq(dataHealsTable.id, JULY_2026_AUDIT_CORRECTIONS_V2));
     logger.info(
       {
         heal: JULY_2026_AUDIT_CORRECTIONS_V2,
@@ -2890,6 +3002,10 @@ async function runJuly2026AuditCorrectionsV3(): Promise<void> {
       healedProfiles++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedProfiles } })
+      .where(eq(dataHealsTable.id, JULY_2026_AUDIT_CORRECTIONS_V3));
     logger.info(
       { heal: JULY_2026_AUDIT_CORRECTIONS_V3, healedProfiles },
       "Data heal applied",
@@ -3001,6 +3117,10 @@ async function runApplicatorContaminationDepoison(): Promise<void> {
       healedProfiles++;
     }
 
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedProfiles, details: healedDetails } })
+      .where(eq(dataHealsTable.id, APPLICATOR_CONTAMINATION_DEPOISON_ID));
     logger.info(
       { heal: APPLICATOR_CONTAMINATION_DEPOISON_ID, healedProfiles, details: healedDetails },
       "Data heal applied",
@@ -3040,6 +3160,10 @@ async function runSyncRowNameRegistryRestore(): Promise<void> {
       .where(and(eq(dailySyncTable.date, today), eq(dailySyncTable.scope, "live")));
 
     if (!row) {
+      await tx
+        .update(dataHealsTable)
+        .set({ result: { skipped: "no live sync row for today" } })
+        .where(eq(dataHealsTable.id, SYNC_ROW_BRAND_RESTORE_ID));
       logger.info({ heal: SYNC_ROW_BRAND_RESTORE_ID }, "No live sync row for today — skipped");
       return;
     }
@@ -3047,6 +3171,10 @@ async function runSyncRowNameRegistryRestore(): Promise<void> {
     const data = (row.data ?? {}) as Record<string, unknown>;
     const existingBrands = Array.isArray(data.brands) ? data.brands as string[] : [];
     if (existingBrands.length > 0) {
+      await tx
+        .update(dataHealsTable)
+        .set({ result: { skipped: "brands already populated" } })
+        .where(eq(dataHealsTable.id, SYNC_ROW_BRAND_RESTORE_ID));
       logger.info({ heal: SYNC_ROW_BRAND_RESTORE_ID }, "brands already populated — skipped");
       return;
     }
@@ -3092,6 +3220,18 @@ async function runSyncRowNameRegistryRestore(): Promise<void> {
       .set({ data: restored as any, updatedAt: new Date() })
       .where(and(eq(dailySyncTable.date, today), eq(dailySyncTable.scope, "live")));
 
+    await tx
+      .update(dataHealsTable)
+      .set({
+        result: {
+          brands: brands.length,
+          cheeseRecipeNames: cheeseRecipeNames.length,
+          mixRecipeNames: mixRecipeNames.length,
+          doughRecipeNames: doughRecipeNames.length,
+          frontlineRecipeNames: frontlineRecipeNames.length,
+        },
+      })
+      .where(eq(dataHealsTable.id, SYNC_ROW_BRAND_RESTORE_ID));
     logger.info(
       {
         heal: SYNC_ROW_BRAND_RESTORE_ID,
@@ -3152,6 +3292,10 @@ async function runBrandDuplicatePurge(): Promise<void> {
         );
       healed++;
     }
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { healedRows: healed } })
+      .where(eq(dataHealsTable.id, BRAND_DUPLICATE_PURGE_ID));
     logger.info({ heal: BRAND_DUPLICATE_PURGE_ID, healedRows: healed }, "Data heal applied");
   });
 }
