@@ -6405,6 +6405,7 @@ export default function Home() {
         // pre-edit values back over the schedule changes.
         if (currentValsChanged || newRuns[newIndex].id !== prevCurId) {
           const curVals = loadRunValues(newRuns[newIndex].id);
+          lastFormRunIdRef.current = newRuns[newIndex].id;
           form.reset(curVals);
           resetFieldArrays(curVals);
         }
@@ -6547,6 +6548,13 @@ export default function Home() {
     })()
   );
   const lastLocalEditRef = useRef(0);
+  // Tracks which run the live form was last reset to. The autosave useEffect([v])
+  // reads run identity from dayStateRef.current (always the latest ref), so if
+  // dayState.currentIndex advances to run B while `v` still carries run A's values
+  // (form.reset hasn't fired yet for the new run), the effect would stamp A's
+  // applicator/recipe data onto B's localStorage slot — cross-run contamination.
+  // Guard: skip the autosave whenever the form ID and the current run ID disagree.
+  const lastFormRunIdRef = useRef<string>("");
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSyncApplyingRef = useRef(false);
   const applySyncCallbackRef = useRef<(p: SyncPayload) => void>(() => {});
@@ -6915,6 +6923,7 @@ export default function Home() {
           // autosave [v] effect and can stamp a fresh markRunValuesUpdated() on
           // an otherwise-idle run — defeating the lost-update guard on peers.
           if (!deepEqual(form.getValues(), merged)) {
+            lastFormRunIdRef.current = currentId;
             form.reset(merged);
             resetFieldArrays(merged);
           }
@@ -7465,6 +7474,7 @@ export default function Home() {
               if (ds.runToTime) setRunToTime(ds.runToTime);
               const firstId = ds.runs[0]?.id;
               const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
+              lastFormRunIdRef.current = firstId ?? "";
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
@@ -7489,6 +7499,7 @@ export default function Home() {
         saveDayState(fresh);
         setDayState(fresh);
         setRunToTime("19:15");
+        lastFormRunIdRef.current = "";
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
         if (serverConfirmedNoRuns) schedulePush(fresh, 0);
@@ -7702,8 +7713,13 @@ export default function Home() {
       )
     ) {
       const merged = mergeRunDefaults(stored);
+      lastFormRunIdRef.current = currentRunId;
       form.reset(merged);
       resetFieldArrays(merged);
+    } else {
+      // Even when no heal is needed, record that the form is now settled for
+      // this run so the autosave guard doesn't block the first genuine edit.
+      lastFormRunIdRef.current = currentRunId;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRunId]);
@@ -7715,6 +7731,13 @@ export default function Home() {
     const run = ds?.runs[ds?.currentIndex];
     const runId = run?.id;
     if (!runId) return;
+    // Guard: if the form hasn't been explicitly reset for this run yet (e.g. the
+    // dayState ref advanced to a new run but form.reset hasn't fired), `v` still
+    // carries the previous run's values. Saving them here would stamp the wrong
+    // product's applicator/recipe data onto the new run's localStorage slot and
+    // profile — the cross-run contamination bug. Only proceed once the form is
+    // confirmed settled for the current run.
+    if (lastFormRunIdRef.current !== runId) return;
     // Only treat this as a real user edit when the live form actually DIFFERS from
     // the values already stored for this run. A programmatic form.reset() — run
     // switch, sync-apply (the merge resets the live form to the accepted remote),
@@ -7789,6 +7812,7 @@ export default function Home() {
     saveRunValues(liveRun.id, merged);
     markRunValuesUpdated(liveRun.id, now);
     lastLocalEditRef.current = now;
+    lastFormRunIdRef.current = liveRun.id;
     form.reset(merged);
     resetFieldArrays(merged);
     schedulePush(dayStateRef.current, 0);
@@ -8107,6 +8131,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     const newVals = loadRunValues(newId);
+    lastFormRunIdRef.current = newId;
     form.reset(newVals);
     resetFieldArrays(newVals);
     setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
@@ -9003,6 +9028,10 @@ export default function Home() {
   }
 
   function endRun() {
+    // Guard: a run that was never started cannot be ended. Every UI call-site
+    // is already gated (STOP RUN only shows when runStatus==="running"), but
+    // this makes the function itself safe against future or unexpected paths.
+    if (!currentRun?.startedAt) return;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     if (currentRun?.brand || currentRun?.flavor) {
@@ -11108,6 +11137,7 @@ export default function Home() {
               if (ds.runToTime) setRunToTime(ds.runToTime);
               const firstId = ds.runs[0]?.id;
               const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
+              lastFormRunIdRef.current = firstId ?? "";
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
@@ -11130,6 +11160,7 @@ export default function Home() {
         setDayState(fresh);
         saveDayState(fresh);
         setRunToTime("19:15");
+        lastFormRunIdRef.current = "";
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
         if (serverConfirmedNoRuns) schedulePush(fresh, 0);
@@ -19129,46 +19160,50 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       </>
                     )}
                     <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app3Type.trim().toLowerCase().includes("mix") ? (
-                      <StatRow
-                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                        value={fmtNum(calc.app3Lbs, 1) + " lbs"}
-                        testId="output-app3-batches"
-                        highlight={calc.app3Lbs > 0}
-                        sub={v.app3CheeseRecipeName?.trim() || undefined}
-                      />
-                    ) : (
-                      <BatchMadeRow
-                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                        totalBatches={calc.app3Batches}
-                        made={app3Made}
-                        onIncrement={() => setApp3Made(n => n + 1)}
-                        onDecrement={() => setApp3Made(n => Math.max(0, n - 1))}
-                        isLive={isLive}
-                        testId="output-app3-batches"
-                        sub={v.app3CheeseRecipeName?.trim() || undefined}
-                      />
+                    {v.app3Type.trim() && (v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0) && (
+                      v.app3Type.trim().toLowerCase().includes("mix") ? (
+                        <StatRow
+                          label={`App 3 — ${v.app3Type}`}
+                          value={fmtNum(calc.app3Lbs, 1) + " lbs"}
+                          testId="output-app3-batches"
+                          highlight={calc.app3Lbs > 0}
+                          sub={v.app3CheeseRecipeName?.trim() || undefined}
+                        />
+                      ) : (
+                        <BatchMadeRow
+                          label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                          totalBatches={calc.app3Batches}
+                          made={app3Made}
+                          onIncrement={() => setApp3Made(n => n + 1)}
+                          onDecrement={() => setApp3Made(n => Math.max(0, n - 1))}
+                          isLive={isLive}
+                          testId="output-app3-batches"
+                          sub={v.app3CheeseRecipeName?.trim() || undefined}
+                        />
+                      )
                     )}
                     <div className="border-t border-border/60" aria-hidden="true" />
-                    {v.app4Type.trim().toLowerCase().includes("mix") ? (
-                      <StatRow
-                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                        value={fmtNum(calc.app4Lbs, 1) + " lbs"}
-                        testId="output-app4-batches"
-                        highlight={calc.app4Lbs > 0}
-                        sub={v.app4CheeseRecipeName?.trim() || undefined}
-                      />
-                    ) : (
-                      <BatchMadeRow
-                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                        totalBatches={calc.app4Batches}
-                        made={app4Made}
-                        onIncrement={() => setApp4Made(n => n + 1)}
-                        onDecrement={() => setApp4Made(n => Math.max(0, n - 1))}
-                        isLive={isLive}
-                        testId="output-app4-batches"
-                        sub={v.app4CheeseRecipeName?.trim() || undefined}
-                      />
+                    {v.app4Type.trim() && (v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0) && (
+                      v.app4Type.trim().toLowerCase().includes("mix") ? (
+                        <StatRow
+                          label={`App 4 — ${v.app4Type}`}
+                          value={fmtNum(calc.app4Lbs, 1) + " lbs"}
+                          testId="output-app4-batches"
+                          highlight={calc.app4Lbs > 0}
+                          sub={v.app4CheeseRecipeName?.trim() || undefined}
+                        />
+                      ) : (
+                        <BatchMadeRow
+                          label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                          totalBatches={calc.app4Batches}
+                          made={app4Made}
+                          onIncrement={() => setApp4Made(n => n + 1)}
+                          onDecrement={() => setApp4Made(n => Math.max(0, n - 1))}
+                          isLive={isLive}
+                          testId="output-app4-batches"
+                          sub={v.app4CheeseRecipeName?.trim() || undefined}
+                        />
+                      )
                     )}
                   </CardContent>
                 </Card>
