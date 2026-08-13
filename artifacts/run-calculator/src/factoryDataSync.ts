@@ -51,6 +51,10 @@ import {
   DEFAULT_SHIPPERS,
   DEFAULT_SKID_STACKING,
   DEFAULT_GRIP_SHEETS,
+  SHIFT_START_TIME_KEY,
+  PRODUCTION_START_TIME_KEY,
+  DEFAULT_SHIFT_START_TIME,
+  DEFAULT_PRODUCTION_START_TIME,
 } from "./types";
 
 // ── Key classification ───────────────────────────────────────────────────────
@@ -86,6 +90,8 @@ const FACTORY_KV_SERVER_ONLY_KEYS: ReadonlySet<string> = new Set([
   SHIPPER_KEY,
   SKID_STACKING_KEY,
   GRIP_SHEETS_KEY,
+  SHIFT_START_TIME_KEY,
+  PRODUCTION_START_TIME_KEY,
 ]);
 
 // ── Stamp tracking ───────────────────────────────────────────────────────────
@@ -128,6 +134,8 @@ let _packagingSettings: {
   skidStacking: string[];
   gripSheets: string[];
 } | null = null;
+let _shiftStartTime: string | null = null;
+let _productionStartTime: string | null = null;
 
 export function getStopReasons(): string[] {
   return _stopReasons ?? DEFAULT_STOP_REASONS;
@@ -135,6 +143,24 @@ export function getStopReasons(): string[] {
 
 export function setStopReasonsModuleState(list: string[]): void {
   _stopReasons = list;
+}
+
+/** Returns the factory-wide shift start time as "HH:MM" (defaults to "06:00"). */
+export function getShiftStartTime(): string {
+  return _shiftStartTime ?? DEFAULT_SHIFT_START_TIME;
+}
+
+/** Returns the factory-wide production start time as "HH:MM" (defaults to "07:00"). */
+export function getProductionStartTime(): string {
+  return _productionStartTime ?? DEFAULT_PRODUCTION_START_TIME;
+}
+
+export function setShiftStartTimeModuleState(t: string): void {
+  _shiftStartTime = t;
+}
+
+export function setProductionStartTimeModuleState(t: string): void {
+  _productionStartTime = t;
 }
 
 export interface PackagingSettings {
@@ -321,12 +347,47 @@ export function hydrateFromServer(data: FactoryDataMap): void {
     try { localStorage.removeItem(key); } catch {}
   }
   _packagingSettings = pkg;
+
+  // Shift start time and production start time (simple string values).
+  for (const [key, setter] of [
+    [SHIFT_START_TIME_KEY, (v: string) => { _shiftStartTime = v; }],
+    [PRODUCTION_START_TIME_KEY, (v: string) => { _productionStartTime = v; }],
+  ] as [string, (v: string) => void][]) {
+    const entry = data[key];
+    const localRaw = (() => {
+      try { return localStorage.getItem(key); } catch { return null; }
+    })();
+    const localTs = getLocalStamp(key);
+
+    if (entry) {
+      const serverTs = new Date(entry.updatedAt).getTime();
+      if (localTs > serverTs && localRaw !== null) {
+        try { putFactoryKey(key, JSON.parse(localRaw)); } catch {}
+        try {
+          const v = JSON.parse(localRaw);
+          if (typeof v === "string") setter(v);
+        } catch {}
+      } else {
+        if (typeof entry.value === "string") setter(entry.value);
+      }
+    } else if (localRaw !== null) {
+      try { putFactoryKey(key, JSON.parse(localRaw)); } catch {}
+      try {
+        const v = JSON.parse(localRaw);
+        if (typeof v === "string") setter(v);
+      } catch {}
+    }
+    // Remove stale localStorage copy.
+    try { localStorage.removeItem(key); } catch {}
+  }
 }
 
 /** Test-only: reset module state between test cases. */
 export function resetFactoryDataSyncForTests(): void {
   _stopReasons = null;
   _packagingSettings = null;
+  _shiftStartTime = null;
+  _productionStartTime = null;
 }
 
 // ── One-time migration heals ──────────────────────────────────────────────────

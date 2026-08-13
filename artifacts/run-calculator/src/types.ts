@@ -454,6 +454,12 @@ export const DEFAULT_STOP_REASONS = [
 ];
 export const DEFAULT_SUPERVISOR_PIN = "1234";
 
+// Factory-wide shift timing constants (stored as HH:MM strings in factory KV).
+export const SHIFT_START_TIME_KEY = "run-calc-shift-start-time";
+export const PRODUCTION_START_TIME_KEY = "run-calc-production-start-time";
+export const DEFAULT_SHIFT_START_TIME = "06:00";
+export const DEFAULT_PRODUCTION_START_TIME = "07:00";
+
 export const INGREDIENT_TYPES_KEY = "run-calc-ingredient-types";
 // Merge tombstones: names removed by an ingredient merge. Kept so live-sync's
 // additive union can't bring a merged-away name back from a stale peer/server.

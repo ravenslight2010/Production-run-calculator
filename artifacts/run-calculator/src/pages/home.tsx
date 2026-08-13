@@ -34,6 +34,8 @@ import {
   DEFAULT_SKID_STACKING,
   GRIP_SHEETS_KEY,
   DEFAULT_GRIP_SHEETS,
+  SHIFT_START_TIME_KEY,
+  PRODUCTION_START_TIME_KEY,
   isCartonedValue,
   labelPositionLabel,
   LABEL_POSITION_OPTIONS,
@@ -193,6 +195,8 @@ import {
   putFactoryKey,
   getStopReasons,
   getPackagingSettings,
+  getShiftStartTime,
+  getProductionStartTime,
   stampLocalWrite,
   FACTORY_KV_CACHED_KEYS,
   runFactoryKvMigration,
@@ -3128,6 +3132,10 @@ export default function Home() {
   const [skidStacking, setSkidStacking] = useState<string[]>(() => getPackagingSettings().skidStacking);
   const [gripSheets, setGripSheets] = useState<string[]>(() => getPackagingSettings().gripSheets);
 
+  // Factory-wide shift timing (server-only, manager-writable).
+  const [shiftStartTime, setShiftStartTime] = useState<string>(() => getShiftStartTime());
+  const [productionStartTime, setProductionStartTime] = useState<string>(() => getProductionStartTime());
+
   function makePackagingList(
     list: string[],
     setList: (v: string[]) => void,
@@ -4064,6 +4072,7 @@ export default function Home() {
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
   const canApproveResets = hasCapability("approve-password-resets");
+  const canManageFactorySettings = hasCapability("manage-factory-settings");
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
   const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
@@ -7126,6 +7135,8 @@ export default function Home() {
         setShipper(pkg.shipper);
         setSkidStacking(pkg.skidStacking);
         setGripSheets(pkg.gripSheets);
+        setShiftStartTime(getShiftStartTime());
+        setProductionStartTime(getProductionStartTime());
         // Reload cached keys from localStorage (hydrateFromServer just wrote them)
         reloadMasterData();
         // One-time migration heals: push localStorage data to the server for
@@ -11869,7 +11880,7 @@ export default function Home() {
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
           cycleCount: "Cycle Counts", staff: "Staff", audit: "Audit Log", pin: "Change PIN",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
-          "ai-corrections": "AI Memory",
+          "ai-corrections": "AI Memory", times: "Shift Times",
         };
         const sectionDefs = ([
           {
@@ -11889,6 +11900,7 @@ export default function Home() {
             key: "settings",
             label: "Settings",
             subTabs: [
+              "times",
               ...(canEditRules ? ["rules"] : []),
               ...(canManageInventory ? ["dieDefaults", "freezer", "cycleCount"] : []),
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
@@ -12676,6 +12688,43 @@ export default function Home() {
                         </button>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Shift Times */}
+                {manageCategory === "times" && (
+                  <div className="space-y-4">
+                    <p className="text-xs text-muted-foreground">
+                      Factory-wide shift timing used by the dough &amp; sauce prep phase tracker.
+                      {!canManageFactorySettings && <span className="ml-1 text-amber-500/80">Managers with factory-settings access can edit these.</span>}
+                    </p>
+                    <div className="space-y-3">
+                      {([
+                        { key: SHIFT_START_TIME_KEY, label: "Shift Start", value: shiftStartTime, set: setShiftStartTime },
+                        { key: PRODUCTION_START_TIME_KEY, label: "Production Start", value: productionStartTime, set: setProductionStartTime },
+                      ] as { key: string; label: string; value: string; set: (v: string) => void }[]).map(({ key, label, value, set }) => (
+                        <div key={key}>
+                          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                            {label}
+                          </label>
+                          {canManageFactorySettings ? (
+                            <input
+                              type="time"
+                              value={value}
+                              onChange={e => {
+                                const v = e.target.value;
+                                if (!v) return;
+                                set(v);
+                                putFactoryKey(key, v);
+                              }}
+                              className="border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                            />
+                          ) : (
+                            <span className="text-sm font-mono text-foreground">{value}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
