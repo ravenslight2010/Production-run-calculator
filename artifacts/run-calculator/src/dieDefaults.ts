@@ -93,14 +93,8 @@ function isTunnelUntouched(key: keyof DieLineDefaults, cur: number): boolean {
  * the built-in map, tolerating the naming variants in use (`7"`, `7in`,
  * `7 inch`, `12" Dies`, `Argus Dies`, ...). Returns null for unknown/blank dies.
  */
-export function dieLineDefaultsFor(
-  dieName: string,
-  overrides?: DieLineDefaultsOverrides,
-): DieLineDefaults | null {
-  const t = dieDefaultsKey(dieName);
-  if (!t) return null;
-  const stored = overrides?.[t];
-  if (stored) return stored;
+/** Resolve the built-in hardcoded defaults for a die name (no overrides). */
+function builtinFor(t: string): DieLineDefaults | null {
   if (/argus/.test(t)) return ELEVEN_OR_ARGUS;
   const m = t.match(/(\d{1,2})\s*(?:"|"|in\b|inch)?/);
   if (!m) return null;
@@ -109,6 +103,35 @@ export function dieLineDefaultsFor(
   if (size === 12) return TWELVE;
   if (size === 11) return ELEVEN_OR_ARGUS;
   return null;
+}
+
+/**
+ * Resolve the line-setting defaults for a die name. A manager-stored override
+ * (matched by exact die name, case-insensitive) wins; otherwise falls back to
+ * the built-in map, tolerating the naming variants in use (`7"`, `7in`,
+ * `7 inch`, `12" Dies`, `Argus Dies`, ...). Returns null for unknown/blank dies.
+ *
+ * When a stored override exists for a known die size, it is merged ON TOP of
+ * the built-in defaults (built-in first, stored fields overlay). This ensures
+ * that a manager who leaves `preTunnelMin`/`postTunnelMin` blank still gets the
+ * die-specific built-in tunnel times (e.g. 3.5/3.0 for 7") rather than the
+ * generic 2.5-min factory fallback that applies when those fields are absent.
+ * For unknown die names (no built-in), the stored override is returned as-is.
+ */
+export function dieLineDefaultsFor(
+  dieName: string,
+  overrides?: DieLineDefaultsOverrides,
+): DieLineDefaults | null {
+  const t = dieDefaultsKey(dieName);
+  if (!t) return null;
+  const builtin = builtinFor(t);
+  const stored = overrides?.[t];
+  if (!stored) return builtin;
+  // Merge: built-in provides defaults (especially tunnel times for known die
+  // sizes); stored manager fields overlay. Absent tunnel fields in the stored
+  // entry correctly inherit the die's built-in values instead of falling back
+  // to the generic 2.5-min factory default.
+  return builtin ? { ...builtin, ...stored } : stored;
 }
 
 // ─── Crust-mode defaults ────────────────────────────────────────────────────

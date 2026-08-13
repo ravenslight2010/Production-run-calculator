@@ -20,12 +20,14 @@ import {
 } from "../dieLineDefaultsServer";
 import { DIE_LINE_DEFAULTS_QUERY_KEY, useDieLineDefaults } from "../hooks/useDieLineDefaults";
 
-const FIELDS: { key: keyof DieLineDefaults; label: string; step: string }[] = [
+const FIELDS: { key: keyof DieLineDefaults; label: string; step: string; optional?: boolean }[] = [
   { key: "crustsPerCycle", label: "Crusts / Cycle", step: "1" },
   { key: "cycleSpeed", label: "Cycle Speed", step: "0.1" },
   { key: "speedAdjustment", label: "Speed Adjustment", step: "0.05" },
   { key: "freezerTime", label: "Freezer Time (min)", step: "1" },
   { key: "casesPerLayer", label: "Extra Case Buffer", step: "1" },
+  { key: "preTunnelMin", label: "Pre-tunnel (min)", step: "0.5", optional: true },
+  { key: "postTunnelMin", label: "Post-tunnel (min)", step: "0.5", optional: true },
 ];
 
 type Draft = Record<keyof DieLineDefaults, string>;
@@ -37,6 +39,9 @@ function toDraft(v: DieLineDefaults | null): Draft {
     speedAdjustment: v ? String(v.speedAdjustment) : "",
     freezerTime: v ? String(v.freezerTime) : "",
     casesPerLayer: v ? String(v.casesPerLayer) : "",
+    // Optional tunnel fields: blank string means "leave at built-in default".
+    preTunnelMin: v?.preTunnelMin != null ? String(v.preTunnelMin) : "",
+    postTunnelMin: v?.postTunnelMin != null ? String(v.postTunnelMin) : "",
   };
 }
 
@@ -115,9 +120,18 @@ export default function DieLineDefaultsManager({ dieTypes }: { dieTypes: string[
         const parsed: Partial<DieLineDefaults> = {};
         let valid = true;
         for (const f of FIELDS) {
-          const n = Number(draft[f.key]);
-          if (draft[f.key].trim() === "" || !Number.isFinite(n) || n < 0) valid = false;
-          else parsed[f.key] = n;
+          const raw = draft[f.key]?.trim() ?? "";
+          if (raw === "") {
+            // Optional fields may be left blank (blank → use built-in default).
+            if (!f.optional) valid = false;
+            // Leave the field absent from parsed so the server omits it.
+          } else {
+            const n = Number(raw);
+            // Optional tunnel fields must be strictly positive (0 is not a valid
+            // dwell time and the server drops ≤0 values; treat 0 the same as blank).
+            if (!Number.isFinite(n) || n < 0 || (f.optional && n === 0)) valid = false;
+            else parsed[f.key] = n;
+          }
         }
         return (
           <div key={key} className="rounded-lg border border-border/50 bg-card/50 px-3 py-2.5 space-y-2" data-testid={`die-defaults-row-${key}`}>
@@ -127,15 +141,18 @@ export default function DieLineDefaultsManager({ dieTypes }: { dieTypes: string[
                 {stored ? "Custom (saved)" : builtin ? "Built-in defaults" : "No defaults yet"}
               </span>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
               {FIELDS.map((f) => (
                 <label key={f.key} className="space-y-0.5">
-                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</span>
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {f.label}{f.optional && <span className="normal-case font-normal ml-0.5">(opt)</span>}
+                  </span>
                   <input
                     type="number"
                     min={0}
                     step={f.step}
                     value={draft[f.key]}
+                    placeholder={f.optional ? "built-in" : undefined}
                     onChange={(e) =>
                       setDrafts((d) => ({ ...d, [key]: { ...(d[key] ?? toDraft(base)), [f.key]: e.target.value } }))
                     }

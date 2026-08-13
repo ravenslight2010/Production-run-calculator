@@ -2116,7 +2116,9 @@ export const ListDieLineDefaultsResponse = zod.object({
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().optional(),
+  "postTunnelMin": zod.number().optional()
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
@@ -2132,7 +2134,9 @@ export const SaveDieLineDefaultsBody = zod.object({
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().optional(),
+  "postTunnelMin": zod.number().optional()
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
@@ -2143,7 +2147,9 @@ export const SaveDieLineDefaultsResponse = zod.object({
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().optional(),
+  "postTunnelMin": zod.number().optional()
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 
@@ -2163,7 +2169,9 @@ export const DeleteDieLineDefaultsResponse = zod.object({
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
   "freezerTime": zod.number(),
-  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI')
+  "casesPerLayer": zod.number().describe('\"Extra Case Buffer\" in the UI'),
+  "preTunnelMin": zod.number().optional(),
+  "postTunnelMin": zod.number().optional()
 }).describe('Manager-set line-setting defaults for one die type, applied as blank-fill pre-fills when the die is picked on the run form or setup editor.'))
 })
 

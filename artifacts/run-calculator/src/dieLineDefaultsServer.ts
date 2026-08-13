@@ -33,6 +33,13 @@ function coerceEntry(raw: unknown): DieLineDefaultsEntry | null {
   for (const k of ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "freezerTime", "casesPerLayer"] as const) {
     if (!Number.isFinite(entry[k])) return null;
   }
+  // Optional tunnel overrides — present only when the manager set them.
+  for (const k of ["preTunnelMin", "postTunnelMin"] as const) {
+    if (r[k] !== undefined && r[k] !== null) {
+      const n = num(r[k]);
+      if (Number.isFinite(n) && n > 0) entry[k] = n;
+    }
+  }
   return entry;
 }
 
@@ -78,13 +85,16 @@ export function toOverridesMap(entries: DieLineDefaultsEntry[]): DieLineDefaults
   for (const e of entries) {
     const key = dieDefaultsKey(e.name);
     if (!key) continue;
-    out[key] = {
+    const def: DieLineDefaults = {
       crustsPerCycle: e.crustsPerCycle,
       cycleSpeed: e.cycleSpeed,
       speedAdjustment: e.speedAdjustment,
       freezerTime: e.freezerTime,
       casesPerLayer: e.casesPerLayer,
     };
+    if (e.preTunnelMin != null) def.preTunnelMin = e.preTunnelMin;
+    if (e.postTunnelMin != null) def.postTunnelMin = e.postTunnelMin;
+    out[key] = def;
   }
   return out;
 }

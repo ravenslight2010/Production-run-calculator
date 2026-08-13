@@ -130,8 +130,42 @@ describe("manager overrides", () => {
 
   it("a stored override wins over the built-in map (case-insensitive by name)", () => {
     const overrides = { '7" dies': OVERRIDE };
-    expect(dieLineDefaultsFor('7" Dies', overrides)).toEqual(OVERRIDE);
-    expect(resolveDieLineDefaults('7" DIES', BLANK, overrides)).toEqual(OVERRIDE);
+    // Override fields win; built-in tunnel times backfill since OVERRIDE has none.
+    const result = dieLineDefaultsFor('7" Dies', overrides);
+    expect(result).toMatchObject(OVERRIDE);
+    expect(result).toMatchObject({ preTunnelMin: 3.5, postTunnelMin: 3.0 });
+    // resolveDieLineDefaults fills all untouched fields from the merged result.
+    const filled = resolveDieLineDefaults('7" DIES', BLANK, overrides);
+    expect(filled).toMatchObject(OVERRIDE);
+    expect(filled).toMatchObject({ preTunnelMin: 3.5, postTunnelMin: 3.0 });
+  });
+
+  it("7\" override without tunnel fields still gets die-specific built-in tunnel times", () => {
+    // This is the key fix: saving a 7" entry without preTunnelMin/postTunnelMin
+    // must NOT lose the 3.5/3.0 built-in values — they back-fill from SEVEN.
+    const overrides = { '7"': OVERRIDE };
+    const result = dieLineDefaultsFor('7"', overrides);
+    expect(result).toMatchObject({ preTunnelMin: 3.5, postTunnelMin: 3.0 });
+  });
+
+  it("12\" override without tunnel fields gets 2.0/2.0 built-in tunnel times", () => {
+    const overrides = { '12"': OVERRIDE };
+    const result = dieLineDefaultsFor('12"', overrides);
+    expect(result).toMatchObject({ preTunnelMin: 2.0, postTunnelMin: 2.0 });
+  });
+
+  it("partial tunnel override: only one field stored, other comes from built-in", () => {
+    const partial = { ...OVERRIDE, preTunnelMin: 4.5 };
+    const overrides = { '7"': partial };
+    const result = dieLineDefaultsFor('7"', overrides);
+    expect(result).toMatchObject({ preTunnelMin: 4.5, postTunnelMin: 3.0 });
+  });
+
+  it("explicit tunnel overrides in stored entry win over built-in", () => {
+    const withTunnel = { ...OVERRIDE, preTunnelMin: 5.0, postTunnelMin: 4.0 };
+    const overrides = { '7"': withTunnel };
+    const result = dieLineDefaultsFor('7"', overrides);
+    expect(result).toMatchObject({ preTunnelMin: 5.0, postTunnelMin: 4.0 });
   });
 
   it("an override enables pre-fill for dies the built-in map doesn't know", () => {

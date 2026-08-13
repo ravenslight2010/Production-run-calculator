@@ -22,6 +22,8 @@ export const dieLineDefaultsTable = pgTable(
     speedAdjustment: doublePrecision("speed_adjustment").notNull().default(1),
     freezerTime: doublePrecision("freezer_time").notNull().default(0),
     casesPerLayer: doublePrecision("cases_per_layer").notNull().default(0),
+    preTunnelMin: doublePrecision("pre_tunnel_min"),
+    postTunnelMin: doublePrecision("post_tunnel_min"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
