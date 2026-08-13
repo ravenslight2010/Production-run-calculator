@@ -661,7 +661,10 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
             if (ing && rowLbs > 0) add(ing, rowLbs * batches, "lbs");
           }
         } else {
-          add("Dough", batches, "batches");
+          // Non-warehouse view OR warehouse view with no recipe rows configured:
+          // fall back to batch count so the card always shows something useful.
+          const doughName = (vals.doughRecipeName ?? "").trim();
+          add(doughName || "Dough", batches, "batches");
         }
       }
     }
@@ -675,14 +678,18 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
       const hasSauceRecipe = sauceRecipeRows.length > 0;
       if (opts?.warehouse) {
         if (hasSauceRecipe && s.sauceBatches > 0) {
-          // Expand sauce to per-ingredient lbs for warehouse pullers.
+          // Warehouse: expand sauce to per-ingredient lbs for warehouse pullers.
           for (const r of sauceRecipeRows) {
             const ing = (r.ingredient ?? "").trim();
             const rowLbs = Number(r.lbs ?? 0);
             if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs");
           }
+        } else if (!hasSauceRecipe && s.sauceBatches > 0 && sauceName) {
+          // No recipe rows but a named house sauce with batch math — fall back
+          // to batch count so the warehouse card still shows something useful.
+          add(sauceName, s.sauceBatches, "batches");
         }
-        // Bought-as-is sauces (no recipe rows) stay suppressed in warehouse view.
+        // Bought-as-is sauces (no recipe rows, no batch count) stay suppressed.
       } else {
         if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
           if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
@@ -16180,10 +16187,14 @@ function ScreenModeView() {
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, autoSuppressUntilRef, currentRun, doughSubTab,
-    endStop, floorDimmed, form, pauseRun, runStatus,
-    setResumeDialog, setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
+    endStop, floorDimmed, form, pauseRun, resumeRun, runStatus,
+    setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
     v, ve,
   } = useHomeTabCtx();
+  // Floor Mode manages its own resume-dialog state so the "Freezer empty?" prompt
+  // renders inside this overlay rather than in LiveRunTabContent (which sits behind
+  // the z-40 overlay and is invisible when Floor Mode is active).
+  const [floorResumeDialog, setFloorResumeDialog] = useState(false);
 
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
@@ -16401,14 +16412,32 @@ function FloorModeView() {
                   </button>
                 )}
                 {runStatus === "paused" && (
-                  <button
-                    type="button"
-                    onClick={() => setResumeDialog(true)}
-                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
-                    style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
-                  >
-                    ▶ Resume
-                  </button>
+                  floorResumeDialog ? (
+                    <div className="flex-1 flex items-center justify-center gap-2 rounded-2xl border px-3 py-2 flex-wrap"
+                      style={{ background: "rgba(22,101,52,0.15)", borderColor: "rgba(74,222,128,0.3)" }}>
+                      <span className="text-sm font-medium" style={{ color: "#86efac" }}>Freezer empty?</span>
+                      <button
+                        type="button"
+                        className="px-4 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors"
+                        onClick={() => { resumeRun(true); setFloorResumeDialog(false); }}
+                      >Yes</button>
+                      <button
+                        type="button"
+                        className="px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
+                        style={{ background: "rgba(255,255,255,0.1)", color: "#86efac" }}
+                        onClick={() => { resumeRun(false); setFloorResumeDialog(false); }}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setFloorResumeDialog(true)}
+                      className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                      style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
+                    >
+                      ▶ Resume
+                    </button>
+                  )
                 )}
                 {(runStatus === "running" || runStatus === "paused") && (
                   <button
