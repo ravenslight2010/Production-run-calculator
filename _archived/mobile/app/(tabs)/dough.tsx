@@ -298,6 +298,16 @@ export default function DoughScreen() {
               ? `${supply.casesLeftToOpen} cases to open`
               : `${supply.casesOnLine} cases on line`}
           </Text>
+          {!isCrust && run.settings.doughballWeightOz > 0 && (
+            <Text style={[styles.supplyHint, { color: colors.mutedForeground, marginTop: 6 }]}>
+              Target ball weight:{" "}
+              <Text style={{ color: colors.foreground, fontFamily: FONTS.mono }}>
+                {run.settings.doughballWeightOz % 1 === 0
+                  ? run.settings.doughballWeightOz.toString()
+                  : run.settings.doughballWeightOz.toFixed(2)}{" "}oz
+              </Text>
+            </Text>
+          )}
         </Card>
 
         {/* Dough recipe (dough mode only) */}

@@ -313,6 +313,12 @@ export interface RunCalc {
    */
   doughDepletionSec: number;
   /**
+   * Seconds to consume one sauce barrel (batch) at current PPM.
+   * Formula: sauceEffBarrel × 16 ÷ sauceOzPerPizza ÷ PPM × 60.
+   * 0 when PPM / sauceOzPerPizza / barrel lbs are unset.
+   */
+  sauceDepletionSec: number;
+  /**
    * True when all cases needed for this run are accounted for: cased on the
    * floor OR currently moving through the freezer. Mirrors web calc.pressDone
    * (casesCompleted + casesInFreezer >= casesNeeded). Used to stop dough
@@ -868,6 +874,10 @@ export function computeCalc(
     totalDowntimeSec,
     netElapsedSec,
     doughDepletionSec,
+    sauceDepletionSec:
+      ppm > 0 && sauceEffBarrel > 0 && s.sauceOzPerPizza > 0
+        ? (sauceEffBarrel * 16 / s.sauceOzPerPizza / ppm) * 60
+        : 0,
     pressDone,
   };
 }

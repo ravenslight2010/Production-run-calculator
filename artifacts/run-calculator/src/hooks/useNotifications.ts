@@ -65,8 +65,11 @@ export type UseNotificationsReturn = NotifResult;
  * constructor" and must go through the service worker instead. Prefer
  * `ServiceWorkerRegistration.showNotification()`, fall back to the
  * constructor, and never let either path throw into the calling effect.
+ *
+ * Exported so sauce-tab and other production tab components can fire
+ * push notifications outside of the centralised useNotifications hook.
  */
-function showAppNotification(title: string, options: NotificationOptions): void {
+export function showAppNotification(title: string, options: NotificationOptions): void {
   if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   void (async () => {

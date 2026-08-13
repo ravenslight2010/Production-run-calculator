@@ -361,6 +361,9 @@ import ReviewBadge from "../components/ReviewBadge";
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { useLiveRun, LiveRunProvider, calcRef } from "../contexts/LiveRunContext";
+// showAppNotification is imported from useNotifications to fire sauce push alerts
+import { showAppNotification } from "../hooks/useNotifications";
+import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
 import { useProductionRules } from "../hooks/useProductionRules";
@@ -18638,24 +18641,166 @@ function BatchMadeRow({
 
 const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState, dayStateRef, setDayState, schedulePush } = hx;
-  const { calc, nowTime } = useLiveRun();
+  const { v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush } = hx;
+  // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
+  // so it stops growing during a pause — no wall-clock deltas needed downstream.
+  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec } = useLiveRun();
 
-  const [sauceMade, setSauceMade] = useState(0);
+  // ── Barrel timer state: backed by module-level store so it survives Radix ──
+  // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
+  // initialisers read the stored value on every mount so switching away and
+  // back restores the barrel count, anchor, and alert latches rather than
+  // resetting them to zero.  All setters write back to the store immediately.
+  const [sauceMade, setSauceMadeRaw] = useState(
+    () => getSauceBarrelEntry(currentRunId).barrelsMade,
+  );
+  const [showSauceBarrelDue, setShowSauceBarrelDueRaw] = useState(
+    () => getSauceBarrelEntry(currentRunId).showBarrelDue,
+  );
+  const [showSauceQuickCheck, setShowSauceQuickCheckRaw] = useState(
+    () => getSauceBarrelEntry(currentRunId).showQuickCheck,
+  );
+
+  // Anchor in net-production elapsed seconds when the current barrel started.
+  // 0 means "since run start".  No wall-clock timestamp involved.
+  const lastBarrelNetSecRef = useRef<number>(
+    getSauceBarrelEntry(currentRunId).lastBarrelNetSec,
+  );
+  const sauceBarrelDueKeyRef = useRef<string>(
+    getSauceBarrelEntry(currentRunId).barrelDueKey,
+  );
+  const sauceQuickCheckKeyRef = useRef<string>(
+    getSauceBarrelEntry(currentRunId).quickCheckKey,
+  );
+
+  // Write-through wrappers — keep the persistent store in sync so remounts
+  // restore the correct values.
+  const setSauceMade = useCallback(
+    (fn: ((n: number) => number) | number) => {
+      setSauceMadeRaw((prev) => {
+        const next = typeof fn === "function" ? fn(prev) : fn;
+        getSauceBarrelEntry(currentRunId).barrelsMade = next;
+        return next;
+      });
+    },
+    [currentRunId],
+  );
+  const setShowSauceBarrelDue = useCallback(
+    (val: boolean) => {
+      getSauceBarrelEntry(currentRunId).showBarrelDue = val;
+      setShowSauceBarrelDueRaw(val);
+    },
+    [currentRunId],
+  );
+  const setShowSauceQuickCheck = useCallback(
+    (val: boolean) => {
+      getSauceBarrelEntry(currentRunId).showQuickCheck = val;
+      setShowSauceQuickCheckRaw(val);
+    },
+    [currentRunId],
+  );
+  // Helper: update the barrel anchor ref AND the store in one call.
+  const writeLastBarrelAnchor = useCallback(
+    (sec: number) => {
+      lastBarrelNetSecRef.current = sec;
+      getSauceBarrelEntry(currentRunId).lastBarrelNetSec = sec;
+    },
+    [currentRunId],
+  );
 
   // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
   const {
     prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
   } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime, doughBatchSec: 580, sauceBatchSec: 1800 });
 
-  useEffect(() => { setSauceMade(0); }, [currentRunId]);
-  useEffect(() => { if (runStatus === "ended") setSauceMade(0); }, [runStatus]);
+  // Track the PREVIOUS run ID so the reset effect can distinguish a genuine
+  // new-run transition from a remount with the same run ID (e.g. Radix
+  // TabsContent unmounting and re-mounting when the operator switches tabs).
+  // On a remount the prev ref initialises to currentRunId — equal → skip reset.
+  const prevRunIdRef = useRef<string>(currentRunId);
+
+  useEffect(() => {
+    // Reset only when the run ID genuinely changes — not on tab-return remounts.
+    // A remount sets prevRunIdRef to currentRunId on creation, so this guard
+    // returns immediately, leaving the module-level store (and its persisted
+    // barrel count, anchor, and latches) untouched.
+    if (prevRunIdRef.current === currentRunId) return;
+    prevRunIdRef.current = currentRunId;
+    // Wipe the store entry for the new run so state starts from zero.
+    // Raw setters avoid a write-through echo back to the just-reset entry.
+    resetSauceBarrelEntry(currentRunId);
+    setSauceMadeRaw(0);
+    lastBarrelNetSecRef.current = 0;
+    setShowSauceBarrelDueRaw(false);
+    sauceBarrelDueKeyRef.current = "";
+    sauceQuickCheckKeyRef.current = "";
+    setShowSauceQuickCheckRaw(false);
+  }, [currentRunId]);
+  useEffect(() => {
+    if (runStatus === "ended") {
+      resetSauceBarrelEntry(currentRunId);
+      setSauceMadeRaw(0);
+      setShowSauceBarrelDueRaw(false);
+      setShowSauceQuickCheckRaw(false);
+    }
+  }, [runStatus, currentRunId]);
   // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
   useEffect(() => {
     if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
       setSauceMade(n => n === 0 ? prep.prepBatchesSauce : n);
     }
   }, [runStatus, prep.prepCarriedOver, prep.prepBatchesSauce]);
+
+  // ── Sauce barrel nearly-exhausted alert ───────────────────────────────────
+  // Fire when < 15% of barrel time remains (same threshold as 15-min run alert).
+  // Latch per barrel index so re-entering the tab doesn't re-fire the same alert.
+  // Uses elapsedBatchSec (not wall-clock) so paused time is not counted.
+  // Suppressed once pressDone — the line is no longer consuming sauce.
+  useEffect(() => {
+    const depletionSec = calc.sauceDepletionSec;
+    const isActive = runStatus === "running" && !nextRunPrepActive && !calc.pressDone && depletionSec > 0;
+    if (!isActive || !currentRun?.startedAt) return;
+    const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
+    const secLeft = Math.max(0, depletionSec - barrelElapsed);
+    const pctLeft = secLeft / depletionSec;
+    if (pctLeft >= 0.15) return;
+    const key = `${currentRun.id}-${sauceMade}`;
+    if (sauceBarrelDueKeyRef.current === key) return;
+    sauceBarrelDueKeyRef.current = key;
+    getSauceBarrelEntry(currentRunId).barrelDueKey = key;
+    setShowSauceBarrelDue(true);
+    showAppNotification("🍅 Sauce barrel nearly empty", {
+      body: `${v.frontlineRecipeName?.trim() || "Sauce"} — start the next barrel soon.`,
+      icon: "/icons/icon-192.png",
+      tag: `sauce-barrel-${currentRun.id}-${sauceMade}`,
+    });
+  }, [elapsedBatchSec, runStatus, currentRun?.id, currentRun?.startedAt, calc.sauceDepletionSec, calc.pressDone, nextRunPrepActive, sauceMade, v.frontlineRecipeName]);
+
+  // Clear barrel alert as soon as the press is done — sauce consumption has stopped.
+  useEffect(() => {
+    if (calc.pressDone) setShowSauceBarrelDue(false);
+  }, [calc.pressDone]);
+
+  // ── Sauce packaging quick check (same cadence as dough batch alert) ───────
+  // Uses elapsedBatchSec (pause-aware) — does not need currentRun.startedAt.
+  // Suppressed once pressDone — the line has stopped running.
+  useEffect(() => {
+    const batchSec = calc.timePerBatchSec;
+    if (runStatus !== "running" || !currentRun?.startedAt || batchSec <= 0 || nextRunPrepActive || calc.pressDone) return;
+    const batchNum = Math.floor(elapsedBatchSec / batchSec);
+    if (batchNum < 1) return;
+    const key = `${currentRun.id}-${batchNum}`;
+    if (sauceQuickCheckKeyRef.current === key) return;
+    sauceQuickCheckKeyRef.current = key;
+    getSauceBarrelEntry(currentRunId).quickCheckKey = key;
+    setShowSauceQuickCheck(true);
+  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, elapsedBatchSec, nextRunPrepActive, calc.pressDone, currentRunId]);
+
+  // Clear the quick-check banner when the press is done — checks are irrelevant
+  // once the line has stopped making product.
+  useEffect(() => {
+    if (calc.pressDone) setShowSauceQuickCheck(false);
+  }, [calc.pressDone]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
 
@@ -18726,14 +18871,53 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               label={v.frontlineRecipeName?.trim() || "Sauce"}
               totalBatches={calc.sauceBatches}
               made={sauceMade}
-              onIncrement={() => setSauceMade(n => n + 1)}
+              onIncrement={() => {
+                // writeLastBarrelAnchor syncs both the ref and the store so the
+                // anchor survives subsequent tab navigation (remounts).
+                writeLastBarrelAnchor(elapsedBatchSec);
+                setSauceMade(n => n + 1);
+                setShowSauceBarrelDue(false);
+              }}
               onDecrement={() => setSauceMade(n => Math.max(0, n - 1))}
               isLive={isLive}
               testId="output-sauce-batches"
               sauceEffBarrel={calc.sauceEffBarrel}
             />
+            {/* Sauce barrel countdown TickBar — suppressed during pause,
+                press-done, and next-run prep. */}
+            {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && calc.sauceDepletionSec > 0 && (() => {
+              // Use pause-aware elapsedBatchSec; lastBarrelNetSecRef is also stored
+              // in net-elapsed coords so the delta is naturally pause-safe.
+              const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
+              const secLeft = Math.max(0, calc.sauceDepletionSec - barrelElapsed);
+              const pctLeft = calc.sauceDepletionSec > 0 ? secLeft / calc.sauceDepletionSec : 1;
+              const color = pctLeft < 0.15 ? "text-red-400" : "text-blue-400";
+              return (
+                <TickBar
+                  label="Current barrel lasts"
+                  secLeft={secLeft}
+                  periodSec={calc.sauceDepletionSec}
+                  color={color}
+                />
+              );
+            })()}
+            {/* Sauce barrel nearly-exhausted banner */}
+            {showSauceBarrelDue && (
+              <div className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 mt-2 text-xs">
+                <span className="text-red-400 font-semibold">🍅 Start new barrel soon — current barrel nearly empty</span>
+                <button className="text-muted-foreground hover:text-foreground ml-2 shrink-0" onClick={() => setShowSauceBarrelDue(false)}>✕</button>
+              </div>
+            )}
           </CardContent>
         </Card>
+      )}
+      {/* Sauce packaging quick check — fires on the dough-batch cadence so the
+          sauce crew verifies the skid/case count without switching tabs. */}
+      {showSauceQuickCheck && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-950/10 px-4 py-3 mb-4 text-xs">
+          <span className="text-amber-400 font-semibold">📦 Quick check: update skid and case count in the Packaging tab</span>
+          <button className="text-muted-foreground hover:text-foreground ml-2 shrink-0" onClick={() => setShowSauceQuickCheck(false)}>✕</button>
+        </div>
       )}
       <ReadOnlyRecipeCard
         title="Sauce Recipe"
@@ -19375,6 +19559,16 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           );
                         })()}
                       </div>
+                      {v.targetDoughballWeight > 0 && (
+                        <p className="text-xs text-muted-foreground mt-3">
+                          Target ball weight:{" "}
+                          <span className="font-mono font-semibold text-foreground">
+                            {v.targetDoughballWeight % 1 === 0
+                              ? v.targetDoughballWeight.toString()
+                              : v.targetDoughballWeight.toFixed(2)}{" "}oz
+                          </span>
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 </div>
