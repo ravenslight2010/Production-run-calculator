@@ -522,3 +522,34 @@ function injectSubTabIntoProfileBlobsIfNeeded(stamps: Record<string, number>): v
     // reconcile.
   }
 }
+
+/**
+ * Fetch all profiles from the server and seed any that are NOT already in
+ * localStorage (gap-fill only — never clobbers a local copy).  Does NOT touch
+ * sync stamps or the upload queue, so this is safe to call at any time.
+ *
+ * Returns the complete list of { brand, flavor } pairs from the server so the
+ * caller can iterate the full factory profile pool without depending on the
+ * boot reconciliation having finished first.
+ */
+export async function seedProfilesFromServer(): Promise<{ brand: string; flavor: string }[]> {
+  const items = await apiList();
+  for (const item of items) {
+    const doughKey = doughStorageKey(item.key);
+    const crustKey = crustStorageKey(item.key);
+    // Only write if no local blob exists — do not clobber a local edit that
+    // hasn't been pushed yet (the upload queue will reconcile it shortly).
+    try {
+      if (!localStorage.getItem(doughKey)) {
+        localStorage.setItem(doughKey, JSON.stringify(item.values ?? {}));
+      }
+      if (!localStorage.getItem(crustKey)) {
+        localStorage.setItem(crustKey, JSON.stringify(item.crustValues ?? {}));
+      }
+    } catch {
+      // Quota exceeded or storage unavailable — skip this profile; the caller
+      // will still process whatever it already has in localStorage.
+    }
+  }
+  return items.map(i => ({ brand: i.brand, flavor: i.flavor }));
+}
