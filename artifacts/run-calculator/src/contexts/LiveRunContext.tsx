@@ -56,6 +56,13 @@ export type Calc = {
   doughMadeTimeSec: number;
   rackTimes: { trays: number; sec: number }[];
   sauceBatches: number;
+  /**
+   * Seconds to consume one sauce barrel at current PPM — the cadence at which
+   * the sauce crew must complete batches. 0 when PPM / sauce oz or barrel lbs
+   * are unset. Exposed for the sauce tab's upcoming batch timer (task #569) and
+   * for depletion-guard logic in the Sauce tab.
+   */
+  sauceDepletionSec: number;
   app1Lbs: number; app1Batches: number;
   app2Lbs: number; app2Batches: number;
   app3Lbs: number; app3Batches: number;
@@ -100,6 +107,12 @@ export interface LiveRunContextValue {
   stallPrompt: boolean;
   setStallPrompt: React.Dispatch<React.SetStateAction<boolean>>;
   stallCheck: ReturnType<typeof detectStallFromDelta>;
+  /**
+   * True when the current run's press is done (casesNeeded met) AND an
+   * unstarted dough run follows in today's schedule. Signals the Dough/Sauce
+   * tabs to switch from "late-run" tracking to "prep for next run" mode.
+   */
+  nextRunPrepActive: boolean;
 }
 
 // ── Module-level calc ref (readable by Home without subscribing to context) ──
@@ -242,6 +255,11 @@ export function LiveRunProvider({
     const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : v.sauceBarrelLbs;
     const sauceLbs = (totalPizzasForSauce * v.sauceOzPerPizza) / 16 + 30;
     const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
+    // Time to consume one sauce barrel at current PPM: sauceEffBarrel × 16 ÷ sauceOzPerPizza ÷ PPM × 60
+    const sauceDepletionSec =
+      ppm > 0 && sauceEffBarrel > 0 && v.sauceOzPerPizza > 0
+        ? (sauceEffBarrel * 16 / v.sauceOzPerPizza / ppm) * 60
+        : 0;
 
     // Applicators
     const app1RecipeLbs = (v.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
@@ -351,7 +369,7 @@ export function LiveRunProvider({
       traysNeeded, buffer, doughShortCases, doughDepletionSec, casesOnLastSkid,
       timePressHzSec, timePerTraySec, timePerBatchSec, timePerSkidSec, timePerCaseSec,
       totalTimeSec, adjustedTimeSec, pressCasesLeft, pressDone, extraCases, doughMadeTimeSec,
-      rackTimes, sauceBatches,
+      rackTimes, sauceBatches, sauceDepletionSec,
       app1Lbs, app1Batches, app2Lbs, app2Batches, app3Lbs, app3Batches, app4Lbs, app4Batches,
       pep1Lbs, pep1Batches, pep2Lbs, pep2Batches,
       pep1LbsB, pep1BatchesB, pep2LbsB, pep2BatchesB,
@@ -386,6 +404,18 @@ export function LiveRunProvider({
     calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
       ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
       : 0;
+
+  // ── Next-run prep handoff detection ─────────────────────────────────────
+  // When the current run's press is done AND an unstarted dough run follows in
+  // today's schedule, the Dough/Sauce tabs should switch to "prep for next run"
+  // mode instead of showing late-run countdown timers.
+  const nextRun = dayState.runs[dayState.currentIndex + 1];
+  const nextRunPrepActive =
+    runStatus === "running" &&
+    calc.pressDone &&
+    !!nextRun &&
+    !nextRun.startedAt &&
+    (nextRun.subTab ?? "dough") !== "crusts";
 
   // ── Notifications ────────────────────────────────────────────────────────
   const { showBatchDue, setShowBatchDue } = useNotifications({
@@ -498,6 +528,7 @@ export function LiveRunProvider({
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
+      nextRunPrepActive,
     }),
     [
       nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
@@ -508,6 +539,7 @@ export function LiveRunProvider({
       autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs,
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
+      nextRunPrepActive,
     ],
   );
 

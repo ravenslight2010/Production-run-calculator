@@ -26,7 +26,30 @@ export function getPrepPhase(dayState: DayState): PrepPhase {
   return dayState.prepPhase ?? FRESH_PREP_PHASE;
 }
 
-/** Client-side merge of two prep phases — called on SSE receive. */
+/**
+ * Client-side merge of two prep phases — called on SSE receive.
+ *
+ * Normal (no handoff) merge rules:
+ *   - prepStartedAt: earliest non-null wins
+ *   - batch counts: MAX (counts only increment)
+ *   - prepCarriedOver: sticky true (once carried, always carried)
+ *
+ * Handoff-aware rules (when prepHandoffFromRunId is set):
+ *   A depletion handoff resets counts to zero with prepCarriedOver: false so
+ *   the next run can carry new batches via startRun. A stale SSE echo from a
+ *   peer that hasn't received the handoff yet would clobber the reset via MAX
+ *   counts / sticky-OR. Guard against this:
+ *
+ *   - If LOCAL is in handoff (has a prepHandoffFromRunId) but REMOTE is not (or
+ *     has a different one): remote is pre-handoff — its counts and carry-over
+ *     are stale. Keep local's values and propagate the handoff ID.
+ *
+ *   - If REMOTE is in handoff but LOCAL is not: local is the stale peer.
+ *     Adopt remote's post-handoff values entirely.
+ *
+ *   - If BOTH are in the same handoff: both are post-handoff. Apply MAX counts
+ *     + sticky-OR (staff on two tablets both adding next-run batches).
+ */
 export function mergePrepPhaseClient(
   local: PrepPhase | undefined,
   remote: unknown,
@@ -36,17 +59,75 @@ export function mergePrepPhaseClient(
   const rem = remote as Record<string, unknown>;
   const toNum = (v: unknown) =>
     typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+
   const locSt = loc.prepStartedAt;
   const remSt = typeof rem.prepStartedAt === "number" ? rem.prepStartedAt : null;
-  const prepStartedAt =
-    locSt !== null && remSt !== null
-      ? Math.min(locSt, remSt)
-      : locSt ?? remSt ?? null;
+
+  const locHandoff = loc.prepHandoffFromRunId;
+  const remHandoff = typeof rem.prepHandoffFromRunId === "string" ? rem.prepHandoffFromRunId : undefined;
+  const sameHandoff = locHandoff !== undefined && locHandoff === remHandoff;
+
+  let prepStartedAt: number | null;
+  let prepBatchesDough: number;
+  let prepBatchesSauce: number;
+  let prepCarriedOver: boolean;
+  let prepHandoffFromRunId: string | undefined;
+
+  if (locHandoff && !sameHandoff && remHandoff) {
+    // Both tablets have DIFFERENT handoff IDs (sequential runs: run A then run B).
+    // Use prepStartedAt as the LWW ordering signal — the later timestamp is
+    // the NEWER handoff generation and wins entirely (including its prepStartedAt
+    // so the batch TickBar stays in sync with when that handoff started).
+    const locTs = locSt ?? 0;
+    const remTs = remSt ?? 0;
+    if (remTs > locTs) {
+      // Remote is the newer handoff — adopt its post-handoff state
+      prepStartedAt = remSt;
+      prepBatchesDough = toNum(rem.prepBatchesDough);
+      prepBatchesSauce = toNum(rem.prepBatchesSauce);
+      prepCarriedOver = !!(rem.prepCarriedOver);
+      prepHandoffFromRunId = remHandoff;
+    } else {
+      // Local is the newer (or tied) handoff — keep it
+      prepStartedAt = locSt;
+      prepBatchesDough = loc.prepBatchesDough;
+      prepBatchesSauce = loc.prepBatchesSauce;
+      prepCarriedOver = loc.prepCarriedOver;
+      prepHandoffFromRunId = locHandoff;
+    }
+  } else if (locHandoff && !sameHandoff && !remHandoff) {
+    // Local is in handoff; remote has no handoff ID (stale pre-handoff echo) — keep local
+    prepStartedAt = locSt;
+    prepBatchesDough = loc.prepBatchesDough;
+    prepBatchesSauce = loc.prepBatchesSauce;
+    prepCarriedOver = loc.prepCarriedOver;
+    prepHandoffFromRunId = locHandoff;
+  } else if (!locHandoff && remHandoff) {
+    // Remote is in handoff; local is the stale pre-handoff peer — adopt remote
+    prepStartedAt = remSt;
+    prepBatchesDough = toNum(rem.prepBatchesDough);
+    prepBatchesSauce = toNum(rem.prepBatchesSauce);
+    prepCarriedOver = !!(rem.prepCarriedOver);
+    prepHandoffFromRunId = remHandoff;
+  } else {
+    // Both in same handoff, or neither: MIN start time (earliest prep wins),
+    // MAX counts (increments only), sticky-OR carry-over.
+    prepStartedAt =
+      locSt !== null && remSt !== null
+        ? Math.min(locSt, remSt)
+        : locSt ?? remSt ?? null;
+    prepBatchesDough = Math.max(loc.prepBatchesDough, toNum(rem.prepBatchesDough));
+    prepBatchesSauce = Math.max(loc.prepBatchesSauce, toNum(rem.prepBatchesSauce));
+    prepCarriedOver = !!(loc.prepCarriedOver || rem.prepCarriedOver);
+    prepHandoffFromRunId = locHandoff ?? remHandoff;
+  }
+
   return {
     prepStartedAt,
-    prepBatchesDough: Math.max(loc.prepBatchesDough, toNum(rem.prepBatchesDough)),
-    prepBatchesSauce: Math.max(loc.prepBatchesSauce, toNum(rem.prepBatchesSauce)),
-    prepCarriedOver: !!(loc.prepCarriedOver || rem.prepCarriedOver),
+    prepBatchesDough,
+    prepBatchesSauce,
+    prepCarriedOver,
+    ...(prepHandoffFromRunId !== undefined ? { prepHandoffFromRunId } : {}),
   };
 }
 

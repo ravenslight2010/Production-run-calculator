@@ -18,6 +18,12 @@ interface NotifCalc {
    * left, packaging at 1 skid left.
    */
   pressCasesLeft: number;
+  /**
+   * True when the press has made all cases needed for this run (cased + in
+   * freezer ≥ casesNeeded). Once true, the dough crew switches to the next run
+   * so no further dough batch-due alerts should fire for the current run.
+   */
+  pressDone: boolean;
 }
 
 interface NotifValues {
@@ -265,6 +271,9 @@ export function useNotifications({
   // ── Batch cycle alert ──────────────────────────────────────────────────────
   useEffect(() => {
     if (isCrust) { setShowBatchDue(false); return; } // crust runs mix no dough — no batch alerts; clear any stale banner
+    // Suppress (and clear) once the press has made everything the run needs —
+    // from this point the dough crew is on the NEXT run, not this one.
+    if (calc.pressDone) { setShowBatchDue(false); return; }
     if (runStatus !== "running" || !currentRun?.startedAt || calc.timePerBatchSec <= 0) return;
     const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
     const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
@@ -294,7 +303,7 @@ export function useNotifications({
       Notification.requestPermission();
     }
     return () => { if (batchDismissRef.current) clearTimeout(batchDismissRef.current); };
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust]);
+  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust, calc.pressDone]);
 
   // ── Run time complete alert ────────────────────────────────────────────────
   useEffect(() => {

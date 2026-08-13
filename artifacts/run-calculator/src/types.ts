@@ -357,6 +357,10 @@ export type PrepPhase = {
   // True once prep batches have been carried into the run's batchesReady /
   // sauceMade. Prevents double-apply on subsequent syncs or re-renders.
   prepCarriedOver: boolean;
+  // Run ID that triggered the late-run handoff reset (when pressDone fires with
+  // a next run waiting). Used to ensure the reset fires exactly once per run
+  // regardless of which tab is active or whether the component remounts.
+  prepHandoffFromRunId?: string;
 };
 
 export type DayState = {

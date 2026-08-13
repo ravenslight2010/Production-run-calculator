@@ -27,7 +27,7 @@ const SKY_400 = "#38bdf8";
 export default function DoughScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, updateProgress, substitutions, suppressAutoTrack, autoTrack, autoSuppressUntil, resumeAutoTrack, prepPhase, startPrep, addPrepBatchDough } = useRun();
+  const { run, updateProgress, substitutions, suppressAutoTrack, autoTrack, autoSuppressUntil, resumeAutoTrack, prepPhase, startPrep, addPrepBatchDough, nextRunPrepActive, allRuns, runIndex } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
@@ -56,6 +56,31 @@ export default function DoughScreen() {
           recipes={[run.settings.doughRecipe]}
           typeValues={[]}
         />
+        {/* Next-run prep handoff: shown when current run press is done and a next run is waiting */}
+        {nextRunPrepActive && (() => {
+          const nextRunData = allRuns[runIndex + 1];
+          const nextRunName = nextRunData
+            ? [nextRunData.brand, nextRunData.flavor].filter(Boolean).join(' – ') || `Run ${runIndex + 2}`
+            : '';
+          return (
+            <View style={{ borderRadius: 8, borderWidth: 1, borderColor: '#10b981', backgroundColor: 'rgba(6,78,59,0.3)', padding: 12, marginBottom: 8 }}>
+              <Text style={[styles.progressTitle, { color: '#34d399', marginBottom: 4 }]}>PREPPING FOR NEXT RUN</Text>
+              {!!nextRunName && (
+                <Text style={{ color: colors.mutedForeground, fontSize: 12, marginBottom: 8 }}>{nextRunName}</Text>
+              )}
+              <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                {(prepPhase?.prepBatchesDough ?? 0)} {(prepPhase?.prepBatchesDough ?? 0) === 1 ? 'batch' : 'batches'} ready for next run
+              </Text>
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); addPrepBatchDough(); }}
+                style={{ backgroundColor: '#059669', borderRadius: 6, paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start', marginTop: 8 }}
+              >
+                <Text style={{ color: '#fff', fontFamily: FONTS.bold, fontSize: 13 }}>+1 Batch</Text>
+              </Pressable>
+            </View>
+          );
+        })()}
+
         {/* Shift prep section: shown while no production run is active */}
         {run.startedAt == null && (
           <View style={{ borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 12, marginBottom: 8 }}>

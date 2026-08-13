@@ -306,6 +306,19 @@ export interface RunCalc {
   timePerBatchSec: number;
   totalDowntimeSec: number;
   netElapsedSec: number;
+  /**
+   * Seconds until the staged dough on hand (traysOnLine + batchesReady) is
+   * consumed by the line at current PPM. 0 when PPM is unset or no dough is
+   * staged. Used to suppress batch-due alerts once the crew's supply runs out.
+   */
+  doughDepletionSec: number;
+  /**
+   * True when all cases needed for this run are accounted for: cased on the
+   * floor OR currently moving through the freezer. Mirrors web calc.pressDone
+   * (casesCompleted + casesInFreezer >= casesNeeded). Used to stop dough
+   * batch alerts and trigger the next-run prep handoff.
+   */
+  pressDone: boolean;
 }
 
 export const DEFAULT_SETTINGS: RunSettings = {
@@ -645,11 +658,36 @@ export function computeCalc(
   // casesLeftToRun — which nets out cases already on the line and adds a
   // casesPerLayer buffer — then add a second casesPerLayer buffer to the
   // ingredient pizza total (web doubles the layer buffer for sauce/apps/peps).
-  const freezerMin = liveFreezerMin(state, nowMs);
-  const casesOnLine =
-    ppm > 0 && s.pizzasPerCase > 0
-      ? Math.floor((ppm * freezerMin) / s.pizzasPerCase)
-      : 0;
+  // Lifecycle-aware cases-in-freezer — mirrors web computeCasesInFreezer.
+  // Mobile doesn't shift startedAt on resume (web does via resumeRun); instead
+  // we subtract completed-stoppage downtime from gross elapsed. This prevents
+  // fictitious tunnel fill during pauses and correctly drains after run end.
+  const casesOnLine = (() => {
+    const freezerTimeMin = Number(s.freezerTime);
+    if (!state.startedAt || ppm <= 0 || s.pizzasPerCase <= 0 || freezerTimeMin <= 0) return 0;
+
+    // Sum of all completed-stoppage durations in ms.
+    const completedDownMs = state.stoppages
+      .filter(st => st.endedAt != null)
+      .reduce((acc, st) => acc + (st.endedAt! - st.startedAt), 0);
+
+    if (!state.endedAt) {
+      // Running: freeze elapsed at the open stoppage start (if paused), else use now.
+      const activeStop = state.stoppages.find(st => st.endedAt == null);
+      const refMs = activeStop ? activeStop.startedAt : nowMs;
+      const netElapsedMin = Math.max(0, (refMs - state.startedAt - completedDownMs) / 60000);
+      return Math.floor((ppm * Math.min(netElapsedMin, freezerTimeMin)) / s.pizzasPerCase);
+    }
+
+    // Ended: derive what was in the tunnel at stop, then drain since end.
+    // endRun closes any open stoppage at endedAt, so completedDownMs already
+    // accounts for pauses that were active when the run finished.
+    const netAtEndMin = Math.max(0, (state.endedAt - state.startedAt - completedDownMs) / 60000);
+    const atEndMin = Math.min(netAtEndMin, freezerTimeMin);
+    const sinceEndMin = Math.max(0, (nowMs - state.endedAt) / 60000);
+    const remainMin = Math.max(0, Math.min(atEndMin, freezerTimeMin - sinceEndMin));
+    return Math.floor((ppm * remainMin) / s.pizzasPerCase);
+  })();
   const casesLeftToRun =
     s.casesNeeded -
     p.skidsCompleted * s.casesPerSkid -
@@ -787,6 +825,19 @@ export function computeCalc(
     p.skidsCompleted * s.casesPerSkid + p.casesOnCurrentSkid;
   const extraCases = Math.max(0, casesCompletedTotal - s.casesNeeded);
 
+  // Dough on hand in doughballs (trays × doughballs/tray + batches × batch yield)
+  const doughOnHandBalls =
+    (p.traysOnLine || 0) * s.doughballsPerTray +
+    (p.batchesReady || 0) * doughEffBatch;
+  const doughDepletionSec = ppm > 0 ? (doughOnHandBalls / ppm) * 60 : 0;
+
+  // True when all cases needed are accounted for: cased on the floor OR
+  // currently in the freezer (casesOnLine). Matches web pressDone semantics:
+  //   casesCompleted + casesInFreezer >= casesNeeded
+  // This means alert suppression and the next-run prep handoff both fire while
+  // the last batch is still moving through the freezer — identical to web.
+  const pressDone = s.casesNeeded > 0 && casesCompletedTotal + casesOnLine >= s.casesNeeded;
+
   return {
     casesLeft,
     casesLeftToRun,
@@ -816,6 +867,8 @@ export function computeCalc(
     timePerBatchSec,
     totalDowntimeSec,
     netElapsedSec,
+    doughDepletionSec,
+    pressDone,
   };
 }
 
@@ -1040,6 +1093,9 @@ export type PrepPhaseType = {
   prepBatchesSauce: number;
   /** True once prep batches have been carried into a started run (sticky). */
   prepCarriedOver: boolean;
+  /** Run ID that triggered the late-run handoff reset. Guards against duplicate
+   * resets when the operator switches tabs or the component remounts. */
+  prepHandoffFromRunId?: string;
 };
 
 export const FRESH_PREP: PrepPhaseType = {
@@ -1401,6 +1457,12 @@ interface RunContextValue {
   saveTemplate: (name: string) => void;
   applyTemplate: (id: string) => void;
   deleteTemplate: (id: string) => void;
+  /**
+   * True when the current run's press is done AND an unstarted dough run follows
+   * in today's schedule. Signals the Dough tab to switch to "prep for next run"
+   * mode (mirrors web LiveRunContext.nextRunPrepActive).
+   */
+  nextRunPrepActive: boolean;
   autoTrack: boolean;
   setAutoTrack: (on: boolean) => void;
   floorModeEnabled: boolean;
@@ -4654,6 +4716,45 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const activeStoppage = currentRun?.stoppages?.find((s) => s.endedAt == null) ?? null;
   const calc = computeCalc(currentRun ?? makeNewRun(), Date.now(), appState.substitutions ?? []);
 
+  // True when the current run's press is done AND an unstarted dough run
+  // follows in today's schedule (mirrors web LiveRunContext.nextRunPrepActive).
+  const nextRunMobile = appState.runs[appState.currentIndex + 1];
+  const nextRunPrepActive =
+    currentRun?.isRunning === true &&
+    !currentRun?.endedAt &&
+    calc.pressDone &&
+    !!nextRunMobile &&
+    !nextRunMobile.startedAt &&
+    (nextRunMobile.progress.subTab ?? "dough") !== "crusts";
+
+  // Depletion handoff: reset prepPhase exactly once per run when
+  // nextRunPrepActive first becomes true. Lives in the provider (not a tab
+  // component) so it fires regardless of which screen is visible.
+  // The durable guard `prepHandoffFromRunId === runId` prevents double-reset
+  // across remounts (mirrors web LiveRunHandoffGuard).
+  useEffect(() => {
+    if (!nextRunPrepActive) return;
+    const runId = currentRun?.id ?? "";
+    if (!runId) return;
+    setAppState(prev => {
+      const prevPrep = prev.prepPhase ?? FRESH_PREP;
+      if (prevPrep.prepHandoffFromRunId === runId) return prev; // already done
+      const next: AppState = {
+        ...prev,
+        prepPhase: {
+          prepStartedAt: Date.now(),
+          prepBatchesDough: 0,
+          prepBatchesSauce: 0,
+          prepCarriedOver: false,
+          prepHandoffFromRunId: runId,
+        },
+      };
+      persist(next);
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextRunPrepActive, currentRun?.id]);
+
   // The main context value excludes the per-second clock fields and is memoized
   // so its identity stays stable across ticks. Every callback below is
   // useCallback-stable, so only appState / currentRun / syncStatus drive a
@@ -4700,6 +4801,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         saveTemplate,
         applyTemplate,
         deleteTemplate,
+        nextRunPrepActive,
         autoTrack: appState.autoTrack,
         setAutoTrack,
         floorModeEnabled: appState.floorModeEnabled,

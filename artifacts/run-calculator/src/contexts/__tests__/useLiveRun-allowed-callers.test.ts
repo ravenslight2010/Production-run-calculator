@@ -48,6 +48,11 @@ const ALLOWED_CALLERS = new Set<string>([
   "LiveStoppagesTabContent",
   "LiveSummaryTabContent",
 
+  // Always-mounted inner guard that fires the depletion handoff reset once per
+  // run regardless of which tab is open. It must call useLiveRun() to react to
+  // nextRunPrepActive; it renders null and never drives per-second UI churn.
+  "LiveRunHandoffGuard",
+
   // Live display helpers mounted on top of the main content area:
   // ScreenModeView — station/TV cast display, updates counters per second
   "ScreenModeView",

@@ -15465,6 +15465,8 @@ export default function Home() {
           hopperSec: Number(v.hopperSec) || 0,
         }}
       >
+        {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
+        <LiveRunHandoffGuard />
         {screenMode ? <ScreenModeView /> : mainContent}
       </LiveRunProvider>
       </HomeTabCtx.Provider>
@@ -18959,6 +18961,49 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   );
 });
 
+/**
+ * Always-mounted inner component (rendered directly inside LiveRunProvider).
+ * Detects the late-run depletion handoff — when the current run's press is done
+ * and an unstarted dough run follows — and resets prepPhase exactly once per
+ * run so the crew can track next-run batches starting from zero.
+ *
+ * Lives here (not in LiveDoughTabContent) so the reset fires regardless of
+ * which tab is currently visible. The idempotency guard is
+ * `dayState.prepPhase.prepHandoffFromRunId === currentRunId`, stored durably in
+ * dayState so it survives component remounts and tab switches.
+ */
+function LiveRunHandoffGuard() {
+  const { nextRunPrepActive } = useLiveRun();
+  const { currentRunId, dayState, dayStateRef, setDayState, schedulePush } =
+    useHomeTabCtx();
+  useEffect(() => {
+    if (!nextRunPrepActive) return;
+    if (dayState.prepPhase?.prepHandoffFromRunId === currentRunId) return;
+    // First time nextRunPrepActive for this run: reset prep so the crew can log
+    // next-run batches from zero with prepCarriedOver: false (so startRun will
+    // carry them into the next run's batchesReady).
+    const newPrepPhase = {
+      prepStartedAt: Date.now(),
+      prepBatchesDough: 0,
+      prepBatchesSauce: 0,
+      prepCarriedOver: false,
+      prepHandoffFromRunId: currentRunId,
+    };
+    const newDs = { ...dayStateRef.current!, prepPhase: newPrepPhase };
+    saveDayState(newDs, { stampMeta: false });
+    setDayState(newDs);
+    schedulePush(newDs, 0);
+  }, [
+    nextRunPrepActive,
+    currentRunId,
+    dayState.prepPhase?.prepHandoffFromRunId,
+    dayStateRef,
+    setDayState,
+    schedulePush,
+  ]);
+  return null;
+}
+
 const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const hx = useHomeTabCtx();
   const {
@@ -18973,6 +19018,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     autoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
+    nextRunPrepActive,
   } = useLiveRun();
 
   // ── Shift prep phase (pre-production batch tracking) ─────────────────────
@@ -18989,6 +19035,9 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     prevDoughBatchNumRef.current = doughBatchNum;
   }, [doughBatchNum, prepActive]);
   useEffect(() => { if (runStatus !== "pending") setShowPrepBatchDue(false); }, [runStatus]);
+
+  // Next-run prep handoff reset is handled by LiveRunHandoffGuard (always
+  // mounted inside LiveRunProvider) so it fires regardless of which tab is open.
 
   // ── Speed drift detection ─────────────────────────────────────────────────
   // Tracks manual case/skid corrections and suggests a Speed Adjustment (or
@@ -19343,8 +19392,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     };
                     const { trays: suggestedTrays, batches: suggestedBatches } =
                       suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
-                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
-                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
+                    // Stop auto-track TickBars once the press is done — no more
+                    // batches are needed for this run at that point.
+                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
+                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed && !calc.pressDone;
                     // ── Live countdowns to each auto counter's next tick ──
                     const nowMs = nowTime.getTime();
                     const secLeftOf = (dueMs: number, periodSec: number) =>
@@ -19636,8 +19687,45 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 </div>
 
 
+                {/* Next-run prep handoff card — visible once this run's press is done */}
+                {doughSubTab === "dough" && nextRunPrepActive && (() => {
+                  const nextRunMeta = dayState.runs[dayState.currentIndex + 1];
+                  const nextRunName = nextRunMeta
+                    ? [nextRunMeta.brand, nextRunMeta.flavor].filter(Boolean).join(" – ") || `Run ${dayState.currentIndex + 2}`
+                    : "";
+                  return (
+                    <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-950/30 overflow-hidden">
+                      <div className="px-4 py-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <ArrowRight className="w-5 h-5 shrink-0 text-emerald-400" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-emerald-400">Prepping for next run</p>
+                            {nextRunName && (
+                              <p className="text-xs text-muted-foreground mt-0.5 truncate">{nextRunName}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="px-4 pb-3 flex items-center justify-between gap-3">
+                        <div className="flex flex-col gap-0.5">
+                          <p className="text-xs text-muted-foreground">Dough batches ready for next run</p>
+                          <p className="text-2xl font-mono font-black tabular-nums text-foreground">
+                            {prep.prepBatchesDough}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="outline" onClick={addPrepBatchDough} className="shrink-0 border-emerald-500/40 text-emerald-400 hover:bg-emerald-950/50">
+                          +1 Batch
+                        </Button>
+                      </div>
+                      <div className="border-t border-emerald-500/20 px-4 py-2">
+                        <TickBar label="Next batch due" secLeft={doughSecLeft} periodSec={doughPrepBatchSec} color="text-emerald-400" />
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Next batch due — merged countdown + start-next-batch card (graduated mockup) */}
-                {doughSubTab === "dough" && runStatus === "running" && (() => {
+                {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && (() => {
                   const spinSecCard =
                     (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)) ||
                     calc.timePerBatchSec;
