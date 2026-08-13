@@ -132,6 +132,160 @@ router.get("/brand-profiles", async (req: Request, res: Response) => {
   }
 });
 
+// Returns profiles where app3 or app4 applicator values look inconsistent with
+// the profile's own brand/flavor — a sign of cross-run autosave contamination
+// that the one-time heal may have missed. Three signals are checked:
+//
+//  1. cross-profile: the recipe name appears as the PRIMARY (app1/app2)
+//     applicator on a DIFFERENT profile (same logic as the one-time heal, but
+//     run on demand so newly-imported profiles are also caught).
+//
+//  2. cross-brand: the recipe name contains a known brand-name substring that
+//     belongs to a different profile's brand (e.g. "Hannaford BBQ Chicken"
+//     stored on a "Spinach Goat Cheese" profile).
+//
+//  3. orphaned-type: app3Type or app4Type is set to a non-empty, non-None
+//     value while the companion recipe name is blank — the contaminating run
+//     had no recipe for that slot, so only the type field was overwritten.
+//
+// Managers can use this list to identify profiles that need manual review and
+// a profile clear/re-import from the spec sheet.
+router.get("/brand-profiles/applicator-audit", async (req: Request, res: Response) => {
+  try {
+    const scope = currentScope();
+    const profiles = await db
+      .select()
+      .from(brandProfilesTable)
+      .where(eq(brandProfilesTable.scope, scope));
+
+    // Build a map: normalized recipe name → set of profile keys that list it as
+    // a primary (app1/app2) applicator.
+    const primaryOwners = new Map<string, Set<string>>();
+    for (const p of profiles) {
+      const v = p.values as Record<string, unknown>;
+      const pKey = `${p.brand.toLowerCase()}__${p.flavor.toLowerCase()}`;
+      for (const field of ["app1CheeseRecipeName", "app2CheeseRecipeName"] as const) {
+        const name = String(v[field] ?? "").trim();
+        if (!name) continue;
+        const nameLower = name.toLowerCase();
+        const owners = primaryOwners.get(nameLower) ?? new Set<string>();
+        owners.add(pKey);
+        primaryOwners.set(nameLower, owners);
+      }
+    }
+
+    // Build a set of all brand name strings (lowercased, trimmed) for
+    // cross-brand substring matching. Short brand names (≤ 3 chars) are
+    // excluded to avoid false matches on common words like "red" or "hot".
+    const brandNames = new Set<string>();
+    for (const p of profiles) {
+      const b = (p.brand ?? "").trim().toLowerCase();
+      if (b.length > 3) brandNames.add(b);
+    }
+
+    type AuditItem = {
+      key: string;
+      brand: string;
+      flavor: string;
+      slot: "app3" | "app4";
+      recipeName: string;
+      appType: string;
+      reason: string;
+    };
+
+    const items: AuditItem[] = [];
+
+    for (const p of profiles) {
+      const v = p.values as Record<string, unknown>;
+      const pKey = `${p.brand.toLowerCase()}__${p.flavor.toLowerCase()}`;
+
+      // Collect this profile's own primary names so a recipe stacked at app3/4
+      // is never incorrectly flagged.
+      const ownPrimary = new Set<string>();
+      for (const f of ["app1CheeseRecipeName", "app2CheeseRecipeName"] as const) {
+        const n = String(v[f] ?? "").trim().toLowerCase();
+        if (n) ownPrimary.add(n);
+      }
+
+      const slots = [
+        { recipeField: "app3CheeseRecipeName", typeField: "app3Type", slot: "app3" as const },
+        { recipeField: "app4CheeseRecipeName", typeField: "app4Type", slot: "app4" as const },
+      ];
+
+      for (const { recipeField, typeField, slot } of slots) {
+        const recipeName = String(v[recipeField] ?? "").trim();
+        const appType = String(v[typeField] ?? "").trim();
+        const recipeNameLower = recipeName.toLowerCase();
+
+        // Signal 3: orphaned type — type is set to a non-blank, non-None value
+        // but the recipe name is empty. The contaminating run wrote the type
+        // field but had no cheese recipe in that slot.
+        if (!recipeName) {
+          const isOrphanedType =
+            appType.length > 0 &&
+            appType.toLowerCase() !== "none" &&
+            appType.toLowerCase() !== "mix";
+          if (isOrphanedType) {
+            items.push({
+              key: p.key,
+              brand: p.brand ?? "",
+              flavor: p.flavor ?? "",
+              slot,
+              recipeName: "",
+              appType,
+              reason: "orphaned-type",
+            });
+          }
+          continue;
+        }
+
+        // Skip if it's one of this profile's own primary applicators.
+        if (ownPrimary.has(recipeNameLower)) continue;
+
+        // Signal 1: cross-profile — this recipe name is primary for a
+        // DIFFERENT profile and not for this one.
+        const owners = primaryOwners.get(recipeNameLower);
+        if (owners && [...owners].some((k) => k !== pKey) && !owners.has(pKey)) {
+          items.push({
+            key: p.key,
+            brand: p.brand ?? "",
+            flavor: p.flavor ?? "",
+            slot,
+            recipeName,
+            appType,
+            reason: "cross-profile",
+          });
+          continue;
+        }
+
+        // Signal 2: cross-brand — the recipe name contains a brand-name string
+        // that belongs to a DIFFERENT brand (i.e. not this profile's own brand).
+        const ownBrand = (p.brand ?? "").trim().toLowerCase();
+        for (const b of brandNames) {
+          if (b === ownBrand) continue;
+          if (recipeNameLower.includes(b)) {
+            items.push({
+              key: p.key,
+              brand: p.brand ?? "",
+              flavor: p.flavor ?? "",
+              slot,
+              recipeName,
+              appType,
+              reason: "cross-brand",
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    res.json({ items });
+  } catch (err) {
+    req.log.error({ err }, "failed to run applicator audit");
+    res.status(500).json({ error: "Failed to run applicator audit" });
+  }
+});
+
 // Returns profiles whose stored frontlineRecipeName is a plain generic sauce
 // category label (e.g. "BBQ Sauce", "Ranch") rather than a specific product
 // name — a sign the spec-sheet parenthetical was dropped during import.

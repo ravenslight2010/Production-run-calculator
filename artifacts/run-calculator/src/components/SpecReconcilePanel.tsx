@@ -29,6 +29,7 @@ import {
 import {
   fetchSavedSpecSheets,
   fetchStaleSauceProfiles,
+  fetchApplicatorAuditProfiles,
   reconcileSpecSheet,
   deleteSpecSheet,
   loadCurrentReconcileRecipes,
@@ -37,6 +38,7 @@ import {
   latestSourceKeyIds,
   type SavedSpecSheet,
   type StaleSauceProfile,
+  type ApplicatorAuditProfile,
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
@@ -183,18 +185,23 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
   const [staleProfiles, setStaleProfiles] = useState<StaleSauceProfile[]>([]);
   const [staleExpanded, setStaleExpanded] = useState(false);
 
+  const [auditProfiles, setAuditProfiles] = useState<ApplicatorAuditProfile[]>([]);
+  const [auditExpanded, setAuditExpanded] = useState(false);
+
   const prevSignalRef = useRef(-1);
 
   async function refresh() {
     setLoading(true);
     setListError(null);
     try {
-      const [nextSheets, nextStale] = await Promise.all([
+      const [nextSheets, nextStale, nextAudit] = await Promise.all([
         fetchSavedSpecSheets(),
         fetchStaleSauceProfiles(),
+        fetchApplicatorAuditProfiles(),
       ]);
       setSheets(nextSheets);
       setStaleProfiles(nextStale);
+      setAuditProfiles(nextAudit);
     } catch {
       setListError("Couldn't load saved spec sheets.");
     } finally {
@@ -371,6 +378,73 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                       </span>
                       <span className="text-amber-700 shrink-0">
                         Sauce: "{p.sauceName}"
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Applicator audit warning — profiles where app3 or app4 has a
+            recipe name or type that looks inconsistent with the profile's
+            own brand/flavor, suggesting cross-run autosave contamination
+            that the one-time heal may have missed. */}
+        {auditProfiles.length > 0 && (
+          <div
+            className="rounded-md border border-red-400/60 bg-red-500/10 p-3 space-y-2"
+            data-testid="applicator-audit-warning"
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 text-left text-red-600"
+              onClick={() => setAuditExpanded((v) => !v)}
+              data-testid="button-applicator-audit"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span className="flex-1 text-sm font-medium">
+                {auditProfiles.length} profile{auditProfiles.length !== 1 ? "s" : ""} may have contaminated app 3/4 applicator values
+              </span>
+              {auditExpanded ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+              )}
+            </button>
+            {auditExpanded && (
+              <div className="space-y-2">
+                <p className="text-xs text-red-700">
+                  These profiles have an app 3 or app 4 applicator recipe name or type that looks like
+                  it came from a different product — a sign of a cross-run autosave bug where switching
+                  between two runs quickly caused the wrong run's values to be saved into this profile.
+                  Review each profile in Setup and clear or re-import the applicator 3/4 values as needed.
+                </p>
+                <ul className="space-y-1" data-testid="applicator-audit-list">
+                  {auditProfiles.map((p, i) => (
+                    <li
+                      key={`${p.key}-${p.slot}-${i}`}
+                      className="text-xs"
+                      data-testid={`applicator-audit-profile-${p.key}-${p.slot}`}
+                    >
+                      <span className="font-medium text-foreground">
+                        {p.brand} — {p.flavor}
+                      </span>
+                      <span className="text-red-700 ml-2">
+                        {p.slot === "app3" ? "App 3" : "App 4"}
+                        {p.recipeName
+                          ? <>: "{p.recipeName}"</>
+                          : p.appType
+                            ? <> type "{p.appType}" with no recipe</>
+                            : null}
+                        {" "}
+                        <span className="opacity-70">
+                          ({p.reason === "cross-profile"
+                            ? "belongs to a different product"
+                            : p.reason === "cross-brand"
+                              ? "contains another brand's name"
+                              : "applicator type set but no recipe"})
+                        </span>
                       </span>
                     </li>
                   ))}

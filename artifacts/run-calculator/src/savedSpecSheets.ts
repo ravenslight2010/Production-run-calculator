@@ -321,6 +321,51 @@ export async function fetchStaleSauceProfiles(): Promise<StaleSauceProfile[]> {
 }
 
 /**
+ * A profile flagged by the applicator audit: app3 or app4 has a recipe name or
+ * type that looks inconsistent with the profile's own brand/flavor, suggesting
+ * cross-run autosave contamination.
+ *
+ * `reason` is one of:
+ *   "cross-profile"  — recipe name is the primary applicator on a DIFFERENT profile
+ *   "cross-brand"    — recipe name contains another brand's name as a substring
+ *   "orphaned-type"  — appType is set but the recipe name is blank
+ */
+export type ApplicatorAuditProfile = {
+  key: string;
+  brand: string;
+  flavor: string;
+  slot: "app3" | "app4";
+  recipeName: string;
+  appType: string;
+  reason: "cross-profile" | "cross-brand" | "orphaned-type";
+};
+
+/**
+ * Fetch profiles whose app3/app4 applicator values look inconsistent with the
+ * profile's own brand/flavor. Returns an empty array when none are found or on
+ * network error — advisory only and must never block the import UI.
+ */
+export async function fetchApplicatorAuditProfiles(): Promise<ApplicatorAuditProfile[]> {
+  try {
+    const res = await fetch("/api/brand-profiles/applicator-audit");
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items?: unknown[] };
+    const items = Array.isArray(data.items) ? data.items : [];
+    return items.filter(
+      (x): x is ApplicatorAuditProfile =>
+        x !== null &&
+        typeof x === "object" &&
+        typeof (x as ApplicatorAuditProfile).brand === "string" &&
+        typeof (x as ApplicatorAuditProfile).flavor === "string" &&
+        typeof (x as ApplicatorAuditProfile).slot === "string" &&
+        typeof (x as ApplicatorAuditProfile).reason === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Build a short, human-friendly label for an auto-saved import snapshot. When the
  * uploaded filename(s) are known they lead the label so distinct files (each kept
  * to its two most recent versions) are easy to tell apart.
