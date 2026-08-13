@@ -22122,30 +22122,85 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                 );
               })()}
               {(() => {
-                const appRows: { label: string; value: string }[] = [];
-                const addAR = (type: string, lbs: number, batches: number, prefix: string) => {
-                  if (!type) return;
-                  const isMix = type.trim().toLowerCase().includes("mix");
-                  if (isMix && lbs > 0) appRows.push({ label: `${prefix} — ${type}`, value: fmtNum(lbs, 1) + " lbs" });
-                  else if (!isMix && batches > 0) appRows.push({ label: `${prefix} — ${type}`, value: fmtNum(batches, 2) + " batches" });
+                type AppBlock = {
+                  key: string;
+                  label: string;
+                  value: string;
+                  recipeName?: string;
+                  ingredientRows?: { ingredient: string; lbs: number }[];
                 };
-                addAR(ds.app1Type, ds.app1Lbs, ds.app1Batches, "App 1");
-                addAR(ds.app2Type, ds.app2Lbs, ds.app2Batches, "App 2");
+                const appBlocks: AppBlock[] = [];
+                const addAppBlock = (
+                  type: string, lbs: number, batches: number, prefix: string,
+                  recipeName?: string, recipe?: readonly any[]
+                ) => {
+                  if (!type) return;
+                  const lower = type.trim().toLowerCase();
+                  const isMix = lower.includes("mix");
+                  const isCheese = lower.includes("cheese");
+                  const blendName = (recipeName ?? "").trim();
+                  if (isMix && lbs > 0) {
+                    // Mix recipe rows store oz/pizza per component (despite the field name "lbs").
+                    // rowTotal = (componentOzPerPizza / sumOzPerPizza) * totalRunLbs — mirrors MixRecipeCard.
+                    const recipeRows = (recipe ?? []).filter((r: any) => (r.ingredient ?? "").trim() && Number(r.lbs ?? 0) > 0);
+                    const sumOz = recipeRows.reduce((acc: number, r: any) => acc + Number(r.lbs), 0);
+                    const ingRows = recipeRows.map((r: any) => ({
+                      ingredient: (r.ingredient as string).trim(),
+                      lbs: sumOz > 0 ? (Number(r.lbs) / sumOz) * lbs : 0,
+                    })).filter((r: any) => r.lbs > 0);
+                    appBlocks.push({
+                      key: `${prefix}__${type}`,
+                      label: `${prefix} — ${type}`,
+                      value: fmtNum(lbs, 1) + " lbs",
+                      recipeName: blendName || undefined,
+                      ingredientRows: ingRows.length > 0 ? ingRows : undefined,
+                    });
+                  } else if (isCheese && batches > 0) {
+                    // Use computeCheesePull so fractional batches get the same
+                    // Math.max(1, batches) floor that the Cheese Blend card applies.
+                    const pull = computeCheesePull(recipe as any, batches);
+                    const ingRows = pull.rows
+                      .filter((r: any) => (r.ingredient ?? "").trim() && r.lbs > 0)
+                      .map((r: any) => ({ ingredient: (r.ingredient as string).trim(), lbs: r.lbs }));
+                    appBlocks.push({
+                      key: `${prefix}__${type}`,
+                      label: `${prefix} — ${type}`,
+                      value: fmtNum(batches, 2) + " batches",
+                      recipeName: blendName || undefined,
+                      ingredientRows: ingRows.length > 0 ? ingRows : undefined,
+                    });
+                  } else if (!isMix && !isCheese && batches > 0) {
+                    appBlocks.push({ key: `${prefix}__${type}`, label: `${prefix} — ${type}`, value: fmtNum(batches, 2) + " batches" });
+                  }
+                };
+                addAppBlock(ds.app1Type, ds.app1Lbs, ds.app1Batches, "App 1", dv.app1CheeseRecipeName, dv.app1CheeseRecipe);
+                addAppBlock(ds.app2Type, ds.app2Lbs, ds.app2Batches, "App 2", dv.app2CheeseRecipeName, dv.app2CheeseRecipe);
                 const pepCL = dv.pep1Combined === true ? "1 & 2" : "1";
-                if (ds.pep1Type && ds.pep1Lbs > 0) appRows.push({ label: `Pep ${pepCL} — ${ds.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1Type) ? fmtNum(ds.pep1Lbs, 2) + " lbs" : fmtNum(ds.pep1Batches, 2) + " batches" });
-                if (ds.pep1TypeB && ds.pep1LbsB > 0) appRows.push({ label: `Pep ${pepCL} — ${ds.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1TypeB) ? fmtNum(ds.pep1LbsB, 2) + " lbs" : fmtNum(ds.pep1BatchesB, 2) + " batches" });
-                if (dv.pep1Combined !== true && ds.pep2Type && ds.pep2Lbs > 0) appRows.push({ label: `Pep 2 — ${ds.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2Type) ? fmtNum(ds.pep2Lbs, 2) + " lbs" : fmtNum(ds.pep2Batches, 2) + " batches" });
-                if (dv.pep1Combined !== true && ds.pep2TypeB && ds.pep2LbsB > 0) appRows.push({ label: `Pep 2 — ${ds.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2TypeB) ? fmtNum(ds.pep2LbsB, 2) + " lbs" : fmtNum(ds.pep2BatchesB, 2) + " batches" });
-                addAR(ds.app3Type, ds.app3Lbs, ds.app3Batches, "App 3");
-                addAR(ds.app4Type, ds.app4Lbs, ds.app4Batches, "App 4");
-                if (appRows.length === 0) return null;
+                if (ds.pep1Type && ds.pep1Lbs > 0) appBlocks.push({ key: `pep1__${ds.pep1Type}`, label: `Pep ${pepCL} — ${ds.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1Type) ? fmtNum(ds.pep1Lbs, 2) + " lbs" : fmtNum(ds.pep1Batches, 2) + " batches" });
+                if (ds.pep1TypeB && ds.pep1LbsB > 0) appBlocks.push({ key: `pep1b__${ds.pep1TypeB}`, label: `Pep ${pepCL} — ${ds.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1TypeB) ? fmtNum(ds.pep1LbsB, 2) + " lbs" : fmtNum(ds.pep1BatchesB, 2) + " batches" });
+                if (dv.pep1Combined !== true && ds.pep2Type && ds.pep2Lbs > 0) appBlocks.push({ key: `pep2__${ds.pep2Type}`, label: `Pep 2 — ${ds.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2Type) ? fmtNum(ds.pep2Lbs, 2) + " lbs" : fmtNum(ds.pep2Batches, 2) + " batches" });
+                if (dv.pep1Combined !== true && ds.pep2TypeB && ds.pep2LbsB > 0) appBlocks.push({ key: `pep2b__${ds.pep2TypeB}`, label: `Pep 2 — ${ds.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2TypeB) ? fmtNum(ds.pep2LbsB, 2) + " lbs" : fmtNum(ds.pep2BatchesB, 2) + " batches" });
+                addAppBlock(ds.app3Type, ds.app3Lbs, ds.app3Batches, "App 3", dv.app3CheeseRecipeName, dv.app3CheeseRecipe);
+                addAppBlock(ds.app4Type, ds.app4Lbs, ds.app4Batches, "App 4", dv.app4CheeseRecipeName, dv.app4CheeseRecipe);
+                if (appBlocks.length === 0) return null;
                 return (
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Applicators</div>
-                    {appRows.map((r, i) => (
-                      <div key={i} className="flex justify-between py-0.5">
-                        <span className="text-muted-foreground">{r.label}</span>
-                        <span className="tabular-nums font-medium">{r.value}</span>
+                    {appBlocks.map((b) => (
+                      <div key={b.key} className="mb-1">
+                        <div className="flex justify-between py-0.5">
+                          <span className="text-muted-foreground">{b.label}</span>
+                          <span className="tabular-nums font-medium">{b.value}</span>
+                        </div>
+                        {b.recipeName && (
+                          <div className="pl-3 text-xs text-foreground/70 font-medium py-0.5">{b.recipeName}</div>
+                        )}
+                        {b.ingredientRows && b.ingredientRows.map((r, i) => (
+                          <div key={i} className="flex justify-between py-0.5 pl-5 text-muted-foreground">
+                            <span>{r.ingredient}</span>
+                            <span className="tabular-nums">{fmtNum(r.lbs, 1)} lbs</span>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
