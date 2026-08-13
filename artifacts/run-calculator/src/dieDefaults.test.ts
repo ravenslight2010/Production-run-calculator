@@ -6,7 +6,15 @@ import {
   resolveCrustLineDefaults,
 } from "./dieDefaults";
 
-const BLANK = { crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 1.0, freezerTime: 0, casesPerLayer: 0 };
+const BLANK = {
+  crustsPerCycle: 0,
+  cycleSpeed: 0,
+  speedAdjustment: 1.0,
+  freezerTime: 0,
+  casesPerLayer: 0,
+  preTunnelMin: 0,
+  postTunnelMin: 0,
+};
 
 describe("dieLineDefaultsFor", () => {
   it('matches 7" variants', () => {
@@ -17,6 +25,8 @@ describe("dieLineDefaultsFor", () => {
         speedAdjustment: 0.85,
         freezerTime: 22,
         casesPerLayer: 6,
+        preTunnelMin: 3.5,
+        postTunnelMin: 3.0,
       });
     }
   });
@@ -31,6 +41,13 @@ describe("dieLineDefaultsFor", () => {
     for (const name of ['11"', "11in", "Argus Dies", "argus", '11" Dies']) {
       expect(dieLineDefaultsFor(name)).toMatchObject({ crustsPerCycle: 5, freezerTime: 16, speedAdjustment: 1 });
     }
+  });
+
+  it('11"/Argus has no tunnel-time override (generic 2.5-min fallback applies)', () => {
+    const d = dieLineDefaultsFor("Argus Dies");
+    expect(d).not.toBeNull();
+    expect(d).not.toHaveProperty("preTunnelMin");
+    expect(d).not.toHaveProperty("postTunnelMin");
   });
 
   it("returns null for unknown or blank dies", () => {
@@ -48,6 +65,8 @@ describe("resolveDieLineDefaults", () => {
       speedAdjustment: 0.85,
       freezerTime: 22,
       casesPerLayer: 6,
+      preTunnelMin: 3.5,
+      postTunnelMin: 3.0,
     });
   });
 
@@ -73,6 +92,32 @@ describe("resolveDieLineDefaults", () => {
     const filled = resolveDieLineDefaults('12"', BLANK);
     expect(filled).not.toHaveProperty("speedAdjustment");
     expect(filled).toMatchObject({ crustsPerCycle: 5, cycleSpeed: 8, freezerTime: 15, casesPerLayer: 6 });
+  });
+
+  it("fills preTunnelMin / postTunnelMin when still 0 (stored untouched default)", () => {
+    const filled = resolveDieLineDefaults('7"', BLANK);
+    expect(filled).toMatchObject({ preTunnelMin: 3.5, postTunnelMin: 3.0 });
+  });
+
+  it("fills preTunnelMin / postTunnelMin when at the generic 2.5-min display fallback", () => {
+    // 2.5 is PRE_POST_TUNNEL_DEFAULT_MIN — the fallback shown when value is 0.
+    // It is also "untouched" for these fields, so the die-specific value wins.
+    const cur = { ...BLANK, preTunnelMin: 2.5, postTunnelMin: 2.5 };
+    const filled = resolveDieLineDefaults('7"', cur);
+    expect(filled).toMatchObject({ preTunnelMin: 3.5, postTunnelMin: 3.0 });
+  });
+
+  it("does NOT overwrite a user-typed custom tunnel time", () => {
+    const cur = { ...BLANK, preTunnelMin: 4.5 };
+    const filled = resolveDieLineDefaults('7"', cur);
+    expect(filled).not.toHaveProperty("preTunnelMin");
+    expect(filled).toMatchObject({ postTunnelMin: 3.0 }); // other tunnel field still fills
+  });
+
+  it('11"/Argus has no tunnel override — resolveDieLineDefaults leaves tunnel fields alone', () => {
+    const filled = resolveDieLineDefaults("Argus Dies", BLANK);
+    expect(filled).not.toHaveProperty("preTunnelMin");
+    expect(filled).not.toHaveProperty("postTunnelMin");
   });
 
   it("returns empty object for unknown dies", () => {
@@ -109,7 +154,15 @@ describe("manager overrides", () => {
 });
 
 describe("resolveDieLineDefaultsOnSwitch", () => {
-  const SEVEN_FILLED = { crustsPerCycle: 6, cycleSpeed: 8, speedAdjustment: 0.85, freezerTime: 22, casesPerLayer: 6 };
+  const SEVEN_FILLED = {
+    crustsPerCycle: 6,
+    cycleSpeed: 8,
+    speedAdjustment: 0.85,
+    freezerTime: 22,
+    casesPerLayer: 6,
+    preTunnelMin: 3.5,
+    postTunnelMin: 3.0,
+  };
 
   it("fills every field on an untouched form (same as blank-fill)", () => {
     expect(resolveDieLineDefaultsOnSwitch('7"', BLANK)).toEqual(SEVEN_FILLED);
@@ -122,6 +175,8 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
     // cycleSpeed/casesPerLayer are already 8/6 == 12"'s defaults — no-op omitted
     expect(fills).not.toHaveProperty("cycleSpeed");
     expect(fills).not.toHaveProperty("casesPerLayer");
+    // Tunnel times switch from 7"'s 3.5/3.0 to 12"'s 2.0/2.0
+    expect(fills).toMatchObject({ preTunnelMin: 2.0, postTunnelMin: 2.0 });
   });
 
   it("user-typed values that match no die's defaults survive a switch", () => {
@@ -146,8 +201,35 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
     // Form holds Mystic's override fill; switching to 7" replaces it.
     const fills = resolveDieLineDefaultsOnSwitch('7"', OVERRIDE, overrides);
     expect(fills).toEqual(SEVEN_FILLED);
-    // And switching TO the override die from 7"'s fill applies the override.
-    expect(resolveDieLineDefaultsOnSwitch("Mystic", SEVEN_FILLED, overrides)).toEqual(OVERRIDE);
+    // Switching TO the override die from 7"'s fill applies the override.
+    // The override has no tunnel fields — tunnel values are recognized auto-fill
+    // (3.5 / 3.0 from 7") so they get reset to 0 (generic 2.5 fallback applies).
+    const toMystic = resolveDieLineDefaultsOnSwitch("Mystic", SEVEN_FILLED, overrides);
+    expect(toMystic).toMatchObject(OVERRIDE);
+    expect(toMystic).toMatchObject({ preTunnelMin: 0, postTunnelMin: 0 });
+  });
+
+  it('switching to 11"/Argus resets prior die tunnel values to 0 (generic fallback)', () => {
+    // After using 7": preTunnelMin=3.5, postTunnelMin=3.0
+    const from7 = resolveDieLineDefaultsOnSwitch("Argus Dies", SEVEN_FILLED);
+    expect(from7).toMatchObject({ preTunnelMin: 0, postTunnelMin: 0 });
+
+    // After using 12": preTunnelMin=2.0, postTunnelMin=2.0
+    const twelve_filled = { ...BLANK, crustsPerCycle: 5, cycleSpeed: 8, speedAdjustment: 1, freezerTime: 15, preTunnelMin: 2.0, postTunnelMin: 2.0 };
+    const from12 = resolveDieLineDefaultsOnSwitch("11in", twelve_filled);
+    expect(from12).toMatchObject({ preTunnelMin: 0, postTunnelMin: 0 });
+
+    // A user-typed tunnel value that matches no die's default must NOT be reset.
+    const withCustomTunnel = { ...SEVEN_FILLED, preTunnelMin: 4.8 };
+    const fromCustom = resolveDieLineDefaultsOnSwitch("Argus Dies", withCustomTunnel);
+    expect(fromCustom).not.toHaveProperty("preTunnelMin");
+  });
+
+  it('switching to 11"/Argus with tunnel at 2.5 (display fallback) resets to 0', () => {
+    // 2.5 is the generic fallback — also recognized as "auto-fill"
+    const cur = { ...BLANK, preTunnelMin: 2.5, postTunnelMin: 2.5 };
+    const fills = resolveDieLineDefaultsOnSwitch("Argus Dies", cur);
+    expect(fills).toMatchObject({ preTunnelMin: 0, postTunnelMin: 0 });
   });
 
   it("still returns empty for unknown dies", () => {
