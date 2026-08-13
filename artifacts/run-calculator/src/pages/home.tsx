@@ -528,6 +528,12 @@ import SetupProfileEditor from "@/components/SetupProfileEditor";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -21188,6 +21194,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   } = hx;
 
   const { calc, liveFreezerMin } = useLiveRun();
+  const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
   return (
     <>
                 {/* Shift notes */}
@@ -21280,14 +21287,30 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                   const finishedRuns = dayState.runs.filter((r: any) => !!r.endedAt);
                   const upcomingRuns = dayState.runs.filter((r: any, i: any) => !r.endedAt && i !== dayState.currentIndex);
 
-                  function SummaryCard({ run, isCurrent, readOnly, runVals }: { run: RunMeta; isCurrent?: boolean; readOnly?: boolean; runVals?: FormValues }) {
+                  function SummaryCard({ run, isCurrent, readOnly, runVals, onShowDetail }: { run: RunMeta; isCurrent?: boolean; readOnly?: boolean; runVals?: FormValues; onShowDetail: () => void }) {
                     const vals = runVals ?? (isCurrent ? v : loadRunValues(run.id));
                     const s = computeSummaryStats(vals);
                     const isFinished = !!run.endedAt;
                     const actualDurationSec = run.startedAt && run.endedAt
                       ? (run.endedAt - run.startedAt) / 1000
                       : null;
+
+
+                    // ── Dough batch count (same formula as aggregateNeedRows) ──
+                    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+                    const effDoughYield = dRecipeLbs > 0 && vals.targetDoughballWeight > 0
+                      ? (dRecipeLbs * 16) / vals.targetDoughballWeight
+                      : vals.doughBatchYield;
+                    const doughBatches = effDoughYield > 0 && vals.targetDoughballWeight > 0
+                      ? Math.ceil(s.totalPizzas / effDoughYield)
+                      : 0;
+                    const doughName = (vals.doughRecipeName ?? "").trim() || "Dough";
+
                     const frontlineItems: { label: string; value: string }[] = [];
+                    // Dough row first
+                    if (doughBatches > 0) {
+                      frontlineItems.push({ label: `Dough — ${doughName}`, value: `${fmtNum(doughBatches, 2)} batches` });
+                    }
                     if (s.sauceBatches > 0) {
                       const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
                       frontlineItems.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
@@ -21302,10 +21325,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
                     if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
                     if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
+
+                    // ── Packaging for the detail modal ──
+
+
                     const canEdit = !readOnly && (isSupervisor || isCurrent);
                     const caseDelta = run.actualCases != null ? run.actualCases - s.totalCases : null;
 
                     return (
+
                       <Card
                         className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"}`}
                         onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
@@ -21492,6 +21520,16 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                 {run.notes || "—"}
                               </p>
                             )}
+                          </div>
+                          {/* Ingredient Detail button */}
+                          <div className="pt-2 border-t border-border/30 flex justify-end" onClick={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => onShowDetail()}
+                              className="text-xs text-primary/80 hover:text-primary underline underline-offset-2 font-medium"
+                            >
+                              Ingredient Detail
+                            </button>
                           </div>
                         </CardContent>
                       </Card>
@@ -21785,8 +21823,8 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                             )}
                             {/* Run card */}
                             {isCurrentRun
-                              ? <SummaryCard run={run} isCurrent />
-                              : <SummaryCard run={run} readOnly={isUpcoming ? false : undefined} />
+                              ? <SummaryCard run={run} isCurrent onShowDetail={() => setIngredientDetailRunId(run.id)} />
+                              : <SummaryCard run={run} readOnly={isUpcoming ? false : undefined} onShowDetail={() => setIngredientDetailRunId(run.id)} />
                             }
                           </div>
                         );
@@ -21851,6 +21889,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                       run={run}
                                       readOnly
                                       runVals={day.runValues[run.id] as FormValues | undefined}
+                                      onShowDetail={() => setIngredientDetailRunId(run.id)}
                                     />
                                   ))}
                                 </div>
@@ -21864,6 +21903,121 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     </div>
                   );
                 })()}
+    {/* Ingredient Detail dialog — state lives here to survive parent re-renders */}
+    {(() => {
+      if (!ingredientDetailRunId) return null;
+      // Find the run's values from today or history
+      let detailRun: RunMeta | undefined;
+      let detailVals: FormValues | undefined;
+      const todayRun = dayState.runs.find((r: any) => r.id === ingredientDetailRunId);
+      if (todayRun) {
+        detailRun = todayRun;
+        detailVals = todayRun.id === currentRun.id ? v : loadRunValues(todayRun.id);
+      } else {
+        for (const day of history) {
+          if (day.runValues?.[ingredientDetailRunId]) {
+            const hr = (day.runs as RunMeta[]).find((r: RunMeta) => r.id === ingredientDetailRunId);
+            if (hr) { detailRun = hr; detailVals = day.runValues[ingredientDetailRunId] as FormValues; }
+            break;
+          }
+        }
+      }
+      if (!detailRun || !detailVals) return null;
+      const dv = detailVals;
+      const ds = computeSummaryStats(dv);
+      const ddrLbs = (dv.doughRecipe ?? []).reduce((acc: number, r: any) => acc + Number(r.lbs ?? 0), 0);
+      const effYld = ddrLbs > 0 && dv.targetDoughballWeight > 0
+        ? (ddrLbs * 16) / dv.targetDoughballWeight : dv.doughBatchYield;
+      const dBatches = effYld > 0 && dv.targetDoughballWeight > 0 ? Math.ceil(ds.totalPizzas / effYld) : 0;
+      const dName = (dv.doughRecipeName ?? "").trim() || "Dough";
+      const pkgRows = aggregatePackagingNeeds([dv]);
+      return (
+        <Dialog open={!!ingredientDetailRunId} onOpenChange={open => { if (!open) setIngredientDetailRunId(null); }}>
+          <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Ingredient Detail — {runLabel(detailRun)}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              {dBatches > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Dough</div>
+                  <div className="flex justify-between py-0.5 font-medium">
+                    <span>{dName}</span>
+                    <span className="tabular-nums text-muted-foreground">{fmtNum(dBatches, 2)} batches</span>
+                  </div>
+                  {(dv.doughRecipe ?? []).filter((r: any) => (r.ingredient ?? "").trim() && Number(r.lbs ?? 0) > 0).map((r: any, i: number) => (
+                    <div key={i} className="flex justify-between py-0.5 pl-3 text-muted-foreground">
+                      <span>{r.ingredient}</span>
+                      <span className="tabular-nums">{fmtNum(Number(r.lbs) * dBatches, 1)} lbs</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {ds.sauceBatches > 0 && (() => {
+                const sNm = (dv.frontlineRecipeName ?? "").trim() || "Sauce";
+                const sRows = (dv.frontlineRecipe ?? []).filter((r: any) => (r.ingredient ?? "").trim() && Number(r.lbs ?? 0) > 0);
+                return (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Sauce</div>
+                    <div className="flex justify-between py-0.5 font-medium">
+                      <span>{sNm}</span>
+                      <span className="tabular-nums text-muted-foreground">{fmtNum(ds.sauceBatches, 2)} batches</span>
+                    </div>
+                    {sRows.map((r: any, i: number) => (
+                      <div key={i} className="flex justify-between py-0.5 pl-3 text-muted-foreground">
+                        <span>{r.ingredient}</span>
+                        <span className="tabular-nums">{fmtNum(Number(r.lbs) * ds.sauceBatches, 1)} lbs</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              {(() => {
+                const appRows: { label: string; value: string }[] = [];
+                const addAR = (type: string, lbs: number, batches: number, prefix: string) => {
+                  if (!type) return;
+                  const isMix = type.trim().toLowerCase().includes("mix");
+                  if (isMix && lbs > 0) appRows.push({ label: `${prefix} — ${type}`, value: fmtNum(lbs, 1) + " lbs" });
+                  else if (!isMix && batches > 0) appRows.push({ label: `${prefix} — ${type}`, value: fmtNum(batches, 2) + " batches" });
+                };
+                addAR(ds.app1Type, ds.app1Lbs, ds.app1Batches, "App 1");
+                addAR(ds.app2Type, ds.app2Lbs, ds.app2Batches, "App 2");
+                const pepCL = dv.pep1Combined === true ? "1 & 2" : "1";
+                if (ds.pep1Type && ds.pep1Lbs > 0) appRows.push({ label: `Pep ${pepCL} — ${ds.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1Type) ? fmtNum(ds.pep1Lbs, 2) + " lbs" : fmtNum(ds.pep1Batches, 2) + " batches" });
+                if (ds.pep1TypeB && ds.pep1LbsB > 0) appRows.push({ label: `Pep ${pepCL} — ${ds.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1TypeB) ? fmtNum(ds.pep1LbsB, 2) + " lbs" : fmtNum(ds.pep1BatchesB, 2) + " batches" });
+                if (dv.pep1Combined !== true && ds.pep2Type && ds.pep2Lbs > 0) appRows.push({ label: `Pep 2 — ${ds.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2Type) ? fmtNum(ds.pep2Lbs, 2) + " lbs" : fmtNum(ds.pep2Batches, 2) + " batches" });
+                if (dv.pep1Combined !== true && ds.pep2TypeB && ds.pep2LbsB > 0) appRows.push({ label: `Pep 2 — ${ds.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2TypeB) ? fmtNum(ds.pep2LbsB, 2) + " lbs" : fmtNum(ds.pep2BatchesB, 2) + " batches" });
+                addAR(ds.app3Type, ds.app3Lbs, ds.app3Batches, "App 3");
+                addAR(ds.app4Type, ds.app4Lbs, ds.app4Batches, "App 4");
+                if (appRows.length === 0) return null;
+                return (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Applicators</div>
+                    {appRows.map((r, i) => (
+                      <div key={i} className="flex justify-between py-0.5">
+                        <span className="text-muted-foreground">{r.label}</span>
+                        <span className="tabular-nums font-medium">{r.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              {pkgRows.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Packaging</div>
+                  {pkgRows.map((r, i) => (
+                    <div key={i} className="flex justify-between py-0.5">
+                      <span className="text-muted-foreground">{r.label}</span>
+                      <span className="tabular-nums font-medium">{r.value} <span className="text-muted-foreground font-normal">{r.sub}</span></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      );
+    })()}
     </>
   );
 });
