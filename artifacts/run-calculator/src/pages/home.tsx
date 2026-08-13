@@ -17956,13 +17956,13 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
   const {
-    autoSuppressUntilRef, currentRunId, dayState, form,
+    autoSuppressUntilRef, currentRun, currentRunId, dayState, form,
     lastEndedRun, runStatus, updateDrainingRunValues, v,
     ve,
   } = hx;
 
   const {
-    calc, nowTime, liveFreezerMin,
+    calc, nowTime, liveFreezerMin, elapsedBatchSec,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow,
   } = useLiveRun();
