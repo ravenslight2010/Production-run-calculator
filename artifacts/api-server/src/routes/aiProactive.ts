@@ -69,6 +69,15 @@ export function clampProactiveSettings(
   };
 }
 
+// Upper bound for suggestedAction integer fields. Values above this are
+// implausibly large for a single production shift and are treated as garbage.
+export const SUGGESTED_ACTION_MAX = 9999;
+
+export type ProactiveAlertSuggestedAction = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+};
+
 export type ProactiveAlert = {
   // Stable lowercase slug describing the *kind* of nudge (e.g. "behind-plan",
   // "break-window"). The same situation should reuse the same key so the client
@@ -78,6 +87,10 @@ export type ProactiveAlert = {
   impact: ProactiveImpact;
   title: string;
   detail: string;
+  // Optional ready-to-apply progress correction. Present only on "run" /
+  // "behind-plan" nudges when the AI has enough confidence to suggest a
+  // specific skids-completed + cases-on-skid value. Absent on stock/break nudges.
+  suggestedAction?: ProactiveAlertSuggestedAction;
 };
 
 export type { OptimizeInput };
@@ -93,12 +106,18 @@ export function isDayActive(input: OptimizeInput): boolean {
   return input.runs.some((r) => r.status === "running");
 }
 
+const SuggestedActionSchema = z.object({
+  skidsCompleted: z.unknown().optional(),
+  casesOnCurrentSkid: z.unknown().optional(),
+});
+
 const AlertSchema = z.object({
   key: z.coerce.string().optional(),
   category: z.coerce.string().optional(),
   impact: z.coerce.string().optional(),
   title: z.coerce.string().optional(),
   detail: z.coerce.string().optional(),
+  suggested_action: z.unknown().optional(),
 });
 const ResponseSchema = z.object({
   alert: z.unknown().nullish(),
@@ -161,12 +180,39 @@ export function sanitizeProactiveAlert(raw: unknown): {
   if (!title || !detail) return withNote(null);
 
   const category = mapCategory(a.category);
+
+  // Parse the optional suggested_action. Drop the action (but keep the alert)
+  // when: category is not "run" (actions only valid for behind-plan run nudges),
+  // either field is missing/non-numeric/negative/implausibly large.
+  let suggestedAction: ProactiveAlertSuggestedAction | undefined;
+  if (a.suggested_action != null && category === "run") {
+    const sa = SuggestedActionSchema.safeParse(a.suggested_action);
+    if (sa.success) {
+      const skids = Number(sa.data.skidsCompleted);
+      const cases = Number(sa.data.casesOnCurrentSkid);
+      if (
+        Number.isFinite(skids) &&
+        Number.isFinite(cases) &&
+        skids >= 0 &&
+        cases >= 0 &&
+        skids <= SUGGESTED_ACTION_MAX &&
+        cases <= SUGGESTED_ACTION_MAX
+      ) {
+        suggestedAction = {
+          skidsCompleted: Math.round(skids),
+          casesOnCurrentSkid: Math.round(cases),
+        };
+      }
+    }
+  }
+
   return withNote({
     key: slugifyKey(a.key, category),
     category,
     impact: mapImpact(a.impact),
     title,
     detail,
+    ...(suggestedAction ? { suggestedAction } : {}),
   });
 }
 
@@ -260,6 +306,11 @@ export function buildProactivePrompt(
       `minRemaining=${r.minutesRemaining ?? "n/a"}`,
       `netRunMin=${Math.round(r.netElapsedSec / 60)}`,
       `downtimeMin=${Math.round(r.downtimeSec / 60)}`,
+      // Unit-conversion fields needed for the suggested_action calculation.
+      // pizzasPerCase converts PPM (pizzas/min) to cases; casesPerSkid splits
+      // a total case count into skidsCompleted + casesOnCurrentSkid.
+      `pizzasPerCase=${r.pizzasPerCase ?? "n/a"}`,
+      `casesPerSkid=${r.casesPerSkid ?? "n/a"}`,
     ];
     const stops = (r.stoppages ?? [])
       .map((s) => `${s.reason}(${Math.round(s.durationSec / 60)}m${s.open ? ",open" : ""})`)
@@ -335,7 +386,8 @@ export function buildProactivePrompt(
   lines.push(
     "Return ONLY JSON of the exact shape: " +
       '{"alert":{"key":string,"category":"run"|"break"|"efficiency","title":string,"detail":string,' +
-      '"impact":"high"|"medium"|"low"}|null,"note":string}. ' +
+      '"impact":"high"|"medium"|"low",' +
+      '"suggested_action":{"skidsCompleted":integer,"casesOnCurrentSkid":integer}|omit}|null,"note":string}. ' +
       'Set "alert" to null when there is nothing clearly worth surfacing right now. ' +
       "When you do surface one, keep title short (a glanceable headline) and detail to one or two " +
       "plain-language sentences a floor manager can act on immediately. " +
@@ -346,6 +398,23 @@ export function buildProactivePrompt(
       'Use "category":"break" for a break/changeover window, "category":"efficiency" for an ' +
       'at-risk-stock / waste-avoidance nudge (use the key "stock-expiring") or a low-stock / reorder ' +
       'nudge (use the key "reorder-now"), otherwise "run". ' +
+      'Include "suggested_action" ONLY when ALL of these are true: (1) the category is "run" and ' +
+      "the nudge is about the line falling behind its recorded case count; (2) the day is active " +
+      "and the affected run has no open stoppages; (3) pizzasPerCase and casesPerSkid are both known " +
+      "(not n/a) for the affected run; (4) the planned throughput over the net elapsed time implies " +
+      "meaningfully more cases than recorded — use plannedPPM (the machine's CONFIGURED speed, " +
+      "which is INDEPENDENT of the recorded case count) as the throughput signal: " +
+      "impliedCases = floor(plannedPPM × netRunMin / pizzasPerCase), " +
+      "then check whether (impliedCases - casesMade) / max(casesMade, 1) > 0.10 " +
+      "(implied total is more than 10% above what was recorded). " +
+      "Do NOT use actualPPM for this calculation — it is derived from casesMade and would be circular. " +
+      "Only suggest a correction when the line appears to be running normally at its configured speed " +
+      "but the recorded case count looks low, suggesting the counter may not have been updated. " +
+      "(5) You can express the correction as non-negative whole numbers: " +
+      "skidsCompleted = floor(impliedCases / casesPerSkid), " +
+      "casesOnCurrentSkid = impliedCases mod casesPerSkid. " +
+      "Omit suggested_action entirely for stock, break, or efficiency nudges, when there are open " +
+      "stoppages, when pizzasPerCase or casesPerSkid is n/a, or when you are not confident. " +
       TIME_FORMAT_INSTRUCTION,
   );
 

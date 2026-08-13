@@ -166,6 +166,8 @@ export function buildOptimizeRun(run: RunState, index: number, nowMs: number): O
     netElapsedSec: Math.round(netElapsedSec),
     downtimeSec: Math.round(downtimeSec),
     stoppages,
+    pizzasPerCase: ppc,
+    casesPerSkid: s.casesPerSkid,
   };
 }
 

@@ -18,12 +18,21 @@ import type { OptimizeInput } from "./aiOptimize";
 export type ProactiveCategory = "run" | "break" | "efficiency";
 export type ProactiveImpact = "high" | "medium" | "low";
 
+export type ProactiveAlertSuggestedAction = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+};
+
 export type ProactiveAlert = {
   key: string;
   category: ProactiveCategory;
   title: string;
   detail: string;
   impact: ProactiveImpact;
+  // Optional ready-to-apply progress correction. Present only on "run" /
+  // "behind-plan" nudges when the AI has enough confidence to suggest specific
+  // skids-completed + cases-on-skid values. Absent on stock/break nudges.
+  suggestedAction?: ProactiveAlertSuggestedAction;
 };
 
 export type ProactiveAlertResult = {

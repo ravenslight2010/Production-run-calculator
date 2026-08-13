@@ -209,6 +209,142 @@ describe("sanitizeProactiveAlert — normalization", () => {
   });
 });
 
+describe("sanitizeProactiveAlert — suggestedAction", () => {
+  function validAlert(overrides: Record<string, unknown> = {}) {
+    return {
+      alert: {
+        key: "behind-plan",
+        category: "run",
+        impact: "high",
+        title: "Falling behind",
+        detail: "Line is running slower than planned.",
+        ...overrides,
+      },
+    };
+  }
+
+  it("passes through a valid suggestedAction", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: 12, casesOnCurrentSkid: 3 } }),
+    );
+    expect(out.alert?.suggestedAction).toEqual({ skidsCompleted: 12, casesOnCurrentSkid: 3 });
+  });
+
+  it("drops the action when skidsCompleted is negative but keeps the alert", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: -1, casesOnCurrentSkid: 3 } }),
+    );
+    expect(out.alert).not.toBeNull();
+    expect(out.alert?.suggestedAction).toBeUndefined();
+    expect(out.alert?.title).toBe("Falling behind");
+  });
+
+  it("drops the action when casesOnCurrentSkid is negative but keeps the alert", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: 5, casesOnCurrentSkid: -2 } }),
+    );
+    expect(out.alert).not.toBeNull();
+    expect(out.alert?.suggestedAction).toBeUndefined();
+  });
+
+  it("drops the action when a value is implausibly large but keeps the alert", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: 99999, casesOnCurrentSkid: 0 } }),
+    );
+    expect(out.alert).not.toBeNull();
+    expect(out.alert?.suggestedAction).toBeUndefined();
+  });
+
+  it("coerces numeric strings and rounds floats", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: "10", casesOnCurrentSkid: 2.7 } }),
+    );
+    expect(out.alert?.suggestedAction).toEqual({ skidsCompleted: 10, casesOnCurrentSkid: 3 });
+  });
+
+  it("drops the action when fields are non-numeric but keeps the alert", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: "many", casesOnCurrentSkid: 3 } }),
+    );
+    expect(out.alert).not.toBeNull();
+    expect(out.alert?.suggestedAction).toBeUndefined();
+  });
+
+  it("alert without suggested_action has no suggestedAction field", () => {
+    const out = sanitizeProactiveAlert(validAlert());
+    expect(out.alert?.suggestedAction).toBeUndefined();
+  });
+
+  it("zero is a valid value for both fields", () => {
+    const out = sanitizeProactiveAlert(
+      validAlert({ suggested_action: { skidsCompleted: 0, casesOnCurrentSkid: 0 } }),
+    );
+    expect(out.alert?.suggestedAction).toEqual({ skidsCompleted: 0, casesOnCurrentSkid: 0 });
+  });
+
+  it("drops the action when category is not 'run', even if values are valid", () => {
+    // A model that attaches a correction to a break or efficiency alert must be ignored.
+    const breakAlert = sanitizeProactiveAlert({
+      alert: {
+        key: "break-window",
+        category: "break",
+        impact: "medium",
+        title: "Take lunch now",
+        detail: "Good window opening.",
+        suggested_action: { skidsCompleted: 5, casesOnCurrentSkid: 3 },
+      },
+    });
+    expect(breakAlert.alert).not.toBeNull();
+    expect(breakAlert.alert?.category).toBe("break");
+    expect(breakAlert.alert?.suggestedAction).toBeUndefined();
+
+    const effAlert = sanitizeProactiveAlert({
+      alert: {
+        key: "stock-expiring",
+        category: "efficiency",
+        impact: "high",
+        title: "Use expiring stock",
+        detail: "Mozzarella expires today.",
+        suggested_action: { skidsCompleted: 8, casesOnCurrentSkid: 0 },
+      },
+    });
+    expect(effAlert.alert).not.toBeNull();
+    expect(effAlert.alert?.category).toBe("efficiency");
+    expect(effAlert.alert?.suggestedAction).toBeUndefined();
+  });
+});
+
+describe("buildProactivePrompt — suggestedAction guidance", () => {
+  it("includes suggested_action in the JSON schema instruction", () => {
+    const { user } = buildProactivePrompt(baseInput());
+    expect(user).toContain("suggested_action");
+    expect(user).toContain("skidsCompleted");
+    expect(user).toContain("casesOnCurrentSkid");
+  });
+
+  it("instructs model to omit suggested_action for stock and break nudges", () => {
+    const { user } = buildProactivePrompt(baseInput());
+    expect(user).toMatch(/omit.*suggested_action.*stock.*break|stock.*break.*omit.*suggested_action/i);
+  });
+
+  it("instructs model to use plannedPPM (not actualPPM) for the independent throughput signal", () => {
+    const { user } = buildProactivePrompt(baseInput());
+    expect(user).toContain("pizzasPerCase");
+    expect(user).toContain("casesPerSkid");
+    // The prompt must use plannedPPM (config-derived, independent of casesMade) not
+    // actualPPM (which is derived from casesMade and would be circular).
+    expect(user).toMatch(/plannedPPM.*netRunMin.*pizzasPerCase|pizzasPerCase.*plannedPPM/i);
+    expect(user).toMatch(/do not use actualPPM/i);
+  });
+
+  it("includes pizzasPerCase and casesPerSkid in each run's formatted line", () => {
+    const { user } = buildProactivePrompt(baseInput());
+    // The run formatter should emit these fields so the model can use them
+    expect(user).toContain("pizzasPerCase=");
+    expect(user).toContain("casesPerSkid=");
+  });
+});
+
 describe("validateOptimizeBody (reused by /ai/proactive-alert)", () => {
   it("accepts a valid live-day body", () => {
     const result = validateOptimizeBody(baseInput());

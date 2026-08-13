@@ -6,9 +6,14 @@ import type { ProactiveAlert } from "../aiProactive";
 export default function ProactiveAlertBanner({
   alert,
   onDismiss,
+  onApply,
 }: {
   alert: ProactiveAlert | null;
   onDismiss: () => void;
+  // When provided and the alert carries a suggestedAction, an "Apply" button is
+  // shown next to the dismiss ×. Calling it applies the correction and clears
+  // the banner (same as dismiss). Absent on alerts with no suggestedAction.
+  onApply?: () => void;
 }) {
   if (!alert) return null;
 
@@ -29,6 +34,8 @@ export default function ProactiveAlertBanner({
         ? "text-muted-foreground"
         : "text-primary";
 
+  const showApply = onApply != null && alert.suggestedAction != null;
+
   return (
     <div
       role="status"
@@ -41,6 +48,17 @@ export default function ProactiveAlertBanner({
         <p className="text-sm font-semibold leading-snug">{alert.title}</p>
         <p className="mt-0.5 text-xs leading-snug opacity-90">{alert.detail}</p>
       </div>
+      {showApply && (
+        <button
+          type="button"
+          onClick={() => { onApply(); onDismiss(); }}
+          aria-label="Apply suggested correction"
+          data-testid="proactive-alert-apply"
+          className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+        >
+          Apply
+        </button>
+      )}
       <button
         type="button"
         onClick={onDismiss}

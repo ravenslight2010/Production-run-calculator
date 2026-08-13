@@ -13196,7 +13196,34 @@ export default function Home() {
                 </button>
               </div>
             )}
-            <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
+            <ProactiveAlertBanner
+              alert={proactiveAlert}
+              onDismiss={dismissProactiveAlert}
+              onApply={(() => {
+                const action = proactiveAlert?.suggestedAction;
+                if (!action) return undefined;
+                const runningRun = dayState.runs.find((r) => r.status === "running");
+                if (!runningRun) return undefined;
+                // Validate action values against the run's actual capacity so a
+                // badly-calibrated model response can't silently overwrite progress
+                // with nonsense (e.g. more cases-on-skid than skid capacity, or a
+                // total that far exceeds the run target).
+                const runVals = runningRun.id === currentRunId ? form.getValues() : loadRunValues(runningRun.id);
+                const casesPerSkid = runVals.casesPerSkid ?? 0;
+                const casesNeeded = runVals.casesNeeded ?? 0;
+                // casesOnCurrentSkid must be < casesPerSkid (can't overfill a skid).
+                if (casesPerSkid > 0 && action.casesOnCurrentSkid >= casesPerSkid) return undefined;
+                // Implied total must not exceed casesNeeded by more than 20%.
+                const impliedTotal = action.skidsCompleted * (casesPerSkid || 1) + action.casesOnCurrentSkid;
+                if (casesNeeded > 0 && impliedTotal > casesNeeded * 1.2) return undefined;
+                return () => {
+                  buildVoiceHandlers().setRunProgress(runningRun.id, {
+                    skidsCompleted: action.skidsCompleted,
+                    casesOnCurrentSkid: action.casesOnCurrentSkid,
+                  });
+                };
+              })()}
+            />
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
               {/* ─── RUN ─── */}
               <TabsContent value="run" className="max-w-[620px] mx-auto">

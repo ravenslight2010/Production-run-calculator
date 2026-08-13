@@ -26,6 +26,10 @@ export type OptimizeRun = {
   netElapsedSec: number;
   downtimeSec: number;
   stoppages: OptimizeStoppage[];
+  /** How many pizzas make one case (unit-conversion denominator for PPM→cases) */
+  pizzasPerCase?: number;
+  /** How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid) */
+  casesPerSkid?: number;
 };
 
 export type OptimizeScheduledRun = {
@@ -165,6 +169,8 @@ export function buildOptimizeRun(run: RunMeta, vals: FormValues, nowMs: number):
     netElapsedSec: Math.round(netElapsedSec),
     downtimeSec: Math.round(downtimeSec),
     stoppages,
+    pizzasPerCase: ppc,
+    casesPerSkid: vals.casesPerSkid,
   };
 }
 

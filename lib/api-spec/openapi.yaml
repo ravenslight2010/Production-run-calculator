@@ -4833,6 +4833,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OptimizeStoppage"
+        pizzasPerCase:
+          type: number
+          description: How many pizzas make one case (unit-conversion denominator for PPM→cases)
+        casesPerSkid:
+          type: number
+          description: How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)
 
     OptimizeScheduledRun:
       type: object

@@ -847,7 +847,9 @@ export const AiOptimizeBody = zod.object({
   "reason": zod.string(),
   "durationSec": zod.number(),
   "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-}))
+})),
+  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
+  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
 })).describe('Today\'s runs (running, upcoming, and finished)'),
   "scheduledRuns": zod.array(zod.object({
   "date": zod.string(),
@@ -875,7 +877,9 @@ export const AiOptimizeBody = zod.object({
   "reason": zod.string(),
   "durationSec": zod.number(),
   "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
-}))
+})),
+  "pizzasPerCase": zod.number().optional().describe('How many pizzas make one case (unit-conversion denominator for PPM→cases)'),
+  "casesPerSkid": zod.number().optional().describe('How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid)')
 })).optional().describe('Recent finished runs from prior days'),
   "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
 })

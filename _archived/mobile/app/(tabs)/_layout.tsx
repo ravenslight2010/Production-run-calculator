@@ -83,8 +83,16 @@ export default function TabLayout() {
   // hook owns cooldown + de-dup (see context/aiProactive.ts). Mounted here
   // (persistent across tab switches) to mirror the web hook in home.tsx
   // (replit.md parity).
-  const { allRuns, history, runToTime, scheduled, brandProfiles, writeError, dismissWriteError } =
-    useRun();
+  const {
+    allRuns,
+    history,
+    runToTime,
+    scheduled,
+    brandProfiles,
+    writeError,
+    dismissWriteError,
+    updateProgressForRun,
+  } = useRun();
   const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
     enabled: isManager,
     buildInput: () => {
@@ -305,7 +313,32 @@ export default function TabLayout() {
 
       <SyncWriteErrorBanner message={writeError} onDismiss={dismissWriteError} />
 
-      <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
+      <ProactiveAlertBanner
+        alert={proactiveAlert}
+        onDismiss={dismissProactiveAlert}
+        onApply={(() => {
+          const action = proactiveAlert?.suggestedAction;
+          if (!action) return undefined;
+          const runningRun = allRuns.find((r) => r.status === "running");
+          if (!runningRun) return undefined;
+          // Validate action values against the run's actual capacity so a
+          // badly-calibrated model response can't silently overwrite progress
+          // with nonsense values.
+          const casesPerSkid = runningRun.settings?.casesPerSkid ?? 0;
+          const casesNeeded = runningRun.settings?.casesNeeded ?? 0;
+          // casesOnCurrentSkid must be < casesPerSkid (can't overfill a skid).
+          if (casesPerSkid > 0 && action.casesOnCurrentSkid >= casesPerSkid) return undefined;
+          // Implied total must not exceed casesNeeded by more than 20%.
+          const impliedTotal = action.skidsCompleted * (casesPerSkid || 1) + action.casesOnCurrentSkid;
+          if (casesNeeded > 0 && impliedTotal > casesNeeded * 1.2) return undefined;
+          return () => {
+            updateProgressForRun(runningRun.id, {
+              skidsCompleted: action.skidsCompleted,
+              casesOnCurrentSkid: action.casesOnCurrentSkid,
+            });
+          };
+        })()}
+      />
 
       <Modal
         visible={menuOpen}

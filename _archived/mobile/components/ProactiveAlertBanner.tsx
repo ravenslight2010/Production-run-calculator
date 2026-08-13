@@ -13,9 +13,14 @@ import type { ProactiveAlert } from "@/context/aiProactive";
 export default function ProactiveAlertBanner({
   alert,
   onDismiss,
+  onApply,
 }: {
   alert: ProactiveAlert | null;
   onDismiss: () => void;
+  // When provided and the alert carries a suggestedAction, an "Apply" button is
+  // shown next to the dismiss ×. Calling it applies the correction and clears
+  // the banner (same as dismiss). Absent on alerts with no suggestedAction.
+  onApply?: () => void;
 }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -25,6 +30,8 @@ export default function ProactiveAlertBanner({
     alert.category === "break" ? "coffee" : alert.category === "efficiency" ? "zap" : "alert-triangle";
 
   const accent = alert.impact === "high" ? colors.warning ?? colors.primary : colors.primary;
+
+  const showApply = onApply != null && alert.suggestedAction != null;
 
   return (
     <View
@@ -49,6 +56,17 @@ export default function ProactiveAlertBanner({
             {alert.detail}
           </Text>
         </View>
+        {showApply && (
+          <Pressable
+            onPress={() => { onApply(); onDismiss(); }}
+            hitSlop={10}
+            accessibilityLabel="Apply suggested correction"
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.applyBtn, { opacity: pressed ? 0.6 : 1, borderColor: accent + "88" }]}
+          >
+            <Text style={[styles.applyText, { color: accent }]}>Apply</Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={onDismiss}
           hitSlop={10}
@@ -93,4 +111,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 14, fontFamily: FONTS.semibold },
   detail: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular, lineHeight: 16 },
   close: { padding: 2 },
+  applyBtn: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: "center",
+  },
+  applyText: { fontSize: 12, fontFamily: FONTS.semibold },
 });
