@@ -173,13 +173,15 @@ const CompactRunStrip = memo(function CompactRunStrip() {
           const elapsedMin = elapsedBatchSec / 60;
           const ppm = calc.ppm;
           if (ppm <= 0) return null;
-          const feedDoneMin =
-            v.pizzasPerCase > 0 && v.casesNeeded > 0
-              ? (v.casesNeeded * v.pizzasPerCase) / ppm
-              : Infinity;
-          const feedComplete = elapsedMin >= feedDoneMin;
-          const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
-          const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
+          // Use the actual press-done signal (count-based), not elapsed-time
+          // estimate — mirrors home.tsx and avoids "emptying" while pressing.
+          const feedComplete = !!calc.pressDone;
+          const filling = !feedComplete && elapsedMin > 0 && elapsedMin < freezerMin;
+          // Derive drain remainder from live freezer contents, same as home.tsx.
+          const emptyRemainMin =
+            feedComplete && ppm > 0 && v.pizzasPerCase > 0
+              ? (calc.casesInFreezer * v.pizzasPerCase) / ppm
+              : 0;
           const emptying = feedComplete && emptyRemainMin > 0;
           if (!filling && !emptying) return null;
           const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
@@ -194,8 +196,8 @@ const CompactRunStrip = memo(function CompactRunStrip() {
               <Timer className={`w-3.5 h-3.5 shrink-0 ${tone.text}`} />
               <span className={`text-[11px] font-semibold ${tone.text}`}>
                 {filling
-                  ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
-                  : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
+                  ? `Line filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
+                  : `Line emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
               </span>
             </div>
           );

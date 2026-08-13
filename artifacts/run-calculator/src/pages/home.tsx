@@ -16963,13 +16963,13 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           <div className="flex-1 min-w-0">
                             <p className={`text-sm font-semibold ${tone.text}`}>
                               {filling
-                                ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
-                                : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
+                                ? `Line filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
+                                : `Line emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               {filling
-                                ? `Product is still travelling the ${fmtMins(freezerMin)} freezer tunnel — the completed count starts climbing once it clears.`
-                                : `Dough feed is done — the tunnel is draining the last cases.`}
+                                ? `Product is still travelling the ${fmtMins(freezerMin)} line tunnel — the completed count starts climbing once it clears.`
+                                : `Dough feed is done — the line tunnel is draining the last cases.`}
                             </p>
                             <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
                               <div

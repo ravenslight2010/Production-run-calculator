@@ -540,6 +540,82 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(values.batchesReady).toBeLessThan(10);
   });
 
+  it("global pause+resume: first post-resume tick does not drain the full pause duration", () => {
+    // Regression guard: when a run is globally paused (runStatus → "paused")
+    // and then resumed (runStatus → "running"), the first tick must consume at
+    // most one normal tray period's worth — NOT the wall-clock duration of the
+    // pause. Previously, trayLastMsRef / batchLastMsRef retained their
+    // pre-pause values, so nowMs − prevMs on the first post-resume tick spanned
+    // the entire pause, draining far more trays/batches than were consumed.
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 20, batchesReady: 5 });
+    const t0 = 1_700_000_000_000;
+
+    // Start running; mount tick arms the refs and drains one tray + one
+    // quarter-batch (same as the other tests).
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; runStatus: "running" | "paused"; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: props.runStatus,
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: { ...baseCalc, traysNeeded: 0, batchesNeeded: 0 }, // pure drain
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, runStatus: "running" as const, v: makeV({ traysOnLine: 20, batchesReady: 5 }) } },
+    );
+
+    // After mount: one tray consumed (20→19), quarter-batch consumed (5→4.75).
+    expect(values.traysOnLine).toBe(19);
+    expect(values.batchesReady).toBe(4.75);
+
+    // Advance clock by one tray period so the next consumption tick is armed.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000),
+      elapsedBatchSec: 10 * 60 + 36,
+      runStatus: "running",
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+    // One more tray consumed (19→18).
+    expect(values.traysOnLine).toBe(18);
+    const traysBeforePause = values.traysOnLine;
+    const batchesBeforePause = values.batchesReady;
+
+    // Pause the run: tick loop freezes, wall clock keeps advancing.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000),
+      elapsedBatchSec: 10 * 60 + 36,
+      runStatus: "paused",
+      v: makeV({ traysOnLine: traysBeforePause, batchesReady: batchesBeforePause }),
+    });
+
+    // Simulate a 5-minute pause (5 tray periods + 3.3 quarter-batch periods).
+    const pauseMs = 5 * 60 * 1000;
+
+    // Resume: the useEffect that reacts to runStatus → "running" should zero
+    // the consumption anchor refs, preventing the first tick from spanning the
+    // pause duration.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000 + pauseMs),
+      elapsedBatchSec: 10 * 60 + 36,
+      runStatus: "running",
+      v: makeV({ traysOnLine: traysBeforePause, batchesReady: batchesBeforePause }),
+    });
+
+    // First post-resume tick: refs were zeroed, so the consumption delta is
+    // treated as "first tick" (one full tray period assumed) — at most one tray.
+    // Without the fix the drift would drain 5 trays (the 5-minute pause).
+    const traysDropped = traysBeforePause - values.traysOnLine;
+    expect(traysDropped).toBeLessThanOrEqual(1);
+
+    // Batch counter: the drift from a 5-minute pause would be ~3.33 quarter
+    // batches (5min / 1.5min per quarter). After the fix it must be ≤ 1 quarter
+    // batch (0.25).
+    const batchesDropped = batchesBeforePause - values.batchesReady;
+    expect(batchesDropped).toBeLessThanOrEqual(0.25 + 1e-9);
+  });
+
   it("disabled (cast screens) never writes — no decrement, no seed", () => {
     // Wall display screens pass disabled:true; they must never mutate the
     // counters or their decrements sync back over the operator's manual edits.

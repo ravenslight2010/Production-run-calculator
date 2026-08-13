@@ -406,6 +406,14 @@ export function useAutoTrack({
     if (runStatus === "running") {
       doughTimerPausedRef.current = 0;
       setIsDoughTimerPaused(false);
+      // Zero all consumption anchors so the first post-resume tick does not
+      // compute a delta spanning the full pause duration. This mirrors what
+      // resumeDoughTimers() does for the Batch Pipeline manual-pause path.
+      trayLastMsRef.current = 0;
+      batchLastMsRef.current = 0;
+      trayNextDueMsRef.current = 0;
+      batchNextDueMsRef.current = 0;
+      hopperProdNextDueMsRef.current = 0;
     }
   }, [runStatus]);
 
