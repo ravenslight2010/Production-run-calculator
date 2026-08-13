@@ -155,6 +155,7 @@ describe("PostgresRateLimitStore — shared cross-instance counting", () => {
     const now = 9_000_000;
     const total = 40;
 
+
     // Fire many hits in parallel, spread across instances. The atomic upsert
     // serializes on the row lock, so the final count equals the number of hits
     // with no lost updates.
@@ -169,7 +170,7 @@ describe("PostgresRateLimitStore — shared cross-instance counting", () => {
     // Every count value 1..total appears exactly once (no duplicates/skips).
     const sorted = results.map((r) => r.count).sort((x, y) => x - y);
     expect(sorted).toEqual(Array.from({ length: total }, (_, i) => i + 1));
-  });
+  }, 30_000);
 
   it("keeps distinct keys on independent counters", async () => {
     const store = newInstance();

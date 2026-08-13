@@ -18,12 +18,14 @@
 import {
   DEFAULT_PROGRESS,
   DEFAULT_SETTINGS,
+  FRESH_PREP,
   renameIngredientList,
   DIE_TYPE_RENAMES,
   renameIngredientSettings,
   renamePepList,
   renamePepSettings,
   todayStr,
+  type PrepPhaseType,
   type RecipeRow,
   type RunProgress,
   type RunSettings,
@@ -60,6 +62,7 @@ export interface SyncableState {
   substitutions: IngredientSubstitution[];
   substitutionLog: SubstitutionLogEntry[];
   stagedItems: Record<string, boolean>;
+  prepPhase?: PrepPhaseType;
 }
 
 export type SyncableStatePatch = Partial<SyncableState>;
@@ -371,6 +374,7 @@ export function appStateToPayload(
       substitutions: state.substitutions ?? [],
       substitutionLog: state.substitutionLog ?? [],
       stagedItems: state.stagedItems ?? {},
+      prepPhase: state.prepPhase,
     },
     runValues,
     runValuesUpdatedAt,
@@ -812,6 +816,43 @@ export function applyPayloadToState(
         out[k] = !!out[k] || !!val;
       }
       patch.stagedItems = out;
+    }
+    // Merge prepPhase.
+    // On reset: adopt remote phase WHOLESALE (or FRESH_PREP if absent). Never blend
+    // prior-day local state — doing so would resurrect yesterday's prepStartedAt into
+    // the new day, causing the Start Prep button to stay hidden after daily rollover.
+    // Same-day receive: earliest non-null start, MAX counts, sticky prepCarriedOver.
+    const remotePP =
+      ds && typeof ds === "object" ? (ds as Record<string, unknown>).prepPhase : undefined;
+    const toNumPP = (v: unknown) =>
+      typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+    if (isReset) {
+      const rem =
+        remotePP && typeof remotePP === "object"
+          ? (remotePP as Record<string, unknown>)
+          : {};
+      patch.prepPhase = {
+        prepStartedAt: typeof rem.prepStartedAt === "number" ? rem.prepStartedAt : null,
+        prepBatchesDough: toNumPP(rem.prepBatchesDough),
+        prepBatchesSauce: toNumPP(rem.prepBatchesSauce),
+        prepCarriedOver: !!rem.prepCarriedOver,
+      };
+    } else if (remotePP || prev.prepPhase) {
+      const loc = prev.prepPhase ?? FRESH_PREP;
+      const rem =
+        remotePP && typeof remotePP === "object"
+          ? (remotePP as Record<string, unknown>)
+          : {};
+      const lSt = loc.prepStartedAt;
+      const rSt = typeof rem.prepStartedAt === "number" ? rem.prepStartedAt : null;
+      const prepStartedAt =
+        lSt !== null && rSt !== null ? Math.min(lSt, rSt) : lSt ?? rSt ?? null;
+      patch.prepPhase = {
+        prepStartedAt,
+        prepBatchesDough: Math.max(loc.prepBatchesDough, toNumPP(rem.prepBatchesDough)),
+        prepBatchesSauce: Math.max(loc.prepBatchesSauce, toNumPP(rem.prepBatchesSauce)),
+        prepCarriedOver: !!(loc.prepCarriedOver || rem.prepCarriedOver),
+      };
     }
     patch.resetAt = Math.max(prev.resetAt, remoteResetAt);
     patch.date = todayStr();

@@ -340,6 +340,20 @@ export type RunMeta = {
   seeded?: boolean;
 };
 
+// Shift prep phase: covers the window before production starts (e.g. 6–7 AM).
+// Synced in day-state so all tablets see live prep progress.
+export type PrepPhase = {
+  // When "Start Prep" was pressed (ms epoch). Once set, never cleared.
+  prepStartedAt: number | null;
+  // Dough batches completed during prep (increments only).
+  prepBatchesDough: number;
+  // Sauce batches completed during prep (increments only).
+  prepBatchesSauce: number;
+  // True once prep batches have been carried into the run's batchesReady /
+  // sauceMade. Prevents double-apply on subsequent syncs or re-renders.
+  prepCarriedOver: boolean;
+};
+
 export type DayState = {
   runs: RunMeta[];
   currentIndex: number;
@@ -359,10 +373,13 @@ export type DayState = {
   // Keyed by `${runId}::${label}__${unit}` (only checked items stored as true).
   // Lives in synced day-state, NOT master data; cleared at the daily reset.
   stagedItems?: Record<string, boolean>;
+  // Shift prep phase (before production start). Synced so all tablets track
+  // the same prep progress. Reset with the daily reset.
+  prepPhase?: PrepPhase;
 };
 
 export type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean> };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a
   // stale remote that would clobber a fresher local edit (the "click away and my

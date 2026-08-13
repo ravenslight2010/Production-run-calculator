@@ -572,3 +572,65 @@ describe("protectRunValues delete/un-delete stamp preservation", () => {
     expect(out.undeletedStamps).toBeUndefined();
   });
 });
+
+describe("protectRunValues prepPhase — shift prep phase merge", () => {
+  // prepPhase lives inside dayState. The server runs a symmetric merge on same-day
+  // pushes (inReset === exReset), applying: earliest non-null start, MAX counts,
+  // sticky prepCarriedOver. The wholesale-reset path (inReset > exReset) returns
+  // early before reaching this logic, so incoming prepPhase passes through as-is.
+  const b = { runValues: {}, runValuesUpdatedAt: {} };
+  const ds = (pp?: Record<string, unknown>) => ({
+    runs: [] as unknown[],
+    resetAt: 100,
+    ...(pp ? { prepPhase: pp } : {}),
+  });
+  const pp = (
+    prepStartedAt: number | null,
+    prepBatchesDough = 0,
+    prepBatchesSauce = 0,
+    prepCarriedOver = false,
+  ) => ({ prepStartedAt, prepBatchesDough, prepBatchesSauce, prepCarriedOver });
+
+  it("merges to earliest non-null prepStartedAt when both sides have started", () => {
+    const incoming = { ...b, dayState: ds(pp(3000, 2, 0)) };
+    const existing = { ...b, dayState: ds(pp(1000, 1, 1)) };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const phase = ((out.dayState as Record<string, unknown>).prepPhase as Record<string, unknown>);
+    expect(phase.prepStartedAt).toBe(1000); // earlier wins
+    expect(phase.prepBatchesDough).toBe(2); // max
+    expect(phase.prepBatchesSauce).toBe(1); // max
+  });
+
+  it("keeps existing prepStartedAt when incoming has null", () => {
+    const incoming = { ...b, dayState: ds(pp(null, 0, 0)) };
+    const existing = { ...b, dayState: ds(pp(5000, 3, 1)) };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const phase = ((out.dayState as Record<string, unknown>).prepPhase as Record<string, unknown>);
+    expect(phase.prepStartedAt).toBe(5000);
+    expect(phase.prepBatchesDough).toBe(3);
+  });
+
+  it("keeps incoming prepStartedAt when existing has null", () => {
+    const incoming = { ...b, dayState: ds(pp(8000, 2, 0)) };
+    const existing = { ...b, dayState: ds(pp(null, 0, 0)) };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const phase = ((out.dayState as Record<string, unknown>).prepPhase as Record<string, unknown>);
+    expect(phase.prepStartedAt).toBe(8000);
+  });
+
+  it("prepCarriedOver is sticky: incoming true + stored false → true", () => {
+    const incoming = { ...b, dayState: ds(pp(1000, 3, 1, true)) };
+    const existing = { ...b, dayState: ds(pp(1000, 2, 0, false)) };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const phase = ((out.dayState as Record<string, unknown>).prepPhase as Record<string, unknown>);
+    expect(phase.prepCarriedOver).toBe(true);
+  });
+
+  it("omits prepPhase from outDay when neither side has it", () => {
+    const incoming = { ...b, dayState: ds() };
+    const existing = { ...b, dayState: ds() };
+    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const outDay = out.dayState as Record<string, unknown>;
+    expect(outDay.prepPhase).toBeUndefined();
+  });
+});

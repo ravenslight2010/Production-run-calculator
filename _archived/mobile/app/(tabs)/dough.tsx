@@ -27,7 +27,7 @@ const SKY_400 = "#38bdf8";
 export default function DoughScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, updateProgress, substitutions, suppressAutoTrack, autoTrack, autoSuppressUntil, resumeAutoTrack } = useRun();
+  const { run, updateProgress, substitutions, suppressAutoTrack, autoTrack, autoSuppressUntil, resumeAutoTrack, prepPhase, startPrep, addPrepBatchDough } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
@@ -56,6 +56,32 @@ export default function DoughScreen() {
           recipes={[run.settings.doughRecipe]}
           typeValues={[]}
         />
+        {/* Shift prep section: shown while no production run is active */}
+        {run.startedAt == null && (
+          <View style={{ borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 12, marginBottom: 8 }}>
+            <Text style={[styles.progressTitle, { color: colors.mutedForeground, marginBottom: 8 }]}>SHIFT PREP</Text>
+            {prepPhase?.prepStartedAt == null ? (
+              <Pressable
+                onPress={() => { Haptics.selectionAsync(); startPrep(); }}
+                style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start' }}
+              >
+                <Text style={{ color: '#000', fontFamily: FONTS.bold, fontSize: 13 }}>Start Prep</Text>
+              </Pressable>
+            ) : (
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                  {prepPhase.prepBatchesDough} {prepPhase.prepBatchesDough === 1 ? 'batch' : 'batches'} ready
+                </Text>
+                <Pressable
+                  onPress={() => { Haptics.selectionAsync(); addPrepBatchDough(); }}
+                  style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start' }}
+                >
+                  <Text style={{ color: '#000', fontFamily: FONTS.bold, fontSize: 13 }}>+1 Batch</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
         {/* Mode toggle */}
         {supplyConfigured ? (
           <View style={styles.supplyHeader}>

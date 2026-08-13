@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, ReadOnlyRecipe, StatRow } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
@@ -10,7 +10,7 @@ import { useColors } from "@/hooks/useColors";
 export default function SauceScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, substitutions } = useRun();
+  const { run, substitutions, prepPhase, startPrep, addPrepBatchSauce } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -38,6 +38,34 @@ export default function SauceScreen() {
           recipes={[run.settings.frontlineRecipe]}
           typeValues={[]}
         />
+        {/* Sauce prep section: shown while no production run is active */}
+        {run.startedAt == null && (
+          <View style={{ borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, padding: 12, marginBottom: 8 }}>
+            <Text style={{ fontFamily: FONTS.bold, fontSize: 11, color: colors.mutedForeground, letterSpacing: 1, marginBottom: 8 }}>SAUCE PREP</Text>
+            {prepPhase?.prepStartedAt == null ? (
+              <Pressable
+                onPress={startPrep}
+                style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start' }}
+              >
+                <Text style={{ color: '#000', fontFamily: FONTS.bold, fontSize: 13 }}>Start Prep</Text>
+              </Pressable>
+            ) : (
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                  {prepPhase.prepBatchesSauce} of 1 batch ready
+                </Text>
+                {prepPhase.prepBatchesSauce < 1 && (
+                  <Pressable
+                    onPress={addPrepBatchSauce}
+                    style={{ backgroundColor: colors.primary, borderRadius: 6, paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start' }}
+                  >
+                    <Text style={{ color: '#000', fontFamily: FONTS.bold, fontSize: 13 }}>+1 Batch</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+          </View>
+        )}
         <Card title="Sauce Needs" icon="droplet" style={{ marginBottom: 16 }}>
           {hasSauce ? (
             <StatRow label="Sauce" value={sauceValue} />

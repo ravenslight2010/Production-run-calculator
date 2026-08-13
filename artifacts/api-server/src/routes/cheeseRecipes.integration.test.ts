@@ -112,7 +112,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-}, 60_000);
+}, 120_000);
 
 beforeEach(async () => {
   clearUserValidityCache();

@@ -546,7 +546,39 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   // dayState field (shiftNotes, overlays, resetAt, date, …). If the push omitted
   // dayState entirely, fall back to the stored one so its runs aren't lost.
   const base = inDay ?? exDay;
-  const outDay = base ? { ...base, runs: mergedRuns } : undefined;
+  // Merge prepPhase: prepStartedAt = earliest non-null (once started, never
+  // un-started), batch counts = MAX (monotonically increasing), prepCarriedOver
+  // = sticky true (once a run has been started with carry-over, keep it).
+  const mergedPrepPhase = (() => {
+    const toNum = (v: unknown) =>
+      typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+    const inp =
+      inDay && typeof inDay === "object"
+        ? ((inDay as Record<string, unknown>).prepPhase as Record<string, unknown> | undefined)
+        : undefined;
+    const exp =
+      exDay && typeof exDay === "object"
+        ? ((exDay as Record<string, unknown>).prepPhase as Record<string, unknown> | undefined)
+        : undefined;
+    if (!inp && !exp) return undefined;
+    const i = (inp && typeof inp === "object") ? inp : {};
+    const e = (exp && typeof exp === "object") ? exp : {};
+    const iSt = typeof i.prepStartedAt === "number" ? i.prepStartedAt : null;
+    const eSt = typeof e.prepStartedAt === "number" ? e.prepStartedAt : null;
+    const prepStartedAt =
+      iSt !== null && eSt !== null
+        ? Math.min(iSt, eSt)
+        : iSt ?? eSt ?? null;
+    return {
+      prepStartedAt,
+      prepBatchesDough: Math.max(toNum(i.prepBatchesDough), toNum(e.prepBatchesDough)),
+      prepBatchesSauce: Math.max(toNum(i.prepBatchesSauce), toNum(e.prepBatchesSauce)),
+      prepCarriedOver: !!(i.prepCarriedOver || e.prepCarriedOver),
+    };
+  })();
+  const outDay = base
+    ? { ...base, runs: mergedRuns, ...(mergedPrepPhase ? { prepPhase: mergedPrepPhase } : {}) }
+    : undefined;
 
   const out: Record<string, unknown> = {
     ...incoming,

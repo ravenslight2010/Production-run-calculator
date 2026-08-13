@@ -66,6 +66,7 @@ import {
   type MasterDataChangeType,
   type IngredientSubstitution,
   type SubstitutionLogEntry,
+  type PrepPhase,
   withTempOverrides,
 } from "../types";
 import {
@@ -361,6 +362,7 @@ import { useLiveRun, LiveRunProvider, calcRef } from "../contexts/LiveRunContext
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
 import { useProductionRules } from "../hooks/useProductionRules";
+import { usePrepPhase, mergePrepPhaseClient, getPrepPhase, FRESH_PREP_PHASE } from "../hooks/usePrepPhase";
 import {
   evaluateRules,
   newRule,
@@ -6836,6 +6838,16 @@ export default function Home() {
           const mergedSubLog = isReset
             ? remoteSubLog
             : unionById(prev.substitutionLog ?? [], remoteSubLog).sort((x, y) => x.ts - y.ts);
+          // Merge prepPhase: earliest non-null start, MAX counts, sticky prepCarriedOver.
+          // On reset: adopt remote prepPhase or FRESH_PREP_PHASE — NEVER prev.prepPhase.
+          // A legacy/omitted remote payload (no prepPhase key) must still clear the prior
+          // day's prepStartedAt; falling back to prev would resurrect it into the new shift.
+          const remotePrepPhase = (payload.dayState as Record<string, unknown>).prepPhase;
+          const mergedPrepPhase: PrepPhase = isReset
+            ? (remotePrepPhase && typeof remotePrepPhase === "object"
+                ? (remotePrepPhase as PrepPhase)
+                : FRESH_PREP_PHASE)
+            : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase);
           const newDs = {
             ...prev,
             runs: newRuns,
@@ -6846,6 +6858,7 @@ export default function Home() {
             substitutions: mergedSubs,
             substitutionLog: mergedSubLog,
             stagedItems: mergedStaged,
+            prepPhase: mergedPrepPhase,
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -7612,7 +7625,7 @@ export default function Home() {
     // (/api/factory-data) and are replicated via write-through PUTs + startup
     // fetch (see factoryDataSync.ts).
     return {
-      dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
+      dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,
       history: loadHistory(),
@@ -8921,6 +8934,20 @@ export default function Home() {
         void consumeRun(r.id, computeRunConsumptionLines(loadRunValues(r.id))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
       }
     }
+    // Carry over prep batches into the starting run (once, guarded by prepCarriedOver).
+    // Adds dough prep batches to the run form's batchesReady field so the live
+    // calculation begins with the correct head start.
+    const prep = dayState.prepPhase;
+    let nextPrepPhase = prep;
+    if (prep && !prep.prepCarriedOver && prep.prepBatchesDough > 0) {
+      const curBatches = Number(form.getValues("batchesReady")) || 0;
+      form.setValue("batchesReady", curBatches + prep.prepBatchesDough, { shouldDirty: true });
+      markRunValuesUpdated(currentRunId, now);
+      nextPrepPhase = { ...prep, prepCarriedOver: true };
+    } else if (prep && !prep.prepCarriedOver) {
+      // Mark carried even if no dough batches — prevents re-check on next startRun.
+      nextPrepPhase = { ...prep, prepCarriedOver: true };
+    }
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex
         ? { ...r, startedAt: now, endedAt: undefined }
@@ -8928,7 +8955,7 @@ export default function Home() {
           ? { ...r, endedAt: now, pausedAt: undefined }
           : r
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const newDs = { ...dayState, runs: newRuns, prepPhase: nextPrepPhase };
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
@@ -11541,7 +11568,6 @@ export default function Home() {
 
       {/* ── Glance overlay ──────────────────────────────────────────────── */}
       {showGlance && <GlanceOverlay />}
-
 
 
       {/* ── Screens / Cast Dialog ───────────────────────────────────────── */}
@@ -18509,18 +18535,70 @@ function BatchMadeRow({
 
 const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId } = hx;
-  const { calc } = useLiveRun();
+  const { v, runStatus, currentRunId, dayState, dayStateRef, setDayState, schedulePush } = hx;
+  const { calc, nowTime } = useLiveRun();
 
   const [sauceMade, setSauceMade] = useState(0);
 
+  // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
+  const {
+    prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
+  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime, doughBatchSec: 580, sauceBatchSec: 1800 });
+
   useEffect(() => { setSauceMade(0); }, [currentRunId]);
   useEffect(() => { if (runStatus === "ended") setSauceMade(0); }, [runStatus]);
+  // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
+  useEffect(() => {
+    if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
+      setSauceMade(n => n === 0 ? prep.prepBatchesSauce : n);
+    }
+  }, [runStatus, prep.prepCarriedOver, prep.prepBatchesSauce]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
 
   return (
     <>
+      {/* ── Sauce Prep Section (shown before production starts) ─────────────── */}
+      {runStatus === "pending" && (
+        <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
+          <div className="h-1 bg-red-400 w-full" />
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Timer className="w-4 h-4" /> Sauce Prep
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-5">
+            {!prepActive ? (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Press <span className="font-semibold">Start Prep</span> to begin tracking pre-production sauce batches.
+                </p>
+                <Button size="sm" className="w-fit" onClick={startPrep}>
+                  Start Prep
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">
+                    <span className="font-mono font-semibold tabular-nums">{prep.prepBatchesSauce}</span>
+                    <span className="text-muted-foreground"> of 1 batch ready</span>
+                  </span>
+                  {prep.prepBatchesSauce < 1 && (
+                    <Button size="sm" variant="outline" onClick={addPrepBatchSauce}>+1 Batch</Button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Prep elapsed:</span>
+                  <span className="font-mono font-semibold tabular-nums text-foreground">
+                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
       {calc.sauceBatches > 0 && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-primary w-full" />
@@ -18796,6 +18874,21 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
   } = useLiveRun();
 
+  // ── Shift prep phase (pre-production batch tracking) ─────────────────────
+  const doughPrepBatchSec = Math.max(30,
+    (Number(v.mixerLowSec) || 330) + (Number(v.mixerHighSec) || 180) + (Number(v.hopperSec) || 70),
+  );
+  const {
+    prep, prepActive, elapsedSec: prepElapsedSec, doughSecLeft, doughBatchNum, startPrep, addPrepBatchDough,
+  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime, doughBatchSec: doughPrepBatchSec, sauceBatchSec: 1800 });
+  const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
+  const prevDoughBatchNumRef = useRef(0);
+  useEffect(() => {
+    if (prepActive && doughBatchNum > 0 && doughBatchNum > prevDoughBatchNumRef.current) setShowPrepBatchDue(true);
+    prevDoughBatchNumRef.current = doughBatchNum;
+  }, [doughBatchNum, prepActive]);
+  useEffect(() => { if (runStatus !== "pending") setShowPrepBatchDue(false); }, [runStatus]);
+
   // ── Speed drift detection ─────────────────────────────────────────────────
   // Tracks manual case/skid corrections and suggests a Speed Adjustment (or
   // Approximate Line Speed for crust mode) when the line consistently runs
@@ -18856,6 +18949,63 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 
   return (
     <>
+      {/* ── Shift Prep Section (shown before production starts) ─────────────────── */}
+      {runStatus === "pending" && doughSubTab === "dough" && (
+        <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
+          <div className="h-1 bg-amber-500 w-full" />
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Timer className="w-4 h-4" /> Shift Prep
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-5">
+            {!prepActive ? (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Press <span className="font-semibold">Start Prep</span> to begin tracking pre-production dough batches.
+                </p>
+                <Button size="sm" className="w-fit" onClick={startPrep}>
+                  Start Prep
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Prep elapsed:</span>
+                  <span className="font-mono font-semibold tabular-nums text-foreground">
+                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
+                  </span>
+                </div>
+                {showPrepBatchDue && (
+                  <div className="flex items-center justify-between gap-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs">
+                    <span className="text-amber-600 font-semibold">⚠ Prep batch ready — mark +1 when mixed.</span>
+                    <button className="text-muted-foreground hover:text-foreground ml-2" onClick={() => setShowPrepBatchDue(false)}>✕</button>
+                  </div>
+                )}
+                <TickBar label="Next batch due" secLeft={doughSecLeft} periodSec={doughPrepBatchSec} color="text-amber-500" />
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-sm">
+                    <span className="font-mono font-semibold tabular-nums">{prep.prepBatchesDough}</span>
+                    <span className="text-muted-foreground"> {prep.prepBatchesDough === 1 ? "batch" : "batches"} ready</span>
+                  </span>
+                  <Button size="sm" variant="outline" onClick={addPrepBatchDough}>+1 Batch</Button>
+                </div>
+                {(() => {
+                  const prodTime = getProductionStartTime();
+                  if (!prodTime) return null;
+                  const [h, m] = prodTime.split(":").map(Number);
+                  const target = new Date(nowTime);
+                  target.setHours(h, m, 0, 0);
+                  const msLeft = target.getTime() - nowTime;
+                  if (msLeft <= 0) return null;
+                  const minLeft = Math.round(msLeft / 60000);
+                  return <p className="text-xs text-muted-foreground mt-1">Production starts in <span className="font-semibold">{minLeft}m</span></p>;
+                })()}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
                 {/* Batch pipeline + measured machine times (dough runs only) */}
                 {doughSubTab === "dough" && (() => {
                   const safeLow = Math.max(0, Number(v.mixerLowSec) || 0);

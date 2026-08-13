@@ -1129,7 +1129,15 @@ export function freshDayState(): DayState {
   // the shared day has real runs (see isPristineSeedRun) — otherwise every
   // fresh device signing in mid-day adds a blank "Unnamed Run" to every peer's
   // list via the additive union.
-  return { runs: [{ id: genId(), brand: "", flavor: "", seeded: true }], currentIndex: 0, date: todayStr(), substitutions: [], substitutionLog: [], stagedItems: {} };
+  return {
+    runs: [{ id: genId(), brand: "", flavor: "", seeded: true }],
+    currentIndex: 0,
+    date: todayStr(),
+    substitutions: [],
+    substitutionLog: [],
+    stagedItems: {},
+    prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
+  };
 }
 
 // True when a run is still the untouched auto-created placeholder: flagged

@@ -559,6 +559,7 @@ function buildNextDayState(cur: AppState, today: string): AppState {
     substitutions: [],
     substitutionLog: [],
     stagedItems: {},
+    prepPhase: FRESH_PREP,
     date: today,
     resetAt: boundaryMs,
     history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -1030,6 +1031,24 @@ export interface ScheduledRun {
   imported?: boolean;
 }
 
+export type PrepPhaseType = {
+  /** When "Start Prep" was pressed (ms epoch). Once set, never cleared. */
+  prepStartedAt: number | null;
+  /** Dough batches completed during prep (increments only, MAX merge). */
+  prepBatchesDough: number;
+  /** Sauce batches completed during prep (increments only, MAX merge). */
+  prepBatchesSauce: number;
+  /** True once prep batches have been carried into a started run (sticky). */
+  prepCarriedOver: boolean;
+};
+
+export const FRESH_PREP: PrepPhaseType = {
+  prepStartedAt: null,
+  prepBatchesDough: 0,
+  prepBatchesSauce: 0,
+  prepCarriedOver: false,
+};
+
 interface AppState {
   runs: RunState[];
   currentIndex: number;
@@ -1086,6 +1105,8 @@ interface AppState {
   // Deliberately EXCLUDED from the sync payload (mapping.ts never reads it) — it's
   // a per-device trail, and snapshots would blow the sync size limit (web parity).
   changeHistory: MasterDataChange[];
+  // Shift prep phase: before production starts. Synced; reset at daily rollover.
+  prepPhase?: PrepPhaseType;
 }
 
 export type MasterDataChangeType = "merge" | "add" | "remove" | "rename";
@@ -1456,6 +1477,11 @@ interface RunContextValue {
   moveScheduledDay: (fromDate: string, toDate: string) => void;
   moveScheduledRun: (fromDate: string, id: string, toDate: string) => void;
   applyScheduledDay: (date: string) => boolean;
+  // Shift prep phase state + batch tracking actions.
+  prepPhase: PrepPhaseType | undefined;
+  startPrep: () => void;
+  addPrepBatchDough: () => void;
+  addPrepBatchSauce: () => void;
   // Live multi-device sync connection status.
   syncStatus: SyncStatus;
   // Set when an inventory-consume write to the server failed (best-effort write
@@ -2585,19 +2611,62 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             ).catch(() => setWriteError(CONSUME_WRITE_ERR));
           }
         });
-        const runs = prev.runs.map((r, i) =>
-          i === prev.currentIndex
-            ? { ...r, isRunning: true, startedAt: r.startedAt ?? now, endedAt: undefined, metaUpdatedAt: now }
-            : r.startedAt != null && r.endedAt == null
-              ? { ...r, isRunning: false, endedAt: now, metaUpdatedAt: now }
-              : r,
-        );
-        const next = { ...prev, runs };
+        // Carry over prep batches into the starting run (once, guarded by prepCarriedOver).
+        const prep = prev.prepPhase ?? FRESH_PREP;
+        const carryDough = !prep.prepCarriedOver && prep.prepBatchesDough > 0;
+        const runs = prev.runs.map((r, i) => {
+          if (i === prev.currentIndex) {
+            const base = { ...r, isRunning: true, startedAt: r.startedAt ?? now, endedAt: undefined, metaUpdatedAt: now };
+            if (carryDough) {
+              return {
+                ...base,
+                progress: {
+                  ...base.progress,
+                  batchesReady: (base.progress.batchesReady ?? 0) + prep.prepBatchesDough,
+                },
+              };
+            }
+            return base;
+          }
+          return r.startedAt != null && r.endedAt == null
+            ? { ...r, isRunning: false, endedAt: now, metaUpdatedAt: now }
+            : r;
+        });
+        const nextPrepPhase: PrepPhaseType = { ...prep, prepCarriedOver: true };
+        const next = { ...prev, runs, prepPhase: nextPrepPhase };
         persist(next);
         return next;
       }),
     [persist],
   );
+
+  const startPrep = useCallback(() => {
+    setAppState((prev) => {
+      const prep = prev.prepPhase ?? FRESH_PREP;
+      if (prep.prepStartedAt !== null) return prev; // already started
+      const next = { ...prev, prepPhase: { ...prep, prepStartedAt: Date.now() } };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const addPrepBatchDough = useCallback(() => {
+    setAppState((prev) => {
+      const prep = prev.prepPhase ?? FRESH_PREP;
+      const next = { ...prev, prepPhase: { ...prep, prepBatchesDough: prep.prepBatchesDough + 1 } };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const addPrepBatchSauce = useCallback(() => {
+    setAppState((prev) => {
+      const prep = prev.prepPhase ?? FRESH_PREP;
+      const next = { ...prev, prepPhase: { ...prep, prepBatchesSauce: prep.prepBatchesSauce + 1 } };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
 
   const endRun = useCallback(
     () =>
@@ -4685,6 +4754,10 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         moveScheduledDay,
         moveScheduledRun,
         applyScheduledDay,
+        prepPhase: appState.prepPhase,
+        startPrep,
+        addPrepBatchDough,
+        addPrepBatchSauce,
         syncStatus,
         writeError,
         dismissWriteError,
