@@ -2897,6 +2897,117 @@ async function runJuly2026AuditCorrectionsV3(): Promise<void> {
   });
 }
 
+// ── Cross-run applicator contamination depoison ───────────────────────────────
+// The cross-run autosave bug (fixed 2026-08-13) could save Run A's full form
+// values into Run B's brand profile when the user switched between runs quickly.
+// The clearest symptom: app3CheeseRecipeName or app4CheeseRecipeName contains a
+// product name that belongs to a completely different flavor (e.g.
+// "Hannaford BBQ Chicken Cheese Mix" stored on a Spinach Goat Cheese profile).
+//
+// Detection: if a profile's app3/app4 cheese recipe name is used as the primary
+// (app1/app2) applicator by a DIFFERENT profile, and is NOT a primary name for
+// this profile, it was written by contamination. We clear the recipe name and
+// the associated applicator type field so the profile returns to a neutral state
+// that the next real run save or spec import will fill correctly.
+const APPLICATOR_CONTAMINATION_DEPOISON_ID = "applicator-contamination-depoison-v1";
+
+async function runApplicatorContaminationDepoison(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: APPLICATOR_CONTAMINATION_DEPOISON_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+
+    // Build: cheese recipe name → set of canonical profile keys that list it as
+    // a PRIMARY (app1 / app2) applicator. "Primary" slots are far less likely to
+    // have been contaminated (contamination usually flows from a different run's
+    // app3/app4 values landing on the wrong profile).
+    const primaryOwners = new Map<string, Set<string>>();
+    for (const p of profiles) {
+      const v = p.values as Record<string, unknown>;
+      const pKey = `${p.brand.toLowerCase()}__${p.flavor.toLowerCase()}`;
+      for (const field of ["app1CheeseRecipeName", "app2CheeseRecipeName"] as const) {
+        const name = String(v[field] ?? "").trim();
+        if (!name) continue;
+        const owners = primaryOwners.get(name) ?? new Set<string>();
+        owners.add(pKey);
+        primaryOwners.set(name, owners);
+      }
+    }
+
+    let healedProfiles = 0;
+    const healedDetails: Array<{ profileKey: string; field: string; cleared: string }> = [];
+
+    for (const p of profiles) {
+      const values = { ...(p.values as Record<string, unknown>) };
+      let changed = false;
+      const pKey = `${p.brand.toLowerCase()}__${p.flavor.toLowerCase()}`;
+
+      // Collect this profile's own primary names so a cheese used at both app1
+      // and app3 (a legitimate stacking) is never incorrectly cleared.
+      const ownPrimary = new Set<string>();
+      for (const f of ["app1CheeseRecipeName", "app2CheeseRecipeName"] as const) {
+        const n = String(values[f] ?? "").trim();
+        if (n) ownPrimary.add(n);
+      }
+
+      // Slot pairs: the recipe-name field and its companion type field.
+      const slots = [
+        { recipe: "app3CheeseRecipeName", type: "app3Type" },
+        { recipe: "app4CheeseRecipeName", type: "app4Type" },
+      ] as const;
+
+      for (const { recipe, type } of slots) {
+        const name = String(values[recipe] ?? "").trim();
+        if (!name) continue;
+
+        // Never clear a name that is legitimately one of this profile's own
+        // primary applicators (it may be stacked at app3/app4 too).
+        if (ownPrimary.has(name)) continue;
+
+        const owners = primaryOwners.get(name);
+        if (!owners) continue;
+
+        const ownedByOther = [...owners].some((k) => k !== pKey);
+        const ownedBySelf = owners.has(pKey);
+
+        // Contamination signature: this name is the primary applicator for a
+        // DIFFERENT profile, and this profile never claimed it as its own
+        // primary. Clear the recipe name and the type so the slot resets to
+        // the default "None" state.
+        if (ownedByOther && !ownedBySelf) {
+          healedDetails.push({ profileKey: p.key, field: recipe, cleared: name });
+          values[recipe] = "";
+          values[type] = "";
+          changed = true;
+        }
+      }
+
+      if (!changed) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      healedProfiles++;
+    }
+
+    logger.info(
+      { heal: APPLICATOR_CONTAMINATION_DEPOISON_ID, healedProfiles, details: healedDetails },
+      "Data heal applied",
+    );
+  });
+}
+
 // ── Sync-row name-registry restore ───────────────────────────────────────────
 // A fresh device (no localStorage) pushes empty arrays for brands,
 // cheeseRecipeNames, mixRecipeNames, doughRecipeNames, frontlineRecipeNames,
@@ -3073,6 +3184,7 @@ export async function runDataHeals(): Promise<void> {
   await runJuly2026ProfileCorrections();
   await runJuly2026AuditCorrectionsV2();
   await runJuly2026AuditCorrectionsV3();
+  await runApplicatorContaminationDepoison();
   await runSyncRowNameRegistryRestore();
   await runBrandDuplicatePurge();
 }
