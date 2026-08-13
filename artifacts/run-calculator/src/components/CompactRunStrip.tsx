@@ -3,6 +3,8 @@ import { Pause, Play, ChevronRight, Timer } from "lucide-react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
 import { fmtElapsed, fmtComma, fmtClock, fmtCountdownParts } from "../utils";
+import { computeLinePhases, pickMostActivePhase, type PhaseInfo } from "../linePhases";
+import { PRE_POST_TUNNEL_DEFAULT_MIN } from "../types";
 
 // ─── CompactRunStrip ──────────────────────────────────────────────────────────
 // Condensed run-summary header shown on every tab except the Run tab.
@@ -166,39 +168,60 @@ const CompactRunStrip = memo(function CompactRunStrip() {
             )}
           </div>
         )}
-        {/* Compact freezer phase line — same math as the Run tab banner */}
-        {!currentRun?.endedAt && runStatus === "running" && (() => {
+        {/* Compact 3-phase line strip — shows the most active transition */}
+        {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
           const freezerMin = Number(ve.freezerTime) || 0;
           if (freezerMin <= 0) return null;
-          const elapsedMin = elapsedBatchSec / 60;
-          const ppm = calc.ppm;
-          if (ppm <= 0) return null;
-          // Use the actual press-done signal (count-based), not elapsed-time
-          // estimate — mirrors home.tsx and avoids "emptying" while pressing.
-          const feedComplete = !!calc.pressDone;
-          const filling = !feedComplete && elapsedMin > 0 && elapsedMin < freezerMin;
-          // Derive drain remainder from live freezer contents, same as home.tsx.
-          const emptyRemainMin =
-            feedComplete && ppm > 0 && v.pizzasPerCase > 0
-              ? (calc.casesInFreezer * v.pizzasPerCase) / ppm
-              : 0;
-          const emptying = feedComplete && emptyRemainMin > 0;
-          if (!filling && !emptying) return null;
-          const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
-          const remainMs = Math.max(0, remainMin * 60000);
-          const mm = Math.floor(remainMs / 60000);
-          const ss = Math.floor((remainMs % 60000) / 1000);
-          const tone = filling
-            ? { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400" }
-            : { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400" };
+          if (calc.ppm <= 0 && runStatus === "running") return null;
+          const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+          const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+          const nowMs = nowTime.getTime();
+          const lastClosedPause = (currentRun?.stoppages ?? [])
+            .filter((s: any) => s.type === "pause" && s.endedAt)
+            .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
+          const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
+          const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
+          const phases = computeLinePhases({
+            elapsedBatchSec,
+            pausedAt: currentRun?.pausedAt ?? null,
+            lastResumeWallMs,
+            lastPauseStartWallMs,
+            runStatus: runStatus as string,
+            preTunnelMin: preTun,
+            postTunnelMin: postTun,
+            freezerTime: freezerMin,
+            nowMs,
+            pressDone: !!calc.pressDone,
+            casesInFreezer: calc.casesInFreezer,
+            ppm: calc.ppm,
+            pizzasPerCase: Number(v.pizzasPerCase) || 0,
+          });
+          // Show the most active transition: filling/draining/resuming (nearest deadline)
+          // beats paused — during a pause, Stage 2/3 "still draining" is more informative
+          // than Stage 1 "stopped".
+          const active = pickMostActivePhase(phases);
+          if (!active) return null;
+          const mm = Math.floor(active.remainMs / 60000);
+          const ss = Math.floor((active.remainMs % 60000) / 1000);
+          const isDrain = active.state === "draining";
+          const isPaused = active.state === "paused";
+          const isResume = active.state === "resuming";
+          const tone = isDrain
+            ? { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400" }
+            : isPaused
+            ? { wrap: "bg-muted/20 border-border/30", text: "text-muted-foreground" }
+            : { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400" };
+          const label = isPaused
+            ? `${active.label} — stopped`
+            : isResume
+            ? `${active.label} — product arriving in ${fmtCountdownParts(mm, ss)}`
+            : isDrain
+            ? `${active.label} — draining${active.remainMs > 0 ? " → " + fmtCountdownParts(mm, ss) : ""}`
+            : `${active.label} — filling → ${fmtCountdownParts(mm, ss)}`;
           return (
             <div className={`mt-1 rounded-md border px-3 py-1.5 flex items-center justify-center gap-2 ${tone.wrap}`}>
               <Timer className={`w-3.5 h-3.5 shrink-0 ${tone.text}`} />
-              <span className={`text-[11px] font-semibold ${tone.text}`}>
-                {filling
-                  ? `Line filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
-                  : `Line emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
-              </span>
+              <span className={`text-[11px] font-semibold ${tone.text}`}>{label}</span>
             </div>
           );
         })()}

@@ -406,9 +406,11 @@ export function useAutoTrack({
     if (runStatus === "running") {
       doughTimerPausedRef.current = 0;
       setIsDoughTimerPaused(false);
-      // Zero all consumption anchors so the first post-resume tick does not
-      // compute a delta spanning the full pause duration. This mirrors what
-      // resumeDoughTimers() does for the Batch Pipeline manual-pause path.
+      // Zero all consumption anchors on resume so the first post-resume tick does
+      // not compute a delta spanning the full pause duration (consumption overshoot).
+      // Zeroing the "next due" refs as well prevents a stale future timestamp from
+      // suppressing the first post-resume tick. This is the superset of what both
+      // Task #570 and Task #571 required.
       trayLastMsRef.current = 0;
       batchLastMsRef.current = 0;
       trayNextDueMsRef.current = 0;

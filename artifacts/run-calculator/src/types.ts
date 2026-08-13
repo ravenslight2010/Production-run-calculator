@@ -113,6 +113,13 @@ export const formSchema = z.object({
   skidStacking: z.string().default(""),
   gripSheets: z.string().default("none"),
   slipSheets: z.string().default("no"),
+  // Line tunnel stage timings — split the total line time (freezerTime) into
+  // three physically distinct segments.  0/blank falls back to 2.5 min at
+  // display/computation time (see PRE_POST_TUNNEL_DEFAULT_MIN).  Same pattern
+  // as MACHINE_TIME_DEFAULTS: default 0 = "never measured/changed" so legacy
+  // runs that pre-date these fields transparently use the factory-typical value.
+  preTunnelMin: z.coerce.number().min(0).default(0),
+  postTunnelMin: z.coerce.number().min(0).default(0),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.
   tempFreezerTime: z.coerce.number().min(0).default(0),
@@ -142,11 +149,7 @@ export function withTempOverrides<T extends Partial<Record<string, unknown>>>(v:
 export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
 export type DoughRecipePreset = { rows: RecipeRow[]; doughballWeightOz?: number };
 
-// Factory-typical machine times (seconds) used as defaults for the dough tab's
-// Machine Times fields. Saved profiles/runs that predate these defaults hold 0
-// ("never measured"); read paths fold that 0 back to these defaults so the
-// dough tab shows usable times everywhere. Keep in lockstep with the zod
-// defaults above AND the server's blank-run template (protectRunValues.ts).
+export const PRE_POST_TUNNEL_DEFAULT_MIN = 2.5;
 export const MACHINE_TIME_DEFAULTS = {
   mixerLowSec: 330,
   mixerHighSec: 180,
@@ -232,6 +235,8 @@ export const DEFAULT_VALUES: FormValues = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
+  preTunnelMin: 0,
+  postTunnelMin: 0,
   tempFreezerTime: 0,
   tempCrustsPerCycle: 0,
   tempCycleSpeed: 0,

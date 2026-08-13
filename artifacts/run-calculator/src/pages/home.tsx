@@ -68,6 +68,7 @@ import {
   type SubstitutionLogEntry,
   type PrepPhase,
   withTempOverrides,
+  PRE_POST_TUNNEL_DEFAULT_MIN,
 } from "../types";
 import {
   fmtElapsed,
@@ -90,6 +91,7 @@ import {
 } from "../utils";
 import { setActiveSubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
+import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
   freshDayState,
   loadDayState,
@@ -15205,7 +15207,7 @@ export default function Home() {
                           ["cycleSpeed", "Cycle Speed (rpm)"],
                           ["speedAdjustment", "Speed Adj"],
                           ["approxLineSpeed", "Line Speed"],
-                          ["freezerTime", "Freezer Time (min)"],
+                          ["freezerTime", "Total line time (min)"],
                           ["pizzasPerCase", "Pizzas / Case"],
                           ["casesPerLayer", "Cases / Layer"],
                           ["doughballsPerTray", "Doughballs / Tray"],
@@ -16908,22 +16910,54 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   {runStatus === "ended" && (
                     <div className="flex items-center justify-center py-1">
               {runStatus === "ended" && (() => {
-                const emptyMs = Number(ve.freezerTime) * 60000;
-                const remainMs = lastEndedRun?.endedAt && emptyMs > 0
-                  ? Math.max(0, lastEndedRun.endedAt + emptyMs - nowTime.getTime())
-                  : 0;
-                const draining = emptyMs > 0 && remainMs > 0;
-                const mm = Math.floor(remainMs / 60000);
-                const ss = Math.floor((remainMs % 60000) / 1000);
-                return draining ? (
-                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                    Freezer draining · {fmtCountdownParts(mm, ss)}
-                  </span>
-                ) : (
+                const freezerMin2 = Number(ve.freezerTime) || 0;
+                const preTun2 = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                const postTun2 = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                const refEndedAt = lastEndedRun?.endedAt;
+                const nowMs2 = nowTime.getTime();
+                if (!refEndedAt || freezerMin2 <= 0) return (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
                     <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                    Ended{emptyMs > 0 ? " · Freezer empty" : ""}
+                    Ended
+                  </span>
+                );
+                // Compute actual virtual (pause-excluded) elapsed for the ended run.
+                // computeEndedRunElapsedSec caps open/unclosed pause stoppages at
+                // endedAt so auto-ended paused runs don't count the pause as production.
+                const endedElapsedSec = computeEndedRunElapsedSec({
+                  startedAt: lastEndedRun.startedAt,
+                  endedAt: refEndedAt,
+                  stoppages: lastEndedRun.stoppages,
+                });
+                const phases2 = computeLinePhases({
+                  elapsedBatchSec: endedElapsedSec,
+                  pausedAt: null,
+                  lastResumeWallMs: 0,
+                  lastPauseStartWallMs: 0,
+                  runStatus: "ended",
+                  preTunnelMin: preTun2,
+                  postTunnelMin: postTun2,
+                  freezerTime: freezerMin2,
+                  nowMs: nowMs2,
+                  pressDone: true,
+                  casesInFreezer: 0,
+                  ppm: 0,
+                  pizzasPerCase: 0,
+                  endedAt: refEndedAt,
+                });
+                const activePhase = pickMostActivePhase(phases2);
+                if (!activePhase) return (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                    Ended · Line clear
+                  </span>
+                );
+                const mm2 = Math.floor(activePhase.remainMs / 60000);
+                const ss2 = Math.floor((activePhase.remainMs % 60000) / 1000);
+                return (
+                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                    {activePhase.label} draining{activePhase.remainMs > 0 ? ` · ${fmtCountdownParts(mm2, ss2)}` : ""}
                   </span>
                 );
               })()}
@@ -16951,60 +16985,66 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 </button>
               </div>
             )}
-                  {/* Freezer status — filling at run start, emptying at run end.
-                      Auto-hidden whenever the tunnel is in steady state. */}
-                  {!currentRun?.endedAt && runStatus === "running" && (() => {
+                  {/* 3-phase line status — filling at run start, draining when press done.
+                      Auto-hidden when all stages are in steady-state active. */}
+                  {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
                     const freezerMin = Number(ve.freezerTime) || 0;
                     if (freezerMin <= 0) return null;
-                    const elapsedMin = elapsedBatchSec / 60;
-                    const ppm = calc.ppm;
-                    // No line speed yet → no product moving through the tunnel, so
-                    // neither phase is meaningful.
-                    if (ppm <= 0) return null;
-                    // Use the actual case-count signal (pressDone), NOT elapsed time vs
-                    // theoretical press time. The time formula fires too early when the
-                    // line runs behind pace: elapsed > feedDoneMin while cases are still
-                    // being pressed, spuriously showing "Freezer emptying" on an active run.
-                    const feedComplete = !!calc.pressDone;
-                    const filling = !feedComplete && elapsedMin > 0 && elapsedMin < freezerMin;
-                    // Drain countdown: how long until the cases already in the tunnel exit.
-                    const emptyRemainMin =
-                      feedComplete && ppm > 0 && v.pizzasPerCase > 0
-                        ? (calc.casesInFreezer * v.pizzasPerCase) / ppm
-                        : 0;
-                    const emptying = feedComplete && emptyRemainMin > 0;
-                    if (!filling && !emptying) return null;
-                    const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
-                    const remainMs = Math.max(0, remainMin * 60000);
-                    const mm = Math.floor(remainMs / 60000);
-                    const ss = Math.floor((remainMs % 60000) / 1000);
-                    const pct = Math.max(0, Math.min(1, 1 - remainMin / freezerMin));
-                    const tone = filling
-                      ? { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400", bar: "bg-sky-500" }
-                      : { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400", bar: "bg-amber-500" };
+                    if (calc.ppm <= 0 && runStatus === "running") return null;
+                    const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                    const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                    // Last resume: most recent closed "pause" stoppage (endedAt=resume, startedAt=pause start).
+                    const lastClosedPause = (currentRun?.stoppages ?? [])
+                      .filter((s: any) => s.type === "pause" && s.endedAt)
+                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
+                    const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
+                    const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
+                    const phases = computeLinePhases({
+                      elapsedBatchSec,
+                      pausedAt: currentRun?.pausedAt ?? null,
+                      lastResumeWallMs,
+                      lastPauseStartWallMs,
+                      runStatus: runStatus as string,
+                      preTunnelMin: preTun,
+                      postTunnelMin: postTun,
+                      freezerTime: freezerMin,
+                      nowMs: nowTime.getTime(),
+                      pressDone: !!calc.pressDone,
+                      casesInFreezer: calc.casesInFreezer,
+                      ppm: calc.ppm,
+                      pizzasPerCase: Number(v.pizzasPerCase) || 0,
+                    });
+                    const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
+                    // Hide the strip entirely when everything is in steady-state or empty.
+                    const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
+                    if (!anyVisible) return null;
+                    function phaseRowStyle(state: PhaseInfo["state"]) {
+                      if (state === "filling" || state === "resuming") return { text: "text-sky-400", dot: "bg-sky-400", badge: "bg-sky-950/40 border-sky-700/30" };
+                      if (state === "draining") return { text: "text-amber-400", dot: "bg-amber-400 animate-pulse", badge: "bg-amber-950/40 border-amber-700/30" };
+                      if (state === "paused") return { text: "text-muted-foreground", dot: "bg-muted-foreground", badge: "bg-muted/20 border-border/30" };
+                      return { text: "text-muted-foreground", dot: "bg-muted-foreground/40", badge: "bg-muted/10 border-border/20" };
+                    }
+                    function phaseLabel(phase: PhaseInfo): string {
+                      const mm = Math.floor(phase.remainMs / 60000);
+                      const ss = Math.floor((phase.remainMs % 60000) / 1000);
+                      const t = fmtCountdownParts(mm, ss);
+                      if (phase.state === "filling") return `${phase.label} — filling → ${t}`;
+                      if (phase.state === "draining") return phase.remainMs > 0 ? `${phase.label} — draining → ${t}` : `${phase.label} — draining`;
+                      if (phase.state === "resuming") return `${phase.label} — product arriving in ${t}`;
+                      if (phase.state === "paused") return `${phase.label} — stopped`;
+                      return phase.label;
+                    }
                     return (
-                      <div className="mb-4 rounded-lg border overflow-hidden">
-                        <div className={`flex items-start gap-2.5 px-4 py-3 ${tone.wrap}`}>
-                          <Timer className={`w-4 h-4 shrink-0 mt-0.5 ${tone.text}`} />
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-semibold ${tone.text}`}>
-                              {filling
-                                ? `Line filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
-                                : `Line emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {filling
-                                ? `Product is still travelling the ${fmtMins(freezerMin)} line tunnel — the completed count starts climbing once it clears.`
-                                : `Dough feed is done — the line tunnel is draining the last cases.`}
-                            </p>
-                            <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-1000 ${tone.bar}`}
-                                style={{ width: `${pct * 100}%` }}
-                              />
+                      <div className="mb-4 rounded-lg border border-border/40 bg-card/60 overflow-hidden divide-y divide-border/20">
+                        {rows.filter(r => r.state !== "empty").map((phase, i) => {
+                          const s = phaseRowStyle(phase.state);
+                          return (
+                            <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 ${s.badge}`}>
+                              <span className={`h-2 w-2 rounded-full shrink-0 ${s.dot}`} />
+                              <span className={`text-xs font-semibold ${s.text}`}>{phaseLabel(phase)}</span>
                             </div>
-                          </div>
-                        </div>
+                          );
+                        })}
                       </div>
                     );
                   })()}
@@ -17231,11 +17271,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   const freezerMissing = !(Number(ve.freezerTime) > 0);
                   if (missing.length === 0 && !freezerMissing) return null;
                   const headline = missing.length > 0
-                    ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Freezer Time"] : [])].join(", ")} not set`
-                    : "Freezer status can't show yet — Freezer Time not set";
+                    ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Total line time"] : [])].join(", ")} not set`
+                    : "Line phase status can't show yet — Total line time not set";
                   const detail = missing.length > 0
-                    ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and freezer status all start working once they're in."
-                    : "If this run uses the freezer tunnel, scroll down and enter Freezer Time (min) under the line settings to see the filling/emptying status.";
+                    ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
+                    : "If this run uses a freezer tunnel, scroll down and enter Total line time (min) under the line settings to see the 3-stage filling/emptying status.";
                   return (
                     <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-missing-line-setup">
                       <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
@@ -17801,7 +17841,21 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <NumField
                           control={form.control}
                           name="freezerTime"
-                          label="Freezer Time (min)"
+                          label="Total line time (min)"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="preTunnelMin"
+                          label="Pre-tunnel (min)"
+                          step="0.5"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="postTunnelMin"
+                          label="Post-tunnel (min)"
+                          step="0.5"
                         />
                       </div>
                       <Separator className="opacity-30" />
@@ -18069,65 +18123,112 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     </div>
                   );
                 })()}
-                {/* ─── Freezer stage (filling while running, emptying for active ended run) ─── */}
+                {/* ─── Line stage (3-phase: filling while running, draining when done/ended) ─── */}
                 {(() => {
-                  const showFilling = runStatus === "running" && Number(ve.freezerTime) > 0;
+                  const freezerMin = Number(ve.freezerTime) || 0;
+                  const showFilling = (runStatus === "running" || runStatus === "paused") && freezerMin > 0;
                   const showEmptying =
-                    Number(ve.freezerTime) > 0 && !!lastEndedRun?.endedAt && lastEndedRun.id === currentRunId;
+                    freezerMin > 0 && !!lastEndedRun?.endedAt && lastEndedRun.id === currentRunId;
                   if (!showFilling && !showEmptying) return null;
+                  const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                  const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                  const nowMs = nowTime.getTime();
+                  let phases;
+                  if (showFilling) {
+                    const lastClosedPause2 = (currentRun?.stoppages ?? [])
+                      .filter((s: any) => s.type === "pause" && s.endedAt)
+                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
+                    const lastResumeWallMs2 = lastClosedPause2?.endedAt ?? 0;
+                    const lastPauseStartWallMs2 = lastClosedPause2?.startedAt ?? 0;
+                    phases = computeLinePhases({
+                      elapsedBatchSec,
+                      pausedAt: currentRun?.pausedAt ?? null,
+                      lastResumeWallMs: lastResumeWallMs2,
+                      lastPauseStartWallMs: lastPauseStartWallMs2,
+                      runStatus: runStatus as string,
+                      preTunnelMin: preTun,
+                      postTunnelMin: postTun,
+                      freezerTime: freezerMin,
+                      nowMs,
+                      pressDone: !!calc.pressDone,
+                      casesInFreezer: calc.casesInFreezer,
+                      ppm: calc.ppm,
+                      pizzasPerCase: Number(v.pizzasPerCase) || 0,
+                    });
+                  } else {
+                    // Compute actual virtual (pause-excluded) elapsed for the ended run.
+                    // computeEndedRunElapsedSec caps open/unclosed pause stoppages at
+                    // endedAt so auto-ended paused runs don't count the pause as production.
+                    const erElapsedSec = computeEndedRunElapsedSec({
+                      startedAt: lastEndedRun!.startedAt,
+                      endedAt: lastEndedRun!.endedAt!,
+                      stoppages: lastEndedRun!.stoppages,
+                    });
+                    phases = computeLinePhases({
+                      elapsedBatchSec: erElapsedSec,
+                      pausedAt: null,
+                      lastResumeWallMs: 0,
+                      lastPauseStartWallMs: 0,
+                      runStatus: "ended",
+                      preTunnelMin: preTun,
+                      postTunnelMin: postTun,
+                      freezerTime: freezerMin,
+                      nowMs,
+                      pressDone: true,
+                      casesInFreezer: 0,
+                      ppm: 0,
+                      pizzasPerCase: 0,
+                      endedAt: lastEndedRun!.endedAt!,
+                    });
+                  }
+                  const rows = [phases.stage1, phases.stage2, phases.stage3];
+                  const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
+                  if (!anyVisible && !showEmptying) return null;
+                  // Overall progress: use liveFreezerMin for filling, elapsed-since-end for draining.
+                  const totalSecs = freezerMin * 60;
+                  const elapsedSecs = showFilling ? liveFreezerMin * 60 : Math.min(totalSecs, (nowMs - (lastEndedRun?.endedAt ?? nowMs)) / 1000);
+                  const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
+                  const drainDone = !showFilling && rows.every(r => r.state === "empty");
                   return (
                     <div className="flex mb-4">
                       <TimelineNode icon={Snowflake} active />
                       <div className="flex-1 mt-2 space-y-2">
-                        {showFilling && (() => {
-                          const totalSecs = Number(ve.freezerTime) * 60;
-                          const elapsedSecs = liveFreezerMin * 60;
-                          const remainSecs = Math.max(0, totalSecs - elapsedSecs);
-                          const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
-                          const mm = Math.floor(remainSecs / 60);
-                          const ss = Math.floor(remainSecs % 60);
-                          const done = remainSecs === 0;
-                          return (
-                            <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
-                              <div className="flex justify-between items-end mb-2">
-                                <span className="text-sm font-semibold uppercase tracking-wider text-primary">Freezer Loading</span>
-                                <span className={`text-xs font-mono font-bold ${done ? "text-green-400" : "text-primary/80"}`}>
-                                  {done ? "✓ Freezer full" : `${fmtCountdownParts(mm, ss)} rem`}
-                                </span>
-                              </div>
-                              <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-green-500" : "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"}`}
-                                  style={{ width: `${pct * 100}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })()}
-                        {showEmptying && (() => {
-                          const freezerMs = Number(ve.freezerTime) * 60000;
-                          const remainMs = Math.max(0, lastEndedRun!.endedAt! + freezerMs - nowTime.getTime());
-                          const pct = Math.min(1 - remainMs / freezerMs, 1);
-                          const mm = Math.floor(remainMs / 60000);
-                          const ss = Math.floor((remainMs % 60000) / 1000);
-                          const done = remainMs === 0;
-                          return (
-                            <div className="bg-amber-950/20 border border-amber-600/30 rounded-lg p-3">
-                              <div className="flex justify-between items-end mb-2">
-                                <span className="text-sm font-semibold uppercase tracking-wider text-amber-400">Freezer Emptying</span>
-                                <span className={`text-xs font-mono font-bold ${done ? "text-emerald-400" : "text-amber-400"}`}>
-                                  {done ? "✓ Freezer empty" : `${fmtCountdownParts(mm, ss)} left`}
-                                </span>
-                              </div>
-                              <div className="w-full h-1.5 rounded-full bg-background border border-amber-600/10 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-emerald-500" : "bg-amber-500"}`}
-                                  style={{ width: `${pct * 100}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div className={`border rounded-lg p-3 ${showFilling && !calc.pressDone ? "bg-primary/5 border-primary/20" : "bg-amber-950/20 border-amber-600/30"}`}>
+                          <div className="flex justify-between items-end mb-2">
+                            <span className={`text-sm font-semibold uppercase tracking-wider ${showFilling && !calc.pressDone ? "text-primary" : "text-amber-400"}`}>
+                              {showFilling && !calc.pressDone ? "Line Loading" : drainDone ? "Line Clear" : "Line Draining"}
+                            </span>
+                            <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : showFilling && !calc.pressDone ? "text-primary/80" : "text-amber-400"}`}>
+                              {drainDone ? "✓ Line clear" : `${fmtNum(pct * 100, 0)}%`}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden mb-2">
+                            <div
+                              className={`h-full rounded-full transition-all duration-1000 ${drainDone ? "bg-emerald-500" : showFilling && !calc.pressDone ? "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]" : "bg-amber-500"}`}
+                              style={{ width: `${pct * 100}%` }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            {rows.filter(r => r.state !== "empty").map((phase, i) => {
+                              const mm = Math.floor(phase.remainMs / 60000);
+                              const ss = Math.floor((phase.remainMs % 60000) / 1000);
+                              const dotCls = phase.state === "paused" ? "bg-muted-foreground" : phase.state === "active" ? "bg-emerald-500" : phase.state === "draining" ? "bg-amber-400 animate-pulse" : "bg-sky-400 animate-pulse";
+                              const textCls = phase.state === "paused" ? "text-muted-foreground" : phase.state === "active" ? "text-emerald-400" : phase.state === "draining" ? "text-amber-300" : "text-sky-300";
+                              const stateText = phase.state === "filling" ? `filling → ${fmtCountdownParts(mm, ss)}`
+                                : phase.state === "draining" ? (phase.remainMs > 0 ? `draining → ${fmtCountdownParts(mm, ss)}` : "draining")
+                                : phase.state === "resuming" ? `product arriving in ${fmtCountdownParts(mm, ss)}`
+                                : phase.state === "paused" ? "stopped"
+                                : phase.state === "active" ? "flowing" : "";
+                              return (
+                                <div key={i} className="flex items-center gap-2 text-[11px]">
+                                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotCls}`} />
+                                  <span className="text-muted-foreground font-medium">{phase.label}</span>
+                                  <span className={`font-semibold ${textCls}`}>— {stateText}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
