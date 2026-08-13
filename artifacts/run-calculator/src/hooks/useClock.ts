@@ -37,11 +37,24 @@ export function useClock(runStatus: RunStatus): Date {
       }
     };
 
+    const onFocus = () => {
+      // Fallback for devices where visibilitychange doesn't fire reliably on
+      // screen wake or app-switch (e.g. some Android tablets). Mirrors the
+      // "tab became visible" branch of onVisibility so the clock is never
+      // left frozen after a screen lock/unlock cycle.
+      if (!document.hidden) {
+        setNowTime(new Date());
+        start();
+      }
+    };
+
     start();
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
     return () => {
       if (id) clearInterval(id);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
     };
   }, [runStatus]);
 
