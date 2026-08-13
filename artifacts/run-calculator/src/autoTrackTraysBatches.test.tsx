@@ -616,6 +616,75 @@ describe("auto-track tray/batch up/down tracking", () => {
     expect(batchesDropped).toBeLessThanOrEqual(0.25 + 1e-9);
   });
 
+  it("global pause+resume: production ref re-arms at half-period offset and does not catch-up write on resume", () => {
+    // Regression guard: when a run is globally paused and then resumed, the
+    // production ticker (trayProdNextDueMsRef) used to carry its pre-pause value.
+    // If both tickers were simultaneously overdue on resume, both fired at the
+    // same nowMs and both re-armed to nowMs+period, collapsing the half-period
+    // offset to zero — the two TickBars showed identical countdowns from that
+    // point forward.
+    //
+    // Fix: reset trayProdNextDueMsRef=0 on resume (alongside trayNextDueMsRef).
+    // The first-encounter arm then re-establishes the half-period offset cleanly:
+    //   tray ref  → nowMs + period   (consumption fires immediately, re-arms)
+    //   trayProd  → nowMs + period/2 (production first-encounter arm, no write)
+    //
+    // tray period  = 60/100 min × 60 = 36 s  → half = 18 s
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 20, batchesReady: 5 });
+    const t0 = 1_700_000_000_000;
+    const PERIOD_MS = 36_000; // (60 perTray / 100 ppm) * 60000
+
+    const { result, rerender } = renderHook(
+      (props: { nowTime: Date; runStatus: "running" | "paused"; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: props.runStatus,
+          nowTime: props.nowTime,
+          elapsedBatchSec: 10 * 60,
+          calc: baseCalc, // traysNeeded: 30 > 0 → production ticks fire
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), runStatus: "running" as const, v: makeV({ traysOnLine: 20, batchesReady: 5 }) } },
+    );
+
+    // Mount: consumption fires (t0), production arms at t0+18s.
+    expect(values.traysOnLine).toBe(19); // consumption decremented
+
+    // Let production fire its first write tick at t0+18s.
+    rerender({ nowTime: new Date(t0 + 18_000), runStatus: "running", v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }) });
+    expect(values.traysOnLine).toBe(20); // production +1
+
+    const traysBeforePause = values.traysOnLine;
+
+    // Pause for 3 full tray periods (108 s) — both tickers become overdue.
+    rerender({ nowTime: new Date(t0 + 18_000), runStatus: "paused", v: makeV({ traysOnLine: traysBeforePause, batchesReady: values.batchesReady }) });
+
+    const resumeMs = t0 + 18_000 + 108_000; // 3 periods later
+
+    // Resume: the useEffect zeros both refs.
+    rerender({ nowTime: new Date(resumeMs), runStatus: "running", v: makeV({ traysOnLine: traysBeforePause, batchesReady: values.batchesReady }) });
+
+    // After resume tick:
+    // • Consumption (ref=0) fires immediately → re-arms to resumeMs + PERIOD_MS
+    // • Production (ref=0) hits first-encounter path → arms to resumeMs + PERIOD_MS/2 (no write)
+    // Tray count must drop by at most 1 (one consumption tick), NOT jump by
+    // multiple trays (catch-up production writes would push it UP, not down —
+    // but we assert no extra +1 production writes occurred).
+    const traysAfterResume = values.traysOnLine;
+    expect(traysAfterResume).toBeLessThanOrEqual(traysBeforePause); // at most one consumption decrement
+    expect(traysAfterResume).toBeGreaterThanOrEqual(traysBeforePause - 1);
+
+    // Half-period separation: after the resume tick the refs must differ by
+    // exactly half a tray period (18 s = PERIOD_MS/2).
+    const { tickDueRefs } = result.current;
+    const trayRef = tickDueRefs.tray.current;
+    const trayProdRef = tickDueRefs.trayProd.current;
+    // tray ref (consumption re-armed) should be resumeMs + PERIOD_MS
+    // trayProd ref (first-encounter arm) should be resumeMs + PERIOD_MS/2
+    expect(trayRef - trayProdRef).toBeCloseTo(PERIOD_MS / 2, -1); // within 10 ms
+  });
+
   it("disabled (cast screens) never writes — no decrement, no seed", () => {
     // Wall display screens pass disabled:true; they must never mutate the
     // counters or their decrements sync back over the operator's manual edits.

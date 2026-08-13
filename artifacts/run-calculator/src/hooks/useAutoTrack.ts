@@ -414,6 +414,11 @@ export function useAutoTrack({
       trayLastMsRef.current = 0;
       batchLastMsRef.current = 0;
       trayNextDueMsRef.current = 0;
+      // Also reset the production ticker so it re-arms at nowMs + period/2 via
+      // the first-encounter path on the next tick — re-establishing the half-period
+      // phase offset from the new resume baseline instead of carrying a stale or
+      // simultaneously-overdue timestamp that collapses the offset to zero.
+      trayProdNextDueMsRef.current = 0;
       batchNextDueMsRef.current = 0;
       hopperProdNextDueMsRef.current = 0;
     }
