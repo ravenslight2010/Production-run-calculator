@@ -19444,6 +19444,9 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         const suppressed = Date.now() < autoSuppressUntilRef.current;
         const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
         const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
+        const nowMs = nowTime.getTime();
+        const secLeftOf = (dueMs: number, periodSec: number) =>
+          dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
         const expectedTotal = s ? s.expectedCases : null;
         const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
         const packOnPace = packGapCases <= 2;
