@@ -17019,6 +17019,23 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 
   return (
     <>
+                {/* Blank-run sweep confirmation dialog */}
+                {confirmRemoveBlanks && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
+                    <div className="bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
+                      <h2 className="text-base font-bold">Remove {blankRunIds.length} blank run{blankRunIds.length > 1 ? "s" : ""}?</h2>
+                      <p className="text-sm text-muted-foreground">
+                        {blankRunIds.length > 1 ? "These runs have" : "This run has"} no brand, flavor, or data. Removing{" "}
+                        {blankRunIds.length > 1 ? "them" : "it"} clears{" "}
+                        {blankRunIds.length > 1 ? "them" : "it"} from all devices and can't be undone.
+                      </p>
+                      <div className="flex gap-2 justify-end">
+                        <button type="button" onClick={() => setConfirmRemoveBlanks(false)} className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted/40 transition-colors">Cancel</button>
+                        <button type="button" onClick={removeBlankRuns} className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors">Remove</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {/* ─── Run cockpit — identity, status & KPIs (graduated ManagerHub mockup) ─── */}
                 <div className="space-y-4 mb-4">
                   {/* Top bar: run position + last-run recall + run actions */}
@@ -17059,6 +17076,17 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     className="h-6 w-6 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
                   >
                     <Maximize2 className="w-3 h-3" />
+                  </button>
+                )}
+                {isSupervisor && blankRunIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRemoveBlanks(true)}
+                    title={`Remove ${blankRunIds.length} blank run${blankRunIds.length > 1 ? "s" : ""}`}
+                    className="h-6 flex items-center gap-1 text-xs font-bold text-destructive/70 bg-destructive/10 px-2 rounded border border-destructive/20 hover:bg-destructive/20 transition-colors"
+                  >
+                    <Eraser className="w-3 h-3" />
+                    <span className="hidden sm:inline">{blankRunIds.length} Blank</span>
                   </button>
                 )}
                 <button
