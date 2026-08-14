@@ -17326,7 +17326,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     </div>
                   )}
                   {runStatus === "running" && currentRun?.startedAt ? (
-                    <div className="flex items-center justify-center">
+                    <div className="flex items-center justify-center gap-2 flex-wrap">
                       <div className="bg-card px-3 py-1.5 rounded-full border border-border/50 text-xs text-muted-foreground font-medium">
                         Elapsed Time:{" "}
                         <ElapsedTimeBadge
@@ -17337,6 +17337,22 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           pausedAt={currentRun.pausedAt ?? null}
                         />
                       </div>
+                      {(() => {
+                        const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
+                        const suppressed = Date.now() < autoSuppressUntilRef.current;
+                        const caseAutoActive = autoTrackProgress && !!autoTrackSuggestion && !suppressed;
+                        if (!caseAutoActive || casePeriodSec <= 0) return null;
+                        const nowMs = nowTime.getTime();
+                        const secLeft = tickDueRefs.case.current > 0
+                          ? Math.min(casePeriodSec, Math.max(0, (tickDueRefs.case.current - nowMs) / 1000))
+                          : casePeriodSec;
+                        return (
+                          <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
+                            Next case in{" "}
+                            <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : null}
                   {runStatus === "paused" && (
@@ -18403,7 +18419,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow,
+    fireAutoTrackNow, tickDueRefs,
   } = useLiveRun();
 
   // ── Speed drift detection ─────────────────────────────────────────────────
@@ -18831,6 +18847,24 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 minsLeft={suppressedMinsLeft}
                                 onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                               />
+
+                              {(() => {
+                                const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
+                                const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
+                                if (!caseAutoActive || casePeriodSec <= 0) return null;
+                                const nowMs = nowTime.getTime();
+                                const secLeft = tickDueRefs.case.current > 0
+                                  ? Math.min(casePeriodSec, Math.max(0, (tickDueRefs.case.current - nowMs) / 1000))
+                                  : casePeriodSec;
+                                return (
+                                  <div className="flex items-center justify-center">
+                                    <div className="bg-card px-3 py-1.5 rounded-full border border-orange-500/30 text-xs text-muted-foreground font-medium">
+                                      Next case in{" "}
+                                      <span className="text-orange-400 font-bold tabular-nums">{fmtMS(secLeft)}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               <div>
                                 <div className="flex justify-center items-end gap-3 font-mono">
