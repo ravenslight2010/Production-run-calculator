@@ -749,22 +749,26 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
     if (s.pep1Type && s.pep1Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
       if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs");
-      else add(s.pep1Type, s.pep1Batches, "batches");
+      else if (s.pep1Batches > 0) add(s.pep1Type, s.pep1Batches, "batches");
+      else add(s.pep1Type, s.pep1Lbs, "lbs"); // no batch size configured — show lbs so warehouse pullers know what to pull
     }
     if (s.pep1TypeB && s.pep1LbsB > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
       if (isPepStd) add(s.pep1TypeB, s.pep1LbsB, "lbs");
-      else add(s.pep1TypeB, s.pep1BatchesB, "batches");
+      else if (s.pep1BatchesB > 0) add(s.pep1TypeB, s.pep1BatchesB, "batches");
+      else add(s.pep1TypeB, s.pep1LbsB, "lbs");
     }
     if (s.pep2Type && s.pep2Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
       if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs");
-      else add(s.pep2Type, s.pep2Batches, "batches");
+      else if (s.pep2Batches > 0) add(s.pep2Type, s.pep2Batches, "batches");
+      else add(s.pep2Type, s.pep2Lbs, "lbs");
     }
     if (s.pep2TypeB && s.pep2LbsB > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
       if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs");
-      else add(s.pep2TypeB, s.pep2BatchesB, "batches");
+      else if (s.pep2BatchesB > 0) add(s.pep2TypeB, s.pep2BatchesB, "batches");
+      else add(s.pep2TypeB, s.pep2LbsB, "lbs");
     }
     for (const a of appsBack) addApp(a);
   }

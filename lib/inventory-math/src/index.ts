@@ -305,13 +305,15 @@ export function computeRunLines(
   if (pep1Type && s.pep1Lbs > 0) {
     const std = defaultPepTypes.includes(pep1Type);
     if (std) add(`ingredient:${pep1Type}:lbs`, "ingredient", pep1Type, "lbs", s.pep1Lbs);
-    else add(`ingredient:${pep1Type}:batches`, "ingredient", pep1Type, "batches", s.pep1Batches);
+    else if (s.pep1Batches > 0) add(`ingredient:${pep1Type}:batches`, "ingredient", pep1Type, "batches", s.pep1Batches);
+    else add(`ingredient:${pep1Type}:lbs`, "ingredient", pep1Type, "lbs", s.pep1Lbs); // no batch size configured — track by lbs
   }
   const pep2Type = (s.pep2Type ?? "").trim();
   if (pep2Type && s.pep2Lbs > 0) {
     const std = defaultPepTypes.includes(pep2Type);
     if (std) add(`ingredient:${pep2Type}:lbs`, "ingredient", pep2Type, "lbs", s.pep2Lbs);
-    else add(`ingredient:${pep2Type}:batches`, "ingredient", pep2Type, "batches", s.pep2Batches);
+    else if (s.pep2Batches > 0) add(`ingredient:${pep2Type}:batches`, "ingredient", pep2Type, "batches", s.pep2Batches);
+    else add(`ingredient:${pep2Type}:lbs`, "ingredient", pep2Type, "lbs", s.pep2Lbs);
   }
   // Additional pep type per applicator — same keys as the primary types so a
   // repeated pep name folds into one inventory line. Suppressed automatically
@@ -320,13 +322,15 @@ export function computeRunLines(
   if (pep1TypeB && s.pep1LbsB > 0) {
     const std = defaultPepTypes.includes(pep1TypeB);
     if (std) add(`ingredient:${pep1TypeB}:lbs`, "ingredient", pep1TypeB, "lbs", s.pep1LbsB);
-    else add(`ingredient:${pep1TypeB}:batches`, "ingredient", pep1TypeB, "batches", s.pep1BatchesB);
+    else if (s.pep1BatchesB > 0) add(`ingredient:${pep1TypeB}:batches`, "ingredient", pep1TypeB, "batches", s.pep1BatchesB);
+    else add(`ingredient:${pep1TypeB}:lbs`, "ingredient", pep1TypeB, "lbs", s.pep1LbsB);
   }
   const pep2TypeB = (s.pep2TypeB ?? "").trim();
   if (pep2TypeB && s.pep2LbsB > 0) {
     const std = defaultPepTypes.includes(pep2TypeB);
     if (std) add(`ingredient:${pep2TypeB}:lbs`, "ingredient", pep2TypeB, "lbs", s.pep2LbsB);
-    else add(`ingredient:${pep2TypeB}:batches`, "ingredient", pep2TypeB, "batches", s.pep2BatchesB);
+    else if (s.pep2BatchesB > 0) add(`ingredient:${pep2TypeB}:batches`, "ingredient", pep2TypeB, "batches", s.pep2BatchesB);
+    else add(`ingredient:${pep2TypeB}:lbs`, "ingredient", pep2TypeB, "lbs", s.pep2LbsB);
   }
 
   // Packaging — only cartoned runs consume packaging. Accepts the web app's new
