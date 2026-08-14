@@ -114,12 +114,11 @@ export const formSchema = z.object({
   gripSheets: z.string().default("none"),
   slipSheets: z.string().default("no"),
   // Line tunnel stage timings — split the total line time (freezerTime) into
-  // three physically distinct segments.  0/blank falls back to 2.5 min at
-  // display/computation time (see PRE_POST_TUNNEL_DEFAULT_MIN).  Same pattern
-  // as MACHINE_TIME_DEFAULTS: default 0 = "never measured/changed" so legacy
-  // runs that pre-date these fields transparently use the factory-typical value.
-  preTunnelMin: z.coerce.number().min(0).default(0),
-  postTunnelMin: z.coerce.number().min(0).default(0),
+  // three physically distinct segments.  Default 2.5 min each (the factory
+  // standard pre/post dwell).  A one-time boot heal writes 2.5 into any
+  // existing profile that still has 0 stored from before this default was set.
+  preTunnelMin: z.coerce.number().min(0).default(2.5),
+  postTunnelMin: z.coerce.number().min(0).default(2.5),
   // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
   // override (use the Setup value). Never saved into brand/flavor profiles.
   tempFreezerTime: z.coerce.number().min(0).default(0),
@@ -235,8 +234,8 @@ export const DEFAULT_VALUES: FormValues = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
-  preTunnelMin: 0,
-  postTunnelMin: 0,
+  preTunnelMin: PRE_POST_TUNNEL_DEFAULT_MIN,
+  postTunnelMin: PRE_POST_TUNNEL_DEFAULT_MIN,
   tempFreezerTime: 0,
   tempCrustsPerCycle: 0,
   tempCycleSpeed: 0,

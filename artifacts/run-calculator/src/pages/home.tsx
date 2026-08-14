@@ -8337,6 +8337,50 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cheeseRecipesList, mixes]);
 
+  // One-time boot heal: write preTunnelMin = postTunnelMin = 2.5 into every
+  // saved profile that still has 0 stored (from before the default was raised).
+  // Also updates the open form if it loaded with 0 values.
+  useEffect(() => {
+    const MARKER = "run-calc-tunnel-pre-post-default-v1";
+    if (localStorage.getItem(MARKER)) return;
+    localStorage.setItem(MARKER, "1");
+
+    const PREFIX = "run-calc-profile-";
+    const toHeal: { brand: string; flavor: string }[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(PREFIX)) continue;
+      const suffix = k.slice(PREFIX.length);
+      if (!suffix.includes("__")) continue;
+      const dIdx = suffix.indexOf("__");
+      const brand  = suffix.slice(0, dIdx);
+      const flavor = suffix.slice(dIdx + 2);
+      const p = loadProfile(brand, flavor);
+      if (!p) continue;
+      if (!(Number(p.preTunnelMin) > 0) || !(Number(p.postTunnelMin) > 0)) {
+        toHeal.push({ brand, flavor });
+      }
+    }
+    for (const { brand, flavor } of toHeal) {
+      const p = loadProfile(brand, flavor);
+      if (!p) continue;
+      saveProfile(brand, flavor, {
+        ...p,
+        preTunnelMin: Number(p.preTunnelMin) > 0 ? Number(p.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
+        postTunnelMin: Number(p.postTunnelMin) > 0 ? Number(p.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
+      } as FormValues);
+    }
+    // Fix the open form too if it loaded with 0 from a legacy profile.
+    if (!(Number(form.getValues("preTunnelMin")) > 0)) {
+      form.setValue("preTunnelMin", PRE_POST_TUNNEL_DEFAULT_MIN, { shouldDirty: true });
+    }
+    if (!(Number(form.getValues("postTunnelMin")) > 0)) {
+      form.setValue("postTunnelMin", PRE_POST_TUNNEL_DEFAULT_MIN, { shouldDirty: true });
+    }
+  // Run once on mount; form ref is stable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
   // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
   // the same per-id upsert Manage Lists uses; the server gates the write on
@@ -18173,6 +18217,20 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           step="0.5"
                         />
                       </div>
+                      {(() => {
+                        const total  = Number(v.freezerTime) || 0;
+                        const pre    = Number(v.preTunnelMin)  > 0 ? Number(v.preTunnelMin)  : PRE_POST_TUNNEL_DEFAULT_MIN;
+                        const post   = Number(v.postTunnelMin) > 0 ? Number(v.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                        const tunnel = Math.max(0, total - pre - post);
+                        if (total <= 0) return null;
+                        return (
+                          <p className="text-[11px] text-muted-foreground">
+                            Freeze tunnel set point:{" "}
+                            <span className="font-semibold text-foreground">{fmtNum(tunnel, 1)} min</span>
+                            {" "}({fmtNum(pre, 1)} pre + {fmtNum(tunnel, 1)} tunnel + {fmtNum(post, 1)} post = {fmtNum(total, 1)} total)
+                          </p>
+                        );
+                      })()}
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
