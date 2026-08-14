@@ -19462,12 +19462,22 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               sauceEffBarrel={calc.sauceEffBarrel}
             />
             {/* Sauce barrel countdown TickBar — suppressed during pause,
-                press-done, and next-run prep. */}
+                press-done, and next-run prep. When the barrel expires the
+                TickBar is replaced with an actionable prompt so the operator
+                knows to tap + rather than staring at a frozen 0:00. */}
             {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && calc.sauceDepletionSec > 0 && (() => {
               // Use pause-aware elapsedBatchSec; lastBarrelNetSecRef is also stored
               // in net-elapsed coords so the delta is naturally pause-safe.
               const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
               const secLeft = Math.max(0, calc.sauceDepletionSec - barrelElapsed);
+              if (secLeft <= 0) {
+                return (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-red-400 font-semibold animate-pulse">
+                    <span>🍅</span>
+                    <span>Barrel time up — tap + to start next barrel &amp; reset timer</span>
+                  </div>
+                );
+              }
               const pctLeft = calc.sauceDepletionSec > 0 ? secLeft / calc.sauceDepletionSec : 1;
               const color = pctLeft < 0.15 ? "text-red-400" : "text-blue-400";
               return (
