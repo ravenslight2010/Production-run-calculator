@@ -116,8 +116,11 @@ function blankCheeseRecipe(): CheeseRecipe {
 // manager role on writes; this card is only rendered for managers.
 export default function CheeseRecipesManager({
   ingredientSuggestions = [],
+  onSaved,
 }: {
   ingredientSuggestions?: string[];
+  /** Called with the full server-normalized pool after any successful save. */
+  onSaved?: (saved: CheeseRecipe[]) => void;
 }) {
   const qc = useQueryClient();
   const { items, isLoading } = useCheeseRecipes();
@@ -163,6 +166,7 @@ export default function CheeseRecipesManager({
     onSuccess: (saved) => {
       qc.setQueryData(["cheeseRecipes"], saved);
       setError(null);
+      onSaved?.(saved);
     },
     onError: () =>
       setError("Could not save the cheese recipe. Check your connection and try again."),

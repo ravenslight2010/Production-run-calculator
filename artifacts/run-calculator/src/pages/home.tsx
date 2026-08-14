@@ -4308,11 +4308,14 @@ export default function Home() {
           if (!recipeName) continue;
           const freshRows = recipeByName.get(recipeName.toLowerCase());
           if (!freshRows) continue;
-          // Skip if the lbs sum is already correct (avoids no-op writes).
+          // Skip if every ingredient and its lbs is already identical (full row comparison,
+          // not just sum — catches ingredient renames, additions, or removals that preserve total).
           const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
-          const currentSum = currentRows.reduce((s, r) => s + Number(r.lbs), 0);
-          const freshSum   = freshRows.reduce((s, r) => s + r.lbs, 0);
-          if (Math.abs(currentSum - freshSum) < 0.001) continue;
+          const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => {
+            const cr = currentRows[i];
+            return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001;
+          });
+          if (!rowsChanged) continue;
           updates[rowsField] = freshRows;
         }
 
@@ -4348,7 +4351,6 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [form],
   );
-
   // Server-side role (distinct from the local supervisor PIN toggle below).
   const { isManager, hasCapability } = useMe();
   const canEditRules = hasCapability("edit-production-rules");
@@ -13129,6 +13131,7 @@ export default function Home() {
                     )}
                     <CheeseRecipesManager
                       ingredientSuggestions={unifiedIngredientUniverse}
+                      onSaved={propagateCheeseRecipeUpdates}
                     />
                   </div>
                 )}
