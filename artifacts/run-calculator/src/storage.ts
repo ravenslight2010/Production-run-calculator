@@ -1107,7 +1107,12 @@ export function refreshCheeseOrMixProfileRows(
         const curRows = Array.isArray(obj[rowsField])
           ? (obj[rowsField] as { ingredient?: unknown; lbs?: unknown }[])
           : [];
-        if (opts?.emptyRowsOnly && curRows.length > 0) continue;
+        // "emptyRowsOnly" also heals rows that are all-zero (ingredient names
+        // present but every lbs = 0) — these are effectively empty because
+        // they carry no useful data and will just be re-imported from the
+        // server mix master-data anyway.
+        const curRowsAllZero = curRows.every((r) => !(Number(r.lbs) > 0));
+        if (opts?.emptyRowsOnly && curRows.length > 0 && !curRowsAllZero) continue;
         if (recipeRowsEqual(curRows, targetRows)) continue;
         obj[rowsField] = targetRows.map((r) => ({ ingredient: r.ingredient, lbs: r.lbs }));
         changed = true;

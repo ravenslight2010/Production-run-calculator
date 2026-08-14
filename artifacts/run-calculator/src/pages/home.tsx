@@ -8311,31 +8311,95 @@ export default function Home() {
   //   • First load after the fix: full heal (any stale rows corrected), set marker.
   //   • Subsequent loads: empty-rows-only pass so a profile with no rows still
   //     gets filled even after the marker is set.
-  const cheeseMixHealDoneRef = useRef(false);
+  // Heal saved profiles + the open form so mix recipe rows show the imported
+  // oz/pizza amounts from the premix sheet rather than all-zero placeholders.
+  //
+  // Two-tier strategy:
+  //   • First-time full heal (marker not yet set): runs once when at least one
+  //     pool has data, overwrites ALL rows so stale pre-import zeros are fixed.
+  //     Protected by cheeseMixFullHealDoneRef so it fires exactly once per mount.
+  //   • Ongoing emptyRowsOnly heal (marker already set): runs every time the
+  //     mixes/cheese pool changes (e.g. after a fresh premix import while the
+  //     app is open) WITHOUT the ref guard, so newly imported amounts are
+  //     picked up immediately without a page reload.
+  const cheeseMixFullHealDoneRef = useRef(false);
   useEffect(() => {
-    if (cheeseMixHealDoneRef.current) return;
     const markerKey = "run-calc-cheese-mix-row-heal-v1";
     const markerSet = !!localStorage.getItem(markerKey);
-    // Wait until at least one pool has data before running the one-time full
-    // heal — pools start as [] while the server responds. After the marker is
-    // set the ongoing emptyRowsOnly pass can run immediately (it's cheap).
-    if (!markerSet && cheeseRecipesList.length === 0 && mixes.length === 0) return;
-    cheeseMixHealDoneRef.current = true;
-    for (const r of cheeseRecipesList) {
-      if (r.enabled === false || !r.name.trim()) continue;
-      const rows = normalizeRecipeRowsForCompare(r.components);
-      if (rows.length === 0) continue;
-      refreshCheeseOrMixProfileRows(r.name, rows, markerSet ? { emptyRowsOnly: true } : undefined);
+
+    // Build rows for a mix correctly: components use `perPizza` not `lbs`.
+    // normalizeRecipeRowsForCompare reads `r.lbs` and would return 0 for all.
+    function mixRows(m: (typeof mixes)[number]) {
+      return (m.components ?? [])
+        .map((c) => ({ ingredient: (c.ingredient ?? "").trim(), lbs: Math.max(0, c.perPizza ?? 0) }))
+        .filter((c) => c.ingredient);
     }
-    for (const m of mixes) {
-      if (!m.name.trim()) continue;
-      const rows = normalizeRecipeRowsForCompare(m.components);
-      if (rows.length === 0) continue;
-      refreshCheeseOrMixProfileRows(m.name, rows, markerSet ? { emptyRowsOnly: true } : undefined);
+
+    if (markerSet) {
+      // Ongoing pass — runs on every dep change without a ref guard.
+      for (const r of cheeseRecipesList) {
+        if (r.enabled === false || !r.name.trim()) continue;
+        const rows = normalizeRecipeRowsForCompare(r.components);
+        if (rows.length === 0) continue;
+        refreshCheeseOrMixProfileRows(r.name, rows, { emptyRowsOnly: true });
+      }
+      for (const m of mixes) {
+        if (!m.name.trim()) continue;
+        const rows = mixRows(m);
+        if (rows.length === 0) continue;
+        refreshCheeseOrMixProfileRows(m.name, rows, { emptyRowsOnly: true });
+      }
+    } else {
+      // First-time full heal — wait for pool data, run once per mount.
+      if (cheeseRecipesList.length === 0 && mixes.length === 0) return;
+      if (cheeseMixFullHealDoneRef.current) return;
+      cheeseMixFullHealDoneRef.current = true;
+      for (const r of cheeseRecipesList) {
+        if (r.enabled === false || !r.name.trim()) continue;
+        const rows = normalizeRecipeRowsForCompare(r.components);
+        if (rows.length === 0) continue;
+        refreshCheeseOrMixProfileRows(r.name, rows);
+      }
+      for (const m of mixes) {
+        if (!m.name.trim()) continue;
+        const rows = mixRows(m);
+        if (rows.length === 0) continue;
+        refreshCheeseOrMixProfileRows(m.name, rows);
+      }
+      localStorage.setItem(markerKey, "1");
     }
-    if (!markerSet) localStorage.setItem(markerKey, "1");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cheeseRecipesList, mixes]);
+
+  // Seed the currently-open form's mix applicator slots from server data
+  // whenever the mixes pool changes and a slot has a name set but all-zero
+  // recipe rows. Covers: page load before mixes arrive from the server, and
+  // the first session after a premix import without re-picking the name.
+  useEffect(() => {
+    if (serverMixRowsByName.size === 0) return;
+    const mixFormSlots = [
+      { typeField: "app1Type", nameField: "app1CheeseRecipeName", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza" },
+      { typeField: "app2Type", nameField: "app2CheeseRecipeName", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza" },
+      { typeField: "app3Type", nameField: "app3CheeseRecipeName", recipeField: "app3CheeseRecipe", ozField: "app3OzPerPizza" },
+      { typeField: "app4Type", nameField: "app4CheeseRecipeName", recipeField: "app4CheeseRecipe", ozField: "app4OzPerPizza" },
+    ] as const;
+    const curVals = form.getValues();
+    for (const { typeField, nameField, recipeField, ozField } of mixFormSlots) {
+      const type = (curVals[typeField] as string | undefined) ?? "";
+      if (!type.trim().toLowerCase().includes("mix")) continue;
+      const name = ((curVals[nameField] as string | undefined) ?? "").trim().toLowerCase();
+      if (!name) continue;
+      const curRows = (curVals[recipeField] as { lbs?: number }[] | undefined) ?? [];
+      const allZero = curRows.every((r) => !(Number(r.lbs) > 0));
+      if (!allZero) continue; // already has valid amounts — don't overwrite
+      const serverRows = serverMixRowsByName.get(name);
+      if (!serverRows || serverRows.length === 0) continue;
+      form.setValue(recipeField as "app1CheeseRecipe", serverRows.map((r) => ({ ...r })), { shouldDirty: true });
+      const rowSum = serverRows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
+      if (rowSum > 0) form.setValue(ozField as "app1OzPerPizza", rowSum, { shouldDirty: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverMixRowsByName]);
 
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
   // ingredient. Their sum should always equal appNOzPerPizza. Auto-sync
