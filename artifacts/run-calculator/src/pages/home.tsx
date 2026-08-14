@@ -8044,7 +8044,10 @@ export default function Home() {
       }
     }
     lastLocalEditRef.current = now;
-    schedulePush(ds, 2000);
+    // Use the default 600ms debounce so the push fires between 1-second
+    // auto-track ticks (2000ms was starving the push — the timer kept being
+    // reset before it could fire, delaying syncs up to the 30s interval).
+    schedulePush(ds);
     flashSaved();
   }, [v]);
 

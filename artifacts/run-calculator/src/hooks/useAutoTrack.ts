@@ -248,6 +248,16 @@ export function useAutoTrack({
   // tunnel is empty. -1 = not baselined yet: a device that opens mid-drain
   // baselines on its first tick instead of back-filling a catch-up jump.
   const drainFreezerRef = useRef<number>(-1);
+  // Stale-delta catch-up guard. When the form is reset to 0 cases while
+  // lastExpectedCasesRef still holds a positive value (e.g. after a long
+  // pause or an SSE form-reset), the first delta tick would compute
+  // deltaCases = expectedRaw − old_prevExpected and write that whole
+  // accumulated amount on top of 0 — producing a wrong low count (e.g. 54
+  // when the real count is 524). This ref allows a single re-baseline tick
+  // (no write) when that pattern is detected; the NEXT tick can write
+  // normally because prevExpected was updated to expectedRaw on the skipped
+  // tick, so deltaCases is then ≈ 1 case.
+  const formResetSkippedRef = useRef<boolean>(false);
 
   // Freezer-drain window: after End Run, packaging keeps casing product for as
   // long as the tunnel takes to empty. Case/skid auto-track keeps ticking
@@ -319,6 +329,7 @@ export function useAutoTrack({
     traySeededRef.current = false;
     batchSeededRef.current = false;
     drainFreezerRef.current = -1;
+    formResetSkippedRef.current = false;
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
     doughTimerPausedRef.current = 0;
     setIsDoughTimerPaused(false);
@@ -493,13 +504,30 @@ export function useAutoTrack({
           // manual correction is preserved and tracking continues forward from it.
           const deltaCases = Math.max(0, expectedRaw - prevExpected);
           if (deltaCases > 0) {
-            const target = curTotal + deltaCases;
-            // Never pull a value down below what the operator already has on the floor.
-            const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-            if (newTotal !== curTotal) {
-              form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
-              form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+            // Stale-delta catch-up guard: if the form shows 0 cases but
+            // prevExpected is positive, the form was reset (SSE echo, run
+            // switch, or operator correction to 0) while the expected-cases
+            // baseline was still ahead. Applying the full accumulated delta
+            // on top of 0 would write a wrong low count (e.g. 54 when the
+            // real count is 524). Skip this one tick — lastExpectedCasesRef
+            // was already updated above to expectedRaw, so the NEXT tick has
+            // a fresh baseline and writes ≈ 1 case (normal increment). Set
+            // formResetSkippedRef so the very next tick always proceeds even
+            // if curTotal is still 0 (operator-corrected-to-0 resumes).
+            if (!formResetSkippedRef.current && curTotal === 0 && prevExpected > cps) {
+              formResetSkippedRef.current = true;
+            } else {
+              formResetSkippedRef.current = false;
+              const target = curTotal + deltaCases;
+              // Never pull a value down below what the operator already has on the floor.
+              const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
+              if (newTotal !== curTotal) {
+                form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
+                form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+              }
             }
+          } else {
+            formResetSkippedRef.current = false;
           }
         }
       }
