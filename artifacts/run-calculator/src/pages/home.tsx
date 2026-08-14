@@ -18483,12 +18483,16 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   }
   useEffect(() => { setSpeedNudge(null); }, [currentRunId]);
 
-  function detectSpeedDrift(newTotal: number) {
+  // correctionDir: +1 = user tapped add, -1 = user tapped subtract.
+  // We track the BUTTON DIRECTION, not newTotal − expected, because when
+  // auto-track over-counts (line slower than configured) the running total stays
+  // above expectedCases and every subtract still yields a positive delta — which
+  // wrongly fires "faster than predicted". Tracking the tap direction is immune
+  // to that: consistent subtracts → slower, consistent adds → faster.
+  function detectSpeedDrift(newTotal: number, correctionDir: 1 | -1) {
     if (speedNudgeDismissedRef.current) return;
     if (Date.now() < speedNudgeLastAcceptRef.current + 30_000) return;
     if (!autoTrackProgress || runStatus !== "running") return;
-    const expectedTotal = autoTrackSuggestion?.expectedCases ?? null;
-    if (expectedTotal === null || expectedTotal <= 0) return;
     const elapsedNetMin = elapsedBatchSec / 60;
     // Cases don't exit the tunnel until freezerTime minutes into the run, so
     // measure observed PPM over the output window only — the same subtraction
@@ -18499,10 +18503,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     if (elapsedOutputMin < 1) return; // Need at least a minute of output
     const ppc = v.pizzasPerCase;
     if (ppc <= 0 || calc.ppm <= 0) return;
-    const delta = newTotal - expectedTotal;
-    if (Math.abs(delta) < 1) return; // Ignore sub-case corrections
     const history = speedCorrectionHistoryRef.current;
-    history.push({ ts: Date.now(), delta });
+    history.push({ ts: Date.now(), delta: correctionDir });
     if (history.length > 10) history.splice(0, history.length - 10);
     const positives = history.filter(c => c.delta > 0).length;
     const negatives = history.filter(c => c.delta < 0).length;
@@ -18510,6 +18512,9 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     const observedPpm = (newTotal * ppc) / elapsedOutputMin;
     const driftRatio = observedPpm / calc.ppm;
     if (Math.abs(driftRatio - 1.0) < 0.10) return; // < 10% drift — not significant
+    // Cross-check: the observedPpm direction must agree with the correction direction.
+    // This prevents a stale history (e.g. 2 adds from earlier) from misfiring after
+    // the user switches direction.
     const direction: "faster" | "slower" = driftRatio > 1.0 ? "faster" : "slower";
     if (direction === "faster" && positives < 2) return;
     if (direction === "slower" && negatives < 2) return;
@@ -18916,7 +18921,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); onManual(); const ns = Math.max(0, skids - 1); form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns); }}
+                                    onClick={() => { navigator.vibrate?.(8); onManual(); const ns = Math.max(0, skids - 1); form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns, -1); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -18930,7 +18935,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); onManual(); const ns = skids + 1; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns); }}
+                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); onManual(); const ns = skids + 1; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns, 1); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -18951,7 +18956,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); onManual(); const nc = Math.max(0, casesOnSkid - 1); form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? skids * casesPerSkid + nc : skids); }}
+                                    onClick={() => { navigator.vibrate?.(8); onManual(); const nc = Math.max(0, casesOnSkid - 1); form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? skids * casesPerSkid + nc : skids, -1); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -18970,7 +18975,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); onManual(); const nc = casesOnSkid + 1; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? skids * casesPerSkid + nc : skids); }}
+                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); onManual(); const nc = casesOnSkid + 1; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? skids * casesPerSkid + nc : skids, 1); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -19006,7 +19011,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                     const ns = skids + 1;
                                     form.setValue("skidsCompleted", ns, { shouldDirty: true });
                                     form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
-                                    detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid : ns);
+                                    detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid : ns, 1);
                                   }}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"
