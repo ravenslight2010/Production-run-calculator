@@ -295,8 +295,15 @@ export function computeRunLines(
     const type = (a.type ?? "").trim();
     if (!type) continue;
     const isMix = type.toLowerCase().includes("mix");
-    if (isMix && a.lbs > 0) add(`ingredient:${type}:lbs`, "ingredient", type, "lbs", a.lbs);
-    else if (!isMix && a.batches > 0) add(`ingredient:${type}:batches`, "ingredient", type, "batches", a.batches);
+    if (isMix && a.lbs > 0) {
+      add(`ingredient:${type}:lbs`, "ingredient", type, "lbs", a.lbs);
+    } else if (!isMix && a.batches > 0) {
+      add(`ingredient:${type}:batches`, "ingredient", type, "batches", a.batches);
+    } else if (!isMix && a.lbs > 0) {
+      // No batch size configured — track by lbs so ingredients like Hamburger
+      // still appear in inventory consumption and the warehouse pull list.
+      add(`ingredient:${type}:lbs`, "ingredient", type, "lbs", a.lbs);
+    }
   }
 
   // Pepperoni / toppings — trim type identically across apps so keys/std-vs-batch

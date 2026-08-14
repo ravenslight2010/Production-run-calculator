@@ -742,8 +742,13 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
           // No recipe rows — fall back to batch count so display degrades gracefully.
           add(label, a.batches, "batches");
         }
+      } else if (!isMix && !isCheese && a.batches > 0) {
+        add(label, a.batches, "batches");
+      } else if (!isMix && !isCheese && a.lbs > 0) {
+        // No batch size configured for this applicator type — show lbs so
+        // warehouse pullers still know how much to pull (e.g. Hamburger, Beef).
+        add(label, a.lbs, "lbs");
       }
-      else if (!isMix && a.batches > 0) add(label, a.batches, "batches");
     };
     for (const a of appsFront) addApp(a);
     if (s.pep1Type && s.pep1Lbs > 0) {
