@@ -8378,13 +8378,13 @@ export default function Home() {
   useEffect(() => {
     if (serverMixRowsByName.size === 0) return;
     const mixFormSlots = [
-      { typeField: "app1Type", nameField: "app1CheeseRecipeName", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza" },
-      { typeField: "app2Type", nameField: "app2CheeseRecipeName", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza" },
-      { typeField: "app3Type", nameField: "app3CheeseRecipeName", recipeField: "app3CheeseRecipe", ozField: "app3OzPerPizza" },
-      { typeField: "app4Type", nameField: "app4CheeseRecipeName", recipeField: "app4CheeseRecipe", ozField: "app4OzPerPizza" },
+      { typeField: "app1Type", nameField: "app1CheeseRecipeName", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza", replace: replaceCheese1 },
+      { typeField: "app2Type", nameField: "app2CheeseRecipeName", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza", replace: replaceCheese2 },
+      { typeField: "app3Type", nameField: "app3CheeseRecipeName", recipeField: "app3CheeseRecipe", ozField: "app3OzPerPizza", replace: replaceCheese3 },
+      { typeField: "app4Type", nameField: "app4CheeseRecipeName", recipeField: "app4CheeseRecipe", ozField: "app4OzPerPizza", replace: replaceCheese4 },
     ] as const;
     const curVals = form.getValues();
-    for (const { typeField, nameField, recipeField, ozField } of mixFormSlots) {
+    for (const { typeField, nameField, recipeField, ozField, replace } of mixFormSlots) {
       const type = (curVals[typeField] as string | undefined) ?? "";
       if (!type.trim().toLowerCase().includes("mix")) continue;
       const name = ((curVals[nameField] as string | undefined) ?? "").trim().toLowerCase();
@@ -8394,13 +8394,16 @@ export default function Home() {
       if (!allZero) continue; // already has valid amounts — don't overwrite
       const serverRows = serverMixRowsByName.get(name);
       if (!serverRows || serverRows.length === 0) continue;
-      form.setValue(recipeField as "app1CheeseRecipe", serverRows.map((r) => ({ ...r })), { shouldDirty: true });
+      const hasServerData = serverRows.some((r) => (Number(r.lbs) || 0) > 0);
+      if (!hasServerData) continue;
+      const rows = serverRows.map((r) => ({ ...r }));
+      form.setValue(recipeField as "app1CheeseRecipe", rows, { shouldDirty: true });
+      replace(rows);
       const rowSum = serverRows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
       if (rowSum > 0) form.setValue(ozField as "app1OzPerPizza", rowSum, { shouldDirty: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverMixRowsByName]);
-
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
   // ingredient. Their sum should always equal appNOzPerPizza. Auto-sync
   // appNOzPerPizza from the row sum whenever it drifts (e.g. after the user
