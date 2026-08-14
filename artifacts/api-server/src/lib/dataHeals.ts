@@ -3300,6 +3300,58 @@ async function runBrandDuplicatePurge(): Promise<void> {
   });
 }
 
+// ── Heal: set pre/post tunnel defaults on profiles that still have 0 ──────────
+// The schema default for preTunnelMin / postTunnelMin was raised from 0 to 2.5
+// (the factory-standard dwell). Any profile saved before that change has 0
+// stored in the server pool, which means Setup loads "0 min" instead of the
+// correct 2.5 min factory standard. This heal sets both fields to 2.5 on every
+// profile where either is ≤ 0, and advances the LWW stamp so a device holding
+// the old 0-value copy can't re-publish it over the heal.
+const TUNNEL_PRE_POST_DEFAULT_HEAL_ID = "tunnel-pre-post-default-v1";
+
+async function runTunnelPrePostDefaultHeal(): Promise<void> {
+  const DEFAULT_MIN = 2.5;
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: TUNNEL_PRE_POST_DEFAULT_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let updated = 0;
+    for (const p of profiles) {
+      const values = { ...(p.values as Record<string, unknown>) };
+      const pre = Number(values.preTunnelMin ?? 0);
+      const post = Number(values.postTunnelMin ?? 0);
+      if (pre > 0 && post > 0) continue;
+      if (!(pre > 0)) values.preTunnelMin = DEFAULT_MIN;
+      if (!(post > 0)) values.postTunnelMin = DEFAULT_MIN;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(
+          and(
+            eq(brandProfilesTable.key, p.key),
+            eq(brandProfilesTable.scope, p.scope),
+          ),
+        );
+      updated++;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: profiles.length, updated } })
+      .where(eq(dataHealsTable.id, TUNNEL_PRE_POST_DEFAULT_HEAL_ID));
+    logger.info(
+      { heal: TUNNEL_PRE_POST_DEFAULT_HEAL_ID, scanned: profiles.length, updated },
+      "Data heal applied",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
@@ -3331,4 +3383,5 @@ export async function runDataHeals(): Promise<void> {
   await runApplicatorContaminationDepoison();
   await runSyncRowNameRegistryRestore();
   await runBrandDuplicatePurge();
+  await runTunnelPrePostDefaultHeal();
 }

@@ -8337,6 +8337,36 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cheeseRecipesList, mixes]);
 
+  // For mix applicators, the recipe rows' lbs field stores oz/pizza per
+  // ingredient. Their sum should always equal appNOzPerPizza. Auto-sync
+  // appNOzPerPizza from the row sum whenever it drifts (e.g. after the user
+  // edits recipe rows or loads a profile where the total was never matched).
+  useEffect(() => {
+    const slots = [
+      { typeField: "app1Type", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza" },
+      { typeField: "app2Type", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza" },
+      { typeField: "app3Type", recipeField: "app3CheeseRecipe", ozField: "app3OzPerPizza" },
+      { typeField: "app4Type", recipeField: "app4CheeseRecipe", ozField: "app4OzPerPizza" },
+    ] as const;
+    for (const { typeField, recipeField, ozField } of slots) {
+      const type = (v[typeField] as string | undefined) ?? "";
+      if (!type.trim().toLowerCase().includes("mix")) continue;
+      const rows = (v[recipeField] as { lbs?: number }[] | undefined) ?? [];
+      const rowSum = rows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
+      if (rowSum <= 0) continue; // don't zero out a valid oz field
+      const current = Number(v[ozField]) || 0;
+      if (Math.abs(current - rowSum) > 0.001) {
+        form.setValue(ozField, rowSum, { shouldDirty: true });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    v.app1Type, v.app1CheeseRecipe,
+    v.app2Type, v.app2CheeseRecipe,
+    v.app3Type, v.app3CheeseRecipe,
+    v.app4Type, v.app4CheeseRecipe,
+  ]);
+
   // One-time boot heal: write preTunnelMin = postTunnelMin = 2.5 into every
   // saved profile that still has 0 stored (from before the default was raised).
   // Also updates the open form if it loaded with 0 values.

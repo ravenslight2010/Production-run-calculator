@@ -107,9 +107,13 @@ describe("isAllDefaultRunValue (legacy pep-25 blank shape)", () => {
 // The formSchema fallbacks once invented line numbers (casesNeeded 384,
 // cycleSpeed 7.8, pep batch 25 lbs, …) when a legacy stored blob was missing a
 // field. They must all be 0 now — the deliberate exceptions are
-// speedAdjustment (1.0) and the machine times, which default to the
-// factory-typical times (MACHINE_TIME_DEFAULTS) — and must agree with
-// DEFAULT_VALUES exactly.
+// speedAdjustment (1.0), the machine times (MACHINE_TIME_DEFAULTS), and the
+// tunnel pre/post times (preTunnelMin / postTunnelMin = 2.5, the factory
+// standard dwell) — and must agree with DEFAULT_VALUES exactly.
+const PRE_POST_TUNNEL_DEFAULTS: Partial<Record<string, number>> = {
+  preTunnelMin: 2.5,
+  postTunnelMin: 2.5,
+};
 describe("formSchema legacy fallbacks", () => {
   it("parses an empty blob to all-zero quantity fields (no invented progress/settings)", () => {
     const parsed = formSchema.parse({});
@@ -120,6 +124,10 @@ describe("formSchema legacy fallbacks", () => {
         expect(v, `schema default for ${k}`).toBe(
           MACHINE_TIME_DEFAULTS[k as keyof typeof MACHINE_TIME_DEFAULTS],
         );
+        continue;
+      }
+      if (k in PRE_POST_TUNNEL_DEFAULTS) {
+        expect(v, `schema default for ${k}`).toBe(PRE_POST_TUNNEL_DEFAULTS[k]);
         continue;
       }
       expect(v, `schema default for ${k}`).toBe(0);
