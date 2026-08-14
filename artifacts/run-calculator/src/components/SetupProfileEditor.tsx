@@ -45,6 +45,7 @@ import { Separator } from "@/components/ui/separator";
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle } from "lucide-react";
+import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
@@ -684,6 +685,17 @@ export default function SetupProfileEditor({
               <NumField control={form.control} name={batchKey} label="Batch Weight (lbs)" />
             )}
           </div>
+        )}
+        {isMix && (
+          <AppSlotMathBadge
+            rows={recipe}
+            ozPerPizza={Number((v[ozKey] as number) ?? 0)}
+            onResolveByRowSum={(newOz) => form.setValue(ozKey, newOz, { shouldDirty: true })}
+            onResolveByTotal={(scaledRows) => {
+              form.setValue(recipeKey, scaledRows as any, { shouldDirty: true });
+              replaceCheeseByApp[app](scaledRows as any);
+            }}
+          />
         )}
         {isCheese && (
           <CheesePickCard

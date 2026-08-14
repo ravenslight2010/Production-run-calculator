@@ -357,6 +357,7 @@ import {
 import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
+import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
@@ -20932,6 +20933,14 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
+                      {v.app1Type.trim().toLowerCase().includes("mix") && (
+                        <AppSlotMathBadge
+                          rows={v.app1CheeseRecipe ?? []}
+                          ozPerPizza={Number(v.app1OzPerPizza) || 0}
+                          onResolveByRowSum={(newOz) => form.setValue("app1OzPerPizza", newOz, { shouldDirty: true })}
+                          onResolveByTotal={(scaledRows) => { form.setValue("app1CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese1(scaledRows as any); }}
+                        />
+                      )}
                       {v.app1Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
@@ -21001,6 +21010,14 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
+                      {v.app2Type.trim().toLowerCase().includes("mix") && (
+                        <AppSlotMathBadge
+                          rows={v.app2CheeseRecipe ?? []}
+                          ozPerPizza={Number(v.app2OzPerPizza) || 0}
+                          onResolveByRowSum={(newOz) => form.setValue("app2OzPerPizza", newOz, { shouldDirty: true })}
+                          onResolveByTotal={(scaledRows) => { form.setValue("app2CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese2(scaledRows as any); }}
+                        />
+                      )}
                       {v.app2Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
@@ -21249,6 +21266,14 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
+                      {v.app3Type.trim().toLowerCase().includes("mix") && (
+                        <AppSlotMathBadge
+                          rows={v.app3CheeseRecipe ?? []}
+                          ozPerPizza={Number(v.app3OzPerPizza) || 0}
+                          onResolveByRowSum={(newOz) => form.setValue("app3OzPerPizza", newOz, { shouldDirty: true })}
+                          onResolveByTotal={(scaledRows) => { form.setValue("app3CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese3(scaledRows as any); }}
+                        />
+                      )}
                       {v.app3Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
@@ -21318,6 +21343,14 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
+                      {v.app4Type.trim().toLowerCase().includes("mix") && (
+                        <AppSlotMathBadge
+                          rows={v.app4CheeseRecipe ?? []}
+                          ozPerPizza={Number(v.app4OzPerPizza) || 0}
+                          onResolveByRowSum={(newOz) => form.setValue("app4OzPerPizza", newOz, { shouldDirty: true })}
+                          onResolveByTotal={(scaledRows) => { form.setValue("app4CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese4(scaledRows as any); }}
+                        />
+                      )}
                       {v.app4Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded

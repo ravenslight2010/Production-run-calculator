@@ -20,6 +20,11 @@ import {
   type Mix,
   type MixComponent,
 } from "@workspace/mixes";
+import {
+  detectMixComponentConflicts,
+  resolveMixByPerPizza,
+  resolveMixByPerBatchLbs,
+} from "@workspace/setup-math-check";
 import { useMixes } from "../hooks/useMixes";
 import { saveMixes, deleteMixes } from "../mixes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
@@ -620,6 +625,67 @@ function MixEditor({
             ))}
           </div>
         )}
+        {/* Mix component math conflict panel */}
+        {(() => {
+          const conflicts = detectMixComponentConflicts(draft.components, draft.batchSize);
+          if (conflicts.length === 0) return null;
+          return (
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="text-[12px] font-medium text-amber-700 dark:text-amber-400 flex-1 leading-tight">
+                  {conflicts.length === 1
+                    ? "1 component has mismatched oz/pizza and lbs/batch"
+                    : `${conflicts.length} components have mismatched oz/pizza and lbs/batch`}
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {conflicts.map((cf) => (
+                  <div key={cf.componentIdx} className="rounded bg-muted/40 px-2.5 py-1.5 text-[11px]">
+                    <span className="font-semibold">{cf.ingredient || `Row ${cf.componentIdx + 1}`}</span>
+                    {": "}
+                    <span className="font-mono">{cf.perPizza} oz/pizza</span> implies{" "}
+                    <span className="font-mono">{cf.expectedPerBatchLbs.toFixed(2)} lbs/batch</span>, but{" "}
+                    <span className="font-mono">{cf.perBatchLbs} lbs/batch</span> is entered.
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    const resolved = resolveMixByPerPizza(draft.components, draft.batchSize);
+                    const next = { ...draft, components: resolved as MixComponent[] };
+                    setDraft(next);
+                    commit(next);
+                  }}
+                  className="flex-1 min-w-[140px] px-2 py-1.5 rounded-md border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-[11px] font-semibold text-amber-800 dark:text-amber-300 transition-colors disabled:opacity-50 text-left"
+                >
+                  Use oz/pizza → fix all lbs/batch values
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    const { components: resolvedComps, batchSize: resolvedBatchSize } =
+                      resolveMixByPerBatchLbs(draft.components, draft.batchSize);
+                    const next = {
+                      ...draft,
+                      components: resolvedComps as MixComponent[],
+                      batchSize: resolvedBatchSize,
+                    };
+                    setDraft(next);
+                    commit(next);
+                  }}
+                  className="flex-1 min-w-[140px] px-2 py-1.5 rounded-md border border-border/60 bg-muted/40 hover:bg-muted/70 text-[11px] font-semibold text-foreground transition-colors disabled:opacity-50 text-left"
+                >
+                  Use lbs/batch → redistribute oz/pizza values
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         <datalist id={`mix-ingredients-${draft.id}`}>
           {ingredientSuggestions.map((s) => (
             <option key={s} value={s} />
