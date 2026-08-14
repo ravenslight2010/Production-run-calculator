@@ -142,12 +142,12 @@ interface AutoTrackResult {
 export type UseAutoTrackReturn = AutoTrackResult;
 
 // Each counter ticks at its own natural production pace, clamped to a sane
-// range: never faster than once per 2s (the app clock ticks per second) and
-// never slower than once per hour (a stalled/garbage rate must not freeze the
+// range: never faster than once per 1s (the app clock resolution) and never
+// slower than once per hour (a stalled/garbage rate must not freeze the
 // counter forever).
 function clampPeriodMs(ms: number): number {
   if (!Number.isFinite(ms) || ms <= 0) return 60 * 60 * 1000;
-  return Math.min(60 * 60 * 1000, Math.max(2000, ms));
+  return Math.min(60 * 60 * 1000, Math.max(1000, ms));
 }
 
 /**
