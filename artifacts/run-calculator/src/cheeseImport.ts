@@ -248,7 +248,7 @@ export async function commitCheeseImport(
   newAliases: ReadonlyArray<SpecImportAlias> = [],
   recipesToRemove: ReadonlyArray<string> = [],
 ): Promise<CheeseCommitResult> {
-  if (recipesToApply.length === 0 && recipesToRemove.length === 0) return { count: 0 };
+  if (recipesToApply.length === 0 && recipesToRemove.length === 0) return { count: 0, saved: [] };
   const existing = await fetchCheeseRecipes();
   const removeSet = new Set(recipesToRemove);
   const afterRemoval = recipesToRemove.length > 0

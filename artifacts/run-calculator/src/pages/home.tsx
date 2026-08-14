@@ -16893,60 +16893,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
-                {/* Remove run — only for upcoming (pending) runs when more than one exists, supervisors only */}
-                {isSupervisor && !currentRun?.startedAt && !currentRun?.endedAt && dayState.runs.length > 1 && (
-                  confirmRemoveRun ? (
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-destructive font-semibold">Remove?</span>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
-                        onClick={removeRun}
-                      >Yes</button>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
-                        onClick={() => setConfirmRemoveRun(false)}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemoveRun(true)}
-                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                      title="Remove this run"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )
-                )}
-                {/* Remove blank runs — sweep untouched "Unnamed Run" entries pinned in the shared day, supervisors only */}
-                {isSupervisor && blankRunIds.length > 0 && (
-                  confirmRemoveBlanks ? (
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-destructive font-semibold">Remove {blankRunIds.length} blank run{blankRunIds.length === 1 ? "" : "s"}?</span>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
-                        onClick={removeBlankRuns}
-                      >Yes</button>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
-                        onClick={() => setConfirmRemoveBlanks(false)}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemoveBlanks(true)}
-                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                      title={`Remove ${blankRunIds.length} blank run${blankRunIds.length === 1 ? "" : "s"}`}
-                    >
-                      <Eraser className="w-3.5 h-3.5" />
-                    </button>
-                  )
-                )}
                 {dayState.runs.length > 1 && (
                   <button
                     type="button"
