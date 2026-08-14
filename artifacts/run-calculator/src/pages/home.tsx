@@ -18778,7 +18778,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); onManual(); form.setValue("skidsCompleted", Math.max(0, skids - 1), { shouldDirty: true }); }}
+                                    onClick={() => { navigator.vibrate?.(8); onManual(); const ns = Math.max(0, skids - 1); form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -18792,7 +18792,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); onManual(); form.setValue("skidsCompleted", skids + 1, { shouldDirty: true }); }}
+                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); onManual(); const ns = skids + 1; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -18813,7 +18813,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); onManual(); form.setValue("casesOnCurrentSkid", Math.max(0, casesOnSkid - 1), { shouldDirty: true }); }}
+                                    onClick={() => { navigator.vibrate?.(8); onManual(); const nc = Math.max(0, casesOnSkid - 1); form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? skids * casesPerSkid + nc : skids); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -18832,7 +18832,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); onManual(); form.setValue("casesOnCurrentSkid", casesOnSkid + 1, { shouldDirty: true }); }}
+                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); onManual(); const nc = casesOnSkid + 1; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(casesPerSkid > 0 ? skids * casesPerSkid + nc : skids); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -18865,8 +18865,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                     markRunValuesUpdated(currentRunId, Date.now());
                                     autoSuppressUntilRef.current = 0;
                                     fireAutoTrackNow();
-                                    form.setValue("skidsCompleted", skids + 1, { shouldDirty: true });
+                                    const ns = skids + 1;
+                                    form.setValue("skidsCompleted", ns, { shouldDirty: true });
                                     form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+                                    detectSpeedDrift(casesPerSkid > 0 ? ns * casesPerSkid : ns);
                                   }}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"
@@ -18924,6 +18926,55 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   </div>
                 </div>
                 </div>
+
+                {/* Speed adjustment nudge — appears when packaging corrections
+                    indicate the configured line speed is off by ≥10%. */}
+                {speedNudge && (
+                  <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-950/15 px-4 py-3" data-testid="speed-nudge-card">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-1.5">
+                      Line Speed Suggestion
+                    </p>
+                    <p className="text-xs text-foreground mb-2.5">
+                      Line running <span className="font-semibold text-amber-300">{speedNudge.direction}</span> than
+                      predicted — adjust{" "}
+                      <span className="font-medium">
+                        {speedNudge.isCrust ? "Approximate Line Speed" : "Speed Adjustment"}
+                      </span>{" "}
+                      to <span className="font-mono font-bold">{speedNudge.value.toFixed(2)}</span>?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        data-testid="speed-nudge-accept"
+                        onClick={() => {
+                          const now = Date.now();
+                          const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
+                          form.setValue(field, speedNudge.value, { shouldDirty: true });
+                          markRunValuesUpdated(currentRunId, now);
+                          hx.lastLocalEditRef.current = now;
+                          schedulePush(dayStateRef.current, 0);
+                          speedNudgeLastAcceptRef.current = now;
+                          speedCorrectionHistoryRef.current = [];
+                          setSpeedNudge(null);
+                        }}
+                        className="flex-1 rounded-md bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold py-1.5 transition-colors"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="speed-nudge-dismiss"
+                        onClick={() => {
+                          speedNudgeDismissedRef.current = true;
+                          setSpeedNudge(null);
+                        }}
+                        className="flex-1 rounded-md border border-border/50 bg-muted/40 hover:bg-muted text-muted-foreground text-xs py-1.5 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* ─── Packaging Config (collapsible) ─── */}
                 <details className="group mt-6 rounded-xl border border-border/40 bg-card/40 overflow-hidden">
@@ -20181,9 +20232,6 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
                             form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
                             onManual();
-                            // Check whether this correction indicates a persistent
-                            // drift from the predicted line speed.
-                            detectSpeedDrift(total);
                           };
                           // Without a cases-per-skid setting the two counters
                           // can't be combined into one total — bump each field
@@ -20270,14 +20318,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
                             onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={() => {
-                              onManual();
-                              // Detect drift for crust mode (or dough mode without casesPerSkid)
-                              const cs = Number(form.getValues("skidsCompleted")) || 0;
-                              const cc = Number(form.getValues("casesOnCurrentSkid")) || 0;
-                              const cps = v.casesPerSkid > 0 ? v.casesPerSkid : 0;
-                              detectSpeedDrift(cps > 0 ? cs * cps + cc : cs);
-                            }}
+                            onManualChange={() => { onManual(); }}
                           />
                           <StepperField
                             control={form.control}
@@ -20286,64 +20327,9 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
                             onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={() => {
-                              onManual();
-                              const cs = Number(form.getValues("skidsCompleted")) || 0;
-                              const cc = Number(form.getValues("casesOnCurrentSkid")) || 0;
-                              const cps = v.casesPerSkid > 0 ? v.casesPerSkid : 0;
-                              detectSpeedDrift(cps > 0 ? cs * cps + cc : cs);
-                            }}
+                            onManualChange={() => { onManual(); }}
                           />
                         </div>
-                        )}
-                        {/* Speed adjustment nudge — appears when repeated manual corrections
-                            indicate the configured line speed is off by ≥10%. */}
-                        {speedNudge && (
-                          <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-950/15 px-4 py-3" data-testid="speed-nudge-card">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-1.5">
-                              Line Speed Suggestion
-                            </p>
-                            <p className="text-xs text-foreground mb-2.5">
-                              Line running <span className="font-semibold text-amber-300">{speedNudge.direction}</span> than
-                              predicted — adjust{" "}
-                              <span className="font-medium">
-                                {speedNudge.isCrust ? "Approximate Line Speed" : "Speed Adjustment"}
-                              </span>{" "}
-                              to <span className="font-mono font-bold">{speedNudge.value.toFixed(2)}</span>?
-                            </p>
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                data-testid="speed-nudge-accept"
-                                onClick={() => {
-                                  const now = Date.now();
-                                  const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
-                                  form.setValue(field, speedNudge.value, { shouldDirty: true });
-                                  markRunValuesUpdated(currentRunId, now);
-                                  hx.lastLocalEditRef.current = now;
-                                  schedulePush(dayStateRef.current, 0);
-                                  speedNudgeLastAcceptRef.current = now;
-                                  // Clear correction history so the next drift episode starts fresh
-                                  speedCorrectionHistoryRef.current = [];
-                                  setSpeedNudge(null);
-                                }}
-                                className="flex-1 rounded-md bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold py-1.5 transition-colors"
-                              >
-                                Accept
-                              </button>
-                              <button
-                                type="button"
-                                data-testid="speed-nudge-dismiss"
-                                onClick={() => {
-                                  speedNudgeDismissedRef.current = true;
-                                  setSpeedNudge(null);
-                                }}
-                                className="flex-1 rounded-md border border-border/50 bg-muted/40 hover:bg-muted text-muted-foreground text-xs py-1.5 transition-colors"
-                              >
-                                Dismiss
-                              </button>
-                            </div>
-                          </div>
                         )}
                       </>
                     );
