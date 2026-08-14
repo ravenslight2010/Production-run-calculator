@@ -19158,10 +19158,13 @@ function BatchMadeRow({
 
 const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush } = hx;
+  const {
+    v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
+    form, autoSuppressUntilRef, lastLocalEditRef,
+  } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
-  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec } = useLiveRun();
+  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs } = useLiveRun();
 
   // ── Barrel timer state: backed by module-level store so it survives Radix ──
   // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
@@ -19428,14 +19431,104 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           </CardContent>
         </Card>
       )}
-      {/* Sauce packaging quick check — fires on the dough-batch cadence so the
-          sauce crew verifies the skid/case count without switching tabs. */}
-      {showSauceQuickCheck && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-950/10 px-4 py-3 mb-4 text-xs">
-          <span className="text-amber-400 font-semibold">📦 Quick check: update skid and case count in the Packaging tab</span>
-          <button className="text-muted-foreground hover:text-foreground ml-2 shrink-0" onClick={() => setShowSauceQuickCheck(false)}>✕</button>
-        </div>
-      )}
+      {/* Packaging quick check — same widget as the dough tab so the sauce
+          crew can update skid/case counts without switching tabs. */}
+      {(runStatus === "running" || runStatus === "paused") && (() => {
+        const hasCps = v.casesPerSkid > 0;
+        const cps = hasCps ? v.casesPerSkid : 0;
+        const packedSkids = Number(v.skidsCompleted) || 0;
+        const packedCasesOnSkid = Number(v.casesOnCurrentSkid) || 0;
+        const packedTotal = packedSkids * cps + packedCasesOnSkid;
+        const skidsTotal = hasCps && v.casesNeeded > 0 ? Math.ceil(v.casesNeeded / cps) : null;
+        const s = autoTrackSuggestion;
+        const suppressed = Date.now() < autoSuppressUntilRef.current;
+        const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
+        const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
+        const expectedTotal = s ? s.expectedCases : null;
+        const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
+        const packOnPace = packGapCases <= 2;
+        const packBehindSec = packGapCases * casePeriodSec;
+        const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; markRunValuesUpdated(currentRunId, Date.now()); };
+        const setPackedTotal = (t: number) => {
+          const total = Math.max(0, t);
+          markRunValuesUpdated(currentRunId, Date.now());
+          form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
+          form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
+          onManual();
+        };
+        const bumpSkids = (d: number) => {
+          markRunValuesUpdated(currentRunId, Date.now());
+          form.setValue("skidsCompleted", Math.max(0, packedSkids + d), { shouldDirty: true });
+          onManual();
+        };
+        const bumpCases = (d: number) => {
+          markRunValuesUpdated(currentRunId, Date.now());
+          form.setValue("casesOnCurrentSkid", Math.max(0, packedCasesOnSkid + d), { shouldDirty: true });
+          onManual();
+        };
+        const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
+        return (
+          <div className={`mb-4 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Packaging — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
+              </p>
+              {hasCps && expectedTotal !== null && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  packOnPace
+                    ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
+                    : "text-amber-400 border-amber-500/30 bg-amber-950/20"
+                }`}>
+                  {packOnPace ? "On pace" : `Behind ${packGapCases} case${packGapCases !== 1 ? "s" : ""}`}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
+                <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn}>−</button>
+                  <p className="text-xl font-mono font-bold text-foreground tabular-nums">
+                    {packedSkids}
+                    {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
+                  </p>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn}>+</button>
+                </div>
+              </div>
+              <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
+                <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn}>−</button>
+                  <p className="text-xl font-mono font-bold text-foreground tabular-nums">
+                    {packedCasesOnSkid}
+                    {hasCps && <span className="text-xs text-muted-foreground font-normal">/{cps}</span>}
+                  </p>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn}>+</button>
+                </div>
+              </div>
+              <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
+                <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
+                  {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
+                </p>
+              </div>
+            </div>
+            {hasCps && expectedTotal !== null && (
+              <p className="text-[10px] text-muted-foreground mt-2">
+                {packOnPace ? (
+                  <>Packed {packedTotal} cases vs {expectedTotal} expected at line speed — packaging is keeping up.</>
+                ) : (
+                  <>
+                    Packed <span className="text-foreground font-semibold">{packedTotal}</span> cases vs{" "}
+                    <span className="text-foreground font-semibold">{expectedTotal}</span> expected at line speed —
+                    that's <span className="text-amber-400 font-semibold">{fmtMS(packBehindSec)}</span> behind.
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+        );
+      })()}
       <ReadOnlyRecipeCard
         title="Sauce Recipe"
         subtitle={v.frontlineRecipeName?.trim() || undefined}
