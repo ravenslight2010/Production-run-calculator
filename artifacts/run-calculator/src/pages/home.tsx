@@ -18450,7 +18450,13 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     const expectedTotal = autoTrackSuggestion?.expectedCases ?? null;
     if (expectedTotal === null || expectedTotal <= 0) return;
     const elapsedNetMin = elapsedBatchSec / 60;
-    if (elapsedNetMin < 1) return; // Need at least a minute of data
+    // Cases don't exit the tunnel until freezerTime minutes into the run, so
+    // measure observed PPM over the output window only — the same subtraction
+    // autoTrackSuggestion uses. Without this, early-run suggestions are wildly
+    // low because the full elapsed time is in the denominator but only a
+    // fraction of it has produced packaged output.
+    const elapsedOutputMin = Math.max(0, elapsedNetMin - Number(v.freezerTime));
+    if (elapsedOutputMin < 1) return; // Need at least a minute of output
     const ppc = v.pizzasPerCase;
     if (ppc <= 0 || calc.ppm <= 0) return;
     const delta = newTotal - expectedTotal;
@@ -18461,7 +18467,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     const positives = history.filter(c => c.delta > 0).length;
     const negatives = history.filter(c => c.delta < 0).length;
     if (positives < 2 && negatives < 2) return; // Need ≥2 corrections in same direction
-    const observedPpm = (newTotal * ppc) / elapsedNetMin;
+    const observedPpm = (newTotal * ppc) / elapsedOutputMin;
     const driftRatio = observedPpm / calc.ppm;
     if (Math.abs(driftRatio - 1.0) < 0.10) return; // < 10% drift — not significant
     const direction: "faster" | "slower" = driftRatio > 1.0 ? "faster" : "slower";
