@@ -231,6 +231,8 @@ export async function prepareCheeseImport(
 export type CheeseCommitResult = {
   /** How many recipes were saved. */
   count: number;
+  /** The full saved pool returned by the server after the commit. */
+  saved: CheeseRecipe[];
 };
 
 /**
@@ -255,7 +257,7 @@ export async function commitCheeseImport(
   const merged = recipesToApply.length > 0
     ? mergeCheeseRecipes(afterRemoval, recipesToApply)
     : afterRemoval;
-  await saveCheeseRecipes(merged);
+  const saved = await saveCheeseRecipes(merged);
   // Remember the review's manual "use existing recipe" picks as blend-name
   // aliases so the next import of the same sheet pre-suggests the same links.
   // Best-effort: the recipes already saved; learning is a bonus.
@@ -266,5 +268,5 @@ export async function commitCheeseImport(
       // ignore — learning is non-critical
     }
   }
-  return { count: recipesToApply.length };
+  return { count: recipesToApply.length, saved };
 }

@@ -4233,6 +4233,122 @@ export default function Home() {
     [form],
   );
 
+  // After a cheese recipe workbook import, fan the updated per-batch lbs into
+  // every saved brand/flavor profile whose appNCheeseRecipeName matches one of
+  // the saved recipes. Also updates the open form and pending runs.
+  const propagateCheeseRecipeUpdates = useCallback(
+    async (updatedRecipes: CheeseRecipe[]) => {
+      if (updatedRecipes.length === 0) return;
+
+      // Build name-key → fresh row snapshot for recipes that have real lbs.
+      const recipeByName = new Map<string, Array<{ ingredient: string; lbs: number }>>();
+      for (const recipe of updatedRecipes) {
+        const key = (recipe.name ?? "").trim().toLowerCase();
+        if (!key) continue;
+        const rows = recipe.components
+          .filter((c) => Number(c.lbs) > 0)
+          .map((c) => ({ ingredient: c.ingredient, lbs: Number(c.lbs) }));
+        if (rows.length > 0) recipeByName.set(key, rows);
+      }
+      if (recipeByName.size === 0) return;
+
+      // Seed all server profiles into localStorage before scanning.
+      let serverPairs: { brand: string; flavor: string }[] = [];
+      try {
+        serverPairs = await seedProfilesFromServer();
+      } catch {
+        // Network unavailable — fall back to whatever localStorage already holds.
+      }
+
+      // Collect all brand__flavor profile keys.
+      const seenSuffixes = new Set<string>();
+      const profileSuffixes: string[] = [];
+      const PREFIX = "run-calc-profile-";
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k?.startsWith(PREFIX)) continue;
+        const suffix = k.slice(PREFIX.length);
+        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
+          seenSuffixes.add(suffix);
+          profileSuffixes.push(suffix);
+        }
+      }
+      for (const { brand, flavor } of serverPairs) {
+        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+        if (!seenSuffixes.has(suffix)) {
+          seenSuffixes.add(suffix);
+          profileSuffixes.push(suffix);
+        }
+      }
+
+      const cheeseSlots = [
+        { nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe" },
+        { nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe" },
+        { nameField: "app3CheeseRecipeName", rowsField: "app3CheeseRecipe" },
+        { nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe" },
+      ] as const;
+
+      let updatedCount = 0;
+      const propagations: Promise<void>[] = [];
+
+      for (const suffix of profileSuffixes) {
+        const dunderIdx = suffix.indexOf("__");
+        if (dunderIdx < 0) continue;
+        const brand  = suffix.slice(0, dunderIdx);
+        const flavor = suffix.slice(dunderIdx + 2);
+
+        const profile = loadProfile(brand, flavor);
+        if (!profile) continue;
+
+        const profileRec = profile as unknown as Record<string, unknown>;
+        const updates: Record<string, unknown> = {};
+
+        for (const { nameField, rowsField } of cheeseSlots) {
+          const recipeName = ((profileRec[nameField] as string) ?? "").trim();
+          if (!recipeName) continue;
+          const freshRows = recipeByName.get(recipeName.toLowerCase());
+          if (!freshRows) continue;
+          // Skip if the lbs sum is already correct (avoids no-op writes).
+          const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+          const currentSum = currentRows.reduce((s, r) => s + Number(r.lbs), 0);
+          const freshSum   = freshRows.reduce((s, r) => s + r.lbs, 0);
+          if (Math.abs(currentSum - freshSum) < 0.001) continue;
+          updates[rowsField] = freshRows;
+        }
+
+        if (Object.keys(updates).length === 0) continue;
+
+        const updated = { ...profile, ...updates } as FormValues;
+        const saved = saveProfile(brand, flavor, updated);
+        if (saved) {
+          updatedCount++;
+          propagations.push(propagateProfileToPendingRuns(brand, flavor));
+        }
+      }
+
+      await Promise.allSettled(propagations);
+
+      // Update the open form if it references any of the updated recipes.
+      const cv = form.getValues() as unknown as Record<string, unknown>;
+      for (const { nameField, rowsField } of cheeseSlots) {
+        const recipeName = ((cv[nameField] as string) ?? "").trim();
+        if (!recipeName) continue;
+        const freshRows = recipeByName.get(recipeName.toLowerCase());
+        if (!freshRows) continue;
+        form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
+      }
+
+      if (updatedCount > 0) {
+        toast({
+          title: "Cheese recipes updated",
+          description: `${updatedCount} profile${updatedCount === 1 ? "" : "s"} refreshed with new recipe weights`,
+        });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [form],
+  );
+
   // Server-side role (distinct from the local supervisor PIN toggle below).
   const { isManager, hasCapability } = useMe();
   const canEditRules = hasCapability("edit-production-rules");
@@ -10780,6 +10896,9 @@ export default function Home() {
         title: "Cheese recipes imported",
         description: `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved.`,
       });
+      // Fan updated per-batch lbs into all profiles that reference the changed
+      // recipes by name, and refresh pending runs + the open form.
+      void propagateCheeseRecipeUpdates(result.saved);
     } catch (err) {
       setCheeseImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
