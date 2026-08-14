@@ -18395,7 +18395,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
   const {
-    autoSuppressUntilRef, currentRun, currentRunId, dayState, form,
+    autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
     lastEndedRun, runStatus, updateDrainingRunValues, v,
     ve,
   } = hx;
@@ -18405,6 +18405,64 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow,
   } = useLiveRun();
+
+  // ── Speed drift detection ─────────────────────────────────────────────────
+  // Tracks manual case/skid corrections and suggests a Speed Adjustment (or
+  // Approximate Line Speed for crust mode) when the line consistently runs
+  // faster or slower than the configured prediction.
+  const speedDriftRunRef = useRef<string>("");
+  const speedCorrectionHistoryRef = useRef<Array<{ ts: number; delta: number }>>([]);
+  const speedNudgeDismissedRef = useRef<boolean>(false);
+  const speedNudgeLastAcceptRef = useRef<number>(0);
+  const [speedNudge, setSpeedNudge] = useState<{
+    value: number; isCrust: boolean; direction: "faster" | "slower";
+  } | null>(null);
+
+  // Reset detection bookkeeping synchronously (ref mutations are fine in render)
+  // and clear the nudge card state via effect (must not call setState during render).
+  if (speedDriftRunRef.current !== currentRunId) {
+    speedDriftRunRef.current = currentRunId;
+    speedCorrectionHistoryRef.current = [];
+    speedNudgeDismissedRef.current = false;
+  }
+  useEffect(() => { setSpeedNudge(null); }, [currentRunId]);
+
+  function detectSpeedDrift(newTotal: number) {
+    if (speedNudgeDismissedRef.current) return;
+    if (Date.now() < speedNudgeLastAcceptRef.current + 30_000) return;
+    if (!autoTrackProgress || runStatus !== "running") return;
+    const expectedTotal = autoTrackSuggestion?.expectedCases ?? null;
+    if (expectedTotal === null || expectedTotal <= 0) return;
+    const elapsedNetMin = elapsedBatchSec / 60;
+    if (elapsedNetMin < 1) return; // Need at least a minute of data
+    const ppc = v.pizzasPerCase;
+    if (ppc <= 0 || calc.ppm <= 0) return;
+    const delta = newTotal - expectedTotal;
+    if (Math.abs(delta) < 1) return; // Ignore sub-case corrections
+    const history = speedCorrectionHistoryRef.current;
+    history.push({ ts: Date.now(), delta });
+    if (history.length > 10) history.splice(0, history.length - 10);
+    const positives = history.filter(c => c.delta > 0).length;
+    const negatives = history.filter(c => c.delta < 0).length;
+    if (positives < 2 && negatives < 2) return; // Need ≥2 corrections in same direction
+    const observedPpm = (newTotal * ppc) / elapsedNetMin;
+    const driftRatio = observedPpm / calc.ppm;
+    if (Math.abs(driftRatio - 1.0) < 0.10) return; // < 10% drift — not significant
+    const direction: "faster" | "slower" = driftRatio > 1.0 ? "faster" : "slower";
+    if (direction === "faster" && positives < 2) return;
+    if (direction === "slower" && negatives < 2) return;
+    const isCrust = doughSubTab === "crusts";
+    let suggestedValue: number;
+    if (isCrust) {
+      // Crust mode: suggest new Approximate Line Speed (direct ppm observation)
+      suggestedValue = Math.round(observedPpm * 100) / 100;
+    } else {
+      // Dough mode: suggest new Speed Adjustment = current × drift ratio
+      suggestedValue = Math.max(0.01, Math.min(9.99,
+        Math.round(v.speedAdjustment * driftRatio * 100) / 100));
+    }
+    setSpeedNudge({ value: suggestedValue, isCrust, direction });
+  }
 
   // ── Auto-tick skid/case counter for the prior run draining through the
   // freezer tunnel while the NEXT run is already active on the form.
@@ -19839,64 +19897,6 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 
   // Next-run prep handoff reset is handled by LiveRunHandoffGuard (always
   // mounted inside LiveRunProvider) so it fires regardless of which tab is open.
-
-  // ── Speed drift detection ─────────────────────────────────────────────────
-  // Tracks manual case/skid corrections and suggests a Speed Adjustment (or
-  // Approximate Line Speed for crust mode) when the line consistently runs
-  // faster or slower than the configured prediction.
-  const speedDriftRunRef = useRef<string>("");
-  const speedCorrectionHistoryRef = useRef<Array<{ ts: number; delta: number }>>([]);
-  const speedNudgeDismissedRef = useRef<boolean>(false);
-  const speedNudgeLastAcceptRef = useRef<number>(0);
-  const [speedNudge, setSpeedNudge] = useState<{
-    value: number; isCrust: boolean; direction: "faster" | "slower";
-  } | null>(null);
-
-  // Reset detection bookkeeping synchronously (ref mutations are fine in render)
-  // and clear the nudge card state via effect (must not call setState during render).
-  if (speedDriftRunRef.current !== currentRunId) {
-    speedDriftRunRef.current = currentRunId;
-    speedCorrectionHistoryRef.current = [];
-    speedNudgeDismissedRef.current = false;
-  }
-  useEffect(() => { setSpeedNudge(null); }, [currentRunId]);
-
-  function detectSpeedDrift(newTotal: number) {
-    if (speedNudgeDismissedRef.current) return;
-    if (Date.now() < speedNudgeLastAcceptRef.current + 30_000) return;
-    if (!autoTrackProgress || runStatus !== "running") return;
-    const expectedTotal = autoTrackSuggestion?.expectedCases ?? null;
-    if (expectedTotal === null || expectedTotal <= 0) return;
-    const elapsedNetMin = elapsedBatchSec / 60;
-    if (elapsedNetMin < 1) return; // Need at least a minute of data
-    const ppc = v.pizzasPerCase;
-    if (ppc <= 0 || calc.ppm <= 0) return;
-    const delta = newTotal - expectedTotal;
-    if (Math.abs(delta) < 1) return; // Ignore sub-case corrections
-    const history = speedCorrectionHistoryRef.current;
-    history.push({ ts: Date.now(), delta });
-    if (history.length > 10) history.splice(0, history.length - 10);
-    const positives = history.filter(c => c.delta > 0).length;
-    const negatives = history.filter(c => c.delta < 0).length;
-    if (positives < 2 && negatives < 2) return; // Need ≥2 corrections in same direction
-    const observedPpm = (newTotal * ppc) / elapsedNetMin;
-    const driftRatio = observedPpm / calc.ppm;
-    if (Math.abs(driftRatio - 1.0) < 0.10) return; // < 10% drift — not significant
-    const direction: "faster" | "slower" = driftRatio > 1.0 ? "faster" : "slower";
-    if (direction === "faster" && positives < 2) return;
-    if (direction === "slower" && negatives < 2) return;
-    const isCrust = doughSubTab === "crusts";
-    let suggestedValue: number;
-    if (isCrust) {
-      // Crust mode: suggest new Approximate Line Speed (direct ppm observation)
-      suggestedValue = Math.round(observedPpm * 100) / 100;
-    } else {
-      // Dough mode: suggest new Speed Adjustment = current × drift ratio
-      suggestedValue = Math.max(0.01, Math.min(9.99,
-        Math.round(v.speedAdjustment * driftRatio * 100) / 100));
-    }
-    setSpeedNudge({ value: suggestedValue, isCrust, direction });
-  }
 
   return (
     <>
