@@ -19205,7 +19205,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   return (
     <>
       {/* ── Sauce Prep Section (shown before production starts) ─────────────── */}
-      {runStatus === "pending" && !prep.prepCarriedOver && (
+      {runStatus === "pending" && !prep.prepCarriedOver && dayState.runs.every(r => !r.startedAt) && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-red-400 w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
@@ -19686,7 +19686,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   return (
     <>
       {/* ── Shift Prep Section (shown before production starts) ─────────────────── */}
-      {runStatus === "pending" && !prep.prepCarriedOver && doughSubTab === "dough" && (
+      {runStatus === "pending" && !prep.prepCarriedOver && doughSubTab === "dough" && dayState.runs.every(r => !r.startedAt) && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-amber-500 w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
