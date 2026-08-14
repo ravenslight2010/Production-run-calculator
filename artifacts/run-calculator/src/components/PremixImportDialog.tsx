@@ -493,6 +493,27 @@ export default function PremixImportDialog({
                               </div>
                             )}
 
+                            {(() => {
+                              const existingComponents = existingMixById.get(m.id)?.components ?? [];
+                              const importedIngredientKeys = new Set(m.components.map(c => c.ingredient.trim().toLowerCase()).filter(Boolean));
+                              const removedComponents = c.status === "update"
+                                ? existingComponents.filter(ec => !importedIngredientKeys.has(ec.ingredient.trim().toLowerCase()))
+                                : [];
+                              return removedComponents.length > 0 ? (
+                                <div
+                                  className="mt-2 rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-700"
+                                  data-testid={`premix-removed-components-${it.key}`}
+                                >
+                                  Removes {removedComponents.length} ingredient{removedComponents.length === 1 ? "" : "s"} no longer in the sheet:{" "}
+                                  {removedComponents.map((rc, i) => (
+                                    <span key={rc.ingredient}>
+                                      <span className="line-through">{rc.ingredient}</span>
+                                      {i < removedComponents.length - 1 ? ", " : ""}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null;
+                            })()}
                             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                               <span>
                                 Batch:{" "}
@@ -504,8 +525,13 @@ export default function PremixImportDialog({
                                 </span>
                               </span>
                               <span>
-                                {m.components.length} ingredient
-                                {m.components.length === 1 ? "" : "s"}
+                                {(() => {
+                                  const existingComponents = existingMixById.get(m.id)?.components ?? [];
+                                  if (c.status === "update" && existingComponents.length > 0 && existingComponents.length !== m.components.length) {
+                                    return <>{existingComponents.length} → <span className="text-foreground">{m.components.length}</span> ingredient{m.components.length === 1 ? "" : "s"}</>;
+                                  }
+                                  return <>{m.components.length} ingredient{m.components.length === 1 ? "" : "s"}</>;
+                                })()}
                               </span>
                               {m.daysEarly > 0 && (
                                 <span>

@@ -788,6 +788,22 @@ export default function SpecImportDialog({
     [edited, prepared],
   );
 
+  // Per-recipe map of ingredients that are in the CURRENT library but NOT in the
+  // import — applying the import would remove them from the saved recipe.
+  // Keyed by "kind\x00recipeName (lowercased)" matching how buildDiscrepancies
+  // reports extra-ingredient entries. Only applies to non-new recipes.
+  const removedIngredientsByRecipe = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const d of discrepancies) {
+      if (d.type !== "extra-ingredient" || !d.ingredient) continue;
+      const key = `${d.kind}\u0000${d.recipeName.trim().toLowerCase()}`;
+      const arr = map.get(key);
+      if (arr) arr.push(d.ingredient);
+      else map.set(key, [d.ingredient]);
+    }
+    return map;
+  }, [discrepancies]);
+
   // Flavor-grounding corrections/flags from the server-side sanitizer, keyed by
   // the (canonicalized) brand+flavor of the profile each concerns so they can be
   // attached to that profile's row. Warnings whose profile row can't be found
@@ -1095,42 +1111,52 @@ export default function SpecImportDialog({
                     Recipes
                   </p>
                   <ul className="space-y-2">
-                    {recipes.map((r) => (
-                      <RecipeRow
-                        key={r.key}
-                        item={r}
-                        existingOptions={existingRecipeNamesByKind[r.kind] ?? []}
-                        onToggle={() => setRecipe(r.key, { include: !r.include })}
-                        onName={(name) => setRecipe(r.key, { name })}
-                        onKind={(kind) =>
-                          setRecipe(r.key, {
-                            kind,
-                            linkExisting: undefined,
-                            updateExisting: false,
-                            // The merge note describes the ORIGINAL suggested
-                            // link; a kind change clears that link, so the
-                            // note must go too.
-                            mergedAway: false,
-                          })
-                        }
-                        onLinkExisting={(linkExisting) =>
-                          // Changing the pick resets the "update it" checkbox —
-                          // consent to overwrite one recipe must never carry
-                          // over to a different one.
-                          setRecipe(r.key, {
-                            linkExisting: linkExisting || undefined,
-                            updateExisting: false,
-                            // The merge note only applies to the originally
-                            // suggested survivor link — picking a different
-                            // recipe (or clearing the pick) retires it.
-                            mergedAway: false,
-                          })
-                        }
-                        onUpdateExisting={(updateExisting) =>
-                          setRecipe(r.key, { updateExisting })
-                        }
-                      />
-                    ))}
+                    {recipes.map((r) => {
+                      // Removed ingredients: what's in the current library for
+                      // this recipe but not in the import — applying would
+                      // drop them from the saved recipe. Only relevant for
+                      // non-new recipes.
+                      const finalName = (r.linkExisting?.trim() || r.name.trim()).toLowerCase();
+                      const recipeKindKey = `${parseKindOf(r.kind)}\u0000${finalName}`;
+                      const removedIngredients = removedIngredientsByRecipe.get(recipeKindKey) ?? [];
+                      return (
+                        <RecipeRow
+                          key={r.key}
+                          item={r}
+                          existingOptions={existingRecipeNamesByKind[r.kind] ?? []}
+                          removedIngredients={removedIngredients}
+                          onToggle={() => setRecipe(r.key, { include: !r.include })}
+                          onName={(name) => setRecipe(r.key, { name })}
+                          onKind={(kind) =>
+                            setRecipe(r.key, {
+                              kind,
+                              linkExisting: undefined,
+                              updateExisting: false,
+                              // The merge note describes the ORIGINAL suggested
+                              // link; a kind change clears that link, so the
+                              // note must go too.
+                              mergedAway: false,
+                            })
+                          }
+                          onLinkExisting={(linkExisting) =>
+                            // Changing the pick resets the "update it" checkbox —
+                            // consent to overwrite one recipe must never carry
+                            // over to a different one.
+                            setRecipe(r.key, {
+                              linkExisting: linkExisting || undefined,
+                              updateExisting: false,
+                              // The merge note only applies to the originally
+                              // suggested survivor link — picking a different
+                              // recipe (or clearing the pick) retires it.
+                              mergedAway: false,
+                            })
+                          }
+                          onUpdateExisting={(updateExisting) =>
+                            setRecipe(r.key, { updateExisting })
+                          }
+                        />
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -1504,6 +1530,7 @@ function ProfileRow({
 function RecipeRow({
   item,
   existingOptions,
+  removedIngredients = [],
   onToggle,
   onName,
   onKind,
@@ -1513,6 +1540,12 @@ function RecipeRow({
   item: RecipeItem;
   /** Existing saved recipes of this kind the user can reuse instead of creating one. */
   existingOptions: string[];
+  /**
+   * Ingredients present in the CURRENT library recipe but NOT in the import —
+   * applying would remove them. Computed from discrepancy `extra-ingredient`
+   * entries for non-new recipes. Empty for new ones.
+   */
+  removedIngredients?: string[];
   onToggle: () => void;
   onName: (v: string) => void;
   onKind: (v: SpecImportDisplayKind) => void;
@@ -1695,6 +1728,21 @@ function RecipeRow({
           {!linked && rowsPreview && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Read: {rowsPreview}
+            </div>
+          )}
+
+          {item.include && !isNew && removedIngredients.length > 0 && (
+            <div
+              className="mt-1.5 rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-700"
+              data-testid={`spec-recipe-removed-ingredients-${item.key}`}
+            >
+              Removes {removedIngredients.length} ingredient{removedIngredients.length === 1 ? "" : "s"} no longer in the sheet:{" "}
+              {removedIngredients.map((ing, i) => (
+                <span key={ing}>
+                  <span className="line-through">{ing}</span>
+                  {i < removedIngredients.length - 1 ? ", " : ""}
+                </span>
+              ))}
             </div>
           )}
 
