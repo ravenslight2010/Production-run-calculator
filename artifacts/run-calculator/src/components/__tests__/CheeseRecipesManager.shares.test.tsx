@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
-import CheeseRecipesManager from "../CheeseRecipesManager";
+import CheeseRecipesManager, { CheeseRecipeEditor } from "../CheeseRecipesManager";
 
 // Focus: the Share % column and per-flavor preview must follow the manager's
 // batch lbs when the imported per-pizza oz data no longer covers every row —
@@ -14,8 +14,8 @@ vi.mock("../../hooks/useCheeseRecipes", () => ({
   useCheeseRecipes: () => ({ items, isLoading: false }),
 }));
 vi.mock("../../cheeseRecipes", () => ({
-  saveCheeseRecipes: async (next: CheeseRecipe[]) => next,
-  deleteCheeseRecipes: async () => [],
+  saveCheeseRecipes: vi.fn(async (next: CheeseRecipe[]) => next),
+  deleteCheeseRecipes: vi.fn(async () => []),
 }));
 
 afterEach(() => {
@@ -65,6 +65,21 @@ function shareValues(container: HTMLElement): number[] {
   ).map((el) => Number(el.value));
 }
 
+// Target lbs inputs unambiguously via aria-label (not inputMode, which the
+// oz/pizza DecimalInputs also use).
+function lbsInputs(container: HTMLElement): HTMLInputElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLInputElement>('input[aria-label="lbs per batch"]'),
+  );
+}
+
+// Target oz/pizza inputs unambiguously.
+function ozInputs(container: HTMLElement): HTMLInputElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLInputElement>('input[aria-label="oz per pizza"]'),
+  );
+}
+
 describe("CheeseRecipesManager blend shares with partial oz data", () => {
   it("derives Share % from lbs (not stale partial oz), Cellulose no longer zeroed", () => {
     items.push(aldos());
@@ -86,13 +101,10 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
     const { container } = renderManager();
     expandRecipe();
 
-    // Bump Cellulose (row 5) from 1.6 → 30 lbs via its lbs input (the
-    // text/decimal input right after the ingredient name input).
-    const lbsInputs = Array.from(
-      container.querySelectorAll<HTMLInputElement>('input[inputmode="decimal"]'),
-    );
-    expect(lbsInputs).toHaveLength(5);
-    fireEvent.change(lbsInputs[4], { target: { value: "30" } });
+    // Bump Cellulose (row 5) from 1.6 → 30 lbs via its lbs input.
+    const inputs = lbsInputs(container);
+    expect(inputs).toHaveLength(5);
+    fireEvent.change(inputs[4], { target: { value: "30" } });
 
     const shares = shareValues(container);
     // New total 356.3 → Cellulose 30/356.3 ≈ 8.4%.
@@ -118,13 +130,99 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
       container.querySelectorAll<HTMLInputElement>('input[list^="cheese-ingredients-"]'),
     );
     fireEvent.change(ingredientInputs[2], { target: { value: "Cellulose" } });
-    const lbsInputs = Array.from(
-      container.querySelectorAll<HTMLInputElement>('input[inputmode="decimal"]'),
-    );
-    fireEvent.change(lbsInputs[2], { target: { value: "10" } });
+    const inputs = lbsInputs(container);
+    fireEvent.change(inputs[2], { target: { value: "10" } });
 
     const shares = shareValues(container);
     expect(shares).toEqual([60, 30, 10]);
   });
-});
 
+  it("editing oz/pizza commits the updated value and reflects in share %", () => {
+    // Recipe with only oz values (no lbs) — oz IS the share source.
+    items.push({
+      ...aldos(),
+      components: [
+        { ingredient: "Mozzarella", lbs: 0, ozPerPizza: 3 },
+        { ingredient: "Parmesan", lbs: 0, ozPerPizza: 1 },
+      ],
+    });
+    const { container } = renderManager();
+    expandRecipe();
+
+    // Edit Parmesan oz from 1 → 3 → shares should become 50/50.
+    const inputs = ozInputs(container);
+    expect(inputs).toHaveLength(2);
+    fireEvent.change(inputs[1], { target: { value: "3" } });
+
+    const shares = shareValues(container);
+    expect(shares[0]).toBeCloseTo(50, 0);
+    expect(shares[1]).toBeCloseTo(50, 0);
+  });
+
+  it("nonzero oz edit on a lbs>0 row calls onChange with updated ozPerPizza (on blur)", () => {
+    // Use CheeseRecipeEditor directly — avoids React Query's async mutation
+    // pipeline and tests the commit path in isolation.
+    const onChange = vi.fn();
+    const recipe: CheeseRecipe = {
+      ...aldos(),
+      components: [
+        { ingredient: "Mozzarella", lbs: 60, ozPerPizza: 2 },
+        { ingredient: "Parmesan", lbs: 30, ozPerPizza: 1 },
+      ],
+    };
+    const { container } = render(
+      <CheeseRecipeEditor
+        recipe={recipe}
+        disabled={false}
+        ingredientSuggestions={[]}
+        onChange={onChange}
+        onDelete={() => {}}
+      />,
+    );
+    const inputs = ozInputs(container);
+    expect(inputs).toHaveLength(2);
+    // Edit Mozzarella oz from 2 → 4; blur commits.
+    fireEvent.change(inputs[0], { target: { value: "4" } });
+    fireEvent.blur(inputs[0]);
+    expect(onChange).toHaveBeenCalled();
+    const saved: CheeseRecipe = onChange.mock.calls.at(-1)![0];
+    expect(saved.components[0].ozPerPizza).toBe(4);
+  });
+
+  it("clearing oz/pizza on a lbs>0 row calls onChange immediately (no blur needed)", () => {
+    // When the manager types 0 in an oz field that has lbs>0, the input unmounts
+    // immediately (hidden rule: lbs>0 && oz===0), skipping onBlur. The fix
+    // commits synchronously inside onValue before the unmount.
+    const onChange = vi.fn();
+    const recipe: CheeseRecipe = {
+      ...aldos(),
+      components: [
+        { ingredient: "Mozzarella", lbs: 60, ozPerPizza: 2 },
+        { ingredient: "Parmesan", lbs: 30, ozPerPizza: 1 },
+      ],
+    };
+    const { container } = render(
+      <CheeseRecipeEditor
+        recipe={recipe}
+        disabled={false}
+        ingredientSuggestions={[]}
+        onChange={onChange}
+        onDelete={() => {}}
+      />,
+    );
+    const inputs = ozInputs(container);
+    expect(inputs).toHaveLength(2);
+
+    // Clear Parmesan oz → 0 (no blur fired after this).
+    fireEvent.change(inputs[1], { target: { value: "0" } });
+
+    // Input should be gone (hidden because lbs>0 && oz===0).
+    expect(ozInputs(container)).toHaveLength(1);
+
+    // onChange must have been called synchronously (no blur required).
+    expect(onChange).toHaveBeenCalled();
+    const saved: CheeseRecipe = onChange.mock.calls.at(-1)![0];
+    // ozPerPizza should be absent (normalizer strips undefined/0).
+    expect(saved.components[1].ozPerPizza).toBeUndefined();
+  });
+});

@@ -49,6 +49,8 @@ function DecimalInput({
   disabled,
   className,
   max,
+  "aria-label": ariaLabel,
+  title,
 }: {
   value: number;
   onValue: (n: number) => void;
@@ -56,6 +58,8 @@ function DecimalInput({
   disabled?: boolean;
   className?: string;
   max?: number;
+  "aria-label"?: string;
+  title?: string;
 }) {
   const [text, setText] = useState<string | null>(null);
   const clamp = (n: number) =>
@@ -83,6 +87,8 @@ function DecimalInput({
       }}
       disabled={disabled}
       className={className}
+      aria-label={ariaLabel}
+      title={title}
     />
   );
 }
@@ -449,7 +455,7 @@ export default function CheeseRecipesManager({
   );
 }
 
-function CheeseRecipeEditor({
+export function CheeseRecipeEditor({
   recipe,
   disabled,
   ingredientSuggestions,
@@ -648,7 +654,7 @@ function CheeseRecipeEditor({
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <p className="text-[11px] font-semibold text-muted-foreground">
-            Ingredients (lbs per batch · oz/pizza from spec · share % of blend)
+            Ingredients (lbs per batch · oz/pizza · share % of blend)
           </p>
           {draft.components.length > 0 && (
             <span className="text-[11px] text-muted-foreground font-mono">
@@ -674,6 +680,7 @@ function CheeseRecipeEditor({
                 />
                 <DecimalInput
                   value={c.lbs}
+                  aria-label="lbs per batch"
                   onValue={(n) =>
                     // Editing a row's batch lbs makes any imported per-pizza
                     // oz on that row stale — drop it so the manager's lbs
@@ -685,22 +692,41 @@ function CheeseRecipeEditor({
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
                 <span className="text-[11px] text-muted-foreground">lbs</span>
-                {(c.ozPerPizza ?? 0) > 0 && (
-                  <span
-                    className={
-                      "text-[10px] font-mono whitespace-nowrap " +
-                      ((c.lbs ?? 0) > 0
-                        ? "text-muted-foreground/60"
-                        : "text-amber-500 font-semibold")
-                    }
-                    title={
-                      (c.lbs ?? 0) > 0
-                        ? "Per-pizza oz from spec sheet (batch lbs takes precedence)"
-                        : "Per-pizza oz from spec sheet — batch lbs not yet entered"
-                    }
-                  >
-                    {Number(c.ozPerPizza).toFixed(2)} oz/pizza
-                  </span>
+                {/* oz/pizza: editable unless lbs > 0 with no oz value (batch lbs is sole source of truth) */}
+                {!((c.lbs ?? 0) > 0 && !((c.ozPerPizza ?? 0) > 0)) && (
+                  <>
+                    <DecimalInput
+                      value={c.ozPerPizza ?? 0}
+                      aria-label="oz per pizza"
+                      onValue={(n) => {
+                        const p = { ozPerPizza: n > 0 ? n : undefined };
+                        const nextComponents = draft.components.map((c2, i) =>
+                          i === idx ? { ...c2, ...p } : c2,
+                        );
+                        const nextDraft = { ...draft, components: nextComponents };
+                        setDraft(nextDraft);
+                        // If clearing (n=0) on a lbs>0 row, the input unmounts
+                        // immediately and onBlur won't fire — commit now so the
+                        // cleared value actually persists.
+                        const wouldUnmount = (c.lbs ?? 0) > 0 && !(n > 0);
+                        if (wouldUnmount) commit(nextDraft);
+                      }}
+                      onBlur={() => commit()}
+                      disabled={disabled}
+                      title={
+                        (c.lbs ?? 0) > 0
+                          ? "Per-pizza oz — used for blend shares when all rows have an oz value; lbs drive shares when oz coverage is partial"
+                          : "Per-pizza oz from spec sheet — enter batch lbs to switch to a lbs-based blend"
+                      }
+                      className={
+                        "w-16 rounded-md border px-2 py-1 text-xs font-mono " +
+                        ((c.ozPerPizza ?? 0) > 0 && (c.lbs ?? 0) > 0
+                          ? "border-input bg-background text-muted-foreground"
+                          : "border-input bg-background")
+                      }
+                    />
+                    <span className="text-[11px] text-muted-foreground">oz/pizza</span>
+                  </>
                 )}
                 <input
                   type="number"
