@@ -74,7 +74,7 @@ import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent } from "./namedRecipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
-import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
+import { addSpecMixesIfAbsent, applyMixPerPizza, type Mix } from "@workspace/mixes";
 import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
@@ -768,8 +768,12 @@ export async function commitSpecImport(
       .filter((m): m is Mix => m != null);
     if (candidates.length) {
       const { merged, added } = addSpecMixesIfAbsent(existingMixes, candidates);
-      if (added > 0) {
-        await saveMixes(merged);
+      // Refresh per-pizza oz on already-saved mixes from spec-sheet amounts.
+      // Only updates components that already exist on the mix AND where the
+      // incoming value is > 0, so a manager's hand-typed value is never zeroed.
+      const ozRes = applyMixPerPizza(merged, candidates);
+      if (added > 0 || ozRes.updated > 0) {
+        await saveMixes(ozRes.next);
         mixesAdded = added;
       }
     }

@@ -812,7 +812,10 @@ describe("collectSpecImportMixes", () => {
       name: "White Fajita Mix",
       brand: "Hannaford",
       flavor: "Fajita",
-      componentIngredients: ["Mozzarella", "Cheddar"],
+      components: [
+        { ingredient: "Mozzarella", perPizza: 3 },
+        { ingredient: "Cheddar", perPizza: 1 },
+      ],
     });
   });
 
@@ -866,17 +869,20 @@ describe("collectSpecImportMixes", () => {
     ]);
     const mixes = collectSpecImportMixes(parsed, new Set());
     expect(mixes).toHaveLength(1);
-    expect(mixes[0].componentIngredients).toEqual(["Sauce"]);
+    expect(mixes[0].components.map((c) => c.ingredient)).toEqual(["Sauce"]);
   });
 });
 
 describe("specMixDraftToMix", () => {
-  it("builds a normalized zero-amount Mix carrying only ingredient names", () => {
+  it("builds a normalized Mix carrying ingredient names and per-pizza oz from spec", () => {
     const mix = specMixDraftToMix({
       name: "White Fajita Mix",
       brand: "Hannaford",
       flavor: "Fajita",
-      componentIngredients: ["Mozzarella", "Cheddar"],
+      components: [
+        { ingredient: "Mozzarella", perPizza: 2.5 },
+        { ingredient: "Cheddar", perPizza: 1.5 },
+      ],
     });
     expect(mix).not.toBeNull();
     expect(mix).toMatchObject({
@@ -885,20 +891,30 @@ describe("specMixDraftToMix", () => {
       flavor: "Fajita",
       batchSize: 0,
       components: [
-        { ingredient: "Mozzarella", perPizza: 0 },
-        { ingredient: "Cheddar", perPizza: 0 },
+        { ingredient: "Mozzarella", perPizza: 2.5 },
+        { ingredient: "Cheddar", perPizza: 1.5 },
       ],
     });
   });
 
+  it("preserves perPizza 0 when the spec sheet had no amount for an ingredient", () => {
+    const mix = specMixDraftToMix({
+      name: "Buffalo Mix",
+      brand: "",
+      flavor: "",
+      components: [{ ingredient: "Sauce", perPizza: 0 }],
+    });
+    expect(mix?.components[0].perPizza).toBe(0);
+  });
+
   it("shares premixId so a spec mix and a premix of the same product converge", () => {
-    const draft = { name: "Buffalo Mix", brand: "Bob", flavor: "Buffalo", componentIngredients: ["A"] };
+    const draft = { name: "Buffalo Mix", brand: "Bob", flavor: "Buffalo", components: [{ ingredient: "A", perPizza: 1 }] };
     const mix = specMixDraftToMix(draft);
     expect(mix!.id).toBe(premixId({ brand: "Bob", flavor: "Buffalo", name: "Buffalo Mix" }));
   });
 
   it("returns null for a blank name", () => {
-    expect(specMixDraftToMix({ name: "  ", brand: "", flavor: "", componentIngredients: [] })).toBeNull();
+    expect(specMixDraftToMix({ name: "  ", brand: "", flavor: "", components: [] })).toBeNull();
   });
 });
 

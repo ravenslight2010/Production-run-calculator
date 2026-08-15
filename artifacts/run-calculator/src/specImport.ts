@@ -111,7 +111,7 @@ import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { namedRecipeFromDraft, parseDoughCustomerSection, parseDoughVariantTable, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
-import { addSpecMixesIfAbsent, fillSpecMixTags, type Mix } from "@workspace/mixes";
+import { addSpecMixesIfAbsent, applyMixPerPizza, fillSpecMixTags, type Mix } from "@workspace/mixes";
 import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
@@ -2089,8 +2089,12 @@ export async function commitSpecImport(
       // scopes (e.g. a prior import saved them with no customer) — a mix that
       // already has a brand is never re-scoped.
       const tagRes = fillSpecMixTags(merged, candidates);
-      if (added > 0 || tagRes.tagged > 0) {
-        await saveMixes(tagRes.next);
+      // Refresh per-pizza oz on already-saved mixes from spec-sheet amounts.
+      // Only updates components that already exist on the mix AND where the
+      // incoming value is > 0, so a manager's hand-typed value is never zeroed.
+      const ozRes = applyMixPerPizza(tagRes.next, candidates);
+      if (added > 0 || tagRes.tagged > 0 || ozRes.updated > 0) {
+        await saveMixes(ozRes.next);
         mixesAdded = added;
       }
     }

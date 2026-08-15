@@ -3758,7 +3758,7 @@ async function runAugust2026ImportFixSauces(): Promise<void> {
         enabled: true,
         brand: "",
         flavors: [],
-      });
+      }).onConflictDoNothing();
       added++;
     }
 

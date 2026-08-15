@@ -648,7 +648,7 @@ function CheeseRecipeEditor({
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <p className="text-[11px] font-semibold text-muted-foreground">
-            Ingredients (lbs per batch · share % of blend)
+            Ingredients (lbs per batch · oz/pizza from spec · share % of blend)
           </p>
           {draft.components.length > 0 && (
             <span className="text-[11px] text-muted-foreground font-mono">
@@ -685,6 +685,23 @@ function CheeseRecipeEditor({
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
                 <span className="text-[11px] text-muted-foreground">lbs</span>
+                {(c.ozPerPizza ?? 0) > 0 && (
+                  <span
+                    className={
+                      "text-[10px] font-mono whitespace-nowrap " +
+                      ((c.lbs ?? 0) > 0
+                        ? "text-muted-foreground/60"
+                        : "text-amber-500 font-semibold")
+                    }
+                    title={
+                      (c.lbs ?? 0) > 0
+                        ? "Per-pizza oz from spec sheet (batch lbs takes precedence)"
+                        : "Per-pizza oz from spec sheet — batch lbs not yet entered"
+                    }
+                  >
+                    {Number(c.ozPerPizza).toFixed(2)} oz/pizza
+                  </span>
+                )}
                 <input
                   type="number"
                   min={0}

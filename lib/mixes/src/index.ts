@@ -576,6 +576,71 @@ export function fillSpecMixTags(
   return { next, tagged };
 }
 
+/**
+ * Backfill per-pizza oz amounts onto already-saved mixes from a new spec-import
+ * batch. For each update that matches an existing mix by NAME and BRAND SCOPE,
+ * fill in any component whose `perPizza` is currently 0 with the incoming
+ * value. Components that already have a nonzero `perPizza` are NEVER touched —
+ * the app has no provenance field to distinguish a manager-typed value from a
+ * prior import, so the rule is: nonzero wins and is never overwritten. Only
+ * updates with perPizza > 0 are applied; zeros are ignored.
+ *
+ * Brand-scope rule (mirrors addSpecMixesIfAbsent): a branded update only
+ * matches existing mixes with the SAME brand (case-insensitive). An unbranded
+ * update only matches existing mixes that are also unbranded. This prevents a
+ * spec import for one customer from altering same-named mixes owned by a
+ * different customer. Pure. Returns the next list plus how many mixes had at
+ * least one component's perPizza filled in.
+ */
+export function applyMixPerPizza(
+  existing: ReadonlyArray<Mix>,
+  updates: ReadonlyArray<{
+    name: string;
+    brand?: string;
+    components: ReadonlyArray<{ ingredient: string; perPizza: number }>;
+  }>,
+): { next: Mix[]; updated: number } {
+  // Key: "<brandLower>\0<nameMixKey>" → ingredient-name-lower → oz
+  const byBrandName = new Map<string, Map<string, number>>();
+  for (const u of updates) {
+    const nameKey = mixNameMatchKey(u.name);
+    if (!nameKey) continue;
+    const brandKey = (u.brand ?? "").trim().toLowerCase();
+    const mapKey = `${brandKey}\0${nameKey}`;
+    if (byBrandName.has(mapKey)) continue; // first update wins
+    const oz = new Map<string, number>();
+    for (const c of u.components) {
+      const ing = c.ingredient.trim().toLowerCase();
+      const v = Number(c.perPizza);
+      if (!ing || !Number.isFinite(v) || v <= 0) continue;
+      if (!oz.has(ing)) oz.set(ing, v);
+    }
+    if (oz.size) byBrandName.set(mapKey, oz);
+  }
+  if (!byBrandName.size) return { next: [...existing], updated: 0 };
+  let updated = 0;
+  const next = existing.map((m) => {
+    const brandKey = (m.brand ?? "").trim().toLowerCase();
+    const nameKey = mixNameMatchKey(m.name);
+    const oz = byBrandName.get(`${brandKey}\0${nameKey}`);
+    if (!oz) return m;
+    let changed = false;
+    const components = m.components.map((c) => {
+      // Never overwrite a nonzero value — no provenance to distinguish manager
+      // entry from a prior import; preserve whatever is already there.
+      if (c.perPizza !== 0) return c;
+      const v = oz.get(c.ingredient.trim().toLowerCase());
+      if (v === undefined) return c;
+      changed = true;
+      return { ...c, perPizza: v };
+    });
+    if (!changed) return m;
+    updated++;
+    return { ...m, components };
+  });
+  return { next, updated };
+}
+
 // ---------------------------------------------------------------------------
 // Plan building
 // ---------------------------------------------------------------------------

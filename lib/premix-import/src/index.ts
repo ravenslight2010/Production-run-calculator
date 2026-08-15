@@ -744,17 +744,17 @@ export function premixToMix(
  * Convert a spec-import-detected mix draft into a normalized Mix. Uses the SAME
  * deterministic id as the premix importer (premixId) so a mix first seen in a
  * spec sheet and later re-imported from a premix sheet converge onto ONE row
- * instead of duplicating. The amounts a spec sheet cannot express — per-pizza
- * ounces and batch size — are left at 0 for the manager to fill in the Mixes
- * editor; only the ingredient names carry over. Returns null for a blank name.
+ * instead of duplicating. Per-pizza oz amounts come from the spec sheet's
+ * ingredient rows (the same `row.lbs` parser quirk the cheese collector uses).
+ * Batch size is not expressed on a spec sheet and stays at 0 for the manager
+ * to fill in the Mixes editor. Returns null for a blank name.
  */
 export function specMixDraftToMix(draft: SpecMixDraft): Mix | null {
   const name = draft.name.trim();
   if (!name) return null;
-  const components: MixComponent[] = draft.componentIngredients
-    .map((ingredient) => ingredient.trim())
-    .filter((ingredient) => ingredient.length > 0)
-    .map((ingredient) => ({ ingredient, perPizza: 0 }));
+  const components: MixComponent[] = draft.components
+    .map(({ ingredient, perPizza }) => ({ ingredient: ingredient.trim(), perPizza }))
+    .filter(({ ingredient }) => ingredient.length > 0);
   return normalizeMix({
     id: premixId({ brand: draft.brand, flavor: draft.flavor, name }),
     name,

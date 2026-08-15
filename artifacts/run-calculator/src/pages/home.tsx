@@ -4672,7 +4672,7 @@ export default function Home() {
     (async () => {
       const existing = await fetchMixes();
       const candidates = pending
-        .map((p) => specMixDraftToMix({ name: p.name, brand: "", flavor: "", componentIngredients: p.componentIngredients }))
+        .map((p) => specMixDraftToMix({ name: p.name, brand: "", flavor: "", components: (p.componentIngredients ?? []).map((ingredient: string) => ({ ingredient, perPizza: 0 })) }))
         .filter((m): m is Mix => m != null);
       const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
       if (added > 0) {
@@ -5098,7 +5098,7 @@ export default function Home() {
             name: n,
             brand: "",
             flavor: "",
-            componentIngredients: (cheeseRows.get(n.trim().toLowerCase()) ?? []).map((r) => r.ingredient),
+            components: (cheeseRows.get(n.trim().toLowerCase()) ?? []).map((r) => ({ ingredient: r.ingredient, perPizza: 0 })),
           }))
           .filter((m): m is Mix => m != null);
         const { merged, added } = addSpecMixesIfAbsent(mixPool, drafts);

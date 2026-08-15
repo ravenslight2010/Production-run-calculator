@@ -734,16 +734,20 @@ export function fillSpecCheeseTargetsFromProfiles(parsed: ParsedSpecImport): Par
 
 /**
  * A mix detected in a parsed spec import, ready to be turned into a server Mix.
- * A spec sheet only expresses a mix's ingredient NAMES (its batch blend, in
- * ambiguous ratio units) — never a reliable per-pizza ounce amount or batch
- * size — so only the names are carried; amounts are filled in the Mixes editor.
+ * The spec sheet's per-pizza ounce amounts are carried per ingredient (the
+ * same `row.lbs` parser quirk used by the cheese collector — see comment
+ * there). Batch size is not expressed on a spec sheet and stays at 0 until
+ * the manager fills it in the Mixes editor.
  */
 export type SpecMixDraft = {
   name: string;
   brand: string;
   flavor: string;
-  /** Component ingredient names, de-duped case-insensitively, order preserved. */
-  componentIngredients: string[];
+  /**
+   * Component ingredients with their per-pizza ounce amounts from the spec
+   * sheet. De-duped case-insensitively, order preserved.
+   */
+  components: Array<{ ingredient: string; perPizza: number }>;
 };
 
 /**
@@ -771,16 +775,18 @@ export function collectSpecImportMixes(
     const brand = (t0?.brand ?? "").trim();
     const flavor = (t0?.flavor ?? "").trim();
     const ingSeen = new Set<string>();
-    const componentIngredients: string[] = [];
+    const components: Array<{ ingredient: string; perPizza: number }> = [];
     for (const row of r.rows) {
       const ing = (row.ingredient ?? "").trim();
       if (!ing) continue;
       const k = ing.toLowerCase();
       if (ingSeen.has(k)) continue;
       ingSeen.add(k);
-      componentIngredients.push(ing);
+      // row.lbs holds the sheet's per-pizza OUNCES (parser quirk — same as the
+      // cheese collector). Surface it under its true unit.
+      components.push({ ingredient: ing, perPizza: row.lbs });
     }
-    out.push({ name, brand, flavor, componentIngredients });
+    out.push({ name, brand, flavor, components });
   }
   return out;
 }
