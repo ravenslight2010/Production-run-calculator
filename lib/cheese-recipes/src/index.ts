@@ -562,15 +562,21 @@ export function fillCheeseRecipeTags(
 }
 
 /**
- * Write spec-sheet PER-PIZZA OUNCES onto existing cheese recipes' components —
- * the `ozPerPizza` column ONLY. Per-batch `lbs` is never touched (that column
- * belongs to managers and the cheese workbook importer), so a spec import can
- * refresh per-pizza amounts without any risk of corrupting curated batch
- * pounds. Recipes are matched by trimmed case-insensitive NAME; within a
- * matched recipe, components are matched by trimmed case-insensitive
- * ingredient name. Unmatched update ingredients are ignored (no components are
- * added or removed). Pure. Returns the next list plus how many RECIPES had at
- * least one component's ozPerPizza actually change.
+ * @deprecated ONE-TIME HEAL UTILITY ONLY — do NOT wire into any import path.
+ *
+ * This function wrote spec-sheet per-pizza ounces onto cheese recipe components
+ * during the historical data heal (task 647 / cheese-oz-depoison-v1). That heal
+ * has already run in production and stripped the poisoned values. The spec
+ * import pipeline was updated (task 648) to never write `ozPerPizza` onto recipe
+ * components at all — the correct place for per-pizza oz is the applicator SLOT,
+ * not the recipe definition.
+ *
+ * Keeping this export purely so the existing unit tests can verify its behaviour
+ * in isolation; those tests document what the historical heal did. Do not call
+ * this function from any new import, sync, or server code path.
+ *
+ * Pure. Returns the next list plus how many RECIPES had at least one component's
+ * ozPerPizza actually change.
  */
 export function applyCheeseOzPerPizza(
   existing: ReadonlyArray<CheeseRecipe>,
