@@ -3388,6 +3388,8 @@ export async function runDataHeals(): Promise<void> {
   await runAugust2026ImportFixMixes();
   await runAugust2026ImportFixProfiles();
   await runAugust2026ImportFixSauces();
+  await runAugust2026CheeseRecipeLbs();
+  await runAugust2026LowesMixFixes();
 }
 
 // ── August 2026 import data-quality fixes ─────────────────────────────────────
@@ -3765,5 +3767,132 @@ async function runAugust2026ImportFixSauces(): Promise<void> {
       .set({ result: { attempted: MISSING_SAUCES.length, added } })
       .where(eq(dataHealsTable.id, AUG2026_SAUCE_FIX_ID));
     logger.info({ heal: AUG2026_SAUCE_FIX_ID, attempted: MISSING_SAUCES.length, added }, "Data heal applied");
+  });
+}
+
+// ── Cheese recipe lbs from ozPerPizza ─────────────────────────────────────────
+// Several cheese recipes were left with lbs=0 and ozPerPizza stored (spec-import
+// format) rather than having batch lbs computed. This heal converts ozPerPizza
+// to lbs using the known batch pizza count for each brand and clears ozPerPizza
+// (matching the app's behaviour when a manager edits lbs in the UI).
+//
+// Covered recipes:
+//  Production:
+//   · Lowe's 7 Pepperoni/Romano Cheese Mix  — batch derived from app1 cross-ref:
+//       Lowe's 7 Pepperoni recipe (32.8 lbs) ÷ 0.7 oz/pizza × 16 = 749.71 pizzas
+//  Dev seed (no-op in prod — names differ from production recipe names):
+//   · Aldo's Cheese Mix          (307 pizzas, 2.9 oz/pizza total)
+//   · Bobo Alfredo Cheese Mix    (828 pizzas, 2.5 oz/pizza total)
+//   · Bobo Breakfast Cheese      (828 pizzas, 2.0 oz/pizza total)
+//   · Basha's Original Cheese Mix          (162 pizzas, 3.0 oz/pizza total)
+//   · Basha's Pepperoni Cheese Mix         (162 pizzas, 4.0 oz/pizza total)
+//   · Basha's Pepperoni/Romano Cheese Mix  (162 pizzas, 2.25 oz/pizza total)
+//   · Brand Cheese Mix           (387 pizzas, 2.0 oz/pizza total)
+//   · Deluxe Meat Mix            (828 pizzas, 2.35 oz/pizza total)
+const AUG2026_CHEESE_LBS_ID = "aug2026-cheese-recipe-lbs-v1";
+
+type CheeseComponent = { ingredient: string; lbs: number; ozPerPizza?: number };
+
+const CHEESE_BATCH_CONFIGS: Array<{ name: string; batchPizzas: number }> = [
+  // Production
+  { name: "Lowe's 7 Pepperoni/Romano Cheese Mix", batchPizzas: 749.71428571 },
+  // Dev seed data (no-op in production — production uses different recipe names)
+  { name: "Aldo's Cheese Mix", batchPizzas: 307 },
+  { name: "Bobo Alfredo Cheese Mix", batchPizzas: 828 },
+  { name: "Bobo Breakfast Cheese", batchPizzas: 828 },
+  { name: "Basha's Original Cheese Mix", batchPizzas: 162 },
+  { name: "Basha's Pepperoni Cheese Mix", batchPizzas: 162 },
+  { name: "Basha's Pepperoni/Romano Cheese Mix", batchPizzas: 162 },
+  { name: "Brand Cheese Mix", batchPizzas: 387 },
+  { name: "Deluxe Meat Mix", batchPizzas: 828 },
+];
+
+async function runAugust2026CheeseRecipeLbs() {
+  const already = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, AUG2026_CHEESE_LBS_ID));
+  if (already.length > 0) return;
+
+  await db.insert(dataHealsTable).values({ id: AUG2026_CHEESE_LBS_ID, result: null });
+
+  let scanned = 0;
+  let updated = 0;
+
+  await db.transaction(async (tx) => {
+    for (const { name, batchPizzas } of CHEESE_BATCH_CONFIGS) {
+      const rows = await tx
+        .select()
+        .from(cheeseRecipesTable)
+        .where(and(eq(cheeseRecipesTable.scope, "live"), eq(cheeseRecipesTable.name, name)));
+
+      for (const row of rows) {
+        scanned++;
+        const components = row.components as CheeseComponent[];
+        const allZeroLbs = components.every((c) => !c.lbs || c.lbs === 0);
+        const hasOzPerPizza = components.some((c) => typeof c.ozPerPizza === "number" && c.ozPerPizza > 0);
+        if (!allZeroLbs || !hasOzPerPizza) continue;
+
+        const healed = components.map((c) => {
+          const { ozPerPizza, ...rest } = c as CheeseComponent & { ozPerPizza?: number };
+          return {
+            ...rest,
+            lbs: ozPerPizza != null ? Math.round((ozPerPizza * batchPizzas / 16) * 10000) / 10000 : 0,
+          };
+        });
+
+        await tx
+          .update(cheeseRecipesTable)
+          .set({ components: healed })
+          .where(and(eq(cheeseRecipesTable.scope, "live"), eq(cheeseRecipesTable.name, name)));
+        updated++;
+      }
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned, updated } })
+      .where(eq(dataHealsTable.id, AUG2026_CHEESE_LBS_ID));
+    logger.info({ heal: AUG2026_CHEESE_LBS_ID, scanned, updated }, "Data heal applied");
+  });
+}
+
+// ── Lowe's mix stray component fix ───────────────────────────────────────────
+// The first mixes heal (aug2026-import-fix-mixes-v1) patched batch_size and
+// flavor for "Lowe's Red Hot Bacon Jalapeno Mix" but its `continue` statement
+// skipped the stray 0-oz component removal for that same row.
+// This heal removes the phantom zero-perPizza Bacon (C&F) component.
+const AUG2026_LOWES_MIX_STRAY_ID = "aug2026-lowes-mix-stray-component-v1";
+
+async function runAugust2026LowesMixFixes() {
+  const already = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, AUG2026_LOWES_MIX_STRAY_ID));
+  if (already.length > 0) return;
+
+  await db.insert(dataHealsTable).values({ id: AUG2026_LOWES_MIX_STRAY_ID, result: null });
+
+  let updated = 0;
+
+  await db.transaction(async (tx) => {
+    const TARGET = "Lowe's Red Hot Bacon Jalapeno Mix";
+    const rows = await tx
+      .select()
+      .from(mixesTable)
+      .where(and(eq(mixesTable.scope, "live"), eq(mixesTable.name, TARGET)));
+
+    for (const row of rows) {
+      type MixComponent = { ingredient: string; perPizza: number; perBatchLbs?: number };
+      const components = row.components as MixComponent[];
+      const cleaned = components.filter((c) => c.perPizza > 0);
+      if (cleaned.length === components.length) continue; // nothing to remove
+
+      await tx
+        .update(mixesTable)
+        .set({ components: cleaned })
+        .where(and(eq(mixesTable.scope, "live"), eq(mixesTable.name, TARGET)));
+      updated++;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { updated } })
+      .where(eq(dataHealsTable.id, AUG2026_LOWES_MIX_STRAY_ID));
+    logger.info({ heal: AUG2026_LOWES_MIX_STRAY_ID, updated }, "Data heal applied");
   });
 }
