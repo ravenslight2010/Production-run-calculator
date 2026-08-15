@@ -502,7 +502,7 @@ export function CheeseRecipeEditor({
   function addComponent() {
     setDraft((d) => ({
       ...d,
-      components: [...d.components, { ingredient: "", lbs: 0, ozPerPizza: 0 }],
+      components: [...d.components, { ingredient: "", lbs: 0 }],
     }));
   }
 
@@ -685,7 +685,7 @@ export function CheeseRecipeEditor({
                     // Editing a row's batch lbs makes any imported per-pizza
                     // oz on that row stale — drop it so the manager's lbs
                     // (not old spec data) drive the blend shares.
-                    patchComponent(idx, { lbs: n, ozPerPizza: undefined })
+                    patchComponent(idx, { lbs: n })
                   }
                   onBlur={() => commit()}
                   disabled={disabled}

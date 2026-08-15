@@ -77,7 +77,7 @@ describe("backfillCheeseRecipeFromMergedSources", () => {
       cellulose: "9.9",
       notes: "drop",
       components: [
-        { ingredient: "Mozzarella", lbs: 99, ozPerPizza: 4, sharePct: 10 },
+        { ingredient: "Mozzarella", lbs: 99, sharePct: 10 },
         { ingredient: "Romano", lbs: 2 },
       ],
     });
@@ -87,12 +87,11 @@ describe("backfillCheeseRecipeFromMergedSources", () => {
     expect(out!.shredderSetting).toBe("3");
     expect(out!.cellulose).toBe("1.0");
     expect(out!.notes).toBe("keep");
-    // Matched row: lbs/sharePct kept, only the missing ozPerPizza fills.
+    // Matched row: existing lbs/sharePct kept (target values win); source only fills blanks.
     expect(out!.components[0]).toEqual({
       ingredient: "Mozzarella",
       lbs: 15,
       sharePct: 60,
-      ozPerPizza: 4,
     });
     // Source-only row appended.
     expect(out!.components[1]).toEqual({ ingredient: "Romano", lbs: 2 });
@@ -109,7 +108,7 @@ describe("backfillCheeseRecipeFromMergedSources", () => {
       name: "S2",
       shredderSetting: "#7",
       components: [
-        { ingredient: "Mozzarella", lbs: 99, ozPerPizza: 3 },
+        { ingredient: "Mozzarella", lbs: 99 },
         { ingredient: "Provolone", lbs: 4 },
       ],
     });
@@ -117,7 +116,7 @@ describe("backfillCheeseRecipeFromMergedSources", () => {
     expect(out).not.toBeNull();
     expect(out!.shredderSetting).toBe("#2");
     expect(out!.components).toEqual([
-      { ingredient: "Mozzarella", lbs: 10, ozPerPizza: 3 },
+      { ingredient: "Mozzarella", lbs: 10 },
       { ingredient: "Provolone", lbs: 4 },
     ]);
   });
@@ -129,11 +128,11 @@ describe("backfillCheeseRecipeFromMergedSources", () => {
       shredderSetting: "1",
       cellulose: "0.5",
       notes: "n",
-      components: [{ ingredient: "Mozzarella", lbs: 5, ozPerPizza: 2, sharePct: 100 }],
+      components: [{ ingredient: "Mozzarella", lbs: 5, sharePct: 100 }],
     });
     const source = recipe({
       name: "S",
-      components: [{ ingredient: "Mozzarella", lbs: 3, ozPerPizza: 1 }],
+      components: [{ ingredient: "Mozzarella", lbs: 3 }],
     });
     expect(backfillCheeseRecipeFromMergedSources(target, [source])).toBeNull();
   });

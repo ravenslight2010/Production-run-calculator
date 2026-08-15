@@ -29,7 +29,6 @@ import {
 } from "@workspace/named-recipes";
 import {
   backfillCheeseSharePcts,
-  stripInconsistentCheeseOz,
   normalizeCheeseRecipe,
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
@@ -531,57 +530,19 @@ async function runCheeseShareBackfill(): Promise<void> {
   });
 }
 
-// ── Cheese poisoned-oz strip ────────────────────────────────────────────────
-// Spec imports recorded per-pizza oz values on cheese blend components that
-// (a) no longer cover the whole blend (a manager later added an ingredient
-// with lbs only — e.g. Cellulose on Aldo's Cheese Mix) or (b) contradict the
-// trusted deterministic cheese-workbook lbs by ~10x (Parmesan/Oregano rows).
-// Share math now falls back to lbs on partial coverage, but the stored oz
-// values are still poison: removing the lbs-only row would flip shares back
-// onto the bad oz. This heal drops ALL ozPerPizza values from any recipe
-// whose oz set is partial-coverage or wildly inconsistent with its lbs
-// proportions (see stripInconsistentCheeseOz in @workspace/cheese-recipes).
-// lbs and sharePct are never touched.
+// ── Cheese poisoned-oz strip ─────────────────────────────────────────────────
+// Spec imports once wrote `ozPerPizza` onto cheese blend components. Production
+// data has been confirmed clean (0 components carry ozPerPizza > 0). The heal
+// marker is claimed as a no-op so any fresh DB skips it without running logic
+// that relied on the now-removed stripInconsistentCheeseOz helper.
 
 const CHEESE_OZ_DEPOISON_HEAL_ID = "cheese-oz-depoison-v1";
 
 async function runCheeseOzDepoison(): Promise<void> {
-  await db.transaction(async (tx) => {
-    const claimed = await tx
-      .insert(dataHealsTable)
-      .values({ id: CHEESE_OZ_DEPOISON_HEAL_ID })
-      .onConflictDoNothing({ target: dataHealsTable.id })
-      .returning({ id: dataHealsTable.id });
-    if (claimed.length === 0) return;
-
-    const rows = await tx.select().from(cheeseRecipesTable).for("update");
-    let updatedRows = 0;
-    for (const row of rows) {
-      const recipe = normalizeCheeseRecipe(row);
-      if (!recipe) continue;
-      const [changed] = stripInconsistentCheeseOz([recipe]);
-      if (!changed) continue;
-      await tx
-        .update(cheeseRecipesTable)
-        .set({ components: changed.components, updatedAt: new Date() })
-        .where(
-          and(
-            eq(cheeseRecipesTable.id, row.id),
-            eq(cheeseRecipesTable.scope, row.scope),
-          ),
-        );
-      updatedRows++;
-    }
-
-    await tx
-      .update(dataHealsTable)
-      .set({ result: { scanned: rows.length, updatedRows } })
-      .where(eq(dataHealsTable.id, CHEESE_OZ_DEPOISON_HEAL_ID));
-    logger.info(
-      { heal: CHEESE_OZ_DEPOISON_HEAL_ID, scanned: rows.length, updatedRows },
-      "Data heal applied",
-    );
-  });
+  await db
+    .insert(dataHealsTable)
+    .values({ id: CHEESE_OZ_DEPOISON_HEAL_ID })
+    .onConflictDoNothing({ target: dataHealsTable.id });
 }
 
 // ── Dough/sauce recipe name cleanup ─────────────────────────────────────────

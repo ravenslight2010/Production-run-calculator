@@ -7,7 +7,6 @@ import {
   cheeseComponentShares,
   cheesePerFlavorComponentOz,
   backfillCheeseSharePcts,
-  stripInconsistentCheeseOz,
   addCheeseRecipesIfAbsent,
   addCheeseRecipesIfAbsentByName,
   specCheeseDraftToRecipe,
@@ -192,19 +191,6 @@ describe("specCheeseDraftToRecipe", () => {
     expect(
       specCheeseDraftToRecipe({ name: "  ", brand: "", flavors: [], components: [] }),
     ).toBeNull();
-  });
-  it("does NOT write ozPerPizza onto recipe components (applicator-slot field, not recipe field)", () => {
-    // ozPerPizza on the draft is accepted for legacy callers but silently
-    // ignored — spec imports must not write per-pizza oz onto recipe components.
-    const r = specCheeseDraftToRecipe({
-      name: "Spec Blend",
-      brand: "B",
-      flavors: [],
-      components: [{ ingredient: "Mozzarella", ozPerPizza: 2.07 }],
-    });
-    expect(r?.components).toEqual([
-      { ingredient: "Mozzarella", lbs: 0 },
-    ]);
   });
 });
 
@@ -420,13 +406,7 @@ describe("cheeseComponentShares", () => {
     expect(shares).toEqual([0.75, 0.25]);
   });
 
-  it("falls back to ozPerPizza proportions, then lbs proportions", () => {
-    expect(
-      cheeseComponentShares([
-        { ingredient: "Mozz", lbs: 1, ozPerPizza: 3 },
-        { ingredient: "Cheddar", lbs: 99, ozPerPizza: 1 },
-      ]),
-    ).toEqual([0.75, 0.25]);
+  it("falls back to lbs proportions when sharePct is absent", () => {
     expect(
       cheeseComponentShares([
         { ingredient: "Mozz", lbs: 30 },
@@ -435,43 +415,12 @@ describe("cheeseComponentShares", () => {
     ).toEqual([0.75, 0.25]);
   });
 
-  it("skips the oz basis when coverage is PARTIAL (a weighted row has no oz) and uses lbs", () => {
-    // The add-a-row-after-import case: two imported rows carry oz, the
-    // manager-added Cellulose row has lbs only. Shares must come from lbs so
-    // the new row isn't zeroed by stale oz data.
+  it("zero-lbs rows are excluded from the lbs total and receive a 0 share", () => {
     const shares = cheeseComponentShares([
-      { ingredient: "Pizella", lbs: 60, ozPerPizza: 2 },
-      { ingredient: "Mozzarella", lbs: 30, ozPerPizza: 1 },
-      { ingredient: "Cellulose", lbs: 10 },
+      { ingredient: "Mozz", lbs: 10 },
+      { ingredient: "Spec-only", lbs: 0 },
     ]);
-    expect(shares).toEqual([0.6, 0.3, 0.1]);
-  });
-
-  it("still uses the oz basis when it FULLY covers every weighted row", () => {
-    const shares = cheeseComponentShares([
-      { ingredient: "Mozz", lbs: 10, ozPerPizza: 3 },
-      { ingredient: "Cheddar", lbs: 10, ozPerPizza: 1 },
-    ]);
-    expect(shares).toEqual([0.75, 0.25]);
-  });
-
-  it("uses partial oz values as a LAST resort when there are no usable lbs at all", () => {
-    const shares = cheeseComponentShares([
-      { ingredient: "Mozz", lbs: 0, ozPerPizza: 3 },
-      { ingredient: "Cheddar", lbs: 0, ozPerPizza: 1 },
-      { ingredient: "Cellulose", lbs: 0 },
-    ]);
-    expect(shares).toEqual([0.75, 0.25, 0]);
-  });
-
-  it("oz coverage ignores zero-lbs rows: oz-only rows don't force the lbs basis", () => {
-    // A spec-only recipe row (lbs 0, oz set) alongside fully-covered weighted
-    // rows keeps the oz basis usable.
-    const shares = cheeseComponentShares([
-      { ingredient: "Mozz", lbs: 10, ozPerPizza: 2 },
-      { ingredient: "Spec-only", lbs: 0, ozPerPizza: 2 },
-    ]);
-    expect(shares).toEqual([0.5, 0.5]);
+    expect(shares).toEqual([1, 0]);
   });
 
   it("normalizes odd sharePct totals and returns zeros with no usable numbers", () => {
@@ -504,65 +453,6 @@ describe("cheesePerFlavorComponentOz", () => {
   });
 });
 
-describe("stripInconsistentCheeseOz", () => {
-  const base = {
-    id: "r1",
-    name: "Aldo's Cheese Mix",
-    brand: "Aldo's",
-    flavors: [],
-    shredderSetting: "",
-    cellulose: "",
-    notes: "",
-    enabled: true,
-  };
-
-  it("drops all oz values when coverage is partial (the Aldo's Cellulose case)", () => {
-    const [changed] = stripInconsistentCheeseOz([
-      { ...base, components: [
-        { ingredient: "Pizella", lbs: 207, ozPerPizza: 2.07 },
-        { ingredient: "Mozzarella", lbs: 119, ozPerPizza: 1.19 },
-        { ingredient: "Parmesan", lbs: 0.2, ozPerPizza: 0.02 },
-        { ingredient: "Oregano", lbs: 0.1, ozPerPizza: 0.01 },
-        { ingredient: "Cellulose", lbs: 1.6 }, // manager-added, no oz
-      ] },
-    ]);
-    expect(changed).toBeDefined();
-    expect(changed.components.every((c) => c.ozPerPizza === undefined)).toBe(true);
-    // lbs untouched
-    expect(changed.components.map((c) => c.lbs)).toEqual([207, 119, 0.2, 0.1, 1.6]);
-  });
-
-  it("drops all oz values when a row's oz share contradicts its lbs share by >3x", () => {
-    // ~10x-off oz on the tiny Parm/Oregano rows (the reported poison).
-    const [changed] = stripInconsistentCheeseOz([
-      { ...base, components: [
-        { ingredient: "Pizella", lbs: 207, ozPerPizza: 2.07 },
-        { ingredient: "Mozzarella", lbs: 119, ozPerPizza: 1.19 },
-        { ingredient: "Parmesan", lbs: 0.2, ozPerPizza: 0.2 },
-        { ingredient: "Oregano", lbs: 0.1, ozPerPizza: 0.1 },
-      ] },
-    ]);
-    expect(changed).toBeDefined();
-    expect(changed.components.every((c) => c.ozPerPizza === undefined)).toBe(true);
-  });
-
-  it("leaves consistent full-coverage recipes and lbs-only / oz-only recipes alone", () => {
-    const consistent = { ...base, id: "a", components: [
-      { ingredient: "Mozz", lbs: 30, ozPerPizza: 3 },
-      { ingredient: "Ched", lbs: 10, ozPerPizza: 1 },
-    ] };
-    const lbsOnly = { ...base, id: "b", components: [
-      { ingredient: "Mozz", lbs: 30 },
-      { ingredient: "Ched", lbs: 10 },
-    ] };
-    const ozOnly = { ...base, id: "c", components: [
-      { ingredient: "Mozz", lbs: 0, ozPerPizza: 3 },
-      { ingredient: "Ched", lbs: 0, ozPerPizza: 1 },
-    ] };
-    expect(stripInconsistentCheeseOz([consistent, lbsOnly, ozOnly])).toEqual([]);
-  });
-});
-
 describe("backfillCheeseSharePcts", () => {
   const base = {
     id: "r1",
@@ -575,14 +465,14 @@ describe("backfillCheeseSharePcts", () => {
     enabled: true,
   };
 
-  it("fills sharePct from ozPerPizza proportions where absent (2dp)", () => {
+  it("fills sharePct from lbs proportions where absent (2dp)", () => {
     const [changed] = backfillCheeseSharePcts([
       { ...base, components: [
-        { ingredient: "Mozz", lbs: 0, ozPerPizza: 2 },
-        { ingredient: "Cheddar", lbs: 0, ozPerPizza: 1 },
+        { ingredient: "Mozz", lbs: 60 },
+        { ingredient: "Cheddar", lbs: 40 },
       ] },
     ]);
-    expect(changed.components.map((c) => c.sharePct)).toEqual([66.67, 33.33]);
+    expect(changed.components.map((c) => c.sharePct)).toEqual([60, 40]);
   });
 
   it("never rewrites an existing sharePct and skips recipes with no numbers", () => {
