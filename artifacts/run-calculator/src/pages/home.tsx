@@ -7071,7 +7071,7 @@ export default function Home() {
                   // non-default values for it).
                   if (
                     remoteRuns.length > 0 &&
-                    isPristineSeedRun(r, loadRunValues(r.id)) &&
+                    isPristineSeedRun(r) &&
                     !(
                       r.id === currentLocalId &&
                       (Date.now() - lastLocalEditRef.current < 2000 ||
@@ -7911,7 +7911,7 @@ export default function Home() {
       // local-only until the user gives it any data (then it's no longer
       // pristine and syncs normally). The `seeded` flag is stripped below so it
       // never travels over the wire.
-      if (isPristineSeedRun(run, value)) continue;
+      if (isPristineSeedRun(run)) continue;
       const { seeded: _seeded, ...meta } = run;
       pushRuns.push(meta);
       runValues[run.id] = value;
@@ -8687,7 +8687,7 @@ export default function Home() {
   const blankRunIds = useMemo(
     () =>
       dayState.runs
-        .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r, loadRunValues(r.id)))
+        .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r))
         .map((r) => r.id),
     [dayState],
   );
@@ -8700,7 +8700,7 @@ export default function Home() {
     // Recompute at click time — the memo may be a render behind a sync apply.
     const blankIds = new Set(
       dayState.runs
-        .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r, loadRunValues(r.id)))
+        .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r))
         .map((r) => r.id),
     );
     if (blankIds.size === 0) return;
