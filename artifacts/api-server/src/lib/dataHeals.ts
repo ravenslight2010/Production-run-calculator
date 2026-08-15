@@ -3384,4 +3384,219 @@ export async function runDataHeals(): Promise<void> {
   await runSyncRowNameRegistryRestore();
   await runBrandDuplicatePurge();
   await runTunnelPrePostDefaultHeal();
+  await runAugust2026ImportFixCheeseRecipes();
+  await runAugust2026ImportFixMixes();
+  await runAugust2026ImportFixProfiles();
+}
+
+// ── August 2026 import data-quality fixes ─────────────────────────────────────
+// The 5-sheet spec import on 2026-08-14/15 introduced several data bugs:
+//  · Edwardo's Parmesan Oregano Mix:       "NO Cellulose" note parsed as 0-lb component
+//  · Bobo's Deluxe Meat Mix (cheese_recipes): ozPerPizza field in component instead of lbs
+//  · Bobo's Deluxe Meat Mix (mixes):       perPizza stored as 0 (should be 2.35 oz)
+//  · Corner Booth Spinach / Hot Giardiniera, Basha's Hawaiian: batch_size stored as 0
+//  · Nob Hill Craft Red Hot Bacon Jalapeno: batch_size undercounted (23.29 → 34.93 lbs)
+//  · Nob Hill Craft Red Hot Bacon Jalapeno: flavor = 'RED HOT CHICKEN' (wrong mix linked)
+//  · Nob Hill Craft Caribbean Pinapples + Club Mix: brand stored as lowercase
+//  · All 'nob hill craft' brand_profiles:   brand stored as lowercase
+//  · nob hill craft / south of the border:  app2 recipe link uses bare 'South of the Border Mix'
+//    instead of the full name 'Nob Hill Craft South of the Border Mix'
+//  · nob hill craft / club:                 stray app1CheeseRecipeName on a raw-ingredient slot
+
+const AUG2026_CHEESE_FIX_ID = "aug2026-import-fix-cheese-recipes-v1";
+const AUG2026_MIXES_FIX_ID = "aug2026-import-fix-mixes-v1";
+const AUG2026_PROFILES_FIX_ID = "aug2026-import-fix-profiles-v1";
+
+async function runAugust2026ImportFixCheeseRecipes(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: AUG2026_CHEESE_FIX_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Scan all live cheese recipes; only two rows need fixing
+    const rows = await tx
+      .select()
+      .from(cheeseRecipesTable)
+      .where(eq(cheeseRecipesTable.scope, "live"))
+      .for("update");
+
+    let updated = 0;
+    for (const row of rows) {
+      const components = (row.components ?? []) as Array<Record<string, unknown>>;
+
+      if (row.name === "Edwardo's Parmesan Oregano Mix") {
+        // Remove the "NO Cellulose" phantom row (a spec-sheet note, not an ingredient)
+        const fixed = components.filter((c) => c["ingredient"] !== "NO Cellulose");
+        if (fixed.length === components.length) continue;
+        await tx
+          .update(cheeseRecipesTable)
+          .set({ components: fixed as any, updatedAt: new Date() })
+          .where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, row.scope)));
+        updated++;
+      } else if (row.name === "Bobo's Deluxe Meat Mix") {
+        // The importer wrote ozPerPizza into a cheese recipe component (wrong format).
+        // Correct batch weight: 828 pizzas/run × 2.35 oz ÷ 16 = 121.6125 lbs.
+        // (Derived from Bobo's Veggie Mix batch: 147.4875 lbs ÷ 2.85 oz/pizza × 16 = 828 pizzas)
+        const hasOzPerPizza = components.some((c) => "ozPerPizza" in c);
+        if (!hasOzPerPizza) continue;
+        const fixed = components.map((c) => ({
+          ingredient: c["ingredient"],
+          lbs: 121.6125,
+        }));
+        await tx
+          .update(cheeseRecipesTable)
+          .set({ components: fixed as any, updatedAt: new Date() })
+          .where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, row.scope)));
+        updated++;
+      }
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, updated } })
+      .where(eq(dataHealsTable.id, AUG2026_CHEESE_FIX_ID));
+    logger.info({ heal: AUG2026_CHEESE_FIX_ID, scanned: rows.length, updated }, "Data heal applied");
+  });
+}
+
+async function runAugust2026ImportFixMixes(): Promise<void> {
+  // Batch size fixes: name → corrected values (undefined = leave unchanged)
+  const BATCH_SIZE_FIXES: Record<string, { batchSize?: number; flavor?: string; brand?: string }> = {
+    "Nob Hill Craft Red Hot Bacon Jalapeno Mix": {
+      batchSize: 34.9312,          // was 23.2875 — only Bacon counted; Jalapenos (11.64 lbs) missing
+      flavor: "RED HOT BACON JALAPENO", // was 'RED HOT CHICKEN' (wrong row from spec sheet)
+    },
+    "Nob Hill Craft Caribbean Pinapples": {
+      batchSize: 31.05,            // was 0
+      brand: "Nob Hill Craft",     // was lowercase 'nob hill craft'
+    },
+    "Nob Hill Craft Club Mix": {
+      brand: "Nob Hill Craft",     // was lowercase 'nob hill craft'
+    },
+    "Corner Booth Spinach Mix":      { batchSize: 72.45 },  // was 0
+    "Corner Booth Hot Giardiniera Mix": { batchSize: 144.9 }, // was 0
+    "Basha's Ultra Thin Hawaiian":   { batchSize: 82.8 },   // was 0
+  };
+
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: AUG2026_MIXES_FIX_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx
+      .select()
+      .from(mixesTable)
+      .where(eq(mixesTable.scope, "live"))
+      .for("update");
+
+    let updated = 0;
+    for (const row of rows) {
+      const fix = BATCH_SIZE_FIXES[row.name];
+      if (fix) {
+        const patch: Record<string, unknown> = { updatedAt: new Date() };
+        if (fix.batchSize !== undefined) patch["batchSize"] = fix.batchSize;
+        if (fix.flavor !== undefined) patch["flavor"] = fix.flavor;
+        if (fix.brand !== undefined) patch["brand"] = fix.brand;
+        await tx
+          .update(mixesTable)
+          .set(patch as any)
+          .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+        updated++;
+        continue;
+      }
+
+      // Bobo's Deluxe Meat Mix: importer left perPizza = 0; spec sheet says 2.35 oz/pizza.
+      // Same 828-pizza batch as above → 121.6125 lbs.
+      if (row.name === "Bobo's Deluxe Meat Mix") {
+        const components = (row.components ?? []) as Array<Record<string, unknown>>;
+        const hasZeroPerPizza = components.some((c) => Number(c["perPizza"]) === 0);
+        if (!hasZeroPerPizza) continue;
+        const fixed = components.map((c) => ({
+          ...c,
+          perPizza: 2.35,
+          perBatchLbs: 121.6125,
+        }));
+        await tx
+          .update(mixesTable)
+          .set({ components: fixed as any, batchSize: 121.6125, updatedAt: new Date() } as any)
+          .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+        updated++;
+      }
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: rows.length, updated } })
+      .where(eq(dataHealsTable.id, AUG2026_MIXES_FIX_ID));
+    logger.info({ heal: AUG2026_MIXES_FIX_ID, scanned: rows.length, updated }, "Data heal applied");
+  });
+}
+
+async function runAugust2026ImportFixProfiles(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: AUG2026_PROFILES_FIX_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Select all live Nob Hill Craft profiles (brand stored lowercase from importer)
+    const profiles = await tx
+      .select()
+      .from(brandProfilesTable)
+      .where(
+        and(
+          eq(brandProfilesTable.scope, "live"),
+          sql`LOWER(${brandProfilesTable.brand}) = 'nob hill craft'`,
+        ),
+      )
+      .for("update");
+
+    let updated = 0;
+    for (const p of profiles) {
+      const values = { ...(p.values as Record<string, unknown>) };
+      let changed = false;
+
+      // 1. Fix lowercase brand name
+      const correctBrand = "Nob Hill Craft";
+      if (p.brand !== correctBrand) changed = true;
+
+      // 2. Fix south of the border: app2 recipe link points to bare name (no prefix)
+      if (p.flavor === "south of the border") {
+        if ((values["app2CheeseRecipeName"] as string | undefined) === "South of the Border Mix") {
+          values["app2CheeseRecipeName"] = "Nob Hill Craft South of the Border Mix";
+          changed = true;
+        }
+      }
+
+      // 3. Fix club: stray recipe name on app1 (type = raw Diced Chicken ingredient, not a mix)
+      if (p.flavor === "club") {
+        if ((values["app1CheeseRecipeName"] as string | undefined) === "Nob Hill Craft Club Mix") {
+          values["app1CheeseRecipeName"] = null;
+          changed = true;
+        }
+      }
+
+      if (!changed) continue;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ brand: correctBrand, values, updatedAtMs: stamp })
+        .where(and(eq(brandProfilesTable.key, p.key), eq(brandProfilesTable.scope, p.scope)));
+      updated++;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned: profiles.length, updated } })
+      .where(eq(dataHealsTable.id, AUG2026_PROFILES_FIX_ID));
+    logger.info({ heal: AUG2026_PROFILES_FIX_ID, scanned: profiles.length, updated }, "Data heal applied");
+  });
 }
