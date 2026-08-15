@@ -565,65 +565,6 @@ export function fillCheeseRecipeTags(
 }
 
 /**
- * @deprecated ONE-TIME HEAL UTILITY ONLY — do NOT wire into any import path.
- *
- * This function wrote spec-sheet per-pizza ounces onto cheese recipe components
- * during the historical data heal (task 647 / cheese-oz-depoison-v1). That heal
- * has already run in production and stripped the poisoned values. The spec
- * import pipeline was updated (task 648) to never write `ozPerPizza` onto recipe
- * components at all — the correct place for per-pizza oz is the applicator SLOT,
- * not the recipe definition.
- *
- * Keeping this export purely so the existing unit tests can verify its behaviour
- * in isolation; those tests document what the historical heal did. Do not call
- * this function from any new import, sync, or server code path.
- *
- * Pure. Returns the next list plus how many RECIPES had at least one component's
- * ozPerPizza actually change.
- */
-export function applyCheeseOzPerPizza(
-  existing: ReadonlyArray<CheeseRecipe>,
-  updates: ReadonlyArray<{
-    name: string;
-    components: ReadonlyArray<{ ingredient: string; ozPerPizza: number }>;
-  }>,
-): { next: CheeseRecipe[]; updated: number } {
-  const byName = new Map<
-    string,
-    Map<string, number>
-  >();
-  for (const u of updates) {
-    const nameKey = u.name.trim().toLowerCase();
-    if (!nameKey) continue;
-    const oz = new Map<string, number>();
-    for (const c of u.components) {
-      const ing = c.ingredient.trim().toLowerCase();
-      const v = Number(c.ozPerPizza);
-      if (!ing || !Number.isFinite(v) || v <= 0) continue;
-      if (!oz.has(ing)) oz.set(ing, v);
-    }
-    if (oz.size) byName.set(nameKey, oz);
-  }
-  if (!byName.size) return { next: [...existing], updated: 0 };
-  let updated = 0;
-  const next = existing.map((r) => {
-    const oz = byName.get(r.name.trim().toLowerCase());
-    if (!oz) return r;
-    let changed = false;
-    const components = r.components.map((c) => {
-      const v = oz.get(c.ingredient.trim().toLowerCase());
-      if (v === undefined || c.ozPerPizza === v) return c;
-      changed = true;
-      return { ...c, ozPerPizza: v };
-    });
-    if (!changed) return r;
-    updated++;
-    return { ...r, components };
-  });
-  return { next, updated };
-}
-
-/**
  * Merge imported cheese recipes into the existing list BY ID: an imported
  * recipe replaces the existing one with the same id, otherwise it is appended.
  * Order is preserved (existing first, then genuinely new). Pure — mirrors the

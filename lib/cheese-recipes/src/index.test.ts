@@ -11,7 +11,6 @@ import {
   addCheeseRecipesIfAbsent,
   addCheeseRecipesIfAbsentByName,
   specCheeseDraftToRecipe,
-  applyCheeseOzPerPizza,
   mergeCheeseRecipes,
   repointCheeseRecipesForBrandMerge,
   renameCheeseRecipesBrand,
@@ -206,60 +205,6 @@ describe("specCheeseDraftToRecipe", () => {
     expect(r?.components).toEqual([
       { ingredient: "Mozzarella", lbs: 0 },
     ]);
-  });
-});
-
-describe("applyCheeseOzPerPizza", () => {
-  it("writes ONLY ozPerPizza on name+ingredient matches — curated lbs untouched", () => {
-    const existing = [
-      make({
-        id: "curated",
-        name: "Aldo's Cheese Mix",
-        components: [
-          { ingredient: "Pizella", lbs: 207 },
-          { ingredient: "Part Skim Mozzarella", lbs: 119 },
-        ],
-      }),
-    ];
-    const { next, updated } = applyCheeseOzPerPizza(existing, [
-      {
-        name: "aldo's cheese mix", // case-insensitive name match
-        components: [
-          { ingredient: "PIZELLA", ozPerPizza: 2.07 }, // ci ingredient match
-          { ingredient: "Part Skim Mozzarella", ozPerPizza: 1.19 },
-        ],
-      },
-    ]);
-    expect(updated).toBe(1);
-    expect(next[0].components).toEqual([
-      { ingredient: "Pizella", lbs: 207, ozPerPizza: 2.07 },
-      { ingredient: "Part Skim Mozzarella", lbs: 119, ozPerPizza: 1.19 },
-    ]);
-  });
-  it("does not count a recipe whose oz values already match (no churn save)", () => {
-    const existing = [
-      make({
-        name: "Blend",
-        components: [{ ingredient: "Mozz", lbs: 30, ozPerPizza: 2 }],
-      }),
-    ];
-    const { next, updated } = applyCheeseOzPerPizza(existing, [
-      { name: "Blend", components: [{ ingredient: "Mozz", ozPerPizza: 2 }] },
-    ]);
-    expect(updated).toBe(0);
-    expect(next[0]).toBe(existing[0]);
-  });
-  it("ignores unmatched names, unmatched ingredients, and non-positive oz", () => {
-    const existing = [
-      make({ name: "Blend", components: [{ ingredient: "Mozz", lbs: 30 }] }),
-    ];
-    const { next, updated } = applyCheeseOzPerPizza(existing, [
-      { name: "Other", components: [{ ingredient: "Mozz", ozPerPizza: 2 }] },
-      { name: "Blend", components: [{ ingredient: "Prov", ozPerPizza: 2 }] },
-      { name: "Blend", components: [{ ingredient: "Mozz", ozPerPizza: 0 }] },
-    ]);
-    expect(updated).toBe(0);
-    expect(next[0].components).toEqual([{ ingredient: "Mozz", lbs: 30 }]);
   });
 });
 
