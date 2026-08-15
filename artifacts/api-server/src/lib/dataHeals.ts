@@ -3451,6 +3451,26 @@ async function runAugust2026ImportFixCheeseRecipes(): Promise<void> {
           .set({ components: fixed as any, updatedAt: new Date() })
           .where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, row.scope)));
         updated++;
+      } else if (
+        row.name === "Lucia's Craft Pepperoni Cheese Mix" ||
+        row.name === "Lucia's Craft Pepperoni/Jalapeno Cheese Mix"
+      ) {
+        // Same ozPerPizza-in-component bug as Bobo's Deluxe.
+        // Lucia's Craft batch = 745.2 pizzas/run (verified identically across Caribbean,
+        // Club, South of Border, Bratwurst, Chicken Masala, and White Fajita mixes).
+        // Convert: lbs = ozPerPizza × 745.2 ÷ 16, rounded to 4 decimal places.
+        const hasOzPerPizza = components.some((c) => "ozPerPizza" in c);
+        if (!hasOzPerPizza) continue;
+        const LUCIA_BATCH_PIZZAS = 745.2;
+        const fixed = components.map((c) => ({
+          ingredient: c["ingredient"],
+          lbs: Math.round((Number(c["ozPerPizza"]) * LUCIA_BATCH_PIZZAS / 16) * 10000) / 10000,
+        }));
+        await tx
+          .update(cheeseRecipesTable)
+          .set({ components: fixed as any, updatedAt: new Date() })
+          .where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, row.scope)));
+        updated++;
       }
     }
 
@@ -3476,9 +3496,23 @@ async function runAugust2026ImportFixMixes(): Promise<void> {
     "Nob Hill Craft Club Mix": {
       brand: "Nob Hill Craft",     // was lowercase 'nob hill craft'
     },
-    "Corner Booth Spinach Mix":      { batchSize: 72.45 },  // was 0
-    "Corner Booth Hot Giardiniera Mix": { batchSize: 144.9 }, // was 0
-    "Basha's Ultra Thin Hawaiian":   { batchSize: 82.8 },   // was 0
+    "Corner Booth Spinach Mix":            { batchSize: 72.45 },  // was 0
+    "Corner Booth Hot Giardiniera Mix":    { batchSize: 144.9 }, // was 0
+    "Basha's Ultra Thin Hawaiian":         { batchSize: 82.8 },   // was 0
+    // Lucia's Craft — batch_size stored as 0 or counting only one ingredient.
+    // Correct values are the sum of already-stored perBatchLbs (each product line has its own
+    // batch size, so we use the perBatchLbs sum rather than a fixed pizza count).
+    "Lucia's Craft Red Hot Bacon Jalapeno Mix": {
+      batchSize: 34.9312,  // Jalapenos 11.6437 + Bacon 23.2875; was only counting Bacon
+    },
+    "Lucia's Craft Caribbean Pinapples": { batchSize: 31.05 },   // was 0; perBatchLbs correct
+    "Lucia's Craft Alfredo Spinach":     { batchSize: 49.6125 }, // was 0; perBatchLbs correct
+    // Lowe's — Jalapeno-missing batch_size bug + wrong flavor + stray phantom Bacon component
+    // (stray component removal handled separately in the loop below)
+    "Lowe's Red Hot Bacon Jalapeno Mix": {
+      batchSize: 31.05,   // Jalapenos 10.35 + Bacon 20.7; was only counting Bacon (20.7)
+      flavor: "RED HOT BACON JALAPENO", // was 'RED HOT CHICKEN'
+    },
   };
 
   await db.transaction(async (tx) => {
@@ -3512,7 +3546,7 @@ async function runAugust2026ImportFixMixes(): Promise<void> {
       }
 
       // Bobo's Deluxe Meat Mix: importer left perPizza = 0; spec sheet says 2.35 oz/pizza.
-      // Same 828-pizza batch as above → 121.6125 lbs.
+      // 828-pizza batch (from Bobo's Veggie Mix 147.4875 lbs ÷ 2.85 oz × 16 = 828 pizzas).
       if (row.name === "Bobo's Deluxe Meat Mix") {
         const components = (row.components ?? []) as Array<Record<string, unknown>>;
         const hasZeroPerPizza = components.some((c) => Number(c["perPizza"]) === 0);
@@ -3525,6 +3559,21 @@ async function runAugust2026ImportFixMixes(): Promise<void> {
         await tx
           .update(mixesTable)
           .set({ components: fixed as any, batchSize: 121.6125, updatedAt: new Date() } as any)
+          .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+        updated++;
+      }
+
+      // Lowe's Red Hot Bacon Jalapeno Mix: a phantom 0-oz "Bacon (C&F ...)" component was appended
+      // alongside the correct "Bacon, NATURAL" entry. Strip any component with perPizza=0.
+      // (batch_size and flavor are already fixed above via BATCH_SIZE_FIXES)
+      if (row.name === "Lowe's Red Hot Bacon Jalapeno Mix") {
+        const components = (row.components ?? []) as Array<Record<string, unknown>>;
+        const hasZeroPerPizza = components.some((c) => Number(c["perPizza"]) === 0);
+        if (!hasZeroPerPizza) continue;
+        const fixed = components.filter((c) => Number(c["perPizza"]) !== 0);
+        await tx
+          .update(mixesTable)
+          .set({ components: fixed as any, updatedAt: new Date() } as any)
           .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
         updated++;
       }
