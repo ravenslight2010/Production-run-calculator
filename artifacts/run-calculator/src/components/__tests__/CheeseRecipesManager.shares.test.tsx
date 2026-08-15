@@ -65,18 +65,9 @@ function shareValues(container: HTMLElement): number[] {
   ).map((el) => Number(el.value));
 }
 
-// Target lbs inputs unambiguously via aria-label (not inputMode, which the
-// oz/pizza DecimalInputs also use).
 function lbsInputs(container: HTMLElement): HTMLInputElement[] {
   return Array.from(
     container.querySelectorAll<HTMLInputElement>('input[aria-label="lbs per batch"]'),
-  );
-}
-
-// Target oz/pizza inputs unambiguously.
-function ozInputs(container: HTMLElement): HTMLInputElement[] {
-  return Array.from(
-    container.querySelectorAll<HTMLInputElement>('input[aria-label="oz per pizza"]'),
   );
 }
 
@@ -137,92 +128,8 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
     expect(shares).toEqual([60, 30, 10]);
   });
 
-  it("editing oz/pizza commits the updated value and reflects in share %", () => {
-    // Recipe with only oz values (no lbs) — oz IS the share source.
-    items.push({
-      ...aldos(),
-      components: [
-        { ingredient: "Mozzarella", lbs: 0, ozPerPizza: 3 },
-        { ingredient: "Parmesan", lbs: 0, ozPerPizza: 1 },
-      ],
-    });
-    const { container } = renderManager();
-    expandRecipe();
-
-    // Edit Parmesan oz from 1 → 3 → shares should become 50/50.
-    const inputs = ozInputs(container);
-    expect(inputs).toHaveLength(2);
-    fireEvent.change(inputs[1], { target: { value: "3" } });
-
-    const shares = shareValues(container);
-    expect(shares[0]).toBeCloseTo(50, 0);
-    expect(shares[1]).toBeCloseTo(50, 0);
-  });
-
-  it("nonzero oz edit on a lbs>0 row calls onChange with updated ozPerPizza (on blur)", () => {
-    // Use CheeseRecipeEditor directly — avoids React Query's async mutation
-    // pipeline and tests the commit path in isolation.
-    const onChange = vi.fn();
-    const recipe: CheeseRecipe = {
-      ...aldos(),
-      components: [
-        { ingredient: "Mozzarella", lbs: 60, ozPerPizza: 2 },
-        { ingredient: "Parmesan", lbs: 30, ozPerPizza: 1 },
-      ],
-    };
-    const { container } = render(
-      <CheeseRecipeEditor
-        recipe={recipe}
-        disabled={false}
-        ingredientSuggestions={[]}
-        onChange={onChange}
-        onDelete={() => {}}
-      />,
-    );
-    const inputs = ozInputs(container);
-    expect(inputs).toHaveLength(2);
-    // Edit Mozzarella oz from 2 → 4; blur commits.
-    fireEvent.change(inputs[0], { target: { value: "4" } });
-    fireEvent.blur(inputs[0]);
-    expect(onChange).toHaveBeenCalled();
-    const saved: CheeseRecipe = onChange.mock.calls.at(-1)![0];
-    expect(saved.components[0].ozPerPizza).toBe(4);
-  });
-
-  it("clearing oz/pizza on a lbs>0 row calls onChange immediately (no blur needed)", () => {
-    // When the manager types 0 in an oz field that has lbs>0, the input unmounts
-    // immediately (hidden rule: lbs>0 && oz===0), skipping onBlur. The fix
-    // commits synchronously inside onValue before the unmount.
-    const onChange = vi.fn();
-    const recipe: CheeseRecipe = {
-      ...aldos(),
-      components: [
-        { ingredient: "Mozzarella", lbs: 60, ozPerPizza: 2 },
-        { ingredient: "Parmesan", lbs: 30, ozPerPizza: 1 },
-      ],
-    };
-    const { container } = render(
-      <CheeseRecipeEditor
-        recipe={recipe}
-        disabled={false}
-        ingredientSuggestions={[]}
-        onChange={onChange}
-        onDelete={() => {}}
-      />,
-    );
-    const inputs = ozInputs(container);
-    expect(inputs).toHaveLength(2);
-
-    // Clear Parmesan oz → 0 (no blur fired after this).
-    fireEvent.change(inputs[1], { target: { value: "0" } });
-
-    // Input should be gone (hidden because lbs>0 && oz===0).
-    expect(ozInputs(container)).toHaveLength(1);
-
-    // onChange must have been called synchronously (no blur required).
-    expect(onChange).toHaveBeenCalled();
-    const saved: CheeseRecipe = onChange.mock.calls.at(-1)![0];
-    // ozPerPizza should be absent (normalizer strips undefined/0).
-    expect(saved.components[1].ozPerPizza).toBeUndefined();
-  });
+  // oz/pizza is not shown in the cheese recipe editor — it is an applicator
+  // property (the same recipe can be applied at different weights by different
+  // applicators, giving each a different per-ingredient oz). Share % is what
+  // drives the per-ingredient split; applicator oz/pizza lives on the run form.
 });
