@@ -52,6 +52,7 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## User preferences
 
+- **Fix all errors immediately.** Any TypeScript, test, or build error encountered during any task — whether directly related to the current work or not — must be fixed before moving on. Do not let errors accumulate.
 - **CURRENT FOCUS: WEB ONLY — parity paused.** As of 2026-07-06 the user is focusing on the web app (`artifacts/run-calculator`) only; the mobile app has not been used or tested yet. Do NOT do web+mobile parity work for now — build/change web only unless the user explicitly asks for mobile. The parity rule below is retained for when mobile work resumes.
 - **(Paused) Keep web and mobile at parity.** Any feature added, removed, or changed must be applied to BOTH `artifacts/run-calculator` (web) and `artifacts/run-calculator-mobile` (Expo). Match formulas exactly across both. Mobile is local-only (AsyncStorage `run-calc-mobile-v2`, additive migration via `normalizeState`/`normalizeSettings`); web is its own app — adapt storage/UI per platform but keep behavior identical.
 
