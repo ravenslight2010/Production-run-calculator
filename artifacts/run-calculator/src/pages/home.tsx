@@ -241,6 +241,7 @@ import { TickBar } from "../components/TickBar";
 import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../components/DoughRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
+import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
 import { updateSupervisorPin } from "../supervisorPinApi";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
@@ -1848,23 +1849,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function useDropdownScrollKeeper(open: boolean) {
-  const posRef = useRef(0);
-  const wasOpenRef = useRef(false);
-  if (open && !wasOpenRef.current) posRef.current = 0;
-  wasOpenRef.current = open;
-  const handlersRef = useRef({
-    listRef: (node: HTMLDivElement | null) => {
-      if (node && posRef.current > 0 && node.scrollTop !== posRef.current) {
-        node.scrollTop = posRef.current;
-      }
-    },
-    onScroll: (e: { currentTarget: HTMLDivElement }) => {
-      posRef.current = e.currentTarget.scrollTop;
-    },
-  });
-  return handlersRef.current;
-}
+// useDropdownScrollKeeper lives in src/hooks/useDropdownScrollKeeper.ts
+// (moved out of home.tsx so Fast Refresh is not broken by a hook export)
 
 export function TypeDropdown({
   label,

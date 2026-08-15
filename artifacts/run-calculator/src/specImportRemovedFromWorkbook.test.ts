@@ -219,16 +219,33 @@ describe("computeProfilesRemovedFromWorkbook", () => {
     expect(result).toEqual([{ brand: "NewBrand", flavor: "Cheese" }]);
   });
 
-  it("matches a single-file import against a compound (multi-file batch) sourceKey snapshot", async () => {
-    // The file was last imported as part of a batch whose snapshot is stored
-    // under "alpha|specs" — a per-file intersection lookup must still find it.
+  it("returns [] when the only matching snapshot is from a different-set batch import", async () => {
+    // Bug: file A was last imported as part of a batch (A+B), snapshot stored
+    // under "alpha|specs". Re-importing A alone must NOT report profiles from B
+    // as "removed from workbook" — we can't tell which profiles belonged to A
+    // vs B in the batch snapshot. Exact file-set matching returns [] here.
     fetchSheetsSpy.mockResolvedValue([
-      snapshot([profile("Aldo", "Cheese")], "alpha|specs", 1, 100),
+      snapshot([profile("Aldo", "Cheese"), profile("Other", "Brand")], "alpha|specs", 1, 100),
     ]);
     const result = await computeProfilesRemovedFromWorkbook(
       ["specs.xlsx"],
       [],
-      [], // Cheese absent from new parse
+      [], // all absent from new parse, but we can't know which file they came from
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("surfaces a removed profile when a previous single-file snapshot exists for the same file", async () => {
+    // When file A has its own single-file snapshot AND is re-imported alone,
+    // profiles genuinely absent from the new parse are correctly surfaced.
+    fetchSheetsSpy.mockResolvedValue([
+      // Single-file snapshot — exact match
+      snapshot([profile("Aldo", "Cheese"), profile("Aldo", "Pepperoni")], "specs", 1, 100),
+    ]);
+    const result = await computeProfilesRemovedFromWorkbook(
+      ["specs.xlsx"],
+      [],
+      [profile("Aldo", "Pepperoni")], // Cheese is gone from the new parse
     );
     expect(result).toEqual([{ brand: "Aldo", flavor: "Cheese" }]);
   });

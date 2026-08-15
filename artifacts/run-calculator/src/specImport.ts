@@ -1448,7 +1448,16 @@ export async function computeProfilesRemovedFromWorkbook(
   if (!sourceKey) return [];
   try {
     const sheets = await fetchSavedSpecSheets();
-    const candidates = selectPruneSnapshots(sheets, sourceKey).filter((s) => s.data);
+    // EXACT file-set match only: a profile is only "removed from the workbook"
+    // when the previous snapshot covered exactly the same set of files as this
+    // import. Intersection matching (selectPruneSnapshots) is correct for the
+    // re-import prune (it must find a batch snapshot to avoid clobbering edits),
+    // but wrong here — it would attribute ALL profiles from an "A|B|C" batch
+    // snapshot to a later single-file "A" import, falsely reporting B's and C's
+    // profiles as removed. Safe failure mode is [] (no false positives).
+    const candidates = sheets
+      .filter((s) => (s.sourceKey ?? "").trim() === sourceKey && s.data)
+      .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
     if (candidates.length === 0) return [];
     const previous = mergePruneSnapshots(candidates.map((s) => s.data));
     const previousProfiles = previous.profiles ?? [];
