@@ -3387,6 +3387,7 @@ export async function runDataHeals(): Promise<void> {
   await runAugust2026ImportFixCheeseRecipes();
   await runAugust2026ImportFixMixes();
   await runAugust2026ImportFixProfiles();
+  await runAugust2026ImportFixSauces();
 }
 
 // ── August 2026 import data-quality fixes ─────────────────────────────────────
@@ -3577,6 +3578,57 @@ async function runAugust2026ImportFixMixes(): Promise<void> {
           .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
         updated++;
       }
+
+      // Lucia's Craft House Dlux Mix and Sweet Chili Veggie Mix: importer left ALL perPizza = 0.
+      // Per-pizza oz from spec sheet confirmed by manager (2026-08-15).
+      // Batch size assumed 745.2 pizzas/run (standard Lucia's Craft batch, verified across 6+ mixes).
+      // perBatchLbs = perPizza × 745.2 ÷ 16 for each ingredient.
+      const LUCIA_BATCH_PZ = 745.2;
+      if (row.name === "Lucia's Craft House Dlux Mix") {
+        const components = (row.components ?? []) as Array<Record<string, unknown>>;
+        const allZero = components.every((c) => Number(c["perPizza"]) === 0);
+        if (!allZero) continue;
+        // Spec: FR Red Onion Strips 1.325 oz, Black Olives 0.5 oz (total = 1.825 oz matches profile)
+        const spec: Array<{ ingredient: string; perPizza: number }> = [
+          { ingredient: "FR Red Onion Strips", perPizza: 1.325 },
+          { ingredient: "Black Olives",        perPizza: 0.5   },
+        ];
+        const fixed = spec.map((s) => ({
+          ingredient: s.ingredient,
+          perPizza: s.perPizza,
+          perBatchLbs: Math.round(s.perPizza * LUCIA_BATCH_PZ / 16 * 10000) / 10000,
+        }));
+        const batchSize = fixed.reduce((sum, c) => sum + c.perBatchLbs, 0);
+        await tx
+          .update(mixesTable)
+          .set({ components: fixed as any, batchSize, updatedAt: new Date() } as any)
+          .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+        updated++;
+      }
+
+      if (row.name === "Lucia's Craft Sweet Chili Veggie Mix") {
+        const components = (row.components ?? []) as Array<Record<string, unknown>>;
+        const allZero = components.every((c) => Number(c["perPizza"]) === 0);
+        if (!allZero) continue;
+        // Spec: FR Red Onion Strips 0.5 oz, Blanched Red Pepper Strips 0.5 oz,
+        // Green Pepper Strips Blanched 0.5 oz (total = 1.5 oz matches profile)
+        const spec: Array<{ ingredient: string; perPizza: number }> = [
+          { ingredient: "FR Red Onion Strips",       perPizza: 0.5 },
+          { ingredient: "Blanched Red Pepper Strips", perPizza: 0.5 },
+          { ingredient: "Green Pepper Strips, Blanched", perPizza: 0.5 },
+        ];
+        const fixed = spec.map((s) => ({
+          ingredient: s.ingredient,
+          perPizza: s.perPizza,
+          perBatchLbs: Math.round(s.perPizza * LUCIA_BATCH_PZ / 16 * 10000) / 10000,
+        }));
+        const batchSize = fixed.reduce((sum, c) => sum + c.perBatchLbs, 0);
+        await tx
+          .update(mixesTable)
+          .set({ components: fixed as any, batchSize, updatedAt: new Date() } as any)
+          .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+        updated++;
+      }
     }
 
     await tx
@@ -3647,5 +3699,71 @@ async function runAugust2026ImportFixProfiles(): Promise<void> {
       .set({ result: { scanned: profiles.length, updated } })
       .where(eq(dataHealsTable.id, AUG2026_PROFILES_FIX_ID));
     logger.info({ heal: AUG2026_PROFILES_FIX_ID, scanned: profiles.length, updated }, "Data heal applied");
+  });
+}
+
+// ── August 2026 import: missing sauce recipes ──────────────────────────────────
+// The 5-sheet spec import wrote frontlineRecipeName values with a "(Legacy)" suffix
+// (e.g. "BBQ Sauce (Legacy)", "Ranch Sauce (Legacy)") across 28+ brand profiles,
+// but the corresponding sauce_recipe rows were never created.  The app shows a broken
+// link ("legacy" raw name) instead of the recipe card.  Fix: create each missing
+// sauce_recipe as a buy-as-is stub (empty components).  Managers can add formula rows
+// via the UI later if needed.
+const AUG2026_SAUCE_FIX_ID = "aug2026-import-fix-sauce-recipes-v1";
+
+async function runAugust2026ImportFixSauces(): Promise<void> {
+  // Every unique frontlineRecipeName found in brand_profiles that has no matching sauce_recipe row.
+  // Ordered by rough frequency across affected profiles.
+  const MISSING_SAUCES: Array<{ id: string; name: string }> = [
+    { id: "bbq-sauce-legacy",                    name: "BBQ Sauce (Legacy)" },
+    { id: "ranch-sauce-legacy",                  name: "Ranch Sauce (Legacy)" },
+    { id: "cheeseburger-sauce-legacy",           name: "Cheeseburger Sauce (Legacy)" },
+    { id: "sweet-n-sour-sauce-legacy",           name: "Sweet n Sour Sauce (Legacy)" },
+    { id: "al-pastor-sauce-legacy",              name: "Al Pastor Sauce (Legacy)" },
+    { id: "buffalo-ranch-sauce-legacy",          name: "Buffalo Ranch Sauce (Legacy)" },
+    { id: "legacy-buffalo-ranch",                name: "Legacy Buffalo Ranch" },
+    { id: "sauce-legacy-cheeseburger-recipe",    name: "Sauce (Legacy Cheeseburger Recipe)" },
+  ];
+
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: AUG2026_SAUCE_FIX_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    let added = 0;
+    for (const { id, name } of MISSING_SAUCES) {
+      // Check for an existing row by exact name (case-insensitive) before inserting.
+      const existing = await tx
+        .select({ id: sauceRecipesTable.id })
+        .from(sauceRecipesTable)
+        .where(
+          and(
+            eq(sauceRecipesTable.scope, "live"),
+            eq(sql`lower(${sauceRecipesTable.name})`, name.toLowerCase()),
+          ),
+        );
+      if (existing.length > 0) continue;
+
+      await tx.insert(sauceRecipesTable).values({
+        id,
+        scope: "live",
+        name,
+        notes: "",
+        components: [],
+        enabled: true,
+        brand: "",
+        flavors: [],
+      });
+      added++;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { attempted: MISSING_SAUCES.length, added } })
+      .where(eq(dataHealsTable.id, AUG2026_SAUCE_FIX_ID));
+    logger.info({ heal: AUG2026_SAUCE_FIX_ID, attempted: MISSING_SAUCES.length, added }, "Data heal applied");
   });
 }
