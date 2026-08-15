@@ -8,7 +8,7 @@ import type { SheetGrid } from "@workspace/spec-import";
 
 /** Build a minimal SheetGrid from a list of first-column strings. */
 function grid(cells: string[]): SheetGrid {
-  return { rows: cells.map((c) => [c]) };
+  return { name: "", rows: cells.map((c) => [c]) };
 }
 
 // ─── parseSauceGuide ─────────────────────────────────────────────────────────

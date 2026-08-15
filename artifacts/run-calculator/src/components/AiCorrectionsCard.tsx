@@ -190,7 +190,7 @@ export default function AiCorrectionsCard() {
                         {isConflicted && (
                           <AlertTriangle
                             className="shrink-0 w-3.5 h-3.5 text-amber-400"
-                            title="This entry is part of a rename chain or cycle and is currently ignored by the AI. Delete the stale entry to restore it."
+                            aria-label="This entry is part of a rename chain or cycle and is currently ignored by the AI. Delete the stale entry to restore it."
                           />
                         )}
                         <div className="min-w-0 flex-1">

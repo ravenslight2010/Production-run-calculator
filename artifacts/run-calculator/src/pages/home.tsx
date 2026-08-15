@@ -13650,7 +13650,7 @@ export default function Home() {
               onApply={(() => {
                 const action = proactiveAlert?.suggestedAction;
                 if (!action) return undefined;
-                const runningRun = dayState.runs.find((r) => r.status === "running");
+                const runningRun = dayState.runs.find((r) => !!r.startedAt && !r.endedAt);
                 if (!runningRun) return undefined;
                 // Validate action values against the run's actual capacity so a
                 // badly-calibrated model response can't silently overwrite progress
@@ -16885,7 +16885,7 @@ function FloorModeView() {
                     type="button"
                     onClick={() => {
                       navigator.vibrate?.(15);
-                      markRunValuesUpdated(currentRunId, Date.now());
+                      markRunValuesUpdated(currentRun?.id ?? "", Date.now());
                       autoSuppressUntilRef.current = 0;
                       fireAutoTrackNow();
                       form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
@@ -16984,7 +16984,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   // not trigger a false-positive warning.
   function handleStartRun() {
     const firstPendingIdx = dayState.runs.findIndex(
-      (r) => !r.startedAt && (r.brand || r.flavor),
+      (r: RunMeta) => !r.startedAt && (r.brand || r.flavor),
     );
     if (firstPendingIdx !== -1 && firstPendingIdx !== dayState.currentIndex) {
       const nextRun = dayState.runs[firstPendingIdx];
@@ -19074,7 +19074,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           form.setValue(field, speedNudge.value, { shouldDirty: true });
                           markRunValuesUpdated(currentRunId, now);
                           hx.lastLocalEditRef.current = now;
-                          schedulePush(dayStateRef.current, 0);
+                          hx.schedulePush(hx.dayStateRef.current, 0);
                           speedNudgeLastAcceptRef.current = now;
                           speedCorrectionHistoryRef.current = [];
                           setSpeedNudge(null);
@@ -19353,7 +19353,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   // Prep phase: shared prepStartedAt with dough tab, own sauce batch counter.
   const {
     prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
-  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime, doughBatchSec: 580, sauceBatchSec: 1800 });
+  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: 580, sauceBatchSec: 1800 });
 
   // Track the PREVIOUS run ID so the reset effect can distinguish a genuine
   // new-run transition from a remount with the same run ID (e.g. Radix
@@ -19449,7 +19449,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   return (
     <>
       {/* ── Sauce Prep Section (shown before production starts) ─────────────── */}
-      {runStatus === "pending" && !prep.prepCarriedOver && dayState.runs.every(r => !r.startedAt) && (
+      {runStatus === "pending" && !prep.prepCarriedOver && dayState.runs.every((r: RunMeta) => !r.startedAt) && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-red-400 w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
@@ -19960,7 +19960,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   );
   const {
     prep, prepActive, elapsedSec: prepElapsedSec, doughSecLeft, doughBatchNum, startPrep, addPrepBatchDough,
-  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime, doughBatchSec: doughPrepBatchSec, sauceBatchSec: 1800 });
+  } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: doughPrepBatchSec, sauceBatchSec: 1800 });
   const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
   const prevDoughBatchNumRef = useRef(0);
   useEffect(() => {
@@ -19975,7 +19975,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   return (
     <>
       {/* ── Shift Prep Section (shown before production starts) ─────────────────── */}
-      {runStatus === "pending" && !prep.prepCarriedOver && doughSubTab === "dough" && dayState.runs.every(r => !r.startedAt) && (
+      {runStatus === "pending" && !prep.prepCarriedOver && doughSubTab === "dough" && dayState.runs.every((r: RunMeta) => !r.startedAt) && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-amber-500 w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
@@ -20019,9 +20019,9 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   const prodTime = getProductionStartTime();
                   if (!prodTime) return null;
                   const [h, m] = prodTime.split(":").map(Number);
-                  const target = new Date(nowTime);
+                  const target = new Date(nowTime.getTime());
                   target.setHours(h, m, 0, 0);
-                  const msLeft = target.getTime() - nowTime;
+                  const msLeft = target.getTime() - nowTime.getTime();
                   if (msLeft <= 0) return null;
                   const minLeft = Math.round(msLeft / 60000);
                   return <p className="text-xs text-muted-foreground mt-1">Production starts in <span className="font-semibold">{minLeft}m</span></p>;
@@ -21858,7 +21858,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
 
 
                     // ── Dough batch count (same formula as aggregateNeedRows) ──
-                    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+                    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc: number, r: { lbs?: string | number }) => acc + Number(r.lbs ?? 0), 0);
                     const effDoughYield = dRecipeLbs > 0 && vals.targetDoughballWeight > 0
                       ? (dRecipeLbs * 16) / vals.targetDoughballWeight
                       : vals.doughBatchYield;

@@ -3093,6 +3093,7 @@ export function loadSpecImportKnown(): {
   sauceIngredients: string[];
   sauceNames: string[];
   dieTypes: string[];
+  doughNames: string[];
   doughRecipes: string[];
   sauceRecipes: string[];
   cheeseRecipes: string[];

@@ -1,9 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "composite": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["es2022"]
   },
-  "include": ["src/**/*"],
+  "include": ["src"],
   "references": [
     { "path": "../../lib/spec-import" },
     { "path": "../../lib/name-match" }
