@@ -404,16 +404,21 @@ export function addCheeseRecipesIfAbsent(
  * to fill in the editor; the recipe is enabled so run pickers see it right away.
  * Pure — shared by web + mobile so a spec-import cheese recipe is identical on
  * both platforms.
+ *
+ * Component `lbs` values from a SpecCheeseRecipeDraft are proportional amounts
+ * (the spec sheet's per-pizza ounces used as ratio seeds). `ozPerPizza` is
+ * deliberately NOT written onto recipe components — that column belongs to
+ * applicator slots, not recipes.
  */
 export function specCheeseDraftToRecipe(draft: {
   name: string;
   brand: string;
   flavors: string[];
   /**
-   * Spec-sheet amounts are PER-PIZZA OUNCES and must arrive under `ozPerPizza`
-   * so they land in the component's oz column — never masquerading as batch
-   * pounds. `lbs` is only for callers that genuinely hold per-batch pounds
-   * (e.g. the one-time local→server preset consolidation).
+   * Component amounts as `lbs` (proportional seed values, typically the spec
+   * sheet's per-pizza ounces used as ratios). `ozPerPizza` is accepted for
+   * legacy callers but is ignored — it is never written onto the recipe
+   * component (that column belongs to applicator slots, not recipes).
    */
   components: ReadonlyArray<{ ingredient: string; lbs?: number; ozPerPizza?: number }>;
 }): CheeseRecipe | null {
@@ -434,7 +439,8 @@ export function specCheeseDraftToRecipe(draft: {
     components: draft.components.map((c) => ({
       ingredient: c.ingredient,
       lbs: c.lbs ?? 0,
-      ozPerPizza: c.ozPerPizza ?? 0,
+      // ozPerPizza intentionally omitted: spec-import must not write per-pizza
+      // oz onto recipe components (invisible to managers, skews share math).
     })),
     enabled: true,
   });

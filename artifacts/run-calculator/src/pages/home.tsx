@@ -10337,7 +10337,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed } =
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
       // Tombstone profiles the manager marked as removed from the workbook.
       // Done after commit so the new profiles are written first; deletion is
@@ -10615,7 +10615,7 @@ export default function Home() {
       // Recipes editor shows. When an existing pool recipe's rows were
       // replaced via the review's "update it with this sheet" checkbox
       // (dough/sauce ONLY), those pickers must refetch too.
-      if (cheeseRecipesAdded > 0 || cheeseOzUpdated > 0)
+      if (cheeseRecipesAdded > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
       // Invalidate dough recipes when server recipe rows were replaced,
       // placeholder recipes were added, OR doughball variants were pushed

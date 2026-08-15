@@ -6,10 +6,11 @@
 //
 // Spec sheets express cheese amounts as PER-PIZZA ounces (dumped into the
 // RecipeRow `lbs` field — long-standing parser quirk), while the server cheese
-// pool stores PER-BATCH pounds. Cheese components now carry a SEPARATE
-// `ozPerPizza` column: a spec import refreshes ONLY that column on matching
-// pool recipes, leaving curated `lbs` byte-identical. Dough/sauce updates
-// (whose workbooks ARE per-batch) still replace rows wholesale.
+// pool stores PER-BATCH pounds. Spec imports do NOT write ozPerPizza onto
+// cheese recipe components (that column belongs to applicator slots, not
+// recipes). An existing pool recipe matched by name is left byte-identical.
+// Dough/sauce updates (whose workbooks ARE per-batch) still replace rows
+// wholesale.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ParsedSpecImport } from "@workspace/spec-import";
@@ -138,7 +139,7 @@ beforeEach(() => {
 });
 
 describe("commitSpecImport — cheese batch pounds are never overwritten (per-pizza vs per-batch)", () => {
-  it("writes the sheet's per-pizza ounces to ozPerPizza ONLY — curated lbs survive, even with updateExisting flagged", async () => {
+  it("leaves the curated pool recipe byte-identical — no oz written, no save triggered, even with updateExisting flagged", async () => {
     const prepared = makePrepared({
       profiles: [],
       recipes: [
@@ -148,7 +149,7 @@ describe("commitSpecImport — cheese batch pounds are never overwritten (per-pi
           updateExisting: true,
           userNamed: true,
           // Per-pizza ounces in the lbs field (parser quirk) — the values that
-          // must NEVER land in the pool's per-batch lbs column.
+          // must NEVER land in the pool's per-batch lbs column or ozPerPizza.
           rows: [
             { ingredient: "Pizella", lbs: 2.07 },
             { ingredient: "Part Skim Mozzarella", lbs: 1.19 },
@@ -157,21 +158,14 @@ describe("commitSpecImport — cheese batch pounds are never overwritten (per-pi
       ],
     });
 
-    const { recipesUpdated, cheeseRecipesAdded, cheeseOzUpdated } =
+    const { recipesUpdated, cheeseRecipesAdded } =
       await commitSpecImport(prepared);
 
     // No wholesale cheese row replacement, nothing added (the recipe already
-    // exists) — but the matched recipe's per-pizza OZ column was refreshed.
+    // exists), and no oz refresh — nothing was written, so nothing was saved.
     expect(recipesUpdated).toBe(0);
     expect(cheeseRecipesAdded).toBe(0);
-    expect(cheeseOzUpdated).toBe(1);
-    expect(savedCheese.calls).toBe(1);
-    const saved = savedCheese.last?.find((r) => r.name === "Aldo's Cheese Mix");
-    // Curated per-batch pounds are byte-identical; only ozPerPizza changed.
-    expect(saved?.components).toEqual([
-      { ingredient: "Pizella", lbs: 207, ozPerPizza: 2.07 },
-      { ingredient: "Part Skim Mozzarella", lbs: 119, ozPerPizza: 1.19 },
-    ]);
+    expect(savedCheese.calls).toBe(0);
   });
 
   it("still applies a dough updateExisting (per-batch workbook rows)", async () => {

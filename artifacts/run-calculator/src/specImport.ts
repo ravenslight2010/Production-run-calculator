@@ -116,7 +116,6 @@ import { addSpecMixesIfAbsent, applyMixPerPizza, applyNewMixComponents, detectNe
 import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
-  applyCheeseOzPerPizza,
   fillCheeseRecipeTags,
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
@@ -1905,12 +1904,6 @@ export async function commitSpecImport(
   mixesAdded: number;
   cheeseRecipesAdded: number;
   /**
-   * Existing server-pool cheese recipes whose components' PER-PIZZA OUNCE
-   * column was refreshed from this sheet (matched by name). Batch pounds are
-   * never touched — spec sheets carry per-pizza ounces only.
-   */
-  cheeseOzUpdated: number;
-  /**
    * Saved server-pool recipes (dough / sauce) whose ingredient rows were
    * REPLACED with this sheet's, because the user linked the parsed recipe
    * to them AND checked "update it with this sheet" in the review.
@@ -2266,7 +2259,6 @@ export async function commitSpecImport(
   let recipesUpdated = 0;
 
   let cheeseRecipesAdded = 0;
-  let cheeseOzUpdated = 0;
   try {
     const existingMixes = await fetchMixes();
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
@@ -2277,20 +2269,13 @@ export async function commitSpecImport(
     if (drafts.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
       const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
-      // Refresh the PER-PIZZA OUNCE column on pool recipes this sheet names
-      // (linked picks were already renamed onto the pool name). Safe by
-      // construction: only ozPerPizza is written, per-batch lbs is untouched,
-      // so a spec import can never corrupt curated batch pounds. Recipes just
-      // added above are unchanged (their oz values already match the drafts).
-      const ozRes = applyCheeseOzPerPizza(merged, drafts);
       // Backfill customer tags onto already-saved UNBRANDED pool recipes this
       // sheet scopes (e.g. a prior import saved them with no customer) — a
       // recipe that already has a brand is never re-scoped.
-      const tagRes = fillCheeseRecipeTags(ozRes.next, drafts);
-      if (added > 0 || ozRes.updated > 0 || tagRes.tagged > 0) {
+      const tagRes = fillCheeseRecipeTags(merged, drafts);
+      if (added > 0 || tagRes.tagged > 0) {
         await saveCheeseRecipes(tagRes.next);
         cheeseRecipesAdded = added;
-        cheeseOzUpdated = ozRes.updated;
       }
     }
   } catch {
@@ -2359,5 +2344,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed };
 }

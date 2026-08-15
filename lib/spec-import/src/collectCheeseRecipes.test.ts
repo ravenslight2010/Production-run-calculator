@@ -42,8 +42,8 @@ describe("collectSpecImportCheeseRecipes", () => {
       brand: "Bobo",
       flavors: ["Pepperoni"],
       components: [
-        { ingredient: "Mozzarella", ozPerPizza: 30 },
-        { ingredient: "Provolone", ozPerPizza: 10 },
+        { ingredient: "Mozzarella", lbs: 30 },
+        { ingredient: "Provolone", lbs: 10 },
       ],
     });
   });
@@ -125,10 +125,10 @@ describe("collectSpecImportCheeseRecipes", () => {
       none,
     );
     // The parsed rows carry per-pizza OUNCES in the `lbs` field (parser
-    // quirk); the draft surfaces them under their true unit.
+    // quirk); the draft preserves them as proportional lbs for share seeding.
     expect(drafts[0].components).toEqual([
-      { ingredient: "Mozzarella", ozPerPizza: 30 },
-      { ingredient: "Provolone", ozPerPizza: 10 },
+      { ingredient: "Mozzarella", lbs: 30 },
+      { ingredient: "Provolone", lbs: 10 },
     ]);
   });
 

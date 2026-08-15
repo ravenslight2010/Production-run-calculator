@@ -851,12 +851,12 @@ export function collectSpecImportMixesByBrandScope(
  * (see specImportRecipeIsMix) become drafts; mixes go to the Mixes list instead.
  *
  * NOTE on units: a spec sheet expresses cheese amounts as per-pizza ounces
- * (dumped into the RecipeRow `lbs` field by the parser — a long-standing quirk),
- * whereas a server cheese recipe stores per-BATCH pounds. The draft therefore
- * carries the amounts under an explicit `ozPerPizza` field so downstream code
- * writes them into the cheese recipe's per-pizza-oz column — NEVER into the
- * per-batch `lbs` column (a manager or the Cheese Mix Recipe Specs workbook
- * importer owns those pounds).
+ * (dumped into the RecipeRow `lbs` field by the parser — a long-standing quirk).
+ * The draft carries these values as proportional `lbs` amounts so downstream
+ * code can seed blend shares from their ratios. Per-pizza oz is intentionally
+ * NOT stored on cheese recipe components — that column belongs to applicator
+ * slots, not recipes, and invisible imported values were silently skewing
+ * share calculations.
  */
 export type SpecCheeseRecipeDraft = {
   name: string;
@@ -865,11 +865,12 @@ export type SpecCheeseRecipeDraft = {
   /** Flavors of that brand this recipe is assigned to (may be empty). */
   flavors: string[];
   /**
-   * Component ingredients + PER-PIZZA OUNCE amounts, de-duped by ingredient
-   * (order preserved). The oz value is the parsed RecipeRow `lbs` (the parser's
-   * oz-in-lbs quirk), surfaced under its true unit.
+   * Component ingredients + proportional amounts (from the parsed RecipeRow
+   * `lbs` field, which holds per-pizza ounces due to a parser quirk — usable
+   * as relative proportions to seed blend shares), de-duped by ingredient
+   * (order preserved).
    */
-  components: Array<{ ingredient: string; ozPerPizza: number }>;
+  components: Array<{ ingredient: string; lbs: number }>;
 };
 
 /**
@@ -910,16 +911,17 @@ export function collectSpecImportCheeseRecipes(
       flavors.push(f);
     }
     const ingSeen = new Set<string>();
-    const components: Array<{ ingredient: string; ozPerPizza: number }> = [];
+    const components: Array<{ ingredient: string; lbs: number }> = [];
     for (const row of r.rows) {
       const ing = (row.ingredient ?? "").trim();
       if (!ing) continue;
       const k = ing.toLowerCase();
       if (ingSeen.has(k)) continue;
       ingSeen.add(k);
-      // row.lbs holds the sheet's per-pizza OUNCES (parser quirk) — surface it
-      // under its true unit so it can only ever land in the oz column.
-      components.push({ ingredient: ing, ozPerPizza: row.lbs });
+      // row.lbs holds the sheet's per-pizza OUNCES (parser quirk). Kept as
+      // proportional lbs so blend shares can be seeded from their ratios;
+      // ozPerPizza is intentionally NOT written onto cheese recipe components.
+      components.push({ ingredient: ing, lbs: row.lbs });
     }
     out.push({ name, brand, flavors, components });
   }

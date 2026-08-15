@@ -194,7 +194,9 @@ describe("specCheeseDraftToRecipe", () => {
       specCheeseDraftToRecipe({ name: "  ", brand: "", flavors: [], components: [] }),
     ).toBeNull();
   });
-  it("routes spec per-pizza ounces to ozPerPizza, leaving batch lbs at 0", () => {
+  it("does NOT write ozPerPizza onto recipe components (applicator-slot field, not recipe field)", () => {
+    // ozPerPizza on the draft is accepted for legacy callers but silently
+    // ignored — spec imports must not write per-pizza oz onto recipe components.
     const r = specCheeseDraftToRecipe({
       name: "Spec Blend",
       brand: "B",
@@ -202,7 +204,7 @@ describe("specCheeseDraftToRecipe", () => {
       components: [{ ingredient: "Mozzarella", ozPerPizza: 2.07 }],
     });
     expect(r?.components).toEqual([
-      { ingredient: "Mozzarella", lbs: 0, ozPerPizza: 2.07 },
+      { ingredient: "Mozzarella", lbs: 0 },
     ]);
   });
 });
