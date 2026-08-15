@@ -23,7 +23,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { ManualOverrideBanner, manualOverrideBannerShow } from "./pages/home";
+import { ManualOverrideBanner, manualOverrideBannerShow } from "./components/ManualOverrideBanner";
 
 afterEach(cleanup);
 
