@@ -14347,6 +14347,12 @@ export default function Home() {
                                         {m.notes && (
                                           <div className="text-[11px] text-emerald-400/70 italic mb-1.5">{m.notes}</div>
                                         )}
+                                        {m.missingAmounts && (
+                                          <div className="flex items-center gap-1.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 mb-1.5 text-xs text-amber-300">
+                                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                            No oz/pizza amounts — open the Mixes editor to enter them
+                                          </div>
+                                        )}
                                         <div className="space-y-1 pt-1 border-t border-emerald-800/30">
                                           <div className="text-[11px] uppercase tracking-wider text-emerald-400/70 font-semibold pt-1">Pull For Mix</div>
                                           {m.components.length === 0 ? (

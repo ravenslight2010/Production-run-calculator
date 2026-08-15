@@ -273,6 +273,15 @@ export default function MixesScreen() {
                                 </Text>
                               ) : null}
 
+                              {m.missingAmounts ? (
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 6, borderWidth: 1, borderColor: "#92400e", backgroundColor: "#451a03", paddingHorizontal: 8, paddingVertical: 6 }}>
+                                  <Feather name="alert-triangle" size={14} color="#fcd34d" />
+                                  <Text style={{ flex: 1, fontSize: 11, fontFamily: FONTS.regular, color: "#fcd34d" }}>
+                                    No oz/pizza amounts — open the Mixes editor to enter them
+                                  </Text>
+                                </View>
+                              ) : null}
+
                               <View style={{ gap: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: colors.border }}>
                                 <Text style={{ fontSize: 10, fontFamily: FONTS.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.5, paddingTop: 4 }}>
                                   Pull For Mix

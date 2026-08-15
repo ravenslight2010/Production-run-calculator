@@ -676,6 +676,14 @@ export interface MixPlanEntry {
   // remainingLbs / batchSize (fractional; 0 when batchSize <= 0).
   batches: number;
   components: MixComponentPlan[];
+  /**
+   * True when the mix has at least one component but EVERY component's
+   * perPizza is 0 — i.e. no oz/pizza amounts have been entered yet. The
+   * plan's totalLbs will be 0 as a result. Callers use this to distinguish
+   * "amounts missing" from "legitimately 0 lbs" (e.g. amountAlreadyMade
+   * covers everything, or a future-date run with 0 pizzas).
+   */
+  missingAmounts: boolean;
 }
 
 // A run on the make-day with at least one matched mix.
@@ -718,6 +726,10 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
   const totalLbs = components.reduce((acc, c) => acc + c.lbs, 0);
   const remainingLbs = Math.max(0, totalLbs - mix.amountAlreadyMade);
   const batches = mix.batchSize > 0 ? remainingLbs / mix.batchSize : 0;
+  // True when the mix has components but none carry a perPizza amount yet —
+  // the manager needs to open the Mixes editor and fill them in.
+  const missingAmounts =
+    mix.components.length > 0 && mix.components.every((c) => !(c.perPizza > 0));
   const entry: MixPlanEntry = {
     mixId: mix.id,
     name: mix.name,
@@ -728,6 +740,7 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
     remainingLbs,
     batches,
     components,
+    missingAmounts,
   };
   if (mix.notes) entry.notes = mix.notes;
   return entry;
