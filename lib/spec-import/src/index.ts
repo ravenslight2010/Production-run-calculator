@@ -865,12 +865,13 @@ export type SpecCheeseRecipeDraft = {
   /** Flavors of that brand this recipe is assigned to (may be empty). */
   flavors: string[];
   /**
-   * Component ingredients + proportional amounts (from the parsed RecipeRow
-   * `lbs` field, which holds per-pizza ounces due to a parser quirk — usable
-   * as relative proportions to seed blend shares), de-duped by ingredient
-   * (order preserved).
+   * Component ingredients for the blend. `lbs` is always 0 — spec sheets carry
+   * per-pizza ounces (not batch pounds), and storing oz as lbs would pollute
+   * batch-weight calculations everywhere. `sharePct` (0–100, 2dp) is derived
+   * from the oz proportions so blend ratios are preserved without corrupting
+   * the per-batch pound field. Managers fill in real batch lbs in the editor.
    */
-  components: Array<{ ingredient: string; lbs: number }>;
+  components: Array<{ ingredient: string; lbs: number; sharePct?: number }>;
 };
 
 /**
@@ -911,18 +912,27 @@ export function collectSpecImportCheeseRecipes(
       flavors.push(f);
     }
     const ingSeen = new Set<string>();
-    const components: Array<{ ingredient: string; lbs: number }> = [];
+    // row.lbs holds the sheet's per-pizza OUNCES (parser quirk). Collected as
+    // raw oz values so we can compute proportional sharePct. These must NOT be
+    // stored in component.lbs — lbs is a per-batch pound field consumed by the
+    // recipe editor, profileAutofill, and run hydration as actual batch weight.
+    const rawRows: Array<{ ingredient: string; oz: number }> = [];
     for (const row of r.rows) {
       const ing = (row.ingredient ?? "").trim();
       if (!ing) continue;
       const k = ing.toLowerCase();
       if (ingSeen.has(k)) continue;
       ingSeen.add(k);
-      // row.lbs holds the sheet's per-pizza OUNCES (parser quirk). Kept as
-      // proportional lbs so blend shares can be seeded from their ratios;
-      // ozPerPizza is intentionally NOT written onto cheese recipe components.
-      components.push({ ingredient: ing, lbs: row.lbs });
+      rawRows.push({ ingredient: ing, oz: Math.max(0, row.lbs) });
     }
+    // Derive sharePct from oz proportions so the blend ratio is preserved
+    // without polluting the batch-pound field. lbs is left 0 — managers fill
+    // in real batch pounds in the recipe editor.
+    const totalOz = rawRows.reduce((s, c) => s + c.oz, 0);
+    const components: SpecCheeseRecipeDraft["components"] = rawRows.map((c) => {
+      const pct = totalOz > 0 ? Math.round((c.oz / totalOz) * 10000) / 100 : 0;
+      return pct > 0 ? { ingredient: c.ingredient, lbs: 0, sharePct: pct } : { ingredient: c.ingredient, lbs: 0 };
+    });
     out.push({ name, brand, flavors, components });
   }
   return out;

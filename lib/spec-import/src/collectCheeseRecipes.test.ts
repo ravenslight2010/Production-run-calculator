@@ -37,13 +37,15 @@ describe("collectSpecImportCheeseRecipes", () => {
       none,
     );
     expect(drafts).toHaveLength(1);
+    // lbs is always 0 — spec sheets carry per-pizza oz, not batch pounds.
+    // sharePct is derived from oz proportions: 30/40=75%, 10/40=25%.
     expect(drafts[0]).toEqual({
       name: "Aldo's Cheese Mix",
       brand: "Bobo",
       flavors: ["Pepperoni"],
       components: [
-        { ingredient: "Mozzarella", lbs: 30 },
-        { ingredient: "Provolone", lbs: 10 },
+        { ingredient: "Mozzarella", lbs: 0, sharePct: 75 },
+        { ingredient: "Provolone", lbs: 0, sharePct: 25 },
       ],
     });
   });
@@ -124,11 +126,12 @@ describe("collectSpecImportCheeseRecipes", () => {
       ]),
       none,
     );
-    // The parsed rows carry per-pizza OUNCES in the `lbs` field (parser
-    // quirk); the draft preserves them as proportional lbs for share seeding.
+    // row.lbs holds per-pizza oz (parser quirk). sharePct is derived from
+    // those proportions: 30/40=75%, 10/40=25%. lbs is always 0 — batch
+    // pounds are not known from the spec sheet.
     expect(drafts[0].components).toEqual([
-      { ingredient: "Mozzarella", lbs: 30 },
-      { ingredient: "Provolone", lbs: 10 },
+      { ingredient: "Mozzarella", lbs: 0, sharePct: 75 },
+      { ingredient: "Provolone", lbs: 0, sharePct: 25 },
     ]);
   });
 

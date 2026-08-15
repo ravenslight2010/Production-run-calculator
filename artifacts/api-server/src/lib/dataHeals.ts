@@ -31,6 +31,7 @@ import {
   backfillCheeseSharePcts,
   stripInconsistentCheeseOz,
   normalizeCheeseRecipe,
+  type CheeseRecipe,
 } from "@workspace/cheese-recipes";
 import {
   POISONED_CHEESE_ALIAS_PAIRS,
@@ -3390,6 +3391,187 @@ export async function runDataHeals(): Promise<void> {
   await runAugust2026ImportFixSauces();
   await runAugust2026CheeseRecipeLbs();
   await runAugust2026LowesMixFixes();
+  await runCheeseComponentOzStrip();
+}
+
+// ── Strip all ozPerPizza from cheese recipe components ───────────────────────
+// Spec imports (task #632) wrote `ozPerPizza` onto cheese recipe components in
+// the database. Now that oz/pizza has been removed from the cheese recipe editor
+// UI, managers can no longer see or clear these values. The share calculation
+// falls back to `ozPerPizza` when ALL rows have it — so invisible imported oz
+// values can silently override manager-entered lbs-based shares.
+//
+// This heal (v2) correctly handles the interaction with the share-backfill heal
+// that ran earlier: when oz was FULL-COVERAGE (every lbs>0 component had oz),
+// the backfill persisted oz-derived sharePct values that still dominate even
+// after ozPerPizza is removed (sharePct has priority over lbs in cheeseComponentShares).
+// The fix:
+//   1. Detect ozPerPizza by PROPERTY PRESENCE, not positive value — a stored 0
+//      is equally invisible to managers and must be removed.
+//   2. When oz was full-coverage, clear the oz-derived sharePct values and
+//      recompute them from lbs via backfillCheeseSharePcts so lbs becomes authoritative.
+//   3. When oz was partial (backfill already used lbs), just strip oz and
+//      leave the existing lbs-derived sharePct alone.
+//
+// The v1 marker was already committed and the v1 implementation is now moot;
+// the v2 marker runs on every database that needs the complete fix.
+
+/**
+ * Pure helper — exported for unit tests.
+ *
+ * Strips `ozPerPizza` from every component (by PROPERTY PRESENCE, not value)
+ * and recomputes `sharePct` from lbs so the recipe is fully lbs-authoritative.
+ *
+ * Why unconditional sharePct recompute: the preceding share-backfill heal ran
+ * before this strip heal and may have persisted oz-derived `sharePct` values
+ * (when oz was full-coverage). Once `ozPerPizza` is removed (by the v1 heal or
+ * by this function), those stale `sharePct` values still dominate over lbs in
+ * `cheeseComponentShares`. The only safe recovery is to clear ALL `sharePct`
+ * and recompute from lbs — lbs-derived values are identical to what the backfill
+ * would have produced from lbs, so this is always safe even for rows where
+ * sharePct was already lbs-correct.
+ *
+ * Returns null when no change is needed (no ozPerPizza present AND all stored
+ * sharePct values already match the lbs-derived recompute within 2dp).
+ */
+export function recomputeCheeseSharesFromLbs(recipe: CheeseRecipe): CheeseRecipe | null {
+  const comps = recipe.components;
+
+  // Detect ozPerPizza by property presence (not value — ozPerPizza: 0 is also
+  // invisible to managers and must be removed from storage).
+  const hasOzProp = comps.some((c) => "ozPerPizza" in c);
+
+  // Only clear and recompute sharePct when the recipe has usable batch-pound
+  // data. A zero-lbs recipe (e.g. a newly-spec-imported stub whose sharePct
+  // was derived from oz proportions during import) must keep its existing
+  // sharePct — clearing it would destroy valid blend ratios and backfill
+  // cannot restore them without positive lbs to compute from.
+  const totalLbs = comps.reduce((s, c) => s + Math.max(0, Number(c.lbs ?? 0)), 0);
+  const hasUsableLbs = totalLbs > 0;
+
+  if (!hasUsableLbs) {
+    // No positive lbs: only strip ozPerPizza (if present), leave sharePct intact.
+    if (!hasOzProp) return null;
+    const stripped = comps.map((c): typeof comps[number] => {
+      if (!("ozPerPizza" in c)) return c;
+      const copy: Record<string, unknown> = { ...c };
+      delete copy.ozPerPizza;
+      return copy as typeof comps[number];
+    });
+    return { ...recipe, components: stripped };
+  }
+
+  // Recipe has usable lbs: strip ozPerPizza AND clear ALL sharePct (which may
+  // be oz-derived from the share-backfill heal that ran before this fix).
+  // lbs-derived values are safe to recompute — they round-trip exactly.
+  // Avoid naming the local component type to prevent conflicts with any module-
+  // level CheeseComponent declarations; use `typeof comps[number]` inference.
+  const stripped = comps.map((c): typeof comps[number] => {
+    const copy: Record<string, unknown> = { ...c };
+    delete copy.ozPerPizza;
+    delete copy.sharePct;
+    return copy as typeof comps[number];
+  });
+
+  // Recompute sharePct from lbs (backfill fills where sharePct is 0/absent —
+  // always the case here since we just cleared them all).
+  const [backfilled] = backfillCheeseSharePcts([{ ...recipe, components: stripped }]);
+  const newComps = backfilled ? backfilled.components : stripped;
+
+  // Return null when nothing actually changed — i.e., no ozPerPizza was present
+  // AND all sharePct values already matched the lbs-derived values exactly.
+  // (backfillCheeseSharePcts rounds to 2dp via Math.round(x * 10000) / 100, so
+  // values that were already correctly lbs-derived will round-trip exactly.)
+  const anythingChanged = comps.some((c, i) => {
+    if ("ozPerPizza" in c) return true;
+    return (c.sharePct ?? 0) !== (newComps[i].sharePct ?? 0);
+  });
+
+  if (!anythingChanged) return null;
+  return { ...recipe, components: newComps };
+}
+
+// v1 marker already claimed in prod; this no-op guard prevents the old (broken)
+// v1 logic from running again if somehow the marker row is missing.
+const CHEESE_COMPONENT_OZ_STRIP_V1_ID = "cheese-component-oz-strip-v1";
+
+const CHEESE_COMPONENT_OZ_STRIP_HEAL_ID = "cheese-component-oz-strip-v2";
+
+async function runCheeseComponentOzStrip(): Promise<void> {
+  // Silently claim the v1 marker too so any fresh DB (e.g. a dev environment
+  // that never ran v1) doesn't accidentally run the old broken implementation
+  // via a future code path that calls it.
+  await db
+    .insert(dataHealsTable)
+    .values({ id: CHEESE_COMPONENT_OZ_STRIP_V1_ID })
+    .onConflictDoNothing({ target: dataHealsTable.id });
+
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CHEESE_COMPONENT_OZ_STRIP_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Scan ALL cheese recipes: strip any remaining ozPerPizza AND recompute
+    // sharePct from lbs. This handles both:
+    //   • Fresh DBs where v1 hasn't run yet (ozPerPizza still present)
+    //   • Production DBs where v1 already stripped ozPerPizza but left behind
+    //     oz-derived sharePct values (sharePct has priority over lbs in
+    //     cheeseComponentShares, so those stale values still poison shares).
+    const rows = await tx.select().from(cheeseRecipesTable).for("update");
+    let scanned = 0;
+    let updatedRows = 0;
+    let strippedComponents = 0;
+    for (const row of rows) {
+      scanned++;
+
+      // Inspect raw stored JSON for ozPerPizza property BEFORE calling
+      // normalizeCheeseRecipe. The normalizer silently drops ozPerPizza: 0
+      // fields, so a recipe with only zero-valued oz would appear clean to
+      // recomputeCheeseSharesFromLbs — but the zero field still sits in the
+      // database and must be removed from storage.
+      const rawComps: unknown[] = Array.isArray(row.components) ? row.components : [];
+      const rawOzCount = rawComps.filter(
+        (c): boolean =>
+          typeof c === "object" && c !== null && "ozPerPizza" in (c as object),
+      ).length;
+
+      const recipe = normalizeCheeseRecipe(row);
+      if (!recipe) continue;
+
+      const changed = recomputeCheeseSharesFromLbs(recipe);
+
+      // Write the row if: (a) raw JSON had ozPerPizza (including zero-valued),
+      // OR (b) sharePct recompute produced a change. When only raw zeros were
+      // found (rawOzCount > 0 but changed == null), the normalizer already
+      // stripped them in `recipe.components` — persist those clean components.
+      if (rawOzCount === 0 && !changed) continue;
+
+      const finalComponents = changed ? changed.components : recipe.components;
+      await tx
+        .update(cheeseRecipesTable)
+        .set({ components: finalComponents, updatedAt: new Date() })
+        .where(
+          and(
+            eq(cheeseRecipesTable.id, row.id),
+            eq(cheeseRecipesTable.scope, row.scope),
+          ),
+        );
+      updatedRows++;
+      strippedComponents += rawOzCount;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({ result: { scanned, updatedRows, strippedComponents } })
+      .where(eq(dataHealsTable.id, CHEESE_COMPONENT_OZ_STRIP_HEAL_ID));
+    logger.info(
+      { heal: CHEESE_COMPONENT_OZ_STRIP_HEAL_ID, scanned, updatedRows, strippedComponents },
+      "Data heal applied",
+    );
+  });
 }
 
 // ── August 2026 import data-quality fixes ─────────────────────────────────────

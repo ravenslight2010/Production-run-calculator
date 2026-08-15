@@ -415,12 +415,14 @@ export function specCheeseDraftToRecipe(draft: {
   brand: string;
   flavors: string[];
   /**
-   * Component amounts as `lbs` (proportional seed values, typically the spec
-   * sheet's per-pizza ounces used as ratios). `ozPerPizza` is accepted for
-   * legacy callers but is ignored — it is never written onto the recipe
-   * component (that column belongs to applicator slots, not recipes).
+   * Component amounts. `lbs` is real per-batch pounds (0 for spec-import stubs
+   * — managers fill in real values in the editor). `sharePct` (0–100, 2dp) is
+   * the ingredient's percentage of the blend, derived from oz proportions during
+   * import so blend ratios are preserved even before real batch lbs are entered.
+   * `ozPerPizza` is accepted for legacy callers but is ignored — it is never
+   * written onto recipe components (that column belongs to applicator slots).
    */
-  components: ReadonlyArray<{ ingredient: string; lbs?: number; ozPerPizza?: number }>;
+  components: ReadonlyArray<{ ingredient: string; lbs?: number; ozPerPizza?: number; sharePct?: number }>;
 }): CheeseRecipe | null {
   const name = draft.name.trim();
   if (!name) return null;
@@ -441,6 +443,7 @@ export function specCheeseDraftToRecipe(draft: {
       lbs: c.lbs ?? 0,
       // ozPerPizza intentionally omitted: spec-import must not write per-pizza
       // oz onto recipe components (invisible to managers, skews share math).
+      ...(c.sharePct ? { sharePct: c.sharePct } : {}),
     })),
     enabled: true,
   });
