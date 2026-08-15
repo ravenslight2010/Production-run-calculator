@@ -111,6 +111,7 @@ import {
   shouldHealFormFromStored,
   isPristineSeedRun,
   isBlankRemovableRun,
+  shouldResetFormOnRunSwitch,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
   dropTombstonesForAliveNames,
@@ -7997,6 +7998,28 @@ export default function Home() {
       lastFormRunIdRef.current = currentRunId;
       form.reset(merged);
       resetFieldArrays(merged);
+    } else if (
+      // The form was last settled for a DIFFERENT run and still shows values
+      // that differ from this run's stored copy — i.e. it is still displaying
+      // the PREVIOUS run's data. This happens when the current run id changes
+      // without an imperative run-switch handler (which would form.reset
+      // itself): a peer's day reset or a fully-tombstoned run union seeds a
+      // fresh blank placeholder and the sync-apply index clamp lands on it,
+      // but its id isn't in the payload so no reset fires. Settling here
+      // (the old else-branch behavior) let the next form.watch autosave copy
+      // the previous run's casesNeeded/skidsCompleted/recipes into the blank
+      // run's slot — the source of the daily contaminated "Unnamed Run" rows.
+      // Reset the form to the new run's stored copy instead.
+      shouldResetFormOnRunSwitch(
+        form.getValues(),
+        mergeRunDefaults(stored),
+        lastFormRunIdRef.current === currentRunId,
+      )
+    ) {
+      const merged = mergeRunDefaults(stored);
+      lastFormRunIdRef.current = currentRunId;
+      form.reset(merged);
+      resetFieldArrays(merged);
     } else {
       // Even when no heal is needed, record that the form is now settled for
       // this run so the autosave guard doesn't block the first genuine edit.
@@ -8652,6 +8675,10 @@ export default function Home() {
     };
     setDayState(newDs);
     saveDayState(newDs);
+    // Settle the form for the new run explicitly (like switchToRun does) so
+    // the [currentRunId] heal effect and the autosave guard both see a
+    // consistent "form belongs to this run" state from the first render.
+    lastFormRunIdRef.current = newId;
     form.reset(DEFAULT_VALUES);
     resetFieldArrays(DEFAULT_VALUES);
     schedulePush(newDs, 0);

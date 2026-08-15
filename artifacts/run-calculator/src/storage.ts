@@ -1486,6 +1486,33 @@ export function shouldHealFormFromStored(
   );
 }
 
+// Pure decision behind the settle branch of the current-run heal effect
+// (home.tsx). When the CURRENT RUN id changes without an imperative run-switch
+// handler firing form.reset — e.g. a peer's day RESET (or a fully-tombstoned
+// run union) seeds a fresh blank placeholder run and the current index clamps
+// onto it — the live form still shows the PREVIOUS run's values. Blindly
+// marking the form "settled" for the new run in that state lets the very next
+// form.watch autosave write the old run's casesNeeded/skidsCompleted/recipes
+// into the blank run's localStorage slot: the cross-run contamination that
+// produced the daily "Unnamed Run" rows carrying the first real run's data.
+// Returns true when the form must be reset to the new run's stored copy
+// INSTEAD of being settled as-is:
+//   1. the form was last settled for a DIFFERENT run (formSettledForRun=false)
+//      — an imperative handler that already reset the form also set
+//      lastFormRunIdRef, so this only fires on the unhandled switch paths, and
+//   2. the live form differs from the new run's stored (default-merged) copy —
+//      identical values (e.g. both all-default on a fresh device) need no reset.
+// No recent-edit quiet window here: any typing in flight belongs to the OLD
+// run, and preserving it in the NEW run's form IS the contamination.
+export function shouldResetFormOnRunSwitch(
+  liveVals: FormValues,
+  storedMergedVals: FormValues,
+  formSettledForRun: boolean,
+): boolean {
+  if (formSettledForRun) return false;
+  return !deepEqual(liveVals, storedMergedVals);
+}
+
 // ── Sync-receive merge-survival helpers ─────────────────────────────────────
 // Extracted from the home.tsx sync-receive handler so the recipe-name-merge
 // survival guarantees are importable and regression-tested end-to-end (a merge

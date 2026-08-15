@@ -45,6 +45,23 @@ Call sites stamped:
 equals form), we still need to stamp the ref so the autosave isn't permanently blocked for
 that run. Without it, the autosave would skip every genuine user edit after a clean switch.
 
+## Residual Hole (fixed later): the else-branch settle itself contaminated
+
+The heal effect's else branch settled the form for the new run even when the form still
+showed the PREVIOUS run's populated values. `shouldHealFormFromStored` only fires on
+all-default-form-over-populated-stored, so the reverse case (populated form, blank/default
+stored) fell through to "settle" — and the next autosave wrote the old run's
+casesNeeded/skidsCompleted/recipes into the new (blank) run's slot. Trigger paths: a peer's
+day RESET (sync-apply seeds a fresh placeholder run and the index clamp lands on it) or a
+fully-tombstoned run union — the placeholder's id isn't in the payload, so no form.reset
+fires. This was the source of the daily contaminated "Unnamed Run" rows.
+
+**Fix**: `shouldResetFormOnRunSwitch` (storage.ts, unit-tested): when the form is NOT
+settled for the new run AND its values differ from the new run's default-merged stored
+copy, RESET the form to the stored copy instead of settling. No quiet-window exception —
+in-flight typing belongs to the OLD run; keeping it in the new run's form IS the bug.
+Rule: an unsettled form must never be adopted as-is by a run it wasn't reset for.
+
 ## Secondary Fix
 
 Frontline tab (LiveFrontlineTabContent): App 3 / App 4 rows now only render when they
