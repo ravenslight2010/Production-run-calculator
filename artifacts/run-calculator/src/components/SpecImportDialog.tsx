@@ -57,12 +57,17 @@ type Props = {
    * the same sheet remembers the corrections.
    * `profilesToRemove` are the brand+flavor profiles the manager checked in the
    * "No longer in this workbook" section and confirmed for tombstoning.
+   * `acceptedNewMixIngredientNames` are compound `"${brand}\0${name}"` keys
+   * (both lower-cased) for the mixes whose newly detected ingredient rows the
+   * manager approved for appending. Using a compound key prevents same-name
+   * mixes under different brands from being conflated.
    */
   onConfirm: (
     parsed: ParsedSpecImport,
     learnedRenames: SpecImportAlias[],
     profilesToRemove: Array<{brand: string; flavor: string}>,
     forceUpdateProfileKeys: ReadonlySet<string>,
+    acceptedNewMixIngredientNames: ReadonlySet<string>,
   ) => void;
 };
 
@@ -398,6 +403,13 @@ export default function SpecImportDialog({
   // Two-step review: step 1 confirms product brand/flavor names only; step 2
   // reviews everything else (recipes, die types, the diff, notes, mappings).
   const [step, setStep] = useState<1 | 2>(1);
+  /**
+   * Lower-cased mix names whose new ingredient additions the manager has
+   * accepted (checked). Unchecked = skip silently at commit time.
+   * Default: all new additions start UNCHECKED so no silent changes happen
+   * on a routine re-import — the manager must explicitly opt in per mix.
+   */
+  const [acceptedNewMixNames, setAcceptedNewMixNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (prepared) {
@@ -415,11 +427,13 @@ export default function SpecImportDialog({
           remove: false,
         })),
       );
+      setAcceptedNewMixNames(new Set());
       setStep(1);
     } else {
       setProfiles([]);
       setRecipes([]);
       setRemovedProfiles([]);
+      setAcceptedNewMixNames(new Set());
       setStep(1);
     }
   }, [prepared]);
@@ -1161,6 +1175,79 @@ export default function SpecImportDialog({
                 </div>
               )}
 
+              {step === 2 && (prepared?.newMixIngredients ?? []).length > 0 && (
+                <div className="space-y-2" data-testid="spec-new-mix-ingredients">
+                  <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2.5">
+                    <div className="flex items-center gap-2 text-amber-700">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span className="text-xs font-semibold">New ingredients detected on existing mixes</span>
+                    </div>
+                    <p className="mt-1 text-xs text-amber-700">
+                      The spec sheet added ingredient rows that aren't on your saved mixes yet.
+                      Check the ones you'd like to add — existing amounts are never changed.
+                    </p>
+                  </div>
+                  <ul className="space-y-2">
+                    {(prepared?.newMixIngredients ?? []).map((entry) => {
+                      // Compound key: brand + NUL + name (both lower-cased).
+                      // Prevents same-name mixes under different brands from
+                      // sharing checkbox state or React list keys.
+                      const brandKey = entry.brand.trim().toLowerCase();
+                      const nameKey = entry.mixName.trim().toLowerCase();
+                      const key = `${brandKey}\0${nameKey}`;
+                      // data-testid uses a URL-safe variant (NUL → "|") for
+                      // test selectors.
+                      const testKey = `${brandKey}|${nameKey}`;
+                      const accepted = acceptedNewMixNames.has(key);
+                      return (
+                        <li
+                          key={key}
+                          className={`rounded-lg border p-3 ${accepted ? "border-amber-400/60 bg-amber-500/5" : "border-border/60 opacity-70"}`}
+                          data-testid={`spec-new-mix-ingredients-${testKey}`}
+                        >
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={accepted}
+                              onChange={() =>
+                                setAcceptedNewMixNames((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(key)) next.delete(key);
+                                  else next.add(key);
+                                  return next;
+                                })
+                              }
+                              className="mt-0.5 h-4 w-4 accent-amber-500"
+                              aria-label={`Add new ingredients to ${entry.mixName}`}
+                              data-testid={`spec-new-mix-accept-${testKey}`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-medium text-foreground">
+                                  {entry.mixName}
+                                </span>
+                                <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-600">
+                                  {entry.newComponents.length} new
+                                </span>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {entry.newComponents.map((c, i) => (
+                                  <span key={c.ingredient}>
+                                    {c.ingredient}{" "}
+                                    <span className="text-foreground/70">{c.perPizza} oz/pizza</span>
+                                    {i < entry.newComponents.length - 1 ? " · " : ""}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
               {step === 2 && rememberedMappingCount > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {rememberedMappingCount} new name mapping
@@ -1273,6 +1360,7 @@ export default function SpecImportDialog({
                   .filter((p) => p.include && p.forceUpdate)
                   .map((p) => `${p.brand.trim().toLowerCase()}\u0000${p.flavor.trim().toLowerCase()}`),
               ),
+              acceptedNewMixNames,
             )}
               disabled={
                 loading ||

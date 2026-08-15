@@ -19,6 +19,7 @@ import {
   collectMatchCandidates,
   collectSpecAliases,
   collectSpecImportMixes,
+  collectSpecImportMixesByBrandScope,
   collectSpecImportCheeseLinkSuggestions,
   collectSpecImportCheeseRecipes,
   applySpecImportBlendNameAliases,
@@ -111,7 +112,7 @@ import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { namedRecipeFromDraft, parseDoughCustomerSection, parseDoughVariantTable, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
-import { addSpecMixesIfAbsent, applyMixPerPizza, fillSpecMixTags, type Mix } from "@workspace/mixes";
+import { addSpecMixesIfAbsent, applyMixPerPizza, applyNewMixComponents, detectNewMixComponents, fillSpecMixTags, type Mix, type MixComponent } from "@workspace/mixes";
 import {
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
@@ -175,6 +176,14 @@ export type SpecImportPrepared = {
    */
   profilesRemovedFromWorkbook?: Array<{brand: string; flavor: string}>;
   note?: string;
+  /**
+   * New ingredient rows the spec sheet added to EXISTING mixes — components
+   * present in the import but missing from the saved mix. Populated during
+   * prepare (best-effort; absent when offline or no existing mixes). The
+   * manager accepts or skips per mix in the review dialog; only the accepted
+   * entries are appended during commit. Absent = nothing new detected.
+   */
+  newMixIngredients?: Array<{ mixName: string; brand: string; newComponents: MixComponent[] }>;
   /**
    * Customer assignments parsed deterministically from dough mixing procedure
    * sheet header rows (format: "{Brand [qualifier]}: {flavor, …}"). Populated
@@ -1329,6 +1338,70 @@ async function buildReusedPrepared(
   };
 }
 
+/**
+ * Best-effort: fetch existing mixes and compute which incoming spec mix
+ * components are brand-scope-matched to an existing mix but not yet present
+ * in it. Returns an empty array when offline, 403, or no candidates.
+ *
+ * Mirrors the full commit-time pipeline so detection sees the same effective
+ * mix scope:
+ *  1. fillSpecCheeseTargetsFromProfiles — brand-fills candidate recipes whose
+ *     brand comes from a profile applicator slot (not a direct recipe target).
+ *  2. addSpecMixesIfAbsent — establishes which candidates are new vs existing.
+ *  3. fillSpecMixTags — assigns the candidate's brand to any previously
+ *     unbranded existing mix that the candidate name-matches.
+ *
+ * Without step 3, detectNewMixComponents's strict same-brand check rejects a
+ * branded candidate vs an unbranded existing mix even when addSpecMixesIfAbsent
+ * + fillSpecMixTags would merge them at commit time — leaving newly added
+ * ingredients invisible in the review dialog for those mixes.
+ */
+/**
+ * Best-effort: fetch existing mixes and compute which incoming spec mix
+ * components are brand-scope-matched to an existing mix but not yet present
+ * in it. Returns an empty array when offline, 403, or no candidates.
+ *
+ * Uses `collectSpecImportMixesByBrandScope` (compound brand+name de-dup) so
+ * same-named mixes under different brands both produce candidates — unlike
+ * `collectSpecImportMixes` which de-dupes by name alone and takes the first
+ * brand, which would silently drop the second brand-scoped candidate.
+ *
+ * Then mirrors the full commit pipeline:
+ *  1. fillSpecCheeseTargetsFromProfiles — brand-fills recipes referenced via
+ *     profile applicators (not direct recipe targets).
+ *  2. addSpecMixesIfAbsent — establishes which candidates are new vs existing.
+ *  3. fillSpecMixTags — assigns the candidate's brand to any previously
+ *     unbranded existing mix that name-matches, matching commit's scope.
+ *
+ * Exported for unit testing; callers outside specImport.ts should treat this
+ * as an implementation detail (it is async and touches the network).
+ */
+export async function computeNewMixIngredients(
+  parsed: ParsedSpecImport,
+): Promise<Array<{ mixName: string; brand: string; newComponents: MixComponent[] }>> {
+  try {
+    const existingMixes = await fetchMixes();
+    if (!existingMixes.length) return [];
+    // Step 1: mirror commit's profile-derived brand fill.
+    const scopedParsed = fillSpecCheeseTargetsFromProfiles(parsed);
+    const mixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
+    // Use brand-scope-aware collection so same-named mixes under different
+    // brands each get a candidate (collectSpecImportMixes de-dupes by name only).
+    const candidates = collectSpecImportMixesByBrandScope(scopedParsed, mixNamesLower)
+      .map((d) => specMixDraftToMix(d))
+      .filter((m): m is Mix => m != null);
+    if (!candidates.length) return [];
+    // Steps 2–3: apply the same new-vs-existing and tag-backfill pipeline that
+    // commit uses, so an unbranded saved mix that a branded candidate matches
+    // gets its brand assigned before detection runs.
+    const { merged } = addSpecMixesIfAbsent(existingMixes, candidates);
+    const { next: taggedMixes } = fillSpecMixTags(merged, candidates);
+    return detectNewMixComponents(taggedMixes, candidates);
+  } catch {
+    return [];
+  }
+}
+
 /** Load the known lists + learned aliases shared by every file in an import. */
 async function loadSpecImportContext(): Promise<{
   known: ReturnType<typeof loadSpecImportKnown>;
@@ -1486,8 +1559,12 @@ export async function prepareSpecImport(
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
   if (snapshot) {
     const reused = await buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
+    // Detect new mix ingredients even on a reused parse — the mixes pool may
+    // have changed since the snapshot was taken (manager added a mix).
+    const newMixIngredients = await computeNewMixIngredients(reused.parsed);
     return {
       ...reused,
+      ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
       ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
       ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
     };
@@ -1548,6 +1625,10 @@ export async function prepareSpecImport(
     ? await computeProfilesRemovedFromWorkbook([name], aliases, parsed.profiles)
     : [];
 
+  // Detect new ingredient rows on existing mixes — best-effort, after all
+  // other work so it doesn't slow the AI parse path.
+  const newMixIngredients = await computeNewMixIngredients(parsed);
+
   return {
     parsed,
     summary,
@@ -1564,6 +1645,7 @@ export async function prepareSpecImport(
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
+    ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
     ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
     ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
   };
@@ -1773,6 +1855,10 @@ export async function prepareSpecImportMulti(
       ? await computeProfilesRemovedFromWorkbook(names ?? [], aliases, parsed.profiles)
       : [];
 
+  // Detect new ingredient rows on existing mixes — best-effort, after all
+  // other work so it doesn't slow the AI parse path.
+  const newMixIngredients = await computeNewMixIngredients(parsed);
+
   return {
     parsed,
     summary,
@@ -1789,6 +1875,7 @@ export async function prepareSpecImportMulti(
     ...(sourceHash ? { sourceHash } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
+    ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
     ...(allCustomerAssignments.length > 0 ? { doughCustomerAssignments: allCustomerAssignments } : {}),
     ...(allVariantsFromTable.length > 0 ? { doughVariantsFromTable: allVariantsFromTable } : {}),
   };
@@ -1807,6 +1894,13 @@ export async function commitSpecImport(
    * ones. Sourced from the step-2 "Force update" checkboxes in SpecImportDialog.
    */
   forceUpdateProfileKeys?: ReadonlySet<string>,
+  /**
+   * Mix names (lower-cased) whose newly detected ingredient rows should be
+   * APPENDED to the saved mix. Sourced from the step-2 "new mix ingredients"
+   * checkboxes in SpecImportDialog. Only entries in `prepared.newMixIngredients`
+   * that the manager accepted are applied; unchecked ones are skipped silently.
+   */
+  acceptedNewMixIngredientNames?: ReadonlySet<string>,
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
@@ -2083,20 +2177,63 @@ export async function commitSpecImport(
     const candidates = collectSpecImportMixes(scopedParsed, userMixNamesLower)
       .map((d) => specMixDraftToMix(d))
       .filter((m): m is Mix => m != null);
+
+    // accepted additions computed before the candidates-gated block so they are
+    // applied even on a snapshot-pruned re-import where `candidates` is empty
+    // (unchanged recipes are pruned, but the manager's accepted additions from
+    // the review must still persist).
+    // Compound key: "${brand}\0${name}" — same scheme the dialog uses, so
+    // same-name mixes under different brands are never conflated.
+    const acceptedAdditions = (prepared.newMixIngredients ?? []).filter((e) => {
+      const compoundKey = `${e.brand.trim().toLowerCase()}\0${e.mixName.trim().toLowerCase()}`;
+      return acceptedNewMixIngredientNames?.has(compoundKey);
+    });
+
+    // Working state starts as raw existing mixes; the candidates block advances
+    // it through add → tag → perPizza if the pruned parse has mix data.
+    let workingMixes: Mix[] = existingMixes as Mix[];
+    let added = 0;
+    let tagged = 0;
+    let updated = 0;
+
     if (candidates.length) {
-      const { merged, added } = addSpecMixesIfAbsent(existingMixes, candidates);
+      const addRes = addSpecMixesIfAbsent(existingMixes, candidates);
+      added = addRes.added;
       // Backfill product tags onto already-saved UNBRANDED mixes this sheet
       // scopes (e.g. a prior import saved them with no customer) — a mix that
       // already has a brand is never re-scoped.
-      const tagRes = fillSpecMixTags(merged, candidates);
+      const tagRes = fillSpecMixTags(addRes.merged, candidates);
+      tagged = tagRes.tagged;
       // Refresh per-pizza oz on already-saved mixes from spec-sheet amounts.
       // Only updates components that already exist on the mix AND where the
       // incoming value is > 0, so a manager's hand-typed value is never zeroed.
       const ozRes = applyMixPerPizza(tagRes.next, candidates);
-      if (added > 0 || tagRes.tagged > 0 || ozRes.updated > 0) {
-        await saveMixes(ozRes.next);
+      updated = ozRes.updated;
+      workingMixes = ozRes.next;
+    }
+
+    // Apply accepted new ingredient rows independent of whether candidates is
+    // populated. On a snapshot-pruned re-import the candidates block above is
+    // skipped entirely, so workingMixes may still hold unbranded pool mixes.
+    // Run a fillSpecMixTags pass using the accepted entries as proxies so
+    // previously-unbranded mixes get their brand assigned before
+    // applyNewMixComponents matches by brand+name — mirroring exactly what
+    // would happen if candidates were present. fillSpecMixTags is idempotent
+    // for already-branded mixes, so this is safe when candidates also ran.
+    if (acceptedAdditions.length) {
+      const tagRes2 = fillSpecMixTags(
+        workingMixes,
+        acceptedAdditions.map((a) => ({ name: a.mixName, brand: a.brand, flavor: "" })),
+      );
+      tagged += tagRes2.tagged;
+      const newCompRes = applyNewMixComponents(tagRes2.next, acceptedAdditions);
+      if (added > 0 || tagged > 0 || updated > 0 || newCompRes.applied > 0) {
+        await saveMixes(newCompRes.next);
         mixesAdded = added;
       }
+    } else if (added > 0 || tagged > 0 || updated > 0) {
+      await saveMixes(workingMixes);
+      mixesAdded = added;
     }
   } catch {
     // Best-effort (non-manager 403, offline, sync disabled) — import applied.

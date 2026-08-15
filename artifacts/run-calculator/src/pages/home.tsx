@@ -10318,6 +10318,7 @@ export default function Home() {
     learnedRenames: SpecImportAlias[],
     profilesToRemove: Array<{brand: string; flavor: string}> = [],
     forceUpdateProfileKeys: ReadonlySet<string> = new Set(),
+    acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
   ) {
     if (!specImportPrepared) return;
     setSpecImportApplying(true);
@@ -10337,7 +10338,7 @@ export default function Home() {
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
       const { mixesAdded, cheeseRecipesAdded, cheeseOzUpdated, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed } =
-        await commitSpecImport(toCommit, forceUpdateProfileKeys);
+        await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
       // Tombstone profiles the manager marked as removed from the workbook.
       // Done after commit so the new profiles are written first; deletion is
       // local-only (same tombstone path as manual brand/flavor deletion in the

@@ -641,12 +641,59 @@ export function applyMixPerPizza(
   return { next, updated };
 }
 
-// ---------------------------------------------------------------------------
-// Plan building
-// ---------------------------------------------------------------------------
-
-// A scheduled run resolved to its product + pizza/case counts (each app computes
-// pizzas/cases from the run's profile recipe before calling in).
+/**
+ * Find ingredient rows present in `updates` but MISSING from the matched
+ * existing mix — i.e. new ingredients the spec sheet added to a mix the
+ * manager already keeps. Only fires on mixes that MATCH by name + brand scope
+ * (new mixes in `updates` are handled by addSpecMixesIfAbsent, not here).
+ * Includes any row with a non-blank ingredient name, regardless of perPizza
+ * value — a new ingredient with a missing/zero oz-per-pizza is still visible
+ * so the manager can fill it in the Mixes editor after accepting.
+ *
+ * Brand-scope rule mirrors applyMixPerPizza: a branded update only matches
+ * existing mixes of the same brand; unbranded matches unbranded only.
+ * Pure. Returns one entry per affected mix.
+ */
+export function detectNewMixComponents(
+  existing: ReadonlyArray<Mix>,
+  updates: ReadonlyArray<{
+    name: string;
+    brand?: string;
+    components: ReadonlyArray<{ ingredient: string; perPizza: number }>;
+  }>,
+): Array<{ mixName: string; brand: string; newComponents: MixComponent[] }> {
+  const result: Array<{ mixName: string; brand: string; newComponents: MixComponent[] }> = [];
+  for (const u of updates) {
+    const nameKey = mixNameMatchKey(u.name);
+    if (!nameKey) continue;
+    const brandKey = (u.brand ?? "").trim().toLowerCase();
+    const matched = existing.find(
+      (m) =>
+        (m.brand ?? "").trim().toLowerCase() === brandKey &&
+        mixNameMatchKey(m.name) === nameKey,
+    );
+    if (!matched) continue; // no existing mix → addSpecMixesIfAbsent's territory
+    const existingIngKeys = new Set(
+      matched.components.map((c) => c.ingredient.trim().toLowerCase()),
+    );
+    const newComponents: MixComponent[] = [];
+    const seenNew = new Set<string>();
+    for (const c of u.components) {
+      const ing = (c.ingredient ?? "").trim();
+      if (!ing) continue;
+      const ingKey = ing.toLowerCase();
+      if (existingIngKeys.has(ingKey)) continue;
+      if (seenNew.has(ingKey)) continue;
+      seenNew.add(ingKey);
+      const v = Number(c.perPizza);
+      newComponents.push({ ingredient: ing, perPizza: Number.isFinite(v) ? Math.max(0, v) : 0 });
+    }
+    if (newComponents.length > 0) {
+      result.push({ mixName: matched.name, brand: matched.brand, newComponents });
+    }
+  }
+  return result;
+}
 export interface MixScheduledRun {
   date: string; // YYYY-MM-DD
   brand: string;
@@ -882,4 +929,42 @@ export function groupMixesByBrand(mixes: ReadonlyArray<Mix>): MixBrandGroup[] {
     return a.brand.localeCompare(b.brand, undefined, { sensitivity: "base" });
   });
   return groups;
+}
+
+/**
+ * Append accepted new ingredient rows to their matched existing mixes.
+ * `acceptedAdditions` is the subset of detectNewMixComponents output the
+ * manager approved in the review dialog. Matched by the same brand + loose
+ * name key as applyMixPerPizza. Ingredients already present in the mix are
+ * skipped (double-guard). Pure. Returns the next list plus how many mixes
+ * had at least one component appended.
+ */
+export function applyNewMixComponents(
+  existing: ReadonlyArray<Mix>,
+  acceptedAdditions: ReadonlyArray<{
+    mixName: string;
+    brand: string;
+    newComponents: ReadonlyArray<MixComponent>;
+  }>,
+): { next: Mix[]; applied: number } {
+  if (!acceptedAdditions.length) return { next: [...existing], applied: 0 };
+  const byKey = new Map<string, ReadonlyArray<MixComponent>>();
+  for (const a of acceptedAdditions) {
+    const nameKey = mixNameMatchKey(a.mixName);
+    const brandKey = (a.brand ?? "").trim().toLowerCase();
+    if (nameKey) byKey.set(`${brandKey}\0${nameKey}`, a.newComponents);
+  }
+  let applied = 0;
+  const next = existing.map((m) => {
+    const brandKey = (m.brand ?? "").trim().toLowerCase();
+    const nameKey = mixNameMatchKey(m.name);
+    const additions = byKey.get(`${brandKey}\0${nameKey}`);
+    if (!additions || !additions.length) return m;
+    const existingIngKeys = new Set(m.components.map((c) => c.ingredient.trim().toLowerCase()));
+    const toAdd = additions.filter((c) => !existingIngKeys.has(c.ingredient.trim().toLowerCase()));
+    if (!toAdd.length) return m;
+    applied++;
+    return { ...m, components: [...m.components, ...toAdd.map((c) => ({ ...c }))] };
+  });
+  return { next, applied };
 }

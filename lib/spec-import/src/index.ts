@@ -792,6 +792,58 @@ export function collectSpecImportMixes(
 }
 
 /**
+ * Like collectSpecImportMixes but de-duplicates by COMPOUND `brand\0name` key
+ * instead of name alone, and expands ALL `recipeTargets` per recipe. This
+ * produces one draft per unique (brand, name) pair — so a mix recipe that
+ * appears under two different brand scopes yields two drafts, one per brand.
+ *
+ * Use this when the caller needs per-brand granularity (e.g. detecting new
+ * ingredients on existing brand-scoped mixes). The original
+ * `collectSpecImportMixes` is still correct for the add-new-mixes commit path
+ * where `addSpecMixesIfAbsent` handles cross-brand name collisions.
+ */
+export function collectSpecImportMixesByBrandScope(
+  parsed: ParsedSpecImport,
+  userMixNamesLower: ReadonlySet<string>,
+): SpecMixDraft[] {
+  const out: SpecMixDraft[] = [];
+  const seen = new Set<string>(); // compound "${brandLower}\0${nameLower}"
+  for (const r of parsed.recipes ?? []) {
+    const name = (r.name ?? "").trim();
+    if (!name || !(r.rows?.length)) continue;
+    if (!specImportRecipeIsMix(r, userMixNamesLower)) continue;
+
+    // Build components once — they are the same regardless of which brand
+    // scope this recipe is being emitted under.
+    const ingSeen = new Set<string>();
+    const components: Array<{ ingredient: string; perPizza: number }> = [];
+    for (const row of r.rows) {
+      const ing = (row.ingredient ?? "").trim();
+      if (!ing) continue;
+      const k = ing.toLowerCase();
+      if (ingSeen.has(k)) continue;
+      ingSeen.add(k);
+      components.push({ ingredient: ing, perPizza: row.lbs });
+    }
+
+    // Emit one draft per distinct (brand, name) target. When there are no
+    // resolved targets, emit one unbranded draft (mirrors original behavior).
+    const targets = recipeTargets(r);
+    const effectiveTargets: Array<{ brand: string; flavor: string }> =
+      targets.length > 0 ? targets : [{ brand: "", flavor: "" }];
+    for (const t of effectiveTargets) {
+      const brand = (t.brand ?? "").trim();
+      const flavor = (t.flavor ?? "").trim();
+      const compoundKey = `${brand.toLowerCase()}\0${name.toLowerCase()}`;
+      if (seen.has(compoundKey)) continue;
+      seen.add(compoundKey);
+      out.push({ name, brand, flavor, components });
+    }
+  }
+  return out;
+}
+
+/**
  * A cheese blend detected in a parsed spec import, ready to be matched against
  * (or created in) the factory-wide server "cheese recipes" pool so the run
  * applicator "Cheese" cards — which are pick-only and hydrate their rows from
