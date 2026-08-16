@@ -5,6 +5,7 @@ import GlanceOverlay from "../components/GlanceOverlay";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
+import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -14495,24 +14496,7 @@ export default function Home() {
                                           <MixAlreadyMadeInput mix={liveMix} saveMixes={saveMixes} onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], saved)} />
                                         ) : null;
                                       })()}
-                                      {m.missingAmounts && (
-                                        <div className="flex flex-col gap-0.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 text-xs text-amber-300">
-                                          <div className="flex items-center gap-1.5">
-                                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                            <span className="font-semibold">
-                                              {m.missingComponentIngredients &&
-                                              m.missingComponentIngredients.length === m.components.length
-                                                ? "No component amounts — pull quantities will be 0"
-                                                : "Some components have no amounts — pull quantities may be understated"}
-                                            </span>
-                                          </div>
-                                          {m.missingComponentIngredients && m.missingComponentIngredients.length > 0 && (
-                                            <span className="pl-5 text-amber-400/80">
-                                              {m.missingComponentIngredients.join(", ")} — check that these names exactly match ingredient names in the run profiles, or open the Mixes editor to enter oz/pizza amounts directly.
-                                            </span>
-                                          )}
-                                        </div>
-                                      )}
+                                      <PrepMixMissingAmountsWarning entry={m} />
                                       {m.components.length > 0 && (
                                         <div className="space-y-1 pt-1 border-t border-violet-800/30">
                                           <p className="text-[11px] uppercase tracking-wider text-violet-400/70 font-semibold pt-1">Pull For Prep</p>
