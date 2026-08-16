@@ -717,7 +717,7 @@ export interface MixPlanEntry {
   notes?: string;
   // Flat +20 lb startup/hopper buffer added automatically (mirrors applicator +20 lb).
   startupLbs: number;
-  // Sum of all component pounds plus the 20 lb startup buffer (= total pounds needed).
+  // Sum of component pounds + 15% waste buffer + 20 lb startup (= total pounds needed).
   totalLbs: number;
   amountAlreadyMade: number;
   // max(0, totalLbs - amountAlreadyMade).
@@ -773,10 +773,13 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
     lbs: (c.perPizza * pizzas) / OZ_PER_LB,
   }));
   const componentLbs = components.reduce((acc, c) => acc + c.lbs, 0);
-  // Add the same flat +20 lb startup/hopper buffer that applicator ingredients
-  // carry — covers the material left in the hopper at startup.
+  // 15% waste buffer covers spills, over-mixing, and hopper residue so the
+  // manager always has a safe margin when deciding how much to make.
+  const MIX_WASTE_FACTOR = 0.15;
+  const wasteLbs = componentLbs * MIX_WASTE_FACTOR;
+  // Flat +20 lb startup/hopper buffer on top of the waste-buffered total.
   const startupLbs = 20;
-  const totalLbs = componentLbs + startupLbs;
+  const totalLbs = componentLbs + wasteLbs + startupLbs;
   const remainingLbs = Math.max(0, totalLbs - mix.amountAlreadyMade);
   const batches = mix.batchSize > 0 ? remainingLbs / mix.batchSize : 0;
   // True when the mix has components but none carry a perPizza amount yet —
@@ -788,7 +791,7 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
     name: mix.name,
     batchSize: mix.batchSize,
     daysEarly: mix.daysEarly,
-    startupLbs: mix.startupLbs,
+    startupLbs,
     totalLbs,
     amountAlreadyMade: mix.amountAlreadyMade,
     remainingLbs,

@@ -14333,7 +14333,7 @@ export default function Home() {
                                         <div className="flex items-baseline justify-between gap-2 text-xs text-emerald-300/80 mb-1.5 tabular-nums">
                                           <span>
                                             Total {fmtNum(m.totalLbs, 2)} lbs
-                                            <span className="ml-1 text-emerald-400/70">(incl. {m.startupLbs} lb startup)</span>
+                                            <span className="ml-1 text-emerald-400/70">(incl. 15% waste + {m.startupLbs} lb startup)</span>
                                           </span>
                                           {m.remainingLbs < m.totalLbs && (
                                             <span className="text-emerald-300">need {fmtNum(m.remainingLbs, 2)} lbs</span>

@@ -60,7 +60,7 @@ describe("buildMixPlan — perPizza pound totals", () => {
     const [group] = buildMixPlan({ mixes, runs, today: TODAY });
     expect(group).toBeDefined();
     const entry = group.runs[0].mixes[0];
-    expect(entry.totalLbs).toBeCloseTo(expectedLbs + 20, 8); // +20 lb startup buffer
+    expect(entry.totalLbs).toBeCloseTo(expectedLbs * 1.15 + 20, 8); // +15% waste + 20 lb startup
     expect(entry.components[0].lbs).toBeCloseTo(expectedLbs, 8);
   });
 
@@ -84,7 +84,7 @@ describe("buildMixPlan — perPizza pound totals", () => {
     const cheddLbs = (1.5 * pizzas) / OZ_PER_LB;
     expect(entry.components[0].lbs).toBeCloseTo(mozzLbs, 8);
     expect(entry.components[1].lbs).toBeCloseTo(cheddLbs, 8);
-    expect(entry.totalLbs).toBeCloseTo(mozzLbs + cheddLbs + 20, 8); // +20 lb startup buffer
+    expect(entry.totalLbs).toBeCloseTo((mozzLbs + cheddLbs) * 1.15 + 20, 8); // +15% waste + 20 lb startup
   });
 });
 
@@ -125,7 +125,7 @@ describe("applyMixPerPizza → buildMixPlan — spec-import end-to-end", () => {
     expect(after).toHaveLength(1);
     const entryAfter = after[0].runs[0].mixes[0];
     const expectedLbs = (perPizzaOz * pizzas) / OZ_PER_LB;
-    expect(entryAfter.totalLbs).toBeCloseTo(expectedLbs + 20, 8); // +20 lb startup buffer
+    expect(entryAfter.totalLbs).toBeCloseTo(expectedLbs * 1.15 + 20, 8); // +15% waste + 20 lb startup
     expect(entryAfter.components[0].lbs).toBeCloseTo(expectedLbs, 8);
   });
 
@@ -136,9 +136,9 @@ describe("applyMixPerPizza → buildMixPlan — spec-import end-to-end", () => {
     const alreadyMade = 5; // lbs on hand
 
     const componentLbs = (perPizzaOz * pizzas) / OZ_PER_LB; // 20 lbs
-    const totalLbs = componentLbs + 20; // +20 lb startup buffer → 40 lbs
-    const expectedRemaining = totalLbs - alreadyMade; // 35 lbs
-    const expectedBatches = expectedRemaining / batchSize; // 35/15
+    const totalLbs = componentLbs * 1.15 + 20; // +15% waste + 20 lb startup → 43 lbs
+    const expectedRemaining = totalLbs - alreadyMade; // 38 lbs
+    const expectedBatches = expectedRemaining / batchSize; // 38/15
 
     const mixes = [
       makeMix({
@@ -163,7 +163,7 @@ describe("buildMixPlan — spec perPizza + premix batchSize consistency", () => 
     const pizzas = 320;
     const perPizzaOz = 2.5;
     const componentLbs = (perPizzaOz * pizzas) / OZ_PER_LB; // 50 lbs
-    const expectedLbs = componentLbs + 20; // +20 lb startup buffer → 70 lbs
+    const expectedLbs = componentLbs * 1.15 + 20; // +15% waste + 20 lb startup → 77.5 lbs
 
     // Simulate a mix that received perPizza from a spec import AND batchSize
     // from a premix-sheet import (the premix importer sets perBatchLbs on
@@ -183,9 +183,9 @@ describe("buildMixPlan — spec perPizza + premix batchSize consistency", () => 
     const [group] = buildMixPlan({ mixes, runs: [run(TODAY, pizzas)], today: TODAY });
     const entry = group.runs[0].mixes[0];
 
-    // lbs = perPizza-derived component lbs + 20 lb startup buffer
+    // lbs = component lbs + 15% waste + 20 lb startup
     expect(entry.totalLbs).toBeCloseTo(expectedLbs, 8);
-    // batch count = remainingLbs / batchSize = 70 / 25 = 2.8
+    // batch count = remainingLbs / batchSize = 77.5 / 25 = 3.1
     expect(entry.batches).toBeCloseTo(expectedLbs / 25, 8);
     // batchSize is echoed through
     expect(entry.batchSize).toBe(25);
@@ -196,8 +196,8 @@ describe("buildMixPlan — spec perPizza + premix batchSize consistency", () => 
     const perPizzaOz = 4.0;
     const batchSize = 30; // 30 lbs per batch (premix-origin)
     const componentLbs = (perPizzaOz * pizzas) / OZ_PER_LB; // 60 lbs
-    const expectedLbs = componentLbs + 20; // +20 lb startup buffer → 80 lbs
-    const expectedBatches = expectedLbs / batchSize; // 80/30 batches
+    const expectedLbs = componentLbs * 1.15 + 20; // +15% waste + 20 lb startup → 89 lbs
+    const expectedBatches = expectedLbs / batchSize; // 89/30 batches
 
     // Mix starts with perPizza=0 (pre-spec-import state), batchSize already set
     const existing = [
@@ -230,7 +230,7 @@ describe("buildMixPlan — spec perPizza + premix batchSize consistency", () => 
     const provLbs = (1.5 * pizzas) / OZ_PER_LB;
     expect(entry.components[0].lbs).toBeCloseTo(mozzLbs, 8);
     expect(entry.components[1].lbs).toBeCloseTo(provLbs, 8);
-    expect(entry.totalLbs).toBeCloseTo(expectedLbs, 8); // component lbs + 20 lb startup buffer
+    expect(entry.totalLbs).toBeCloseTo(expectedLbs, 8); // component lbs + 15% waste + 20 lb startup
     expect(entry.batches).toBeCloseTo(expectedBatches, 8);
   });
 });
