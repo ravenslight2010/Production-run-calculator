@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
+import { currentScope } from "../lib/requestScope";
 import {
   db,
   proactiveAlertSettingsTable,
@@ -1223,24 +1224,26 @@ router.post(
 // db-free aiProactive.ts module (clampProactiveSettings) so they stay
 // unit-testable; this route just persists the clamped values.
 
-// Reads the single settings row, seeding the default on first access so a fresh
-// install returns safe defaults (enabled, 4-min poll, 30-min cooldown).
+// Reads the settings row for the current scope, seeding the default on first
+// access so a fresh install returns safe defaults (enabled, 4-min poll, 30-min
+// cooldown). Live and sandbox each have their own independent row.
 async function loadProactiveSettings() {
+  const scope = currentScope();
   const [row] = await db
     .select()
     .from(proactiveAlertSettingsTable)
-    .where(eq(proactiveAlertSettingsTable.id, 1));
+    .where(eq(proactiveAlertSettingsTable.scope, scope));
   if (row) return row;
   const [created] = await db
     .insert(proactiveAlertSettingsTable)
-    .values({ id: 1 })
-    .onConflictDoNothing({ target: proactiveAlertSettingsTable.id })
+    .values({ scope })
+    .onConflictDoNothing({ target: proactiveAlertSettingsTable.scope })
     .returning();
   if (created) return created;
   const [existing] = await db
     .select()
     .from(proactiveAlertSettingsTable)
-    .where(eq(proactiveAlertSettingsTable.id, 1));
+    .where(eq(proactiveAlertSettingsTable.scope, scope));
   return existing;
 }
 
@@ -1265,11 +1268,12 @@ router.put(
       return;
     }
     const { enabled, pollSeconds, cooldownSeconds } = clampProactiveSettings(parsed.data);
+    const scope = currentScope();
     const [row] = await db
       .insert(proactiveAlertSettingsTable)
-      .values({ id: 1, enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() })
+      .values({ scope, enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() })
       .onConflictDoUpdate({
-        target: proactiveAlertSettingsTable.id,
+        target: proactiveAlertSettingsTable.scope,
         set: { enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() },
       })
       .returning();

@@ -7,17 +7,20 @@ import { usersTable } from "./users";
 // facility memory (for AI grounding) AND a row here, which powers a browsable
 // "Quality history" managers can audit and spot trends in over time.
 //
-// `productType` is "pizza" | "crust" | "other"; `status` is the reviewed verdict
-// "pass" | "warn" | "fail"; `confidence` is the model's 0..1 confidence at check
-// time; `issues` snapshots the specific concerns (array of {type, severity,
-// detail}); `notes` is the optional user context attached to the check; and
-// `thumbnail` is an optional small data URI of the analyzed photo (dropped when
-// too large). The reviewer's id is a soft reference (ON DELETE SET NULL) and the
-// name is snapshotted so the history survives the account being removed.
+// `scope` isolates live and sandbox records — sandbox test checks never appear
+// in the live quality audit trail. `productType` is "pizza" | "crust" | "other";
+// `status` is the reviewed verdict "pass" | "warn" | "fail"; `confidence` is the
+// model's 0..1 confidence at check time; `issues` snapshots the specific concerns
+// (array of {type, severity, detail}); `notes` is the optional user context
+// attached to the check; and `thumbnail` is an optional small data URI of the
+// analyzed photo (dropped when too large). The reviewer's id is a soft reference
+// (ON DELETE SET NULL) and the name is snapshotted so the history survives the
+// account being removed.
 export const qualityChecksTable = pgTable(
   "quality_checks",
   {
     id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
     productType: text("product_type").notNull(),
     status: text("status").notNull(),
     confidence: real("confidence").notNull().default(0),

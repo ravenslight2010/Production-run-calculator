@@ -1,15 +1,18 @@
 import { Router, type IRouter } from "express";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, productionRunsTable } from "@workspace/db";
 import { CreateRunBody, DeleteRunParams, ListRunsResponse, ListRunsResponseItem } from "@workspace/api-zod";
 import { requireCapability } from "../middlewares/requireCapability";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
 router.get("/runs", async (req, res): Promise<void> => {
+  const scope = currentScope();
   const runs = await db
     .select()
     .from(productionRunsTable)
+    .where(eq(productionRunsTable.scope, scope))
     .orderBy(desc(productionRunsTable.createdAt));
   res.json(ListRunsResponse.parse(runs));
 });
@@ -22,7 +25,8 @@ router.post("/runs", requireCapability("manage-factory-settings"), async (req, r
     return;
   }
 
-  const [run] = await db.insert(productionRunsTable).values(parsed.data).returning();
+  const scope = currentScope();
+  const [run] = await db.insert(productionRunsTable).values({ ...parsed.data, scope }).returning();
   res.status(201).json(ListRunsResponseItem.parse(run));
 });
 
@@ -34,9 +38,10 @@ router.delete("/runs/:id", requireCapability("manage-factory-settings"), async (
     return;
   }
 
+  const scope = currentScope();
   const [deleted] = await db
     .delete(productionRunsTable)
-    .where(eq(productionRunsTable.id, params.data.id))
+    .where(and(eq(productionRunsTable.id, params.data.id), eq(productionRunsTable.scope, scope)))
     .returning();
 
   if (!deleted) {

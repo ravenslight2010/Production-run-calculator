@@ -647,7 +647,7 @@ describe("/ai/proactive-settings", () => {
     const [row] = await db
       .select()
       .from(proactiveAlertSettingsTable)
-      .where(eq(proactiveAlertSettingsTable.id, 1));
+      .where(eq(proactiveAlertSettingsTable.scope, "live"));
     expect(row.pollSeconds).toBe(30);
     expect(row.cooldownSeconds).toBe(86_400);
   });

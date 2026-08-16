@@ -162,10 +162,10 @@ describe("GET /factory-data", () => {
     expect(typeof body.data["myKey"].updatedAt).toBe("string");
   });
 
-  it("is accessible to non-manager authenticated users", async () => {
+  it("rejects operators (missing manage-factory-settings capability) with 403", async () => {
     const op = await freshUser("operator");
     const res = await getFactoryData(op);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   it("rejects unauthenticated requests with 401", async () => {

@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const productionRunsTable = pgTable("production_runs", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   label: text("label").notNull().default(""),
   casesNeeded: integer("cases_needed").notNull(),
   casesLeft: integer("cases_left").notNull(),
@@ -18,6 +19,7 @@ export const productionRunsTable = pgTable("production_runs", {
 
 export const insertProductionRunSchema = createInsertSchema(productionRunsTable).omit({
   id: true,
+  scope: true,
   createdAt: true,
 });
 export type InsertProductionRun = z.infer<typeof insertProductionRunSchema>;

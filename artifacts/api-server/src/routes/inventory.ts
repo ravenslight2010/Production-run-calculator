@@ -13,6 +13,7 @@ import {
   type InventoryLot,
   type InventoryLocation,
 } from "@workspace/db";
+import { currentScope } from "../lib/requestScope";
 import {
   computeRunConsumptionLines,
   applySubstitutions,
@@ -823,6 +824,7 @@ router.post(
     const [row] = await db
       .insert(qualityChecksTable)
       .values({
+        scope: currentScope(),
         productType: data.productType,
         status: data.status,
         confidence: data.confidence,
@@ -846,7 +848,7 @@ router.get(
   requireCapability("manage-inventory"),
   async (req, res): Promise<void> => {
     const filter = parseHistoryFilter(req.query);
-    const conditions = [];
+    const conditions: ReturnType<typeof eq>[] = [eq(qualityChecksTable.scope, currentScope())];
     if (filter.productType)
       conditions.push(eq(qualityChecksTable.productType, filter.productType));
     if (filter.status) conditions.push(eq(qualityChecksTable.status, filter.status));
@@ -854,7 +856,7 @@ router.get(
     const rows = await db
       .select()
       .from(qualityChecksTable)
-      .where(conditions.length ? and(...conditions) : undefined)
+      .where(and(...conditions))
       .orderBy(desc(qualityChecksTable.createdAt));
     res.json(rows.map(rowToRecord));
   },

@@ -515,7 +515,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
-  const scope = currentScope();
+    const scope = currentScope();
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic per-run protective merge (see /sync/today): an empty run value can't
@@ -624,6 +624,10 @@ router.post(
       savedPremixSheetsTable,
       supervisorPinSettingsTable,
       cycleCountSchedulesTable,
+      // Operational tables that are now scope-isolated.
+      productionRunsTable,
+      qualityChecksTable,
+      proactiveAlertSettingsTable,
       // Inventory tables child-first so FK constraints never block the wipe.
       inventoryLedgerTable,
       inventoryLotsTable,
@@ -634,13 +638,12 @@ router.post(
     ] as const;
     // sandbox_meta has no scope column — clearing it just forces the sandbox to
     // re-copy from live next time, which is the correct post-purge behavior.
+    // ai_conversation_turns is naturally isolated by userId (sandbox users have
+    // distinct user accounts) so wiping all turns is acceptable here.
     const globalTables = [
       // Per-user AI chat history (keyed by userId, no scope column).
       aiConversationTurnsTable,
       sandboxMetaTable,
-      productionRunsTable,
-      qualityChecksTable,
-      proactiveAlertSettingsTable,
     ] as const;
     const epoch = await db.transaction(async (tx) => {
       for (const t of scopedTables) {
