@@ -561,7 +561,11 @@ function MixEditor({
         <input
           type="checkbox"
           checked={!!draft.isPrep}
-          onChange={(e) => { patch({ isPrep: e.target.checked }); commit(); }}
+          onChange={(e) => {
+            const next = { ...draft, isPrep: e.target.checked };
+            setDraft(next);
+            commit(next);
+          }}
           disabled={disabled}
           className="mt-0.5 accent-violet-500 shrink-0"
         />
