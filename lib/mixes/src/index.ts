@@ -725,6 +725,19 @@ export interface MixComponentPlan {
 }
 
 // A matched mix for a specific run, fully computed.
+/**
+ * Per-run contribution to a prep mix — shows how much of the total lbs comes
+ * from each individual scheduled run. Only populated for prep mixes (isPrep)
+ * when 2+ runs contribute; useful for spotting profile mismatches.
+ */
+export interface MixContribution {
+  brand: string;
+  flavor: string;
+  pizzas: number;
+  /** Sum of all component lbs this run contributes (before waste/startup). */
+  totalLbs: number;
+}
+
 export interface MixPlanEntry {
   mixId: string;
   name: string;
@@ -749,6 +762,13 @@ export interface MixPlanEntry {
    * covers everything, or a future-date run with 0 pizzas).
    */
   missingAmounts: boolean;
+  /**
+   * Per-run breakdown of how many lbs each scheduled run contributes to this
+   * prep mix total. Only present on prep-mix entries with 2+ contributing runs,
+   * so managers can spot mismatches (e.g. Brand A uses 2 oz/pizza vs Brand B
+   * 1.5 oz/pizza of the same ingredient).
+   */
+  contributions?: MixContribution[];
 }
 
 // A run on the make-day with at least one matched mix.
@@ -827,6 +847,7 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
 function computeEntryFromComponentLbs(
   mix: Mix,
   perComponentLbs: number[],
+  contributions?: MixContribution[],
 ): MixPlanEntry {
   const components: MixComponentPlan[] = mix.components.map((c, i) => ({
     ingredient: c.ingredient,
@@ -857,6 +878,9 @@ function computeEntryFromComponentLbs(
     missingAmounts,
   };
   if (mix.notes) entry.notes = mix.notes;
+  // Only attach contributions when there are 2+ runs — a single run adds no
+  // diagnostic value and would just clutter the UI.
+  if (contributions && contributions.length >= 2) entry.contributions = contributions;
   return entry;
 }
 
@@ -987,6 +1011,10 @@ export function buildMixPlan(args: {
         // mix card's generic perPizza. Different brands/flavors may use different
         // weights for the same ingredient. Falls back to mix.component.perPizza
         // if the run has no profile data for that ingredient.
+        //
+        // Also build per-run contribution totals so the UI can show a breakdown
+        // like "Brand A (1200 pizzas): 12.5 lbs · Brand B (800 pizzas): 7.5 lbs".
+        const contributions: MixContribution[] = [];
         const perComponentLbs = mix.components.map((comp) => {
           const key = comp.ingredient.trim().toLowerCase();
           return matchingRuns
@@ -1012,13 +1040,45 @@ export function buildMixPlan(args: {
               return sum + (oz / OZ_PER_LB) * r.pizzas;
             }, 0);
         });
+        // Build per-run contribution totals (sum across all components for each run).
+        for (const r of matchingRuns) {
+          let runTotalLbs = 0;
+          for (const comp of mix.components) {
+            const key = comp.ingredient.trim().toLowerCase();
+            const hasIngredient = (r.ingredients ?? []).some(
+              (i) => i.trim().toLowerCase() === key,
+            );
+            if (!hasIngredient) continue;
+            let oz = comp.perPizza;
+            if (r.ingredientOzPerPizza) {
+              const exact = r.ingredientOzPerPizza[comp.ingredient];
+              if (exact !== undefined) {
+                oz = exact;
+              } else {
+                const ci = Object.entries(r.ingredientOzPerPizza).find(
+                  ([k]) => k.trim().toLowerCase() === key,
+                );
+                if (ci) oz = ci[1];
+              }
+            }
+            runTotalLbs += (oz / OZ_PER_LB) * r.pizzas;
+          }
+          if (runTotalLbs > 0) {
+            contributions.push({
+              brand: r.brand,
+              flavor: r.flavor,
+              pizzas: r.pizzas,
+              totalLbs: runTotalLbs,
+            });
+          }
+        }
         let group = groupByDate.get(date);
         if (!group) {
           group = { date, daysUntil: du, runs: [], prepMixes: [] };
           groupByDate.set(date, group);
           groups.push(group);
         }
-        group.prepMixes.push(computeEntryFromComponentLbs(mix, perComponentLbs));
+        group.prepMixes.push(computeEntryFromComponentLbs(mix, perComponentLbs, contributions));
       }
     }
   }

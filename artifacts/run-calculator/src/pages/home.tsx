@@ -3960,6 +3960,7 @@ export default function Home() {
   }, [enabledCheeseRecipes, serverCheeseNames]);
   // The make-day chosen on the Mixes tab (defaults to today).
   const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
+  const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
   // Warehouse "Time to Count" card. Marking a section counted is open to any
   // signed-in user (floor staff perform the counts).
@@ -14438,7 +14439,17 @@ export default function Home() {
                               {group.prepMixes.length > 0 && (
                                 <div className="mt-3 pt-3 border-t border-emerald-800/40 space-y-3">
                                   <p className="text-[11px] uppercase tracking-wider font-semibold text-violet-400/80">Ingredient Prep</p>
-                                  {group.prepMixes.map((m) => (
+                                  {group.prepMixes.map((m) => {
+                                    const expandKey = `${group.date}::${m.mixId}`;
+                                    const isExpanded = prepMixExpanded.has(expandKey);
+                                    const toggleExpanded = () =>
+                                      setPrepMixExpanded((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(expandKey)) next.delete(expandKey);
+                                        else next.add(expandKey);
+                                        return next;
+                                      });
+                                    return (
                                     <div key={m.mixId} className="rounded-lg bg-violet-950/30 border border-violet-800/30 p-3 space-y-1.5">
                                       <div className="flex items-baseline justify-between gap-2">
                                         <span className="font-semibold text-sm text-violet-100">{m.name}</span>
@@ -14450,6 +14461,34 @@ export default function Home() {
                                         <span>Total {fmtNum(m.totalLbs, 2)} lbs <span className="text-violet-400/70">(incl. 15% waste + {m.startupLbs} lb startup)</span></span>
                                         {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
                                       </div>
+                                      {/* Per-run breakdown toggle — only when 2+ runs contribute */}
+                                      {m.contributions && m.contributions.length >= 2 && (
+                                        <div>
+                                          <button
+                                            type="button"
+                                            onClick={toggleExpanded}
+                                            className="flex items-center gap-1 text-[11px] text-violet-400/80 hover:text-violet-300 transition-colors"
+                                          >
+                                            <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                            {isExpanded ? "Hide" : "Show"} run breakdown ({m.contributions.length} runs)
+                                          </button>
+                                          {isExpanded && (
+                                            <div className="mt-1.5 space-y-0.5 pl-4 border-l border-violet-700/40">
+                                              {m.contributions.map((contrib, ci) => (
+                                                <div key={ci} className="flex items-baseline justify-between gap-2 text-xs">
+                                                  <span className="text-violet-300/80 truncate">
+                                                    {contrib.brand}{contrib.flavor ? ` — ${contrib.flavor}` : ""}
+                                                    <span className="ml-1 text-violet-400/60">({fmtComma(contrib.pizzas)} pizza{contrib.pizzas !== 1 ? "s" : ""})</span>
+                                                  </span>
+                                                  <span className="tabular-nums whitespace-nowrap text-violet-200/90 font-medium">
+                                                    {fmtNum(contrib.totalLbs, 2)} <span className="font-normal text-violet-400/70">lbs</span>
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                       {(() => {
                                         const liveMix = mixes.find((mx) => mx.id === m.mixId);
                                         return liveMix ? (
@@ -14476,7 +14515,8 @@ export default function Home() {
                                         </div>
                                       )}
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                             </CardContent>
