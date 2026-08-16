@@ -81,11 +81,10 @@ export interface Mix {
   components: MixComponent[];
   // Disabled mixes are kept (so toggling is easy) but never produce a plan entry.
   enabled: boolean;
-  // When set, this mix appears in the plan for any run whose profile includes
-  // this ingredient name (case-insensitive). Use for prep recipes that supply
-  // an ingredient used by other recipes (e.g. "Pineapple" or "Fresh Spinach").
-  // Leave blank for normal brand/flavor-matched mixes.
-  prepsIngredient?: string;
+  // When true, this mix is a prep recipe. It appears in the plan for any run
+  // whose profile includes any of this mix's component ingredient names.
+  // Brand/flavor matching is skipped for prep mixes.
+  isPrep?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,8 +162,7 @@ export function normalizeMix(input: unknown): Mix | null {
   };
   if (typeof raw.notes === "string" && raw.notes.trim()) mix.notes = raw.notes.trim();
   if (typeof raw.scope === "string" && raw.scope) mix.scope = raw.scope;
-  if (typeof raw.prepsIngredient === "string" && raw.prepsIngredient.trim())
-    mix.prepsIngredient = raw.prepsIngredient.trim();
+  if (raw.isPrep === true) mix.isPrep = true;
   return mix;
 }
 
@@ -361,8 +359,8 @@ export function backfillMixFromMergedSources(
       next.notes = src.notes;
       changed = true;
     }
-    if (!(next.prepsIngredient ?? "").trim() && (src.prepsIngredient ?? "").trim()) {
-      next.prepsIngredient = src.prepsIngredient;
+    if (!next.isPrep && src.isPrep) {
+      next.isPrep = true;
       changed = true;
     }
     const byKey = new Map<string, MixComponent>();
@@ -848,8 +846,8 @@ export function buildMixPlan(args: {
   if (enabledMixes.length === 0) return [];
 
   // Separate brand/flavor mixes from prep mixes (ingredient-linked).
-  const mixes = enabledMixes.filter((m) => !m.prepsIngredient?.trim());
-  const prepMixList = enabledMixes.filter((m) => !!m.prepsIngredient?.trim());
+  const mixes = enabledMixes.filter((m) => !m.isPrep);
+  const prepMixList = enabledMixes.filter((m) => !!m.isPrep);
 
   // Group brand/flavor mixes by product so each run can find all of its mixes.
   const byProduct = new Map<string, Mix[]>();
@@ -932,12 +930,14 @@ export function buildMixPlan(args: {
       const du = daysUntil(date, today);
       for (const mix of prepMixList) {
         if (du > mix.daysEarly) continue;
-        const target = mix.prepsIngredient!.trim().toLowerCase();
-        // Sum pizzas from all runs on this date that use the ingredient.
+        // Match runs that use any of this mix's component ingredient names.
+        const componentKeys = mix.components.map((comp) =>
+          comp.ingredient.trim().toLowerCase(),
+        );
         const matchPizzas = dateRuns
           .filter((r) =>
-            (r.ingredients ?? []).some(
-              (i) => i.trim().toLowerCase() === target,
+            (r.ingredients ?? []).some((i) =>
+              componentKeys.includes(i.trim().toLowerCase()),
             ),
           )
           .reduce((sum, r) => sum + r.pizzas, 0);

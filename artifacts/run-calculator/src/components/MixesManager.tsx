@@ -47,7 +47,6 @@ function blankMix(): Mix {
     flavor: "",
     batchSize: 0,
     daysEarly: DEFAULT_DAYS_EARLY,
-    prepsIngredient: "",
     notes: "",
     amountAlreadyMade: 0,
     components: [],
@@ -305,7 +304,7 @@ export default function MixesManager({
                                     Off
                                   </span>
                                 )}
-                                {mix.prepsIngredient && (
+                                {mix.isPrep && (
                                   <span className="text-[10px] rounded px-1.5 py-0.5 bg-violet-900/30 text-violet-300 border border-violet-700/40 shrink-0">
                                     prep
                                   </span>
@@ -557,23 +556,20 @@ function MixEditor({
         className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
       />
 
-      {/* Prep ingredient link */}
-      <div className="space-y-0.5">
-        <p className="text-[11px] font-semibold text-muted-foreground">
-          Preps ingredient
-          <span className="font-normal ml-1 text-muted-foreground/70">(leave blank for brand/flavor matching)</span>
-        </p>
+      {/* Prep mix toggle */}
+      <label className="flex items-start gap-2 cursor-pointer group">
         <input
-          type="text"
-          value={draft.prepsIngredient ?? ""}
-          onChange={(e) => patch({ prepsIngredient: e.target.value })}
-          onBlur={() => commit()}
+          type="checkbox"
+          checked={!!draft.isPrep}
+          onChange={(e) => { patch({ isPrep: e.target.checked }); commit(); }}
           disabled={disabled}
-          placeholder="e.g. Pineapple, Fresh Spinach…"
-          className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+          className="mt-0.5 accent-violet-500 shrink-0"
         />
-        <p className="text-[10px] text-muted-foreground/60">When set, this prep recipe appears in the plan for any run that uses this ingredient — regardless of brand/flavor.</p>
-      </div>
+        <div>
+          <span className="text-[11px] font-semibold text-muted-foreground group-hover:text-foreground transition-colors">Prep mix</span>
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5">When checked, this mix appears in the plan for any run that uses one of its component ingredients — regardless of brand/flavor.</p>
+        </div>
+      </label>
 
       {/* Components */}
       <div className="space-y-1.5">
