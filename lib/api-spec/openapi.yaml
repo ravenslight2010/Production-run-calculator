@@ -7585,6 +7585,11 @@ components:
             $ref: "#/components/schemas/MixComponent"
         enabled:
           type: boolean
+        isPrep:
+          type: boolean
+          description: >-
+            When true, this mix is an ingredient-prep mix matched by component
+            ingredient names against each run's profile rather than by brand/flavor.
 
     MixList:
       type: object

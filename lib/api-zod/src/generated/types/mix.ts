@@ -30,4 +30,6 @@ export interface Mix {
   /** The ingredients that make up the mix */
   components: MixComponent[];
   enabled: boolean;
+  /** When true, this mix is an ingredient-prep mix matched by component ingredient names against each run's profile rather than by brand/flavor. */
+  isPrep?: boolean;
 }

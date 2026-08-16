@@ -804,6 +804,10 @@ export interface OptimizeRun {
   netElapsedSec: number;
   downtimeSec: number;
   stoppages: OptimizeStoppage[];
+  /** How many pizzas make one case (unit-conversion denominator for PPM→cases) */
+  pizzasPerCase?: number;
+  /** How many cases fit on one skid (used to split total cases into skidsCompleted + casesOnCurrentSkid) */
+  casesPerSkid?: number;
 }
 
 export interface OptimizeScheduledRun {
@@ -2356,6 +2360,10 @@ export interface DieLineDefaultsEntry {
   freezerTime: number;
   /** "Extra Case Buffer" in the UI */
   casesPerLayer: number;
+  /** Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12"). */
+  preTunnelMin?: number;
+  /** Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12"). */
+  postTunnelMin?: number;
 }
 
 export interface DieLineDefaultsList {
@@ -2456,6 +2464,8 @@ export interface Mix {
   /** The ingredients that make up the mix */
   components: MixComponent[];
   enabled: boolean;
+  /** When true, this mix is an ingredient-prep mix matched by component ingredient names against each run's profile rather than by brand/flavor. */
+  isPrep?: boolean;
 }
 
 export interface MixList {
@@ -2762,6 +2772,7 @@ export const SpecImportAliasKind = {
   sauceIngredient: 'sauceIngredient',
   recipeName: 'recipeName',
   dieType: 'dieType',
+  crossFamilyRouting: 'crossFamilyRouting',
 } as const;
 
 /**
