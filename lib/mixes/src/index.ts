@@ -74,6 +74,9 @@ export interface Mix {
   daysEarly: number;
   // Free-form notes (e.g. "Pull 2 days early", "Mix cold").
   notes?: string;
+  // Extra pounds added flat to every run's total to cover hopper/startup waste
+  // — the same role as the +20 lb buffer on applicator ingredients. 0 = none.
+  startupLbs: number;
   // Pounds already made/on hand, subtracted from the total before computing the
   // remaining pounds and batch count.
   amountAlreadyMade: number;
@@ -138,6 +141,7 @@ export function normalizeMix(input: unknown): Mix | null {
   const flavor = typeof raw.flavor === "string" ? raw.flavor.trim() : "";
   const batchSize = Math.max(0, coerceNum(raw.batchSize, 0));
   const daysEarly = Math.max(0, coerceInt(raw.daysEarly, DEFAULT_DAYS_EARLY));
+  const startupLbs = Math.max(0, coerceNum(raw.startupLbs, 0));
   const amountAlreadyMade = Math.max(0, coerceNum(raw.amountAlreadyMade, 0));
   const enabled = raw.enabled === undefined ? true : raw.enabled !== false;
   const components = Array.isArray(raw.components)
@@ -152,6 +156,7 @@ export function normalizeMix(input: unknown): Mix | null {
     flavor,
     batchSize,
     daysEarly,
+    startupLbs,
     amountAlreadyMade,
     components,
     enabled,
@@ -344,6 +349,10 @@ export function backfillMixFromMergedSources(
     }
     if (!(next.daysEarly > 0) && src.daysEarly > 0) {
       next.daysEarly = src.daysEarly;
+      changed = true;
+    }
+    if (!(next.startupLbs > 0) && src.startupLbs > 0) {
+      next.startupLbs = src.startupLbs;
       changed = true;
     }
     if (!(next.amountAlreadyMade > 0) && src.amountAlreadyMade > 0) {
@@ -715,7 +724,9 @@ export interface MixPlanEntry {
   batchSize: number;
   daysEarly: number;
   notes?: string;
-  // Sum of all component pounds (= total pounds of finished mix needed).
+  // Flat startup/hopper buffer added to every run (mirrors applicator +20 lb).
+  startupLbs: number;
+  // Sum of all component pounds plus startupLbs (= total pounds needed).
   totalLbs: number;
   amountAlreadyMade: number;
   // max(0, totalLbs - amountAlreadyMade).
@@ -770,7 +781,9 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
     // convert to pounds here to keep the whole plan in one unit.
     lbs: (c.perPizza * pizzas) / OZ_PER_LB,
   }));
-  const totalLbs = components.reduce((acc, c) => acc + c.lbs, 0);
+  const componentLbs = components.reduce((acc, c) => acc + c.lbs, 0);
+  // Add the flat hopper/startup buffer (mirrors applicator +20 lb).
+  const totalLbs = componentLbs + mix.startupLbs;
   const remainingLbs = Math.max(0, totalLbs - mix.amountAlreadyMade);
   const batches = mix.batchSize > 0 ? remainingLbs / mix.batchSize : 0;
   // True when the mix has components but none carry a perPizza amount yet —
@@ -782,6 +795,7 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
     name: mix.name,
     batchSize: mix.batchSize,
     daysEarly: mix.daysEarly,
+    startupLbs: mix.startupLbs,
     totalLbs,
     amountAlreadyMade: mix.amountAlreadyMade,
     remainingLbs,

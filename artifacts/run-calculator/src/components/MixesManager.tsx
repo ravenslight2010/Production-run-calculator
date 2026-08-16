@@ -47,6 +47,7 @@ function blankMix(): Mix {
     flavor: "",
     batchSize: 0,
     daysEarly: DEFAULT_DAYS_EARLY,
+    startupLbs: 0,
     notes: "",
     amountAlreadyMade: 0,
     components: [],
@@ -545,6 +546,15 @@ function MixEditor({
           step={0.1}
           disabled={disabled}
           onChange={(v) => patch({ amountAlreadyMade: v })}
+          onCommit={() => commit()}
+        />
+        <NumberField
+          label="Startup buffer (lbs)"
+          value={draft.startupLbs}
+          min={0}
+          step={1}
+          disabled={disabled}
+          onChange={(v) => patch({ startupLbs: v })}
           onCommit={() => commit()}
         />
       </div>
