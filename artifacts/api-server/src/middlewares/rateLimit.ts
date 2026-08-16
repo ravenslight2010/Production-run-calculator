@@ -68,7 +68,17 @@ export class MemoryRateLimitStore implements RateLimitStore {
 export function rateLimit(opts: Options): RequestHandler {
   const { windowMs, max } = opts;
   const keyGenerator = opts.keyGenerator ?? ((req) => req.ip ?? "unknown");
-  const store = opts.store ?? new MemoryRateLimitStore(windowMs);
+  const primaryStore = opts.store ?? new MemoryRateLimitStore(windowMs);
+  // Fallback in-memory store used when the primary (Postgres-backed) store is
+  // unreachable. This ensures rate limiting is never silently disabled by a
+  // transient Postgres outage: instead of failing completely open, we apply a
+  // local per-instance cap. The fallback allows somewhat more traffic than the
+  // primary (it is per-instance and resets on restart), but it still prevents
+  // unbounded request floods from a single client IP/user.
+  const fallbackStore =
+    primaryStore instanceof MemoryRateLimitStore
+      ? null
+      : new MemoryRateLimitStore(windowMs);
 
   return (req: Request, res: Response, next: NextFunction): void => {
     void (async () => {
@@ -77,14 +87,27 @@ export function rateLimit(opts: Options): RequestHandler {
 
       let result: RateLimitResult;
       try {
-        result = await store.hit(key, windowMs, now);
+        result = await primaryStore.hit(key, windowMs, now);
       } catch (err) {
-        // Fail open: if the shared store is unreachable, allow the request
-        // rather than blocking all traffic. The store outage is logged so it's
-        // visible, and the same outage would typically surface elsewhere too.
-        req.log.error({ err, key }, "rate limit store error; allowing request");
-        next();
-        return;
+        // Primary store (Postgres) is unreachable. Fall back to the in-process
+        // memory store rather than failing completely open — this keeps per-user
+        // rate limiting active even during a Postgres outage, at the cost of the
+        // cap being per-instance instead of cross-instance. The outage is still
+        // logged so it surfaces through monitoring.
+        req.log.error({ err, key }, "rate limit store error; falling back to in-memory limiter");
+        if (fallbackStore) {
+          try {
+            result = await fallbackStore.hit(key, windowMs, now);
+          } catch (fallbackErr) {
+            req.log.error({ err: fallbackErr, key }, "rate limit fallback store error; allowing request");
+            next();
+            return;
+          }
+        } else {
+          // Primary was already in-memory; nothing further to fall back to.
+          next();
+          return;
+        }
       }
 
       const { count, resetAt } = result;

@@ -41,6 +41,31 @@ const router: IRouter = Router();
 
 const MAX_BATCH = 1000;
 
+// Cost/abuse guard for the conversation-history write path. Each POST triggers
+// a batch INSERT (up to 20 rows), a full SELECT of the user's window, and
+// individual DELETEs to trim stale rows. Without a limiter a single account
+// can saturate the Postgres connection pool. 30 requests/minute is generous
+// for any real client (mobile/web only calls this path when the user finishes
+// an AI exchange) while still bounding DB write amplification. In production
+// the API may run with more than one instance, so the cap is backed by a
+// shared Postgres store; elsewhere it falls back to in-memory.
+const CONVERSATION_WRITE_RATE_WINDOW_MS = 60_000;
+const CONVERSATION_WRITE_RATE_MAX = 30;
+const conversationWriteRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(CONVERSATION_WRITE_RATE_WINDOW_MS)
+    : undefined;
+
+// Lighter read-side guard for GET /ai-memory/conversation: prevents a burst
+// of reads from building up DB load (each is a SELECT of all rows for the
+// user), and keeps the same pattern as the write path.
+const CONVERSATION_READ_RATE_WINDOW_MS = 60_000;
+const CONVERSATION_READ_RATE_MAX = 60;
+const conversationReadRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(CONVERSATION_READ_RATE_WINDOW_MS)
+    : undefined;
+
 // Every real client call site writes exactly ONE facility-knowledge entry per
 // request (a single dismissal or a single quality-check confirmation) — never a
 // batch. Capping the request to exactly that (rather than MAX_BATCH) means a
@@ -133,7 +158,7 @@ router.post(
   rateLimit({
     windowMs: FACILITY_WRITE_RATE_WINDOW_MS,
     max: FACILITY_WRITE_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-mem-facility-write:${req.userId ?? req.ip ?? "unknown"}`,
     store: facilityWriteRateStore,
   }),
   async (req: Request, res: Response) => {
@@ -190,39 +215,57 @@ router.post(
   },
 );
 
-router.get("/ai-memory/conversation", async (req: Request, res: Response) => {
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  try {
-    const turns = await listConversationTurns(userId);
-    res.json({ turns });
-  } catch (err) {
-    req.log.error({ err }, "failed to get conversation history");
-    res.status(500).json({ error: "Failed to get conversation history" });
-  }
-});
+router.get(
+  "/ai-memory/conversation",
+  rateLimit({
+    windowMs: CONVERSATION_READ_RATE_WINDOW_MS,
+    max: CONVERSATION_READ_RATE_MAX,
+    keyGenerator: (req) => `ai-mem-conv-read:${req.userId ?? req.ip ?? "unknown"}`,
+    store: conversationReadRateStore,
+  }),
+  async (req: Request, res: Response) => {
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const turns = await listConversationTurns(userId);
+      res.json({ turns });
+    } catch (err) {
+      req.log.error({ err }, "failed to get conversation history");
+      res.status(500).json({ error: "Failed to get conversation history" });
+    }
+  },
+);
 
-router.post("/ai-memory/conversation", async (req: Request, res: Response) => {
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  const parsed = AppendConversationBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid input" });
-    return;
-  }
-  try {
-    const turns = await recordConversationTurns(userId, parsed.data.turns.slice(0, MAX_BATCH));
-    res.json({ turns });
-  } catch (err) {
-    req.log.error({ err }, "failed to append conversation turns");
-    res.status(500).json({ error: "Failed to append conversation turns" });
-  }
-});
+router.post(
+  "/ai-memory/conversation",
+  rateLimit({
+    windowMs: CONVERSATION_WRITE_RATE_WINDOW_MS,
+    max: CONVERSATION_WRITE_RATE_MAX,
+    keyGenerator: (req) => `ai-mem-conv-write:${req.userId ?? req.ip ?? "unknown"}`,
+    store: conversationWriteRateStore,
+  }),
+  async (req: Request, res: Response) => {
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const parsed = AppendConversationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    try {
+      const turns = await recordConversationTurns(userId, parsed.data.turns.slice(0, MAX_BATCH));
+      res.json({ turns });
+    } catch (err) {
+      req.log.error({ err }, "failed to append conversation turns");
+      res.status(500).json({ error: "Failed to append conversation turns" });
+    }
+  },
+);
 
 export default router;

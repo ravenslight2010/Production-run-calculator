@@ -33,7 +33,8 @@ Production assumptions for this scan:
 
 - **Production entry points:** `artifacts/api-server/src/app.ts`, `artifacts/api-server/src/index.ts`, `artifacts/api-server/src/routes/index.ts`
 - **Highest-risk areas:** `src/routes/auth.ts`, `src/middlewares/requireAuth.ts`, `src/middlewares/requireCapability.ts`, `src/lib/auth.ts`, `src/lib/roles.ts`, `src/lib/passwordResets.ts`, `src/lib/sandbox.ts`, `src/routes/sync.ts`, `src/routes/inventory.ts`, `src/routes/ai.ts`, `src/routes/aiMemory.ts`, `src/routes/incidents.ts`, `src/routes/incidentsAi.ts`
-- **Confirmed vulnerable routes (scan 2025):** `src/routes/runs.ts` (no capability check on POST/DELETE, no scope isolation); `src/routes/inventory.ts` lines 1045 and 1464 (`/inventory/adjust` and `/inventory/transfer` — no capability gate); `src/routes/sync.ts` line 532 (`DELETE /sync/:date` — no capability gate, `clientToday` bypass allows past-date deletion); `src/routes/factoryData.ts` (GET returns all KV to any authenticated user, no scope isolation); `src/routes/aiMemory.ts` line 208 (conversation endpoint no rate limit).
+- **Confirmed vulnerable routes (scan 2025, open):** `src/routes/runs.ts` (scope isolation absent — POST/DELETE capability gates were added but runs still share a global table with no live/sandbox filter); `src/routes/factoryData.ts` (GET returns all KV to any authenticated user, no scope isolation).
+- **Fixed routes (previously confirmed vulnerable):** `src/routes/inventory.ts` (`/inventory/adjust` and `/inventory/transfer` capability gates added); `src/routes/sync.ts` (`DELETE /sync/:date` capability gate added, now uses server-date guard); `src/routes/aiMemory.ts` (GET + POST `/ai-memory/conversation` rate-limited, keys namespaced); `src/routes/ai.ts` (all AI endpoint rate-limit keys namespaced by route; `POST /ai/forecast-accuracy` rate-limited); `src/routes/incidents.ts` (`POST /incidents` and `POST /ai/incident-clusters` rate-limit keys namespaced independently); `src/routes/incidentsAi.ts` (user-controlled prompt fields JSON-encoded; stored incident-history facts sanitized and JSON-encoded before prompt inclusion).
 - **Scopeless tables (no live/sandbox isolation):** `productionRunsTable`, `qualityChecksTable`, `proactiveAlertSettingsTable`, `factoryKvTable` — these are globally shared and `POST /sync/purge-all` deletes them without scope filter.
 - **Public surface:** `/api/healthz`, `/api/auth/sign-up`, `/api/auth/sign-in`, `/api/auth/username-available`, `/api/auth/forgot-password`, `/api/auth/reset-password`
 - **Authenticated/admin surface:** all other `/api/*` routes after router-level `requireAuth`; elevated routes are guarded per-handler with `requireCapability`. Since the sign-up secret may be shared among staff, authenticated-but-low-privilege routes should still be reviewed for abuse by insider or compromised-staff accounts. Sandbox-only routes remain out of scope in production unless sandbox reachability is reintroduced.
@@ -58,7 +59,7 @@ Operators and managers can mutate schedules, inventory, production rules, aliase
 Required guarantees:
 - All writes must be validated server-side.
 - Capability checks must be enforced on every sensitive mutation — including `DELETE /runs/:id`, `POST /inventory/adjust`, `POST /inventory/transfer`, and `DELETE /sync/:date`.
-- The `?today=` query parameter used for timezone support must not be trusted as a security control (it can bypass past-date guards on DELETE /sync/:date).
+- The `?today=` query parameter must not be trusted as a security control for deletion guards. `DELETE /sync/:date` now uses the server's real UTC date. ✓
 - Sync and inventory mutation paths must prevent unauthorized or conflicting updates from corrupting shared state.
 - Facility-wide AI memory must not be writable in ways that let low-privilege users poison or suppress grounded behavior outside the intended product workflow.
 
@@ -80,9 +81,10 @@ Several public and authenticated routes are computationally or financially expen
 Required guarantees:
 - Expensive endpoints must have effective production rate limits and size bounds.
 - Public auth and recovery endpoints must not allow unbounded automated abuse.
-- `POST /ai-memory/conversation` must be rate-limited (currently absent).
-- `POST /ai/forecast-accuracy` must be rate-limited (currently absent).
-- The rate-limit middleware must not fail open on Postgres store errors in a way that completely removes all AI cost guards.
+- `POST /ai-memory/conversation` is now rate-limited (30 req/min write, 60 req/min read, Postgres-backed in production). ✓
+- `POST /ai/forecast-accuracy` is now rate-limited (10 req/min, Postgres-backed in production). ✓
+- The rate-limit middleware now falls back to an in-process MemoryRateLimitStore when the Postgres store is unreachable, rather than failing completely open. ✓
+- All AI and incident endpoint rate-limit keys are namespaced by route so endpoint quotas are independent. ✓
 - Shared AI-memory stores and other bounded global state must not be cheaply floodable in ways that evict legitimate data or degrade service.
 - External-service failures should degrade safely without taking the application offline.
 

@@ -45,18 +45,28 @@ function pathId(raw: string | string[] | undefined): string {
   return (Array.isArray(raw) ? raw[0] : raw) ?? "";
 }
 
-// Cost/abuse guard for the paid diagnosis endpoint: per-user fixed window. This
-// also bounds a crash loop that keeps auto-submitting — the surplus is dropped
-// with a 429 rather than fanning out into many paid calls. Matches the AI
-// optimize/photo endpoints' posture (10 requests / minute).
+// Cost/abuse guard for the paid incident-diagnosis endpoint: per-user fixed
+// window. This also bounds a crash loop that keeps auto-submitting — the
+// surplus is dropped with a 429 rather than fanning out into many paid calls.
+// Matches the AI optimize/photo endpoints' posture (10 requests / minute).
 const REPORT_RATE_WINDOW_MS = 60_000;
 const REPORT_RATE_MAX = 10;
 
 // In production the API may run with more than one instance, so the cap is
 // backed by a shared Postgres store. Elsewhere it falls back to in-memory.
+// Each endpoint gets its own store and namespaced key so their quotas are
+// independent: exhausting the diagnosis limit cannot deny the clustering
+// endpoint (and vice versa).
 const reportRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(REPORT_RATE_WINDOW_MS)
+    : undefined;
+
+const CLUSTERS_RATE_WINDOW_MS = 60_000;
+const CLUSTERS_RATE_MAX = 10;
+const clustersRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(CLUSTERS_RATE_WINDOW_MS)
     : undefined;
 
 // POST /incidents — report an issue (or auto-submit a crash) and get an AI
@@ -68,7 +78,7 @@ router.post(
   rateLimit({
     windowMs: REPORT_RATE_WINDOW_MS,
     max: REPORT_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-incident-diagnosis:${req.userId ?? req.ip ?? "unknown"}`,
     store: reportRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -197,10 +207,10 @@ router.post(
   "/ai/incident-clusters",
   requireCapability("review-incidents"),
   rateLimit({
-    windowMs: REPORT_RATE_WINDOW_MS,
-    max: REPORT_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
-    store: reportRateStore,
+    windowMs: CLUSTERS_RATE_WINDOW_MS,
+    max: CLUSTERS_RATE_MAX,
+    keyGenerator: (req) => `ai-incident-clusters:${req.userId ?? req.ip ?? "unknown"}`,
+    store: clustersRateStore,
   }),
   async (req, res): Promise<void> => {
     const validation = validateClustersBody(req.body);

@@ -512,7 +512,7 @@ router.post(
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `inv-identify-photo:${req.userId ?? req.ip ?? "unknown"}`,
     store: photoRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -599,7 +599,7 @@ router.post(
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `inv-quality-photo:${req.userId ?? req.ip ?? "unknown"}`,
     store: qualityRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -668,7 +668,7 @@ router.post(
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `inv-production-sheet-photo:${req.userId ?? req.ip ?? "unknown"}`,
     store: productionSheetRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -736,7 +736,7 @@ router.post(
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `inv-label-verify:${req.userId ?? req.ip ?? "unknown"}`,
     store: labelVerifyRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -877,7 +877,7 @@ router.post(
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `inv-waste-insight:${req.userId ?? req.ip ?? "unknown"}`,
     store: wasteRateStore,
   }),
   async (req, res): Promise<void> => {

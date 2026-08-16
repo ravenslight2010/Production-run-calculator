@@ -334,7 +334,7 @@ router.post(
   rateLimit({
     windowMs: OPTIMIZE_RATE_WINDOW_MS,
     max: OPTIMIZE_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-optimize:${req.userId ?? req.ip ?? "unknown"}`,
     store: optimizeRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -411,7 +411,7 @@ router.post(
   rateLimit({
     windowMs: ASK_RATE_WINDOW_MS,
     max: ASK_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-ask:${req.userId ?? req.ip ?? "unknown"}`,
     store: askRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -553,7 +553,7 @@ router.post(
   rateLimit({
     windowMs: COMMAND_RATE_WINDOW_MS,
     max: COMMAND_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-command:${req.userId ?? req.ip ?? "unknown"}`,
     store: commandRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -667,7 +667,7 @@ router.post(
   rateLimit({
     windowMs: RECIPE_ASSIST_RATE_WINDOW_MS,
     max: RECIPE_ASSIST_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-recipe-assistant:${req.userId ?? req.ip ?? "unknown"}`,
     store: recipeAssistRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -790,7 +790,7 @@ router.post(
   rateLimit({
     windowMs: SPEC_RECONCILE_RATE_WINDOW_MS,
     max: SPEC_RECONCILE_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-spec-reconcile:${req.userId ?? req.ip ?? "unknown"}`,
     store: specReconcileRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -891,7 +891,7 @@ router.post(
   rateLimit({
     windowMs: MIX_RECONCILE_RATE_WINDOW_MS,
     max: MIX_RECONCILE_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-mix-reconcile:${req.userId ?? req.ip ?? "unknown"}`,
     store: mixReconcileRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -946,7 +946,7 @@ router.post(
   rateLimit({
     windowMs: MIX_ASSIST_RATE_WINDOW_MS,
     max: MIX_ASSIST_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-mix-assistant:${req.userId ?? req.ip ?? "unknown"}`,
     store: mixAssistRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1131,7 +1131,7 @@ router.post(
   rateLimit({
     windowMs: PROACTIVE_RATE_WINDOW_MS,
     max: PROACTIVE_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-proactive-alert:${req.userId ?? req.ip ?? "unknown"}`,
     store: proactiveRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1295,7 +1295,7 @@ router.post(
   rateLimit({
     windowMs: FORECAST_RATE_WINDOW_MS,
     max: FORECAST_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-forecast:${req.userId ?? req.ip ?? "unknown"}`,
     store: forecastRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1428,7 +1428,7 @@ router.post(
   rateLimit({
     windowMs: SUMMARY_RATE_WINDOW_MS,
     max: SUMMARY_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-summary:${req.userId ?? req.ip ?? "unknown"}`,
     store: summaryRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1525,7 +1525,7 @@ router.post(
   rateLimit({
     windowMs: ANOMALY_RATE_WINDOW_MS,
     max: ANOMALY_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-anomalies:${req.userId ?? req.ip ?? "unknown"}`,
     store: anomalyRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1624,7 +1624,7 @@ router.post(
   rateLimit({
     windowMs: SCHEDULE_RATE_WINDOW_MS,
     max: SCHEDULE_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-schedule-optimize:${req.userId ?? req.ip ?? "unknown"}`,
     store: scheduleRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1717,15 +1717,37 @@ router.post(
   },
 );
 
+// Cost/abuse guard for the forecast-accuracy write path. Although the handler
+// itself makes no AI call, each POST writes up to ACCURACY_MAX_REVIEWS rows
+// into the shared facility_knowledge table and may trigger
+// pruneFacilityKnowledge(), which deletes the oldest entries across ALL
+// domains. Rapid calls can therefore evict quality/ingredient/general facts
+// that every other AI feature depends on. 10 requests/minute matches the
+// posture of all other manager-gated AI endpoints.
+const FORECAST_ACCURACY_RATE_WINDOW_MS = 60_000;
+const FORECAST_ACCURACY_RATE_MAX = 10;
+const forecastAccuracyRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(FORECAST_ACCURACY_RATE_WINDOW_MS)
+    : undefined;
+
 // Forecast-accuracy review: grade previously-recorded forecasts (facility
 // memory, domain "forecast", key `plan:<date>`) against the actual finished
-// history the client supplies for those dates. Manager-gated and read-only —
-// purely deterministic arithmetic (NO AI call), so there's no rate limit. Best-
-// effort records each review back to facility memory (key `accuracy:<date>`) so
-// future forecast prompts learn from past misses.
+// history the client supplies for those dates. Manager-gated. Purely
+// deterministic arithmetic (NO AI call), but still needs a rate limit because
+// each call writes up to ACCURACY_MAX_REVIEWS rows to shared facility memory
+// and can trigger cross-domain pruning (see above). Best-effort records each
+// review back to facility memory (key `accuracy:<date>`) so future forecast
+// prompts learn from past misses.
 router.post(
   "/ai/forecast-accuracy",
   requireCapability("use-ai-tools"),
+  rateLimit({
+    windowMs: FORECAST_ACCURACY_RATE_WINDOW_MS,
+    max: FORECAST_ACCURACY_RATE_MAX,
+    keyGenerator: (req) => `ai-forecast-accuracy:${req.userId ?? req.ip ?? "unknown"}`,
+    store: forecastAccuracyRateStore,
+  }),
   async (req, res): Promise<void> => {
     const validation = validateForecastAccuracyBody(req.body);
     if (!validation.ok) {
@@ -1772,7 +1794,7 @@ router.post(
   rateLimit({
     windowMs: FILL_MISSING_RATE_WINDOW_MS,
     max: FILL_MISSING_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-fill-missing:${req.userId ?? req.ip ?? "unknown"}`,
     store: fillMissingRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1852,7 +1874,7 @@ router.post(
   rateLimit({
     windowMs: MATCH_IMPORT_RATE_WINDOW_MS,
     max: MATCH_IMPORT_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-match-import:${req.userId ?? req.ip ?? "unknown"}`,
     store: matchImportRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -1966,7 +1988,7 @@ router.post(
   rateLimit({
     windowMs: PARSE_SPEC_RATE_WINDOW_MS,
     max: PARSE_SPEC_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-parse-spec-sheet:${req.userId ?? req.ip ?? "unknown"}`,
     store: parseSpecRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -2068,7 +2090,7 @@ router.post(
   rateLimit({
     windowMs: MATCH_PREMIX_RATE_WINDOW_MS,
     max: MATCH_PREMIX_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-match-premix:${req.userId ?? req.ip ?? "unknown"}`,
     store: matchPremixRateStore,
   }),
   async (req, res): Promise<void> => {
@@ -2139,7 +2161,7 @@ router.post(
   rateLimit({
     windowMs: SUGGEST_MERGES_RATE_WINDOW_MS,
     max: SUGGEST_MERGES_RATE_MAX,
-    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    keyGenerator: (req) => `ai-suggest-merges:${req.userId ?? req.ip ?? "unknown"}`,
     store: suggestMergesRateStore,
   }),
   async (req, res): Promise<void> => {

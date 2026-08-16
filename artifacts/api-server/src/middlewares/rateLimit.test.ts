@@ -65,54 +65,125 @@ describe("MemoryRateLimitStore — periodic sweep frees expired buckets", () => 
   });
 });
 
-// Middleware-level fail-open test.
+// Middleware-level primary-store-failure fallback test.
 //
-// The limiter wraps `store.hit` in a try/catch and, on failure, deliberately
-// "fails open": it logs the error and calls next() so a transient store outage
-// (e.g. the shared Postgres store briefly unreachable) does not block all AI
-// traffic. Without coverage, a regression that turned that catch into a 500/429
-// — converting a counter hiccup into a full AI outage — would pass silently.
-// This test injects a store whose `hit` always rejects, drives one request
-// through the middleware, and asserts the request is allowed and the error is
-// logged via req.log.error.
-describe("rateLimit — fails open when the store errors", () => {
-  it("allows the request and logs when store.hit rejects", async () => {
+// When the primary (Postgres-backed) store throws, the limiter falls back to an
+// in-process MemoryRateLimitStore rather than failing completely open. This
+// keeps rate limiting active during a Postgres outage: the cap is per-instance
+// instead of cross-instance, but the endpoint is never completely unguarded.
+//
+// When the primary IS an in-memory store (i.e. no separate store was supplied)
+// and it throws, there is no fallback and the request is allowed through — this
+// preserves the original fail-open behaviour for the in-memory path.
+describe("rateLimit — falls back to in-memory limiter when the primary store errors", () => {
+  it("still enforces the cap via fallback when a non-memory store always rejects", async () => {
+    // A store that always fails — simulates a Postgres outage.
     const failing: RateLimitStore = {
       hit: () => Promise.reject(new Error("store unreachable")),
     };
 
-    const middleware = rateLimit({ windowMs: 1000, max: 5, store: failing });
+    // max=1 so the second request through the fallback store triggers a 429.
+    const middleware = rateLimit({ windowMs: 60_000, max: 1, store: failing });
 
+    async function fireOnce() {
+      const setHeader = vi.fn();
+      const json = vi.fn(() => res);
+      const status = vi.fn(() => res);
+      const res = { setHeader, status, json } as unknown as Response;
+      const req = {
+        ip: "1.2.3.4",
+        log: { error: vi.fn(), warn: vi.fn() },
+      } as unknown as Request;
+      const next = vi.fn() as unknown as NextFunction;
+      middleware(req, res, next);
+      await vi.waitFor(() => {
+        const n = (next as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+        const s = status.mock.calls.length;
+        expect(n + s).toBeGreaterThan(0);
+      });
+      return { next, status, json };
+    }
+
+    // First request: count=1 ≤ max=1, allowed through fallback.
+    const first = await fireOnce();
+    expect(first.next).toHaveBeenCalledTimes(1);
+    expect(first.status).not.toHaveBeenCalled();
+
+    // Second request: count=2 > max=1, blocked by fallback store.
+    const second = await fireOnce();
+    expect(second.next).not.toHaveBeenCalled();
+    expect(second.status).toHaveBeenCalledWith(429);
+  });
+
+  it("logs the primary store error even when the fallback succeeds", async () => {
+    const failing: RateLimitStore = {
+      hit: () => Promise.reject(new Error("store unreachable")),
+    };
+    const middleware = rateLimit({ windowMs: 1000, max: 5, store: failing });
     const errorSpy = vi.fn();
     const req = {
       ip: "1.2.3.4",
       log: { error: errorSpy, warn: vi.fn() },
     } as unknown as Request;
-
     const setHeader = vi.fn();
     const status = vi.fn(() => res);
     const json = vi.fn(() => res);
     const res = { setHeader, status, json } as unknown as Response;
-
     const next = vi.fn() as unknown as NextFunction;
 
     middleware(req, res, next);
 
-    // The middleware runs its work in a fire-and-forget async IIFE, so let the
-    // rejected promise settle before asserting.
     await vi.waitFor(() => {
       expect(next).toHaveBeenCalledTimes(1);
     });
 
-    // Allowed: next() was called, and no blocking/error response was sent.
+    // Request was allowed (first hit on fallback store, well under max=5).
     expect(status).not.toHaveBeenCalled();
     expect(json).not.toHaveBeenCalled();
 
-    // The store outage is surfaced via req.log.error.
+    // Primary store outage is still surfaced via req.log.error.
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [meta] = errorSpy.mock.calls[0];
     expect(meta).toMatchObject({ key: "1.2.3.4" });
     expect(meta.err).toBeInstanceOf(Error);
+  });
+
+  it("uses distinct fallback buckets per key so one user's quota does not affect another's", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const failing: RateLimitStore = {
+      hit: () => Promise.reject(new Error("store unreachable")),
+    };
+    const middleware = rateLimit({ windowMs: 60_000, max: 1, store: failing });
+
+    async function fireAs(ip: string) {
+      const setHeader = vi.fn();
+      const json = vi.fn(() => res);
+      const status = vi.fn(() => res);
+      const res = { setHeader, status, json } as unknown as Response;
+      const req = { ip, log: { error: vi.fn(), warn: vi.fn() } } as unknown as Request;
+      const next = vi.fn() as unknown as NextFunction;
+      middleware(req, res, next);
+      await vi.waitFor(() => {
+        const n = (next as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+        const s = status.mock.calls.length;
+        expect(n + s).toBeGreaterThan(0);
+      });
+      return { next, status };
+    }
+
+    // Exhaust IP A's fallback quota.
+    await fireAs("10.0.0.1"); // count=1 (allowed)
+    const blocked = await fireAs("10.0.0.1"); // count=2 > max=1 (blocked)
+    expect(blocked.status).toHaveBeenCalledWith(429);
+
+    // IP B has its own independent fallback bucket and must still be allowed.
+    const bFirst = await fireAs("10.0.0.2");
+    expect(bFirst.next).toHaveBeenCalledTimes(1);
+    expect(bFirst.status).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
   });
 });
 

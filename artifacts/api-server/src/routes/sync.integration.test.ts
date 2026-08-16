@@ -21,6 +21,9 @@ let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let rolesTable: DbModule["rolesTable"];
+let seedRoles: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -61,6 +64,9 @@ beforeAll(async () => {
   dailySyncTable = dbMod.dailySyncTable;
   syncConflictLogsTable = dbMod.syncConflictLogsTable;
   usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  rolesTable = dbMod.rolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -103,8 +109,14 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${syncConflictLogsTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(
+    sql`TRUNCATE ${dailySyncTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+  );
+  await seedRoles();
   await db.insert(usersTable).values([{ id: USER, username: "user", passwordHash: "x" }]);
+  // Give the test user the manager role so DELETE /sync/:date (which requires
+  // manage-factory-settings, a manager capability) can be exercised.
+  await db.insert(userRolesTable).values({ userId: USER, role: "manager" });
   // Three consecutive dates well clear of any real "today" so the assertions
   // don't depend on when the suite runs.
   await db.insert(dailySyncTable).values([
@@ -634,27 +646,35 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
   });
 });
 
-describe("DELETE /sync/:date — client-local-date guard", () => {
-  it("rejects deleting a day at or before the client-supplied `today`", async () => {
-    const res = await fetch(`${baseUrl}/api/sync/2030-03-11?today=2030-03-11`, {
+// DELETE /sync/:date enforces the server's real UTC date rather than a
+// client-supplied `today` param. This prevents a client from lying about
+// "today" to delete the actual live day (which would nuke a running shift).
+// The capability gate (manage-factory-settings) is tested implicitly: the
+// beforeEach seeds the test user as a manager.
+describe("DELETE /sync/:date — server-date guard", () => {
+  it("rejects deleting a day in the past (server-date comparison)", async () => {
+    // 2020-01-01 is always in the past; the server blocks it regardless of any
+    // client `?today=` param because the guard uses the real server clock.
+    const res = await fetch(`${baseUrl}/api/sync/2020-01-01`, {
       method: "DELETE",
       headers: authHeaders(),
     });
     expect(res.status).toBe(400);
   });
 
-  it("allows deleting the client's future day even if the server (UTC) considers it today", async () => {
-    // Client local 'today' is 2030-03-10, so 2030-03-11 is a deletable future day
-    // from their perspective regardless of the server's UTC clock.
-    const res = await fetch(`${baseUrl}/api/sync/2030-03-11?today=2030-03-10`, {
+  it("allows deleting a future day and removes it from the scheduled list", async () => {
+    // 2030-03-11 is well in the future from any realistic test run, so the
+    // server-date guard passes and the row is removed.
+    const res = await fetch(`${baseUrl}/api/sync/2030-03-11`, {
       method: "DELETE",
       headers: authHeaders(),
     });
     expect(res.status).toBe(200);
-    const remaining = await fetch(`${baseUrl}/api/sync/scheduled?today=2030-03-10`, {
+    // Verify 2030-03-11 is gone; 2030-03-10 and 2030-03-12 remain.
+    const remaining = await fetch(`${baseUrl}/api/sync/scheduled?today=2030-03-09`, {
       headers: authHeaders(),
     });
     const days = (await remaining.json()) as Array<{ date: string }>;
-    expect(days.map((d) => d.date)).toEqual(["2030-03-12"]);
+    expect(days.map((d) => d.date)).toEqual(["2030-03-10", "2030-03-12"]);
   });
 });
