@@ -14370,14 +14370,19 @@ export default function Home() {
                                             <div className="text-xs text-emerald-400/60">No components defined.</div>
                                           ) : (
                                             m.components.map((c, ci) => {
+                                              // Per-batch is a recipe spec — unchanged by already-made.
                                               const perBatch = m.batchSize > 0 && m.batches > 0 && m.totalLbs > 0
                                                 ? (c.lbs / m.totalLbs) * m.batchSize
                                                 : null;
+                                              // Pull amount scales to remaining batches only.
+                                              const pullLbs = m.totalLbs > 0
+                                                ? c.lbs * m.remainingLbs / m.totalLbs
+                                                : 0;
                                               return (
                                                 <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
                                                   <span className="text-emerald-200/90 truncate">{c.ingredient}</span>
                                                   <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50">
-                                                    {fmtNum(c.lbs, 2)} <span className="font-normal text-emerald-300/80">lbs</span>
+                                                    {fmtNum(pullLbs, 2)} <span className="font-normal text-emerald-300/80">lbs</span>
                                                     {perBatch !== null && (
                                                       <span className="font-normal text-emerald-400/70 ml-1.5">({fmtNum(perBatch, 2)}/batch)</span>
                                                     )}
