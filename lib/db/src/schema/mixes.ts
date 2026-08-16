@@ -36,6 +36,7 @@ export const mixesTable = pgTable(
     notes: text("notes").notNull().default(""),
     amountAlreadyMade: real("amount_already_made").notNull().default(0),
     components: jsonb("components").notNull().default([]).$type<MixComponentRow[]>(),
+    isPrep: boolean("is_prep").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

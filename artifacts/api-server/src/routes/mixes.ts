@@ -28,6 +28,7 @@ function toApiItem(row: MixRow): Mix {
     notes: row.notes,
     amountAlreadyMade: row.amountAlreadyMade,
     components: row.components ?? [],
+    isPrep: row.isPrep ?? false,
     enabled: row.enabled,
   };
 }
@@ -44,6 +45,7 @@ function toDbValues(item: Mix) {
     notes: item.notes ?? "",
     amountAlreadyMade: item.amountAlreadyMade,
     components: item.components,
+    isPrep: item.isPrep ?? false,
     enabled: item.enabled,
     updatedAt: new Date(),
   };
