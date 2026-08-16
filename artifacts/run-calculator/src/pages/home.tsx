@@ -4,6 +4,7 @@ import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import GlanceOverlay from "../components/GlanceOverlay";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
+import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -14338,27 +14339,17 @@ export default function Home() {
                                             <span className="text-emerald-300">need {fmtNum(m.remainingLbs, 2)} lbs</span>
                                           )}
                                         </div>
-                                        {/* Already made — inline editable, saves directly to the mix record */}
-                                        <div className="flex items-center gap-2 text-xs mb-1.5">
-                                          <span className="text-emerald-400/70 whitespace-nowrap">Already made:</span>
-                                          <input
-                                            type="number"
-                                            min={0}
-                                            step={0.1}
-                                            defaultValue={mixes.find((mx) => mx.id === m.mixId)?.amountAlreadyMade ?? 0}
-                                            key={`${m.mixId}-already-${mixes.find((mx) => mx.id === m.mixId)?.amountAlreadyMade ?? 0}`}
-                                            onBlur={async (e) => {
-                                              const mix = mixes.find((mx) => mx.id === m.mixId);
-                                              if (!mix) return;
-                                              const val = Math.max(0, Number(e.target.value) || 0);
-                                              if (val === mix.amountAlreadyMade) return;
-                                              const saved = await saveMixes([{ ...mix, amountAlreadyMade: val }]);
-                                              cycleCountQc.setQueryData(["mixes"], saved);
-                                            }}
-                                            className="w-20 rounded border border-emerald-700/50 bg-emerald-950/60 px-1.5 py-0.5 text-xs text-emerald-100 tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                          />
-                                          <span className="text-emerald-400/70">lbs</span>
-                                        </div>
+                                        {/* Already made — controlled component so state stays stable during saves */}
+                                        {(() => {
+                                          const liveMix = mixes.find((mx) => mx.id === m.mixId);
+                                          return liveMix ? (
+                                            <MixAlreadyMadeInput
+                                              mix={liveMix}
+                                              saveMixes={saveMixes}
+                                              onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], saved)}
+                                            />
+                                          ) : null;
+                                        })()}
                                         {m.notes && (
                                           <div className="text-[11px] text-emerald-400/70 italic mb-1.5">{m.notes}</div>
                                         )}
