@@ -202,23 +202,38 @@ export default function PremixImportDialog({
     );
   };
 
-  // Two included rows resolving to the SAME saved mix would collide in the
-  // upsert-by-id merge and silently drop one row's data — block Apply until the
-  // manager changes one of the picks.
   const includedItems = items.filter((it) => selected.has(it.key));
-  const finalIdCounts = new Map<string, number>();
-  for (const it of includedItems) {
-    const id = it.candidate.mix.id;
-    finalIdCounts.set(id, (finalIdCounts.get(id) ?? 0) + 1);
-  }
-  const duplicateTargets = [...finalIdCounts.entries()]
-    .filter(([, n]) => n > 1)
-    .map(([id]) => existingMixById.get(id)?.name ?? items.find((it) => it.candidate.mix.id === id)?.candidate.mix.name ?? id);
 
   const confirm = () => {
-    if (duplicateTargets.length > 0) return;
     const included = includedItems;
-    const mixes = included.map((it) => it.candidate.mix);
+    // When multiple candidates redirect to the same existing mix (e.g. several
+    // customer-specific prep-ingredient blocks all mapped to one generic prep
+    // mix), merge their components rather than letting last-write-wins silently
+    // drop one block's ingredients. Union by ingredient name (case-insensitive);
+    // when the same ingredient appears in two blocks, keep the higher perPizza.
+    const byId = new Map<string, Mix>();
+    for (const it of included) {
+      const mix = it.candidate.mix;
+      const prev = byId.get(mix.id);
+      if (!prev) {
+        byId.set(mix.id, { ...mix, components: [...mix.components] });
+      } else {
+        const merged = [...prev.components];
+        for (const c of mix.components) {
+          const key = c.ingredient.trim().toLowerCase();
+          const idx = merged.findIndex(
+            (mc) => mc.ingredient.trim().toLowerCase() === key,
+          );
+          if (idx === -1) {
+            merged.push(c);
+          } else if (c.perPizza > merged[idx].perPizza) {
+            merged[idx] = c;
+          }
+        }
+        byId.set(mix.id, { ...prev, components: merged });
+      }
+    }
+    const mixes = [...byId.values()];
     // Freezer-pull settings ride along with their mix's include/exclude pick
     // (keyed by the ORIGINAL parsed id — a re-match doesn't change the note).
     const includedPulls = included.flatMap(
@@ -648,32 +663,6 @@ export default function PremixImportDialog({
                 </div>
               )}
 
-              {duplicateTargets.length > 0 && (
-                <div
-                  className="rounded-md border border-destructive/60 bg-destructive/10 p-3"
-                  data-testid="premix-duplicate-target-warning"
-                >
-                  <div className="flex items-center gap-2 text-destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <span className="text-sm font-medium">
-                      Two mixes point at the same saved mix
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-destructive/90">
-                    More than one checked mix would update{" "}
-                    {duplicateTargets.map((n) => `"${n}"`).join(", ")} — only one
-                    would survive. Change one of the "Use existing mix" picks (or
-                    uncheck one) before applying.
-                  </p>
-                  {includedItems.some((it) => mergedAwayKeys.has(it.key)) && (
-                    <p className="mt-1 text-sm text-destructive/90" data-testid="premix-merge-hint">
-                      Tip: these sheets were merged in Manage Lists — uncheck
-                      the old (merged-away) sheet's row to apply.
-                    </p>
-                  )}
-                </div>
-              )}
-
               {prepared.newAliases.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {prepared.newAliases.length} new name mapping
@@ -719,8 +708,7 @@ export default function PremixImportDialog({
               !!error ||
               !prepared ||
               nothing ||
-              !canApply ||
-              duplicateTargets.length > 0
+              !canApply
             }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
