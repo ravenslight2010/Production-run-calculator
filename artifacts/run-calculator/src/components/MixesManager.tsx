@@ -314,6 +314,13 @@ export default function MixesManager({
                                     {mix.batchSize} lbs
                                   </span>
                                 )}
+                                {mix.components.length > 0 &&
+                                  mix.components.every((c) => !(c.perPizza > 0)) && (
+                                    <span className="flex items-center gap-0.5 text-[10px] rounded px-1.5 py-0.5 bg-amber-900/30 text-amber-300 border border-amber-700/40 shrink-0">
+                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                      no oz/pizza
+                                    </span>
+                                  )}
                                 {mix.flavor && (
                                   <span className="basis-full sm:basis-auto ml-5 sm:ml-0 max-w-full min-w-0 text-[11px] text-muted-foreground truncate sm:max-w-[14rem]">
                                     {mix.flavor}
