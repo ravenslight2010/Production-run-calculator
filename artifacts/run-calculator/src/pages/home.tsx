@@ -14261,7 +14261,10 @@ export default function Home() {
                             date: day.date,
                             brand: r.brand,
                             flavor: r.flavor,
-                            pizzas: s.totalPizzas,
+                            // Use totalPizzasForSauce (adds the casesPerLayer startup
+                            // buffer) so mixes and cheese-type mixes get the same
+                            // buffer as applicator ingredients.
+                            pizzas: s.totalPizzasForSauce,
                             cases: s.totalCases,
                           };
                         }),

@@ -170,6 +170,7 @@ export function computeSummaryStats(
   return {
     totalCases: vals.casesNeeded,
     totalPizzas,
+    totalPizzasForSauce,
     estimatedTimeSec,
     sauceLbs,
     sauceBatches,
