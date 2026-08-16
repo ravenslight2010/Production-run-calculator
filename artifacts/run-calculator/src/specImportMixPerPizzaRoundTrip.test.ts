@@ -307,9 +307,11 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     expect(finalMixes[0].components[1].perPizza).toBe(0.5);
 
     // Stage 6: buildMixPlan for a scheduled run of 800 pizzas
-    // Expected: Monterey Jack = 2.0 * 800 / 16 = 100 lbs
-    //           Green Peppers = 0.5 * 800 / 16 = 25 lbs
-    //           total = 125 lbs
+    // Expected component lbs: Monterey Jack = 2.0 * 800 / 16 = 100 lbs
+    //                         Green Peppers = 0.5 * 800 / 16 = 25 lbs
+    //                         componentLbs  = 125 lbs
+    // buildMixPlan adds a 15% waste buffer + 20 lb startup buffer:
+    //   totalLbs = 125 * 1.15 + 20 = 163.75 lbs
     const plan = buildMixPlan({
       runs: [{ date: TODAY, brand: "Aldo's", flavor: "Fajita", pizzas: 800, cases: 80 }],
       mixes: finalMixes,
@@ -317,8 +319,8 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     });
     expect(plan).toHaveLength(1);
     const entry = plan[0].runs[0].mixes[0];
-    expect(entry.totalLbs).toBeCloseTo(125);
-    expect(entry.remainingLbs).toBeCloseTo(125);
+    expect(entry.totalLbs).toBeCloseTo(163.75);
+    expect(entry.remainingLbs).toBeCloseTo(163.75);
     expect(entry.components).toEqual([
       { ingredient: "Monterey Jack", lbs: 100 },
       { ingredient: "Green Peppers", lbs: 25 },
@@ -342,11 +344,12 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
       mixes: finalMixes,
       today: TODAY,
     });
-    // With perPizza=0, lbs are 0 — manager must fill in the Mixes editor.
+    // With perPizza=0, component lbs are 0. buildMixPlan still adds the 20 lb
+    // startup buffer, so totalLbs = 20. The key signal is missingAmounts=true.
     if (plan.length > 0) {
       const entry = plan[0].runs[0].mixes[0];
-      expect(entry.totalLbs).toBe(0);
-      expect(entry.remainingLbs).toBe(0);
+      expect(entry.missingAmounts).toBe(true);
+      expect(entry.components.every((c) => c.lbs === 0)).toBe(true);
     }
     // No plan entries at all is also acceptable when everything is 0.
     // The important thing: no crash and no phantom non-zero lbs.
@@ -383,13 +386,14 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     expect(serverEchoed[0].components[1].perPizza).toBe(0.5);
 
     // buildMixPlan on the server-echoed mixes should still show non-zero lbs.
+    // totalLbs = componentLbs * 1.15 + 20 = 125 * 1.15 + 20 = 163.75
     const plan = buildMixPlan({
       runs: [{ date: TODAY, brand: "Aldo's", flavor: "Fajita", pizzas: 800, cases: 80 }],
       mixes: serverEchoed,
       today: TODAY,
     });
     expect(plan).toHaveLength(1);
-    expect(plan[0].runs[0].mixes[0].totalLbs).toBeCloseTo(125);
+    expect(plan[0].runs[0].mixes[0].totalLbs).toBeCloseTo(163.75);
   });
 
   it("mix from a prior premix import (non-zero perPizza) is preserved after a subsequent spec import", () => {
@@ -434,7 +438,8 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     expect(finalMixes[0].components[1].perPizza).toBe(1.0); // unchanged
 
     // buildMixPlan still shows correct lbs from the premix values.
-    // 3.0 * 800 / 16 = 150 lbs; 1.0 * 800 / 16 = 50 lbs; total = 200 lbs.
+    // Component lbs: 3.0 * 800 / 16 = 150; 1.0 * 800 / 16 = 50; componentLbs = 200
+    // totalLbs = 200 * 1.15 + 20 = 250 (waste buffer + startup buffer applied)
     const plan = buildMixPlan({
       runs: [{ date: TODAY, brand: "Aldo's", flavor: "Fajita", pizzas: 800, cases: 80 }],
       mixes: finalMixes,
@@ -442,7 +447,7 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     });
     expect(plan).toHaveLength(1);
     const entry = plan[0].runs[0].mixes[0];
-    expect(entry.totalLbs).toBeCloseTo(200);
+    expect(entry.totalLbs).toBeCloseTo(250);
     expect(entry.components[0].lbs).toBeCloseTo(150);
     expect(entry.components[1].lbs).toBeCloseTo(50);
   });
@@ -481,6 +486,7 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
       today: TODAY,
     });
     expect(plan).toHaveLength(1);
-    expect(plan[0].runs[0].mixes[0].totalLbs).toBeCloseTo(125);
+    // totalLbs = componentLbs * 1.15 + 20 = 125 * 1.15 + 20 = 163.75
+    expect(plan[0].runs[0].mixes[0].totalLbs).toBeCloseTo(163.75);
   });
 });

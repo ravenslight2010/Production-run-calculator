@@ -277,10 +277,12 @@ describe("GET /api/mixes → buildMixPlan: non-zero Pull For Mix lbs", () => {
     const { items: fetchedMixes } = await getMixes();
     expect(fetchedMixes).toHaveLength(1);
 
-    // Step 3: buildMixPlan for 800 pizzas of Aldo's Fajita
-    // Expected: Monterey Jack = 2.0 * 800 / 16 = 100 lbs
-    //           Green Peppers = 0.5 * 800 / 16 = 25 lbs
-    //           total = 125 lbs
+    // Step 3: buildMixPlan for 800 pizzas of Aldo's Fajita.
+    // buildMixPlan adds a 15% waste buffer and a flat 20 lb startup buffer:
+    //   componentLbs = (2.0 + 0.5) * 800 / 16 = 125 lbs
+    //   wasteLbs     = 125 * 0.15              = 18.75 lbs
+    //   startupLbs   = 20 lbs (flat hopper buffer)
+    //   totalLbs     = 125 + 18.75 + 20        = 163.75 lbs
     const plan = buildMixPlan({
       runs: [{ date: TODAY, brand: "Aldo's", flavor: "Fajita", pizzas: 800, cases: 80 }],
       mixes: fetchedMixes,
@@ -293,8 +295,9 @@ describe("GET /api/mixes → buildMixPlan: non-zero Pull For Mix lbs", () => {
     const entry = planRun.mixes[0];
 
     // The key assertion from task #637: Pull For Mix shows real lbs, not zero.
-    expect(entry.totalLbs).toBeCloseTo(125);
-    expect(entry.remainingLbs).toBeCloseTo(125);
+    // totalLbs = componentLbs * 1.15 + 20 (waste + startup buffers applied by buildMixPlan).
+    expect(entry.totalLbs).toBeCloseTo(163.75);
+    expect(entry.remainingLbs).toBeCloseTo(163.75);
     expect(entry.components).toEqual([
       { ingredient: "Monterey Jack", lbs: 100 },
       { ingredient: "Green Peppers", lbs: 25 },
@@ -319,9 +322,13 @@ describe("GET /api/mixes → buildMixPlan: non-zero Pull For Mix lbs", () => {
       mixes: fetchedMixes,
       today: TODAY,
     });
-    // lbs should be 0 (or no plan entry if the plan skips zero-lbs runs)
+    // Component lbs are 0 (perPizza=0 → lbs=0 per component).
+    // buildMixPlan still adds a 20 lb startup buffer, so totalLbs = 20.
+    // The key signal is missingAmounts=true — the manager must fill in oz values.
     if (plan.length > 0) {
-      expect(plan[0].runs[0].mixes[0].totalLbs).toBe(0);
+      const entry = plan[0].runs[0].mixes[0];
+      expect(entry.missingAmounts).toBe(true);
+      expect(entry.components.every((c) => c.lbs === 0)).toBe(true);
     }
   });
 

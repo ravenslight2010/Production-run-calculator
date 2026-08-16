@@ -139,9 +139,10 @@ describe("buildMixPlan", () => {
       { ingredient: "Onions", lbs: 50 },
       { ingredient: "Peppers", lbs: 30 },
     ]);
-    expect(entry.totalLbs).toBe(80);
-    expect(entry.remainingLbs).toBe(80);
-    expect(entry.batches).toBe(2);
+    // buildMixPlan adds 15% waste buffer + 20 lb startup: 80 * 1.15 + 20 = 112
+    expect(entry.totalLbs).toBeCloseTo(112);
+    expect(entry.remainingLbs).toBeCloseTo(112);
+    expect(entry.batches).toBeCloseTo(112 / 40);
     expect(plan[0].runs[0].pizzas).toBe(1000);
     expect(plan[0].runs[0].cases).toBe(100);
   });
@@ -153,7 +154,7 @@ describe("buildMixPlan", () => {
       flavor: "Combo",
       batchSize: 40,
       amountAlreadyMade: 40,
-      // 1.28 oz/pizza * 1000 / 16 = 80 lbs total.
+      // 1.28 oz/pizza * 1000 / 16 = 80 componentLbs; totalLbs = 80*1.15+20 = 112
       components: [{ ingredient: "Onions", perPizza: 1.28 }],
     });
     const entry = buildMixPlan({
@@ -161,9 +162,9 @@ describe("buildMixPlan", () => {
       mixes: [m],
       today,
     })[0].runs[0].mixes[0];
-    expect(entry.totalLbs).toBe(80);
-    expect(entry.remainingLbs).toBe(40);
-    expect(entry.batches).toBe(1);
+    expect(entry.totalLbs).toBeCloseTo(112);
+    expect(entry.remainingLbs).toBeCloseTo(72); // 112 - amountAlreadyMade(40)
+    expect(entry.batches).toBeCloseTo(72 / 40);
   });
 
   it("reports zero batches when batchSize is 0", () => {
@@ -172,7 +173,7 @@ describe("buildMixPlan", () => {
       brand: "Acme",
       flavor: "Combo",
       batchSize: 0,
-      // 0.8 oz/pizza * 100 / 16 = 5 lbs total.
+      // 0.8 oz/pizza * 100 / 16 = 5 componentLbs; totalLbs = 5*1.15+20 = 25.75
       components: [{ ingredient: "Onions", perPizza: 0.8 }],
     });
     const entry = buildMixPlan({
@@ -180,7 +181,7 @@ describe("buildMixPlan", () => {
       mixes: [m],
       today,
     })[0].runs[0].mixes[0];
-    expect(entry.totalLbs).toBe(5);
+    expect(entry.totalLbs).toBeCloseTo(25.75);
     expect(entry.batches).toBe(0);
   });
 
@@ -259,10 +260,11 @@ describe("buildMixPlan", () => {
     expect(planRun.pizzas).toBe(1000);
     expect(planRun.cases).toBe(100);
     const entry = planRun.mixes[0];
-    // total = 1.28 * 1000 / 16 = 80 lbs; amountAlreadyMade subtracted ONCE => 40 remaining, 1 batch.
-    expect(entry.totalLbs).toBeCloseTo(80);
-    expect(entry.remainingLbs).toBeCloseTo(40);
-    expect(entry.batches).toBeCloseTo(1);
+    // componentLbs = 1.28*1000/16 = 80; totalLbs = 80*1.15+20 = 112;
+    // amountAlreadyMade subtracted ONCE => remainingLbs = 72; batches = 72/40 = 1.8
+    expect(entry.totalLbs).toBeCloseTo(112);
+    expect(entry.remainingLbs).toBeCloseTo(72);
+    expect(entry.batches).toBeCloseTo(72 / 40);
     expect(entry.components[0].lbs).toBeCloseTo(80);
   });
 });

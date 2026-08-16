@@ -45,7 +45,7 @@ import {
 } from "@workspace/db";
 import { and, eq, gt, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
-import { protectRunValues } from "../lib/protectRunValues";
+import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -347,7 +347,7 @@ async function upsertProtected(
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
         existingData = existing?.data;
-        const m = protectRunValues(payload, existing?.data);
+        const m = capMergedResult(protectRunValues(payload, existing?.data));
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
         if (existing) {
@@ -420,11 +420,16 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const today = clientToday(req);
   const scope = currentScope();
+
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    res.status(400).json({ error: "payload must be a JSON object" }); return;
+  }
+  const sanitized = sanitizeSyncPayload(payload);
+  if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  // Atomic read-merge-write so an incoming empty-with-real-stamp push can't wipe a
-  // populated stored run value (see upsertProtected / protectRunValues).
-  const merged = await upsertProtected(today, scope, payload, today, req.ip);
+  const merged = await upsertProtected(today, scope, sanitized, today, req.ip);
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   broadcast(merged, senderId, scope, today);
@@ -434,24 +439,24 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 router.get("/sync/events", async (req: Request, res: Response): Promise<void> => {
   const clientId = (req.query.clientId as string) ?? "";
   const scope = currentScope();
+  const watchDate = clientToday(req);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   const [row] = await db
     .select()
     .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, scope)));
+    .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
   if (row) {
     res.write(`data: ${JSON.stringify({ data: row.data, senderId: null })}\n\n`);
   }
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  const client: SseClient = { res, clientId, scope, watchDate: clientToday(req) };
+  const client: SseClient = { res, clientId, scope, watchDate };
   clients.add(client);
 
   const heartbeat = setInterval(() => {
@@ -515,12 +520,17 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
-    const scope = currentScope();
+  const scope = currentScope();
+
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    res.status(400).json({ error: "payload must be a JSON object" }); return;
+  }
+  const sanitized = sanitizeSyncPayload(payload);
+  if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  // Atomic per-run protective merge (see /sync/today): an empty run value can't
-  // clobber a populated stored one on scheduled days either.
-  const merged = await upsertProtected(date, scope, payload, clientToday(req), req.ip);
+  const merged = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (date === clientToday(req)) {
@@ -555,6 +565,9 @@ router.post(
     const scope = currentScope();
     const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
+      // Reset only wipes the shared day-state for this scope. Master-data
+      // (profiles, recipes, etc.) is preserved. Use /sync/purge-all to wipe
+      // everything. Scope-isolated: live never touches sandbox.
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
       const [row] = await tx
         .insert(dataResetTable)

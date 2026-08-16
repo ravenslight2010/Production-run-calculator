@@ -8,7 +8,7 @@
 // (equal or older) stamp can no longer overwrite a populated stored value.
 
 import { describe, it, expect } from "vitest";
-import { protectRunValues } from "./protectRunValues";
+import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "./protectRunValues";
 
 type Payload = {
   runValues: Record<string, { casesNeeded?: number } | Record<string, never>>;
@@ -632,5 +632,285 @@ describe("protectRunValues prepPhase — shift prep phase merge", () => {
     const out = protectRunValues(incoming, existing) as Record<string, unknown>;
     const outDay = out.dayState as Record<string, unknown>;
     expect(outDay.prepPhase).toBeUndefined();
+  });
+});
+
+// ── sanitizeSyncPayload ────────────────────────────────────────────────────────
+
+describe("sanitizeSyncPayload", () => {
+  it("passes through non-object payloads unchanged", () => {
+    expect(sanitizeSyncPayload(null)).toBe(null);
+    expect(sanitizeSyncPayload("oops")).toBe("oops");
+    expect(sanitizeSyncPayload(42)).toBe(42);
+  });
+
+  it("strips unknown top-level keys", () => {
+    const payload = {
+      brands: ["A"],
+      __proto__: "bad",
+      injectedKey: "malicious",
+      constructor: "evil",
+      dayState: { runs: [] },
+    };
+    const out = sanitizeSyncPayload(payload) as Record<string, unknown>;
+    expect(out).not.toHaveProperty("injectedKey");
+    expect(out).not.toHaveProperty("__proto__");
+    expect(out).not.toHaveProperty("constructor");
+    expect(out).toHaveProperty("brands");
+    expect(out).toHaveProperty("dayState");
+  });
+
+  it("keeps all known top-level keys", () => {
+    const payload = {
+      brands: ["X"],
+      pepTypes: ["Pepperoni"],
+      dayState: { runs: [] },
+      runValues: {},
+      runValuesUpdatedAt: {},
+      deletedItems: {},
+      deletedStamps: {},
+      undeletedStamps: {},
+      doughRecipeNames: [],
+      frontlineRecipeNames: [],
+      cheeseRecipeNames: [],
+      mixRecipeNames: [],
+      brandFlavors: { X: ["Y"] },
+    };
+    const out = sanitizeSyncPayload(payload) as Record<string, unknown>;
+    expect(out).toHaveProperty("brands");
+    expect(out).toHaveProperty("pepTypes");
+    expect(out).toHaveProperty("dayState");
+    expect(out).toHaveProperty("runValues");
+    expect(out).toHaveProperty("deletedItems");
+    expect(out).toHaveProperty("brandFlavors");
+  });
+
+  it("caps string array entries at MAX_LIST_ENTRIES (500)", () => {
+    const big = Array.from({ length: 600 }, (_, i) => `brand-${i}`);
+    const out = sanitizeSyncPayload({ brands: big }) as Record<string, unknown>;
+    expect((out.brands as string[]).length).toBe(500);
+  });
+
+  it("truncates individual string entries to 200 chars", () => {
+    const longName = "x".repeat(300);
+    const out = sanitizeSyncPayload({ pepTypes: [longName] }) as Record<string, unknown>;
+    expect((out.pepTypes as string[])[0].length).toBe(200);
+  });
+
+  it("filters non-string values out of string-array fields", () => {
+    const out = sanitizeSyncPayload({
+      brands: ["Good", 42, null, { evil: true }, "Also Good"],
+    }) as Record<string, unknown>;
+    expect(out.brands).toEqual(["Good", "Also Good"]);
+  });
+
+  it("caps brandFlavors brand count and per-brand flavor arrays", () => {
+    const bigBrands: Record<string, string[]> = {};
+    for (let i = 0; i < 600; i++) bigBrands[`brand-${i}`] = ["flavor"];
+    const out = sanitizeSyncPayload({ brandFlavors: bigBrands }) as Record<string, unknown>;
+    const bf = out.brandFlavors as Record<string, string[]>;
+    expect(Object.keys(bf).length).toBe(500);
+  });
+
+  it("caps brandFlavors brand key length to 200 chars", () => {
+    const longBrand = "b".repeat(300);
+    const out = sanitizeSyncPayload({ brandFlavors: { [longBrand]: ["Flavor"] } }) as Record<string, unknown>;
+    const bf = out.brandFlavors as Record<string, string[]>;
+    const keys = Object.keys(bf);
+    expect(keys[0].length).toBe(200);
+  });
+
+  it("strips unknown dayState sub-keys", () => {
+    const out = sanitizeSyncPayload({
+      dayState: {
+        runs: [],
+        shiftNotes: "hi",
+        resetAt: 0,
+        injectedField: "<script>alert(1)</script>",
+        __proto__: "bad",
+      },
+    }) as Record<string, unknown>;
+    const ds = out.dayState as Record<string, unknown>;
+    expect(ds).not.toHaveProperty("injectedField");
+    expect(ds).not.toHaveProperty("__proto__");
+    expect(ds).toHaveProperty("runs");
+    expect(ds).toHaveProperty("shiftNotes");
+    expect(ds).toHaveProperty("resetAt");
+  });
+
+  it("caps dayState.shiftNotes at 2000 chars", () => {
+    const longNotes = "n".repeat(3000);
+    const out = sanitizeSyncPayload({
+      dayState: { runs: [], shiftNotes: longNotes },
+    }) as Record<string, unknown>;
+    const ds = out.dayState as Record<string, unknown>;
+    expect((ds.shiftNotes as string).length).toBe(2000);
+  });
+
+  it("drops non-string shiftNotes without error", () => {
+    const out = sanitizeSyncPayload({
+      dayState: { runs: [], shiftNotes: 12345 },
+    }) as Record<string, unknown>;
+    const ds = out.dayState as Record<string, unknown>;
+    expect(ds.shiftNotes).toBeUndefined();
+  });
+
+  it("passes through known dayState sub-keys (runs, resetAt, substitutions, etc.)", () => {
+    const out = sanitizeSyncPayload({
+      dayState: {
+        runs: [{ id: "r1" }],
+        resetAt: 12345,
+        substitutions: { r1: [] },
+        substitutionLog: [],
+        stagedItems: {},
+        prepPhase: { prepStartedAt: 1 },
+        date: "2026-01-01",
+        runToTime: 3600,
+      },
+    }) as Record<string, unknown>;
+    const ds = out.dayState as Record<string, unknown>;
+    expect(ds.runs).toEqual([{ id: "r1" }]);
+    expect(ds.resetAt).toBe(12345);
+    expect(ds.substitutions).toBeDefined();
+    expect(ds.substitutionLog).toBeDefined();
+    expect(ds.stagedItems).toBeDefined();
+    expect(ds.prepPhase).toBeDefined();
+    expect(ds.date).toBe("2026-01-01");
+    expect(ds.runToTime).toBe(3600);
+  });
+
+  it("does not modify unknown-key-free payloads", () => {
+    const payload = {
+      brands: ["A", "B"],
+      pepTypes: ["Pepperoni"],
+      dayState: { runs: [], shiftNotes: "ok", resetAt: 0 },
+    };
+    const out = sanitizeSyncPayload(payload) as Record<string, unknown>;
+    expect((out.brands as string[])).toEqual(["A", "B"]);
+    expect((out.pepTypes as string[])).toEqual(["Pepperoni"]);
+  });
+
+  it("caps dayState.runs at MAX_RUNS (50)", () => {
+    const runs = Array.from({ length: 60 }, (_, i) => ({ id: `r${i}`, brand: "X", flavor: "Y" }));
+    const out = sanitizeSyncPayload({ dayState: { runs, resetAt: 0 } }) as Record<string, unknown>;
+    const ds = out.dayState as Record<string, unknown>;
+    expect((ds.runs as unknown[]).length).toBe(50);
+  });
+
+  it("caps runValues at MAX_RUNS (50) keys", () => {
+    const runValues: Record<string, unknown> = {};
+    for (let i = 0; i < 60; i++) runValues[`r${i}`] = { casesNeeded: i };
+    const out = sanitizeSyncPayload({ runValues }) as Record<string, unknown>;
+    expect(Object.keys(out.runValues as object).length).toBe(50);
+  });
+
+  it("caps runValuesUpdatedAt at MAX_RUNS (50) keys", () => {
+    const runValuesUpdatedAt: Record<string, unknown> = {};
+    for (let i = 0; i < 60; i++) runValuesUpdatedAt[`r${i}`] = Date.now();
+    const out = sanitizeSyncPayload({ runValuesUpdatedAt }) as Record<string, unknown>;
+    expect(Object.keys(out.runValuesUpdatedAt as object).length).toBe(50);
+  });
+
+  it("returns null for a payload that exceeds the 512 KB aggregate size limit", () => {
+    // Build a known-key payload that is legitimately structured but very large.
+    const bigHistory = Array.from({ length: 5000 }, (_, i) => ({ id: `e${i}`, data: "x".repeat(100) }));
+    const result = sanitizeSyncPayload({ history: bigHistory, dayState: { runs: [], resetAt: 0 } });
+    expect(result).toBeNull();
+  });
+
+  it("returns null for a payload that would exceed 512 KB via multi-byte Unicode characters", () => {
+    // Each "𝄞" (U+1D11E) is 4 UTF-8 bytes; .length counts 2 code units.
+    // Using a known key so only the size check triggers, not the whitelist.
+    const multibyteStr = "𝄞".repeat(200_000); // ~800 KB UTF-8, ~400 KB UTF-16
+    const result = sanitizeSyncPayload({ history: [{ note: multibyteStr }], dayState: { runs: [], resetAt: 0 } });
+    expect(result).toBeNull();
+  });
+
+  it("passes through non-object payloads (null/string/array) unchanged without error", () => {
+    // sanitizeSyncPayload itself doesn't reject non-objects — it returns them
+    // unchanged. The route handler is responsible for the 400 guard.
+    expect(sanitizeSyncPayload(null)).toBeNull();
+    expect(sanitizeSyncPayload("oops")).toBe("oops");
+    expect(sanitizeSyncPayload([1, 2, 3])).toEqual([1, 2, 3]);
+  });
+
+  it("isSyncPayloadTooLarge returns true for null, false otherwise", () => {
+    expect(isSyncPayloadTooLarge(null)).toBe(true);
+    expect(isSyncPayloadTooLarge({ brands: ["X"] })).toBe(false);
+    expect(isSyncPayloadTooLarge(undefined)).toBe(false);
+  });
+
+  it("valid normal-sized payload is not null", () => {
+    const payload = {
+      brands: ["A", "B"],
+      pepTypes: ["Pepperoni"],
+      dayState: { runs: [{ id: "r1", brand: "A", flavor: "B" }], resetAt: 0 },
+      runValues: { r1: { casesNeeded: 100 } },
+    };
+    const result = sanitizeSyncPayload(payload);
+    expect(result).not.toBeNull();
+  });
+});
+
+// ── capMergedResult ──────────────────────────────────────────────────────────
+
+describe("capMergedResult", () => {
+  const MAX_BYTES = 512 * 1024;
+
+  function byteSize(v: unknown): number {
+    return Buffer.byteLength(JSON.stringify(v), "utf8");
+  }
+
+  it("passes through a small blob unchanged", () => {
+    const merged = {
+      brands: ["Brand A", "Brand B"],
+      dayState: { runs: [], resetAt: 0 },
+    };
+    const result = capMergedResult(merged) as Record<string, unknown>;
+    expect(result.brands).toEqual(["Brand A", "Brand B"]);
+    expect(byteSize(result)).toBeLessThanOrEqual(MAX_BYTES);
+  });
+
+  it("drops brandFlavors when blob exceeds 512 KB via disjoint pushes", () => {
+    // Simulate the merged blob that results from many disjoint pushes each
+    // adding distinct brandFlavors entries. 500 brands × 500 flavors × 200
+    // chars each would be ~50 MB — far beyond the 512 KB limit.
+    const hugeBrandFlavors: Record<string, string[]> = {};
+    for (let b = 0; b < 300; b++) {
+      hugeBrandFlavors[`Brand${"X".repeat(150)}_${b}`] = Array.from(
+        { length: 300 },
+        (_, f) => `Flavor${"Y".repeat(150)}_${f}`,
+      );
+    }
+    const merged = {
+      brands: ["Brand A"],
+      brandFlavors: hugeBrandFlavors,
+      dayState: { runs: [], resetAt: 0 },
+    };
+    expect(byteSize(merged)).toBeGreaterThan(MAX_BYTES);
+    const result = capMergedResult(merged);
+    expect(byteSize(result)).toBeLessThanOrEqual(MAX_BYTES);
+  });
+
+  it("enforces the hard 512 KB guarantee even for pathologically large retained fields", () => {
+    // Build a blob with many additive arrays ALL maxed-out at 500 × 200-char strings.
+    // 500 entries × 200 chars × 12 arrays ≈ 1.2 MB — well over the 512 KB limit.
+    const bigList = Array.from({ length: 500 }, (_, i) => `E_${"Z".repeat(192)}_${String(i).padStart(3, "0")}`);
+    const merged = {
+      brands: bigList,
+      pepTypes: bigList,
+      ingredientTypes: bigList,
+      cheeseRecipeNames: bigList,
+      doughRecipeNames: bigList,
+      sauceRecipeNames: bigList,
+      lineNames: bigList,
+      dieTypes: bigList,
+      ingredientNames: bigList,
+      flavors: bigList,
+      dayState: { runs: [], resetAt: 0 },
+    };
+    expect(byteSize(merged)).toBeGreaterThan(MAX_BYTES);
+    const result = capMergedResult(merged);
+    expect(byteSize(result)).toBeLessThanOrEqual(MAX_BYTES);
   });
 });

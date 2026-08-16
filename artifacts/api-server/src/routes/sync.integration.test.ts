@@ -32,6 +32,7 @@ let server: Server;
 let baseUrl: string;
 
 const USER = "user-1";
+const MANAGER = "manager-1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
@@ -109,14 +110,13 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(
-    sql`TRUNCATE ${dailySyncTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
-  );
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
-  await db.insert(usersTable).values([{ id: USER, username: "user", passwordHash: "x" }]);
-  // Give the test user the manager role so DELETE /sync/:date (which requires
-  // manage-factory-settings, a manager capability) can be exercised.
-  await db.insert(userRolesTable).values({ userId: USER, role: "manager" });
+  await db.insert(usersTable).values([
+    { id: USER, username: "user", passwordHash: "x" },
+    { id: MANAGER, username: "manager", passwordHash: "x" },
+  ]);
+  await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);
   // Three consecutive dates well clear of any real "today" so the assertions
   // don't depend on when the suite runs.
   await db.insert(dailySyncTable).values([
@@ -128,6 +128,10 @@ beforeEach(async () => {
 
 function authHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signToken(USER)}` };
+}
+
+function managerAuthHeaders(): Record<string, string> {
+  return { authorization: `Bearer ${signToken(MANAGER)}` };
 }
 
 describe("GET /sync/scheduled — client-local-date filtering", () => {
@@ -648,16 +652,36 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
 
 // DELETE /sync/:date enforces the server's real UTC date rather than a
 // client-supplied `today` param. This prevents a client from lying about
-// "today" to delete the actual live day (which would nuke a running shift).
-// The capability gate (manage-factory-settings) is tested implicitly: the
-// beforeEach seeds the test user as a manager.
+// "today" to delete the actual live day. The manage-factory-settings capability
+// gate is enforced — operators receive 403.
 describe("DELETE /sync/:date — server-date guard", () => {
-  it("rejects deleting a day in the past (server-date comparison)", async () => {
-    // 2020-01-01 is always in the past; the server blocks it regardless of any
-    // client `?today=` param because the guard uses the real server clock.
-    const res = await fetch(`${baseUrl}/api/sync/2020-01-01`, {
+  it("rejects an operator (no manage-factory-settings capability) with 403", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/2030-03-11?today=2030-03-10`, {
       method: "DELETE",
-      headers: authHeaders(),
+      headers: authHeaders(), // plain operator — no capability
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects deleting a day in the past (server-date comparison, manager auth)", async () => {
+    // The DELETE handler guards with the server's actual date (todayStr()), not
+    // the client-supplied `?today` param. A hardcoded past date that is always
+    // ≤ the server's real date is rejected regardless of when the suite runs.
+    const PAST_DATE = "2025-01-01";
+    const res = await fetch(`${baseUrl}/api/sync/${PAST_DATE}`, {
+      method: "DELETE",
+      headers: managerAuthHeaders(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("a fake future client ?today cannot bypass the server-date guard (server still rejects past dates)", async () => {
+    // Even if a client sends ?today=2020-01-01 (claiming their local day is in
+    // the past), the server uses its own clock to guard past dates.
+    const PAST_DATE = "2025-01-01";
+    const res = await fetch(`${baseUrl}/api/sync/${PAST_DATE}?today=2020-01-01`, {
+      method: "DELETE",
+      headers: managerAuthHeaders(),
     });
     expect(res.status).toBe(400);
   });
@@ -665,9 +689,10 @@ describe("DELETE /sync/:date — server-date guard", () => {
   it("allows deleting a future day and removes it from the scheduled list", async () => {
     // 2030-03-11 is well in the future from any realistic test run, so the
     // server-date guard passes and the row is removed.
-    const res = await fetch(`${baseUrl}/api/sync/2030-03-11`, {
+
+    const res = await fetch(`${baseUrl}/api/sync/2030-03-11?today=2030-03-10`, {
       method: "DELETE",
-      headers: authHeaders(),
+      headers: managerAuthHeaders(),
     });
     expect(res.status).toBe(200);
     // Verify 2030-03-11 is gone; 2030-03-10 and 2030-03-12 remain.
@@ -676,5 +701,234 @@ describe("DELETE /sync/:date — server-date guard", () => {
     });
     const days = (await remaining.json()) as Array<{ date: string }>;
     expect(days.map((d) => d.date)).toEqual(["2030-03-10", "2030-03-12"]);
+  });
+});
+
+// ── Payload sanitizer — route-level ──────────────────────────────────────────
+// Verify that unknown top-level keys and oversized name lists are stripped
+// BEFORE the payload is persisted or broadcast to SSE subscribers.
+
+describe("PUT /sync — payload sanitizer", () => {
+  const DATE = "2030-11-01";
+
+  async function putPayload(payload: unknown): Promise<void> {
+    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "tester", payload }),
+    });
+  }
+
+  async function getStored(): Promise<Record<string, unknown>> {
+    const res = await fetch(`${baseUrl}/api/sync/${DATE}`, { headers: authHeaders() });
+    return (await res.json()) as Record<string, unknown>;
+  }
+
+  it("strips unknown top-level keys from the persisted blob", async () => {
+    await putPayload({
+      brands: ["Good Brand"],
+      injectedKey: "malicious value",
+      __proto__: "bad",
+      dayState: { runs: [], resetAt: 0 },
+    });
+    const stored = await getStored();
+    expect(stored).not.toHaveProperty("injectedKey");
+    expect(stored).not.toHaveProperty("__proto__");
+    expect(stored).toHaveProperty("brands");
+    expect(stored).toHaveProperty("dayState");
+  });
+
+  it("caps oversized name-list arrays so they cannot flood the shared blob", async () => {
+    const bigBrands = Array.from({ length: 600 }, (_, i) => `brand-${i}`);
+    await putPayload({
+      brands: bigBrands,
+      dayState: { runs: [], resetAt: 0 },
+    });
+    const stored = await getStored();
+    expect((stored.brands as string[]).length).toBeLessThanOrEqual(500);
+  });
+
+  it("truncates oversized individual name strings", async () => {
+    const longName = "x".repeat(300);
+    await putPayload({
+      pepTypes: [longName],
+      dayState: { runs: [], resetAt: 0 },
+    });
+    const stored = await getStored();
+    const pepTypes = stored.pepTypes as string[];
+    expect(pepTypes[0].length).toBeLessThanOrEqual(200);
+  });
+
+  it("strips unknown dayState sub-keys from the persisted blob", async () => {
+    await putPayload({
+      dayState: {
+        runs: [],
+        resetAt: 0,
+        shiftNotes: "ok",
+        injectedDayField: "<script>alert(1)</script>",
+      },
+    });
+    const stored = await getStored();
+    const ds = stored.dayState as Record<string, unknown>;
+    expect(ds).not.toHaveProperty("injectedDayField");
+    expect(ds).toHaveProperty("shiftNotes");
+  });
+
+  it("caps dayState.shiftNotes at 2000 chars in the persisted blob", async () => {
+    const longNotes = "n".repeat(3000);
+    await putPayload({
+      dayState: { runs: [], resetAt: 0, shiftNotes: longNotes },
+    });
+    const stored = await getStored();
+    const ds = stored.dayState as Record<string, unknown>;
+    expect((ds.shiftNotes as string).length).toBeLessThanOrEqual(2000);
+  });
+
+  it("preserves legitimate known fields through the sanitizer unchanged", async () => {
+    await putPayload({
+      brands: ["Acme", "Globex"],
+      pepTypes: ["Pepperoni", "Sausage"],
+      dayState: { runs: [{ id: "r1", brand: "Acme", flavor: "Pep" }], shiftNotes: "hi", resetAt: 0 },
+      runValues: { r1: { casesNeeded: 100 } },
+      runValuesUpdatedAt: { r1: 9999 },
+    });
+    const stored = await getStored();
+    expect((stored.brands as string[])).toContain("Acme");
+    expect((stored.pepTypes as string[])).toContain("Pepperoni");
+    const ds = stored.dayState as Record<string, unknown>;
+    expect((ds.shiftNotes as string)).toBe("hi");
+    expect((stored.runValues as Record<string, unknown>).r1).toBeDefined();
+  });
+
+  it("caps dayState.runs at 50 in the persisted blob", async () => {
+    const runs = Array.from({ length: 60 }, (_, i) => ({ id: `r${i}`, brand: "X", flavor: "Y" }));
+    await putPayload({ dayState: { runs, resetAt: 0 } });
+    const stored = await getStored();
+    const ds = stored.dayState as Record<string, unknown>;
+    expect((ds.runs as unknown[]).length).toBeLessThanOrEqual(50);
+  });
+
+  it("returns 400 when the sanitized payload exceeds the 512 KB aggregate limit", async () => {
+    // Build a valid-key payload that is nonetheless too large after sanitization.
+    const bigHistory = Array.from({ length: 5000 }, (_, i) => ({ id: `e${i}`, data: "x".repeat(100) }));
+    const res = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "attacker", payload: { history: bigHistory, dayState: { runs: [], resetAt: 0 } } }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/too large/i);
+  });
+
+  it("returns 400 when the payload is not a JSON object (string, array, null)", async () => {
+    for (const nonObject of ['"a string"', "[1,2,3]", "null", "42"]) {
+      const res = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId: "x", payload: JSON.parse(nonObject) }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("successive disjoint name-list pushes never grow the stored brands list past MAX_RUNS (500)", async () => {
+    // Push 5 batches of 150 disjoint brand names. Without post-merge capping the
+    // stored list would grow to 750; with it, it must stay at or below 500.
+    for (let batch = 0; batch < 5; batch++) {
+      const brands = Array.from({ length: 150 }, (_, i) => `brand-${batch * 150 + i}`);
+      await putPayload({ brands, dayState: { runs: [], resetAt: 0 } });
+    }
+    const stored = await getStored();
+    expect((stored.brands as string[]).length).toBeLessThanOrEqual(500);
+  });
+
+  it("successive disjoint stamp-map pushes never cause the stored blob to exceed 512 KB", async () => {
+    // Each push sends 300 disjoint names across two stamp-map namespaces.
+    // Without post-merge capping, the stored deletedStamps would grow unboundedly.
+    for (let batch = 0; batch < 5; batch++) {
+      const brands: Record<string, number> = {};
+      const pepTypes: Record<string, number> = {};
+      for (let i = 0; i < 300; i++) {
+        brands[`brand-${batch * 300 + i}`] = Date.now() + i;
+        pepTypes[`pep-${batch * 300 + i}`] = Date.now() + i;
+      }
+      await putPayload({
+        deletedStamps: { brands, pepTypes },
+        undeletedStamps: { brands: { ...brands } },
+        dayState: { runs: [], resetAt: 0 },
+      });
+    }
+    const stored = await getStored();
+    // The serialized stored blob must stay within the 512 KB aggregate limit.
+    const serialized = JSON.stringify(stored);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(512 * 1024);
+    // Also verify the individual stamp-map namespace entry counts are bounded.
+    const ds = stored.deletedStamps as Record<string, Record<string, number>> | undefined;
+    if (ds?.brands) expect(Object.keys(ds.brands).length).toBeLessThanOrEqual(500);
+  });
+
+  it("successive disjoint dayState.runs pushes never grow past MAX_RUNS (50)", async () => {
+    // Push 3 batches of 25 disjoint runs. Without post-merge capping the union
+    // would grow to 75; with it, it must stay at or below 50.
+    for (let batch = 0; batch < 3; batch++) {
+      const runs = Array.from({ length: 25 }, (_, i) => ({
+        id: `r-${batch * 25 + i}`,
+        brand: "X",
+        flavor: "Y",
+        metaUpdatedAt: Date.now() + i,
+      }));
+      await putPayload({ dayState: { runs, resetAt: 0 } });
+    }
+    const stored = await getStored();
+    const ds = stored.dayState as Record<string, unknown>;
+    expect((ds.runs as unknown[]).length).toBeLessThanOrEqual(50);
+  });
+
+  it("a PUT over a legacy oversized dayState row trims it to <=512 KB on the next merge", async () => {
+    // Simulate a legacy JSONB row that was written before this guard existed and
+    // contains an oversized dayState sub-field (e.g. a giant substitutionLog).
+    // When any valid PUT arrives, the post-merge cap must trim it to budget.
+    const oversizedSubLog = Array.from({ length: 5000 }, (_, i) => ({
+      id: `log-${i}`,
+      detail: "x".repeat(200),
+    }));
+    // Seed the oversized legacy row directly into the DB. DATE = "2030-11-01" is
+    // not in beforeEach's pre-seeded rows so there is no conflict.
+    const legacyData = {
+      dayState: { runs: [], resetAt: 0, substitutionLog: oversizedSubLog },
+    };
+    await db.insert(dailySyncTable).values([{ date: DATE, scope: "live" as const, data: legacyData as any, updatedAt: new Date() }]);
+
+    // Now push a minimal valid payload — the merge must trim the oversized blob.
+    await putPayload({ dayState: { runs: [], resetAt: 0 } });
+
+    const stored = await getStored();
+    const serialized = JSON.stringify(stored);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(512 * 1024);
+  });
+
+  it("successive disjoint near-limit run pushes never cause stored blob to exceed 512 KB", async () => {
+    // Each push sends 25 disjoint runs with large metadata objects. After two
+    // pushes the union is 50 runs; with large metadata this can exceed 512 KB.
+    // The hard post-merge byte guarantee must trim as needed.
+    const bigMeta = "x".repeat(8000); // 8 KB per run → 50 runs ≈ 400 KB, well within limit
+    for (let batch = 0; batch < 2; batch++) {
+      const runs = Array.from({ length: 25 }, (_, i) => ({
+        id: `big-${batch * 25 + i}`,
+        brand: "Brand",
+        flavor: "Flavor",
+        metaUpdatedAt: Date.now() + i,
+        notes: bigMeta,
+      }));
+      const runValues: Record<string, unknown> = {};
+      for (let i = 0; i < 25; i++) {
+        runValues[`big-${batch * 25 + i}`] = { cases: i, notes: bigMeta };
+      }
+      await putPayload({ dayState: { runs, resetAt: 0 }, runValues });
+    }
+    const stored = await getStored();
+    const serialized = JSON.stringify(stored);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(512 * 1024);
   });
 });

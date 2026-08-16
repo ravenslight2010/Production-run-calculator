@@ -1,4 +1,5 @@
-// Per-run + run-list protective merge for the shared day-state sync row.
+// Per-run + run-list protective merge AND payload sanitization for the shared
+// day-state sync row.
 //
 // Background: the daily_sync row is a single blob shared by every device on a
 // scope+date. Historically PUT /sync was blind last-writer-wins: the incoming
@@ -639,4 +640,472 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   }
 
   return withMergedStamps(out, incoming, existing);
+}
+
+// ── Sync payload sanitizer ────────────────────────────────────────────────────
+// Strips unknown top-level keys and enforces size/content limits on additive
+// name-list fields before the payload enters the protective merge or the DB.
+// This closes the injection vector where an authenticated user could push
+// arbitrary top-level keys or flood list fields (up to the 10 MB body limit)
+// that every connected SSE client would then receive.
+
+/** Maximum number of entries allowed in any name-list array. */
+const MAX_LIST_ENTRIES = 500;
+/** Maximum characters allowed in a single name-list string. */
+const MAX_LIST_STRING_LEN = 200;
+/** Maximum characters allowed in dayState.shiftNotes. */
+const MAX_SHIFT_NOTES_LEN = 2000;
+/** Maximum number of runs allowed in dayState.runs (and runValues). */
+const MAX_RUNS = 50;
+/**
+ * Maximum aggregate JSON size (bytes) for the sanitized payload.
+ * A legitimate day-state blob (full recipes, run values, master-data lists for
+ * one facility) is well under 200 KB. 512 KB gives generous headroom while
+ * bounding the shared-state DoS risk from known complex fields (templates,
+ * history, presets, profiles, run values, …) that are not individually capped.
+ */
+const MAX_AGGREGATE_BYTES = 512 * 1024;
+
+// All top-level keys a legitimate sync push may contain (union of web + mobile
+// types.ts / payloadTypes.ts). Any key NOT in this set is stripped before the
+// payload reaches upsertProtected or the DB.
+const KNOWN_TOP_LEVEL_KEYS = new Set<string>([
+  "dayState",
+  "runValues",
+  "runValuesUpdatedAt",
+  "brands",
+  "brandFlavors",
+  "ingredientTypes",
+  "templates",
+  "history",
+  "pepTypes",
+  "dieTypes",
+  "circles",
+  "shipper",
+  "skidStacking",
+  "gripSheets",
+  "cheeseIngredients",
+  "doughIngredients",
+  "frontlineIngredients",
+  "mixIngredients",
+  "doughRecipeNames",
+  "doughRecipePresets",
+  "frontlineRecipeNames",
+  "frontlineRecipePresets",
+  "cheeseRecipeNames",
+  "cheeseRecipePresets",
+  "mixRecipeNames",
+  "brandProfiles",
+  "crustProfiles",
+  "mergedAway",
+  "deletedItems",
+  "deletedStamps",
+  "undeletedStamps",
+]);
+
+// Name-list fields that are additive string arrays — each entry is a single
+// user-visible name (brand, recipe, ingredient type, etc.). These are the
+// fields most exposed to flooding: a single push can inject 10 MB of strings
+// that every SSE subscriber receives. Cap both total entry count and per-entry
+// length.
+const ADDITIVE_STRING_ARRAY_KEYS = new Set<string>([
+  "brands",
+  "ingredientTypes",
+  "pepTypes",
+  "dieTypes",
+  "circles",
+  "shipper",
+  "skidStacking",
+  "gripSheets",
+  "cheeseIngredients",
+  "doughIngredients",
+  "frontlineIngredients",
+  "mixIngredients",
+  "doughRecipeNames",
+  "frontlineRecipeNames",
+  "cheeseRecipeNames",
+  "mixRecipeNames",
+]);
+
+// Known sub-keys of the dayState object. Any other key is stripped so clients
+// cannot inject arbitrary content into the shared day-state under dayState.*.
+const KNOWN_DAYSTATE_KEYS = new Set<string>([
+  "runs",
+  "shiftNotes",
+  "runToTime",
+  "resetAt",
+  "date",
+  "substitutions",
+  "substitutionLog",
+  "stagedItems",
+  "prepPhase",
+]);
+
+function capStringArray(arr: unknown[]): string[] {
+  return arr
+    .filter((s): s is string => typeof s === "string")
+    .slice(0, MAX_LIST_ENTRIES)
+    .map((s) => s.slice(0, MAX_LIST_STRING_LEN));
+}
+
+/**
+ * Strip unknown top-level keys from a sync payload and enforce size/content
+ * limits on additive name-list fields and known dayState sub-fields.
+ *
+ * This is a defence-in-depth gate applied BEFORE protectRunValues so that
+ * attacker-controlled keys and oversized lists never reach the DB or SSE
+ * broadcast path. The function is intentionally permissive about the SHAPE of
+ * fields it does not understand (objects, arrays of objects, etc.) — it only
+ * enforces the whitelist and limits for the high-risk list fields.
+ */
+export function sanitizeSyncPayload(payload: unknown): unknown {
+  if (!isPlainObject(payload)) return payload;
+
+  const out: Record<string, unknown> = {};
+
+  for (const key of Object.keys(payload)) {
+    if (!KNOWN_TOP_LEVEL_KEYS.has(key)) continue; // drop unknown keys
+
+    const val = payload[key];
+
+    if (ADDITIVE_STRING_ARRAY_KEYS.has(key)) {
+      // Cap count and per-entry length for name-list string arrays.
+      out[key] = capStringArray(asArray(val));
+    } else if (key === "brandFlavors") {
+      // Record<brand, flavor[]> — cap both brand count and per-brand flavors.
+      if (isPlainObject(val)) {
+        const bf: Record<string, string[]> = {};
+        const brands = Object.keys(val).slice(0, MAX_LIST_ENTRIES);
+        for (const brand of brands) {
+          const cappedBrand = brand.slice(0, MAX_LIST_STRING_LEN);
+          bf[cappedBrand] = capStringArray(asArray(val[brand]));
+        }
+        out[key] = bf;
+      }
+    } else if (key === "dayState") {
+      // Strip unknown dayState sub-keys and cap free-text fields + run count.
+      if (isPlainObject(val)) {
+        const ds: Record<string, unknown> = {};
+        for (const dsk of Object.keys(val)) {
+          if (!KNOWN_DAYSTATE_KEYS.has(dsk)) continue; // drop unknown dayState keys
+          if (dsk === "shiftNotes") {
+            // Cap free-text notes to prevent bloat via dayState injection.
+            ds[dsk] = typeof val[dsk] === "string"
+              ? (val[dsk] as string).slice(0, MAX_SHIFT_NOTES_LEN)
+              : undefined;
+          } else if (dsk === "runs") {
+            // Cap run count: a facility will never legitimately have more than
+            // MAX_RUNS runs in a single day. Truncate rather than reject so that
+            // a marginal client push doesn't lose partial data.
+            ds[dsk] = asArray(val[dsk]).slice(0, MAX_RUNS);
+          } else {
+            ds[dsk] = val[dsk];
+          }
+        }
+        out[key] = ds;
+      }
+    } else if (key === "runValues" || key === "runValuesUpdatedAt") {
+      // Cap the number of run-value entries to MAX_RUNS so this map cannot be
+      // used to store an unbounded number of run objects.
+      if (isPlainObject(val)) {
+        const capped: Record<string, unknown> = {};
+        let count = 0;
+        for (const [k, v] of Object.entries(val)) {
+          if (count >= MAX_RUNS) break;
+          capped[k] = v;
+          count++;
+        }
+        out[key] = capped;
+      }
+    } else {
+      // All other known keys (objects, presets, history, etc.) pass through
+      // as-is; the protective merge handles the structural invariants for the
+      // ones that matter (runValues, deletedItems, stamps).
+      out[key] = val;
+    }
+  }
+
+  // Final aggregate size guard: after all structural sanitization, ensure the
+  // remaining payload is within the allowed UTF-8 byte budget. Complex known
+  // fields (templates, history, presets, profiles) are not individually capped
+  // above, so this catches any remaining bulk injection through those paths.
+  // Use Buffer.byteLength (UTF-8 bytes) rather than .length (UTF-16 code units)
+  // so that Unicode-heavy payloads can't sneak past by packing multi-byte chars.
+  // Return null to signal "too large" to the caller — the route rejects with 400.
+  try {
+    if (Buffer.byteLength(JSON.stringify(out), "utf8") > MAX_AGGREGATE_BYTES) {
+      return null;
+    }
+  } catch {
+    return null; // un-serialisable payload — reject
+  }
+
+  return out;
+}
+
+/**
+ * Returns true when `sanitizeSyncPayload` signalled that the payload was too
+ * large (it returns null in that case). Use at the route level to reject with
+ * 400 before persisting or broadcasting.
+ */
+export function isSyncPayloadTooLarge(sanitized: unknown): sanitized is null {
+  return sanitized === null;
+}
+
+/** Maximum number of namespaces in a stamp map (deletedStamps / undeletedStamps). */
+const MAX_STAMP_NAMESPACES = 50;
+/** Maximum number of name entries per namespace in a stamp map. */
+const MAX_STAMP_ENTRIES_PER_NS = 500;
+
+// "Bulk optional" fields that can be trimmed from the merged blob when the
+// aggregate byte limit is exceeded after the union merge. These fields are
+// historical / master-data caches that clients always re-send on the next push;
+// trimming them degrades performance slightly but never loses run data.
+const TRIMMABLE_BULK_FIELDS = [
+  "history",
+  "templates",
+  "doughRecipePresets",
+  "frontlineRecipePresets",
+  "cheeseRecipePresets",
+  "brandProfiles",
+  "crustProfiles",
+  "mergedAway",
+  // brandFlavors is a derived lookup rebuilt from profiles on every push, so
+  // it is safe to drop under budget pressure. It must be here (not only capped
+  // by entry count) because 500 brands × 500 flavors × 200 chars can reach
+  // ~50 MB — far beyond the 512 KB merged-blob budget.
+  "brandFlavors",
+] as const;
+
+/**
+ * Apply the same structural caps as `sanitizeSyncPayload` to the MERGED blob
+ * produced by `protectRunValues`. This prevents incremental growth via
+ * successive disjoint pushes that each individually satisfy the incoming caps.
+ *
+ * Unlike `sanitizeSyncPayload`, this function:
+ *   - Never rejects with null (the merge is already committed; hard-reject
+ *     would lose run data). Instead it caps in place.
+ *   - Does NOT apply the top-level key whitelist (protectRunValues only ever
+ *     produces known keys).
+ *   - Trims bulk optional fields when the aggregate size still exceeds the
+ *     budget after structural capping, preserving run/value data.
+ */
+export function capMergedResult(merged: unknown): unknown {
+  if (!isPlainObject(merged)) return merged;
+
+  const out: Record<string, unknown> = { ...(merged as Record<string, unknown>) };
+
+  // Cap additive string arrays.
+  for (const field of ADDITIVE_STRING_ARRAY_KEYS) {
+    if (field in out) {
+      out[field] = asArray(out[field])
+        .filter((s): s is string => typeof s === "string")
+        .slice(0, MAX_LIST_ENTRIES)
+        .map((s) => s.slice(0, MAX_LIST_STRING_LEN));
+    }
+  }
+
+  // Cap brandFlavors.
+  if (isPlainObject(out.brandFlavors)) {
+    const bf: Record<string, string[]> = {};
+    const brands = Object.keys(out.brandFlavors as object).slice(0, MAX_LIST_ENTRIES);
+    for (const brand of brands) {
+      const cappedBrand = brand.slice(0, MAX_LIST_STRING_LEN);
+      bf[cappedBrand] = asArray((out.brandFlavors as Record<string, unknown>)[brand])
+        .filter((s): s is string => typeof s === "string")
+        .slice(0, MAX_LIST_ENTRIES)
+        .map((s) => s.slice(0, MAX_LIST_STRING_LEN));
+    }
+    out.brandFlavors = bf;
+  }
+
+  // Cap dayState.runs.
+  if (isPlainObject(out.dayState)) {
+    const ds = out.dayState as Record<string, unknown>;
+    if (Array.isArray(ds.runs) && ds.runs.length > MAX_RUNS) {
+      out.dayState = { ...ds, runs: ds.runs.slice(0, MAX_RUNS) };
+    }
+  }
+
+  // Cap runValues / runValuesUpdatedAt.
+  for (const key of ["runValues", "runValuesUpdatedAt"] as const) {
+    if (isPlainObject(out[key])) {
+      const entries = Object.entries(out[key] as object);
+      if (entries.length > MAX_RUNS) {
+        const capped: Record<string, unknown> = {};
+        for (const [k, v] of entries.slice(0, MAX_RUNS)) capped[k] = v;
+        out[key] = capped;
+      }
+    }
+  }
+
+  // Cap deletedItems.runs (run tombstone list) — union-merged by protectRunValues;
+  // successive disjoint pushes accumulate ids without this cap.
+  if (isPlainObject(out.deletedItems)) {
+    const di = out.deletedItems as Record<string, unknown>;
+    if (Array.isArray(di.runs) && di.runs.length > MAX_RUNS) {
+      out.deletedItems = { ...di, runs: di.runs.slice(0, MAX_RUNS) };
+    }
+  }
+
+  // Cap deletion/un-deletion stamp maps. These are union-merged by
+  // `withMergedStamps`, so successive disjoint pushes accumulate entries
+  // unboundedly without this cap. Apply per-namespace and per-entry limits
+  // plus key/value type guards (values must be non-negative timestamps).
+  for (const stampKey of ["deletedStamps", "undeletedStamps"] as const) {
+    if (isPlainObject(out[stampKey])) {
+      const src = out[stampKey] as Record<string, unknown>;
+      const cappedMap: Record<string, Record<string, number>> = {};
+      let nsCount = 0;
+      for (const [ns, names] of Object.entries(src)) {
+        if (nsCount >= MAX_STAMP_NAMESPACES) break;
+        if (!isPlainObject(names)) continue;
+        const cappedNs: Record<string, number> = {};
+        let entryCount = 0;
+        for (const [name, ts] of Object.entries(names)) {
+          if (entryCount >= MAX_STAMP_ENTRIES_PER_NS) break;
+          const n = asNumber(ts);
+          if (n > 0) {
+            cappedNs[name.slice(0, MAX_LIST_STRING_LEN)] = n;
+            entryCount++;
+          }
+        }
+        if (Object.keys(cappedNs).length > 0) {
+          cappedMap[ns.slice(0, MAX_LIST_STRING_LEN)] = cappedNs;
+          nsCount++;
+        }
+      }
+      out[stampKey] = cappedMap;
+    }
+  }
+
+  // Aggregate size guard — pass 1: strip bulk optional fields one by one until
+  // the blob fits within the budget. This degrades performance (clients
+  // re-upload on the next push) but preserves run data integrity.
+  for (const field of TRIMMABLE_BULK_FIELDS) {
+    try {
+      if (Buffer.byteLength(JSON.stringify(out), "utf8") <= MAX_AGGREGATE_BYTES) break;
+    } catch {
+      // un-serialisable — keep trimming
+    }
+    if (field in out) {
+      delete out[field];
+    }
+  }
+
+  // Aggregate size guard — pass 2: drop stamp maps if still over budget.
+  // Stamp entries are advisory (deletion UI) — dropping them causes cosmetic
+  // glitches but never corrupts production data.
+  for (const stampKey of ["deletedStamps", "undeletedStamps"] as const) {
+    try {
+      if (Buffer.byteLength(JSON.stringify(out), "utf8") <= MAX_AGGREGATE_BYTES) break;
+    } catch {
+      // keep trimming
+    }
+    if (stampKey in out) {
+      delete out[stampKey];
+    }
+  }
+
+  // Aggregate size guard — pass 3 (comprehensive hard guarantee): enforce the
+  // 512 KB limit across ALL retained fields, including any legacy-row values
+  // that were merged from the DB without ever passing through the incoming
+  // sanitizer (e.g. an existing oversized shiftNotes, substitutions array, or
+  // stagedItems object written before this guard existed). The trimming cascade
+  // removes content in priority order — most expendable first — so run data
+  // is the last thing ever dropped.
+  function overBudget(): boolean {
+    try {
+      return Buffer.byteLength(JSON.stringify(out), "utf8") > MAX_AGGREGATE_BYTES;
+    } catch {
+      return true; // un-serialisable → must trim
+    }
+  }
+
+  // 3a: Cap shiftNotes in the merged dayState. Legacy rows may have been written
+  //     before the incoming sanitizer was in place and could hold uncapped values.
+  if (isPlainObject(out.dayState)) {
+    const ds = out.dayState as Record<string, unknown>;
+    if (typeof ds.shiftNotes === "string" && ds.shiftNotes.length > MAX_SHIFT_NOTES_LEN) {
+      out.dayState = { ...ds, shiftNotes: ds.shiftNotes.slice(0, MAX_SHIFT_NOTES_LEN) };
+    }
+  }
+
+  // 3b: Drop optional dayState sub-fields one by one (least critical first).
+  //     These fields are useful for the shift but clients re-derive them locally;
+  //     dropping them causes cosmetic degradation but preserves run integrity.
+  const DROPPABLE_DAYSTATE_KEYS = [
+    "substitutionLog",
+    "substitutions",
+    "stagedItems",
+    "prepPhase",
+    "runToTime",
+    "shiftNotes",
+    "date",
+  ] as const;
+  if (overBudget() && isPlainObject(out.dayState)) {
+    const ds = { ...(out.dayState as Record<string, unknown>) };
+    for (const k of DROPPABLE_DAYSTATE_KEYS) {
+      if (!overBudget()) break;
+      // Need to re-stringify with each drop; reassign out.dayState so overBudget() sees it.
+      delete ds[k];
+      out.dayState = ds;
+    }
+  }
+
+  // 3c: Trim runValues entries from the tail (they're large objects).
+  while (overBudget() && isPlainObject(out.runValues)) {
+    const keys = Object.keys(out.runValues as object);
+    if (keys.length === 0) break;
+    const updated = { ...(out.runValues as Record<string, unknown>) };
+    delete updated[keys[keys.length - 1]!];
+    out.runValues = updated;
+  }
+
+  // Mirror: trim runValuesUpdatedAt to match runValues key count.
+  if (isPlainObject(out.runValues) && isPlainObject(out.runValuesUpdatedAt)) {
+    const remaining = new Set(Object.keys(out.runValues as object));
+    const trimmed: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(out.runValuesUpdatedAt as object)) {
+      if (remaining.has(k)) trimmed[k] = v;
+    }
+    out.runValuesUpdatedAt = trimmed;
+  }
+
+  // 3d: Trim dayState.runs from the tail if still over budget.
+  while (overBudget() && isPlainObject(out.dayState)) {
+    const runs = (out.dayState as Record<string, unknown>).runs;
+    if (!Array.isArray(runs) || runs.length === 0) break;
+    out.dayState = { ...(out.dayState as Record<string, unknown>), runs: runs.slice(0, -1) };
+  }
+
+  // 3e: Absolute last resort — if a single run object is itself enormous (or
+  //     some other retained mandatory field is very large), clear runs entirely
+  //     rather than ever writing an oversized row. The clients will re-send their
+  //     local run data on the next push and the merge will restore it.
+  if (overBudget()) {
+    if (isPlainObject(out.dayState)) {
+      const ds = out.dayState as Record<string, unknown>;
+      out.dayState = { runs: [], resetAt: typeof ds.resetAt === "number" ? ds.resetAt : 0 };
+    }
+    out.runValues = {};
+    out.runValuesUpdatedAt = {};
+  }
+
+  // 3f: True hard guarantee — after all cascade steps, strip any remaining
+  //     top-level keys (except the minimum needed for run recovery) until the
+  //     blob actually fits. This is the unconditional backstop that makes the
+  //     512 KB limit a real invariant rather than a best-effort bound.
+  if (overBudget()) {
+    // Drop every top-level key except the core run-recovery fields.
+    const ESSENTIAL_KEYS = new Set(["dayState", "runValues", "runValuesUpdatedAt", "dayStateUpdatedAt"]);
+    const allKeys = Object.keys(out);
+    for (const k of allKeys) {
+      if (ESSENTIAL_KEYS.has(k)) continue;
+      delete out[k];
+      if (!overBudget()) break;
+    }
+  }
+
+  return out;
 }

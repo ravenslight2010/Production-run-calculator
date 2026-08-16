@@ -250,18 +250,20 @@ async function listRuleIds(userId: string): Promise<string[]> {
 describe("live ↔ sandbox scope isolation", () => {
   it("day-state, inventory, and production rules never cross between scopes", async () => {
     // Live writes its rows.
-    await putDayState(LIVE_MANAGER, { marker: "live-day" });
+    await putDayState(LIVE_MANAGER, { dayState: { runs: [], resetAt: 0, shiftNotes: "live-day" } });
     await createItem(LIVE_MANAGER, "live-item");
     await createRule(LIVE_MANAGER, "live-rule");
 
     // Sandbox writes its own, distinct rows.
-    await putDayState(sandboxUserId, { marker: "sandbox-day" });
+    await putDayState(sandboxUserId, { dayState: { runs: [], resetAt: 0, shiftNotes: "sandbox-day" } });
     await createItem(sandboxUserId, "sandbox-item");
     await createRule(sandboxUserId, "sandbox-rule");
 
     // Each scope reads back ONLY its own day-state.
-    expect(await getDayState(LIVE_MANAGER)).toEqual({ marker: "live-day" });
-    expect(await getDayState(sandboxUserId)).toEqual({ marker: "sandbox-day" });
+    const liveDs = await getDayState(LIVE_MANAGER) as Record<string, unknown>;
+    const sandboxDs = await getDayState(sandboxUserId) as Record<string, unknown>;
+    expect((liveDs?.dayState as Record<string, unknown>)?.shiftNotes).toBe("live-day");
+    expect((sandboxDs?.dayState as Record<string, unknown>)?.shiftNotes).toBe("sandbox-day");
 
     // Inventory is isolated: neither scope sees the other's item.
     expect(await listItemKeys(LIVE_MANAGER)).toEqual(["live-item"]);
@@ -284,13 +286,13 @@ describe("live ↔ sandbox scope isolation", () => {
 describe("POST /sandbox/reset re-copies live → sandbox", () => {
   it("wipes the sandbox's divergent edits and mirrors live, leaving live untouched", async () => {
     // Live is the source of truth.
-    await putDayState(LIVE_MANAGER, { marker: "live-day" });
+    await putDayState(LIVE_MANAGER, { dayState: { runs: [], resetAt: 0, shiftNotes: "live-day" } });
     await createItem(LIVE_MANAGER, "live-item");
     await createRule(LIVE_MANAGER, "live-rule");
 
     // The sandbox diverges: a different day-state, a sandbox-only item, and a
     // sandbox-only rule.
-    await putDayState(sandboxUserId, { marker: "sandbox-divergent" });
+    await putDayState(sandboxUserId, { dayState: { runs: [], resetAt: 0, shiftNotes: "sandbox-divergent" } });
     await createItem(sandboxUserId, "sandbox-only-item");
     await createRule(sandboxUserId, "sandbox-only-rule");
 
@@ -299,18 +301,20 @@ describe("POST /sandbox/reset re-copies live → sandbox", () => {
     expect(resetRes.status).toBe(200);
 
     // The sandbox now mirrors live: divergent edits gone, live's rows copied in.
-    expect(await getDayState(sandboxUserId)).toEqual({ marker: "live-day" });
+    const sandboxAfter = await getDayState(sandboxUserId) as Record<string, unknown>;
+    expect((sandboxAfter?.dayState as Record<string, unknown>)?.shiftNotes).toBe("live-day");
     expect(await listItemKeys(sandboxUserId)).toEqual(["live-item"]);
     expect(await listRuleIds(sandboxUserId)).toEqual(["live-rule"]);
 
     // Live is completely unaffected by the reset.
-    expect(await getDayState(LIVE_MANAGER)).toEqual({ marker: "live-day" });
+    const liveAfter = await getDayState(LIVE_MANAGER) as Record<string, unknown>;
+    expect((liveAfter?.dayState as Record<string, unknown>)?.shiftNotes).toBe("live-day");
     expect(await listItemKeys(LIVE_MANAGER)).toEqual(["live-item"]);
     expect(await listRuleIds(LIVE_MANAGER)).toEqual(["live-rule"]);
   });
 
   it("refuses a live session (403) and changes nothing", async () => {
-    await putDayState(LIVE_MANAGER, { marker: "live-day" });
+    await putDayState(LIVE_MANAGER, { dayState: { runs: [], resetAt: 0, shiftNotes: "live-day" } });
     await createItem(LIVE_MANAGER, "live-item");
 
     const res = await req(LIVE_MANAGER, "POST", "/api/sandbox/reset");
@@ -318,7 +322,8 @@ describe("POST /sandbox/reset re-copies live → sandbox", () => {
 
     // The live data the request could have clobbered is intact, and nothing was
     // copied into the sandbox.
-    expect(await getDayState(LIVE_MANAGER)).toEqual({ marker: "live-day" });
+    const liveDs = await getDayState(LIVE_MANAGER) as Record<string, unknown>;
+    expect((liveDs?.dayState as Record<string, unknown>)?.shiftNotes).toBe("live-day");
     expect(await listItemKeys(LIVE_MANAGER)).toEqual(["live-item"]);
     expect(await listItemKeys(sandboxUserId)).toEqual([]);
   });
