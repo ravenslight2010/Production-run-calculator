@@ -712,6 +712,10 @@ export interface MixScheduledRun {
   // All ingredient names used in this run's profile (applicator types,
   // cheese/sauce recipe rows). Used to match prep mixes by ingredient.
   ingredients?: string[];
+  // oz/pizza for each ingredient name, sourced from the run's profile.
+  // Used by prep mixes so lbs scale to each brand's actual recipe weight,
+  // not the mix card's generic perPizza value.
+  ingredientOzPerPizza?: Record<string, number>;
 }
 
 // One component of a mix, scaled to the run's pizza count.
@@ -800,6 +804,45 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
   // the manager needs to open the Mixes editor and fill them in.
   const missingAmounts =
     mix.components.length > 0 && mix.components.every((c) => !(c.perPizza > 0));
+  const entry: MixPlanEntry = {
+    mixId: mix.id,
+    name: mix.name,
+    batchSize: mix.batchSize,
+    daysEarly: mix.daysEarly,
+    startupLbs,
+    totalLbs,
+    amountAlreadyMade: mix.amountAlreadyMade,
+    remainingLbs,
+    batches,
+    components,
+    missingAmounts,
+  };
+  if (mix.notes) entry.notes = mix.notes;
+  return entry;
+}
+
+// Like computeEntry but accepts pre-computed per-component lbs totals (already
+// summed across runs with per-run oz/pizza). Used for prep mixes where each run
+// may use a different oz/pizza weight for the same ingredient.
+function computeEntryFromComponentLbs(
+  mix: Mix,
+  perComponentLbs: number[],
+): MixPlanEntry {
+  const components: MixComponentPlan[] = mix.components.map((c, i) => ({
+    ingredient: c.ingredient,
+    lbs: perComponentLbs[i] ?? 0,
+  }));
+  const componentLbs = components.reduce((acc, comp) => acc + comp.lbs, 0);
+  const MIX_WASTE_FACTOR = 0.15;
+  const wasteLbs = componentLbs * MIX_WASTE_FACTOR;
+  const startupLbs = 20;
+  const totalLbs = componentLbs + wasteLbs + startupLbs;
+  const remainingLbs = Math.max(0, totalLbs - mix.amountAlreadyMade);
+  const batches = mix.batchSize > 0 ? remainingLbs / mix.batchSize : 0;
+  // missingAmounts: mix has components but none contributed any lbs
+  // (likely because the profile oz/pizza is 0 and no perPizza fallback).
+  const missingAmounts =
+    mix.components.length > 0 && perComponentLbs.every((l) => !(l > 0));
   const entry: MixPlanEntry = {
     mixId: mix.id,
     name: mix.name,
@@ -934,21 +977,48 @@ export function buildMixPlan(args: {
         const componentKeys = mix.components.map((comp) =>
           comp.ingredient.trim().toLowerCase(),
         );
-        const matchPizzas = dateRuns
-          .filter((r) =>
-            (r.ingredients ?? []).some((i) =>
-              componentKeys.includes(i.trim().toLowerCase()),
-            ),
-          )
-          .reduce((sum, r) => sum + r.pizzas, 0);
-        if (matchPizzas <= 0) continue;
+        const matchingRuns = dateRuns.filter((r) =>
+          (r.ingredients ?? []).some((i) =>
+            componentKeys.includes(i.trim().toLowerCase()),
+          ),
+        );
+        if (matchingRuns.length === 0) continue;
+        // Compute per-component lbs using each run's profile oz/pizza, not the
+        // mix card's generic perPizza. Different brands/flavors may use different
+        // weights for the same ingredient. Falls back to mix.component.perPizza
+        // if the run has no profile data for that ingredient.
+        const perComponentLbs = mix.components.map((comp) => {
+          const key = comp.ingredient.trim().toLowerCase();
+          return matchingRuns
+            .filter((r) =>
+              (r.ingredients ?? []).some(
+                (i) => i.trim().toLowerCase() === key,
+              ),
+            )
+            .reduce((sum, r) => {
+              let oz = comp.perPizza; // fallback: mix card value
+              if (r.ingredientOzPerPizza) {
+                // Try exact name match first, then case-insensitive.
+                const exact = r.ingredientOzPerPizza[comp.ingredient];
+                if (exact !== undefined) {
+                  oz = exact;
+                } else {
+                  const ci = Object.entries(r.ingredientOzPerPizza).find(
+                    ([k]) => k.trim().toLowerCase() === key,
+                  );
+                  if (ci) oz = ci[1];
+                }
+              }
+              return sum + (oz / OZ_PER_LB) * r.pizzas;
+            }, 0);
+        });
         let group = groupByDate.get(date);
         if (!group) {
           group = { date, daysUntil: du, runs: [], prepMixes: [] };
           groupByDate.set(date, group);
           groups.push(group);
         }
-        group.prepMixes.push(computeEntry(mix, matchPizzas));
+        group.prepMixes.push(computeEntryFromComponentLbs(mix, perComponentLbs));
       }
     }
   }

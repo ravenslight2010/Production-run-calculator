@@ -14258,16 +14258,41 @@ export default function Home() {
                             ...(r.dieType ? { dieType: r.dieType } : {}),
                           };
                           const s = computeSummaryStats(vals);
-                          // Collect ingredient names for prep-mix matching.
-                          const ingredients = [
-                            vals.app1Type, vals.app2Type, vals.app3Type, vals.app4Type,
-                            vals.pep1Type, vals.pep2Type, vals.pep1TypeB, vals.pep2TypeB,
-                            ...vals.app1CheeseRecipe.map((row) => row.ingredient),
-                            ...vals.app2CheeseRecipe.map((row) => row.ingredient),
-                            ...vals.app3CheeseRecipe.map((row) => row.ingredient),
-                            ...vals.app4CheeseRecipe.map((row) => row.ingredient),
-                            ...vals.frontlineRecipe.map((row) => row.ingredient),
-                          ].filter(Boolean);
+                          // Collect ingredient names + oz/pizza for prep-mix matching.
+                          // Each applicator slot contributes its ingredients: when a
+                          // cheese recipe is set, split the total oz/pizza by each
+                          // row's lbs share; otherwise the slot type gets the full oz.
+                          const ingredientOzPerPizza: Record<string, number> = {};
+                          const addSlot = (
+                            recipe: typeof vals.app1CheeseRecipe,
+                            type: string,
+                            oz: number,
+                          ) => {
+                            if (recipe.length > 0 && oz > 0) {
+                              const { rows } = computeCheesePerPizzaOz(recipe, oz);
+                              recipe.forEach((row, i) => {
+                                if (row.ingredient)
+                                  ingredientOzPerPizza[row.ingredient] =
+                                    (ingredientOzPerPizza[row.ingredient] ?? 0) + rows[i];
+                              });
+                            } else if (type && oz > 0) {
+                              ingredientOzPerPizza[type] =
+                                (ingredientOzPerPizza[type] ?? 0) + oz;
+                            }
+                          };
+                          addSlot(vals.app1CheeseRecipe, vals.app1Type, vals.app1OzPerPizza);
+                          addSlot(vals.app2CheeseRecipe, vals.app2Type, vals.app2OzPerPizza);
+                          addSlot(vals.app3CheeseRecipe, vals.app3Type, vals.app3OzPerPizza);
+                          addSlot(vals.app4CheeseRecipe, vals.app4Type, vals.app4OzPerPizza);
+                          if (vals.pep1Type && vals.pep1OzPerPizza > 0)
+                            ingredientOzPerPizza[vals.pep1Type] = (ingredientOzPerPizza[vals.pep1Type] ?? 0) + vals.pep1OzPerPizza;
+                          if (vals.pep2Type && vals.pep2OzPerPizza > 0)
+                            ingredientOzPerPizza[vals.pep2Type] = (ingredientOzPerPizza[vals.pep2Type] ?? 0) + vals.pep2OzPerPizza;
+                          if (vals.pep1TypeB && (vals.pep1OzPerPizzaB ?? 0) > 0)
+                            ingredientOzPerPizza[vals.pep1TypeB] = (ingredientOzPerPizza[vals.pep1TypeB] ?? 0) + (vals.pep1OzPerPizzaB ?? 0);
+                          if (vals.pep2TypeB && (vals.pep2OzPerPizzaB ?? 0) > 0)
+                            ingredientOzPerPizza[vals.pep2TypeB] = (ingredientOzPerPizza[vals.pep2TypeB] ?? 0) + (vals.pep2OzPerPizzaB ?? 0);
+                          const ingredients = Object.keys(ingredientOzPerPizza);
                           return {
                             date: day.date,
                             brand: r.brand,
@@ -14278,6 +14303,7 @@ export default function Home() {
                             pizzas: s.totalPizzasForSauce,
                             cases: s.totalCases,
                             ingredients,
+                            ingredientOzPerPizza,
                           };
                         }),
                     );
