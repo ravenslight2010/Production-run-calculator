@@ -17,7 +17,6 @@ export type MixAssistMixContext = {
   batchSize: number;
   daysEarly: number;
   amountAlreadyMade: number;
-  startupLbs: number;
   enabled: boolean;
   components: { ingredient: string; perPizza: number }[];
 };
@@ -37,7 +36,6 @@ export function buildMixAssistContext(mixes: ReadonlyArray<Mix>): MixAssistMixCo
     batchSize: m.batchSize,
     daysEarly: m.daysEarly,
     amountAlreadyMade: m.amountAlreadyMade,
-    startupLbs: m.startupLbs,
     enabled: m.enabled,
     components: m.components.map((c) => ({ ingredient: c.ingredient, perPizza: c.perPizza })),
   }));
