@@ -106,6 +106,7 @@ router.post(
               notes: values.notes,
               amountAlreadyMade: values.amountAlreadyMade,
               components: values.components,
+              isPrep: values.isPrep,
               enabled: values.enabled,
               updatedAt: values.updatedAt,
             },
