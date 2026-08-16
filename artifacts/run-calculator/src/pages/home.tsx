@@ -14298,9 +14298,16 @@ export default function Home() {
                                       {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
                                     </div>
                                     <div className="text-xs text-emerald-300/80 whitespace-nowrap tabular-nums">
-                                      {run.cases} case{run.cases !== 1 ? "s" : ""} · {run.pizzas} pizza{run.pizzas !== 1 ? "s" : ""}
+                                      {run.cases} case{run.cases !== 1 ? "s" : ""}
+                                      {run.pizzas > 0 ? ` · ${run.pizzas} pizza${run.pizzas !== 1 ? "s" : ""}` : null}
                                     </div>
                                   </div>
+                                  {run.cases > 0 && run.pizzas === 0 && (
+                                    <div className="flex items-center gap-1.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 mb-2 text-xs text-amber-300">
+                                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                      Pizzas/case not set for this product — open Setup to enter it so lbs can be computed
+                                    </div>
+                                  )}
                                   <div className="space-y-2.5">
                                     {run.mixes.map((m) => (
                                       <div key={m.mixId} className="rounded border border-emerald-800/30 bg-emerald-900/10 p-2.5">
@@ -14335,18 +14342,31 @@ export default function Home() {
                                           </div>
                                         )}
                                         <div className="space-y-1 pt-1 border-t border-emerald-800/30">
-                                          <div className="text-[11px] uppercase tracking-wider text-emerald-400/70 font-semibold pt-1">Pull For Mix</div>
+                                          <div className="text-[11px] uppercase tracking-wider text-emerald-400/70 font-semibold pt-1">
+                                            Pull For Mix
+                                            {m.batchSize > 0 && m.batches > 0 && (
+                                              <span className="ml-1.5 font-normal normal-case text-emerald-500/70">(per batch in parentheses)</span>
+                                            )}
+                                          </div>
                                           {m.components.length === 0 ? (
                                             <div className="text-xs text-emerald-400/60">No components defined.</div>
                                           ) : (
-                                            m.components.map((c, ci) => (
-                                              <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
-                                                <span className="text-emerald-200/90 truncate">{c.ingredient}</span>
-                                                <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50">
-                                                  {fmtNum(c.lbs, 2)} <span className="font-normal text-emerald-300/80">lbs</span>
-                                                </span>
-                                              </div>
-                                            ))
+                                            m.components.map((c, ci) => {
+                                              const perBatch = m.batchSize > 0 && m.batches > 0 && m.totalLbs > 0
+                                                ? (c.lbs / m.totalLbs) * m.batchSize
+                                                : null;
+                                              return (
+                                                <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
+                                                  <span className="text-emerald-200/90 truncate">{c.ingredient}</span>
+                                                  <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50">
+                                                    {fmtNum(c.lbs, 2)} <span className="font-normal text-emerald-300/80">lbs</span>
+                                                    {perBatch !== null && (
+                                                      <span className="font-normal text-emerald-400/70 ml-1.5">({fmtNum(perBatch, 2)}/batch)</span>
+                                                    )}
+                                                  </span>
+                                                </div>
+                                              );
+                                            })
                                           )}
                                         </div>
                                       </div>
