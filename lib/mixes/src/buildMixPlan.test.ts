@@ -400,3 +400,113 @@ describe("buildMixPlan — prep mixes: ingredientOzPerPizza lookup", () => {
     expect(entry.components[0].lbs).not.toBeCloseTo(wrongLbs, 1);
   });
 });
+
+// ── missingAmounts + missingComponentIngredients ───────────────────────────
+
+describe("buildMixPlan — prep-mix missingAmounts and missingComponentIngredients", () => {
+  function makePrepMix(overrides: Partial<Mix> & { name: string }): Mix {
+    return normalizeMix({
+      id: overrides.id ?? overrides.name.toLowerCase().replace(/\s+/g, "-"),
+      name: overrides.name,
+      brand: overrides.brand ?? "",
+      flavor: overrides.flavor ?? "",
+      batchSize: overrides.batchSize ?? 0,
+      daysEarly: overrides.daysEarly ?? 0,
+      amountAlreadyMade: overrides.amountAlreadyMade ?? 0,
+      components: overrides.components ?? [],
+      enabled: true,
+      isPrep: true,
+    })!;
+  }
+
+  function prepRun(
+    date: string,
+    pizzas: number,
+    ingredients: string[],
+    ozMap?: Record<string, number>,
+    brand = "BrandX",
+  ): MixScheduledRun {
+    const r: MixScheduledRun = { date, brand, flavor: "", pizzas, cases: 0, ingredients };
+    if (ozMap) r.ingredientOzPerPizza = ozMap;
+    return r;
+  }
+
+  it("missingAmounts=true and missingComponentIngredients lists ALL components when no run matches any ingredient (name mismatch)", () => {
+    const mixes = [
+      makePrepMix({
+        name: "Veggie Prep",
+        components: [
+          { ingredient: "Bell Peppers", perPizza: 1.5 },
+          { ingredient: "Onions", perPizza: 1.0 },
+        ],
+      }),
+    ];
+    // Run profile uses different names — no ingredient matches
+    const r = prepRun(TODAY, 200, ["Green Peppers", "Yellow Onions"], {
+      "Green Peppers": 1.5,
+      "Yellow Onions": 1.0,
+    });
+
+    const plan = buildMixPlan({ mixes, runs: [r], today: TODAY });
+    // Prep mix must still appear (not silently skipped)
+    expect(plan).toHaveLength(1);
+    expect(plan[0].prepMixes).toHaveLength(1);
+
+    const entry = plan[0].prepMixes[0];
+    expect(entry.missingAmounts).toBe(true);
+    expect(entry.missingComponentIngredients).toEqual(["Bell Peppers", "Onions"]);
+    // Pull quantities are 0; totalLbs is startup-only (20 lbs)
+    expect(entry.components[0].lbs).toBe(0);
+    expect(entry.components[1].lbs).toBe(0);
+    expect(entry.totalLbs).toBeCloseTo(20, 8); // startup buffer only
+  });
+
+  it("missingAmounts=true and missingComponentIngredients lists only the unmatched component when match is partial", () => {
+    const mixes = [
+      makePrepMix({
+        name: "Partial Prep",
+        components: [
+          { ingredient: "Pepperoni", perPizza: 2.0 },
+          { ingredient: "Jalapenos", perPizza: 1.0 }, // name mismatch in run profile
+        ],
+      }),
+    ];
+    // Run profile has Pepperoni (matches) but calls the other ingredient "Jalapeños" (won't match)
+    const r = prepRun(
+      TODAY,
+      100,
+      ["Pepperoni", "Jalapeños"],
+      { Pepperoni: 2.0, "Jalapeños": 1.0 },
+    );
+
+    const plan = buildMixPlan({ mixes, runs: [r], today: TODAY });
+    expect(plan).toHaveLength(1);
+    const entry = plan[0].prepMixes[0];
+
+    expect(entry.missingAmounts).toBe(true);
+    expect(entry.missingComponentIngredients).toEqual(["Jalapenos"]);
+    // Pepperoni lbs are populated; Jalapenos lbs are 0
+    const expectedPepLbs = (2.0 * 100) / OZ_PER_LB;
+    expect(entry.components[0].lbs).toBeCloseTo(expectedPepLbs, 8);
+    expect(entry.components[1].lbs).toBe(0);
+  });
+
+  it("missingAmounts=false and missingComponentIngredients absent when all components are matched", () => {
+    const mixes = [
+      makePrepMix({
+        name: "Full Match Prep",
+        components: [
+          { ingredient: "Mushrooms", perPizza: 1.5 },
+          { ingredient: "Olives", perPizza: 0.5 },
+        ],
+      }),
+    ];
+    const r = prepRun(TODAY, 120, ["Mushrooms", "Olives"], { Mushrooms: 1.5, Olives: 0.5 });
+
+    const [group] = buildMixPlan({ mixes, runs: [r], today: TODAY });
+    const entry = group.prepMixes[0];
+
+    expect(entry.missingAmounts).toBe(false);
+    expect(entry.missingComponentIngredients).toBeUndefined();
+  });
+});

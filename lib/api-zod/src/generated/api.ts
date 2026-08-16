@@ -2332,7 +2332,7 @@ export const ListMixesResponse = zod.object({
   "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is an ingredient-prep mix matched by component ingredient names against each run\'s profile rather than by brand\/flavor.')
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
 
@@ -2357,7 +2357,7 @@ export const SaveMixesBody = zod.object({
   "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is an ingredient-prep mix matched by component ingredient names against each run\'s profile rather than by brand\/flavor.')
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')).describe('The batch of mixes to create or update (by id)')
 })
 
@@ -2377,7 +2377,7 @@ export const SaveMixesResponse = zod.object({
   "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is an ingredient-prep mix matched by component ingredient names against each run\'s profile rather than by brand\/flavor.')
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
 
@@ -2406,7 +2406,7 @@ export const DeleteMixesResponse = zod.object({
   "perBatchLbs": zod.number().optional().describe('Pounds of this ingredient in one batch of the mix (reference only). Absent\/0 = not recorded.')
 }).describe('One ingredient of a mix and how many ounces of it go into a single pizza\'s worth of the finished mix, plus an optional per-batch pound amount (manager-entered reference; plan math scales from perPizza).')).describe('The ingredients that make up the mix'),
   "enabled": zod.boolean(),
-  "isPrep": zod.boolean().optional().describe('When true, this mix is an ingredient-prep mix matched by component ingredient names against each run\'s profile rather than by brand\/flavor.')
+  "isPrep": zod.boolean().optional().describe('When true, this mix is a prep recipe matched by ingredient name across all runs (brand\/flavor matching is skipped). Absent = false.')
 }).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
 })
 

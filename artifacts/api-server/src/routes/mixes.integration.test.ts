@@ -359,3 +359,86 @@ describe("GET /api/mixes → buildMixPlan: non-zero Pull For Mix lbs", () => {
     expect(second.items[0].components[1].perPizza).toBe(0.5);
   });
 });
+
+describe("POST /api/mixes — isPrep round-trip", () => {
+  it("saves isPrep=true and returns it correctly on the same POST response", async () => {
+    const { status, items } = await postMixes([
+      {
+        id: "prep-mix-herb",
+        name: "Herb Prep Mix",
+        brand: "",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        amountAlreadyMade: 0,
+        components: [{ ingredient: "Basil", perPizza: 1.0 }],
+        enabled: true,
+        isPrep: true,
+      },
+    ]);
+    expect(status).toBe(200);
+    expect(items).toHaveLength(1);
+    expect(items[0].isPrep).toBe(true);
+  });
+
+  it("persists isPrep=true so a subsequent GET returns it unchanged (not reset to false)", async () => {
+    await postMixes([
+      {
+        id: "prep-mix-herb",
+        name: "Herb Prep Mix",
+        brand: "",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        amountAlreadyMade: 0,
+        components: [{ ingredient: "Basil", perPizza: 1.0 }],
+        enabled: true,
+        isPrep: true,
+      },
+    ]);
+
+    const { status, items } = await getMixes();
+    expect(status).toBe(200);
+    expect(items).toHaveLength(1);
+    expect(items[0].isPrep).toBe(true);
+  });
+
+  it("upsert preserves isPrep=true when the same id is re-POSTed — toggling Prep checkbox survives a save round-trip", async () => {
+    // First POST: create as a normal (non-prep) mix
+    await postMixes([
+      {
+        id: "mix-toggle-prep",
+        name: "Toggle Mix",
+        brand: "Aldo's",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        amountAlreadyMade: 0,
+        components: [{ ingredient: "Onions", perPizza: 1.0 }],
+        enabled: true,
+        isPrep: false,
+      },
+    ]);
+
+    // Manager toggles the Prep checkbox and saves — re-POST same id with isPrep=true
+    const { items } = await postMixes([
+      {
+        id: "mix-toggle-prep",
+        name: "Toggle Mix",
+        brand: "Aldo's",
+        flavor: "",
+        batchSize: 0,
+        daysEarly: 0,
+        amountAlreadyMade: 0,
+        components: [{ ingredient: "Onions", perPizza: 1.0 }],
+        enabled: true,
+        isPrep: true,
+      },
+    ]);
+    expect(items[0].isPrep).toBe(true);
+
+    // GET confirms it persisted
+    const get = await getMixes();
+    expect(get.items[0].isPrep).toBe(true);
+  });
+});

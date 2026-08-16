@@ -755,13 +755,22 @@ export interface MixPlanEntry {
   batches: number;
   components: MixComponentPlan[];
   /**
-   * True when the mix has at least one component but EVERY component's
-   * perPizza is 0 — i.e. no oz/pizza amounts have been entered yet. The
-   * plan's totalLbs will be 0 as a result. Callers use this to distinguish
-   * "amounts missing" from "legitimately 0 lbs" (e.g. amountAlreadyMade
-   * covers everything, or a future-date run with 0 pizzas).
+   * True when the mix has at least one component and AT LEAST ONE component's
+   * resolved lbs is 0. For brand/flavor mixes this means every component's
+   * perPizza is 0 (none entered yet). For prep mixes it fires whenever any
+   * component failed to produce lbs — either its name doesn't match any run
+   * profile ingredient (name mismatch), the profile oz/pizza is 0 with no
+   * mix-card fallback, or no runs on this date carry the ingredient at all.
+   * See `missingComponentIngredients` for the specific ingredient names.
    */
   missingAmounts: boolean;
+  /**
+   * For prep mixes: ingredient names whose profile oz/pizza resolved to
+   * 0 lbs (either no run carries the ingredient or every matching run has
+   * 0 oz/pizza with no mix-card fallback). Empty for brand/flavor mixes.
+   * Present when non-empty so callers can call out specific components.
+   */
+  missingComponentIngredients?: string[];
   /**
    * Per-run breakdown of how many lbs each scheduled run contributes to this
    * prep mix total. Only present on prep-mix entries with 2+ contributing runs,
@@ -860,10 +869,15 @@ function computeEntryFromComponentLbs(
   const totalLbs = componentLbs + wasteLbs + startupLbs;
   const remainingLbs = Math.max(0, totalLbs - mix.amountAlreadyMade);
   const batches = mix.batchSize > 0 ? remainingLbs / mix.batchSize : 0;
-  // missingAmounts: mix has components but none contributed any lbs
-  // (likely because the profile oz/pizza is 0 and no perPizza fallback).
+  // missingAmounts: at least one component contributed no lbs — either because
+  // its name doesn't match any run profile ingredient (name mismatch) or the
+  // profile oz/pizza is 0 and the mix card has no perPizza fallback.
+  // Also true when the prep mix has no matching runs at all (all zeros).
+  const missingComponentIngredients = mix.components
+    .filter((_, i) => !(perComponentLbs[i] > 0))
+    .map((c) => c.ingredient);
   const missingAmounts =
-    mix.components.length > 0 && perComponentLbs.every((l) => !(l > 0));
+    mix.components.length > 0 && missingComponentIngredients.length > 0;
   const entry: MixPlanEntry = {
     mixId: mix.id,
     name: mix.name,
@@ -878,6 +892,8 @@ function computeEntryFromComponentLbs(
     missingAmounts,
   };
   if (mix.notes) entry.notes = mix.notes;
+  if (missingComponentIngredients.length > 0)
+    entry.missingComponentIngredients = missingComponentIngredients;
   // Only attach contributions when there are 2+ runs — a single run adds no
   // diagnostic value and would just clutter the UI.
   if (contributions && contributions.length >= 2) entry.contributions = contributions;
@@ -1024,7 +1040,10 @@ export function buildMixPlan(args: {
             componentKeys.some((ck) => ingredientMatches(i, ck)),
           ),
         );
-        if (matchingRuns.length === 0) continue;
+        // Do NOT skip when no runs matched — include the prep mix with all-zero
+        // component lbs so missingAmounts=true and the warning renders. A name
+        // mismatch between the mix card and run profiles is the most likely cause
+        // and would otherwise make the entry invisible to the manager entirely.
         // Compute per-component lbs using each run's profile oz/pizza, not the
         // mix card's generic perPizza. Different brands/flavors may use different
         // weights for the same ingredient. Falls back to mix.component.perPizza
@@ -1058,13 +1077,14 @@ export function buildMixPlan(args: {
               return sum + (oz / OZ_PER_LB) * r.pizzas;
             }, 0);
         });
-        // Build per-run contribution totals (sum across all components for each run).
+        // Build per-run contribution totals (sum across all components for each
+        // run). Uses the same ingredientMatches() logic as perComponentLbs so
+        // the contribution breakdown always reconciles to the plan total.
         for (const r of matchingRuns) {
           let runTotalLbs = 0;
           for (const comp of mix.components) {
-            const key = comp.ingredient.trim().toLowerCase();
             const hasIngredient = (r.ingredients ?? []).some(
-              (i) => i.trim().toLowerCase() === key,
+              (i) => ingredientMatches(i, comp.ingredient),
             );
             if (!hasIngredient) continue;
             let oz = comp.perPizza;
@@ -1074,7 +1094,7 @@ export function buildMixPlan(args: {
                 oz = exact;
               } else {
                 const ci = Object.entries(r.ingredientOzPerPizza).find(
-                  ([k]) => k.trim().toLowerCase() === key,
+                  ([k]) => ingredientMatches(k, comp.ingredient),
                 );
                 if (ci) oz = ci[1];
               }
