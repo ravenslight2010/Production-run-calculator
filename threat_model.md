@@ -33,9 +33,11 @@ Production assumptions for this scan:
 
 - **Production entry points:** `artifacts/api-server/src/app.ts`, `artifacts/api-server/src/index.ts`, `artifacts/api-server/src/routes/index.ts`
 - **Highest-risk areas:** `src/routes/auth.ts`, `src/middlewares/requireAuth.ts`, `src/middlewares/requireCapability.ts`, `src/lib/auth.ts`, `src/lib/roles.ts`, `src/lib/passwordResets.ts`, `src/lib/sandbox.ts`, `src/routes/sync.ts`, `src/routes/inventory.ts`, `src/routes/ai.ts`, `src/routes/aiMemory.ts`, `src/routes/incidents.ts`, `src/routes/incidentsAi.ts`
+- **Confirmed vulnerable routes (scan 2025):** `src/routes/runs.ts` (no capability check on POST/DELETE, no scope isolation); `src/routes/inventory.ts` lines 1045 and 1464 (`/inventory/adjust` and `/inventory/transfer` — no capability gate); `src/routes/sync.ts` line 532 (`DELETE /sync/:date` — no capability gate, `clientToday` bypass allows past-date deletion); `src/routes/factoryData.ts` (GET returns all KV to any authenticated user, no scope isolation); `src/routes/aiMemory.ts` line 208 (conversation endpoint no rate limit).
+- **Scopeless tables (no live/sandbox isolation):** `productionRunsTable`, `qualityChecksTable`, `proactiveAlertSettingsTable`, `factoryKvTable` — these are globally shared and `POST /sync/purge-all` deletes them without scope filter.
 - **Public surface:** `/api/healthz`, `/api/auth/sign-up`, `/api/auth/sign-in`, `/api/auth/username-available`, `/api/auth/forgot-password`, `/api/auth/reset-password`
 - **Authenticated/admin surface:** all other `/api/*` routes after router-level `requireAuth`; elevated routes are guarded per-handler with `requireCapability`. Since the sign-up secret may be shared among staff, authenticated-but-low-privilege routes should still be reviewed for abuse by insider or compromised-staff accounts. Sandbox-only routes remain out of scope in production unless sandbox reachability is reintroduced.
-- **Usually dev-only / out of scope unless proven reachable:** `artifacts/mockup-sandbox/**`, test files, local build scripts, and preview-only token-in-query handling guarded by `NODE_ENV !== "production"`
+- **Usually dev-only / out of scope unless proven reachable:** `artifacts/mockup-sandbox/**`, `_archived/mobile/**`, test files, local build scripts, and preview-only token-in-query handling guarded by `NODE_ENV !== "production"`
 
 ## Threat Categories
 
@@ -55,7 +57,8 @@ Operators and managers can mutate schedules, inventory, production rules, aliase
 
 Required guarantees:
 - All writes must be validated server-side.
-- Capability checks must be enforced on every sensitive mutation.
+- Capability checks must be enforced on every sensitive mutation — including `DELETE /runs/:id`, `POST /inventory/adjust`, `POST /inventory/transfer`, and `DELETE /sync/:date`.
+- The `?today=` query parameter used for timezone support must not be trusted as a security control (it can bypass past-date guards on DELETE /sync/:date).
 - Sync and inventory mutation paths must prevent unauthorized or conflicting updates from corrupting shared state.
 - Facility-wide AI memory must not be writable in ways that let low-privilege users poison or suppress grounded behavior outside the intended product workflow.
 
@@ -68,6 +71,7 @@ Required guarantees:
 - Low-privilege authenticated users must not be able to bulk-read protected facility-wide AI memory or manager-only operational context unless that access is intentionally granted.
 - Sandbox users must never gain access to live data unless that exposure is explicitly authorized and protected.
 - Logs, errors, and AI prompts must not expose secrets or data outside the intended audience.
+- Factory KV entries and quality check records must have scope isolation to prevent sandbox/live data intermingling.
 
 ### Denial of Service
 
@@ -76,6 +80,9 @@ Several public and authenticated routes are computationally or financially expen
 Required guarantees:
 - Expensive endpoints must have effective production rate limits and size bounds.
 - Public auth and recovery endpoints must not allow unbounded automated abuse.
+- `POST /ai-memory/conversation` must be rate-limited (currently absent).
+- `POST /ai/forecast-accuracy` must be rate-limited (currently absent).
+- The rate-limit middleware must not fail open on Postgres store errors in a way that completely removes all AI cost guards.
 - Shared AI-memory stores and other bounded global state must not be cheaply floodable in ways that evict legitimate data or degrade service.
 - External-service failures should degrade safely without taking the application offline.
 
@@ -88,3 +95,4 @@ Required guarantees:
 - First-user/bootstrap behavior must not let any holder of the general staff sign-up code seize manager control unintentionally.
 - Delegated recovery capabilities must not become a path to take over higher-privilege accounts.
 - Sandbox/demo features must not create a shortcut to manager-level powers in production.
+- Destructive operations on production data (run deletion, inventory adjustment, schedule deletion) must require explicit capability checks — not just authentication.
