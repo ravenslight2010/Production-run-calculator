@@ -529,10 +529,11 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.json({ ok: true });
 });
 
-router.delete("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
+router.delete("/sync/:date", requireCapability("manage-factory-settings"), async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
-  if (date <= clientToday(req)) { res.status(400).json({ error: "Cannot delete today or past days" }); return; }
+  // Use server date (not client-supplied ?today=) so the past-date guard cannot be bypassed
+  if (date <= todayStr()) { res.status(400).json({ error: "Cannot delete today or past days" }); return; }
   await db
     .delete(dailySyncTable)
     .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, currentScope())));

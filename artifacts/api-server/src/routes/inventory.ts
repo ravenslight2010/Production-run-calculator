@@ -1042,7 +1042,7 @@ export async function adjustInventory(
   });
 }
 
-router.post("/inventory/adjust", async (req, res): Promise<void> => {
+router.post("/inventory/adjust", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const parsed = AdjustInventoryBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -1461,7 +1461,7 @@ export async function transferStock(
   });
 }
 
-router.post("/inventory/transfer", async (req, res): Promise<void> => {
+router.post("/inventory/transfer", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const parsed = TransferInventoryBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
