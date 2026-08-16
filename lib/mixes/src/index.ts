@@ -977,6 +977,24 @@ export function buildMixPlan(args: {
     groups.push({ date, daysUntil: du, runs: planRuns, prepMixes: [] });
   }
 
+  // ── Ingredient matching helper ────────────────────────────────────────────
+  // "Pineapple" should match "Pineapple - Drained", "Pineapple (Tidbits)", etc.
+  // because spec imports and manual profiles often add qualifiers after the base
+  // name. We consider two names equivalent when one is a word-boundary prefix of
+  // the other (the next character after the shorter name must be a separator,
+  // not a letter/digit, to avoid false positives like "Apple" matching "Applesauce").
+  function ingredientMatches(a: string, b: string): boolean {
+    const ak = a.trim().toLowerCase();
+    const bk = b.trim().toLowerCase();
+    if (ak === bk) return true;
+    const [longer, shorter] = ak.length >= bk.length ? [ak, bk] : [bk, ak];
+    if (longer.startsWith(shorter)) {
+      const next = longer[shorter.length];
+      return next === " " || next === "-" || next === "," || next === "(" || next === "/";
+    }
+    return false;
+  }
+
   // Prep-mix pass: mixes with prepsIngredient match by ingredient name
   // across all runs on a date, regardless of brand/flavor.
   if (prepMixList.length > 0) {
@@ -1003,7 +1021,7 @@ export function buildMixPlan(args: {
         );
         const matchingRuns = dateRuns.filter((r) =>
           (r.ingredients ?? []).some((i) =>
-            componentKeys.includes(i.trim().toLowerCase()),
+            componentKeys.some((ck) => ingredientMatches(i, ck)),
           ),
         );
         if (matchingRuns.length === 0) continue;
@@ -1020,7 +1038,7 @@ export function buildMixPlan(args: {
           return matchingRuns
             .filter((r) =>
               (r.ingredients ?? []).some(
-                (i) => i.trim().toLowerCase() === key,
+                (i) => ingredientMatches(i, comp.ingredient),
               ),
             )
             .reduce((sum, r) => {
@@ -1032,7 +1050,7 @@ export function buildMixPlan(args: {
                   oz = exact;
                 } else {
                   const ci = Object.entries(r.ingredientOzPerPizza).find(
-                    ([k]) => k.trim().toLowerCase() === key,
+                    ([k]) => ingredientMatches(k, comp.ingredient),
                   );
                   if (ci) oz = ci[1];
                 }
