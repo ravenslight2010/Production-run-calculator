@@ -81,6 +81,11 @@ export interface Mix {
   components: MixComponent[];
   // Disabled mixes are kept (so toggling is easy) but never produce a plan entry.
   enabled: boolean;
+  // When set, this mix appears in the plan for any run whose profile includes
+  // this ingredient name (case-insensitive). Use for prep recipes that supply
+  // an ingredient used by other recipes (e.g. "Pineapple" or "Fresh Spinach").
+  // Leave blank for normal brand/flavor-matched mixes.
+  prepsIngredient?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +163,8 @@ export function normalizeMix(input: unknown): Mix | null {
   };
   if (typeof raw.notes === "string" && raw.notes.trim()) mix.notes = raw.notes.trim();
   if (typeof raw.scope === "string" && raw.scope) mix.scope = raw.scope;
+  if (typeof raw.prepsIngredient === "string" && raw.prepsIngredient.trim())
+    mix.prepsIngredient = raw.prepsIngredient.trim();
   return mix;
 }
 
@@ -352,6 +359,10 @@ export function backfillMixFromMergedSources(
     }
     if (!(next.notes ?? "").trim() && (src.notes ?? "").trim()) {
       next.notes = src.notes;
+      changed = true;
+    }
+    if (!(next.prepsIngredient ?? "").trim() && (src.prepsIngredient ?? "").trim()) {
+      next.prepsIngredient = src.prepsIngredient;
       changed = true;
     }
     const byKey = new Map<string, MixComponent>();
@@ -700,6 +711,9 @@ export interface MixScheduledRun {
   flavor: string;
   pizzas: number;
   cases: number;
+  // All ingredient names used in this run's profile (applicator types,
+  // cheese/sauce recipe rows). Used to match prep mixes by ingredient.
+  ingredients?: string[];
 }
 
 // One component of a mix, scaled to the run's pizza count.
@@ -749,6 +763,8 @@ export interface MixPlanGroup {
   date: string;
   daysUntil: number;
   runs: MixPlanRun[];
+  // Prep mixes matched by ingredient (across all runs on this date).
+  prepMixes: MixPlanEntry[];
 }
 
 // Whole-days between today and a run date (both YYYY-MM-DD). Parsed as UTC so the
@@ -828,10 +844,14 @@ export function buildMixPlan(args: {
   today: string;
 }): MixPlanGroup[] {
   const { runs, today } = args;
-  const mixes = args.mixes.filter((m) => m.enabled);
-  if (mixes.length === 0) return [];
+  const enabledMixes = args.mixes.filter((m) => m.enabled);
+  if (enabledMixes.length === 0) return [];
 
-  // Group enabled mixes by product so each run can find all of its mixes.
+  // Separate brand/flavor mixes from prep mixes (ingredient-linked).
+  const mixes = enabledMixes.filter((m) => !m.prepsIngredient?.trim());
+  const prepMixList = enabledMixes.filter((m) => !!m.prepsIngredient?.trim());
+
+  // Group brand/flavor mixes by product so each run can find all of its mixes.
   const byProduct = new Map<string, Mix[]>();
   for (const mix of mixes) {
     const key = productKey(mix.brand, mix.flavor);
@@ -889,10 +909,53 @@ export function buildMixPlan(args: {
       });
     }
     if (planRuns.length === 0) continue;
-    groups.push({ date, daysUntil: du, runs: planRuns });
+    groups.push({ date, daysUntil: du, runs: planRuns, prepMixes: [] });
   }
 
-  return groups.sort((a, b) => a.date.localeCompare(b.date));
+  // Prep-mix pass: mixes with prepsIngredient match by ingredient name
+  // across all runs on a date, regardless of brand/flavor.
+  if (prepMixList.length > 0) {
+    // Index all date-valid runs by date for fast ingredient lookup.
+    const runsByDate = new Map<string, MixScheduledRun[]>();
+    for (const run of runs) {
+      const du = daysUntil(run.date, today);
+      if (!Number.isFinite(du) || du < 0) continue;
+      let list = runsByDate.get(run.date);
+      if (!list) { list = []; runsByDate.set(run.date, list); }
+      list.push(run);
+    }
+    // Fast group lookup so we can add to existing groups or create new ones.
+    const groupByDate = new Map<string, MixPlanGroup>();
+    for (const g of groups) groupByDate.set(g.date, g);
+
+    for (const [date, dateRuns] of runsByDate) {
+      const du = daysUntil(date, today);
+      for (const mix of prepMixList) {
+        if (du > mix.daysEarly) continue;
+        const target = mix.prepsIngredient!.trim().toLowerCase();
+        // Sum pizzas from all runs on this date that use the ingredient.
+        const matchPizzas = dateRuns
+          .filter((r) =>
+            (r.ingredients ?? []).some(
+              (i) => i.trim().toLowerCase() === target,
+            ),
+          )
+          .reduce((sum, r) => sum + r.pizzas, 0);
+        if (matchPizzas <= 0) continue;
+        let group = groupByDate.get(date);
+        if (!group) {
+          group = { date, daysUntil: du, runs: [], prepMixes: [] };
+          groupByDate.set(date, group);
+          groups.push(group);
+        }
+        group.prepMixes.push(computeEntry(mix, matchPizzas));
+      }
+    }
+  }
+
+  return groups
+    .filter((g) => g.runs.length > 0 || g.prepMixes.length > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ── Mix list browsing (search + brand grouping for the settings UI) ─────────

@@ -14258,6 +14258,16 @@ export default function Home() {
                             ...(r.dieType ? { dieType: r.dieType } : {}),
                           };
                           const s = computeSummaryStats(vals);
+                          // Collect ingredient names for prep-mix matching.
+                          const ingredients = [
+                            vals.app1Type, vals.app2Type, vals.app3Type, vals.app4Type,
+                            vals.pep1Type, vals.pep2Type, vals.pep1TypeB, vals.pep2TypeB,
+                            ...vals.app1CheeseRecipe.map((row) => row.ingredient),
+                            ...vals.app2CheeseRecipe.map((row) => row.ingredient),
+                            ...vals.app3CheeseRecipe.map((row) => row.ingredient),
+                            ...vals.app4CheeseRecipe.map((row) => row.ingredient),
+                            ...vals.frontlineRecipe.map((row) => row.ingredient),
+                          ].filter(Boolean);
                           return {
                             date: day.date,
                             brand: r.brand,
@@ -14267,6 +14277,7 @@ export default function Home() {
                             // buffer as applicator ingredients.
                             pizzas: s.totalPizzasForSauce,
                             cases: s.totalCases,
+                            ingredients,
                           };
                         }),
                     );
@@ -14397,6 +14408,51 @@ export default function Home() {
                                   </div>
                                 </div>
                               ))}
+                              {/* Prep mixes — ingredient-linked */}
+                              {group.prepMixes.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-emerald-800/40 space-y-3">
+                                  <p className="text-[11px] uppercase tracking-wider font-semibold text-violet-400/80">Ingredient Prep</p>
+                                  {group.prepMixes.map((m) => (
+                                    <div key={m.mixId} className="rounded-lg bg-violet-950/30 border border-violet-800/30 p-3 space-y-1.5">
+                                      <div className="flex items-baseline justify-between gap-2">
+                                        <span className="font-semibold text-sm text-violet-100">{m.name}</span>
+                                        <span className="text-xs tabular-nums text-violet-300/80">
+                                          {m.batchSize > 0 ? `${fmtNum(m.batches, 2)} batches` : <span className="text-violet-400/60">no batch size</span>}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-baseline justify-between gap-2 text-xs text-violet-300/80 tabular-nums">
+                                        <span>Total {fmtNum(m.totalLbs, 2)} lbs <span className="text-violet-400/70">(incl. 15% waste + {m.startupLbs} lb startup)</span></span>
+                                        {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
+                                      </div>
+                                      {(() => {
+                                        const liveMix = mixes.find((mx) => mx.id === m.mixId);
+                                        return liveMix ? (
+                                          <MixAlreadyMadeInput mix={liveMix} saveMixes={saveMixes} onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], saved)} />
+                                        ) : null;
+                                      })()}
+                                      {m.missingAmounts && (
+                                        <div className="flex items-center gap-1.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 text-xs text-amber-300">
+                                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                          No oz/pizza amounts — open the Mixes editor to enter them
+                                        </div>
+                                      )}
+                                      {m.components.length > 0 && (
+                                        <div className="space-y-1 pt-1 border-t border-violet-800/30">
+                                          <p className="text-[11px] uppercase tracking-wider text-violet-400/70 font-semibold pt-1">Pull For Prep</p>
+                                          {m.components.map((c, ci) => (
+                                            <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
+                                              <span className="text-violet-200/90 truncate">{c.ingredient}</span>
+                                              <span className="font-bold tabular-nums whitespace-nowrap text-violet-50">
+                                                {fmtNum(m.totalLbs > 0 ? c.lbs * m.remainingLbs / m.totalLbs : 0, 2)} <span className="font-normal text-violet-300/80">lbs</span>
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </CardContent>
                           </Card>
                         ))}
