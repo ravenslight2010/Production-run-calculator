@@ -538,15 +538,6 @@ function MixEditor({
           onChange={(v) => patch({ daysEarly: v })}
           onCommit={() => commit()}
         />
-        <NumberField
-          label="Already made (lbs)"
-          value={draft.amountAlreadyMade}
-          min={0}
-          step={0.1}
-          disabled={disabled}
-          onChange={(v) => patch({ amountAlreadyMade: v })}
-          onCommit={() => commit()}
-        />
       </div>
 
       {/* Notes */}

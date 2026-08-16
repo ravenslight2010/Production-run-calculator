@@ -14334,9 +14334,30 @@ export default function Home() {
                                             Total {fmtNum(m.totalLbs, 2)} lbs
                                             <span className="ml-1 text-emerald-400/70">(incl. {m.startupLbs} lb startup)</span>
                                           </span>
-                                          {m.amountAlreadyMade > 0 && (
-                                            <span>have {fmtNum(m.amountAlreadyMade, 2)} → need {fmtNum(m.remainingLbs, 2)} lbs</span>
+                                          {m.remainingLbs < m.totalLbs && (
+                                            <span className="text-emerald-300">need {fmtNum(m.remainingLbs, 2)} lbs</span>
                                           )}
+                                        </div>
+                                        {/* Already made — inline editable, saves directly to the mix record */}
+                                        <div className="flex items-center gap-2 text-xs mb-1.5">
+                                          <span className="text-emerald-400/70 whitespace-nowrap">Already made:</span>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            step={0.1}
+                                            defaultValue={mixes.find((mx) => mx.id === m.mixId)?.amountAlreadyMade ?? 0}
+                                            key={`${m.mixId}-already-${mixes.find((mx) => mx.id === m.mixId)?.amountAlreadyMade ?? 0}`}
+                                            onBlur={async (e) => {
+                                              const mix = mixes.find((mx) => mx.id === m.mixId);
+                                              if (!mix) return;
+                                              const val = Math.max(0, Number(e.target.value) || 0);
+                                              if (val === mix.amountAlreadyMade) return;
+                                              const saved = await saveMixes([{ ...mix, amountAlreadyMade: val }]);
+                                              cycleCountQc.setQueryData(["mixes"], saved);
+                                            }}
+                                            className="w-20 rounded border border-emerald-700/50 bg-emerald-950/60 px-1.5 py-0.5 text-xs text-emerald-100 tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                          />
+                                          <span className="text-emerald-400/70">lbs</span>
                                         </div>
                                         {m.notes && (
                                           <div className="text-[11px] text-emerald-400/70 italic mb-1.5">{m.notes}</div>
