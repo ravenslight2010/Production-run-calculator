@@ -173,6 +173,10 @@ const CURRENT_BLANK = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
+  // 0 → normalized to 2.5 by MACHINE_TIME_DEFAULTS (preTunnelMin/postTunnelMin
+  // default moved from 0 to 2.5; old clients may carry 0).
+  preTunnelMin: 0,
+  postTunnelMin: 0,
   tempFreezerTime: 0,
   tempCrustsPerCycle: 0,
   tempCycleSpeed: 0,

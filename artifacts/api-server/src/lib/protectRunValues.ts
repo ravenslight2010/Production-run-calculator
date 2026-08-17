@@ -267,6 +267,8 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
+  preTunnelMin: 2.5,
+  postTunnelMin: 2.5,
   tempFreezerTime: 0,
   tempCrustsPerCycle: 0,
   tempCycleSpeed: 0,
@@ -281,14 +283,19 @@ const LEGACY_PEP_BATCH_FIELDS = [
   "pep2BatchLbsB",
 ] as const;
 
-// Machine-time fields whose default moved from 0 ("not measured") to the
-// factory-typical times. A blank run may carry EITHER shape depending on when
-// the client saved it — normalize 0 to the current default before comparing.
-// Keep in lockstep with the web's MACHINE_TIME_DEFAULTS (types.ts).
+// Fields whose default moved from 0 to a non-zero factory-typical value.
+// A blank run may carry EITHER shape depending on when the client saved it —
+// normalize 0 to the current default before comparing.
+// Keep in lockstep with the web's MACHINE_TIME_DEFAULTS and
+// PRE_POST_TUNNEL_DEFAULT_MIN (types.ts).
 const MACHINE_TIME_DEFAULTS: Record<string, number> = {
   mixerLowSec: 330,
   mixerHighSec: 180,
   hopperSec: 70,
+  // Tunnel stage pre/post dwell times (minutes). Default moved from 0 to 2.5;
+  // old stored profiles carry 0 until the one-time boot heal runs.
+  preTunnelMin: 2.5,
+  postTunnelMin: 2.5,
 };
 
 // True when a run value is an exact all-default/blank template (see above):
