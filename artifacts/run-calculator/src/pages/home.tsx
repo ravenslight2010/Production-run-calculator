@@ -18926,7 +18926,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     if (newTotal !== curTotal) {
       updateDrainingRunValues(drainingRun.id, {
         skidsCompleted: Math.floor(newTotal / cps),
-        casesOnCurrentSkid: newTotal % cps,
+        casesOnCurrentSkid: Math.round(newTotal % cps),
       });
     }
   }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, updateDrainingRunValues]);
@@ -19927,7 +19927,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           const total = Math.max(0, t);
           markRunValuesUpdated(currentRunId, Date.now());
           form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
-          form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
+          form.setValue("casesOnCurrentSkid", Math.round(total % cps), { shouldDirty: true });
           onManual();
         };
         const bumpSkids = (d: number) => {
@@ -20739,7 +20739,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             // as stale and can't overwrite the manual edit.
                             markRunValuesUpdated(currentRunId, Date.now());
                             form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
-                            form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
+                            form.setValue("casesOnCurrentSkid", Math.round(total % cps), { shouldDirty: true });
                             onManual();
                           };
                           // Without a cases-per-skid setting the two counters
