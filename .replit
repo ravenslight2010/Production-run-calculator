@@ -52,6 +52,10 @@ args = "Web App"
 task = "workflow.run"
 args = "test:corpus"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "check-model-bump"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -163,6 +167,17 @@ args = "pnpm --filter @workspace/corpus-harness run test"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "check-model-bump"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run check-model-bump"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"

@@ -1,4 +1,4 @@
-// Google Gemini models served via Replit AI Integrations. gemini-3.1-pro-preview
+// Google Gemini models served via Replit AI Integrations. gemini-3.2-flash-preview
 // is the current model: it honors JSON response mode, supports vision and
 // streaming — the right fit for this real-time floor app. The client adapter
 // runs it with LOW thinking (see client.ts); thinking tokens still share the
@@ -7,8 +7,8 @@
 // keep the two names so callers can still signal intent and the tiers can
 // diverge later without touching call sites.
 export const AI_MODELS = {
-  full: "gemini-3.1-pro-preview",
-  cheap: "gemini-3.1-pro-preview",
+  full: "gemini-3.2-flash-preview",
+  cheap: "gemini-3.2-flash-preview",
 } as const;
 
 export type ModelKind = keyof typeof AI_MODELS;
