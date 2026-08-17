@@ -204,13 +204,37 @@ export default function PremixImportDialog({
 
   const includedItems = items.filter((it) => selected.has(it.key));
 
+  // Count how many included items resolve to each target mix id.
+  const finalIdCounts = new Map<string, number>();
+  for (const it of includedItems) {
+    const id = it.candidate.mix.id;
+    finalIdCounts.set(id, (finalIdCounts.get(id) ?? 0) + 1);
+  }
+  // Collisions onto PREP mixes are safe — their components are merged below.
+  // Collisions onto regular brand/flavor mixes would silently drop one block's
+  // data, so block Apply for those until the manager resolves the conflict.
+  const duplicateTargets = [...finalIdCounts.entries()]
+    .filter(([id, n]) => {
+      if (n <= 1) return false;
+      const target = existingMixById.get(id);
+      return !target?.isPrep;
+    })
+    .map(
+      ([id]) =>
+        existingMixById.get(id)?.name ??
+        items.find((it) => it.candidate.mix.id === id)?.candidate.mix.name ??
+        id,
+    );
+
   const confirm = () => {
+    if (duplicateTargets.length > 0) return;
     const included = includedItems;
-    // When multiple candidates redirect to the same existing mix (e.g. several
-    // customer-specific prep-ingredient blocks all mapped to one generic prep
-    // mix), merge their components rather than letting last-write-wins silently
-    // drop one block's ingredients. Union by ingredient name (case-insensitive);
-    // when the same ingredient appears in two blocks, keep the higher perPizza.
+    // When multiple candidates redirect to the same PREP mix (e.g. several
+    // customer-specific blocks for the same ingredient), merge their components
+    // rather than letting last-write-wins silently drop one block's ingredients.
+    // Regular brand/flavor mix collisions are already blocked above.
+    // Union by ingredient name (case-insensitive); keep the higher perPizza for
+    // any ingredient that appears in more than one block.
     const byId = new Map<string, Mix>();
     for (const it of included) {
       const mix = it.candidate.mix;
@@ -663,6 +687,32 @@ export default function PremixImportDialog({
                 </div>
               )}
 
+              {duplicateTargets.length > 0 && (
+                <div
+                  className="rounded-md border border-destructive/60 bg-destructive/10 p-3"
+                  data-testid="premix-duplicate-target-warning"
+                >
+                  <div className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      Two mixes point at the same saved mix
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-destructive/90">
+                    More than one checked mix would update{" "}
+                    {duplicateTargets.map((n) => `"${n}"`).join(", ")} — only one
+                    would survive. Change one of the "Use existing mix" picks (or
+                    uncheck one) before applying.
+                  </p>
+                  {includedItems.some((it) => mergedAwayKeys.has(it.key)) && (
+                    <p className="mt-1 text-sm text-destructive/90" data-testid="premix-merge-hint">
+                      Tip: these sheets were merged in Manage Lists — uncheck
+                      the old (merged-away) sheet's row to apply.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {prepared.newAliases.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {prepared.newAliases.length} new name mapping
@@ -708,7 +758,8 @@ export default function PremixImportDialog({
               !!error ||
               !prepared ||
               nothing ||
-              !canApply
+              !canApply ||
+              duplicateTargets.length > 0
             }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >

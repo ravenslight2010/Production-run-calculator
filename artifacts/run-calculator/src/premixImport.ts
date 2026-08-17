@@ -70,7 +70,7 @@ export type PremixImportPrepared = {
    * can offer a per-mix "Use existing mix instead" redirect picker AND show what
    * components would be removed when an existing mix is updated by the import.
    */
-  existingMixes: { id: string; name: string; brand: string; flavor: string; components: { ingredient: string; perPizza: number; perBatchLbs?: number }[] }[];
+  existingMixes: { id: string; name: string; brand: string; flavor: string; isPrep?: boolean; components: { ingredient: string; perPizza: number; perBatchLbs?: number }[] }[];
   /**
    * Learned-alias redirect suggestions the review pre-applies: candidate mix id
    * (the dialog's stable key) → existing mix id the manager linked that sheet
@@ -283,7 +283,7 @@ export async function preparePremixImport(
     flavorsByBrand: known.flavorsByBrand,
     existingIds: [...existingIds],
     existingMixes: existing
-      .map((m) => ({ id: m.id, name: m.name, brand: m.brand, flavor: m.flavor, components: m.components ?? [] }))
+      .map((m) => ({ id: m.id, name: m.name, brand: m.brand, flavor: m.flavor, isPrep: m.isPrep, components: m.components ?? [] }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     redirectSuggestions,
     freezerPulls,
