@@ -6903,10 +6903,17 @@ export default function Home() {
           // once from the schedule. A peer without the schedule carries
           // casesNeeded=0; if they make any real edit their newer stamp wins
           // the LWW check above, but we must NOT let their 0 wipe our target.
-          const acceptedVals: FormValues =
-            (vals as FormValues).casesNeeded === 0 && localVals.casesNeeded > 0
-              ? { ...(vals as FormValues), casesNeeded: localVals.casesNeeded }
-              : (vals as FormValues);
+          const remoteVals = vals as FormValues;
+          const acceptedVals: FormValues = {
+            ...remoteVals,
+            ...(remoteVals.casesNeeded === 0 && localVals.casesNeeded > 0
+              ? { casesNeeded: localVals.casesNeeded }
+              : {}),
+            // Guard against float values written before the modulo paths were
+            // wrapped in Math.round(). A pre-fix float in stored day-state that
+            // arrives via SSE would otherwise display with decimals on screen.
+            casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
+          };
           saveRunValues(id, acceptedVals);
           if (rTs > lTs) mergedUpd[id] = rTs;
         }
