@@ -323,14 +323,16 @@ export function useNotifications({
     setShowBatchDue(true);
     if (batchDismissRef.current) clearTimeout(batchDismissRef.current);
     batchDismissRef.current = setTimeout(() => setShowBatchDue(false), 10000);
-    if (Notification.permission === "granted") {
-      showAppNotification("🍕 Start next dough batch", {
-        body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
-        icon: "/icons/icon-192.png",
-        tag: `batch-${currentRun.id}-${batchNum}`,
-      });
-    } else if (Notification.permission === "default") {
-      Notification.requestPermission();
+    if ("Notification" in window) {
+      if (Notification.permission === "granted") {
+        showAppNotification("🍕 Start next dough batch", {
+          body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
+          icon: "/icons/icon-192.png",
+          tag: `batch-${currentRun.id}-${batchNum}`,
+        });
+      } else if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
     }
     return () => { if (batchDismissRef.current) clearTimeout(batchDismissRef.current); };
   }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust, calc.pressDone]);

@@ -14,7 +14,7 @@
 // The hook is exercised directly (not mocked) via renderHook so the latch
 // logic in paceArmedRef and paceFiredRef is exercised against real state.
 
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
@@ -79,26 +79,13 @@ const EARLY_MS = T0 + 5 * 60_000;
 const BEHIND_MS = T0 + 15 * 60_000;
 
 // ── Browser API stubs ────────────────────────────────────────────────────────
-// jsdom does not provide the Notification API at all. The batch-cycle effect
-// inside useNotifications accesses Notification.permission directly (without
-// the `"Notification" in window` guard used by showAppNotification), so we
-// must define a minimal stub or it throws "Notification is not defined".
-// Setting permission = "denied" ensures every notification code-path latches
-// silently — no push is attempted, no requestPermission() is called.
-//
 // navigator.vibrate is optional-chained in the hook so it never throws.
+// The Notification API is guarded by `"Notification" in window` throughout
+// the hook, so no stub is needed when jsdom omits it.
 //
 // No fake-timer setup is needed: the pace alert effect is purely reactive to
 // nowTime prop changes, and the batch-due setTimeout auto-dismiss (10 s) is
 // irrelevant to pace-alert assertions.
-
-beforeAll(() => {
-  Object.defineProperty(window, "Notification", {
-    value: { permission: "denied" as NotificationPermission },
-    writable: true,
-    configurable: true,
-  });
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
