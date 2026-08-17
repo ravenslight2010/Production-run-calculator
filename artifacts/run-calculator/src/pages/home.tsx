@@ -120,6 +120,7 @@ import {
   dropTombstonesForAliveNames,
   clearRecipeNameSelections,
   loadProfile,
+  profileHasRealData,
   backfillFromProfile,
   saveProfile,
   mergeProfileIntoOpenForm,
@@ -9507,6 +9508,55 @@ export default function Home() {
     return `Tunnel time updated to ${s.recommendedValue} min (${changed.join(" + ")}).`;
   }
 
+  // Pre-flight check for RunInsightsCard: returns a warning string when Accept
+  // is likely to throw (no saved profile AND not the current open run).  This
+  // mirrors the throw conditions in applyRunSuggestion so managers see the
+  // problem before clicking rather than only after.
+  function getRunSuggestionAcceptWarning(s: RunSuggestion): string | null {
+    const isCurrentRun =
+      !!currentRun &&
+      (currentRun.brand ?? "") === s.brand &&
+      (currentRun.flavor ?? "") === s.flavor;
+    // Current run is always updated directly — no profile needed.
+    if (isCurrentRun) return null;
+
+    // profileHasRealData mirrors the profileObjHasRealData check inside
+    // saveProfile — only profiles with real recipe/applicator data would
+    // actually be persisted (saveProfile returns false for blank/placeholder
+    // profiles, so changed.length stays 0 and Accept throws).
+    const hasRealProfile = profileHasRealData(s.brand, s.flavor);
+
+    if (s.type === "speed-target") {
+      // Accept succeeds only if saveProfile would write (real-data profile)
+      // or the open form is already showing this product.
+      if (!hasRealProfile) {
+        return "No saved setup for this product — open its Setup profile first.";
+      }
+      return null;
+    }
+
+    // tunnel-time succeeds when either:
+    //   (a) buildTunnelDieDefaultEntry can construct a valid entry — same call
+    //       path as applyRunSuggestion (returns null for unknown/custom dies or
+    //       incomplete built-in defaults), OR
+    //   (b) the profile has real data AND a non-zero freezerTime > 0
+    //       (matching the `profile && profile.freezerTime > 0` guard in
+    //       applyRunSuggestion before it calls saveProfile).
+    const dieEntry = s.dieType
+      ? buildTunnelDieDefaultEntry(
+          s.dieType,
+          dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
+          s.recommendedValue,
+        )
+      : null;
+    const profile = hasRealProfile ? loadProfile(s.brand, s.flavor) : null;
+    const hasProfileTime = !!(profile && profile.freezerTime > 0);
+    if (!dieEntry && !hasProfileTime) {
+      return "No saved setup or die defaults for this product — open its Setup profile first.";
+    }
+    return null;
+  }
+
   function endRun() {
     // Guard: a run that was never started cannot be ended. Every UI call-site
     // is already gated (STOP RUN only shows when runStatus==="running"), but
@@ -13766,7 +13816,12 @@ export default function Home() {
                 {/* Run Insights: manager-only pattern-based setting suggestions
                     from completed runs. One at a time; Accept applies, Dismiss
                     suppresses. Renders nothing when there's nothing to show. */}
-                {isManager && <RunInsightsCard onAccept={applyRunSuggestion} />}
+                {isManager && (
+                  <RunInsightsCard
+                    onAccept={applyRunSuggestion}
+                    getAcceptWarning={getRunSuggestionAcceptWarning}
+                  />
+                )}
                 <div className="mb-4">
                   <FillMissingPanel
                     getRecord={() => ({

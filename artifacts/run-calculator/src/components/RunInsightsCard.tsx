@@ -19,9 +19,17 @@ export const RUN_SUGGESTIONS_QUERY_KEY = ["run-suggestions"] as const;
 // seems accurate") with a Got-it clear action. Nothing is ever auto-applied.
 export default function RunInsightsCard({
   onAccept,
+  getAcceptWarning,
 }: {
   /** Applies the accepted setting change; resolves to a confirmation line. */
   onAccept: (s: RunSuggestion) => Promise<string>;
+  /**
+   * Optional pre-flight check. Called with the pending suggestion before the
+   * Accept button is rendered. Return a non-empty string to show a warning
+   * (the manager can still accept — the warning explains the likely outcome).
+   * Return null/undefined when Accept is expected to succeed.
+   */
+  getAcceptWarning?: (s: RunSuggestion) => string | null | undefined;
 }) {
   const qc = useQueryClient();
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -76,6 +84,7 @@ export default function RunInsightsCard({
   if (!isLoading && !current && followUps.length === 0 && !confirmation && !error) return null;
 
   const busy = acceptMutation.isPending || dismissMutation.isPending;
+  const acceptWarning = current ? (getAcceptWarning?.(current) ?? null) : null;
 
   const settingLabel = (s: RunSuggestion) =>
     s.type === "speed-target" ? "Cycle speed" : "Tunnel time";
@@ -186,6 +195,15 @@ export default function RunInsightsCard({
                 </p>
               </div>
             </div>
+            {acceptWarning && (
+              <p
+                className="text-xs text-amber-500 flex items-start gap-1"
+                data-testid="text-run-insights-accept-warning"
+              >
+                <span className="shrink-0 mt-px">⚠</span>
+                <span>{acceptWarning}</span>
+              </p>
+            )}
             <div className="flex items-center gap-2 pt-1">
               <Button
                 size="sm"
