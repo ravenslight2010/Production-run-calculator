@@ -19,7 +19,7 @@
 // Isolation notes:
 //  • timePerBatchSec = 0 → batch-cycle effect returns early (no vibrate
 //    from that path).
-//  • elapsed time < PACE_MIN_ELAPSED_MIN (10 min) → pace effect only
+//  • elapsed time < freezerTime (10 min) → pace effect only
 //    arms, never fires (no vibrate from that path).
 //  • adjustedTimeSec > 900 s → 15-min alert is well clear of its threshold.
 //  • A stable EMPTY_LABELS constant prevents nextRunLabels array-reference

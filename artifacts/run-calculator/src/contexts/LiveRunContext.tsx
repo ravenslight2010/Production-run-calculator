@@ -343,7 +343,10 @@ export function LiveRunProvider({
       const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(ve.freezerTime));
       const expectedCases = Math.floor((ppm * elapsedMinAfterTunnel) / v.pizzasPerCase);
       paceDelta = casesCompleted - expectedCases;
-      paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
+      // Don't show a verdict until elapsed >= freezerTime (the tunnel window).
+      if (elapsedMin >= Number(ve.freezerTime)) {
+        paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
+      }
     }
 
     let catchUpPpm: number | null = null;

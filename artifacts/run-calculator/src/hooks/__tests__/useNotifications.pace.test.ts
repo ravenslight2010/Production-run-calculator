@@ -3,7 +3,7 @@
 // Unit tests for the behind-pace alert in useNotifications.
 //
 // Covers four scenarios called out in the task spec:
-//  1. Alert does NOT fire before 10 minutes have elapsed (arm-only window).
+//  1. Alert does NOT fire before freezerTime minutes have elapsed (arm-only window).
 //  2. Alert fires exactly once when shortfall ≥ 10 cases AND ≤ 30 min remain,
 //     after the run was first observed while on pace.
 //  3. Alert does NOT fire when the run was already behind from the very first
@@ -73,8 +73,8 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
 }
 
 // Convenience time constants:
-//   EARLY_MS  → 5 min elapsed  → elapsedMin < 10 → arms, does not evaluate condition
-//   BEHIND_MS → 15 min elapsed → elapsedMin ≥ 10, conditionMet = true
+//   EARLY_MS  → 5 min elapsed  → elapsedMin < freezerTime(10) → arms, does not evaluate condition
+//   BEHIND_MS → 15 min elapsed → elapsedMin ≥ freezerTime(10), conditionMet = true
 const EARLY_MS = T0 + 5 * 60_000;
 const BEHIND_MS = T0 + 15 * 60_000;
 
@@ -107,13 +107,13 @@ afterEach(() => {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("useNotifications — pace alert", () => {
-  // ── 1. No fire before 10 min elapsed ─────────────────────────────────────
-  it("does NOT fire when elapsed time < 10 min (arm-only window)", () => {
+  // ── 1. No fire before freezerTime elapsed ────────────────────────────────
+  it("does NOT fire when elapsed time < freezerTime (arm-only window)", () => {
     const { result } = renderHook((p: Params) => useNotifications(p), {
       initialProps: makeParams(EARLY_MS),
     });
 
-    // elapsedMin = 5 < PACE_MIN_ELAPSED_MIN(10) → only arms, never fires.
+    // elapsedMin = 5 < freezerTime(10) → only arms, never fires.
     expect(result.current.showPaceAlert).toBe(false);
     expect(result.current.paceAlertMsg).toBe("");
   });

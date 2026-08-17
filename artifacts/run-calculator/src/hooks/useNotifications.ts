@@ -70,8 +70,6 @@ interface NotifResult {
 export type UseNotificationsReturn = NotifResult;
 
 // ── Pace alert thresholds ──────────────────────────────────────────────────
-/** Minimum elapsed production minutes before the pace check activates. */
-const PACE_MIN_ELAPSED_MIN = 10;
 /** Fire the alert when the projected shortfall meets or exceeds this many cases. */
 const PACE_SHORTFALL_MIN_CASES = 10;
 /** Only alert when this many minutes or fewer remain in the run. */
@@ -420,8 +418,8 @@ export function useNotifications({
       .reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
     const elapsedMin = Math.max(0, nowMs - currentRun.startedAt - downtimeMs) / 60000;
 
-    // Don't evaluate pace until we have a meaningful elapsed window.
-    if (elapsedMin < PACE_MIN_ELAPSED_MIN) {
+    // Don't evaluate pace until elapsed >= freezerTime (the tunnel window).
+    if (elapsedMin < Number(v.freezerTime)) {
       paceArmedRef.current.add(runId);
       return;
     }
