@@ -431,7 +431,11 @@ describe("buildMixPlan — prep-mix missingAmounts and missingComponentIngredien
     return r;
   }
 
-  it("missingAmounts=true and missingComponentIngredients lists ALL components when no run matches any ingredient (name mismatch)", () => {
+  it("prep mix card is absent when no runs on the date list any of its component ingredients", () => {
+    // Before this fix the card was always shown for prep mixes (even with zero
+    // matching runs) so managers would see "No component amounts" for ingredients
+    // nobody was making that day. Now the card is suppressed entirely when no
+    // run's ingredient list contains any of the mix's component names.
     const mixes = [
       makePrepMix({
         name: "Veggie Prep",
@@ -441,21 +445,43 @@ describe("buildMixPlan — prep-mix missingAmounts and missingComponentIngredien
         ],
       }),
     ];
-    // Run profile uses different names — no ingredient matches
+    // Run profile uses completely different ingredient names — zero match.
     const r = prepRun(TODAY, 200, ["Green Peppers", "Yellow Onions"], {
       "Green Peppers": 1.5,
       "Yellow Onions": 1.0,
     });
 
     const plan = buildMixPlan({ mixes, runs: [r], today: TODAY });
-    // Prep mix must still appear (not silently skipped)
+    // Card must be absent — no run uses this mix's ingredients.
+    expect(plan).toHaveLength(0);
+  });
+
+  it("prep mix card appears with missingAmounts=true when a run lists the ingredient but has no oz/pizza amounts", () => {
+    // A run that HAS "Bell Peppers" in its ingredient list but provides no
+    // oz/pizza value for it should still show the prep mix card with a warning,
+    // because the name match IS there — only the amounts are missing (name-alignment
+    // is fine, quantity data is missing). This is still actionable for a manager.
+    const mixes = [
+      makePrepMix({
+        name: "Veggie Prep",
+        components: [
+          { ingredient: "Bell Peppers", perPizza: 0 }, // no generic fallback
+          { ingredient: "Onions", perPizza: 0 },
+        ],
+      }),
+    ];
+    // Run lists the ingredients (name match succeeds) but provides no oz amounts.
+    const r = prepRun(TODAY, 200, ["Bell Peppers", "Onions"]);
+
+    const plan = buildMixPlan({ mixes, runs: [r], today: TODAY });
+    // Card must appear — the run uses these ingredients even if amounts are missing.
     expect(plan).toHaveLength(1);
     expect(plan[0].prepMixes).toHaveLength(1);
 
     const entry = plan[0].prepMixes[0];
     expect(entry.missingAmounts).toBe(true);
     expect(entry.missingComponentIngredients).toEqual(["Bell Peppers", "Onions"]);
-    // Pull quantities are 0; totalLbs is startup-only (20 lbs)
+    // Pull quantities are 0 because perPizza=0 and no ingredientOzPerPizza.
     expect(entry.components[0].lbs).toBe(0);
     expect(entry.components[1].lbs).toBe(0);
     expect(entry.totalLbs).toBeCloseTo(20, 8); // startup buffer only

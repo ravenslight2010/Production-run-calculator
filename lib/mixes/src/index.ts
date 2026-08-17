@@ -1040,10 +1040,13 @@ export function buildMixPlan(args: {
             componentKeys.some((ck) => ingredientMatches(i, ck)),
           ),
         );
-        // Do NOT skip when no runs matched — include the prep mix with all-zero
-        // component lbs so missingAmounts=true and the warning renders. A name
-        // mismatch between the mix card and run profiles is the most likely cause
-        // and would otherwise make the entry invisible to the manager entirely.
+        // Skip entirely when no runs on this date use any of this mix's component
+        // ingredients — there is nothing to warn about and the card would just
+        // show "No component amounts — pull quantities will be 0" for ingredients
+        // nobody needs that day. The warning IS still useful when there ARE
+        // matching runs but oz/pizza amounts resolve to zero (name mismatch),
+        // so we only skip on a true zero-match, not on zero-lbs.
+        if (matchingRuns.length === 0) continue;
         // Compute per-component lbs using each run's profile oz/pizza, not the
         // mix card's generic perPizza. Different brands/flavors may use different
         // weights for the same ingredient. Falls back to mix.component.perPizza

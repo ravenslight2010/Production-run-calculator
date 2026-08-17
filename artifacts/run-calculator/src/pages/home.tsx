@@ -14460,7 +14460,7 @@ export default function Home() {
                     // date=today so the make-day plan works when today is selected.
                     const todayDateStr = todayStr();
                     const liveRunsForMixes = dayState.runs
-                      .filter((r) => r.brand)
+                      .filter((r) => r.brand && !r.endedAt)
                       .map((r) => {
                         const runVals = r.id === currentRunId ? form.getValues() : loadRunValues(r.id);
                         return valsToMixRun(todayDateStr, r.brand, r.flavor ?? "", runVals);
