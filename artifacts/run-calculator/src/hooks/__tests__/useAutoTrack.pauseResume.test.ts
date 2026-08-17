@@ -538,4 +538,122 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // Exactly one delta worth (10), nowhere near the 110-case stale catch-up.
     expect(afterWriteTick).toBeLessThanOrEqual(BASE_V.casesPerSkid);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 6. Dough-timer pause + global run pause + global run resume
+  //
+  // Combined sequence:
+  //   a) dough timers paused (pauseDoughTimers, runStatus stays "running")
+  //   b) global run paused  (runStatus → "paused")
+  //   c) global run resumed (runStatus → "running")
+  //
+  // On step (c) the runStatus "running" effect fires and must:
+  //   • clear doughTimerPausedRef (isDoughTimerPaused → false)
+  //   • zero trayLastMsRef + trayNextDueMsRef so the first post-resume
+  //     consumption tick uses ONE period (2 min), not the full pause span
+  //     (5 min, capped at 2 periods = 4 min → 2 trays "jump").
+  //
+  // This ensures neither the global-pause cycle nor the pre-existing
+  // dough-timer pause causes a double-freeze or state leak.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("6. dough-timer pause + global pause + global resume: clears dough pause and no tray jump", () => {
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+      trays?: number,
+      batches?: number,
+    ): Props => ({
+      runId: "run-6",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        traysOnLine: trays ?? store.traysOnLine,
+        batchesReady: batches ?? store.batchesReady,
+      },
+      form,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props("running", T0, 5, 2) },
+    );
+
+    // ── Tick 1 at T0+500: establishes trayLastMsRef / batchLastMsRef ──────
+    // prevMs=0 → duration=1 period (2 min) → traysConsumed=1.  trays: 5→4.
+    // trayLastMsRef  ← T0+500
+    // trayNextDueMsRef ← T0+500+TRAY_PERIOD_MS (= T0+120500)
+    const T1 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1);
+      rerender(props("running", T1));
+    });
+    expect(store.traysOnLine).toBe(4);
+
+    // ── Step (a): pauseDoughTimers() at T1+1 — runStatus stays "running" ──
+    // doughTimerPausedRef becomes non-zero; tray/batch ticks suppressed.
+    act(() => {
+      vi.setSystemTime(T1 + 1);
+      result.current.pauseDoughTimers();
+      rerender(props("running", T1 + 1));
+    });
+    expect(result.current.isDoughTimerPaused).toBe(true);
+    expect(store.traysOnLine).toBe(4); // no change — dough paused
+
+    // ── Step (b): global pause (runStatus → "paused") at T1+2 ─────────────
+    // Tick effect early-returns (runStatus ≠ "running").
+    // trayLastMsRef is NOT reset here — remains T1 (from tick 1).
+    const tGlobalPause = T1 + 2;
+    act(() => {
+      vi.setSystemTime(tGlobalPause);
+      rerender(props("paused", tGlobalPause));
+    });
+    expect(store.traysOnLine).toBe(4); // still unchanged
+
+    // ── Stay paused (both dough-timer and global) for 5 minutes ───────────
+    const tResume = tGlobalPause + 5 * 60_000;
+    act(() => {
+      vi.setSystemTime(tResume);
+      rerender(props("paused", tResume));
+    });
+    expect(store.traysOnLine).toBe(4); // unchanged while paused
+
+    // ── Step (c): global resume (runStatus → "running") ───────────────────
+    // React runs effects in declaration order inside this act():
+    //   i)  runStatus effect (paused → running):
+    //         doughTimerPausedRef.current ← 0  (clears the dough-timer pause)
+    //         setIsDoughTimerPaused(false)
+    //         trayLastMsRef.current ← 0         (was T1)
+    //         trayNextDueMsRef.current ← 0      (was T0+120500, past-due)
+    //         batchLastMsRef / batchNextDueMsRef / prod refs ← 0
+    //   ii) tick effect (trayNextDueMsRef=0 → fires immediately):
+    //         prevMs = trayLastMsRef = 0
+    //         durationMin = TRAY_PERIOD_MS/60000 = 2 min  (one period)
+    //         traysConsumed = floor(2*100/200) = 1   →  4→3
+    //
+    // WITHOUT trayLastMsRef being reset in step (i), prevMs would be T1
+    // (T0+500); elapsed ≈ 5 min → capped at 2 periods (4 min) →
+    // floor(4*100/200)=2 trays → 4→2 ("jump").
+    const traysBeforeResume = store.traysOnLine; // 4
+    act(() => {
+      vi.setSystemTime(tResume + 2);
+      rerender(props("running", tResume + 2));
+    });
+
+    // Dough-timer pause must be cleared by the runStatus effect.
+    expect(result.current.isDoughTimerPaused).toBe(false);
+
+    // Exactly 1 tray consumed on the first post-resume tick (one period).
+    // If either the dough-timer pause were still active (suppressing the tick)
+    // OR the trayLastMsRef had not been reset (causing a 2-tray jump), this
+    // assertion would fail.
+    const traysDropped = traysBeforeResume - store.traysOnLine;
+    expect(traysDropped).toBe(1);
+    expect(store.traysOnLine).toBe(3);
+  });
 });
