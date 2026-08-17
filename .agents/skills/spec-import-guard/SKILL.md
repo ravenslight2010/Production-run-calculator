@@ -49,21 +49,70 @@ pnpm --filter @workspace/spec-import exec vitest run
 
 This runs the 25 dedicated test files in `lib/spec-import/src/` covering alias hygiene, sanitizer, canonicalize, chunk union, merge logic, and import link passes. **Required after any change to `lib/spec-import/`.** The web artifact's Vitest config covers only `artifacts/run-calculator/src/**/*.test.{ts,tsx}` and does not include these library tests.
 
-### 4. Real-AI harnesses (required when the AI prompt changed)
+### 4. Real-AI harnesses (required when the AI prompt or model changed)
 
-Run **both** after any prompt or model change (`AI_MODELS` / `pickModel` repointed):
+> **Why these exist:** the spec importer's per-chunk limits are tuned empirically to the current model (`gemini-3.1-pro-preview`): 16 k-char chunk budget (`DEFAULT_LIMITS.maxTotalChars`), 65 536 `max_completion_tokens` on `/ai/parse-spec-sheet`, sanitizer `maxProfiles` 400. When `AI_MODELS` / `pickModel` is repointed, these limits can silently become wrong — the failure mode is an import that "succeeds" but quietly drops data (truncated output → non-JSON → empty chunk, or valid-but-empty JSON). These harnesses are the only defence.
 
-**a. Large-spec round-trip harness**
-```
+Run **both** after any prompt or model change:
+
+---
+
+#### 4a. Large-spec round-trip harness (on-demand — size regression)
+
+**Run this whenever `AI_MODELS` / `pickModel` changes.** It is the primary guard against silent data loss at scale. Full run takes 10–20 minutes (real AI calls, costs money).
+
+**Prerequisites:**
+1. API server running: start the `artifacts/api-server: API Server` workflow (port 8080) **or** the `API Server` workflow (port 5000).
+2. Set env vars — either:
+   - `VERIFY_USERNAME` + `VERIFY_PASSWORD` (an existing manager account), or
+   - Leave both unset to auto-sign-up a fresh user (only works when it will be the **first** user in the DB — use a clean test database or promote via `user_roles.role='manager'`).
+3. If the API is on a non-default port, set `API_BASE=http://localhost:PORT/api`.
+
+**Quick smoke run (cheap, ~2 min, 12 chunks):**
+```bash
+BRANDS=4 FLAVORS=3 \
+VERIFY_USERNAME=mymanager VERIFY_PASSWORD=mypass \
 pnpm --filter @workspace/scripts run verify-large-spec-import
 ```
-- Generates a 30-brand × 8-flavor synthetic export via `buildSpecExportGrids`, chunks it with `splitGridsForPrompt`, sends every chunk through the live `/ai/parse-spec-sheet`, merges with `mergeParsedSpecImports`, asserts zero loss (profiles, recipes, rows, targets).
-- Needs the API server running + a manager account (`VERIFY_USERNAME` / `VERIFY_PASSWORD` env vars).
-- Throttles at 8 req/min; sleeps 65 s on 429. A single chunk returning empty on the first attempt is flakiness (harness retries 3×); still-empty after retries is a systematic limit regression.
 
-**b. Parse-rule stress + round-trip harness**
+**Full run (30 brands × 8 flavors = 240 profiles + 90 recipes, ~10 chunks, ~10–20 min):**
+```bash
+VERIFY_USERNAME=mymanager VERIFY_PASSWORD=mypass \
+pnpm --filter @workspace/scripts run verify-large-spec-import
+```
 
-The script must be bundled with esbuild before running (Node's native type-stripping cannot load `@workspace/api-zod`'s extensionless internal imports):
+**Reading a failure:** when data is lost the harness exits 1 and prints a clear diff:
+```
+FAIL — 6 problem(s):
+  - MISSING PROFILE: Golden Crust / Veggie
+  - MISSING PROFILE: Golden Crust / BBQ Chicken
+  - MISSING RECIPE: [dough] Golden Crust Dough
+  - MISSING ROW: [sauce] Rustic Hearth Sauce → Spice Blend
+  - WRONG LBS: [cheese] Alpine Stone Cheese Blend → Mozzarella: got 400, expected 423
+  - MISSING TARGET: [dough] Golden Crust Dough → Golden Crust / BBQ Chicken
+
+Data was lost or corrupted between export → chunk → AI parse → merge.
+If the AI model recently changed, re-tune: the 16k chunk budget
+(DEFAULT_LIMITS.maxTotalChars in lib/spec-import), the 65536
+max_completion_tokens on /ai/parse-spec-sheet, and maxProfiles (400).
+```
+
+**Interpreting results:**
+- `MISSING PROFILE` / `MISSING RECIPE` — whole items lost; likely a chunk returning empty JSON or the chunk-size budget too wide for the new model's output cap. Reduce `DEFAULT_LIMITS.maxTotalChars` in `lib/spec-import/src/index.ts`.
+- `MISSING ROW` / `WRONG LBS` — partial data loss; the AI parsed the item but truncated its ingredient list. Same fix.
+- `MISSING TARGET` — recipe present but brand/flavor link lost; the `"Brand: flavor, …"` target row was cut by the prompt-cell clamp. Check `PROMPT_MAX_CELL_CHARS` wrapping in the exporter.
+- A single empty chunk on the **first attempt** that passes on retry = transient flakiness; still-empty after 3 retries = systematic model/limit regression.
+
+**Harness script:** `scripts/src/verify-large-spec-import.mts`
+Rate-limit: throttles at 8 req/min, sleeps 65 s on 429.
+
+---
+
+#### 4b. Parse-rule stress + round-trip harness (on-demand — rule regression)
+
+Run after any **prompt rewrite** (not just model changes). Covers qualifier-brand separation, known-sauce grounding, paraphrase snapping, and xlsx round-trip.
+
+The script must be bundled with esbuild first (Node's native type-stripping cannot load `@workspace/api-zod`'s extensionless internal imports):
 ```bash
 cd artifacts/api-server
 ./node_modules/.bin/esbuild scripts/e2e-spec-roundtrip.ts --bundle \
@@ -71,8 +120,12 @@ cd artifacts/api-server
   --banner:js="import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);"
 node /tmp/e2e-spec.mjs
 ```
-- Covers qualifier-brand separation, known-sauce grounding (SCENARIO 2: a sheet abbreviating ready-made sauces the factory already has must import with no false "not found" warning), paraphrase snapping, and xlsx round-trip.
-- The deterministic xlsx write → read → grid half is also guarded in CI (no AI): `lib/spec-export/src/xlsx-roundtrip.test.ts` (`test:spec-export`). The esbuild harness is the only check for the AI-parse half.
+
+- **SCENARIO 2** (same run): a sheet abbreviating ready-made sauces the factory already has (`known.sauceNames`) must import with NO false "not found on the sheet" warning; a control re-sanitize WITHOUT the known list must warn; a scripted paraphrase must still warn/snap.
+- The deterministic xlsx write → read → grid half is guarded in CI (no AI): `lib/spec-export/src/xlsx-roundtrip.test.ts` (`test:spec-export`). The esbuild harness is the only check for the AI-parse half.
+- Expected final line: `ALL CHECKS PASSED — full round-trip with no data loss.`
+
+---
 
 **When to skip real-AI harnesses:** if the change is purely deterministic (sanitizer, chunk logic, alias system, import link passes) and you have not touched the prompt or model routing, the real-AI harnesses can be skipped. Corpus + lib/spec-import unit tests are sufficient.
 
@@ -148,5 +201,6 @@ When the known-lists glue is updated to filter brands/flavors through deletion t
 | Corpus regression (deterministic, no AI) | `pnpm --filter @workspace/corpus-harness run test` | **Always** after any spec import change |
 | Spec-export prompt round-trip (cell clamp) | `pnpm --filter @workspace/spec-export run test` | After exporter changes |
 | lib/spec-import unit tests (alias, sanitizer, merge, link) | `pnpm --filter @workspace/spec-import exec vitest run` | After any lib/spec-import change |
-| Large spec round-trip (real AI) | `pnpm --filter @workspace/scripts run verify-large-spec-import` | After prompt or model changes |
+| Large spec round-trip — smoke (real AI, ~2 min) | `BRANDS=4 FLAVORS=3 VERIFY_USERNAME=… VERIFY_PASSWORD=… pnpm --filter @workspace/scripts run verify-large-spec-import` | Quick check after prompt or model changes |
+| Large spec round-trip — full (real AI, 10–20 min) | `VERIFY_USERNAME=… VERIFY_PASSWORD=… pnpm --filter @workspace/scripts run verify-large-spec-import` | **Required** after any AI model change — see step 4a for full setup |
 | Parse-rule stress + xlsx round-trip (real AI) | esbuild + node — see step 4b above | After prompt or model changes |
