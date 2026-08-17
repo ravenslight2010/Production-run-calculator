@@ -18,10 +18,13 @@ import {
   useRun,
   computeCalc,
   runLabel,
+  profileKey,
   PACKAGING_FIELDS,
   type RecipeRow,
   type RunSettings,
 } from "@/context/RunContext";
+import RunInsightsCard from "@/components/RunInsightsCard";
+import { type RunSuggestion } from "@/context/runInsights";
 import { computeCheesePull } from "@workspace/inventory-math";
 import { findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual } from "@workspace/spec-import";
 import { FONTS } from "@/constants/fonts";
@@ -164,6 +167,7 @@ export default function ConfigureScreen() {
     allRuns,
     brandProfiles,
     updateSettings,
+    saveProfileFor,
     templates,
     saveTemplate,
     applyTemplate,
@@ -498,6 +502,48 @@ export default function ConfigureScreen() {
 
   const currentLabel = runLabel(run, runIndex);
 
+  // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
+  // never called automatically. Returns a confirmation line for the card.
+  const handleAcceptRunSuggestion = async (s: RunSuggestion): Promise<string> => {
+    const changed: string[] = [];
+    const productName = [s.brand, s.flavor].filter(Boolean).join(" ");
+
+    if (s.type === "speed-target") {
+      const existing = brandProfiles[profileKey(s.brand, s.flavor)];
+      if (existing) {
+        saveProfileFor(s.brand, s.flavor, { ...existing, cycleSpeed: s.recommendedValue });
+        changed.push(`saved setup for ${productName || "product"}`);
+      }
+      if (run.settings.brand === s.brand && run.settings.flavor === s.flavor) {
+        updateSettings({ cycleSpeed: s.recommendedValue });
+        changed.push("current run");
+      }
+      if (changed.length === 0) {
+        throw new Error(
+          "No saved setup found for this product — open its Setup profile and change the cycle speed there.",
+        );
+      }
+      return `Cycle speed updated to ${s.recommendedValue} (${changed.join(" + ")}).`;
+    }
+
+    // tunnel-time
+    const existing = brandProfiles[profileKey(s.brand, s.flavor)];
+    if (existing && (existing.freezerTime ?? 0) > 0) {
+      saveProfileFor(s.brand, s.flavor, { ...existing, freezerTime: s.recommendedValue });
+      changed.push(`saved setup for ${productName || "product"}`);
+    }
+    if (run.settings.brand === s.brand && run.settings.flavor === s.flavor) {
+      updateSettings({ freezerTime: s.recommendedValue });
+      changed.push("current run");
+    }
+    if (changed.length === 0) {
+      throw new Error(
+        "No saved setup found to apply this to — update the tunnel time manually.",
+      );
+    }
+    return `Tunnel time updated to ${s.recommendedValue} min (${changed.join(" + ")}).`;
+  };
+
   const tryUnlock = () => {
     if (pinEntry === supervisorPin) {
       setUnlocked(true);
@@ -597,6 +643,11 @@ export default function ConfigureScreen() {
             {currentLabel}
           </Text>
         </View>
+
+        {/* Run Insights — manager-only pattern-based setting suggestions */}
+        {isManager && (
+          <RunInsightsCard onAccept={handleAcceptRunSuggestion} />
+        )}
 
         {/* Fill in missing data assistant */}
         <FillMissingPanel />

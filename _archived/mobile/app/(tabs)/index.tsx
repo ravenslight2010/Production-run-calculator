@@ -44,6 +44,7 @@ import {
   type DoughSupplyMode,
   type Stoppage,
 } from "@/context/RunContext";
+import { reportRunInsightsAfterFinalize } from "@/context/runInsights";
 import { useColors } from "@/hooks/useColors";
 import { useNotifications } from "@/hooks/useNotifications";
 import FloorMode from "@/components/FloorMode";
@@ -992,7 +993,14 @@ export default function CalculatorScreen() {
                   <Pressable
                     onPress={() => {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      // Snapshot run before ending so the insight reporter can
+                      // see the completed stats (endRun queues a state update).
+                      const endedRun = { ...run, endedAt: Date.now(), isRunning: false as const };
                       endRun();
+                      void reportRunInsightsAfterFinalize(
+                        [endedRun],
+                        allRuns.map((r) => r.id === run.id ? endedRun : r),
+                      ).catch(() => {});
                     }}
                     style={({ pressed }) => [
                       styles.ctrlBtn,
