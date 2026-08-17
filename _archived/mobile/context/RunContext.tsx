@@ -78,6 +78,7 @@ import { collectMergeAliases } from "@workspace/merge-suggest";
 import { moveEntries } from "@workspace/schedule-move";
 import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type MergeSuggestCategory } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
+import { reportRunInsightsAfterFinalize } from "./runInsights";
 import { fetchMixes, saveMixes } from "./mixes";
 import { saveSpecImportAliases } from "./specImportAliases";
 import type { SpecImportAlias } from "@workspace/spec-import";
@@ -2668,10 +2669,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
-  const startRun = useCallback(
-    () =>
+  const startRun = useCallback(() => {
+      const now = Date.now();
+      // Snapshot runs that will be auto-finalized BEFORE the state update so we
+      // can report insights fire-and-forget after setAppState is queued.
+      // appStateRef.current always has the latest committed state.
+      const snap = appStateRef.current;
+      const autoFinalizedRuns: RunState[] = snap.runs
+        .filter((r, i) => i !== snap.currentIndex && r.startedAt != null && r.endedAt == null)
+        .map((r) => ({ ...r, isRunning: false, endedAt: now }));
+
       setAppState((prev) => {
-        const now = Date.now();
         // Starting a run stops any other run that is currently running. Finalize
         // each like an explicit endRun: deduct its own inventory (idempotent per
         // runId, from its own settings) before clearing its running flag.
@@ -2708,7 +2716,19 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const next = { ...prev, runs, prepPhase: nextPrepPhase };
         persist(next);
         return next;
-      }),
+      });
+
+      // Fire-and-forget: report insights for any runs that were auto-finalized
+      // by this startRun call (mirrors the End-button hook in index.tsx).
+      if (autoFinalizedRuns.length > 0) {
+        const todayAfter = snap.runs.map((r, i) =>
+          i !== snap.currentIndex && r.startedAt != null && r.endedAt == null
+            ? { ...r, isRunning: false, endedAt: now }
+            : r,
+        );
+        void reportRunInsightsAfterFinalize(autoFinalizedRuns, todayAfter).catch(() => {});
+      }
+    },
     [persist],
   );
 
