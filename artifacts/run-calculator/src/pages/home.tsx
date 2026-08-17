@@ -14608,11 +14608,15 @@ export default function Home() {
                                   </div>
                                 </div>
                               ))}
-                              {/* Prep mixes — ingredient-linked */}
-                              {group.prepMixes.length > 0 && (
+                              {/* Prep mixes — ingredient-linked. Zero-pull cards (totalLbs === 0) are hidden;
+                                  cards with totalLbs > 0 but remainingLbs === 0 still show so staff can confirm
+                                  already-made coverage. */}
+                              {(() => {
+                                const visiblePrepMixes = group.prepMixes.filter((m) => m.totalLbs > 0);
+                                return visiblePrepMixes.length > 0 && (
                                 <div className="mt-3 pt-3 border-t border-emerald-800/40 space-y-3">
                                   <p className="text-[11px] uppercase tracking-wider font-semibold text-violet-400/80">Ingredient Prep</p>
-                                  {group.prepMixes.map((m) => {
+                                  {visiblePrepMixes.map((m) => {
                                     const expandKey = `${group.date}::${m.mixId}`;
                                     const isExpanded = prepMixExpanded.has(expandKey);
                                     const toggleExpanded = () =>
@@ -14686,7 +14690,8 @@ export default function Home() {
                                     );
                                   })}
                                 </div>
-                              )}
+                              );
+                              })()}
                             </CardContent>
                           </Card>
                         ))}
