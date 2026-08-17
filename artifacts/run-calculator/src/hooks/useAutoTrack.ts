@@ -170,7 +170,8 @@ function clampPeriodMs(ms: number): number {
  * never double-count saved progress.
  *
  * Trays/batches: incremental decrement per tick — subtracts consumption for the
- * actual duration since that counter's last tick (capped to 2 periods).
+ * actual duration since that counter's last tick (capped to 2 periods for
+ * tray/batch; cases apply the full catch-up delta on wake).
  */
 export function useAutoTrack({
   runId,
@@ -225,10 +226,6 @@ export function useAutoTrack({
   // incremental decrement (consumption for the actual elapsed duration).
   const trayLastMsRef = useRef<number>(0);
   const batchLastMsRef = useRef<number>(0);
-  // Wall-clock ms of the last case tick — used to cap the per-tick delta after
-  // a large gap (screen-off, tab hidden) so a single wake-up event cannot apply
-  // many minutes of accumulated production in one tick. 0 = not yet fired.
-  const caseLastMsRef = useRef<number>(0);
   // expectedCases value at the last case tick — the baseline the incremental
   // skids/cases delta is measured from. -1 = "not baselined yet" (first tick
   // after a mount/reset).
@@ -328,7 +325,6 @@ export function useAutoTrack({
     hopperProdNextDueMsRef.current = 0;
     trayLastMsRef.current = 0;
     batchLastMsRef.current = 0;
-    caseLastMsRef.current = 0;
     lastExpectedCasesRef.current = -1;
     traysRemainderRef.current = 0;
     traySeededRef.current = false;
@@ -429,7 +425,6 @@ export function useAutoTrack({
       // Task #570 and Task #571 required.
       trayLastMsRef.current = 0;
       batchLastMsRef.current = 0;
-      caseLastMsRef.current = 0;
       trayNextDueMsRef.current = 0;
       // Also reset the production ticker so it re-arms at nowMs + period/2 via
       // the first-encounter path on the next tick — re-establishing the half-period
@@ -464,16 +459,6 @@ export function useAutoTrack({
       const expectedRaw = autoTrackSuggestion.expectedCasesRaw;
       const expectedCases = autoTrackSuggestion.expectedCases;
       caseNextDueMsRef.current = nowMs + casePeriodMs;
-      // Cap the per-tick delta to 2 case-periods worth of production so a long
-      // screen-off or backgrounded tab can't apply many minutes of accumulated
-      // expected output in one wake-up tick (mirrors the 2-period cap on trays/
-      // batches). On the very first tick (caseLastMsRef === 0) treat elapsed as
-      // exactly one period — no catch-up needed there either.
-      const prevCaseMs = caseLastMsRef.current;
-      const elapsedCaseMs = prevCaseMs > 0 ? nowMs - prevCaseMs : casePeriodMs;
-      const cappedCaseMs = Math.min(elapsedCaseMs, casePeriodMs * 2);
-      const maxDeltaCases = (cappedCaseMs / 60000) * (calc.ppm / (v.pizzasPerCase || 1));
-      caseLastMsRef.current = nowMs;
       lastExpectedCasesRef.current = expectedRaw;
       // Freezer baseline advances on EVERY case tick (even suppressed / while
       // running) so the drain delta is always measured from the latest tunnel
@@ -518,13 +503,11 @@ export function useAutoTrack({
         } else {
           // Add the production since the last tick on top of the current value, so a
           // manual correction is preserved and tracking continues forward from it.
-          // Cap to maxDeltaCases (2 case-periods) so a screen-off wake-up can't
-          // apply an unbounded accumulated delta in one tick.
           // Floor to a whole number — cases are discrete; a fractional delta
           // (e.g. 0.1666 when ppm/pizzasPerCase doesn't divide evenly into the
           // tick interval) would store a float into casesOnCurrentSkid via the
           // modulo below and corrupt every subsequent curTotal read.
-          const deltaCases = Math.floor(Math.min(Math.max(0, expectedRaw - prevExpected), maxDeltaCases));
+          const deltaCases = Math.floor(Math.max(0, expectedRaw - prevExpected));
           if (deltaCases > 0) {
             // Stale-delta catch-up guard: if the form shows 0 cases but
             // prevExpected is positive, the form was reset (SSE echo, run
