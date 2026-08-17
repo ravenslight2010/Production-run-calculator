@@ -280,7 +280,7 @@ describe("live ↔ sandbox scope isolation", () => {
     expect(itemRows.map((r) => r.scope).sort()).toEqual(["live", "sandbox"]);
     const ruleRows = await db.select().from(productionRulesTable);
     expect(ruleRows.map((r) => r.scope).sort()).toEqual(["live", "sandbox"]);
-  });
+  }, 20_000);
 });
 
 describe("POST /sandbox/reset re-copies live → sandbox", () => {

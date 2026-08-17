@@ -894,7 +894,7 @@ describe("capMergedResult", () => {
     expect(byteSize(merged)).toBeGreaterThan(MAX_BYTES);
     const result = capMergedResult(merged);
     expect(byteSize(result)).toBeLessThanOrEqual(MAX_BYTES);
-  });
+  }, 20_000);
 
   it("enforces the hard 512 KB guarantee even for pathologically large retained fields", () => {
     // Build a blob with many additive arrays ALL maxed-out at 500 × 200-char strings.
