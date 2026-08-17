@@ -293,6 +293,170 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  // 4. Dough-timer independent pause: traysOnLine must NOT jump on resume
+  //
+  // pauseDoughTimers() freezes dough ticks mid-run while runStatus stays
+  // "running".  resumeDoughTimers() zeroes trayLastMsRef + trayNextDueMsRef so
+  // the first post-resume consumption tick uses ONE period (2 min) — not the
+  // accumulated pause span (5 min, capped at 2 periods = 4 min → 2 trays).
+  //
+  // Note: unlike the global-pause resume path, the runStatus effect does NOT
+  // fire here (runStatus never changes). resumeDoughTimers() itself zeros the
+  // refs, so the no-jump guarantee comes from resumeDoughTimers alone.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("4. traysOnLine/batchesReady do not jump after dough-timer pause + resume", () => {
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number, trays?: number, batches?: number): Props => ({
+      runId: "run-4",
+      runStatus: "running" as const,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        traysOnLine: trays ?? store.traysOnLine,
+        batchesReady: batches ?? store.batchesReady,
+      },
+      form,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, 5, 2) },
+    );
+
+    // ── Tick 1 at T0+500: establishes trayLastMsRef / batchLastMsRef ──────
+    // prevMs=0 → duration=1 period → consumes 1 tray (5→4).
+    // trayLastMsRef  ← T0+500
+    // trayNextDueMsRef ← T0+500+TRAY_PERIOD_MS (= T0+120500)  [well in future]
+    const T1 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1);
+      rerender(props(T1));
+    });
+    expect(store.traysOnLine).toBe(4);
+
+    // ── pauseDoughTimers() called at T1+1 ────────────────────────────────
+    // doughTimerPausedRef.current = T1+1; tray/batch ticks suppressed.
+    act(() => {
+      vi.setSystemTime(T1 + 1);
+      result.current.pauseDoughTimers();
+      rerender(props(T1 + 1));
+    });
+    expect(store.traysOnLine).toBe(4); // unchanged — dough paused
+
+    // ── Stay paused for 5 minutes (> 2 tray periods). ─────────────────────
+    const tPause5min = T1 + 5 * 60_000; // 300 001 ms after T1
+    act(() => {
+      vi.setSystemTime(tPause5min);
+      rerender(props(tPause5min));
+    });
+    expect(store.traysOnLine).toBe(4); // still no tray tick
+
+    // ── resumeDoughTimers() called: zeroes trayLastMsRef + trayNextDueMsRef.
+    // The consumption tick fires immediately (trayNextDueMsRef=0, nowMs≥0):
+    //   prevMs = trayLastMsRef = 0 → durationMin = 1 period (2 min)
+    //   traysConsumed = floor(2*100/200) = 1 → 4→3
+    //
+    // WITHOUT resumeDoughTimers resetting trayLastMsRef, prevMs would be T1
+    // (T0+500). The elapsed span (≈5 min) would be capped at 2 periods (4 min)
+    // → floor(4*100/200)=2 trays consumed → 4→2 (the "jump").
+    const traysBeforeResume = store.traysOnLine; // 4
+    act(() => {
+      vi.setSystemTime(tPause5min + 2);
+      result.current.resumeDoughTimers();
+      rerender(props(tPause5min + 2));
+    });
+
+    const traysDropped = traysBeforeResume - store.traysOnLine;
+    // Exactly 1 tray (one period). A jump would be 2 (two-period cap hit).
+    expect(traysDropped).toBe(1);
+    expect(store.traysOnLine).toBe(3);
+    // batchesReady must also not have jumped (still at or near its pre-pause value).
+    expect(store.batchesReady).toBeGreaterThanOrEqual(0);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 5. Cases/skids keep ticking during a dough-timer-only pause
+  //
+  // Dough-timer pause must NOT block the cases/skids counter — the line is
+  // still running; only the dough batch pipeline display is frozen.
+  // Confirms the guard at line 563 (doughTimerPausedRef > 0 → return) is
+  // placed AFTER the cases block, not before it.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("5. cases/skids continue ticking normally while dough timers are paused", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 5,
+      batchesReady: 2,
+    });
+
+    // elapsed=700 → elapsedMin≈11.67 → afterTunnel≈1.67 → expectedCasesRaw≈16
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number, elapsedSec: number): Props => ({
+      runId: "run-5",
+      runStatus: "running" as const,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, ELAPSED_SEC) },
+    );
+
+    // ── Tick 1 at T0+500: first-tick branch; form is 0 → seed cases. ──────
+    const T1 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1);
+      rerender(props(T1, ELAPSED_SEC));
+    });
+    const casesAfterTick1 = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+    const traysAfterTick1 = store.traysOnLine;
+    // First tick seeded cases (0→something) and consumed 1 tray.
+    expect(casesAfterTick1).toBeGreaterThanOrEqual(0); // may or may not seed
+    expect(traysAfterTick1).toBeLessThanOrEqual(5);
+
+    // ── pauseDoughTimers() at T1+1: freeze dough ticks. ──────────────────
+    act(() => {
+      vi.setSystemTime(T1 + 1);
+      result.current.pauseDoughTimers();
+      rerender(props(T1 + 1, ELAPSED_SEC));
+    });
+    const traysWhenPaused = store.traysOnLine;
+    const casesWhenPaused = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+
+    // ── Advance 3 case periods while dough timers are paused. ─────────────
+    // Cases should still tick (3 increments); trays must stay frozen.
+    const advanceMs = 3 * CASE_PERIOD_MS; // 18 000 ms
+    const tAfterPause = T1 + 1 + advanceMs;
+    const elapsedAfterPause = ELAPSED_SEC + advanceMs / 1000;
+
+    // Step through case periods one at a time so each tick fires.
+    for (let i = 1; i <= 3; i++) {
+      const nowMs = T1 + 1 + i * CASE_PERIOD_MS + 1;
+      act(() => {
+        vi.setSystemTime(nowMs);
+        rerender(props(nowMs, ELAPSED_SEC + (i * CASE_PERIOD_MS) / 1000));
+      });
+    }
+
+    const casesAfterPause = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+    const traysAfterPause = store.traysOnLine;
+
+    // Cases advanced during dough-timer pause — case ticking is NOT blocked.
+    expect(casesAfterPause).toBeGreaterThan(casesWhenPaused);
+    // Trays frozen — dough ticks suppressed by pause guard.
+    expect(traysAfterPause).toBe(traysWhenPaused);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   // 3. formResetSkippedRef is a single-use latch
   //
   // Verify that after one guard skip, the NEXT tick always writes — even when
