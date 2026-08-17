@@ -46,6 +46,9 @@ barely shift.
 next run's dough" card is gone; `carryOverDone` field kept only for sync compat.
 Its replacement is the automatic next-run pre-seed above.
 
-Web-only (mobile parity paused). When parity resumes, port pressCasesLeft /
-pressDone, the two-stage latches, the count-based auto-track stop, and the
-pre-seed effect to mobile RunContext.
+**Mobile parity note (updated):** Mobile `pressDone` is already count-based
+(`casesCompletedTotal + casesOnLine >= casesNeeded`) matching web semantics —
+see `_archived/mobile/context/RunContext.tsx`. Mobile's separate
+`doughFeedComplete` gate (stopping tray/batch auto-track) uses a time-based
+`feedCasesRaw` (elapsed with no tunnel offset) — distinct from `pressDone`.
+The two-stage switchover latches and next-run pre-seed remain web-only for now.
