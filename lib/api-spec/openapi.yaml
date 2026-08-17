@@ -1883,6 +1883,119 @@ paths:
         "403":
           description: Manager role required
 
+  /run-suggestions:
+    get:
+      operationId: listRunSuggestions
+      tags: [runSuggestions]
+      summary: List run-coaching suggestions (Run Insights)
+      description: >-
+        Returns stored run-coaching suggestions (pending, accepted, dismissed).
+        These are deterministic, math-driven recommendations to adjust a
+        setting (cycle speed or tunnel time) generated after runs complete;
+        nothing is ever auto-applied. Reading is open to any signed-in user;
+        acting on them is manager-only.
+      responses:
+        "200":
+          description: All stored run suggestions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunSuggestionsList"
+
+  /run-suggestions/observe:
+    post:
+      operationId: observeRunSuggestion
+      tags: [runSuggestions]
+      summary: Report a run-coaching suggestion candidate
+      description: >-
+        Called after a run finalizes when the client's deterministic analysis
+        found a significant, consistent deviation between observed and
+        configured values. Upserts one row per pattern (type + product + die).
+        A dismissed pattern is only reopened when the drift has worsened or
+        the configured value changed. Best-effort AI narration is attached
+        server-side; on provider failure a deterministic explanation is kept.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObserveRunSuggestionInput"
+      responses:
+        "200":
+          description: Result of the observation (created/updated/suppressed)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  suppressed:
+                    type: boolean
+                  suggestion:
+                    $ref: "#/components/schemas/RunSuggestion"
+        "400":
+          description: Invalid input
+
+  /run-suggestions/update:
+    post:
+      operationId: updateRunSuggestion
+      tags: [runSuggestions]
+      summary: Accept or dismiss a run suggestion (manager only)
+      description: >-
+        Manager decision on a pending suggestion — accept (the client applies
+        the setting change) or dismiss (pattern suppressed until it recurs).
+        Can also clear a delivered follow-up note.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRunSuggestionInput"
+      responses:
+        "200":
+          description: The full updated suggestion list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunSuggestionsList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+        "404":
+          description: Unknown suggestion
+
+  /run-suggestions/follow-up:
+    post:
+      operationId: followUpRunSuggestion
+      tags: [runSuggestions]
+      summary: Record a post-accept follow-up note for a suggestion
+      description: >-
+        After a suggestion was accepted, the next finished run of the same
+        product/die reports whether the adjusted setting tracked reality.
+        Only writes onto an accepted suggestion that has no note yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunSuggestionFollowUpInput"
+      responses:
+        "200":
+          description: Acknowledged (no-op when the note slot is taken)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          description: Invalid input
+
   /die-types:
     get:
       operationId: listDieTypes
@@ -7420,6 +7533,131 @@ components:
           description: Die names whose stored defaults should be removed
           items:
             type: string
+
+    RunSuggestion:
+      type: object
+      description: >-
+        One run-coaching suggestion pattern (Run Insights). Values are in the
+        unit of the setting being recommended (cycles/min for speed-target,
+        minutes for tunnel-time) so Accept can apply them directly.
+      required:
+        - id
+        - type
+        - brand
+        - flavor
+        - dieType
+        - observedValue
+        - configuredValue
+        - recommendedValue
+        - unit
+        - runCount
+        - statsLine
+        - narrative
+        - status
+        - followUpNote
+        - updatedAt
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [speed-target, tunnel-time]
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+        observedValue:
+          type: number
+        configuredValue:
+          type: number
+        recommendedValue:
+          type: number
+        unit:
+          type: string
+        runCount:
+          type: integer
+        statsLine:
+          type: string
+        narrative:
+          type: string
+        status:
+          type: string
+          enum: [pending, accepted, dismissed]
+        followUpNote:
+          type: string
+        updatedAt:
+          type: number
+          description: Epoch milliseconds of the last change
+
+    RunSuggestionsList:
+      type: object
+      required:
+        - suggestions
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunSuggestion"
+
+    ObserveRunSuggestionInput:
+      type: object
+      required:
+        - type
+        - observedValue
+        - configuredValue
+        - recommendedValue
+        - unit
+        - runCount
+        - statsLine
+      properties:
+        type:
+          type: string
+          enum: [speed-target, tunnel-time]
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+        observedValue:
+          type: number
+        configuredValue:
+          type: number
+        recommendedValue:
+          type: number
+        unit:
+          type: string
+        runCount:
+          type: integer
+        statsLine:
+          type: string
+          description: Deterministic plain-English stats summary built client-side
+
+    UpdateRunSuggestionInput:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, dismissed]
+        clearFollowUp:
+          type: boolean
+
+    RunSuggestionFollowUpInput:
+      type: object
+      required:
+        - id
+        - note
+      properties:
+        id:
+          type: string
+        note:
+          type: string
 
     SaveDieTypesInput:
       type: object

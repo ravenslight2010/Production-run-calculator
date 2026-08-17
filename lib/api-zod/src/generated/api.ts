@@ -2193,6 +2193,116 @@ export const DeleteDieLineDefaultsResponse = zod.object({
 
 
 /**
+ * Returns stored run-coaching suggestions (pending, accepted, dismissed). These are deterministic, math-driven recommendations to adjust a setting (cycle speed or tunnel time) generated after runs complete; nothing is ever auto-applied. Reading is open to any signed-in user; acting on them is manager-only.
+ * @summary List run-coaching suggestions (Run Insights)
+ */
+export const ListRunSuggestionsResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "id": zod.string(),
+  "type": zod.enum(['speed-target', 'tunnel-time']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "observedValue": zod.number(),
+  "configuredValue": zod.number(),
+  "recommendedValue": zod.number(),
+  "unit": zod.string(),
+  "runCount": zod.number(),
+  "statsLine": zod.string(),
+  "narrative": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed']),
+  "followUpNote": zod.string(),
+  "updatedAt": zod.number().describe('Epoch milliseconds of the last change')
+}).describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles\/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.'))
+})
+
+
+/**
+ * Called after a run finalizes when the client's deterministic analysis found a significant, consistent deviation between observed and configured values. Upserts one row per pattern (type + product + die). A dismissed pattern is only reopened when the drift has worsened or the configured value changed. Best-effort AI narration is attached server-side; on provider failure a deterministic explanation is kept.
+ * @summary Report a run-coaching suggestion candidate
+ */
+export const ObserveRunSuggestionBody = zod.object({
+  "type": zod.enum(['speed-target', 'tunnel-time']),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "dieType": zod.string().optional(),
+  "observedValue": zod.number(),
+  "configuredValue": zod.number(),
+  "recommendedValue": zod.number(),
+  "unit": zod.string(),
+  "runCount": zod.number(),
+  "statsLine": zod.string().describe('Deterministic plain-English stats summary built client-side')
+})
+
+export const ObserveRunSuggestionResponse = zod.object({
+  "ok": zod.boolean(),
+  "suppressed": zod.boolean().optional(),
+  "suggestion": zod.object({
+  "id": zod.string(),
+  "type": zod.enum(['speed-target', 'tunnel-time']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "observedValue": zod.number(),
+  "configuredValue": zod.number(),
+  "recommendedValue": zod.number(),
+  "unit": zod.string(),
+  "runCount": zod.number(),
+  "statsLine": zod.string(),
+  "narrative": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed']),
+  "followUpNote": zod.string(),
+  "updatedAt": zod.number().describe('Epoch milliseconds of the last change')
+}).optional().describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles\/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.')
+})
+
+
+/**
+ * Manager decision on a pending suggestion — accept (the client applies the setting change) or dismiss (pattern suppressed until it recurs). Can also clear a delivered follow-up note.
+ * @summary Accept or dismiss a run suggestion (manager only)
+ */
+export const UpdateRunSuggestionBody = zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['accepted', 'dismissed']).optional(),
+  "clearFollowUp": zod.boolean().optional()
+})
+
+export const UpdateRunSuggestionResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "id": zod.string(),
+  "type": zod.enum(['speed-target', 'tunnel-time']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "observedValue": zod.number(),
+  "configuredValue": zod.number(),
+  "recommendedValue": zod.number(),
+  "unit": zod.string(),
+  "runCount": zod.number(),
+  "statsLine": zod.string(),
+  "narrative": zod.string(),
+  "status": zod.enum(['pending', 'accepted', 'dismissed']),
+  "followUpNote": zod.string(),
+  "updatedAt": zod.number().describe('Epoch milliseconds of the last change')
+}).describe('One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles\/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.'))
+})
+
+
+/**
+ * After a suggestion was accepted, the next finished run of the same product/die reports whether the adjusted setting tracked reality. Only writes onto an accepted suggestion that has no note yet.
+ * @summary Record a post-accept follow-up note for a suggestion
+ */
+export const FollowUpRunSuggestionBody = zod.object({
+  "id": zod.string(),
+  "note": zod.string()
+})
+
+export const FollowUpRunSuggestionResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
  * Returns every factory-wide die type (the selectable Die Type master list). These are shared master-data (not part of the per-day sync payload), so they survive factory data resets and fresh devices. Any signed-in user can read and write them — the list is a shared convenience edited from the run form pickers, like run templates.
  * @summary List factory-wide die types
  */

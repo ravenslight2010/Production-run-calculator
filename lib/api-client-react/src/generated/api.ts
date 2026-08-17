@@ -60,6 +60,7 @@ import type {
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
+  FollowUpRunSuggestion200,
   ForecastAccuracyInput,
   ForecastAccuracyResult,
   ForecastInput,
@@ -102,6 +103,8 @@ import type {
   MixReconcileInput,
   MixReconcileResult,
   NamedRecipeList,
+  ObserveRunSuggestion200,
+  ObserveRunSuggestionInput,
   OkResponse,
   OptimizeInput,
   OptimizeResult,
@@ -128,6 +131,8 @@ import type {
   RestockInput,
   RoleCapabilitiesUpdate,
   RoleDefinition,
+  RunSuggestionFollowUpInput,
+  RunSuggestionsList,
   RunTemplateList,
   SaveAiCorrectionsInput,
   SaveBrandProfilesInput,
@@ -177,6 +182,7 @@ import type {
   UpdateInventoryLocationInput,
   UpdateInventorySettingsInput,
   UpdateProactiveAlertSettingsInput,
+  UpdateRunSuggestionInput,
   UsernameAvailability,
   WasteInsightInput,
   WasteInsightResult
@@ -5695,6 +5701,300 @@ export const useDeleteDieLineDefaults = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteDieLineDefaultsMutationOptions(options));
+    }
+
+export const getListRunSuggestionsUrl = () => {
+
+
+
+
+  return `/api/run-suggestions`
+}
+
+/**
+ * Returns stored run-coaching suggestions (pending, accepted, dismissed). These are deterministic, math-driven recommendations to adjust a setting (cycle speed or tunnel time) generated after runs complete; nothing is ever auto-applied. Reading is open to any signed-in user; acting on them is manager-only.
+ * @summary List run-coaching suggestions (Run Insights)
+ */
+export const listRunSuggestions = async ( options?: RequestInit): Promise<RunSuggestionsList> => {
+
+  return customFetch<RunSuggestionsList>(getListRunSuggestionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRunSuggestionsQueryKey = () => {
+    return [
+    `/api/run-suggestions`
+    ] as const;
+    }
+
+
+export const getListRunSuggestionsQueryOptions = <TData = Awaited<ReturnType<typeof listRunSuggestions>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRunSuggestionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRunSuggestions>>> = ({ signal }) => listRunSuggestions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListRunSuggestionsQueryResult = NonNullable<Awaited<ReturnType<typeof listRunSuggestions>>>
+export type ListRunSuggestionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List run-coaching suggestions (Run Insights)
+ */
+
+export function useListRunSuggestions<TData = Awaited<ReturnType<typeof listRunSuggestions>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRunSuggestions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListRunSuggestionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getObserveRunSuggestionUrl = () => {
+
+
+
+
+  return `/api/run-suggestions/observe`
+}
+
+/**
+ * Called after a run finalizes when the client's deterministic analysis found a significant, consistent deviation between observed and configured values. Upserts one row per pattern (type + product + die). A dismissed pattern is only reopened when the drift has worsened or the configured value changed. Best-effort AI narration is attached server-side; on provider failure a deterministic explanation is kept.
+ * @summary Report a run-coaching suggestion candidate
+ */
+export const observeRunSuggestion = async (observeRunSuggestionInput: ObserveRunSuggestionInput, options?: RequestInit): Promise<ObserveRunSuggestion200> => {
+
+  return customFetch<ObserveRunSuggestion200>(getObserveRunSuggestionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      observeRunSuggestionInput,)
+  }
+);}
+
+
+
+
+export const getObserveRunSuggestionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof observeRunSuggestion>>, TError,{data: BodyType<ObserveRunSuggestionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof observeRunSuggestion>>, TError,{data: BodyType<ObserveRunSuggestionInput>}, TContext> => {
+
+const mutationKey = ['observeRunSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof observeRunSuggestion>>, {data: BodyType<ObserveRunSuggestionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  observeRunSuggestion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ObserveRunSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof observeRunSuggestion>>>
+    export type ObserveRunSuggestionMutationBody = BodyType<ObserveRunSuggestionInput>
+    export type ObserveRunSuggestionMutationError = ErrorType<void>
+
+    /**
+ * @summary Report a run-coaching suggestion candidate
+ */
+export const useObserveRunSuggestion = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof observeRunSuggestion>>, TError,{data: BodyType<ObserveRunSuggestionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof observeRunSuggestion>>,
+        TError,
+        {data: BodyType<ObserveRunSuggestionInput>},
+        TContext
+      > => {
+      return useMutation(getObserveRunSuggestionMutationOptions(options));
+    }
+
+export const getUpdateRunSuggestionUrl = () => {
+
+
+
+
+  return `/api/run-suggestions/update`
+}
+
+/**
+ * Manager decision on a pending suggestion — accept (the client applies the setting change) or dismiss (pattern suppressed until it recurs). Can also clear a delivered follow-up note.
+ * @summary Accept or dismiss a run suggestion (manager only)
+ */
+export const updateRunSuggestion = async (updateRunSuggestionInput: UpdateRunSuggestionInput, options?: RequestInit): Promise<RunSuggestionsList> => {
+
+  return customFetch<RunSuggestionsList>(getUpdateRunSuggestionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateRunSuggestionInput,)
+  }
+);}
+
+
+
+
+export const getUpdateRunSuggestionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRunSuggestion>>, TError,{data: BodyType<UpdateRunSuggestionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateRunSuggestion>>, TError,{data: BodyType<UpdateRunSuggestionInput>}, TContext> => {
+
+const mutationKey = ['updateRunSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateRunSuggestion>>, {data: BodyType<UpdateRunSuggestionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateRunSuggestion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateRunSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof updateRunSuggestion>>>
+    export type UpdateRunSuggestionMutationBody = BodyType<UpdateRunSuggestionInput>
+    export type UpdateRunSuggestionMutationError = ErrorType<void>
+
+    /**
+ * @summary Accept or dismiss a run suggestion (manager only)
+ */
+export const useUpdateRunSuggestion = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRunSuggestion>>, TError,{data: BodyType<UpdateRunSuggestionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateRunSuggestion>>,
+        TError,
+        {data: BodyType<UpdateRunSuggestionInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateRunSuggestionMutationOptions(options));
+    }
+
+export const getFollowUpRunSuggestionUrl = () => {
+
+
+
+
+  return `/api/run-suggestions/follow-up`
+}
+
+/**
+ * After a suggestion was accepted, the next finished run of the same product/die reports whether the adjusted setting tracked reality. Only writes onto an accepted suggestion that has no note yet.
+ * @summary Record a post-accept follow-up note for a suggestion
+ */
+export const followUpRunSuggestion = async (runSuggestionFollowUpInput: RunSuggestionFollowUpInput, options?: RequestInit): Promise<FollowUpRunSuggestion200> => {
+
+  return customFetch<FollowUpRunSuggestion200>(getFollowUpRunSuggestionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      runSuggestionFollowUpInput,)
+  }
+);}
+
+
+
+
+export const getFollowUpRunSuggestionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof followUpRunSuggestion>>, TError,{data: BodyType<RunSuggestionFollowUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof followUpRunSuggestion>>, TError,{data: BodyType<RunSuggestionFollowUpInput>}, TContext> => {
+
+const mutationKey = ['followUpRunSuggestion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof followUpRunSuggestion>>, {data: BodyType<RunSuggestionFollowUpInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  followUpRunSuggestion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type FollowUpRunSuggestionMutationResult = NonNullable<Awaited<ReturnType<typeof followUpRunSuggestion>>>
+    export type FollowUpRunSuggestionMutationBody = BodyType<RunSuggestionFollowUpInput>
+    export type FollowUpRunSuggestionMutationError = ErrorType<void>
+
+    /**
+ * @summary Record a post-accept follow-up note for a suggestion
+ */
+export const useFollowUpRunSuggestion = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof followUpRunSuggestion>>, TError,{data: BodyType<RunSuggestionFollowUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof followUpRunSuggestion>>,
+        TError,
+        {data: BodyType<RunSuggestionFollowUpInput>},
+        TContext
+      > => {
+      return useMutation(getFollowUpRunSuggestionMutationOptions(options));
     }
 
 export const getListDieTypesUrl = () => {

@@ -2379,6 +2379,90 @@ export interface DeleteDieLineDefaultsInput {
   names: string[];
 }
 
+export type RunSuggestionType = typeof RunSuggestionType[keyof typeof RunSuggestionType];
+
+
+export const RunSuggestionType = {
+  'speed-target': 'speed-target',
+  'tunnel-time': 'tunnel-time',
+} as const;
+
+export type RunSuggestionStatus = typeof RunSuggestionStatus[keyof typeof RunSuggestionStatus];
+
+
+export const RunSuggestionStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  dismissed: 'dismissed',
+} as const;
+
+/**
+ * One run-coaching suggestion pattern (Run Insights). Values are in the unit of the setting being recommended (cycles/min for speed-target, minutes for tunnel-time) so Accept can apply them directly.
+ */
+export interface RunSuggestion {
+  id: string;
+  type: RunSuggestionType;
+  brand: string;
+  flavor: string;
+  dieType: string;
+  observedValue: number;
+  configuredValue: number;
+  recommendedValue: number;
+  unit: string;
+  runCount: number;
+  statsLine: string;
+  narrative: string;
+  status: RunSuggestionStatus;
+  followUpNote: string;
+  /** Epoch milliseconds of the last change */
+  updatedAt: number;
+}
+
+export interface RunSuggestionsList {
+  suggestions: RunSuggestion[];
+}
+
+export type ObserveRunSuggestionInputType = typeof ObserveRunSuggestionInputType[keyof typeof ObserveRunSuggestionInputType];
+
+
+export const ObserveRunSuggestionInputType = {
+  'speed-target': 'speed-target',
+  'tunnel-time': 'tunnel-time',
+} as const;
+
+export interface ObserveRunSuggestionInput {
+  type: ObserveRunSuggestionInputType;
+  brand?: string;
+  flavor?: string;
+  dieType?: string;
+  observedValue: number;
+  configuredValue: number;
+  recommendedValue: number;
+  unit: string;
+  runCount: number;
+  /** Deterministic plain-English stats summary built client-side */
+  statsLine: string;
+}
+
+export type UpdateRunSuggestionInputStatus = typeof UpdateRunSuggestionInputStatus[keyof typeof UpdateRunSuggestionInputStatus];
+
+
+export const UpdateRunSuggestionInputStatus = {
+  accepted: 'accepted',
+  dismissed: 'dismissed',
+} as const;
+
+export interface UpdateRunSuggestionInput {
+  id: string;
+  status?: UpdateRunSuggestionInputStatus;
+  clearFollowUp?: boolean;
+}
+
+export interface RunSuggestionFollowUpInput {
+  id: string;
+  note: string;
+}
+
 export interface SaveDieTypesInput {
   /** Die-type display names to create or update */
   names: string[];
@@ -3182,5 +3266,15 @@ category?: MergeSuggestCategory;
  * When category is "flavor", scopes the denied-pair list to a single brand's flavor pool. Ignored for every other category.
  */
 brand?: string;
+};
+
+export type ObserveRunSuggestion200 = {
+  ok: boolean;
+  suppressed?: boolean;
+  suggestion?: RunSuggestion;
+};
+
+export type FollowUpRunSuggestion200 = {
+  ok: boolean;
 };
 

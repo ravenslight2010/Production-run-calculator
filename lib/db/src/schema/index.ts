@@ -36,6 +36,7 @@ export * from "./cycleCountSchedules";
 export * from "./proactiveAlertSettings";
 export * from "./qualityChecks";
 export * from "./runTemplates";
+export * from "./runSuggestions";
 export * from "./supervisorPinSettings";
 export * from "./ingredients";
 export * from "./dieTypes";

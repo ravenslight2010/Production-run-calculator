@@ -215,7 +215,15 @@ import {
   deleteRunTemplatesApi,
   RUN_TEMPLATES_QUERY_KEY,
 } from "../hooks/useRunTemplates";
-import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults } from "../dieDefaults";
+import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
+import { saveDieLineDefaults } from "../dieLineDefaultsServer";
+import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../hooks/useDieLineDefaults";
+import RunInsightsCard from "../components/RunInsightsCard";
+import {
+  reportRunInsightsAfterFinalize,
+  buildTunnelDieDefaultEntry,
+  type RunSuggestion,
+} from "../runInsights";
 import {
   fetchServerDieTypes,
   pushDieTypesToServer,
@@ -9383,6 +9391,13 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
+    // Run Insights: runs auto-finalized by starting this one get the same
+    // post-run evaluation as an explicit Stop Run (best-effort).
+    const autoEnded = newRuns.filter(
+      (r, i) =>
+        i !== dayState.currentIndex && r.endedAt === now && dayState.runs[i]?.startedAt && !dayState.runs[i]?.endedAt,
+    );
+    if (autoEnded.length > 0) void reportRunInsightsAfterFinalize(autoEnded, newRuns);
   }
 
   function pauseRun() {
@@ -9414,6 +9429,84 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
+  // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
+  // never called automatically. Returns a confirmation line for the card.
+  async function applyRunSuggestion(s: RunSuggestion): Promise<string> {
+    if (s.type === "speed-target") {
+      const changed: string[] = [];
+      // Targeted profile write: load → patch one field → save. saveProfile's
+      // empty-over-populated guard is safe here because we pass the full
+      // existing profile with only cycleSpeed changed.
+      const profile = loadProfile(s.brand, s.flavor);
+      if (profile) {
+        if (saveProfile(s.brand, s.flavor, { ...profile, cycleSpeed: s.recommendedValue })) {
+          void propagateProfileToPendingRuns(s.brand, s.flavor);
+          changed.push(`saved setup for ${[s.brand, s.flavor].filter(Boolean).join(" ")}`);
+        }
+      }
+      // If the open form is showing this product, update it too so the change
+      // is visible immediately (out-of-band profile rewrites must reach the
+      // open form — see open-form-profile-clobber).
+      if (
+        currentRun &&
+        (currentRun.brand ?? "") === s.brand &&
+        (currentRun.flavor ?? "") === s.flavor
+      ) {
+        form.setValue("cycleSpeed", s.recommendedValue, { shouldDirty: true });
+        markRunValuesUpdated(currentRunId, Date.now());
+        changed.push("current run form");
+      }
+      if (changed.length === 0) {
+        throw new Error(
+          "No saved setup found for this product — open its Setup profile and change the cycle speed there.",
+        );
+      }
+      return `Cycle speed updated to ${s.recommendedValue} (${changed.join(" + ")}).`;
+    }
+    // tunnel-time — update the per-die default (server master-data) and, when
+    // this product has a saved profile, its stored freezerTime as well (die
+    // defaults are blank-fill-only, so an already-set profile wouldn't pick
+    // the new value up on its own).
+    const changed: string[] = [];
+    if (s.dieType) {
+      // Only update the die default when a complete existing base is
+      // available — an unknown/custom die must never get an all-zero
+      // override minted for it (buildTunnelDieDefaultEntry returns null).
+      const entry = buildTunnelDieDefaultEntry(
+        s.dieType,
+        dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
+        s.recommendedValue,
+      );
+      if (entry) {
+        await saveDieLineDefaults([entry]);
+        void cycleCountQc.invalidateQueries({ queryKey: DIE_LINE_DEFAULTS_QUERY_KEY });
+        changed.push(`die default for ${s.dieType}`);
+      }
+    }
+    const profile = loadProfile(s.brand, s.flavor);
+    if (profile && profile.freezerTime > 0) {
+      if (saveProfile(s.brand, s.flavor, { ...profile, freezerTime: s.recommendedValue })) {
+        void propagateProfileToPendingRuns(s.brand, s.flavor);
+        changed.push(`saved setup for ${[s.brand, s.flavor].filter(Boolean).join(" ")}`);
+      }
+    }
+    if (
+      currentRun &&
+      (currentRun.brand ?? "") === s.brand &&
+      (currentRun.flavor ?? "") === s.flavor
+    ) {
+      form.setValue("freezerTime", s.recommendedValue, { shouldDirty: true });
+      markRunValuesUpdated(currentRunId, Date.now());
+      changed.push("current run form");
+    }
+    if (changed.length === 0) {
+      throw new Error(
+        "No die or saved setup found to apply this to — update the tunnel time manually.",
+      );
+    }
+    return `Tunnel time updated to ${s.recommendedValue} min (${changed.join(" + ")}).`;
+  }
+
   function endRun() {
     // Guard: a run that was never started cannot be ended. Every UI call-site
     // is already gated (STOP RUN only shows when runStatus==="running"), but
@@ -9438,6 +9531,12 @@ export default function Home() {
     const newDs = { ...dayState, runs: newRuns, currentIndex: nextIndex };
     setDayState(newDs);
     saveDayState(newDs);
+    // Run Insights: evaluate the just-finished run against its configured
+    // settings (best-effort, fire-and-forget — never disturbs the run flow).
+    void reportRunInsightsAfterFinalize(
+      newRuns.filter((r) => r.id === currentRunId),
+      newRuns,
+    );
     if (nextIndex !== dayState.currentIndex) {
       const nextVals = loadRunValues(dayState.runs[nextIndex].id);
       form.reset(nextVals);
@@ -13664,6 +13763,10 @@ export default function Home() {
 
               {/* ─── SETUP ─── */}
               <TabsContent value="setup">
+                {/* Run Insights: manager-only pattern-based setting suggestions
+                    from completed runs. One at a time; Accept applies, Dismiss
+                    suppresses. Renders nothing when there's nothing to show. */}
+                {isManager && <RunInsightsCard onAccept={applyRunSuggestion} />}
                 <div className="mb-4">
                   <FillMissingPanel
                     getRecord={() => ({
