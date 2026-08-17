@@ -14407,66 +14407,80 @@ export default function Home() {
                         </p>
                       );
                     }
-                    const runs = scheduledDays.flatMap((day) =>
-                      (day.runs ?? [])
-                        .filter((r) => r.brand)
-                        .map((r) => {
-                          const profile = loadProfile(r.brand, r.flavor);
-                          const vals: FormValues = {
-                            ...(profile ?? DEFAULT_VALUES),
-                            casesNeeded: r.casesNeeded,
-                            ...(r.dieType ? { dieType: r.dieType } : {}),
-                          };
-                          const s = computeSummaryStats(vals);
-                          // Collect ingredient names + oz/pizza for prep-mix matching.
-                          // Each applicator slot contributes its ingredients: when a
-                          // cheese recipe is set, split the total oz/pizza by each
-                          // row's lbs share; otherwise the slot type gets the full oz.
-                          const ingredientOzPerPizza: Record<string, number> = {};
-                          const addSlot = (
-                            recipe: typeof vals.app1CheeseRecipe,
-                            type: string,
-                            oz: number,
-                          ) => {
-                            if (recipe.length > 0 && oz > 0) {
-                              const { rows } = computeCheesePerPizzaOz(recipe, oz);
-                              recipe.forEach((row, i) => {
-                                if (row.ingredient)
-                                  ingredientOzPerPizza[row.ingredient] =
-                                    (ingredientOzPerPizza[row.ingredient] ?? 0) + rows[i];
-                              });
-                            } else if (type && oz > 0) {
-                              ingredientOzPerPizza[type] =
-                                (ingredientOzPerPizza[type] ?? 0) + oz;
-                            }
-                          };
-                          addSlot(vals.app1CheeseRecipe, vals.app1Type, vals.app1OzPerPizza);
-                          addSlot(vals.app2CheeseRecipe, vals.app2Type, vals.app2OzPerPizza);
-                          addSlot(vals.app3CheeseRecipe, vals.app3Type, vals.app3OzPerPizza);
-                          addSlot(vals.app4CheeseRecipe, vals.app4Type, vals.app4OzPerPizza);
-                          if (vals.pep1Type && vals.pep1OzPerPizza > 0)
-                            ingredientOzPerPizza[vals.pep1Type] = (ingredientOzPerPizza[vals.pep1Type] ?? 0) + vals.pep1OzPerPizza;
-                          if (vals.pep2Type && vals.pep2OzPerPizza > 0)
-                            ingredientOzPerPizza[vals.pep2Type] = (ingredientOzPerPizza[vals.pep2Type] ?? 0) + vals.pep2OzPerPizza;
-                          if (vals.pep1TypeB && (vals.pep1OzPerPizzaB ?? 0) > 0)
-                            ingredientOzPerPizza[vals.pep1TypeB] = (ingredientOzPerPizza[vals.pep1TypeB] ?? 0) + (vals.pep1OzPerPizzaB ?? 0);
-                          if (vals.pep2TypeB && (vals.pep2OzPerPizzaB ?? 0) > 0)
-                            ingredientOzPerPizza[vals.pep2TypeB] = (ingredientOzPerPizza[vals.pep2TypeB] ?? 0) + (vals.pep2OzPerPizzaB ?? 0);
-                          const ingredients = Object.keys(ingredientOzPerPizza);
-                          return {
-                            date: day.date,
-                            brand: r.brand,
-                            flavor: r.flavor,
-                            // Use totalPizzasForSauce (adds the casesPerLayer startup
-                            // buffer) so mixes and cheese-type mixes get the same
-                            // buffer as applicator ingredients.
-                            pizzas: s.totalPizzasForSauce,
-                            cases: s.totalCases,
-                            ingredients,
-                            ingredientOzPerPizza,
-                          };
-                        }),
-                    );
+                    // Helper: resolve a FormValues → MixScheduledRun shape. Used for
+                    // both today's live runs and future scheduled runs so the
+                    // ingredient extraction logic stays in one place.
+                    const valsToMixRun = (date: string, brand: string, flavor: string, vals: FormValues) => {
+                      const s = computeSummaryStats(vals);
+                      const ingredientOzPerPizza: Record<string, number> = {};
+                      const addSlot = (
+                        recipe: typeof vals.app1CheeseRecipe,
+                        type: string,
+                        oz: number,
+                      ) => {
+                        if (recipe.length > 0 && oz > 0) {
+                          const { rows } = computeCheesePerPizzaOz(recipe, oz);
+                          recipe.forEach((row, i) => {
+                            if (row.ingredient)
+                              ingredientOzPerPizza[row.ingredient] =
+                                (ingredientOzPerPizza[row.ingredient] ?? 0) + rows[i];
+                          });
+                        } else if (type && oz > 0) {
+                          ingredientOzPerPizza[type] =
+                            (ingredientOzPerPizza[type] ?? 0) + oz;
+                        }
+                      };
+                      addSlot(vals.app1CheeseRecipe, vals.app1Type, vals.app1OzPerPizza);
+                      addSlot(vals.app2CheeseRecipe, vals.app2Type, vals.app2OzPerPizza);
+                      addSlot(vals.app3CheeseRecipe, vals.app3Type, vals.app3OzPerPizza);
+                      addSlot(vals.app4CheeseRecipe, vals.app4Type, vals.app4OzPerPizza);
+                      if (vals.pep1Type && vals.pep1OzPerPizza > 0)
+                        ingredientOzPerPizza[vals.pep1Type] = (ingredientOzPerPizza[vals.pep1Type] ?? 0) + vals.pep1OzPerPizza;
+                      if (vals.pep2Type && vals.pep2OzPerPizza > 0)
+                        ingredientOzPerPizza[vals.pep2Type] = (ingredientOzPerPizza[vals.pep2Type] ?? 0) + vals.pep2OzPerPizza;
+                      if (vals.pep1TypeB && (vals.pep1OzPerPizzaB ?? 0) > 0)
+                        ingredientOzPerPizza[vals.pep1TypeB] = (ingredientOzPerPizza[vals.pep1TypeB] ?? 0) + (vals.pep1OzPerPizzaB ?? 0);
+                      if (vals.pep2TypeB && (vals.pep2OzPerPizzaB ?? 0) > 0)
+                        ingredientOzPerPizza[vals.pep2TypeB] = (ingredientOzPerPizza[vals.pep2TypeB] ?? 0) + (vals.pep2OzPerPizzaB ?? 0);
+                      return {
+                        date,
+                        brand,
+                        flavor,
+                        // Use totalPizzasForSauce (adds the casesPerLayer startup
+                        // buffer) so mixes and cheese-type mixes get the same
+                        // buffer as applicator ingredients.
+                        pizzas: s.totalPizzasForSauce,
+                        cases: s.totalCases,
+                        ingredients: Object.keys(ingredientOzPerPizza),
+                        ingredientOzPerPizza,
+                      };
+                    };
+                    // Today's live runs (dayState.runs) are NOT in the scheduled
+                    // pool — they live in the live day state. Include them as
+                    // date=today so the make-day plan works when today is selected.
+                    const todayDateStr = todayStr();
+                    const liveRunsForMixes = dayState.runs
+                      .filter((r) => r.brand)
+                      .map((r) => {
+                        const runVals = r.id === currentRunId ? form.getValues() : loadRunValues(r.id);
+                        return valsToMixRun(todayDateStr, r.brand, r.flavor ?? "", runVals);
+                      });
+                    const runs = [
+                      ...liveRunsForMixes,
+                      ...scheduledDays.flatMap((day) =>
+                        (day.runs ?? [])
+                          .filter((r) => r.brand)
+                          .map((r) => {
+                            const profile = loadProfile(r.brand, r.flavor);
+                            const vals: FormValues = {
+                              ...(profile ?? DEFAULT_VALUES),
+                              casesNeeded: r.casesNeeded,
+                              ...(r.dieType ? { dieType: r.dieType } : {}),
+                            };
+                            return valsToMixRun(day.date, r.brand, r.flavor, vals);
+                          }),
+                      ),
+                    ];
                     const plan = buildMixPlan({ runs, mixes, today: mixMakeDay });
                     if (plan.length === 0) {
                       return (
