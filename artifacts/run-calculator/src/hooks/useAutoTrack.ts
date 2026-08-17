@@ -502,7 +502,7 @@ export function useAutoTrack({
             const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
             if (newTotal !== curTotal) {
               form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
-              form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+              form.setValue("casesOnCurrentSkid", Math.round(newTotal % cps), { shouldDirty: true });
             }
           }
         } else if (prevExpected < 0) {
@@ -513,14 +513,18 @@ export function useAutoTrack({
           if (curTotal === 0 && expectedCases > 0) {
             const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
             form.setValue("skidsCompleted", Math.floor(seedTotal / cps), { shouldDirty: true });
-            form.setValue("casesOnCurrentSkid", seedTotal % cps, { shouldDirty: true });
+            form.setValue("casesOnCurrentSkid", Math.round(seedTotal % cps), { shouldDirty: true });
           }
         } else {
           // Add the production since the last tick on top of the current value, so a
           // manual correction is preserved and tracking continues forward from it.
           // Cap to maxDeltaCases (2 case-periods) so a screen-off wake-up can't
           // apply an unbounded accumulated delta in one tick.
-          const deltaCases = Math.min(Math.max(0, expectedRaw - prevExpected), maxDeltaCases);
+          // Floor to a whole number — cases are discrete; a fractional delta
+          // (e.g. 0.1666 when ppm/pizzasPerCase doesn't divide evenly into the
+          // tick interval) would store a float into casesOnCurrentSkid via the
+          // modulo below and corrupt every subsequent curTotal read.
+          const deltaCases = Math.floor(Math.min(Math.max(0, expectedRaw - prevExpected), maxDeltaCases));
           if (deltaCases > 0) {
             // Stale-delta catch-up guard: if the form shows 0 cases but
             // prevExpected is positive, the form was reset (SSE echo, run
@@ -541,7 +545,7 @@ export function useAutoTrack({
               const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
               if (newTotal !== curTotal) {
                 form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
-                form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+                form.setValue("casesOnCurrentSkid", Math.round(newTotal % cps), { shouldDirty: true });
               }
             }
           } else {
