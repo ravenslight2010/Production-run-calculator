@@ -54,10 +54,23 @@ interface NotifParams {
 interface NotifResult {
   showBatchDue: boolean;
   setShowBatchDue: React.Dispatch<React.SetStateAction<boolean>>;
+  /** True while the "behind pace" in-app banner should be shown. */
+  showPaceAlert: boolean;
+  setShowPaceAlert: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Human-readable pace alert message (rate / shortfall / time left). */
+  paceAlertMsg: string;
 }
 
 /** Exported return type — shared with __mocks__/useNotifications.ts for compile-time drift detection. */
 export type UseNotificationsReturn = NotifResult;
+
+// ── Pace alert thresholds ──────────────────────────────────────────────────
+/** Minimum elapsed production minutes before the pace check activates. */
+const PACE_MIN_ELAPSED_MIN = 10;
+/** Fire the alert when the projected shortfall meets or exceeds this many cases. */
+const PACE_SHORTFALL_MIN_CASES = 10;
+/** Only alert when this many minutes or fewer remain in the run. */
+const PACE_TIME_REMAINING_MAX_MIN = 30;
 
 /**
  * Fire a notification safely. Android Chrome (and other mobile browsers)
@@ -138,6 +151,17 @@ export function useNotifications({
   const freezerDoneNotifRef = useRef<Set<string>>(new Set());
   const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
+
+  // ── Pace alert state ───────────────────────────────────────────────────────
+  // Per-run arm latch: the run is "armed" once we've observed it while on-pace
+  // (shortfall below threshold OR time remaining above threshold). This matches
+  // the notification-view-refire pattern: a run that started already behind
+  // pace (or was navigated to after the fact) is never armed, so it never fires.
+  const paceArmedRef = useRef<Set<string>>(new Set());
+  // Per-run fired latch: fires exactly once per run.
+  const paceFiredRef = useRef<Set<string>>(new Set());
+  const [showPaceAlert, setShowPaceAlert] = useState(false);
+  const [paceAlertMsg, setPaceAlertMsg] = useState("");
 
   // ── Batch cycle: per-tick memoization ─────────────────────────────────────
   // The batch effect runs every second (nowTime in deps). Track the last
@@ -368,5 +392,90 @@ export function useNotifications({
     }
   }, [runStatus, currentRun?.id, currentRun?.endedAt, v.freezerTime, nowTime]);
 
-  return { showBatchDue, setShowBatchDue };
+  // ── Behind-pace alert ─────────────────────────────────────────────────────
+  // Fires once per run when actual throughput is too slow to finish on time.
+  // Uses the armed-while-pending latch: the run is armed while pace is OK, then
+  // fires once when the shortfall condition is first met. A run that was already
+  // behind before our first tick (e.g. navigation to an old run) is never armed
+  // and therefore never fires.
+  useEffect(() => {
+    if (runStatus !== "running" || !currentRun?.startedAt || currentRun?.endedAt) return;
+    if (calc.ppm <= 0) return;
+    const casesNeeded = Number(v.casesNeeded);
+    if (casesNeeded <= 0) return;
+
+    const runId = currentRun.id;
+    // Short-circuit: already fired for this run.
+    if (paceFiredRef.current.has(runId)) return;
+
+    // Compute net elapsed production time (excluding non-pause stoppages).
+    const nowMs = nowTime.getTime();
+    const downtimeMs = (currentRun.stoppages ?? [])
+      .filter(s => s.endedAt && s.type !== "pause")
+      .reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+    const elapsedMin = Math.max(0, nowMs - currentRun.startedAt - downtimeMs) / 60000;
+
+    // Don't evaluate pace until we have a meaningful elapsed window.
+    if (elapsedMin < PACE_MIN_ELAPSED_MIN) {
+      paceArmedRef.current.add(runId);
+      return;
+    }
+
+    const timeRemainingMin = calc.adjustedTimeSec / 60;
+    // Actual throughput rate in cases per hour.
+    const actualRateCasesPerHr = elapsedMin > 0 ? (calc.casesCompleted / elapsedMin) * 60 : 0;
+    // Projected total at current rate.
+    const projectedFinish = calc.casesCompleted + (actualRateCasesPerHr * timeRemainingMin) / 60;
+    const shortfall = Math.ceil(casesNeeded - projectedFinish);
+
+    const conditionMet =
+      shortfall >= PACE_SHORTFALL_MIN_CASES &&
+      timeRemainingMin > 0 &&
+      timeRemainingMin <= PACE_TIME_REMAINING_MAX_MIN;
+
+    if (!conditionMet) {
+      // Pace is still fine — arm the run so the alert can fire later if it falls behind.
+      paceArmedRef.current.add(runId);
+      return;
+    }
+
+    // Only fire if we previously saw this run while it was on-pace.
+    if (!paceArmedRef.current.has(runId)) return;
+    paceFiredRef.current.add(runId);
+
+    // Silent latch when the user has turned this alert off — future re-enable
+    // won't retroactively fire for a milestone that's already passed.
+    if (!isNotifEnabled(prefsRef.current, "slowPace")) return;
+
+    const rateRounded = Math.round(actualRateCasesPerHr);
+    const remainMin = Math.round(timeRemainingMin);
+    const msg = `At current pace (~${rateRounded}/hr), you'll finish ~${shortfall} cases short. ${remainMin} min remaining.`;
+    setPaceAlertMsg(msg);
+    setShowPaceAlert(true);
+    navigator.vibrate?.([200, 100, 200]);
+    showAppNotification("⚠️ Behind pace", {
+      body: msg,
+      icon: "/icons/icon-192.png",
+      tag: `slow-pace-${runId}`,
+    });
+  }, [
+    runStatus,
+    currentRun?.id,
+    currentRun?.startedAt,
+    currentRun?.endedAt,
+    currentRun?.stoppages,
+    calc.ppm,
+    calc.casesCompleted,
+    calc.adjustedTimeSec,
+    v.casesNeeded,
+    nowTime,
+  ]);
+
+  // Clear the pace banner when switching runs.
+  useEffect(() => {
+    setShowPaceAlert(false);
+    setPaceAlertMsg("");
+  }, [currentRun?.id]);
+
+  return { showBatchDue, setShowBatchDue, showPaceAlert, setShowPaceAlert, paceAlertMsg };
 }

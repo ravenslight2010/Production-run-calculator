@@ -17121,6 +17121,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
+    showPaceAlert, setShowPaceAlert, paceAlertMsg,
   } = useLiveRun();
 
   // Confirm before starting a run that is not the next unstarted run in the
@@ -17620,6 +17621,19 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   data-testid="button-stall-dismiss"
                   className="px-2.5 py-1 rounded-md border border-amber-700/40 hover-elevate"
                   onClick={() => setStallPrompt(false)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            {showPaceAlert && (
+              <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-red-950/40 border border-red-700/30 text-red-400" data-testid="pace-alert-banner">
+                <span>🐢 {paceAlertMsg}</span>
+                <button
+                  type="button"
+                  data-testid="button-pace-alert-dismiss"
+                  className="px-2.5 py-1 rounded-md border border-red-700/40 hover-elevate"
+                  onClick={() => setShowPaceAlert(false)}
                 >
                   Dismiss
                 </button>

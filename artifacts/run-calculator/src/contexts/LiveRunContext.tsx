@@ -113,6 +113,11 @@ export interface LiveRunContextValue {
    * tabs to switch from "late-run" tracking to "prep for next run" mode.
    */
   nextRunPrepActive: boolean;
+  /** True while the behind-pace in-app banner should be visible. */
+  showPaceAlert: boolean;
+  setShowPaceAlert: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Human-readable pace alert message (rate / shortfall / time remaining). */
+  paceAlertMsg: string;
 }
 
 // ── Module-level calc ref (readable by Home without subscribing to context) ──
@@ -418,7 +423,7 @@ export function LiveRunProvider({
     (nextRun.subTab ?? "dough") !== "crusts";
 
   // ── Notifications ────────────────────────────────────────────────────────
-  const { showBatchDue, setShowBatchDue } = useNotifications({
+  const { showBatchDue, setShowBatchDue, showPaceAlert, setShowPaceAlert, paceAlertMsg } = useNotifications({
     runStatus,
     nowTime,
     currentRun,
@@ -529,6 +534,7 @@ export function LiveRunProvider({
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
+      showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
       nowTime, calc, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
@@ -540,6 +546,7 @@ export function LiveRunProvider({
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
+      showPaceAlert, setShowPaceAlert, paceAlertMsg,
     ],
   );
 

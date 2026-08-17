@@ -13,7 +13,8 @@ export type NotificationKind =
   | "batchDue"
   | "warehouseStaging"
   | "runComplete"
-  | "freezerEmpty";
+  | "freezerEmpty"
+  | "slowPace";
 
 export type NotificationPrefs = Record<string, boolean>;
 
@@ -47,6 +48,11 @@ export const NOTIFICATION_KINDS: Array<{
     kind: "freezerEmpty",
     label: "Freezer empty",
     description: "When an ended run's freezer has fully drained.",
+  },
+  {
+    kind: "slowPace",
+    label: "Behind pace alert",
+    description: "Mid-run warning when actual throughput is too slow to finish on time.",
   },
 ];
 

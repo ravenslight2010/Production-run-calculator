@@ -427,6 +427,7 @@ export const NOTIFICATION_PREF_KEYS = [
   "warehouseStaging",
   "runComplete",
   "freezerEmpty",
+  "slowPace",
 ] as const;
 
 // Merge the supplied alert toggles into the user's stored preferences.

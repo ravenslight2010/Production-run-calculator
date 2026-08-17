@@ -19,7 +19,14 @@ import { vi } from "vitest";
 import type { UseNotificationsReturn } from "../useNotifications";
 
 export const mockSetShowBatchDue: UseNotificationsReturn["setShowBatchDue"] = vi.fn();
+export const mockSetShowPaceAlert: UseNotificationsReturn["setShowPaceAlert"] = vi.fn();
 
 export function useNotifications(): UseNotificationsReturn {
-  return { showBatchDue: false, setShowBatchDue: mockSetShowBatchDue };
+  return {
+    showBatchDue: false,
+    setShowBatchDue: mockSetShowBatchDue,
+    showPaceAlert: false,
+    setShowPaceAlert: mockSetShowPaceAlert,
+    paceAlertMsg: "",
+  };
 }
