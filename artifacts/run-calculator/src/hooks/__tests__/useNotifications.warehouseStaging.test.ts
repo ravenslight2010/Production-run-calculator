@@ -75,6 +75,7 @@ function makeParams(overrides: Partial<Params> = {}): Params {
       timePerBatchSec: 0,         // disables batch-cycle alert
       ppm: 120,                   // positive — warehouse staging is active
       casesCompleted: 10,
+      casesInFreezer: 0,
       pressCasesLeft: 25,         // above both staging thresholds at start
       pressDone: false,
     },

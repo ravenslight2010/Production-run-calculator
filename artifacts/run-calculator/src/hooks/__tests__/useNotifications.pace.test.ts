@@ -56,6 +56,7 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
       timePerBatchSec: 360,
       ppm: 100,
       casesCompleted: 50,
+      casesInFreezer: 0,
       pressCasesLeft: 20,
       pressDone: false,
     },
@@ -208,6 +209,30 @@ describe("useNotifications — pace alert", () => {
     });
 
     // Effect returns early at `if (casesNeeded <= 0) return` — never fires.
+    expect(result.current.showPaceAlert).toBe(false);
+  });
+
+  // ── 4c. In-tunnel cases count toward throughput (no false alarm) ─────────
+  it("does NOT fire when cased + in-tunnel output is on pace (task example)", () => {
+    // 35 min at 40 PPM / 12 per case / 18-min tunnel: 54 cased + 60 in tunnel.
+    // Cased-only rate ≈ 93/hr would project a big shortfall (false alarm);
+    // press-output rate ≈ 195/hr projects finish ≥ casesNeeded → no alert.
+    const NOW = T0 + 35 * 60_000;
+    const calc = {
+      ...makeParams(NOW).calc,
+      adjustedTimeSec: 25 * 60, // 25 min remaining (≤ 30-min window)
+      casesCompleted: 54,
+      casesInFreezer: 60,
+    };
+    const v = { freezerTime: 18, casesNeeded: 195, casesPerSkid: 10 };
+
+    const { result, rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(EARLY_MS, { calc, v }),
+    });
+    act(() => {
+      rerender(makeParams(NOW, { calc, v }));
+    });
+    // pressOutput = 114 → rate ≈ 195/hr → projectedFinish ≈ 114 + 81 = 195 ≥ needed.
     expect(result.current.showPaceAlert).toBe(false);
   });
 

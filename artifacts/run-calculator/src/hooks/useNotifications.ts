@@ -13,6 +13,11 @@ interface NotifCalc {
   /** Cases already cased on the floor (skids done + current skid). */
   casesCompleted: number;
   /**
+   * In-tunnel model count: cases the press has already made that are still
+   * traveling through the tunnel/freezer (pressed, not yet packaged).
+   */
+  casesInFreezer: number;
+  /**
    * Cases still to be PRESSED — cased product plus live freezer contents count
    * as done. This is the warehouse staging basis: frontline stages at 2 skids
    * left, packaging at 1 skid left.
@@ -422,10 +427,18 @@ export function useNotifications({
     }
 
     const timeRemainingMin = calc.adjustedTimeSec / 60;
-    // Actual throughput rate in cases per hour.
-    const actualRateCasesPerHr = elapsedMin > 0 ? (calc.casesCompleted / elapsedMin) * 60 : 0;
+    // Press output = cased cases + cases still in the tunnel. Using cased-only
+    // output here would make the line look ~half as fast as it really is and
+    // fire false alarms: e.g. 35 min at 40 PPM / 12 per case / 18-min tunnel
+    // shows 54 cased + ~60 in tunnel. Cased-only rate = 54/35×60 ≈ 93/hr →
+    // false shortfall; press-output rate = 114/35×60 ≈ 195/hr → on pace, and
+    // the projected finish lands within PACE_SHORTFALL_MIN_CASES of
+    // casesNeeded, so no alert fires.
+    const pressOutput = calc.casesCompleted + calc.casesInFreezer;
+    // Actual throughput rate in cases per hour (press output basis).
+    const actualRateCasesPerHr = elapsedMin > 0 ? (pressOutput / elapsedMin) * 60 : 0;
     // Projected total at current rate.
-    const projectedFinish = calc.casesCompleted + (actualRateCasesPerHr * timeRemainingMin) / 60;
+    const projectedFinish = pressOutput + (actualRateCasesPerHr * timeRemainingMin) / 60;
     const shortfall = Math.ceil(casesNeeded - projectedFinish);
 
     const conditionMet =
@@ -466,6 +479,7 @@ export function useNotifications({
     currentRun?.stoppages,
     calc.ppm,
     calc.casesCompleted,
+    calc.casesInFreezer,
     calc.adjustedTimeSec,
     v.casesNeeded,
     nowTime,

@@ -28,6 +28,7 @@ const baseCalc = {
   timePerBatchSec: 0,
   ppm: 40,
   casesCompleted: 0,
+  casesInFreezer: 0,
   pressCasesLeft: 0,
 };
 
