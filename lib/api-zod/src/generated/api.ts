@@ -2263,7 +2263,7 @@ export const ObserveRunSuggestionResponse = zod.object({
  */
 export const UpdateRunSuggestionBody = zod.object({
   "id": zod.string(),
-  "status": zod.enum(['accepted', 'dismissed']).optional(),
+  "status": zod.enum(['accepted', 'dismissed', 'pending']).optional(),
   "clearFollowUp": zod.boolean().optional()
 })
 

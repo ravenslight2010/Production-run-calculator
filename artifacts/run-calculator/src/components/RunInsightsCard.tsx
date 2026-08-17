@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Lightbulb, Check, X, RefreshCw } from "lucide-react";
+import { Loader2, Lightbulb, Check, X, RefreshCw, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ export default function RunInsightsCard({
   const qc = useQueryClient();
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: RUN_SUGGESTIONS_QUERY_KEY,
@@ -47,6 +48,9 @@ export default function RunInsightsCard({
     .sort((a, b) => b.updatedAt - a.updatedAt);
   const current = pending[0];
   const followUps = suggestions.filter((s) => s.status === "accepted" && s.followUpNote);
+  const dismissed = suggestions
+    .filter((s) => s.status === "dismissed")
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 
   const acceptMutation = useMutation({
     mutationFn: async (s: RunSuggestion) => {
@@ -80,10 +84,20 @@ export default function RunInsightsCard({
     onSuccess: (updated) => qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated),
   });
 
-  // Nothing to show at all → render nothing (keeps the Setup tab clean).
-  if (!isLoading && !current && followUps.length === 0 && !confirmation && !error) return null;
+  const reopenMutation = useMutation({
+    mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { status: "pending" }),
+    onSuccess: (updated) => {
+      setError(null);
+      qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated);
+    },
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : "Couldn't re-open the suggestion."),
+  });
 
-  const busy = acceptMutation.isPending || dismissMutation.isPending;
+  // Nothing to show at all → render nothing (keeps the Setup tab clean).
+  if (!isLoading && !current && followUps.length === 0 && dismissed.length === 0 && !confirmation && !error) return null;
+
+  const busy = acceptMutation.isPending || dismissMutation.isPending || reopenMutation.isPending;
   const acceptWarning = current ? (getAcceptWarning?.(current) ?? null) : null;
 
   const settingLabel = (s: RunSuggestion) =>
@@ -238,6 +252,66 @@ export default function RunInsightsCard({
             </div>
           </div>
         ) : null}
+
+        {/* Dismissed suggestions toggle */}
+        {dismissed.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowDismissed((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+              data-testid="button-run-insights-show-dismissed"
+            >
+              {showDismissed ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+              {showDismissed ? "Hide" : "Show"} {dismissed.length} dismissed
+            </button>
+
+            {showDismissed && (
+              <div className="space-y-2 mt-1" data-testid="section-dismissed-suggestions">
+                {dismissed.map((s) => (
+                  <div
+                    key={s.id}
+                    className="rounded-lg border border-muted bg-muted/30 px-3 py-2 space-y-1"
+                    data-testid={`dismissed-suggestion-${s.type}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground">
+                          {productLabel(s)}
+                          {s.dieType ? (
+                            <span className="font-normal"> · {s.dieType}</span>
+                          ) : null}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {settingLabel(s)}: {s.configuredValue} → {s.recommendedValue} {s.unit}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[11px] shrink-0 gap-1"
+                        onClick={() => reopenMutation.mutate(s)}
+                        disabled={reopenMutation.isPending}
+                        data-testid="button-run-insights-reopen"
+                      >
+                        {reopenMutation.isPending ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-3 h-3" />
+                        )}
+                        Re-open
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

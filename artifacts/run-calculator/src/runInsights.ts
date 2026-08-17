@@ -457,7 +457,7 @@ export async function observeRunSuggestion(candidate: SuggestionCandidate): Prom
 
 export async function updateRunSuggestion(
   id: string,
-  patch: { status?: "accepted" | "dismissed"; clearFollowUp?: boolean },
+  patch: { status?: "accepted" | "dismissed" | "pending"; clearFollowUp?: boolean },
 ): Promise<RunSuggestion[]> {
   const res = await fetch("/api/run-suggestions/update", {
     method: "POST",

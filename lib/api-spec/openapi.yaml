@@ -7644,7 +7644,7 @@ components:
           type: string
         status:
           type: string
-          enum: [accepted, dismissed]
+          enum: [accepted, dismissed, pending]
         clearFollowUp:
           type: boolean
 

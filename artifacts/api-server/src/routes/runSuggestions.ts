@@ -297,6 +297,9 @@ router.post(
       } else if (status === "dismissed") {
         set.status = "dismissed";
         set.dismissedObservedValue = existing.observedValue;
+      } else if (status === "pending") {
+        set.status = "pending";
+        set.dismissedObservedValue = null;
       }
       if (clearFollowUp) set.followUpNote = "";
       await db
