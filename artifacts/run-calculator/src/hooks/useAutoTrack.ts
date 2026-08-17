@@ -565,9 +565,12 @@ export function useAutoTrack({
     // ── Trays: count up while dough is still being pressed, down as the line
     // eats it. Production (+1 tray per tray-period, offset half a period from
     // consumption so the two visibly alternate) continues while the run still
-    // has a dough DEFICIT (calc.traysNeeded > 0 — i.e. staged dough does not
-    // yet cover everything left to run). Once the deficit is closed the press
-    // is done and the counter only counts down; whatever is left at the end
+    // has a dough DEFICIT (calc.traysNeeded > 0) OR while there are ready
+    // batches still to be converted into trays (v.batchesReady > 0). The dough
+    // crew keeps pulling trays from ready batches until every batch is
+    // exhausted, so the counter keeps fluctuating until both conditions reach
+    // zero. Once the deficit is closed AND no ready batches remain the press is
+    // done and the counter only counts down; whatever is left at the end
     // carries over to the next run. Dough tracking NEVER runs for an ended run
     // (drain phase is case/skid-only — the dough crew is on the next run). ──
     // Tracks how many trays were auto-seeded this tick so the batch seed
@@ -589,7 +592,7 @@ export function useAutoTrack({
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
       } else if (nowMs >= trayProdNextDueMsRef.current) {
         trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
-        if (!suppressed && !doughFeedComplete && calc.traysNeeded > 0) {
+        if (!suppressed && !doughFeedComplete && (calc.traysNeeded > 0 || v.batchesReady > 0)) {
           delta += 1;
         }
       }
