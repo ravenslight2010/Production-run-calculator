@@ -2837,6 +2837,300 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (k4): Prep mix card appears when the mix component uses the COMMA
+   * separator variant ("Herb, Chopped") and the run's pep1Type is the BASE
+   * name ("Herb").
+   *
+   * This is the REVERSE direction of test (k1). ingredientMatches() picks the
+   * longer of the two names as the prefix, so it handles both directions.
+   * A regression that forgot to normalize or swap longer/shorter would
+   * silently suppress the card in this direction while k1 still passes.
+   */
+  test("prep mix card appears when mix component uses comma-separator qualified name and run uses base name", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-comma-rev-${suffix}`;
+    const mixName = `CommaRevPrepMix ${suffix}`;
+
+    const baseIngredient = `Herb_${suffix}`;
+    const qualifiedComponent = `${baseIngredient}, Chopped`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    const MIX_CARD_OZ = 0.1;
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: qualifiedComponent,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, baseIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: baseIngredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(qualifiedComponent, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(qualifiedComponent, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      expect(rowText).toContain(expectedStr);
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (k5): Prep mix card appears when the mix component uses the PAREN
+   * separator variant ("Herb (Tidbits)") and the run's pep1Type is the BASE
+   * name ("Herb").
+   *
+   * This is the REVERSE direction of test (k2). ingredientMatches() picks the
+   * longer of the two names as the prefix, so it handles both directions.
+   * A regression that forgot to normalize or swap longer/shorter would
+   * silently suppress the card in this direction while k2 still passes.
+   */
+  test("prep mix card appears when mix component uses paren-separator qualified name and run uses base name", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-paren-rev-${suffix}`;
+    const mixName = `ParenRevPrepMix ${suffix}`;
+
+    const baseIngredient = `Herb_${suffix}`;
+    const qualifiedComponent = `${baseIngredient} (Tidbits)`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    const MIX_CARD_OZ = 0.1;
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: qualifiedComponent,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, baseIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: baseIngredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(qualifiedComponent, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(qualifiedComponent, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      expect(rowText).toContain(expectedStr);
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (k6): Prep mix card appears when the mix component uses the SLASH
+   * separator variant ("Herb/Fresh") and the run's pep1Type is the BASE
+   * name ("Herb").
+   *
+   * This is the REVERSE direction of test (k3). ingredientMatches() picks the
+   * longer of the two names as the prefix, so it handles both directions.
+   * A regression that forgot to normalize or swap longer/shorter would
+   * silently suppress the card in this direction while k3 still passes.
+   */
+  test("prep mix card appears when mix component uses slash-separator qualified name and run uses base name", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-slash-rev-${suffix}`;
+    const mixName = `SlashRevPrepMix ${suffix}`;
+
+    const baseIngredient = `Herb_${suffix}`;
+    const qualifiedComponent = `${baseIngredient}/Fresh`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    const MIX_CARD_OZ = 0.1;
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: qualifiedComponent,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, baseIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: baseIngredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(qualifiedComponent, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(qualifiedComponent, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      expect(rowText).toContain(expectedStr);
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (k): Empty state is preserved after a full page reload when all runs
    * are ended — exercises the localStorage + React hydration path separately
    * from the in-memory state path.
