@@ -33,6 +33,11 @@
  *       ended — exercises the localStorage + React hydration path separately
  *       from the in-memory state path.
  *
+ *   (l) Batch count is correct on cold load when amountAlreadyMade is already
+ *       persisted in the DB — the server fetch must wire amountAlreadyMade into
+ *       buildMixPlan so the first render shows floor(remainingLbs / batchSize)
+ *       using the stored value, not 0.
+ *
  * Relevant files:
  *   artifacts/run-calculator/src/pages/home.tsx  — mix plan section, ~14402–14700
  *   lib/mixes/src/index.ts          — buildMixPlan, computeEntryFromComponentLbs
@@ -3550,6 +3555,138 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await expect(mixCard.getByText(/0\.00/, { exact: false })).toBeVisible({ timeout: 5_000 });
       // Partial batch count from step 3 is gone
       await expect(mixCard.getByText(new RegExp(batchesAfterEditStr))).toHaveCount(0, { timeout: 3_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (l): Batch count is correct on cold page load when amountAlreadyMade
+   * is already persisted in the DB (Task #818 target).
+   *
+   * The cold-load path is distinct from the live-edit path tested above:
+   * on mount, useMixes fetches mixes from the server which returns the
+   * persisted amountAlreadyMade. buildMixPlan must use that value so the
+   * first render shows the correct batch count, not the 0-based count.
+   *
+   * Formula:
+   *   totalPizzas  = CASES_NEEDED × PIZZAS_PER_CASE = 100 × 8 = 800
+   *   componentLbs = (PER_PIZZA_OZ / 16) × totalPizzas = (2.0/16) × 800 = 100.00
+   *   totalLbs     = componentLbs × 1.15 + 20 = 135.00
+   *   remainingLbs = totalLbs − AMOUNT_ALREADY_MADE = 135.00 − 50 = 85.00
+   *   batches      = remainingLbs / BATCH_SIZE = 85.00 / 10 = 8.50
+   *
+   * If amountAlreadyMade were ignored/zeroed on cold load the displayed
+   * count would be 135.00 / 10 = 13.50.
+   */
+  test("batch count on cold load uses persisted amountAlreadyMade from the server", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `cold-batch-${suffix}`;
+    const mixName = `ColdBatchMix ${suffix}`;
+    const component = `ColdComp_${suffix}`;
+    const brand = `ColdBrand_${suffix}`;
+    const today = todayStr();
+
+    const BATCH_SIZE = 10;
+    const PER_PIZZA_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const AMOUNT_ALREADY_MADE = 50;
+
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE;                      // 800
+    const componentLbs = (PER_PIZZA_OZ / 16) * totalPizzas;                  // 100.00
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS;    // 135.00
+    const remainingLbs = totalLbs - AMOUNT_ALREADY_MADE;                      //  85.00
+    const expectedBatches = remainingLbs / BATCH_SIZE;                        //   8.50
+    const expectedBatchesStr = expectedBatches.toFixed(2);                    // "8.50"
+    const wrongBatches = totalLbs / BATCH_SIZE;                               //  13.50
+    const wrongBatchesStr = wrongBatches.toFixed(2);                          // "13.50"
+
+    try {
+      // ── Step 1: create the mix in the DB with amountAlreadyMade > 0 ──────────
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        brand,
+        isPrep: false,
+        component,
+        perPizza: PER_PIZZA_OZ,
+        batchSize: BATCH_SIZE,
+        amountAlreadyMade: AMOUNT_ALREADY_MADE,
+      });
+
+      // ── Step 2: sign up, then inject run data into localStorage ──────────────
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing,
+            casesNeeded,
+            pizzasPerCase,
+            casesPerLayer: 0,
+          }));
+        },
+        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // ── Step 3: full page reload — this is the cold-load path ────────────────
+      // On mount, useMixes fetches from the server (which returns the DB row with
+      // amountAlreadyMade = 50). buildMixPlan must use that value immediately.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // ── Step 4: open Mixes tab ───────────────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── Step 5: verify the mix card is present ───────────────────────────────
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const mixCard = todayCard
+        .locator("div", { has: page.getByText(mixName, { exact: true }) })
+        .last();
+
+      // ── Step 6: batch count must use the persisted amountAlreadyMade ─────────
+      // Correct:   remainingLbs / batchSize = 85.00 / 10 = 8.50 batches
+      // Wrong:     totalLbs / batchSize     = 135.00 / 10 = 13.50 batches
+      await expect(
+        mixCard.getByText(new RegExp(expectedBatchesStr)),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        mixCard.getByText(/batch/, { exact: false }),
+      ).toBeVisible({ timeout: 3_000 });
+      await expect(
+        mixCard.getByText(new RegExp(wrongBatchesStr)),
+      ).toHaveCount(0, { timeout: 3_000 });
+
+      // ── Step 7: "need X lbs" badge reflects the correct remainingLbs ─────────
+      await expect(
+        todayCard.getByText(`need ${remainingLbs.toFixed(2)} lbs`, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
