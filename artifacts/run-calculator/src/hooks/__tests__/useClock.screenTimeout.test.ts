@@ -346,6 +346,123 @@ describe("useClock — screen timeout / visibility event handling", () => {
     });
     expect(result.current.getTime()).toBe(T0 + 11_000);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 6. Repeated window "focus" events don't accumulate phantom intervals
+  //    during a live run (status="running", tab always visible).
+  //
+  // Android tablets may fire many rapid "focus" events on screen-wake without
+  // ever toggling visibilitychange.  Each focus event calls onFocus → start(),
+  // which must clearInterval(id) before creating a new one.  If clearInterval
+  // is missing or the closure captures a stale id, each focus leaves an extra
+  // phantom interval ticking; vi.getTimerCount() would exceed 1.
+  //
+  // Three focus events are fired with half-second gaps between them.  After
+  // each focus the test asserts:
+  //   • vi.getTimerCount() === 1  — no phantom accumulation.
+  //   • nowTime snapped to the current system clock immediately.
+  //   • No additional ticks fired since the previous focus (advancing less
+  //     than 1 s between events must not trigger the interval).
+  //
+  // A final 1-second advance confirms exactly one interval is running: nowTime
+  // advances by exactly 1_000 ms (a phantom second interval would double it).
+  //
+  // cleanup() is called first so stale listeners from earlier tests in this
+  // file don't inflate vi.getTimerCount() when we dispatch events.
+  //
+  // Timeline (all times relative to T0):
+  //   Mount  : visible, 1 interval started, count=1.
+  //   +1000  : interval fires → nowTime=T0+1000.
+  //   +1500  : focus #1 → snap T0+1500, count=1, old interval replaced.
+  //   +2000  : focus #2 → snap T0+2000, count=1, old interval replaced.
+  //   +2500  : focus #3 → snap T0+2500, count=1, old interval replaced.
+  //   +3500  : advance 1s → nowTime=T0+3500 (exactly one tick, no phantom).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("6. repeated window focus events: exactly one interval active after each focus, nowTime snaps correctly, no phantom ticks", () => {
+    // Remove stale listeners from hooks mounted by earlier tests in this
+    // describe so that dispatching focus events only fires the single hook
+    // under test — same pattern as test 5 above.
+    cleanup();
+
+    const { result, rerender } = renderHook(() => useClock("running"));
+
+    // One interval must be active immediately after mount (tab is visible).
+    expect(vi.getTimerCount()).toBe(1);
+
+    // ── Establish a non-T0 baseline ─────────────────────────────────────────
+    // Advance 1 s → interval fires once → nowTime = T0 + 1_000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // ── Focus #1 at T0+1500 (mid-period) ────────────────────────────────────
+    // Advance 0.5 s (no tick — the interval fires every 1 s from its last
+    // reset).  System clock = T0+1500.
+    act(() => {
+      vi.advanceTimersByTime(500);
+      rerender();
+    });
+    // Still the post-tick value — we are mid-period.
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Dispatch window "focus".  onFocus: setNowTime(T0+1500) + start() which
+    // clears the current interval and creates a fresh one.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender(); // flush pending setNowTime() state update
+    });
+    expect(vi.getTimerCount()).toBe(1); // exactly one interval, no accumulation
+    expect(result.current.getTime()).toBe(T0 + 1_500); // snapped to current clock
+
+    // ── Focus #2 at T0+2000 ─────────────────────────────────────────────────
+    // Advance 0.5 s more (0.5 s since the last focus reset; new interval has
+    // NOT fired yet).  System clock = T0+2000.
+    act(() => {
+      vi.advanceTimersByTime(500);
+      rerender();
+    });
+    // No interval callback fired — still at the post-focus-#1 snap value.
+    expect(result.current.getTime()).toBe(T0 + 1_500);
+
+    // Dispatch a second window "focus".
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1); // still exactly one interval
+    expect(result.current.getTime()).toBe(T0 + 2_000); // snapped forward again
+
+    // ── Focus #3 at T0+2500 ─────────────────────────────────────────────────
+    // Advance 0.5 s more (0.5 s since the last focus reset; interval has NOT
+    // fired yet).  System clock = T0+2500.
+    act(() => {
+      vi.advanceTimersByTime(500);
+      rerender();
+    });
+    // Still at the post-focus-#2 snap value — no phantom ticks.
+    expect(result.current.getTime()).toBe(T0 + 2_000);
+
+    // Dispatch a third window "focus".
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1); // still exactly one interval
+    expect(result.current.getTime()).toBe(T0 + 2_500); // snapped forward again
+
+    // ── Final cadence check ──────────────────────────────────────────────────
+    // After 3 focus events exactly one interval is running.  Advancing 1 s
+    // must advance nowTime by exactly 1_000 ms — a phantom second interval
+    // would double the advance to 2_000 ms.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 3_500);
+    expect(vi.getTimerCount()).toBe(1); // still exactly one interval at the end
+  });
 });
 
 // ── Slow-tick path (runStatus="pending" / "ended") ────────────────────────────
