@@ -281,6 +281,19 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
     expect(keys).toEqual(["live:keep", "sandbox:shared"]);
   });
 
+  it("keeps the oldest row when both duplicates have no curated lbs", async () => {
+    const older = new Date("2026-06-01T08:00:00Z");
+    const newer = new Date("2026-07-01T08:00:00Z");
+    await seedRow("older-row", "American Cheese Blend", [], older);
+    await seedRow("newer-row", "American Cheese Blend", [], newer);
+
+    await runDataHeals();
+
+    const rows = await db.select().from(cheeseRecipesTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe("older-row");
+  });
+
   it("is marker-guarded: a second run is a no-op even after new dupes appear", async () => {
     await runDataHeals();
     const t = new Date();
