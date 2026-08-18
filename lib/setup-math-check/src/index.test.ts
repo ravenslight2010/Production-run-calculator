@@ -321,3 +321,88 @@ describe("resolveMixByPerBatchLbs", () => {
     expect(newBatchSize).toBe(5);
   });
 });
+
+// ── Spec-import mismatch scenario ─────────────────────────────────────────────
+//
+// A spec import can independently write:
+//   • the appNOzPerPizza total (from the TARGET WEIGHT row in the spec sheet)
+//   • recipe row lbs values (from per-ingredient oz/pizza rows)
+//
+// These often disagree because the spec sheet column is rounded differently from
+// the sum of the ingredient rows. This describe block verifies the full
+// detect → badge-shows → resolve → no-more-conflict → persist round-trip at
+// the pure-logic layer. UI wiring and saveProfile persistence are covered
+// separately in mathCheckBadgeSaveLoad.test.ts.
+
+describe("spec-import mismatch scenario", () => {
+  // Simulates what a real spec import writes: ingredient rows parsed from one
+  // block of the sheet, and a total oz/pizza parsed from a different row.
+  // These are independently rounded and routinely disagree by more than 0.05.
+  const importedRows = [
+    { ingredient: "Herb Blend", lbs: 1.5 },
+    { ingredient: "Oregano", lbs: 0.85 },
+    { ingredient: "Garlic Salt", lbs: 0.6 },
+  ];
+  // sum = 2.95; import separately wrote 3.1 for the total field
+  const importedTotal = 3.1;
+
+  it("import-created disagreement is detected as a row-sum-vs-total conflict", () => {
+    const conflicts = detectAppSlotConflicts(importedRows, importedTotal);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].kind).toBe("row-sum-vs-total");
+    expect(conflicts[0].rowSum).toBeCloseTo(2.95, 5);
+    expect(conflicts[0].total).toBe(importedTotal);
+  });
+
+  it("resolving by row sum produces a value that clears the conflict", () => {
+    const conflicts = detectAppSlotConflicts(importedRows, importedTotal);
+    expect(conflicts).toHaveLength(1);
+
+    const conflict = conflicts[0];
+    // "Use row sum" button path: new oz/pizza = the row sum
+    const newOzPerPizza = resolveByRowSum(conflict.rowSum);
+    expect(newOzPerPizza).toBeCloseTo(2.95, 5);
+
+    // After the field is updated to the row sum the badge must disappear
+    expect(detectAppSlotConflicts(importedRows, newOzPerPizza)).toHaveLength(0);
+  });
+
+  it("resolving by total (scaling rows) also clears the conflict", () => {
+    const conflicts = detectAppSlotConflicts(importedRows, importedTotal);
+    expect(conflicts).toHaveLength(1);
+
+    const scaledRows = resolveByTotal(importedRows, importedTotal);
+    // Scaled rows must now sum to the total within tolerance
+    expect(detectAppSlotConflicts(scaledRows, importedTotal)).toHaveLength(0);
+    // Ingredient proportions are preserved
+    const origSum = importedRows.reduce((s, r) => s + r.lbs, 0);
+    const newSum = scaledRows.reduce((s, r) => s + r.lbs, 0);
+    expect(newSum).toBeCloseTo(importedTotal, 2);
+    // resolveByTotal rounds to 3 decimal places, so use precision 2 here.
+    expect(scaledRows[0].lbs / scaledRows[1].lbs).toBeCloseTo(
+      importedRows[0].lbs / importedRows[1].lbs,
+      2,
+    );
+    // originals not mutated
+    expect(importedRows.reduce((s, r) => s + r.lbs, 0)).toBeCloseTo(origSum, 5);
+  });
+
+  it("a second import that fixes the total also clears the conflict (re-import idempotency)", () => {
+    // Simulate a re-import where the spec sheet's total was corrected to match
+    // the row sum exactly.
+    const correctedTotal = importedRows.reduce((s, r) => s + r.lbs, 0); // 2.95
+    expect(detectAppSlotConflicts(importedRows, correctedTotal)).toHaveLength(0);
+  });
+
+  it("badge does not fire when import rows are absent (no rows to compare)", () => {
+    // A spec import that wrote only the total but no ingredient rows must not
+    // show a badge — there is nothing to disagree with.
+    expect(detectAppSlotConflicts([], importedTotal)).toHaveLength(0);
+  });
+
+  it("badge does not fire when total was not imported (zero)", () => {
+    // A spec import that wrote rows but left the total field at 0 must not
+    // show a badge — no authoritative total to compare against.
+    expect(detectAppSlotConflicts(importedRows, 0)).toHaveLength(0);
+  });
+});
