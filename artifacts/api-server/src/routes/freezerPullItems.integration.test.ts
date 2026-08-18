@@ -38,6 +38,7 @@ let server: Server;
 let baseUrl: string;
 
 const MANAGER = "mgr-fpi-test-1";
+const OPERATOR = "op-fpi-test-1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 // ── Setup/teardown ───────────────────────────────────────────────────────────
@@ -116,8 +117,14 @@ beforeEach(async () => {
     sql`TRUNCATE ${freezerPullItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
-  await db.insert(usersTable).values([{ id: MANAGER, username: "mgr", passwordHash: "x" }]);
-  await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);
+  await db.insert(usersTable).values([
+    { id: MANAGER, username: "mgr", passwordHash: "x" },
+    { id: OPERATOR, username: "op", passwordHash: "x" },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: MANAGER, role: "manager" },
+    { userId: OPERATOR, role: "operator" },
+  ]);
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -295,5 +302,42 @@ describe("POST /api/freezer-pull-items — DELETE round-trip", () => {
     const { items } = await getItems();
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe("fpi-b");
+  });
+});
+
+describe("DELETE /api/freezer-pull-items — auth gate", () => {
+  it("rejects DELETE without any auth token (401)", async () => {
+    // Seed an item so the delete has a target
+    await postItems([makeItem()]);
+
+    const res = await fetch(`${baseUrl}/api/freezer-pull-items`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ["fpi-cheese-blocks"] }),
+    });
+    expect(res.status).toBe(401);
+
+    // Item must still be present — the delete was rejected
+    const { items } = await getItems();
+    expect(items).toHaveLength(1);
+  });
+
+  it("rejects DELETE from a plain operator (403)", async () => {
+    // Seed an item so the delete has a target
+    await postItems([makeItem()]);
+
+    const res = await fetch(`${baseUrl}/api/freezer-pull-items`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${signToken(OPERATOR)}`,
+      },
+      body: JSON.stringify({ ids: ["fpi-cheese-blocks"] }),
+    });
+    expect(res.status).toBe(403);
+
+    // Item must still be present — the delete was rejected
+    const { items } = await getItems();
+    expect(items).toHaveLength(1);
   });
 });
