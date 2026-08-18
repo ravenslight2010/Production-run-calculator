@@ -555,6 +555,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useBackButtonTrap } from "@/hooks/useBackButtonTrap";
 
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
@@ -3616,6 +3617,18 @@ export default function Home() {
       // Storage full/unavailable — losing tab restore is fine.
     }
   }, [activeTab]);
+  // Tab history for the back button trap: push the previous tab whenever the
+  // user navigates so the back button can unwind through tabs before staying.
+  const tabHistoryRef = useRef<string[]>([]);
+  const prevActiveTabRef = useRef(activeTab);
+  useEffect(() => {
+    if (prevActiveTabRef.current !== activeTab) {
+      tabHistoryRef.current.push(prevActiveTabRef.current);
+      // Cap at 20 entries to avoid unbounded growth.
+      if (tabHistoryRef.current.length > 20) tabHistoryRef.current.shift();
+      prevActiveTabRef.current = activeTab;
+    }
+  }, [activeTab]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -6514,6 +6527,50 @@ export default function Home() {
   const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
   const [scheduleMoveDate, setScheduleMoveDate] = useState("");
   const [scheduleMoving, setScheduleMoving] = useState(false);
+
+  // ── Back-button trap (Android / PWA) ──────────────────────────────────────
+  // Priority: close any open overlay first, then unwind tab history, then stay.
+  useBackButtonTrap(() => {
+    // 1. Close the topmost open overlay in priority order.
+    if (showPinDialog)          { setShowPinDialog(false);          return; }
+    if (showStopDialog)         { setShowStopDialog(false);         return; }
+    if (showManualStopDialog)   { setShowManualStopDialog(false);   return; }
+    if (showEditReasonsDialog)  { setShowEditReasonsDialog(false);  return; }
+    if (showManageDialog)       { setShowManageDialog(false);       return; }
+    if (showScheduleDialog)     { setShowScheduleDialog(false); setScheduleView("list"); return; }
+    if (showImportDialog)       { setShowImportDialog(false);       return; }
+    if (showSpecImport)         { setShowSpecImport(false);         return; }
+    if (showPremixImport)       { setShowPremixImport(false);       return; }
+    if (showShippingImport)     { setShowShippingImport(false);     return; }
+    if (showSauceGuideImport)   { setShowSauceGuideImport(false);   return; }
+    if (showDoughGuideImport)   { setShowDoughGuideImport(false);   return; }
+    if (showCheeseImport)       { setShowCheeseImport(false);       return; }
+    if (setupEditorOpen)        { setSetupEditorOpen(false);        return; }
+    if (showScreensDialog)      { setShowScreensDialog(false);      return; }
+    if (showMobileQrDialog)     { setShowMobileQrDialog(false);     return; }
+    if (showReorderDialog)      { setShowReorderDialog(false);      return; }
+    if (showReportIssue)        { setShowReportIssue(false);        return; }
+    if (showAlertSettings)      { setShowAlertSettings(false);      return; }
+    if (showGlance)             { setShowGlance(false);             return; }
+    if (showFloorMode)          { setShowFloorMode(false);          return; }
+    if (sauceWeightsOpen)       { setSauceWeightsOpen(false);       return; }
+    if (resumeDialog)           { setResumeDialog(false);           return; }
+    if (showPasswordDialog)     { setShowPasswordDialog(false);     return; }
+    if (showTour)               { setShowTour(false);               return; }
+    if (showGetStarted)         { setShowGetStarted(false);         return; }
+    if (confirmDeleteBrand)     { setConfirmDeleteBrand(null);      return; }
+    if (confirmDeleteFlavor)    { setConfirmDeleteFlavor(null);     return; }
+    if (confirmRemoveRun)       { setConfirmRemoveRun(false);       return; }
+    if (confirmRemoveBlanks)    { setConfirmRemoveBlanks(false);    return; }
+    if (showBrandDrop)          { setShowBrandDrop(false);          return; }
+    if (showFlavorDrop)         { setShowFlavorDrop(false);         return; }
+    // 2. Unwind tab history if anything is in the stack.
+    const prev = tabHistoryRef.current.pop();
+    if (prev) { setActiveTab(prev); return; }
+    // 3. Nothing to close and no tab history — stay in the app (sentinel keeps
+    //    the browser from exiting; no action needed here).
+  });
+
   function tomorrowStr() {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
