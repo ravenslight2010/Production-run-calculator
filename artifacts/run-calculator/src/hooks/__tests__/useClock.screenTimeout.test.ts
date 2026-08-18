@@ -31,7 +31,7 @@
 // pattern used throughout useAutoTrack.pauseResume.test.ts.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, cleanup } from "@testing-library/react";
 import { useClock, PENDING_CLOCK_MS } from "../useClock";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1032,5 +1032,107 @@ describe("useClock — status transition interval cleanup", () => {
       rerender({ status: "running" });
     });
     expect(result.current.getTime()).toBe(T0 + 3_000);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // M. running → paused while tab is hidden: exactly one interval after
+  //    becoming visible again (no phantom interval from the stale effect).
+  //
+  // The risk: if the useEffect([runStatus]) cleanup does NOT remove the old
+  // "running" effect's visibilitychange/focus listeners, BOTH the stale and
+  // fresh onVisibility handlers fire when the tab becomes visible — creating
+  // two concurrent 1-second intervals instead of one.
+  //
+  // WHY timestamps alone don't reliably catch this:
+  // Both intervals fire at the same fake-clock tick and each calls
+  // setNowTime(new Date()) with the same value, so the rendered time still
+  // looks correct.  We therefore assert vi.getTimerCount() === 1 immediately
+  // after the tab becomes visible; it returns 2 when cleanup fails and 1 when
+  // it succeeds.
+  //
+  // Steps:
+  //   1. Mount with "running"; tab is visible; one interval starts
+  //      (vi.getTimerCount() === 1).
+  //   2. Tab goes hidden; onVisibility clears the interval (count → 0).
+  //   3. Transition to "paused" while still hidden; React cleanup removes the
+  //      old listeners; new effect's start() finds document.hidden=true so
+  //      id=null (still no interval, count stays 0).
+  //   4. Tab becomes visible; the single new onVisibility fires — snaps
+  //      nowTime and starts exactly one interval.
+  //   5. Assert vi.getTimerCount() === 1 ← primary regression guard.
+  //   6. Advance 1 s; nowTime advances by exactly 1_000 ms (no double-tick).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("M. running → paused while hidden: exactly one interval active after becoming visible (no double-tick)", () => {
+    // Flush stale hooks from earlier tests in this file so their
+    // visibilitychange listeners are removed before we dispatch events.
+    // Without this, all N-1 prior hooks' onVisibility handlers fire when we
+    // dispatch the event in step 4, each calling start() and installing a
+    // phantom interval — making vi.getTimerCount() return N instead of 1.
+    cleanup();
+
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "running" | "paused" }) => useClock(status),
+      { initialProps: { status: "running" as const } },
+    );
+
+    // Step 1: one interval must be active immediately after mount.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Let the running interval tick once to establish a non-T0 baseline.
+    // System clock advances to T0 + 1_000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 2: tab goes hidden.
+    // onVisibility fires the hidden branch → clearInterval(id); id = null.
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender({ status: "running" });
+    });
+    // Interval is gone — no timers should be active while hidden.
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Step 3: transition to "paused" while still hidden.
+    // React's useEffect cleanup fires: clears the (already-null) interval
+    // handle and — critically — removes the old "running" effect's
+    // visibilitychange and focus listeners.  The fresh "paused" effect then
+    // runs: start() sees document.hidden=true → id stays null.
+    act(() => {
+      rerender({ status: "paused" });
+    });
+    // Still no interval — document is still hidden.
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Step 4: tab becomes visible.
+    // The (single) new "paused" effect's onVisibility fires:
+    //   setNowTime(new Date())  → snaps to system clock = T0 + 1_000
+    //   start()                 → one fresh 1-second interval registered
+    // System clock has not advanced since step 1, so new Date() = T0 + 1_000.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender({ status: "paused" }); // flush pending setNowTime()
+    });
+
+    // Step 5: exactly one timer active — primary regression guard.
+    // If cleanup failed, both old and new listeners fired → 2 intervals here.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Clock snap: nowTime must equal the current system clock (T0 + 1_000).
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 6: advance 1 s — the single interval fires once.
+    // nowTime advances to T0 + 2_000.  If two intervals had survived they
+    // would both fire at this tick, but vi.getTimerCount() in step 5 already
+    // confirmed that can't happen; this step validates the cadence is correct.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "paused" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 2_000);
   });
 });
