@@ -1,41 +1,47 @@
 // @vitest-environment jsdom
 //
-// Unit tests for the warehouse staging alerts in useNotifications.
+// Unit tests for the warehouse-staging alert in useNotifications (lines 236–299).
 //
-// Covers four scenarios called out in the task spec:
-//  1. Frontline alert fires once when pressCasesLeft ≤ 2 × casesPerSkid.
-//  2. Packaging alert fires once when pressCasesLeft ≤ casesPerSkid.
-//  3. Neither re-fires when navigating to an already-ended run
-//     (runStatus=ended guard, and per-run Set-latch prevents re-trigger).
-//  4. Neither fires when ppm ≤ 0 or casesNeeded = 0.
+// These tests deliberately do NOT install a Notification stub in beforeAll —
+// jsdom omits the Notification API entirely, which is what we're guarding
+// against.  The effect reaches `Notification.permission` only after the
+// `if (!("Notification" in window)) return;` guard (line 245), so it must not
+// crash in this environment.  The tests therefore also serve as regression
+// guards for accidental guard removal.
 //
-// Side-effect detection strategy: the warehouse staging effect calls
-// navigator.vibrate([200, 100, 200]) SYNCHRONOUSLY inside fireStage()
-// before the async showAppNotification.  We spy on navigator.vibrate so
-// the latch bookkeeping in frontlineNotifRef / packagingNotifRef is tested
-// through real, observable behaviour without needing to flush async
-// notification micro-tasks.
+// Detection strategy:
 //
-// Isolation notes:
-//  • timePerBatchSec = 0 → batch-cycle effect returns early (no vibrate
-//    from that path).
-//  • elapsed time < freezerTime (10 min) → pace effect only
-//    arms, never fires (no vibrate from that path).
-//  • adjustedTimeSec > 900 s → 15-min alert is well clear of its threshold.
-//  • A stable EMPTY_LABELS constant prevents nextRunLabels array-reference
-//    churn from spuriously re-running the effect.
+//   • "No-fire" paths (no Notification stub): assert the Notification
+//     constructor is never called and vibrate is never called.  The effect
+//     returns at the guard on line 245, before either branch runs.
+//
+//   • "Fires" path: a per-test Notification stub is injected into window (NOT
+//     in beforeAll) so the `if (!("Notification" in window)) return` guard
+//     is passed and showAppNotification can proceed.  vibrate is called
+//     synchronously inside fireStage, so it is a reliable indicator that the
+//     effect ran all the way through.  The Notification constructor itself is
+//     invoked one microtask later (inside an async IIFE), so tests that assert
+//     on it use `await act(async () => {})` to flush the microtask queue.
+//
+//   • Suppressed-pref path: the silent-latch branch runs AFTER the Notification
+//     guard, so a per-test Notification stub is needed to reach it.  The latch
+//     prevents retroactive firing when the pref is re-enabled mid-run.
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
-// ── Fixed epoch ──────────────────────────────────────────────────────────────
-const T0 = 1_700_000_000_000;
+// ── Sanity: confirm jsdom really omits Notification ──────────────────────────
+// If this fails the whole test file's premise is wrong.
+if (typeof window !== "undefined" && "Notification" in window) {
+  throw new Error("Expected jsdom to NOT have Notification — test premise violated");
+}
 
-// Stable empty array so the nextRunLabels dep never changes reference between
-// rerenders — a new [] each call would re-run the effect unnecessarily.
-const EMPTY_LABELS: string[] = [];
+// ── Fixed epoch ───────────────────────────────────────────────────────────────
+const T0 = 1_700_000_000_000;
+// Run started 30 minutes ago — clears all safety-floor guards.
+const START_AT = T0 - 30 * 60_000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function makeRun(overrides: Partial<RunMeta> = {}): RunMeta {
@@ -43,7 +49,7 @@ function makeRun(overrides: Partial<RunMeta> = {}): RunMeta {
     id: "run-1",
     brand: "TestBrand",
     flavor: "TestFlavor",
-    startedAt: T0,
+    startedAt: START_AT,
     stoppages: [],
     ...overrides,
   };
@@ -52,69 +58,51 @@ function makeRun(overrides: Partial<RunMeta> = {}): RunMeta {
 type Params = Parameters<typeof useNotifications>[0];
 
 /**
- * Build default params that keep ONLY the warehouse staging effect active:
+ * Base params that keep all OTHER effects idle so only the warehouse-staging
+ * effect can produce output:
  *
- *   casesPerSkid = 10  → frontline threshold: pressCasesLeft ≤ 20
- *                         packaging threshold: pressCasesLeft ≤ 10
- *
- * Chosen defaults place pressCasesLeft = 25 — above both thresholds — so
- * the initial render fires nothing.  Tests step it down to cross each
- * threshold individually.
- *
- * Pace alert is suppressed: elapsed = nowTime - T0 = 3 min < 10 min limit.
- * Batch alert is suppressed: timePerBatchSec = 0 → effect returns early.
- * 15-min alert is suppressed: adjustedTimeSec = 45 min >> 15-min threshold.
+ *   adjustedTimeSec = 45 min → well above 15-min threshold (no 15-min alert)
+ *   timePerBatchSec = 0      → batch-cycle effect returns early
+ *   ppm = 100                → valid timing basis (required by staging effect)
+ *   casesNeeded = 200        → non-zero (required by staging effect)
+ *   casesPerSkid = 20        → non-zero (required by staging effect)
+ *   pressCasesLeft = 100     → well above 2*casesPerSkid=40 by default
+ *   runStatus = "running"    → freezer-drain effect skips (requires "ended")
+ *   elapsed < freezerTime    → pace effect arms but never fires
  */
-function makeParams(overrides: Partial<Params> = {}): Params {
+function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
   return {
     runStatus: "running",
-    nowTime: new Date(T0 + 3 * 60_000), // 3 min elapsed — pace alert arm-only
+    nowTime: new Date(nowMs),
     currentRun: makeRun(),
     calc: {
-      adjustedTimeSec: 45 * 60,   // 45 min remaining — above 15-min alert
-      timePerBatchSec: 0,         // disables batch-cycle alert
-      ppm: 120,                   // positive — warehouse staging is active
-      casesCompleted: 10,
+      adjustedTimeSec: 45 * 60,  // well above 15-min threshold
+      timePerBatchSec: 0,        // disables batch-cycle effect
+      ppm: 100,
+      casesCompleted: 50,
       casesInFreezer: 0,
-      pressCasesLeft: 25,         // above both staging thresholds at start
+      pressCasesLeft: 100,       // well above 2*casesPerSkid threshold by default
       pressDone: false,
     },
     v: {
       freezerTime: 10,
       casesNeeded: 200,
-      casesPerSkid: 10,
+      casesPerSkid: 20,
     },
     isCrust: false,
-    nextRunLabels: EMPTY_LABELS,
+    nextRunLabels: [],
     prefs: undefined,
     ...overrides,
   };
 }
 
-// ── Browser API stubs ─────────────────────────────────────────────────────────
-// jsdom does not provide the Notification API.  The warehouse staging effect
-// guards with `!("Notification" in window)` — if Notification is absent the
-// whole effect returns without touching vibrate, so the spy would always read 0.
-// We install a stub with permission = "granted" so the granted branch fires
-// synchronously (no Notification.requestPermission() call needed).
-//
-// navigator.vibrate is optional-chained in the hook so it never throws even
-// when missing; we assign a plain vi.fn() so we can count calls.
-
+// ── vibrate stub ──────────────────────────────────────────────────────────────
+// vibrate is called synchronously inside fireStage (AFTER the Notification
+// guard), so it is a reliable indicator that the effect body ran to completion.
+// No Notification stub — that is the point of this file's beforeAll.
 let vibrateMock: ReturnType<typeof vi.fn>;
 
 beforeAll(() => {
-  // Notification stub — permission "granted", constructor no-op (async IIFE
-  // inside showAppNotification will call `new Notification(...)` but we only
-  // care about the synchronous vibrate call that precedes it).
-  const MockNotification = vi.fn() as unknown as typeof Notification;
-  (MockNotification as unknown as Record<string, unknown>).permission = "granted";
-  Object.defineProperty(window, "Notification", {
-    value: MockNotification,
-    writable: true,
-    configurable: true,
-  });
-
   vibrateMock = vi.fn();
   Object.defineProperty(navigator, "vibrate", {
     value: vibrateMock,
@@ -129,187 +117,368 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Remove any per-test Notification stub that a test may have injected.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (window as any).Notification;
 });
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Helper: per-test Notification stub ───────────────────────────────────────
+// Injected only inside the tests that need to observe a Notification fire.
+// NOT installed globally in beforeAll — that is the whole point of this file.
+//
+// The Notification constructor is called one microtask after fireStage runs
+// (inside an async IIFE in showAppNotification), so callers must
+// `await act(async () => {})` before asserting on the returned ctor mock.
+function injectNotificationStub(permission: NotificationPermission = "granted") {
+  const ctor = vi.fn();
+  const stub = Object.assign(ctor, { permission });
+  Object.defineProperty(window, "Notification", {
+    value: stub,
+    writable: true,
+    configurable: true,
+  });
+  return ctor;
+}
 
-describe("useNotifications — warehouse staging alerts", () => {
+// ── Warehouse-staging effect tests ────────────────────────────────────────────
 
-  // ── 1. Frontline fires once at ≤ 2 × casesPerSkid ───────────────────────
-  it("fires frontline alert exactly once when pressCasesLeft crosses ≤ 2×casesPerSkid", () => {
+describe("useNotifications — warehouse-staging effect (no Notification API)", () => {
+  // The warehouse-staging effect requires, in order:
+  //   1. runStatus = "running", startedAt set, endedAt NOT set
+  //   2. calc.ppm > 0
+  //   3. casesPerSkid > 0 and casesNeeded > 0
+  //   4. pressCasesLeft > 0
+  //   5. "Notification" in window        ← the guard under test
+  //   6. pressCasesLeft ≤ 2*casesPerSkid → frontline not yet latched
+  //   7. pressCasesLeft ≤ casesPerSkid   → packaging not yet latched
+  //
+  // vibrate is called synchronously INSIDE fireStage (after the guard),
+  // so it is only reachable when Notification IS present.
+
+  it("does NOT crash when pressCasesLeft crosses ≤ 2*casesPerSkid with NO Notification API", () => {
+    // Critical regression guard: the effect must silently return at the
+    // `!("Notification" in window)` guard — NOT throw a ReferenceError.
+    // If someone removes the guard, accessing Notification.permission in jsdom
+    // (where Notification is absent) would throw synchronously.
+    const run = makeRun();
     const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(),       // pressCasesLeft = 25 > 20 → no fire
+      // First render: pressCasesLeft well above frontline threshold.
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+      }),
+    });
+
+    // Cross the frontline threshold with NO Notification stub.
+    expect(() => {
+      act(() => {
+        rerender(makeParams(T0 + 1_000, {
+          currentRun: run,
+          calc: { ...makeParams(T0).calc, pressCasesLeft: 35 }, // ≤ 2*20=40
+        }));
+      });
+    }).not.toThrow();
+
+    // Effect returned at the Notification guard — vibrate was never called.
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("fires frontline alert exactly once when pressCasesLeft drops to ≤ 2*casesPerSkid", async () => {
+    const notifCtor = injectNotificationStub("granted");
+
+    const run = makeRun();
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      // Above threshold — no staging alert yet.
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+      }),
     });
 
     expect(vibrateMock).not.toHaveBeenCalled();
+    expect(notifCtor).not.toHaveBeenCalled();
 
-    // Cross the frontline threshold (pressCasesLeft = 18 ≤ 20, > 10)
+    // Cross the frontline threshold: pressCasesLeft ≤ 2*casesPerSkid (40).
     act(() => {
-      rerender(makeParams({ calc: { ...makeParams().calc, pressCasesLeft: 18 } }));
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
+      }));
     });
 
-    // Frontline fires: vibrate called once with the staging pattern.
-    expect(vibrateMock).toHaveBeenCalledTimes(1);
+    // vibrate fires synchronously in fireStage.
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
 
-    // Step pressCasesLeft further down — effect re-runs, but latch holds.
-    act(() => {
-      rerender(makeParams({ calc: { ...makeParams().calc, pressCasesLeft: 16 } }));
-    });
+    // Flush microtask queue so the async Notification constructor call runs.
+    await act(async () => { await Promise.resolve(); });
 
-    // Still exactly one call — latch prevented a second fire.
-    expect(vibrateMock).toHaveBeenCalledTimes(1);
+    expect(notifCtor).toHaveBeenCalledOnce();
+    // Confirm frontline title.
+    expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage FRONTLINE for next run");
   });
 
-  // ── 2. Packaging fires once at ≤ 1 × casesPerSkid ──────────────────────
-  it("fires packaging alert exactly once when pressCasesLeft crosses ≤ casesPerSkid", () => {
+  it("does NOT refire frontline — a second tick at the same pressCasesLeft is a no-op", async () => {
+    const notifCtor = injectNotificationStub("granted");
+
+    const run = makeRun();
     const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(),       // pressCasesLeft = 25 → no fire
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+      }),
     });
 
-    // Cross frontline first (casesPerSkid = 10 → frontline at ≤ 20)
+    // First crossing — fires once.
     act(() => {
-      rerender(makeParams({ calc: { ...makeParams().calc, pressCasesLeft: 18 } }));
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
+      }));
     });
-    const callsAfterFrontline = vibrateMock.mock.calls.length;
-    expect(callsAfterFrontline).toBe(1); // frontline fires
+    await act(async () => { await Promise.resolve(); });
+    expect(notifCtor).toHaveBeenCalledOnce();
 
-    // Cross packaging threshold (pressCasesLeft = 9 ≤ 10)
+    // Second tick — frontlineNotifRef already holds run-1.
     act(() => {
-      rerender(makeParams({ calc: { ...makeParams().calc, pressCasesLeft: 9 } }));
+      rerender(makeParams(T0 + 2_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 30 },
+      }));
     });
+    await act(async () => { await Promise.resolve(); });
 
-    // One more vibrate for packaging (total 2).
-    expect(vibrateMock).toHaveBeenCalledTimes(2);
-
-    // Another step down — latch prevents both from re-firing.
-    act(() => {
-      rerender(makeParams({ calc: { ...makeParams().calc, pressCasesLeft: 7 } }));
-    });
-    expect(vibrateMock).toHaveBeenCalledTimes(2);
+    // Still exactly 1 call — no refire.
+    expect(notifCtor).toHaveBeenCalledOnce();
   });
 
-  // ── 3a. No re-fire on already-ended run (runStatus guard) ───────────────
-  it("does NOT fire when runStatus is 'ended' (navigating to a completed run)", () => {
-    const endedRun = makeRun({ endedAt: T0 + 60 * 60_000 });
+  it("fires packaging alert when pressCasesLeft drops to ≤ casesPerSkid", async () => {
+    const notifCtor = injectNotificationStub("granted");
+
+    const run = makeRun();
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      // Start above frontline threshold.
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+      }),
+    });
+
+    // Cross packaging threshold (≤ 1*casesPerSkid = 20); frontline also fires
+    // here since this is the first time either latch triggers.
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 15 },
+      }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    // Both frontline and packaging should have fired (both thresholds crossed).
+    expect(notifCtor).toHaveBeenCalledTimes(2);
+    const titles = notifCtor.mock.calls.map((c: unknown[]) => c[0]);
+    expect(titles).toContain("🚚 Warehouse: stage FRONTLINE for next run");
+    expect(titles).toContain("🚚 Warehouse: stage PACKAGING for next run");
+  });
+
+  it("fires frontline first, then packaging independently on a later tick", async () => {
+    const notifCtor = injectNotificationStub("granted");
+
+    const run = makeRun();
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+      }),
+    });
+
+    // Step 1: cross frontline threshold only (between cps and 2*cps).
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 }, // ≤40 but >20
+      }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(notifCtor).toHaveBeenCalledOnce();
+    expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage FRONTLINE for next run");
+
+    notifCtor.mockClear();
+    vibrateMock.mockClear();
+
+    // Step 2: cross packaging threshold.
+    act(() => {
+      rerender(makeParams(T0 + 2_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 15 }, // ≤20
+      }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    // Only packaging fires this time — frontline is already latched.
+    expect(notifCtor).toHaveBeenCalledOnce();
+    expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage PACKAGING for next run");
+  });
+
+  it("does NOT fire when ppm is 0 (no valid timing basis)", () => {
+    const run = makeRun();
+
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100, ppm: 0 },
+      }),
+    });
+
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35, ppm: 0 },
+      }));
+    });
+
+    // Effect returns early at `if (calc.ppm <= 0) return`.
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire when pressCasesLeft is 0 (press already done)", () => {
+    const run = makeRun();
 
     renderHook((p: Params) => useNotifications(p), {
-      // pressCasesLeft = 5 would trigger both thresholds if the guard were absent.
-      initialProps: makeParams({
-        runStatus: "ended",
-        currentRun: endedRun,
-        calc: { ...makeParams().calc, pressCasesLeft: 5 },
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 0 },
       }),
     });
 
-    // Effect returns at the first guard (`currentRun?.endedAt` is set).
+    // Effect returns early at `if (pressLeft <= 0) return`.
     expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  // ── 3b. Per-run Set-latch: no re-fire after navigating away and back ─────
-  it("does NOT re-fire after navigating away from a run and back to it", () => {
-    const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(),       // pressCasesLeft = 25 → no fire
-    });
-
-    // Fire frontline for run-1.
-    act(() => {
-      rerender(makeParams({ calc: { ...makeParams().calc, pressCasesLeft: 15 } }));
-    });
-    expect(vibrateMock).toHaveBeenCalledTimes(1);
-
-    // Navigate to a different run.
-    act(() => {
-      rerender(makeParams({
-        currentRun: makeRun({ id: "run-2", startedAt: T0 + 1000 }),
-        calc: { ...makeParams().calc, pressCasesLeft: 25 }, // above thresholds
-      }));
-    });
-
-    // Navigate back to run-1 with pressCasesLeft still at 15 (below frontline).
-    act(() => {
-      rerender(makeParams({
-        currentRun: makeRun({ id: "run-1" }),
-        calc: { ...makeParams().calc, pressCasesLeft: 15 },
-      }));
-    });
-
-    // The Set latch for run-1 is still populated — no additional fire.
-    expect(vibrateMock).toHaveBeenCalledTimes(1);
-  });
-
-  // ── 4a. No fire when ppm ≤ 0 ────────────────────────────────────────────
-  it("does NOT fire when ppm is 0", () => {
-    const noPpm = { ...makeParams().calc, ppm: 0, pressCasesLeft: 5 };
-
-    const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams({ calc: noPpm }),
-    });
-
-    act(() => {
-      rerender(makeParams({ calc: { ...noPpm, pressCasesLeft: 4 } }));
-    });
-
-    // Effect returns at `if (calc.ppm <= 0) return`.
-    expect(vibrateMock).not.toHaveBeenCalled();
-  });
-
-  // ── 4b. No fire when casesNeeded = 0 ────────────────────────────────────
-  it("does NOT fire when casesNeeded is 0", () => {
-    const zeroNeeded = { ...makeParams().v, casesNeeded: 0 };
-
-    const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams({ v: zeroNeeded, calc: { ...makeParams().calc, pressCasesLeft: 5 } }),
-    });
-
-    act(() => {
-      rerender(makeParams({ v: zeroNeeded, calc: { ...makeParams().calc, pressCasesLeft: 4 } }));
-    });
-
-    // Effect returns at `if (cps <= 0 || needed <= 0) return`.
-    expect(vibrateMock).not.toHaveBeenCalled();
-  });
-
-  // ── 4c. No fire when casesPerSkid = 0 ───────────────────────────────────
-  it("does NOT fire when casesPerSkid is 0", () => {
-    const zeroCps = { ...makeParams().v, casesPerSkid: 0 };
-
-    const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams({ v: zeroCps, calc: { ...makeParams().calc, pressCasesLeft: 5 } }),
-    });
-
-    act(() => {
-      rerender(makeParams({ v: zeroCps, calc: { ...makeParams().calc, pressCasesLeft: 4 } }));
+  it("does NOT fire when runStatus is not 'running'", () => {
+    renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        runStatus: "paused",
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
+      }),
     });
 
     expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  // ── 5. Suppressed pref: silently latches, does not re-fire on re-enable ──
-  it("latches silently when warehouseStaging pref is off, preventing fire on re-enable", () => {
-    const prefOff = { warehouseStaging: false } as import("../../../notificationPrefs").NotificationPrefs;
-    const prefOn  = undefined; // missing key = ON
+  it("does NOT fire when the run has endedAt set", () => {
+    const run = makeRun({ endedAt: T0 - 5_000 });
 
+    renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
+      }),
+    });
+
+    // Effect returns at the endedAt guard.
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("latches silently when warehouseStaging pref is off — no refire when pref is re-enabled", async () => {
+    // The suppressed-pref branch runs AFTER the `!("Notification" in window)`
+    // guard, so a Notification stub is needed to reach it.
+    const notifCtor = injectNotificationStub("granted");
+    const prefOff = { warehouseStaging: false } as import("../../notificationPrefs").NotificationPrefs;
+
+    const run = makeRun();
     const { rerender } = renderHook((p: Params) => useNotifications(p), {
-      // pref is OFF, pressCasesLeft already below frontline threshold.
-      initialProps: makeParams({
+      initialProps: makeParams(T0, {
+        currentRun: run,
         prefs: prefOff,
-        calc: { ...makeParams().calc, pressCasesLeft: 15 },
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
       }),
     });
 
-    // Alert suppressed but silently latched — vibrate never called.
-    expect(vibrateMock).not.toHaveBeenCalled();
-
-    // Re-enable the pref and step pressCasesLeft further down to re-trigger.
+    // Cross frontline threshold with pref OFF → silently latches both refs.
     act(() => {
-      rerender(makeParams({
-        prefs: prefOn,
-        calc: { ...makeParams().calc, pressCasesLeft: 14 },
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        prefs: prefOff,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
       }));
     });
+    await act(async () => { await Promise.resolve(); });
 
-    // The milestone was already latched while suppressed — must NOT fire.
+    // Pref suppressed → no Notification, no vibrate.
+    expect(notifCtor).not.toHaveBeenCalled();
     expect(vibrateMock).not.toHaveBeenCalled();
+
+    // Re-enable pref — milestone is already latched, must NOT retroactively fire.
+    act(() => {
+      rerender(makeParams(T0 + 2_000, {
+        currentRun: run,
+        prefs: undefined,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 30 },
+      }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(notifCtor).not.toHaveBeenCalled();
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("fires frontline with short-run message when needed < 2*casesPerSkid", async () => {
+    // A short run (casesNeeded < 2*casesPerSkid) trips the frontline threshold
+    // immediately at start.  The notification body should tell warehouse to
+    // stage 2+ runs now.
+    const notifCtor = injectNotificationStub("granted");
+
+    const run = makeRun();
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        // Short run: needed=30, cps=20, so needed < 2*cps=40
+        // pressCasesLeft starts above threshold.
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+        v: { freezerTime: 10, casesNeeded: 30, casesPerSkid: 20 },
+      }),
+    });
+
+    // Cross frontline threshold for a short run.
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 }, // ≤ 2*20=40
+        v: { freezerTime: 10, casesNeeded: 30, casesPerSkid: 20 },
+      }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(notifCtor).toHaveBeenCalledOnce();
+    expect(notifCtor.mock.calls[0][0]).toBe("🚚 Warehouse: stage FRONTLINE for next run");
+    // Short-run body mentions "under 2 skids total".
+    const body = (notifCtor.mock.calls[0][1] as NotificationOptions).body ?? "";
+    expect(body).toMatch(/under 2 skids/);
+  });
+
+  it("includes next-run labels in the notification body", async () => {
+    const notifCtor = injectNotificationStub("granted");
+
+    const run = makeRun();
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        nextRunLabels: ["Run 2 – Cheese", "Run 3 – Pepperoni"],
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 100 },
+      }),
+    });
+
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        nextRunLabels: ["Run 2 – Cheese", "Run 3 – Pepperoni"],
+        calc: { ...makeParams(T0).calc, pressCasesLeft: 35 },
+      }));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    const body = (notifCtor.mock.calls[0][1] as NotificationOptions).body ?? "";
+    expect(body).toContain("Run 2 – Cheese");
   });
 });
