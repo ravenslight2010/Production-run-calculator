@@ -239,6 +239,7 @@ import RolesManager from "../components/RolesManager";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
+import ManageRunsPanel from "../components/ManageRunsPanel";
 import ProductionRulesManager from "../components/ProductionRulesManager";
 import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
 import CycleCountManager from "../components/CycleCountManager";
@@ -8693,6 +8694,38 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
+  // Remove a specific not-started run by id. Used by the manage-runs panel in
+  // the Settings dialog so managers can deliberately remove any individual run
+  // (not just the current one). Guards mirror removeRun: active/completed runs
+  // and the last remaining run are protected.
+  function removeRunById(id: string) {
+    const idx = dayState.runs.findIndex((r) => r.id === id);
+    if (idx === -1) return;
+    const run = dayState.runs[idx];
+    if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
+    const newRuns = dayState.runs.filter((_, i) => i !== idx);
+    if (newRuns.length === 0) return; // always keep at least one run
+    tombstoneDeleted("runs", run.id);
+    const curId = dayState.runs[dayState.currentIndex]?.id;
+    let newIndex: number;
+    if (curId === id) {
+      // Removed the current run — shift focus to the nearest remaining run.
+      newIndex = Math.max(0, idx - 1);
+    } else {
+      newIndex = Math.max(0, newRuns.findIndex((r) => r.id === curId));
+    }
+    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    if (curId === id) {
+      // Removed current run — reload the new current run's form values.
+      const newVals = loadRunValues(newRuns[newIndex].id);
+      form.reset(newVals);
+      resetFieldArrays(newVals);
+    }
+    schedulePush(newDs, 0);
+  }
+
   // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
   // target brand+flavor and make it current, in one dayState computation, so
   // the existing current run is never renamed/clobbered. Saves the outgoing
@@ -11924,7 +11957,7 @@ export default function Home() {
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
     removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
     removeDoughIngredient, removeDoughRecipeName, removeFlavor, removeFrontline, removeFrontlineIngredient, removeFrontlineRecipeName,
-    removeIngredientType, removeMixIngredient, removeMixRecipeName, removePepType, removeRun, removeSubstitution,
+    removeIngredientType, removeMixIngredient, removeMixRecipeName, removePepType, removeRun, removeRunById, removeSubstitution,
     renameBrand, renameCatalogEntry, renameCheeseIngredient, renameCheeseRecipeName, renameDieType, renameDoughIngredient,
     renameDoughRecipeName, renameFlavor, renameFrontlineIngredient, renameFrontlineRecipeName, renameIngredientType, renameMixIngredient,
     renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
@@ -12497,7 +12530,7 @@ export default function Home() {
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
           cycleCount: "Cycle Counts", staff: "Staff", audit: "Audit Log", pin: "Change PIN",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
-          "ai-corrections": "AI Memory", times: "Shift Times",
+          "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
         };
         const sectionDefs = ([
           {
@@ -12523,6 +12556,7 @@ export default function Home() {
               ...(canManageStaff || canApproveResets ? ["staff"] : []),
               ...(canManageStaff ? ["audit", "ai-corrections"] : []),
               "pin",
+              ...(isSupervisor ? ["runs"] : []),
             ],
           },
           {
@@ -13434,8 +13468,11 @@ export default function Home() {
                 {/* AI corrections memory — manager-only view + delete */}
                 {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}
 
+                {/* Manage runs — supervisor-only panel to remove individual or blank runs */}
+                {manageCategory === "runs" && isSupervisor && <ManageRunsPanel />}
+
                 {/* Recent changes: local per-device undo trail for master-data edits */}
-                {!["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles"].includes(manageCategory) && (
+                {!["pin", "import", "rules", "staff", "audit", "ai-corrections", "setupProfiles", "runs"].includes(manageCategory) && (
                   <div className="mt-6 pt-4 border-t border-border">
                     <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
                     <p className="text-[11px] text-muted-foreground mb-3">
