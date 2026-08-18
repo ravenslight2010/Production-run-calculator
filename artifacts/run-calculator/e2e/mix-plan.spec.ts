@@ -224,6 +224,150 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (c): Ending ONE run in a two-run shift keeps the OTHER run's mix card.
+   *
+   * Mechanism: liveRunsForMixes (home.tsx ~14469) maps dayState.runs filtered by
+   * `r.brand && !r.endedAt`. With two branded runs, both produce plan entries.
+   * After run-1 is stopped (endedAt set), it is excluded from liveRunsForMixes
+   * while run-2 remains. buildMixPlan still receives run-2 and renders its mix —
+   * the date-group card stays visible and only run-1's mix name disappears.
+   */
+  test("ending one run keeps the other run's mix card visible in a multi-run shift", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId1 = `run-mix-a-${suffix}`;
+    const mixId2 = `run-mix-b-${suffix}`;
+    const mixName1 = `RunMixA ${suffix}`;
+    const mixName2 = `RunMixB ${suffix}`;
+    const component1 = `CompA_${suffix}`;
+    const component2 = `CompB_${suffix}`;
+    const brand1 = `BrandA_${suffix}`;
+    const brand2 = `BrandB_${suffix}`;
+    const today = todayStr();
+
+    try {
+      // Create two mixes — one per brand — so each run's active status drives its
+      // own mix card independently.
+      await dbCreateMix(db, {
+        id: mixId1,
+        name: mixName1,
+        brand: brand1,
+        isPrep: false,
+        component: component1,
+        perPizza: 2.0,
+        batchSize: 10,
+      });
+      await dbCreateMix(db, {
+        id: mixId2,
+        name: mixName2,
+        brand: brand2,
+        isPrep: false,
+        component: component2,
+        perPizza: 2.0,
+        batchSize: 10,
+      });
+
+      // Sign up and dismiss the onboarding dialog.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.waitForTimeout(1_000);
+
+      // ── Step 1: Set brand on run 1 (the auto-seeded placeholder) ──────────
+      await page.locator('[data-testid="tab-run"]').click();
+
+      const brandInput = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput.click();
+      await brandInput.fill(brand1);
+      await brandInput.press("Enter");
+
+      // Allow setRunBrandFlavor to persist brand1 on run 1 before we add run 2.
+      await page.waitForTimeout(800);
+
+      // ── Step 2: Add run 2 and set brand2 on it ─────────────────────────────
+      // addRun() saves run-1's form values, appends a blank run, and switches
+      // currentIndex to the new run — the brand input now belongs to run 2.
+      const newRunBtn = page.getByRole("button", { name: /new run/i });
+      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await newRunBtn.click();
+
+      // Wait for the new (blank) run to become active.
+      await page.waitForTimeout(800);
+
+      const brandInput2 = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput2.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput2.click();
+      await brandInput2.fill(brand2);
+      await brandInput2.press("Enter");
+
+      await page.waitForTimeout(800);
+
+      // ── Step 3: Both mix cards must appear on the Mixes tab ───────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // Both mix names must be present inside the date-group card.
+      await expect(todayCard.getByText(mixName1, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+      await expect(todayCard.getByText(mixName2, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── Step 4: Switch to run 1 and start it ──────────────────────────────
+      await page.locator('[data-testid="tab-run"]').click();
+
+      // The Prev button switches from run 2 (index 1) back to run 1 (index 0).
+      const prevBtn = page.getByRole("button", { name: /prev/i });
+      await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await prevBtn.click();
+
+      await page.waitForTimeout(600);
+
+      const startBtn = page.locator('[data-testid="button-start-run"]');
+      await startBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await startBtn.click();
+
+      // ── Step 5: Stop run 1 ─────────────────────────────────────────────────
+      const stopBtn = page.getByRole("button", { name: /stop run/i });
+      await stopBtn.waitFor({ state: "visible", timeout: 10_000 });
+      await stopBtn.click();
+
+      // Allow endRun() to write endedAt on run-1 before we navigate away.
+      await page.waitForTimeout(800);
+
+      // ── Step 6: Verify run-2's mix is still visible; run-1's mix is gone ──
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // The date-group card must still be present — run 2 is still active.
+      await expect(
+        page.locator(`[data-testid="mix-plan-${today}"]`),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // Run-1 ended → its brand is excluded from liveRunsForMixes → mix gone.
+      await expect(
+        page.getByText(mixName1, { exact: false }),
+      ).toHaveCount(0, { timeout: 5_000 });
+
+      // Run-2 is still active → its mix must remain visible.
+      await expect(
+        page.locator(`[data-testid="mix-plan-${today}"]`).getByText(mixName2, {
+          exact: false,
+        }),
+      ).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (b): Mix card disappears from the plan after the run is marked ended.
    *
    * Mechanism: liveRunsForMixes (home.tsx ~14462) filters dayState.runs by
