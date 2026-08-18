@@ -21,9 +21,20 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 
-// ── Capture AI call args so tests can assert max_completion_tokens ────────────
+// ── Single shared mock-state object (one vi.hoisted call matches the pattern ──
+// that provably works in forecastAccuracy.route.test.ts). Splitting state across
+// multiple vi.hoisted calls can leave later closures referencing stale bindings
+// in Vitest's ESM hoisting transform.
 type CapturedCall = { model: string; max_completion_tokens: number };
-const captured = vi.hoisted(() => ({ calls: [] as CapturedCall[], reply: "" }));
+const mock = vi.hoisted(() => ({
+  // AI client capture
+  calls: [] as CapturedCall[],
+  reply: "",
+  // verifyForecastHistory result
+  verifyResult: true as boolean,
+  // recordFacilityKnowledge call counter
+  recordCalls: 0,
+}));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => {
   const AI_MODELS = { full: "gemini-2.5-flash", cheap: "gemini-2.5-flash" } as const;
@@ -33,11 +44,11 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
         completions: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           create: async (args: any) => {
-            captured.calls.push({
+            mock.calls.push({
               model: String(args.model ?? ""),
               max_completion_tokens: Number(args.max_completion_tokens ?? 0),
             });
-            return { choices: [{ message: { content: captured.reply } }] };
+            return { choices: [{ message: { content: mock.reply } }] };
           },
         },
       },
@@ -56,12 +67,14 @@ vi.mock("../middlewares/requireCapability", () => ({
 }));
 
 // Stub out facility memory (DB-dependent): return nothing, silently absorb writes.
+// recordFacilityKnowledge increments mock.recordCalls so tests can assert call
+// counts with the same closure pattern used in forecastAccuracy.route.test.ts.
 vi.mock("./aiMemoryContext", () => ({
   loadFacilityKnowledge: async () => [],
   appendFacilityMemoryBlock: (prompt: string) => prompt,
   appendFacilityMemoryBlock_v2: (prompt: string) => prompt,
   groundPromptWithMemory: async (_log: unknown, prompt: string) => prompt,
-  recordFacilityKnowledge: async () => {},
+  recordFacilityKnowledge: async () => { mock.recordCalls++; },
   recordConversationTurns: async () => {},
 }));
 
@@ -71,9 +84,10 @@ vi.mock("./aiCorrectionsContext", () => ({
   appendCorrectionsBlock: (prompt: string) => prompt,
 }));
 
-// Stub out server-side history verification (DB-dependent): always trust.
+// Stub out server-side history verification (DB-dependent).
+// Default: trust (returns true). Individual tests set mock.verifyResult = false.
 vi.mock("./aiForecastVerify", () => ({
-  verifyForecastHistory: async () => true,
+  verifyForecastHistory: async () => mock.verifyResult,
 }));
 
 // Stub out request scope (DB-dependent).
@@ -107,8 +121,10 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  captured.calls = [];
-  captured.reply = "";
+  mock.calls = [];
+  mock.reply = "";
+  mock.verifyResult = true;
+  mock.recordCalls = 0;
 });
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -185,7 +201,7 @@ function goodMultiDayReply(dates: string[]): string {
 describe("POST /ai/forecast — response shape", () => {
   it("returns valid structured JSON with forecast + forecasts when the model replies correctly", async () => {
     const targetDate = "2026-06-23";
-    captured.reply = goodSingleDayReply(targetDate);
+    mock.reply = goodSingleDayReply(targetDate);
 
     const res = await post({
       nowMs: Date.now(),
@@ -221,7 +237,7 @@ describe("POST /ai/forecast — response shape", () => {
 
   it("populates the runs with brand, flavor, dieType, casesNeeded, rationale", async () => {
     const targetDate = "2026-06-23";
-    captured.reply = goodSingleDayReply(targetDate);
+    mock.reply = goodSingleDayReply(targetDate);
 
     const res = await post({
       nowMs: Date.now(),
@@ -258,7 +274,7 @@ describe("POST /ai/forecast — response shape", () => {
     expect(typeof body.note).toBe("string");
     expect(body.note.length).toBeGreaterThan(0);
     // No AI call should have been made.
-    expect(captured.calls).toHaveLength(0);
+    expect(mock.calls).toHaveLength(0);
   });
 
   it("returns 400 for a malformed request body", async () => {
@@ -270,7 +286,7 @@ describe("POST /ai/forecast — response shape", () => {
 describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
   it("passes max_completion_tokens ≥ 4096 for a single-day request", async () => {
     const targetDate = "2026-06-23";
-    captured.reply = goodSingleDayReply(targetDate);
+    mock.reply = goodSingleDayReply(targetDate);
 
     await post({
       nowMs: Date.now(),
@@ -280,7 +296,7 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
     });
 
     // At least one main AI call must have been made.
-    const mainCall = captured.calls[0];
+    const mainCall = mock.calls[0];
     expect(mainCall).toBeDefined();
     expect(mainCall.max_completion_tokens).toBeGreaterThanOrEqual(4096);
     expect(mainCall.model).toBe("gemini-2.5-flash");
@@ -288,7 +304,7 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
 
   it("passes max_completion_tokens ≥ 8192 for a multi-day (horizonDays > 1) request", async () => {
     const targetDate = "2026-06-23";
-    captured.reply = goodMultiDayReply(["2026-06-23", "2026-06-24", "2026-06-25"]);
+    mock.reply = goodMultiDayReply(["2026-06-23", "2026-06-24", "2026-06-25"]);
 
     await post({
       nowMs: Date.now(),
@@ -297,7 +313,7 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
       history: historyWithRuns(2),
     });
 
-    const mainCall = captured.calls[0];
+    const mainCall = mock.calls[0];
     expect(mainCall).toBeDefined();
     // Multi-day produces proportionally more output — must give the model room.
     expect(mainCall.max_completion_tokens).toBeGreaterThanOrEqual(8192);
@@ -308,14 +324,14 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
     // Confirm the route intentionally scales the budget: a single-day horizon
     // has a lower ceiling than a multi-day one (no silent regression where both
     // get the same, potentially too-small, value).
-    captured.reply = goodSingleDayReply("2026-06-23");
+    mock.reply = goodSingleDayReply("2026-06-23");
     await post({ nowMs: Date.now(), targetDate: "2026-06-23", horizonDays: 1, history: historyWithRuns(2) });
-    const singleTokens = captured.calls[0]?.max_completion_tokens ?? 0;
+    const singleTokens = mock.calls[0]?.max_completion_tokens ?? 0;
 
-    captured.calls = [];
-    captured.reply = goodMultiDayReply(["2026-06-23", "2026-06-24"]);
+    mock.calls = [];
+    mock.reply = goodMultiDayReply(["2026-06-23", "2026-06-24"]);
     await post({ nowMs: Date.now(), targetDate: "2026-06-23", horizonDays: 2, history: historyWithRuns(2) });
-    const multiTokens = captured.calls[0]?.max_completion_tokens ?? 0;
+    const multiTokens = mock.calls[0]?.max_completion_tokens ?? 0;
 
     expect(multiTokens).toBeGreaterThan(singleTokens);
   });
@@ -324,7 +340,7 @@ describe("POST /ai/forecast — max_completion_tokens adequacy", () => {
 describe("POST /ai/forecast — multi-day response shape", () => {
   it("returns one forecast plan per requested day in date order", async () => {
     const dates = ["2026-06-23", "2026-06-24", "2026-06-25"];
-    captured.reply = goodMultiDayReply(dates);
+    mock.reply = goodMultiDayReply(dates);
 
     const res = await post({
       nowMs: Date.now(),
@@ -350,4 +366,57 @@ describe("POST /ai/forecast — multi-day response shape", () => {
       expect(plan.runs.length).toBeGreaterThan(0);
     }
   });
+});
+
+describe("POST /ai/forecast — unverified history path", () => {
+  it("still returns 200 with valid forecast JSON when verifyForecastHistory returns false", async () => {
+    // Simulate the common real-world case: the client submits history that the
+    // server cannot reconcile against its daily_sync records. The forecast is
+    // advisory-only and must still reach the manager — the route must not 5xx
+    // or return a non-JSON response.
+    mock.verifyResult = false;
+    const targetDate = "2026-06-23";
+    mock.reply = goodSingleDayReply(targetDate);
+
+    const res = await post({
+      nowMs: Date.now(),
+      targetDate,
+      history: historyWithRuns(2),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      forecast: { targetDate: string; confidence: string; runs: unknown[] } | null;
+      forecasts: unknown[];
+      generatedAt: number;
+    };
+
+    // Forecast must still be present and well-formed.
+    expect(body.forecast).not.toBeNull();
+    expect(body.forecast?.targetDate).toBe(targetDate);
+    expect(body.forecast?.confidence).toBe("high");
+    expect(Array.isArray(body.forecast?.runs)).toBe(true);
+    expect((body.forecast?.runs ?? []).length).toBeGreaterThan(0);
+    expect(Array.isArray(body.forecasts)).toBe(true);
+    expect(body.forecasts).toHaveLength(1);
+    expect(typeof body.generatedAt).toBe("number");
+  });
+
+  it("does NOT call recordFacilityKnowledge when verifyForecastHistory returns false", async () => {
+    // An unverifiable history must not be trusted into shared facility memory
+    // — a fabricated history could poison the pool every other AI feature uses.
+    mock.verifyResult = false;
+    mock.reply = goodSingleDayReply("2026-06-23");
+
+    await post({
+      nowMs: Date.now(),
+      targetDate: "2026-06-23",
+      history: historyWithRuns(2),
+    });
+
+    // Allow the route's void-fire to settle before asserting.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mock.recordCalls).toBe(0);
+  });
+
 });
