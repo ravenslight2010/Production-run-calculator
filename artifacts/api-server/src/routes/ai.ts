@@ -1227,24 +1227,36 @@ router.post(
 // Reads the settings row for the current scope, seeding the default on first
 // access so a fresh install returns safe defaults (enabled, 4-min poll, 30-min
 // cooldown). Live and sandbox each have their own independent row.
+const PROACTIVE_SETTINGS_DEFAULTS = {
+  enabled: true,
+  pollSeconds: 240,
+  cooldownSeconds: 1800,
+} as const;
+
 async function loadProactiveSettings() {
-  const scope = currentScope();
-  const [row] = await db
-    .select()
-    .from(proactiveAlertSettingsTable)
-    .where(eq(proactiveAlertSettingsTable.scope, scope));
-  if (row) return row;
-  const [created] = await db
-    .insert(proactiveAlertSettingsTable)
-    .values({ scope })
-    .onConflictDoNothing({ target: proactiveAlertSettingsTable.scope })
-    .returning();
-  if (created) return created;
-  const [existing] = await db
-    .select()
-    .from(proactiveAlertSettingsTable)
-    .where(eq(proactiveAlertSettingsTable.scope, scope));
-  return existing;
+  try {
+    const scope = currentScope();
+    const [row] = await db
+      .select()
+      .from(proactiveAlertSettingsTable)
+      .where(eq(proactiveAlertSettingsTable.scope, scope));
+    if (row) return row;
+    const [created] = await db
+      .insert(proactiveAlertSettingsTable)
+      .values({ scope })
+      .onConflictDoNothing({ target: proactiveAlertSettingsTable.scope })
+      .returning();
+    if (created) return created;
+    const [existing] = await db
+      .select()
+      .from(proactiveAlertSettingsTable)
+      .where(eq(proactiveAlertSettingsTable.scope, scope));
+    return existing ?? PROACTIVE_SETTINGS_DEFAULTS;
+  } catch {
+    // DB schema mismatch or other transient error — return safe defaults so
+    // the poll never surfaces a 500 to staff.
+    return PROACTIVE_SETTINGS_DEFAULTS;
+  }
 }
 
 // Open to any signed-in user (the watcher only polls for managers, but reading
@@ -1269,19 +1281,24 @@ router.put(
     }
     const { enabled, pollSeconds, cooldownSeconds } = clampProactiveSettings(parsed.data);
     const scope = currentScope();
-    const [row] = await db
-      .insert(proactiveAlertSettingsTable)
-      .values({ scope, enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: proactiveAlertSettingsTable.scope,
-        set: { enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() },
-      })
-      .returning();
-    res.json({
-      enabled: row.enabled,
-      pollSeconds: row.pollSeconds,
-      cooldownSeconds: row.cooldownSeconds,
-    });
+    try {
+      const [row] = await db
+        .insert(proactiveAlertSettingsTable)
+        .values({ scope, enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: proactiveAlertSettingsTable.scope,
+          set: { enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() },
+        })
+        .returning();
+      res.json({
+        enabled: row.enabled,
+        pollSeconds: row.pollSeconds,
+        cooldownSeconds: row.cooldownSeconds,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: `Failed to save proactive settings: ${msg}` });
+    }
   },
 );
 
