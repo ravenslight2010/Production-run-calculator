@@ -17311,6 +17311,46 @@ export function ElapsedTimeBadge({
   return <span data-testid={testId} className={className}>{fmtElapsed(runAge + addend)}</span>;
 }
 
+/**
+ * PerRunMixSlotBadge — the math-check badge as it appears on the per-run
+ * Setup tab in home.tsx (not the standalone Profile Editor).
+ *
+ * Encapsulates the isMix gate and AppSlotMathBadge mounting logic that
+ * home.tsx applies for each of the four applicator slots. Exported so the
+ * per-run Setup tab badge wiring can be directly render-tested without
+ * mounting the full home.tsx form.
+ *
+ * home.tsx uses this for app1–app4 with:
+ *   appType  = v.appNType
+ *   rows     = v.appNCheeseRecipe ?? []
+ *   ozPerPizza = Number(v.appNOzPerPizza) || 0
+ *   onResolveByRowSum = (newOz) => form.setValue("appNOzPerPizza", newOz, { shouldDirty: true })
+ *   onResolveByTotal  = (scaledRows) => { form.setValue("appNCheeseRecipe", scaledRows, ...); replaceCheeseN(scaledRows); }
+ */
+export function PerRunMixSlotBadge({
+  appType,
+  rows,
+  ozPerPizza,
+  onResolveByRowSum,
+  onResolveByTotal,
+}: {
+  appType: string;
+  rows: RecipeRow[];
+  ozPerPizza: number;
+  onResolveByRowSum: (newOz: number) => void;
+  onResolveByTotal: (scaledRows: RecipeRow[]) => void;
+}) {
+  if (!appType.trim().toLowerCase().includes("mix")) return null;
+  return (
+    <AppSlotMathBadge
+      rows={rows}
+      ozPerPizza={ozPerPizza}
+      onResolveByRowSum={onResolveByRowSum}
+      onResolveByTotal={onResolveByTotal}
+    />
+  );
+}
+
 
 const LiveRunTabContent = memo(function LiveRunTabContent() {
   const hx = useHomeCtx();
@@ -21472,14 +21512,13 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
-                      {v.app1Type.trim().toLowerCase().includes("mix") && (
-                        <AppSlotMathBadge
-                          rows={v.app1CheeseRecipe ?? []}
-                          ozPerPizza={Number(v.app1OzPerPizza) || 0}
-                          onResolveByRowSum={(newOz) => form.setValue("app1OzPerPizza", newOz, { shouldDirty: true })}
-                          onResolveByTotal={(scaledRows) => { form.setValue("app1CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese1(scaledRows as any); }}
-                        />
-                      )}
+                      <PerRunMixSlotBadge
+                        appType={v.app1Type}
+                        rows={v.app1CheeseRecipe ?? []}
+                        ozPerPizza={Number(v.app1OzPerPizza) || 0}
+                        onResolveByRowSum={(newOz) => form.setValue("app1OzPerPizza", newOz, { shouldDirty: true })}
+                        onResolveByTotal={(scaledRows) => { form.setValue("app1CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese1(scaledRows as any); }}
+                      />
                       {v.app1Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
@@ -21549,14 +21588,13 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
-                      {v.app2Type.trim().toLowerCase().includes("mix") && (
-                        <AppSlotMathBadge
-                          rows={v.app2CheeseRecipe ?? []}
-                          ozPerPizza={Number(v.app2OzPerPizza) || 0}
-                          onResolveByRowSum={(newOz) => form.setValue("app2OzPerPizza", newOz, { shouldDirty: true })}
-                          onResolveByTotal={(scaledRows) => { form.setValue("app2CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese2(scaledRows as any); }}
-                        />
-                      )}
+                      <PerRunMixSlotBadge
+                        appType={v.app2Type}
+                        rows={v.app2CheeseRecipe ?? []}
+                        ozPerPizza={Number(v.app2OzPerPizza) || 0}
+                        onResolveByRowSum={(newOz) => form.setValue("app2OzPerPizza", newOz, { shouldDirty: true })}
+                        onResolveByTotal={(scaledRows) => { form.setValue("app2CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese2(scaledRows as any); }}
+                      />
                       {v.app2Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
@@ -21805,14 +21843,13 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
-                      {v.app3Type.trim().toLowerCase().includes("mix") && (
-                        <AppSlotMathBadge
-                          rows={v.app3CheeseRecipe ?? []}
-                          ozPerPizza={Number(v.app3OzPerPizza) || 0}
-                          onResolveByRowSum={(newOz) => form.setValue("app3OzPerPizza", newOz, { shouldDirty: true })}
-                          onResolveByTotal={(scaledRows) => { form.setValue("app3CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese3(scaledRows as any); }}
-                        />
-                      )}
+                      <PerRunMixSlotBadge
+                        appType={v.app3Type}
+                        rows={v.app3CheeseRecipe ?? []}
+                        ozPerPizza={Number(v.app3OzPerPizza) || 0}
+                        onResolveByRowSum={(newOz) => form.setValue("app3OzPerPizza", newOz, { shouldDirty: true })}
+                        onResolveByTotal={(scaledRows) => { form.setValue("app3CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese3(scaledRows as any); }}
+                      />
                       {v.app3Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
@@ -21882,14 +21919,13 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           </div>
                         );
                       })()}
-                      {v.app4Type.trim().toLowerCase().includes("mix") && (
-                        <AppSlotMathBadge
-                          rows={v.app4CheeseRecipe ?? []}
-                          ozPerPizza={Number(v.app4OzPerPizza) || 0}
-                          onResolveByRowSum={(newOz) => form.setValue("app4OzPerPizza", newOz, { shouldDirty: true })}
-                          onResolveByTotal={(scaledRows) => { form.setValue("app4CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese4(scaledRows as any); }}
-                        />
-                      )}
+                      <PerRunMixSlotBadge
+                        appType={v.app4Type}
+                        rows={v.app4CheeseRecipe ?? []}
+                        ozPerPizza={Number(v.app4OzPerPizza) || 0}
+                        onResolveByRowSum={(newOz) => form.setValue("app4OzPerPizza", newOz, { shouldDirty: true })}
+                        onResolveByTotal={(scaledRows) => { form.setValue("app4CheeseRecipe", scaledRows as any, { shouldDirty: true }); replaceCheese4(scaledRows as any); }}
+                      />
                       {v.app4Type.trim().toLowerCase() === "cheese" && (
                         <CheesePickCard
                           embedded
