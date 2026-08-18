@@ -376,6 +376,7 @@ import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
+import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { useLiveRun, LiveRunProvider, calcRef } from "../contexts/LiveRunContext";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
@@ -555,8 +556,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useBackButtonTrap } from "@/hooks/useBackButtonTrap";
-
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
 // sees a newer epoch — on boot via GET /api/sync/reset-epoch and live over SSE —
@@ -3617,16 +3616,18 @@ export default function Home() {
       // Storage full/unavailable — losing tab restore is fine.
     }
   }, [activeTab]);
+
+  // ── Back-button trap (Android PWA / hardware back) ─────────────────────────
   // Tab history for the back button trap: push the previous tab whenever the
   // user navigates so the back button can unwind through tabs before staying.
   const tabHistoryRef = useRef<string[]>([]);
-  const prevActiveTabRef = useRef(activeTab);
+  const prevTabRef = useRef<string>(activeTab);
   useEffect(() => {
-    if (prevActiveTabRef.current !== activeTab) {
-      tabHistoryRef.current.push(prevActiveTabRef.current);
+    if (activeTab !== prevTabRef.current) {
+      tabHistoryRef.current.push(prevTabRef.current);
       // Cap at 20 entries to avoid unbounded growth.
       if (tabHistoryRef.current.length > 20) tabHistoryRef.current.shift();
-      prevActiveTabRef.current = activeTab;
+      prevTabRef.current = activeTab;
     }
   }, [activeTab]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
@@ -4820,6 +4821,7 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
@@ -6510,6 +6512,7 @@ export default function Home() {
   const cheeseImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {id: string; brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
