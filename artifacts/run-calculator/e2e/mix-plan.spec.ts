@@ -1,7 +1,7 @@
 /**
- * E2E: Mix Plan — prep card suppression and ended-run removal
+ * E2E: Mix Plan — prep card suppression, ended-run removal, and pull quantities
  *
- * Two behaviours verified end-to-end that unit tests cannot reach:
+ * Three behaviours verified end-to-end that unit tests cannot reach:
  *
  *   (a) A prep mix card is absent when no active run on the selected day
  *       lists any of the prep mix's component ingredients in its profile.
@@ -11,6 +11,14 @@
  *       STOP RUN. liveRunsForMixes filters on !r.endedAt (home.tsx ~14463),
  *       so ended runs are excluded and the plan collapses to empty.
  *
+ *   (c) A prep mix card shows correct "Pull For Prep" quantities when a run
+ *       DOES list the component ingredient. The displayed lbs must equal
+ *       (ozPerPizza × totalPizzasForSauce) ÷ 16. buildMixPlan resolves the
+ *       per-component lbs from the run's ingredientOzPerPizza map (home.tsx
+ *       ~14422–14463), and computeEntryFromComponentLbs derives totalLbs with
+ *       a 15 % waste buffer and a flat 20 lb startup add. When amountAlreadyMade
+ *       is 0 the Pull For Prep value equals the raw component lbs.
+ *
  * Relevant files:
  *   artifacts/run-calculator/src/pages/home.tsx  — mix plan section, ~14402–14700
  *     • liveRunsForMixes filter: line ~14462–14467
@@ -18,7 +26,9 @@
  *     • data-testid="mix-plan-empty": line ~14487
  *     • data-testid="mix-plan-{date}": line ~14498
  *     • data-testid="mix-make-day": line ~14398
- *   lib/mixes/src/index.ts          — buildMixPlan, prep-mix filtering logic
+ *     • "Ingredient Prep" heading: line ~14625
+ *     • "Pull For Prep" heading: line ~14685
+ *   lib/mixes/src/index.ts          — buildMixPlan, computeEntryFromComponentLbs
  *   artifacts/api-server/src/routes/mixes.ts — POST /api/mixes
  *
  * Run with:
@@ -310,6 +320,203 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await expect(
         page.locator('[data-testid="mix-plan-empty"]'),
       ).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (c): Prep mix card shows correct "Pull For Prep" quantities when a run
+   * DOES list the component ingredient.
+   *
+   * Mechanism:
+   *   1. Insert a prep mix with a unique ingredient name and a known perPizza oz.
+   *   2. Sign up (fresh account), then inject localStorage run values so the
+   *      current placeholder run has:
+   *        • a brand (so it passes the liveRunsForMixes brand filter)
+   *        • pep1Type = the ingredient name, pep1OzPerPizza = 2.0
+   *        • casesNeeded = 100, pizzasPerCase = 8, casesPerLayer = 0
+   *      so that valsToMixRun produces ingredientOzPerPizza[ingredient] = 2.0
+   *      and totalPizzasForSauce = 100 × 8 = 800 pizzas.
+   *   3. Reload the page so the form initialises from the injected localStorage.
+   *   4. Navigate to Mixes tab (make-day = today).
+   *   5. Verify:
+   *        • "Ingredient Prep" section heading is visible
+   *        • The prep mix name appears inside the group card
+   *        • "Pull For Prep" heading is visible
+   *        • The displayed lbs = (2.0 / 16) × 800 = 100.00 lbs
+   *          (amountAlreadyMade = 0 → remainingLbs = totalLbs →
+   *           pull = c.lbs × 1 = component lbs = 100.00 lbs)
+   *
+   * Formula reference (lib/mixes/src/index.ts, computeEntryFromComponentLbs):
+   *   componentLbs = (ozPerPizza / OZ_PER_LB) × pizzas
+   *   totalLbs     = componentLbs × 1.15 + 20   (waste + startup)
+   *   remainingLbs = totalLbs − amountAlreadyMade
+   *   pull display = c.lbs × remainingLbs / totalLbs = c.lbs when remaining=total
+   */
+  test("prep mix card shows correct pull quantities when a run uses its ingredient", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-pull-${suffix}`;
+    const mixName = `PullPrepMix ${suffix}`;
+    // Use a unique ingredient name that won't collide with any default form value.
+    const ingredient = `TestHerb_${suffix}`;
+
+    // Known recipe values — kept as constants so the expected lbs formula is
+    // easy to read and verify.
+    //
+    // IMPORTANT: MIX_CARD_OZ and RUN_OZ are intentionally different.
+    // buildMixPlan prefers the run's profile oz/pizza (ingredientOzPerPizza)
+    // over the mix card's generic perPizza. If the code ignores the run-profile
+    // value and falls back to the mix-card value, the displayed lbs will be
+    // (0.5/16)×800 = 25.00, not 100.00 — so the assertion distinguishes both
+    // paths and a regression in the ingredientOzPerPizza lookup fails the test.
+    const MIX_CARD_OZ = 0.5;  // fallback perPizza on the mix card (low/wrong value)
+    const RUN_OZ = 2.0;        // actual oz/pizza from the run's profile (correct)
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const CASES_PER_LAYER = 0;
+    const totalPizzasForSauce = CASES_NEEDED * PIZZAS_PER_CASE + CASES_PER_LAYER * PIZZAS_PER_CASE;
+    // Pull for prep = component lbs (when amountAlreadyMade = 0).
+    // Expected uses RUN_OZ, not MIX_CARD_OZ.
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzasForSauce; // 100.00
+
+    // The brand string just needs to be non-empty so the run passes the
+    // liveRunsForMixes filter (`r.brand && !r.endedAt`).
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    try {
+      // Insert the prep mix BEFORE the browser loads.
+      // Use MIX_CARD_OZ (0.5) as the fallback perPizza on the mix card. If the
+      // code ignores the run's ingredientOzPerPizza and falls back to this value,
+      // the displayed lbs will be 25.00 rather than 100.00, failing the assertion.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      // Sign up and dismiss the onboarding dialog.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // ── Inject run values into localStorage ────────────────────────────────
+      // The current run uses `form.getValues()` live (home.tsx ~14472), which is
+      // seeded from localStorage on mount. Injecting here and reloading gives the
+      // form the values we want without driving the full UI.
+      await page.evaluate(
+        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase, casesPerLayer }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+
+          // Read the existing dayState to find the current run id.
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+            currentRunId?: string;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+
+          // Tag the first run with a brand so liveRunsForMixes includes it.
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+
+          // Write the run values so valsToMixRun produces the expected ingredient map.
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              casesNeeded,
+              pizzasPerCase,
+              casesPerLayer,
+            }),
+          );
+        },
+        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE, casesPerLayer: CASES_PER_LAYER },
+      );
+
+      // Reload so the React form initialises from the freshly-written localStorage.
+      await page.reload({ waitUntil: "domcontentloaded" });
+
+      // Wait for the main app bottom-nav to confirm the app has remounted.
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+
+      // The "Get Started" dialog only auto-opens ONCE per account (first login).
+      // On reload it should not appear; handle it defensively just in case.
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+
+      // Brief pause for startup async effects (useMixes fetch, etc.).
+      await page.waitForTimeout(1_000);
+
+      // ── Navigate to the Mixes tab ──────────────────────────────────────────
+      await goToMixes(page);
+
+      // Allow the React mix plan calculation to settle.
+      await page.waitForTimeout(500);
+
+      // ── Verify the group card for today is present ─────────────────────────
+      // A prep mix that matches a live run creates a group even when there are no
+      // brand/flavor mixes — see buildMixPlan returning groups with prepMixes only.
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // ── Verify the "Ingredient Prep" section heading ───────────────────────
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── Verify the mix name is visible inside the card ─────────────────────
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── Verify the "Pull For Prep" section heading ─────────────────────────
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── Verify the ingredient row shows the correct pull lbs ───────────────
+      // The displayed value uses fmtNum(lbs, 2) → "100.00".
+      // We assert the ingredient name is visible inside the Pull For Prep section.
+      await expect(todayCard.getByText(ingredient, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // Locate the ingredient row in the Pull For Prep section and read its text.
+      // The row is a flex div containing the ingredient name span and a lbs span.
+      // Using { has } scopes the locator to the div that directly contains the
+      // ingredient name so we read only the relevant row, not the whole card.
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      // Expected: run-profile lbs = (RUN_OZ / 16) × totalPizzasForSauce = 100.00
+      const expectedStr = expectedPullLbs.toFixed(2); // "100.00"
+      // Wrong fallback: mix-card lbs = (MIX_CARD_OZ / 16) × totalPizzasForSauce = 25.00
+      const wrongFallbackStr = ((MIX_CARD_OZ / 16) * totalPizzasForSauce).toFixed(2); // "25.00"
+
+      expect(rowText).toContain(expectedStr);
+      // If the code ignores ingredientOzPerPizza and uses the mix-card perPizza
+      // instead, it would display 25.00 — asserting the fallback is absent
+      // proves the run-profile lookup path was exercised.
+      expect(rowText).not.toContain(wrongFallbackStr);
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
