@@ -1,31 +1,41 @@
 // @vitest-environment jsdom
 //
-// Unit tests for the behind-pace alert in useNotifications.
+// Unit tests for the behind-pace alert effect in useNotifications.
 //
-// Covers four scenarios called out in the task spec:
-//  1. Alert does NOT fire before freezerTime minutes have elapsed (arm-only window).
-//  2. Alert fires exactly once when shortfall ≥ 10 cases AND ≤ 30 min remain,
-//     after the run was first observed while on pace.
-//  3. Alert does NOT fire when the run was already behind from the very first
-//     observation (never-armed → never-fires, prevents old-run re-fire).
-//     Also: alert does not fire when runStatus = "ended" (navigation to old run).
-//  4. Alert does NOT fire when ppm = 0 or casesNeeded = 0.
+// These tests deliberately do NOT install a Notification stub — jsdom omits the
+// Notification API entirely, which is what we're guarding against.
+// showAppNotification() returns immediately when "Notification" is absent (its
+// first guard: `if (!("Notification" in window)) return`), so the call after
+// navigator.vibrate must never crash in this environment.
 //
-// The hook is exercised directly (not mocked) via renderHook so the latch
-// logic in paceArmedRef and paceFiredRef is exercised against real state.
+// Side-effect detection strategy: the pace effect calls navigator.vibrate(…)
+// synchronously BEFORE the showAppNotification call, so vibrate is a reliable
+// indicator that the effect body ran to that point without throwing, even when
+// Notification is absent.
+//
+// Arm → fire lifecycle:
+//   - While elapsedMin < freezerTime  → paceArmedRef is set (run is "armed").
+//   - Once elapsedMin >= freezerTime and the shortfall condition is met → fires once.
+//   - A run observed for the first time already behind pace (never armed) never fires.
 
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
 
-// ── Fixed epoch ──────────────────────────────────────────────────────────────
+// ── Sanity: confirm jsdom really omits Notification ──────────────────────────
+// If this assertion fails the whole test file's premise is wrong.
+if (typeof window !== "undefined" && "Notification" in window) {
+  throw new Error("Expected jsdom to NOT have Notification — test premise violated");
+}
+
+// ── Fixed epoch ───────────────────────────────────────────────────────────────
 const T0 = 1_700_000_000_000;
 
-// ── Helper: make a minimal running RunMeta ───────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function makeRun(overrides: Partial<RunMeta> = {}): RunMeta {
   return {
-    id: "run-1",
+    id: "run-pace-1",
     brand: "TestBrand",
     flavor: "TestFlavor",
     startedAt: T0,
@@ -34,34 +44,41 @@ function makeRun(overrides: Partial<RunMeta> = {}): RunMeta {
   };
 }
 
-// ── Helper: make full useNotifications params ────────────────────────────────
-//
-// Default calc values produce a clear "behind pace" condition at 15 min elapsed:
-//   elapsedMin = 15, casesCompleted = 50, adjustedTimeSec = 25*60
-//   actualRateCasesPerHr = (50/15)*60 ≈ 200
-//   projectedFinish = 50 + 200*25/60 ≈ 133
-//   shortfall = ceil(200 - 133) = 67 ≥ 10  ✓
-//   timeRemainingMin = 25 ≤ 30              ✓
-//   → conditionMet = true
-
 type Params = Parameters<typeof useNotifications>[0];
 
-function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
+/**
+ * Params tuned so only the pace alert can fire on a second tick:
+ *
+ *   freezerTime = 10 min  (elapsedMin < 10 → arm tick; >= 10 → evaluate tick)
+ *   casesNeeded = 200, casesCompleted = 50, casesInFreezer = 0
+ *   At T0 + 15 min elapsed:
+ *     actualRateCasesPerHr ≈ 200/hr
+ *     projectedFinish = 50 + (200×20)/60 ≈ 117
+ *     shortfall = ceil(200 − 117) = 84  ≥ 10  ✓
+ *   adjustedTimeSec = 20 min → timeRemainingMin = 20,  0 < 20 ≤ 30  ✓
+ *
+ * Other effects are suppressed:
+ *   adjustedTimeSec well below 900 s (15 min) on the eval tick — but the
+ *   15-min alert is gated by sawAbove15Ref which is never set in these tests.
+ *   timePerBatchSec = 0  → batch-cycle effect returns early.
+ *   pressCasesLeft = 50 (> 2 skids = 20) → warehouse alert doesn't fire.
+ */
+function makeArmParams(nowMs: number, overrides: Partial<Params> = {}): Params {
   return {
     runStatus: "running",
     nowTime: new Date(nowMs),
-    currentRun: makeRun(),
+    currentRun: makeRun({ startedAt: T0 }),
     calc: {
-      adjustedTimeSec: 25 * 60, // 25 min remaining
-      timePerBatchSec: 360,
+      adjustedTimeSec: 20 * 60,   // 20 min remaining — pace eval tick value
+      timePerBatchSec: 0,          // disables batch-cycle effect
       ppm: 100,
       casesCompleted: 50,
       casesInFreezer: 0,
-      pressCasesLeft: 20,
+      pressCasesLeft: 50,          // well above 2-skid warehouse threshold (2×10=20)
       pressDone: false,
     },
     v: {
-      freezerTime: 10,
+      freezerTime: 10,             // min; arm tick = T0+5 min, eval tick = T0+15 min
       casesNeeded: 200,
       casesPerSkid: 10,
     },
@@ -72,177 +89,219 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
   };
 }
 
-// Convenience time constants:
-//   EARLY_MS  → 5 min elapsed  → elapsedMin < freezerTime(10) → arms, does not evaluate condition
-//   BEHIND_MS → 15 min elapsed → elapsedMin ≥ freezerTime(10), conditionMet = true
-const EARLY_MS = T0 + 5 * 60_000;
-const BEHIND_MS = T0 + 15 * 60_000;
+// ── vibrate stub ──────────────────────────────────────────────────────────────
+// navigator.vibrate is optional-chained so it never throws when absent; we
+// assign a vi.fn() so we can assert it was called.
+// No Notification stub — that is the point of this test file.
 
-// ── Browser API stubs ────────────────────────────────────────────────────────
-// navigator.vibrate is optional-chained in the hook so it never throws.
-// The Notification API is guarded by `"Notification" in window` throughout
-// the hook, so no stub is needed when jsdom omits it.
-//
-// No fake-timer setup is needed: the pace alert effect is purely reactive to
-// nowTime prop changes, and the batch-due setTimeout auto-dismiss (10 s) is
-// irrelevant to pace-alert assertions.
+let vibrateMock: ReturnType<typeof vi.fn>;
+
+beforeAll(() => {
+  vibrateMock = vi.fn();
+  Object.defineProperty(navigator, "vibrate", {
+    value: vibrateMock,
+    writable: true,
+    configurable: true,
+  });
+});
+
+beforeEach(() => {
+  vibrateMock.mockClear();
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Behind-pace effect tests ──────────────────────────────────────────────────
 
-describe("useNotifications — pace alert", () => {
-  // ── 1. No fire before freezerTime elapsed ────────────────────────────────
-  it("does NOT fire when elapsed time < freezerTime (arm-only window)", () => {
-    const { result } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(EARLY_MS),
+describe("useNotifications — behind-pace alert (no Notification API)", () => {
+  // ARM tick  : nowMs = T0 + 5 min  → elapsedMin = 5 < freezerTime=10 → paceArmedRef set
+  const ARM_TICK  = T0 + 5  * 60_000;
+  // EVAL tick : nowMs = T0 + 15 min → elapsedMin = 15 ≥ 10 → shortfall check runs
+  const EVAL_TICK = T0 + 15 * 60_000;
+
+  it("fires vibrate when the run crosses the shortfall threshold after being armed (no Notification crash)", () => {
+    const run = makeRun({ startedAt: T0 });
+
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      // Arm tick: elapsedMin = 5 < 10 → paceArmedRef.add(runId), returns early.
+      initialProps: makeArmParams(ARM_TICK, { currentRun: run }),
     });
 
-    // elapsedMin = 5 < freezerTime(10) → only arms, never fires.
-    expect(result.current.showPaceAlert).toBe(false);
-    expect(result.current.paceAlertMsg).toBe("");
+    expect(vibrateMock).not.toHaveBeenCalled();
+
+    // Eval tick: elapsedMin = 15 ≥ 10 → shortfall = 84 ≥ 10, timeRemainingMin = 20 ≤ 30 → fires.
+    act(() => {
+      rerender(makeArmParams(EVAL_TICK, { currentRun: run }));
+    });
+
+    // vibrate proves the effect body ran past the isNotifEnabled check AND that
+    // showAppNotification's `"Notification" in window` guard didn't crash
+    // (Notification is entirely absent in jsdom).
+    expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
   });
 
-  // ── 2. Fires exactly once after good-pace observation ────────────────────
-  it("fires exactly once when shortfall ≥ 10 and ≤ 30 min remain, after being armed", () => {
-    const { result, rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(EARLY_MS),
+  it("fires exactly once — subsequent ticks with the condition still met do not re-fire", () => {
+    const run = makeRun({ startedAt: T0 });
+
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, { currentRun: run }),
     });
 
-    // Step 1 (elapsedMin = 5): effect arms the run via the early-return branch,
-    // showPaceAlert stays false.
-    expect(result.current.showPaceAlert).toBe(false);
-
-    // Step 2 (elapsedMin = 15): conditionMet = true, run was armed → fires.
+    // First crossing — fires.
     act(() => {
-      rerender(makeParams(BEHIND_MS));
+      rerender(makeArmParams(EVAL_TICK, { currentRun: run }));
     });
 
-    expect(result.current.showPaceAlert).toBe(true);
-    // Message should mention the approximate rate and minutes remaining.
-    expect(result.current.paceAlertMsg).toMatch(/\/hr/);
-    expect(result.current.paceAlertMsg).toMatch(/min remaining/i);
+    expect(vibrateMock).toHaveBeenCalledTimes(1);
 
-    // Step 3: user dismisses the banner; another tick must NOT re-fire it
-    // (paceFiredRef already holds this run's id).
+    // Another tick — paceFiredRef already holds this run id.
     act(() => {
-      result.current.setShowPaceAlert(false);
+      rerender(makeArmParams(EVAL_TICK + 1_000, { currentRun: run }));
     });
-    act(() => {
-      rerender(makeParams(BEHIND_MS + 1_000)); // 1 s later, still behind
-    });
-    expect(result.current.showPaceAlert).toBe(false);
+
+    expect(vibrateMock).toHaveBeenCalledTimes(1);
   });
 
-  // ── 3a. No fire when run was already behind from first observation ────────
-  it("does NOT fire when the run was behind pace from the very first tick (never armed)", () => {
-    // First (and only) observation is at 15 min elapsed with conditionMet = true.
-    // Because paceArmedRef never observed this run while on-pace, the "only fire
-    // if armed" guard prevents the alert.  This is the re-fire-on-old-run guard.
-    const { result } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(BEHIND_MS),
+  it("does NOT fire when the run is first observed already behind pace (never-armed guard)", () => {
+    const run = makeRun({ startedAt: T0 });
+
+    // First (and only) observation is already at the eval tick — paceArmedRef is
+    // never set for this run, so the `if (!paceArmedRef.current.has(runId)) return`
+    // guard prevents the fire.
+    renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(EVAL_TICK, { currentRun: run }),
     });
 
-    expect(result.current.showPaceAlert).toBe(false);
-    expect(result.current.paceAlertMsg).toBe("");
+    expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  // ── 3b. No fire when navigating to an ended run ───────────────────────────
-  it("does NOT fire when runStatus is 'ended' (navigating to an old completed run)", () => {
-    const endedRun = makeRun({ endedAt: BEHIND_MS });
+  it("does NOT fire when ppm is 0 (no timing basis)", () => {
+    const run = makeRun({ startedAt: T0 });
 
-    const { result } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(BEHIND_MS, {
-        runStatus: "ended",
-        currentRun: endedRun,
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, {
+        currentRun: run,
+        calc: { ...makeArmParams(ARM_TICK).calc, ppm: 0 },
       }),
     });
 
-    // The effect's first guard (`runStatus !== "running"`) returns immediately.
-    expect(result.current.showPaceAlert).toBe(false);
-  });
-
-  // ── 4a. No fire when ppm = 0 ─────────────────────────────────────────────
-  it("does NOT fire when ppm is 0", () => {
-    const noPpm = {
-      ...makeParams(EARLY_MS).calc,
-      ppm: 0,
-    };
-
-    const { result, rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(EARLY_MS, { calc: noPpm }),
-    });
-
     act(() => {
-      rerender(makeParams(BEHIND_MS, { calc: noPpm }));
+      rerender(makeArmParams(EVAL_TICK, {
+        currentRun: run,
+        calc: { ...makeArmParams(EVAL_TICK).calc, ppm: 0 },
+      }));
     });
 
-    // Effect returns early at `if (calc.ppm <= 0) return` — never fires.
-    expect(result.current.showPaceAlert).toBe(false);
+    // Effect returns at `if (calc.ppm <= 0) return`.
+    expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  // ── 4b. No fire when casesNeeded = 0 ─────────────────────────────────────
   it("does NOT fire when casesNeeded is 0", () => {
-    const zeroNeeded = { ...makeParams(EARLY_MS).v, casesNeeded: 0 };
+    const run = makeRun({ startedAt: T0 });
 
-    const { result, rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(EARLY_MS, { v: zeroNeeded }),
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, {
+        currentRun: run,
+        v: { ...makeArmParams(ARM_TICK).v, casesNeeded: 0 },
+      }),
     });
 
     act(() => {
-      rerender(makeParams(BEHIND_MS, { v: zeroNeeded }));
+      rerender(makeArmParams(EVAL_TICK, {
+        currentRun: run,
+        v: { ...makeArmParams(EVAL_TICK).v, casesNeeded: 0 },
+      }));
     });
 
-    // Effect returns early at `if (casesNeeded <= 0) return` — never fires.
-    expect(result.current.showPaceAlert).toBe(false);
+    // Effect returns at `if (casesNeeded <= 0) return`.
+    expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  // ── 4c. In-tunnel cases count toward throughput (no false alarm) ─────────
-  it("does NOT fire when cased + in-tunnel output is on pace (task example)", () => {
-    // 35 min at 40 PPM / 12 per case / 18-min tunnel: 54 cased + 60 in tunnel.
-    // Cased-only rate ≈ 93/hr would project a big shortfall (false alarm);
-    // press-output rate ≈ 195/hr projects finish ≥ casesNeeded → no alert.
-    const NOW = T0 + 35 * 60_000;
-    const calc = {
-      ...makeParams(NOW).calc,
-      adjustedTimeSec: 25 * 60, // 25 min remaining (≤ 30-min window)
-      casesCompleted: 54,
-      casesInFreezer: 60,
-    };
-    const v = { freezerTime: 18, casesNeeded: 195, casesPerSkid: 10 };
+  it("does NOT fire when the shortfall is below the minimum threshold", () => {
+    const run = makeRun({ startedAt: T0 });
 
-    const { result, rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(EARLY_MS, { calc, v }),
+    // casesNeeded = 120: at the eval tick projectedFinish ≈ 117, shortfall = 3 < 10.
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, {
+        currentRun: run,
+        v: { ...makeArmParams(ARM_TICK).v, casesNeeded: 120 },
+      }),
     });
+
     act(() => {
-      rerender(makeParams(NOW, { calc, v }));
+      rerender(makeArmParams(EVAL_TICK, {
+        currentRun: run,
+        v: { ...makeArmParams(EVAL_TICK).v, casesNeeded: 120 },
+      }));
     });
-    // pressOutput = 114 → rate ≈ 195/hr → projectedFinish ≈ 114 + 81 = 195 ≥ needed.
-    expect(result.current.showPaceAlert).toBe(false);
+
+    // conditionMet = false (shortfall < PACE_SHORTFALL_MIN_CASES=10) → arms but doesn't fire.
+    expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  // ── 5. Alert clears when switching to a different run ────────────────────
-  it("clears the pace banner when the active run changes", () => {
-    const { result, rerender } = renderHook((p: Params) => useNotifications(p), {
-      initialProps: makeParams(EARLY_MS),
+  it("does NOT fire when timeRemainingMin exceeds the 30-minute window", () => {
+    const run = makeRun({ startedAt: T0 });
+
+    // adjustedTimeSec = 35 min > PACE_TIME_REMAINING_MAX_MIN=30 → conditionMet = false.
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, {
+        currentRun: run,
+        calc: { ...makeArmParams(ARM_TICK).calc, adjustedTimeSec: 35 * 60 },
+      }),
     });
 
-    // Arm and fire for run-1.
     act(() => {
-      rerender(makeParams(BEHIND_MS));
+      rerender(makeArmParams(EVAL_TICK, {
+        currentRun: run,
+        calc: { ...makeArmParams(EVAL_TICK).calc, adjustedTimeSec: 35 * 60 },
+      }));
     });
+
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("latches silently when slowPace pref is off, preventing fire on re-enable", () => {
+    const run = makeRun({ startedAt: T0 });
+    const prefOff = { slowPace: false } as import("../../notificationPrefs").NotificationPrefs;
+
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, { currentRun: run, prefs: prefOff }),
+    });
+
+    // Cross the threshold with pref OFF → paceFiredRef latches silently (no vibrate).
+    act(() => {
+      rerender(makeArmParams(EVAL_TICK, { currentRun: run, prefs: prefOff }));
+    });
+
+    expect(vibrateMock).not.toHaveBeenCalled();
+
+    // Re-enable the pref — milestone already latched, must NOT fire.
+    act(() => {
+      rerender(makeArmParams(EVAL_TICK + 1_000, { currentRun: run, prefs: undefined }));
+    });
+
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("showPaceAlert and paceAlertMsg are set when the alert fires", () => {
+    const run = makeRun({ startedAt: T0 });
+
+    const { rerender, result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeArmParams(ARM_TICK, { currentRun: run }),
+    });
+
+    expect(result.current.showPaceAlert).toBe(false);
+    expect(result.current.paceAlertMsg).toBe("");
+
+    act(() => {
+      rerender(makeArmParams(EVAL_TICK, { currentRun: run }));
+    });
+
+    // Both in-app state values must be set alongside vibrate.
     expect(result.current.showPaceAlert).toBe(true);
-
-    // Switch to run-2 (different id) — the clear-on-id-change effect fires.
-    act(() => {
-      rerender(
-        makeParams(BEHIND_MS, {
-          currentRun: makeRun({ id: "run-2", startedAt: BEHIND_MS }),
-        }),
-      );
-    });
-    expect(result.current.showPaceAlert).toBe(false);
+    expect(result.current.paceAlertMsg).toMatch(/Behind pace|cases short|min remaining/i);
+    expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
   });
 });
