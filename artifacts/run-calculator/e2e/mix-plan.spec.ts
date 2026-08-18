@@ -38,6 +38,12 @@
  *       buildMixPlan so the first render shows floor(remainingLbs / batchSize)
  *       using the stored value, not 0.
  *
+ *   (m) Pull For Mix per-component lbs on a regular mix card update live when
+ *       "already made" is edited (Task #799).
+ *       — Full lbs shown initially (amountAlreadyMade=0).
+ *       — Scaled lbs shown after a partial already-made entry.
+ *       — 0.00 shown after already-made >= totalLbs.
+ *
  * Relevant files:
  *   artifacts/run-calculator/src/pages/home.tsx  — mix plan section, ~14402–14700
  *   lib/mixes/src/index.ts          — buildMixPlan, computeEntryFromComponentLbs
@@ -3150,137 +3156,6 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
    * This test shares the same two-run stop sequence as test (j) and then adds
    * a full page reload before the final empty-state assertion.
    */
-  /**
-   * Test (k): "Already made" value persists after a page reload.
-   *
-   * Verifies that the onBlur → POST /api/mixes path actually writes to the
-   * server (not just the React Query cache), so a hard reload re-fetches the
-   * updated value and the Pull For Prep lbs remain reduced accordingly.
-   *
-   * Formula (same as test f):
-   *   componentLbs  = (2.0/16) × 800  = 100.00
-   *   totalLbs      = 100.00 × 1.15 + 20 = 135.00
-   *   remainingLbs  = 135.00 − 50        =  85.00
-   *   pullLbs       = 100.00 × 85.00 / 135.00 ≈ 62.96
-   */
-  test("'already made' value persists after a page reload (saved to server)", async ({
-    page,
-  }) => {
-    const suffix = uid();
-    const username = `user_${suffix}`;
-    const mixId = `persist-reload-${suffix}`;
-    const mixName = `PersistReloadPrepMix ${suffix}`;
-    const ingredient = `PersistHerb_${suffix}`;
-    const brand = `Brand_${suffix}`;
-    const today = todayStr();
-
-    const RUN_OZ = 2.0;
-    const CASES_NEEDED = 100;
-    const PIZZAS_PER_CASE = 8;
-    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
-    const MIX_WASTE_FACTOR = 0.15;
-    const STARTUP_LBS = 20;
-    const componentLbs = (RUN_OZ / 16) * totalPizzas;                     // 100.00
-    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
-
-    const EDIT_AMOUNT = 50;
-    const remainingAfterEdit = totalLbs - EDIT_AMOUNT;                     //  85.00
-    const expectedPullLbs = componentLbs * remainingAfterEdit / totalLbs;  // ≈62.96
-    const expectedPullStr = expectedPullLbs.toFixed(2);                    // "62.96"
-    const fullPullStr = componentLbs.toFixed(2);                           // "100.00"
-
-    try {
-      await dbCreateMix(db, {
-        id: mixId,
-        name: mixName,
-        isPrep: true,
-        component: ingredient,
-        perPizza: RUN_OZ,
-        amountAlreadyMade: 0,
-      });
-
-      await signUpAndDismissOnboarding(page, username, "TestPass123!");
-
-      // Inject run data into localStorage so the mix card appears
-      await page.evaluate(
-        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
-          const DAY_KEY = "run-calc-day";
-          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
-          const rawDay = localStorage.getItem(DAY_KEY);
-          if (!rawDay) return;
-          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
-          if (!day.runs || day.runs.length === 0) return;
-          day.runs[0].brand = brand;
-          localStorage.setItem(DAY_KEY, JSON.stringify(day));
-          const runId = day.runs[0].id;
-          const existing = (() => {
-            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
-          })();
-          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
-            ...existing, pep1Type: ingredient, pep1OzPerPizza: runOz,
-            casesNeeded, pizzasPerCase, casesPerLayer: 0,
-          }));
-        },
-        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
-      );
-
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
-      await page.waitForTimeout(1_000);
-
-      // Navigate to Mixes and find the mix card
-      await goToMixes(page);
-      await page.waitForTimeout(500);
-
-      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
-      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
-      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
-
-      // Step 1: type 50 into "Already made" and blur to trigger POST /api/mixes
-      const alreadyMadeInput = todayCard.locator('input[type="number"]').first();
-      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
-      await alreadyMadeInput.click();
-      await alreadyMadeInput.fill(String(EDIT_AMOUNT));
-      await alreadyMadeInput.press("Tab");
-
-      // Wait for the save round-trip to complete before reloading
-      await page.waitForTimeout(2_000);
-
-      // Step 2: Hard-reload the page — flushes the React Query cache entirely
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
-      await page.waitForTimeout(1_000);
-
-      // Navigate back to Mixes
-      await goToMixes(page);
-      await page.waitForTimeout(500);
-
-      const reloadedCard = page.locator(`[data-testid="mix-plan-${today}"]`);
-      await reloadedCard.waitFor({ state: "visible", timeout: 8_000 });
-      await expect(reloadedCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
-
-      // Step 3: "Already made" input must show the saved value (50)
-      const savedInput = reloadedCard.locator('input[type="number"]').first();
-      await savedInput.waitFor({ state: "visible", timeout: 5_000 });
-      await expect(savedInput).toHaveValue(String(EDIT_AMOUNT), { timeout: 5_000 });
-
-      // Step 4: Pull For Prep lbs must reflect the reduced amount (≈62.96), not the full 100.00
-      await expect(reloadedCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
-      const ingredientRow = reloadedCard
-        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
-        .last();
-      const rowText = await ingredientRow.innerText();
-      expect(rowText).toContain(expectedPullStr);
-      expect(rowText).not.toContain(fullPullStr);
-    } finally {
-      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
-      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
-    }
-  });
 
   /**
    * Test (l): Empty state is preserved after a full page reload when all runs
@@ -3687,6 +3562,159 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await expect(
         todayCard.getByText(`need ${remainingLbs.toFixed(2)} lbs`, { exact: false }),
       ).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (n): Pull For Mix per-component lbs on a REGULAR (non-prep) mix card
+   * update live when "already made" is edited. — Task #799.
+   *
+   * Regular mixes are brand/flavor-matched (not ingredient-matched like prep
+   * mixes). Component pull lbs come from the mix's own perPizza value scaled to
+   * the run's pizza count. The live formula in home.tsx ~14596:
+   *
+   *   pullLbs = m.totalLbs > 0 ? c.lbs * m.remainingLbs / m.totalLbs : 0
+   *
+   * where:
+   *   c.lbs        = (perPizza / 16) × pizzas  — constant, doesn't change
+   *   m.totalLbs   = c.lbs × 1.15 + 20         — constant, doesn't change
+   *   m.remainingLbs = max(0, totalLbs − amountAlreadyMade) — changes on edit
+   *
+   * Scenario numbers:
+   *   perPizza     = 2.0 oz
+   *   casesNeeded  = 100,  pizzasPerCase = 8  →  pizzas = 800
+   *   c.lbs        = (2.0/16) × 800 = 100.00
+   *   totalLbs     = 100.00 × 1.15 + 20 = 135.00
+   *
+   *   Step 1 (amountAlreadyMade = 0):
+   *     remainingLbs = 135.00 → pullLbs = 100.00 × 135.00 / 135.00 = 100.00 ✓
+   *
+   *   Step 2 (amountAlreadyMade = 50):
+   *     remainingLbs = 85.00  → pullLbs = 100.00 × 85.00 / 135.00 ≈ 62.96 ✓
+   *
+   *   Step 3 (amountAlreadyMade = 200 ≥ totalLbs):
+   *     remainingLbs = 0      → pullLbs = 100.00 × 0 / 135.00 = 0.00 ✓
+   *
+   * The update must happen without a page reload — MixAlreadyMadeInput onBlur
+   * → saveMixes → onSaved → cycleCountQc.setQueryData(["mixes"], saved) →
+   * buildMixPlan re-runs → Pull For Mix re-renders.
+   */
+  test("Pull For Mix per-component lbs on a regular mix card update live when 'already made' is edited", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `reg-pull-live-${suffix}`;
+    const mixName = `RegPullLiveMix ${suffix}`;
+    const component = `RegComp_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const MIX_PER_PIZZA_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+
+    const componentLbs = (MIX_PER_PIZZA_OZ / 16) * totalPizzas; // 100.00
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
+
+    // ── Step 1 expected: full pull (amountAlreadyMade = 0) ──────────────────
+    const fullPullStr = componentLbs.toFixed(2); // "100.00"
+
+    // ── Step 2 expected: partial pull (amountAlreadyMade = 50) ──────────────
+    const EDIT_PARTIAL = 50;
+    const remainingAfterPartial = totalLbs - EDIT_PARTIAL; // 85.00
+    const scaledPullStr = (componentLbs * remainingAfterPartial / totalLbs).toFixed(2); // "62.96"
+
+    // ── Step 3 expected: zero pull (amountAlreadyMade >= totalLbs) ──────────
+    const EDIT_FULL = Math.ceil(totalLbs) + 1; // 136, safely >= 135.00
+
+    try {
+      // Create a regular (non-prep) mix with a single component.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        brand,
+        isPrep: false,
+        component,
+        perPizza: MIX_PER_PIZZA_OZ,
+        batchSize: 0,
+        amountAlreadyMade: 0,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject the brand + pizza counts into localStorage so the run produces
+      // a non-zero pizza count for the mix plan. For regular mixes the match
+      // is brand/flavor only — no ingredient name is needed.
+      await page.evaluate(
+        ({ brand, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Mix", { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // ── Step 1: full pull shown when amountAlreadyMade = 0 ─────────────────
+      // Locate the component row inside the Pull For Mix section.
+      const componentRow = todayCard
+        .locator("div", { has: page.getByText(component, { exact: true }) })
+        .last();
+      await expect(componentRow).toContainText(fullPullStr, { timeout: 5_000 });
+
+      // ── Step 2: type 50 and blur — pull must scale down immediately ─────────
+      // The "Already made" input lives on the regular mix card (emerald section,
+      // NOT the violet Ingredient Prep section).
+      const alreadyMadeInput = todayCard.locator('input[type="number"]').first();
+      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill(String(EDIT_PARTIAL));
+      await alreadyMadeInput.press("Tab");
+
+      // Polling assertion: waits until the component row re-renders with scaled lbs.
+      await expect(componentRow).toContainText(scaledPullStr, { timeout: 5_000 });
+      // The full unscaled value must no longer appear (regression guard).
+      await expect(componentRow).not.toContainText(fullPullStr, { timeout: 3_000 });
+
+      // ── Step 3: type a value >= totalLbs — pull must reach 0.00 ────────────
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill(String(EDIT_FULL));
+      await alreadyMadeInput.press("Tab");
+
+      // Polling assertion: component row must show 0.00 once remainingLbs clamps to 0.
+      await expect(componentRow).toContainText("0.00", { timeout: 5_000 });
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
