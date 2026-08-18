@@ -96,6 +96,7 @@ async function dbCreateMix(
     perPizza?: number;
     batchSize?: number;
     amountAlreadyMade?: number;
+    daysEarly?: number;
   },
 ): Promise<void> {
   const components = JSON.stringify([
@@ -105,10 +106,10 @@ async function dbCreateMix(
     `INSERT INTO mixes
        (id, scope, name, brand, flavor, batch_size, days_early, notes,
         amount_already_made, components, is_prep, enabled, created_at, updated_at)
-     VALUES ($1, 'live', $2, $3, '', $4, 0, '', $7, $5::jsonb, $6, true, NOW(), NOW())
+     VALUES ($1, 'live', $2, $3, '', $4, $8, '', $7, $5::jsonb, $6, true, NOW(), NOW())
      ON CONFLICT (id, scope) DO UPDATE
        SET name=$2, brand=$3, batch_size=$4, components=$5::jsonb,
-           is_prep=$6, amount_already_made=$7, updated_at=NOW()`,
+           is_prep=$6, amount_already_made=$7, days_early=$8, updated_at=NOW()`,
     [
       opts.id,
       opts.name,
@@ -117,6 +118,7 @@ async function dbCreateMix(
       components,
       opts.isPrep ?? false,
       opts.amountAlreadyMade ?? 0,
+      opts.daysEarly ?? 0,
     ],
   );
 }
@@ -1908,6 +1910,187 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       ).toBeVisible({ timeout: 5_000 });
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (l): Prep mix with daysEarly=1 appears on the run day AND one day
+   * early, but is absent two days before (outside the window).
+   *
+   * Mechanism: buildMixPlan (~line 1033 in lib/mixes/src/index.ts) filters
+   * prep mixes with `if (du > mix.daysEarly) continue`, where du = daysUntil(
+   * runDate, makeDay). For a prep mix with daysEarly=1 and a run on day+2:
+   *
+   *   make-day = day+2 (run day)   → du = 0  ≤ 1  → card SHOWN
+   *   make-day = day+1 (one early) → du = 1  ≤ 1  → card SHOWN
+   *   make-day = today  (day+0)    → du = 2  > 1  → card ABSENT
+   *
+   * Setup mirrors the "scheduled future-day run" test: the run is inserted
+   * directly into daily_sync so the startup fetch sees it, and a profile is
+   * injected into localStorage so valsToMixRun() builds the ingredient list.
+   */
+  test("prep mix with daysEarly=1 appears on the run day and one day early but not two days before", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `days-early-prep-${suffix}`;
+    const mixName = `DaysEarlyPrepMix ${suffix}`;
+    const ingredient = `DaysEarlyHerb_${suffix}`;
+    const brand = `DaysEarlyBrand_${suffix}`;
+    const flavor = "";
+
+    const DAYS_EARLY = 1;
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+
+    // The scheduled run is two days from today.
+    const runDateLocal = new Date();
+    runDateLocal.setDate(runDateLocal.getDate() + 2);
+    const runDateStr = localDateStr(runDateLocal);
+
+    // The "one day early" make-day is tomorrow.
+    const oneDayEarlyLocal = new Date();
+    oneDayEarlyLocal.setDate(oneDayEarlyLocal.getDate() + 1);
+    const oneDayEarlyStr = localDateStr(oneDayEarlyLocal);
+
+    const scheduledRunId = `sched-de-run-${suffix}`;
+
+    // Snapshot existing daily_sync row for the run date so teardown can restore it.
+    let preExistingRow: { data: unknown; updated_at: Date } | null = null;
+
+    try {
+      // ── Step 1: Insert the prep mix with daysEarly = 1 ──────────────────────
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: 0.5,
+        daysEarly: DAYS_EARLY,
+      });
+
+      // ── Step 2: Snapshot + upsert scheduled run for day+2 ───────────────────
+      const existingResult = await db.query<{ data: unknown; updated_at: Date }>(
+        `SELECT data, updated_at FROM daily_sync WHERE date = $1 AND scope = 'live'`,
+        [runDateStr],
+      );
+      preExistingRow = existingResult.rows.length > 0 ? existingResult.rows[0] : null;
+
+      const scheduledData = {
+        dayState: {
+          runs: [{ id: scheduledRunId, brand, flavor }],
+        },
+        runValues: {
+          [scheduledRunId]: { casesNeeded: CASES_NEEDED },
+        },
+      };
+      await db.query(
+        `INSERT INTO daily_sync (date, scope, data, updated_at)
+         VALUES ($1, 'live', $2::jsonb, NOW())
+         ON CONFLICT (date, scope) DO UPDATE
+           SET data = $2::jsonb, updated_at = NOW()`,
+        [runDateStr, JSON.stringify(scheduledData)],
+      );
+
+      // ── Step 3: Sign up and dismiss onboarding ───────────────────────────────
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.waitForTimeout(1_000);
+
+      // ── Step 4: Inject profile into localStorage ─────────────────────────────
+      // loadProfile(brand, flavor) → valsToMixRun maps pep1Type → ingredient list.
+      await page.evaluate(
+        ({ brand, flavor, ingredient, runOz, pizzasPerCase }) => {
+          const profileKey = `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(profileKey) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(profileKey, JSON.stringify({
+            ...existing,
+            pep1Type: ingredient,
+            pep1OzPerPizza: runOz,
+            pizzasPerCase,
+          }));
+        },
+        { brand, flavor, ingredient, runOz: RUN_OZ, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // ── Step 5: Navigate to Mixes tab ────────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── Scenario A: make-day = today (day+0) → du=2 > daysEarly=1 → absent ──
+      // Default make-day is today; no live run uses the ingredient → empty state.
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText(mixName, { exact: false })).toHaveCount(0, { timeout: 3_000 });
+
+      // ── Scenario B: make-day = day+1 (one day early) → du=1 ≤ 1 → shown ─────
+      const makeDayPicker = page.locator('[data-testid="mix-make-day"]');
+      await makeDayPicker.fill(oneDayEarlyStr);
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      const oneDayEarlyCard = page.locator(`[data-testid="mix-plan-${runDateStr}"]`);
+      await oneDayEarlyCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(
+        oneDayEarlyCard.getByText("Ingredient Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        oneDayEarlyCard.getByText(mixName, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        oneDayEarlyCard.getByText("Pull For Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        oneDayEarlyCard.getByText(ingredient, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── Scenario C: make-day = day+2 (run day) → du=0 ≤ 1 → shown ───────────
+      await makeDayPicker.fill(runDateStr);
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      const runDayCard = page.locator(`[data-testid="mix-plan-${runDateStr}"]`);
+      await runDayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(
+        runDayCard.getByText("Ingredient Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        runDayCard.getByText(mixName, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── Scenario D: switch back to today → absent again ───────────────────────
+      await makeDayPicker.fill(todayStr());
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText(mixName, { exact: false })).toHaveCount(0, { timeout: 3_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      if (preExistingRow !== null) {
+        await db
+          .query(
+            `INSERT INTO daily_sync (date, scope, data, updated_at)
+             VALUES ($1, 'live', $2::jsonb, $3)
+             ON CONFLICT (date, scope) DO UPDATE
+               SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+            [runDateStr, JSON.stringify(preExistingRow.data), preExistingRow.updated_at],
+          )
+          .catch((err: unknown) => {
+            console.error("WARN: failed to restore daily_sync row:", err);
+          });
+      } else {
+        await db
+          .query("DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'", [runDateStr])
+          .catch(() => {});
+      }
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
