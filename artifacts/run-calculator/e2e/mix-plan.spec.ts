@@ -2173,4 +2173,295 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
+
+  /**
+   * Test (k1): Prep mix card appears when the run ingredient uses the COMMA
+   * separator variant ("Herb, Chopped") and the mix component is the base
+   * name ("Herb").
+   *
+   * ingredientMatches() accepts ',' as a word-boundary separator (line 1009 of
+   * lib/mixes/src/index.ts). A regression that drops ',' from the separator
+   * set would silently suppress this card.
+   */
+  test("prep mix card appears when run ingredient uses comma-separator variant (e.g. 'Herb, Chopped')", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-comma-${suffix}`;
+    const mixName = `CommaPrepMix ${suffix}`;
+
+    const componentBase = `Herb_${suffix}`;
+    const qualifiedIngredient = `${componentBase}, Chopped`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    const MIX_CARD_OZ = 0.1;
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: componentBase,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, qualifiedIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: qualifiedIngredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(componentBase, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(componentBase, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      expect(rowText).toContain(expectedStr);
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (k2): Prep mix card appears when the run ingredient uses the PAREN
+   * separator variant ("Herb (Tidbits)") and the mix component is the base
+   * name ("Herb").
+   *
+   * ingredientMatches() accepts '(' as a word-boundary separator (line 1009 of
+   * lib/mixes/src/index.ts). A regression that drops '(' from the separator
+   * set would silently suppress this card.
+   */
+  test("prep mix card appears when run ingredient uses paren-separator variant (e.g. 'Herb (Tidbits)')", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-paren-${suffix}`;
+    const mixName = `ParenPrepMix ${suffix}`;
+
+    const componentBase = `Herb_${suffix}`;
+    const qualifiedIngredient = `${componentBase} (Tidbits)`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    const MIX_CARD_OZ = 0.1;
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: componentBase,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, qualifiedIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: qualifiedIngredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(componentBase, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(componentBase, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      expect(rowText).toContain(expectedStr);
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (k3): Prep mix card appears when the run ingredient uses the SLASH
+   * separator variant ("Herb/Fresh") and the mix component is the base
+   * name ("Herb").
+   *
+   * ingredientMatches() accepts '/' as a word-boundary separator (line 1009 of
+   * lib/mixes/src/index.ts). A regression that drops '/' from the separator
+   * set would silently suppress this card.
+   */
+  test("prep mix card appears when run ingredient uses slash-separator variant (e.g. 'Herb/Fresh')", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-slash-${suffix}`;
+    const mixName = `SlashPrepMix ${suffix}`;
+
+    const componentBase = `Herb_${suffix}`;
+    const qualifiedIngredient = `${componentBase}/Fresh`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    const MIX_CARD_OZ = 0.1;
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: componentBase,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, qualifiedIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: qualifiedIngredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(componentBase, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(componentBase, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      expect(rowText).toContain(expectedStr);
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
 });
