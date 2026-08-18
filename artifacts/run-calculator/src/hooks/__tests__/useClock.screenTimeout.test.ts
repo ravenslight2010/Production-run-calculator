@@ -456,6 +456,43 @@ describe("useClock — fast-tick path (runStatus=paused) hidden at mount", () =>
     });
     expect(result.current.getTime()).toBe(T0 + 4_000);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P3. Going hidden while paused clears the interval — no phantom ticks.
+  //
+  // The tab is visible; useClock("paused") starts its 1-second interval.
+  // After the first tick at T0+1000, the tab goes hidden.  onVisibility fires
+  // the hidden branch → clearInterval(id).  Advancing 10 more seconds must NOT
+  // advance nowTime (the interval has been cleared and no new one is started).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P3. going hidden while paused clears the interval so no phantom ticks accumulate", () => {
+    // Tab is visible; 1-second interval starts immediately.
+    const { result, rerender } = renderHook(() => useClock("paused"));
+
+    // First tick at T0+1000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    const timeAfterFirstTick = result.current.getTime();
+    expect(timeAfterFirstTick).toBe(T0 + 1_000);
+
+    // Tab goes hidden: onVisibility fires the hidden branch → clearInterval(id).
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+
+    // Advance 10 s while hidden.  No registered interval → nothing fires.
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+      rerender();
+    });
+
+    // nowTime must not have advanced past the pre-hide tick.
+    expect(result.current.getTime()).toBe(timeAfterFirstTick);
+  });
 });
 
 // ── Status transition tests ───────────────────────────────────────────────────
