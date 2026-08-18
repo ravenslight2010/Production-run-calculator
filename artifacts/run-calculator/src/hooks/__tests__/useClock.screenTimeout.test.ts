@@ -742,4 +742,71 @@ describe("useClock — status transition interval cleanup", () => {
     });
     expect(result.current.getTime()).toBe(T0 + 3_000);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // K. paused → running: same-cadence transition keeps exactly one 1-second
+  //    interval (no double-tick).
+  //
+  // Both "paused" and "running" share the same 1-second delay, so the
+  // useEffect([runStatus]) cleanup-and-reinstall cycle must clear the old
+  // interval before registering the new one.  If cleanup is broken, the stale
+  // paused interval survives alongside the new running interval — two active
+  // timers instead of one.
+  //
+  // WHY timestamp assertions alone don't detect this bug:
+  // Both intervals fire at the same fake-clock timestamp and each calls
+  // setNowTime(new Date()) with the identical value.  React's final state looks
+  // correct even if cleanup is skipped.  We therefore assert the active timer
+  // count via vi.getTimerCount() immediately after the transition; it returns 2
+  // when cleanup fails and 1 when it succeeds.
+  //
+  // Steps:
+  //   1. Mount with "paused"; verify timer count = 1.
+  //   2. Advance 1 s → nowTime = T0 + 1_000 (one tick).
+  //   3. Transition to "running"; verify timer count is still 1 (← regression
+  //      guard: would be 2 if the old interval survived).
+  //   4. Advance 1 s → nowTime = T0 + 2_000 (supplementary cadence check).
+  //   5. Advance 1 more second → nowTime = T0 + 3_000.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("K. paused → running: exactly one 1-second interval active after transition (no double-tick)", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "paused" | "running" }) => useClock(status),
+      { initialProps: { status: "paused" as const } },
+    );
+
+    // Step 1: one interval must be active immediately after mount.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Step 2: first 1-second tick while paused.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "paused" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 3: transition to "running".  React runs the useEffect cleanup
+    // (clearInterval on the paused handle) then re-runs the effect registering
+    // a fresh 1-second interval.  After the transition there must still be
+    // exactly ONE active timer — not two (stale paused + new running).
+    // vi.getTimerCount() is the definitive guard here because timestamps alone
+    // cannot distinguish one vs two callbacks setting the same value.
+    act(() => {
+      rerender({ status: "running" });
+    });
+    expect(vi.getTimerCount()).toBe(1); // ← primary regression guard
+
+    // Step 4: supplementary cadence check — advance 1 s.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 2_000);
+
+    // Step 5: subsequent seconds each advance by exactly 1 s.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 3_000);
+  });
 });
