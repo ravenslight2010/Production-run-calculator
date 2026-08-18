@@ -462,6 +462,54 @@ describe("cheese-component-oz-strip-v2 data heal", () => {
     expect(comps[1].sharePct).toBeCloseTo(20, 1);
   });
 
+  it("cleans sandbox-scope rows too (heal has no scope filter)", async () => {
+    // Seed a sandbox row with ozPerPizza and oz-derived (wrong) sharePct.
+    // lbs proportions: 12/(12+3) = 80%, 3/(12+3) = 20%.
+    // oz proportions:  4/(4+0.5) ≈ 88.9%, 0.5/(4+0.5) ≈ 11.1% — clearly different.
+    const sbxTime = new Date("2026-01-01T00:00:00Z");
+    await db.insert(cheeseRecipesTable).values({
+      id: "oz-strip-sandbox",
+      scope: "sandbox",
+      name: "Sandbox Mozzarella Blend",
+      brand: "TestBrand",
+      flavors: [],
+      shredderSetting: "",
+      cellulose: "",
+      notes: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      components: [
+        { ingredient: "Mozzarella", lbs: 12, ozPerPizza: 4,   sharePct: 88.89 },
+        { ingredient: "Provolone",  lbs: 3,  ozPerPizza: 0.5, sharePct: 11.11 },
+      ] as any,
+      enabled: true,
+      createdAt: sbxTime,
+      updatedAt: sbxTime,
+    });
+
+    // Seed a live row that is already clean so we can confirm it is untouched.
+    await seedCheeseRow("oz-strip-live-clean", "Live Clean Blend", [
+      { ingredient: "Mozzarella", lbs: 9, sharePct: 75 },
+      { ingredient: "Parmesan",   lbs: 3, sharePct: 25 },
+    ]);
+
+    await runDataHeals();
+
+    // ── Sandbox row must be cleaned ──────────────────────────────────────────
+    const sbxComps = await loadComponents("oz-strip-sandbox");
+
+    // ozPerPizza must be stripped from both components.
+    expect(sbxComps.every((c) => !("ozPerPizza" in c))).toBe(true);
+
+    // sharePct must now reflect lbs proportions (80% / 20%), not oz (88.9% / 11.1%).
+    expect(sbxComps[0].sharePct).toBeCloseTo(80, 1);
+    expect(sbxComps[1].sharePct).toBeCloseTo(20, 1);
+
+    // ── Live clean row must be unaffected ────────────────────────────────────
+    const liveComps = await loadComponents("oz-strip-live-clean");
+    expect(liveComps[0].sharePct).toBeCloseTo(75, 1);
+    expect(liveComps[1].sharePct).toBeCloseTo(25, 1);
+  });
+
   it("is marker-guarded: a second runDataHeals() does not re-process recipes", async () => {
     await seedCheeseRow("guard-a", "Guard Test Blend", [
       { ingredient: "Mozz", lbs: 20, ozPerPizza: 4, sharePct: 72 },
