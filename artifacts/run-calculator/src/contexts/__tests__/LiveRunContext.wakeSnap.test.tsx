@@ -508,4 +508,74 @@ describe("LiveRunProvider — wake-snap integration (slow cadence, runStatus=pen
     // Subscriber must reflect the snap value.
     expect(nowTimeHistory.at(-1)).toBe(T0 + halfPeriod);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P4. Going hidden stops the slow interval — no phantom ticks accumulate
+  //     while the tab is hidden (end-to-end through LiveRunProvider).
+  //
+  // This is the primary guard for Task #866: a device that screen-locks after
+  // a run ends (runStatus="pending") must not accumulate phantom
+  // PENDING_CLOCK_MS ticks.  The useClock unit test (case D) verifies the
+  // hook in isolation; this test verifies the full provider → subscriber chain.
+  //
+  // Sequence:
+  //   a) Mount with tab visible; slow interval starts (PENDING_CLOCK_MS).
+  //      nowTime = T0.
+  //   b) Advance exactly PENDING_CLOCK_MS → first slow tick fires.
+  //      Subscriber sees T0 + PENDING_CLOCK_MS.  Record this as preHideTime.
+  //   c) Dispatch visibilitychange (hidden) → useClock clears the interval.
+  //   d) Advance another PENDING_CLOCK_MS while hidden.  The cleared interval
+  //      must not fire — subscriber's nowTime must stay at preHideTime.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P4. going hidden stops the slow interval — no phantom ticks through LiveRunProvider", async () => {
+    const nowTimeHistory: number[] = [];
+
+    function LiveSubscriber() {
+      const { nowTime } = useLiveRun();
+      nowTimeHistory.push(nowTime.getTime());
+      return null;
+    }
+
+    // Mount with tab visible — slow interval starts immediately.
+    render(
+      <PendingProviderWrapper>
+        <LiveSubscriber />
+      </PendingProviderWrapper>,
+    );
+
+    // Mount render: T0.
+    expect(nowTimeHistory.at(-1)).toBe(T0);
+
+    // Advance exactly one slow period → first tick fires.
+    await act(async () => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+    });
+    const preHideTime = T0 + PENDING_CLOCK_MS;
+    expect(nowTimeHistory.at(-1)).toBe(preHideTime);
+
+    // Tab goes hidden → useClock must clear the slow interval.
+    await act(async () => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Record how many renders have happened up to this point.
+    const renderCountAfterHide = nowTimeHistory.length;
+
+    // Advance another full slow period while hidden.
+    // If the interval were still running it would fire and push a new value.
+    await act(async () => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+    });
+
+    // No new renders (or no new nowTime advancement) — the interval is stopped.
+    // Either the render count is the same, or every subsequent render still
+    // shows the pre-hide value (both are acceptable; a phantom tick would
+    // have pushed T0 + 2*PENDING_CLOCK_MS into the history).
+    const phantomTickValue = T0 + 2 * PENDING_CLOCK_MS;
+    expect(nowTimeHistory).not.toContain(phantomTickValue);
+
+    // The last observed nowTime must still be the pre-hide tick value.
+    expect(nowTimeHistory.at(-1)).toBe(preHideTime);
+  });
 });
