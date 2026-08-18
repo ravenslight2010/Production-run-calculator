@@ -32,7 +32,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useClock } from "../useClock";
+import { useClock, PENDING_CLOCK_MS } from "../useClock";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -196,6 +196,168 @@ describe("useClock — screen timeout / visibility event handling", () => {
     // Advance 10 s while hidden.  No registered interval → nothing fires.
     act(() => {
       vi.advanceTimersByTime(10_000);
+      rerender();
+    });
+
+    // nowTime must not have advanced past the pre-hide tick.
+    expect(result.current.getTime()).toBe(timeAfterFirstTick);
+  });
+});
+
+// ── Slow-tick path (runStatus="pending" / "ended") ────────────────────────────
+//
+// When no run is active the hook uses PENDING_CLOCK_MS (10 s) instead of 1 s.
+// The same three screen-timeout guarantees must hold on this slower cadence:
+//   A. While hidden, the slow interval is NOT started (nowTime stays frozen).
+//   B. visibilitychange (hidden → visible) snaps nowTime and restarts the
+//      slow interval so the next tick fires after exactly PENDING_CLOCK_MS.
+//   C. window "focus" performs the same snap + restart on the slow path.
+//   D. Going hidden clears the slow interval — no phantom ticks during sleep.
+//
+// Tests use PENDING_CLOCK_MS imported from useClock.ts so that changing the
+// cadence constant automatically keeps the guard meaningful.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("useClock — slow-tick path (runStatus=pending) screen timeout handling", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    setDocumentHidden(false);
+  });
+
+  afterEach(() => {
+    setDocumentHidden(false);
+    vi.useRealTimers();
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // A. While hidden, the slow interval does not start and nowTime stays frozen.
+  //
+  // useClock's start() guards: `id = document.hidden ? null : setInterval(...)`.
+  // With hidden=true at mount and runStatus="pending", id=null regardless of
+  // which cadence would have been chosen.  Advancing fake timers beyond
+  // PENDING_CLOCK_MS fires nothing; nowTime stays at T0.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("A. while document.hidden=true the slow interval does not run (nowTime stays frozen)", () => {
+    setDocumentHidden(true);
+
+    const { result, rerender } = renderHook(() => useClock("pending"));
+    const initialMs = result.current.getTime(); // T0
+
+    // Advance beyond one full slow-tick period — still hidden, no callbacks.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS + 1_000);
+      rerender();
+    });
+
+    expect(result.current.getTime()).toBe(initialMs);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // B. visibilitychange (hidden → visible): nowTime snaps and slow interval
+  //    restarts.
+  //
+  // After staying hidden for PENDING_CLOCK_MS (system clock = T0+PENDING_CLOCK_MS,
+  // no ticks), dispatching visibilitychange fires onVisibility which calls
+  // setNowTime(new Date()) — snapping to T0+PENDING_CLOCK_MS.  A fresh slow
+  // interval is then started.  Advancing PENDING_CLOCK_MS more fires it once,
+  // setting nowTime to T0 + 2*PENDING_CLOCK_MS.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("B. visibilitychange (hidden → visible) snaps nowTime and restarts the slow interval", () => {
+    setDocumentHidden(true);
+
+    const { result, rerender } = renderHook(() => useClock("pending"));
+    const initialMs = result.current.getTime(); // T0
+
+    // Stay hidden for one full slow-tick period.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender();
+    });
+    // No interval registered while hidden — nowTime still T0.
+    expect(result.current.getTime()).toBe(initialMs);
+
+    // Tab becomes visible.  System clock is now T0 + PENDING_CLOCK_MS.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender(); // flush pending setNowTime() state update
+    });
+    expect(result.current.getTime()).toBe(T0 + PENDING_CLOCK_MS);
+
+    // Verify the slow interval was restarted: advancing PENDING_CLOCK_MS fires it.
+    // System clock: T0+PENDING_CLOCK_MS → T0+2*PENDING_CLOCK_MS.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 2 * PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // C. window "focus" event: fallback snap + slow interval restart.
+  //
+  // The tab is visible; the slow interval runs.  We advance PENDING_CLOCK_MS/2
+  // (no tick yet — we are mid-period), then dispatch "focus".  onFocus snaps
+  // nowTime to T0 + PENDING_CLOCK_MS/2 and restarts the interval.  Advancing
+  // PENDING_CLOCK_MS more fires the new interval at T0 + 3/2*PENDING_CLOCK_MS.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("C. window focus event snaps nowTime and restarts the slow interval (fallback path)", () => {
+    const { result, rerender } = renderHook(() => useClock("pending"));
+
+    // Advance half a period — no tick yet (interval fires every PENDING_CLOCK_MS).
+    const halfPeriod = PENDING_CLOCK_MS / 2;
+    act(() => {
+      vi.advanceTimersByTime(halfPeriod);
+      rerender();
+    });
+    // Mid-period: no interval callback yet, nowTime still T0.
+    expect(result.current.getTime()).toBe(T0);
+
+    // Dispatch window "focus" at system clock T0 + halfPeriod.
+    // onFocus: setNowTime(new Date()) → T0+halfPeriod; start() restarts interval.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender(); // flush pending setNowTime() from onFocus
+    });
+    expect(result.current.getTime()).toBe(T0 + halfPeriod);
+
+    // New slow interval fires PENDING_CLOCK_MS later.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + halfPeriod + PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // D. Going hidden clears the slow interval — no phantom ticks during sleep.
+  //
+  // After the first slow-tick fires at T0+PENDING_CLOCK_MS, the tab goes
+  // hidden.  onVisibility clears the interval (id → null).  Advancing another
+  // full PENDING_CLOCK_MS fires nothing; nowTime stays at T0+PENDING_CLOCK_MS.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("D. going hidden clears the slow interval so no phantom ticks accumulate during sleep", () => {
+    const { result, rerender } = renderHook(() => useClock("pending"));
+
+    // First slow tick at T0 + PENDING_CLOCK_MS.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender();
+    });
+    const timeAfterFirstTick = result.current.getTime();
+    expect(timeAfterFirstTick).toBe(T0 + PENDING_CLOCK_MS);
+
+    // Tab goes hidden: onVisibility fires the hidden branch → clearInterval(id).
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+
+    // Advance another full slow period while hidden.  No registered interval
+    // → nothing fires.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
       rerender();
     });
 
