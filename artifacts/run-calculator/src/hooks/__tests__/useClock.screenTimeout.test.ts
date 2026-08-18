@@ -1646,4 +1646,117 @@ describe("useClock — status transition interval cleanup", () => {
     });
     expect(result.current.getTime()).toBe(T0 + 2_000);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Q. running → ended while tab is hidden (focus-event fallback path):
+  //    exactly one interval active after window.focus restores focus.
+  //
+  // This is the window.focus analog of test N (which covers visibilitychange
+  // for the running → ended transition) and complements test O (which covers
+  // running → paused via focus).  On Android tablets, visibilitychange doesn't
+  // fire reliably on screen wake/app-switch, so useClock also listens to
+  // window "focus" via onFocus.  If the old "running" effect's onFocus
+  // listener is NOT removed during cleanup, BOTH the stale and fresh handlers
+  // fire when window.focus is dispatched — installing two concurrent PENDING_CLOCK_MS
+  // intervals instead of one (a phantom slow interval runs alongside the new one).
+  //
+  // The tab is hidden WITHOUT dispatching visibilitychange so the original
+  // running interval is not cleared by onVisibility — only React's effect
+  // cleanup (triggered by the status change) removes it.  This isolates the
+  // focus-listener cleanup path from the visibility path.
+  //
+  // Steps:
+  //   1. Mount with "running"; tab visible; one 1-second interval starts
+  //      (vi.getTimerCount() === 1).
+  //   2. Hide the tab (document.hidden = true) WITHOUT dispatching
+  //      visibilitychange — the running 1-second interval remains alive.
+  //   3. Transition to "ended" while still hidden; React cleanup fires:
+  //      clearInterval on the old running interval + removeEventListeners for
+  //      both visibilitychange and focus.  Fresh "ended" effect runs:
+  //      start() sees document.hidden=true → id=null (no new interval yet).
+  //   4. Make the tab visible (document.hidden = false), then dispatch
+  //      window.focus.  The (single) new "ended" effect's onFocus fires:
+  //      setNowTime(new Date()) + start() → one fresh PENDING_CLOCK_MS interval.
+  //   5. Assert vi.getTimerCount() === 1 ← primary regression guard.
+  //      If cleanup failed, both old and new onFocus handlers fired → 2.
+  //   6. Advance PENDING_CLOCK_MS; nowTime advances by exactly PENDING_CLOCK_MS
+  //      (exactly one slow tick, no phantom doubles it).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("Q. running → ended while hidden: exactly one interval active after window.focus (focus-event fallback path)", () => {
+    // Flush stale hooks from earlier tests so their focus listeners are
+    // removed before we dispatch the focus event in step 4.  Without this,
+    // every prior hook's onFocus handler would also fire, each calling
+    // start() and installing a phantom interval — making vi.getTimerCount()
+    // return N instead of 1.
+    cleanup();
+
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "running" | "ended" }) => useClock(status),
+      { initialProps: { status: "running" as const } },
+    );
+
+    // Step 1: one interval must be active immediately after mount.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Let the running 1-second interval tick once to establish a non-T0 baseline.
+    // System clock advances to T0 + 1_000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 2: hide the tab WITHOUT dispatching visibilitychange.
+    // The running 1-second interval is still alive (onVisibility has NOT been
+    // called, so it has not been cleared yet).
+    act(() => {
+      setDocumentHidden(true);
+      rerender({ status: "running" });
+    });
+    // Interval is still running — not cleared because visibilitychange was
+    // never dispatched.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Step 3: transition to "ended" while still hidden.
+    // React's useEffect cleanup fires: clearInterval on the old running
+    // 1-second interval (vi.getTimerCount() → 0) and — critically — removes
+    // the old "running" effect's focus listener via window.removeEventListener.
+    // The fresh "ended" effect then runs: start() sees document.hidden=true
+    // → id=null (no new PENDING_CLOCK_MS interval yet).
+    act(() => {
+      rerender({ status: "ended" });
+    });
+    // Old 1-second interval is gone; no new slow interval started (still hidden).
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Step 4: tab becomes visible; dispatch window.focus.
+    // The (single) new "ended" effect's onFocus fires:
+    //   !document.hidden is now true → setNowTime(new Date()) + start()
+    //   → one fresh PENDING_CLOCK_MS interval registered.
+    // System clock has not advanced since step 1, so new Date() = T0 + 1_000.
+    act(() => {
+      setDocumentHidden(false);
+      window.dispatchEvent(new Event("focus"));
+      rerender({ status: "ended" }); // flush pending setNowTime()
+    });
+
+    // Step 5: exactly one timer active — primary regression guard.
+    // If cleanup failed to remove the old "running" onFocus listener, both
+    // old and new handlers fired → 2 intervals (one slow phantom + one new).
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Clock snap: nowTime must equal the current system clock (T0 + 1_000).
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 6: advance PENDING_CLOCK_MS — the single slow interval fires once.
+    // nowTime advances to T0 + 1_000 + PENDING_CLOCK_MS.  vi.getTimerCount()
+    // in step 5 already confirmed only one interval exists; this step validates
+    // the cadence is correct (PENDING_CLOCK_MS, not 1 s from a phantom running
+    // interval).
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000 + PENDING_CLOCK_MS);
+  });
 });
