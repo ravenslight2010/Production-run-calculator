@@ -1297,4 +1297,171 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
+
+  /**
+   * Test (g): Prep mix card appears when a run profile uses a QUALIFIED
+   * ingredient name (e.g. "Herb - Dried") whose base name matches the mix
+   * component "Herb".
+   *
+   * Mechanism: ingredientMatches() in lib/mixes/src/index.ts (~line 1002–1011)
+   * treats two names as equivalent when the shorter is a word-boundary prefix of
+   * the longer. "Herb" is a prefix of "Herb - Dried" and the next character is a
+   * space, so the match returns true and the prep mix card is included in the plan.
+   *
+   * Without this prefix logic a run using "Herb - Dried" would never match a mix
+   * component named "Herb" and the card would be silently suppressed.
+   *
+   * This test verifies:
+   *   1. The date-group card appears (prefix match succeeded).
+   *   2. The "Ingredient Prep" and "Pull For Prep" headings are visible.
+   *   3. The displayed lbs = (RUN_OZ / 16) × totalPizzas — non-zero and
+   *      distinct from the mix-card fallback, proving ingredientOzPerPizza was
+   *      resolved via the same ingredientMatches() path.
+   */
+  test("prep mix card appears when run uses a qualified ingredient name matching the mix component base name", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-prefix-${suffix}`;
+    const mixName = `PrefixPrepMix ${suffix}`;
+
+    // Short base name stored on the mix component.
+    const componentBase = `Herb_${suffix}`;
+    // Qualified name stored in the run profile — a common spec-import pattern.
+    const qualifiedIngredient = `${componentBase} - Dried`;
+
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    // Recipe constants — chosen so the expected lbs is unambiguously non-zero
+    // and distinct from any default/fallback value.
+    const RUN_OZ = 3.0;
+    const CASES_NEEDED = 80;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 640
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 120.00
+
+    // Use a clearly-wrong fallback so a regression in the prefix-match is visible.
+    const MIX_CARD_OZ = 0.1; // fallback perPizza on the mix card (distinguishably low)
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 4.00
+
+    try {
+      // Insert the prep mix with the SHORT base name as the component.
+      // The run will list the QUALIFIED name — the prefix logic must bridge them.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: componentBase,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      // Sign up and dismiss the onboarding dialog.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // ── Inject run values into localStorage ────────────────────────────────
+      // Tag the seeded placeholder run with a brand (so it passes the
+      // liveRunsForMixes filter) and set pep1Type to the QUALIFIED ingredient
+      // name ("Herb_<suffix> - Dried"). ingredientMatches() must recognise this
+      // as matching the mix component base name ("Herb_<suffix>").
+      await page.evaluate(
+        ({ brand, qualifiedIngredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+
+          // Brand the first (placeholder) run so liveRunsForMixes includes it.
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+
+          // Write the run values — pep1Type is the QUALIFIED name.
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({
+              ...existing,
+              pep1Type: qualifiedIngredient,
+              pep1OzPerPizza: runOz,
+              casesNeeded,
+              pizzasPerCase,
+              casesPerLayer: 0,
+            }),
+          );
+        },
+        { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // Reload so the React form initialises from the freshly-written localStorage.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+
+      // The "Get Started" dialog only auto-opens on first login; handle defensively.
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+
+      // Brief pause for startup async effects (useMixes fetch, etc.).
+      await page.waitForTimeout(1_000);
+
+      // ── Navigate to the Mixes tab ──────────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── 1. Date-group card must be present ────────────────────────────────
+      // The prefix match "Herb_<suffix>" ⊆ "Herb_<suffix> - Dried" must fire so
+      // buildMixPlan includes this prep mix in the today group.
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // ── 2. "Ingredient Prep" section heading must be visible ───────────────
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── 3. Mix name must appear inside the card ────────────────────────────
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── 4. "Pull For Prep" heading must be visible ─────────────────────────
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── 5. Pull lbs must equal the run-profile value, not the fallback ─────
+      // The ingredient row is found by the BASE component name (which the mix
+      // card renders) and its text must contain the expected lbs string.
+      await expect(todayCard.getByText(componentBase, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(componentBase, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      const expectedStr = expectedPullLbs.toFixed(2);       // "120.00"
+      const wrongFallbackStr = wrongFallbackLbs.toFixed(2); //   "4.00"
+
+      // Correct: run-profile oz resolved via ingredientMatches() prefix lookup.
+      expect(rowText).toContain(expectedStr);
+      // Wrong: mix-card fallback perPizza used (means prefix lookup failed).
+      expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
 });
