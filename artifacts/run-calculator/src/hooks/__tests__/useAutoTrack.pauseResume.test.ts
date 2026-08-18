@@ -110,7 +110,14 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   // (2 min) — not the 5-minute pause span capped at 4 min (2 periods).
   // ───────────────────────────────────────────────────────────────────────────
   it("1. tray consumption on resume uses ONE period, not the pause duration", () => {
-    const { form, store } = makeFakeForm({ traysOnLine: 5 });
+    // Initialize form with 31 cases so the first-tick baseline assertion holds
+    // (curTotal=31 > 0 → hook baselines without writing; form stays at 31).
+    const { form, store } = makeFakeForm({
+      traysOnLine: 5,
+      batchesReady: 2,
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+    });
 
     type Props = Parameters<typeof useAutoTrack>[0];
     const props = (
@@ -185,9 +192,13 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   // first post-resume tick is skipped and the second writes ≈ 1.
   // ───────────────────────────────────────────────────────────────────────────
   it("2. catch-up delta of 54 cases is blocked — total stays ≤ 2 after form reset + resume", () => {
+    // Initialize form with 31 cases so the first-tick baseline assertion holds
+    // (curTotal=31 > 0 → hook baselines without writing; form stays at 31).
     const { form, store } = makeFakeForm({
+      traysOnLine: 5,
+      batchesReady: 2,
       skidsCompleted: 3,
-      casesOnCurrentSkid: 1, // 31 cases total
+      casesOnCurrentSkid: 1,
     });
 
     // elapsed=780 → elapsedMin=13 → afterTunnel=3 → expectedCasesRaw≈30
@@ -197,14 +208,18 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const props = (
       status: "running" | "paused",
       nowMs: number,
-      elapsedSec: number,
+      elapsedSec?: number,
     ): Props => ({
       runId: "run-2",
       runStatus: status,
       nowTime: ms(nowMs),
-      elapsedBatchSec: elapsedSec,
+      elapsedBatchSec: elapsedSec ?? ELAPSED_SEC,
       calc: BASE_CALC,
-      v: BASE_V,
+      v: {
+        ...BASE_V,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
       form,
     });
 
@@ -364,9 +379,9 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
     type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number): Props => ({
+    const props = (status: "running" | "paused", nowMs: number): Props => ({
       runId: "run-4",
-      runStatus: "running" as const,
+      runStatus: status,
       nowTime: ms(nowMs),
       elapsedBatchSec: ELAPSED_SEC,
       calc: BASE_CALC,
@@ -380,7 +395,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
 
     const { result, rerender } = renderHook(
       (p: Props) => useAutoTrack(p),
-      { initialProps: props(T0) },
+      { initialProps: props("running", T0) },
     );
 
     // ── Tick 1 at T0+500: establishes trayLastMsRef / batchLastMsRef ──────
@@ -390,7 +405,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const T1 = T0 + 500;
     act(() => {
       vi.setSystemTime(T1);
-      rerender(props(T1));
+      rerender(props("running", T1));
     });
     expect(store.traysOnLine).toBe(4);
 
@@ -399,7 +414,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     act(() => {
       vi.setSystemTime(T1 + 1);
       result.current.pauseDoughTimers();
-      rerender(props(T1 + 1));
+      rerender(props("running", T1 + 1));
     });
     expect(store.traysOnLine).toBe(4); // unchanged — dough paused
 
@@ -407,20 +422,27 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const tPause5min = T1 + 5 * 60_000;
     act(() => {
       vi.setSystemTime(tPause5min);
-      rerender(props(tPause5min));
+      rerender(props("running", tPause5min));
     });
     expect(store.traysOnLine).toBe(4); // still no tray tick
 
     // ── resumeDoughTimers() called: zeroes trayLastMsRef + trayNextDueMsRef.
-    // tick fires immediately: prevMs=0 → 1 period → 1 tray consumed → 4→3.
-    // WITHOUT the reset: elapsed≈5 min capped at 4 min → 2 trays → 4→2.
+    // The consumption tick fires immediately (trayNextDueMsRef=0, nowMs≥0):
+    //   prevMs = trayLastMsRef = 0 → durationMin = 1 period (2 min)
+    //   traysConsumed = floor(2*100/200) = 1 → 4→3
+    //
+    // WITHOUT resumeDoughTimers resetting trayLastMsRef, prevMs would be T1
+    // (T0+500). The elapsed span (≈5 min) would be capped at 2 periods (4 min)
+    // → floor(4*100/200)=2 trays consumed → 4→2 (the "jump").
+    const tResume = tPause5min + 1;
     const traysBeforeResume = store.traysOnLine; // 4
     act(() => {
-      vi.setSystemTime(tPause5min + 2);
+      vi.setSystemTime(tResume);
       result.current.resumeDoughTimers();
-      rerender(props(tPause5min + 2));
+      rerender(props("running", tResume + 2));
     });
 
+    // Dough-timer pause must be cleared by resumeDoughTimers.
     expect(result.current.isDoughTimerPaused).toBe(false);
     const traysDropped = traysBeforeResume - store.traysOnLine;
     expect(traysDropped).toBe(1);
@@ -440,11 +462,19 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
     type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number, elapsedSec: number): Props => ({
+    // elapsedSec must be passed so expectedCasesRaw grows across ticks,
+    // allowing the case counter to advance during the dough-timer pause period.
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+      elapsedSec?: number,
+      trays?: number,
+      batches?: number,
+    ): Props => ({
       runId: "run-5",
-      runStatus: "running" as const,
+      runStatus: status,
       nowTime: ms(nowMs),
-      elapsedBatchSec: elapsedSec,
+      elapsedBatchSec: elapsedSec ?? ELAPSED_SEC,
       calc: BASE_CALC,
       v: {
         ...BASE_V,
@@ -463,7 +493,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const T1 = T0 + 500;
     act(() => {
       vi.setSystemTime(T1);
-      rerender(props(T1, ELAPSED_SEC));
+      rerender(props("running", T1));
     });
     expect(store.traysOnLine).toBeLessThanOrEqual(5);
 
@@ -471,19 +501,23 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     act(() => {
       vi.setSystemTime(T1 + 1);
       result.current.pauseDoughTimers();
-      rerender(props(T1 + 1, ELAPSED_SEC));
+      rerender(props("running", T1 + 1, ELAPSED_SEC));
     });
     const traysWhenPaused = store.traysOnLine;
     const casesWhenPaused = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
 
     // ── Advance 3 case periods while dough timers are paused. ─────────────
-    // Cases should still tick (case guard is after dough guard, not before);
-    // trays must stay frozen.
+    // Cases should still tick (3 increments); trays must stay frozen.
+    // elapsedSec must increase each iteration so expectedCasesRaw grows
+    // and the hook writes an updated count (delta > 0 → case tick fires).
+    const advanceMs = 3 * CASE_PERIOD_MS; // 18 000 ms
+
+    // Step through case periods one at a time so each tick fires.
     for (let i = 1; i <= 3; i++) {
       const nowMs = T1 + 1 + i * CASE_PERIOD_MS + 1;
       act(() => {
         vi.setSystemTime(nowMs);
-        rerender(props(nowMs, ELAPSED_SEC + (i * CASE_PERIOD_MS) / 1000));
+        rerender(props("running", nowMs, ELAPSED_SEC + (i * CASE_PERIOD_MS) / 1000));
       });
     }
 
@@ -494,6 +528,101 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(casesAfterPause).toBeGreaterThan(casesWhenPaused);
     // Trays frozen — dough ticks suppressed by pause guard.
     expect(traysAfterPause).toBe(traysWhenPaused);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 3. formResetSkippedRef is a single-use latch
+  //
+  // Verify that after one guard skip, the NEXT tick always writes — even when
+  // the operator keeps the form at 0 deliberately (operator-corrected-to-0
+  // case).  The latch must not permanently suppress auto-track.
+  //
+  // Uses exact multiples of 60 s for elapsed so all period boundaries are
+  // whole integers — avoids IEEE 754 rounding issues with elapsedMin fractions
+  // (e.g. 906/60 = 15.1 is not exactly representable, making floor() fragile).
+  // ───────────────────────────────────────────────────────────────────────────
+  it("3. formResetSkippedRef disarms on the next tick (never permanently suppresses)", () => {
+    // elapsed=1200 → elapsedMin=20 → afterTunnel=10 → expectedCasesRaw=100
+    // elapsed+60=1260 → elapsedMin=21 → afterTunnel=11 → raw=110  (Δ=10)
+    // elapsed+120=1320 → elapsedMin=22 → afterTunnel=12 → raw=120 (Δ=10)
+    // All arithmetic is exact integers — no floating-point surprises.
+    const elapsed = 1200;
+
+    // Initialize form with 100 cases (elapsed=1200 → raw=100) so the first-tick
+    // branch baselines without writing (curTotal=100>0 → baseline only).
+    const { form, store } = makeFakeForm({
+      traysOnLine: 5,
+      batchesReady: 2,
+      skidsCompleted: 10,
+      casesOnCurrentSkid: 0,
+    });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+      elapsedSec?: number,
+    ): Props => ({
+      runId: "run-6",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec ?? ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props("running", T0, elapsed) },
+    );
+
+    // ── Initial render: case tick fires immediately (caseNextDueMsRef=0).
+    // prevExpected=-1 → first-tick branch; curTotal=100>0 → baseline only.
+    // lastExpectedCasesRef ← 100 (= floor(10*100/10), exact integer).
+    // caseNextDueMsRef     ← T0+CASE_PERIOD_MS (= T0+6000).
+
+    // ── SSE form reset to 0 (simulating an SSE echo while the session pauses).
+    store.skidsCompleted = 0;
+    store.casesOnCurrentSkid = 0;
+
+    // ── Guard tick at T0+6001 (just past caseNextDueMsRef = T0+6000). ───
+    // elapsed+60=1260 → elapsedMin=21 → afterTunnel=11 → raw=110.
+    // prevExpected=100, deltaCases=110-100=10 > 0.
+    // curTotal=0, prevExpected=100 > casesPerSkid=10 → guard fires!
+    // → skip write; formResetSkippedRef ← true.
+    // → lastExpectedCasesRef ← 110; caseNextDueMsRef ← T0+6001+6000=T0+12001.
+    const Tguard = T0 + CASE_PERIOD_MS + 1; // T0+6001
+    act(() => {
+      vi.setSystemTime(Tguard);
+      rerender(props("running", Tguard, elapsed + 60));
+    });
+    const afterGuardTick = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
+    // Guard fired: write was skipped; form stays at 0.
+    expect(afterGuardTick).toBe(0);
+
+    // ── Write tick at T0+12002 (just past caseNextDueMsRef = T0+12001). ─
+    // elapsed+120=1320 → elapsedMin=22 → afterTunnel=12 → raw=120.
+    // prevExpected=110, deltaCases=120-110=10 > 0.
+    // formResetSkippedRef=true → else branch executes → write proceeds!
+    // target = 0+10=10; newTotal = min(10, max(0,100)) = 10.
+    // → setValue("skidsCompleted",1); setValue("casesOnCurrentSkid",0).
+    // formResetSkippedRef ← false (latch disarmed).
+    const Twrite = T0 + 2 * CASE_PERIOD_MS + 2; // T0+12002
+    act(() => {
+      vi.setSystemTime(Twrite);
+      rerender(props("running", Twrite, elapsed + 120));
+    });
+    const afterWriteTick = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
+
+    // Latch disarmed: write proceeded — total is 10 (one normal delta).
+    expect(afterWriteTick).toBeGreaterThan(0);
+    // Exactly one delta worth (10), nowhere near the 110-case stale catch-up.
+    expect(afterWriteTick).toBeLessThanOrEqual(BASE_V.casesPerSkid);
   });
 
   // ───────────────────────────────────────────────────────────────────────────

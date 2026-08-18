@@ -142,8 +142,17 @@ async function dbCreateMix(
 }
 
 /** Today's date as YYYY-MM-DD (matches the format buildMixPlan uses for groups). */
+/** Format a Date as YYYY-MM-DD using the local calendar (matches app ?today= keying). */
+function localDateStr(d: Date): string {
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateStr(new Date());
 }
 
 // ── DB lifecycle ──────────────────────────────────────────────────────────────
@@ -1453,6 +1462,236 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (i): Prep mix card appears for a SCHEDULED (future-day) run that lists
+   * its ingredient, and is absent when today is selected (no live run uses it).
+   *
+   * Mechanism:
+   *   home.tsx (~14477–14489) reads scheduledDays from the API and, for each
+   *   scheduled run, loads the saved profile via loadProfile(brand, flavor).
+   *   valsToMixRun() then builds ingredientOzPerPizza from the profile's pep
+   *   fields, and buildMixPlan matches prep-mix components against each run's
+   *   `ingredients` list. If the profile is missing or ingredient names don't
+   *   align, the card is silently absent.
+   *
+   *   This test exercises that path end-to-end:
+   *     1. A prep mix is inserted with a unique ingredient name.
+   *     2. A scheduled run for tomorrow is inserted directly into daily_sync
+   *        (scope=live) so the startup fetch returns it in scheduledDays.
+   *     3. A profile for the brand is injected into localStorage with
+   *        pep1Type=ingredient so loadProfile() returns it to valsToMixRun.
+   *     4. With make-day = today (default): no live run uses the ingredient →
+   *        empty-state is shown.
+   *     5. With make-day = tomorrow: the scheduled run matches → group card
+   *        appears with "Ingredient Prep", mix name, "Pull For Prep", and the
+   *        correct pull lbs derived from the profile oz, not the mix-card fallback.
+   *     6. Switching back to today: empty-state is restored.
+   *
+   * Formula:
+   *   expectedPullLbs = (RUN_OZ / 16) × (CASES_NEEDED × PIZZAS_PER_CASE)
+   *                   = (2.0 / 16) × 800 = 100.00 lbs
+   *   MIX_CARD_OZ (0.5) is the wrong fallback; if the code ignores
+   *   ingredientOzPerPizza the result would be 25.00.
+   */
+  test("prep mix card appears for a scheduled future-day run that lists its ingredient", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `sched-future-${suffix}`;
+    const mixName = `FuturePrepMix ${suffix}`;
+    const ingredient = `FutureHerb_${suffix}`;
+    const brand = `FutureBrand_${suffix}`;
+    const flavor = "";
+
+    // MIX_CARD_OZ is the fallback perPizza stored on the mix itself.
+    // RUN_OZ is the profile-derived oz/pizza that buildMixPlan should prefer.
+    // If the profile lookup is broken the displayed lbs will be 25.00, not 100.00.
+    const MIX_CARD_OZ = 0.5;
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 100.00
+    const wrongFallbackLbs = (MIX_CARD_OZ / 16) * totalPizzas; // 25.00
+
+    // Tomorrow in YYYY-MM-DD using the shared local-calendar helper — consistent
+    // with todayStr() and the app's ?today= keying so both dates are in the same
+    // time zone frame and the step-10 "switch back to today" assertion is correct.
+    const tomorrowLocal = new Date();
+    tomorrowLocal.setDate(tomorrowLocal.getDate() + 1);
+    const tomorrowStr = localDateStr(tomorrowLocal);
+
+    const scheduledRunId = `sched-run-${suffix}`;
+
+    // Snapshot the existing daily_sync row (if any) so we can restore it on
+    // teardown instead of permanently deleting shared schedule data.
+    let preExistingRow: { data: unknown; updated_at: Date } | null = null;
+
+    try {
+      // ── Step 1: Insert the prep mix ──────────────────────────────────────────
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: MIX_CARD_OZ,
+      });
+
+      // ── Step 2: Snapshot + upsert a scheduled run for tomorrow in daily_sync ──
+      // The /sync/scheduled endpoint reads daily_sync WHERE date > today AND
+      // scope = 'live'. Read the existing row first so teardown can restore it.
+      const existingResult = await db.query<{ data: unknown; updated_at: Date }>(
+        `SELECT data, updated_at FROM daily_sync WHERE date = $1 AND scope = 'live'`,
+        [tomorrowStr],
+      );
+      preExistingRow = existingResult.rows.length > 0 ? existingResult.rows[0] : null;
+
+      const scheduledData = {
+        dayState: {
+          runs: [{ id: scheduledRunId, brand, flavor }],
+        },
+        runValues: {
+          [scheduledRunId]: { casesNeeded: CASES_NEEDED },
+        },
+      };
+      await db.query(
+        `INSERT INTO daily_sync (date, scope, data, updated_at)
+         VALUES ($1, 'live', $2::jsonb, NOW())
+         ON CONFLICT (date, scope) DO UPDATE
+           SET data = $2::jsonb, updated_at = NOW()`,
+        [tomorrowStr, JSON.stringify(scheduledData)],
+      );
+
+      // ── Step 3: Sign up and dismiss onboarding ───────────────────────────────
+      // Sign up AFTER the DB row exists so the startup fetch (on app mount) picks
+      // up the scheduled run and populates scheduledDays React state.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Brief pause for startup async effects (useMixes + scheduledDays fetch).
+      await page.waitForTimeout(1_000);
+
+      // ── Step 4: Inject the profile into localStorage ─────────────────────────
+      // loadProfile(brand, flavor) reads from localStorage key
+      // `run-calc-profile-${brand.toLowerCase()}__${flavor.toLowerCase()}`.
+      // valsToMixRun maps pep1Type → ingredientOzPerPizza, so the ingredient must
+      // appear in pep1Type with pep1OzPerPizza = RUN_OZ. pizzasPerCase comes from
+      // the profile (not the scheduled run), so it must be set here too.
+      await page.evaluate(
+        ({ brand, flavor, ingredient, runOz, pizzasPerCase }) => {
+          const profileKey = `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+          const existing = (() => {
+            try {
+              return JSON.parse(localStorage.getItem(profileKey) ?? "{}");
+            } catch {
+              return {};
+            }
+          })();
+          localStorage.setItem(
+            profileKey,
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              pizzasPerCase,
+            }),
+          );
+        },
+        { brand, flavor, ingredient, runOz: RUN_OZ, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // ── Step 5: Navigate to the Mixes tab ────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── Step 6: Today (default make-day) shows empty-state ──────────────────
+      // The only live run today is the blank seeded placeholder (no brand, no
+      // ingredient list), so buildMixPlan returns [] → empty-state is shown.
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── Step 7: Switch make-day to tomorrow ──────────────────────────────────
+      const makeDayPicker = page.locator('[data-testid="mix-make-day"]');
+      await makeDayPicker.fill(tomorrowStr);
+      // Tab away to trigger onChange (the date input fires on blur/change).
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      // ── Step 8: Verify the group card for tomorrow is present ────────────────
+      const tomorrowCard = page.locator(`[data-testid="mix-plan-${tomorrowStr}"]`);
+      await tomorrowCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // "Ingredient Prep" section heading confirms buildMixPlan found a prep match.
+      await expect(
+        tomorrowCard.getByText("Ingredient Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // The mix name must appear inside the group card.
+      await expect(
+        tomorrowCard.getByText(mixName, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // "Pull For Prep" section heading confirms the pull-lbs breakdown is rendered.
+      await expect(
+        tomorrowCard.getByText("Pull For Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // The ingredient name must appear in the pull-for-prep section.
+      await expect(
+        tomorrowCard.getByText(ingredient, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── Step 9: Verify the pull lbs use profile oz, not the mix-card fallback ─
+      const ingredientRow = tomorrowCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      // Profile-derived lbs = (RUN_OZ / 16) × 800 = 100.00.
+      expect(rowText).toContain(expectedPullLbs.toFixed(2));
+      // If the code ignores ingredientOzPerPizza and falls back to MIX_CARD_OZ
+      // the result would be 25.00 — asserting it is absent proves the profile path.
+      expect(rowText).not.toContain(wrongFallbackLbs.toFixed(2));
+
+      // ── Step 10: Switch back to today → empty-state is restored ─────────────
+      await makeDayPicker.fill(todayStr());
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      // Restore or remove the daily_sync row losslessly: if one existed before
+      // the test, upsert it back; otherwise delete only the test-inserted row.
+      if (preExistingRow !== null) {
+        await db
+          .query(
+            `INSERT INTO daily_sync (date, scope, data, updated_at)
+             VALUES ($1, 'live', $2::jsonb, $3)
+             ON CONFLICT (date, scope) DO UPDATE
+               SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+            [tomorrowStr, JSON.stringify(preExistingRow.data), preExistingRow.updated_at],
+          )
+          .catch((err: unknown) => {
+            console.error("WARN: failed to restore daily_sync row:", err);
+          });
+      } else {
+        await db
+          .query(
+            "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+            [tomorrowStr],
+          )
+          .catch(() => {});
+      }
+      await db
+        .query("DELETE FROM users WHERE username = $1", [username])
+        .catch(() => {});
     }
   });
 
