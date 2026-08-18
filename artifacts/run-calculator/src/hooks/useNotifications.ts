@@ -360,7 +360,7 @@ export function useNotifications({
     // re-enabling later never fires a stale "time's up".
     if (!isNotifEnabled(prefsRef.current, "runComplete")) return;
     navigator.vibrate?.([300, 100, 300, 100, 300]);
-    if (Notification.permission === "granted") {
+    if ("Notification" in window && Notification.permission === "granted") {
       showAppNotification("✅ Run time complete", {
         body: `${runLabel(currentRun)} — time's up, end the run.`,
         icon: "/icons/icon-192.png",
@@ -388,7 +388,7 @@ export function useNotifications({
     // re-enabling later never fires a stale "freezer empty".
     if (!isNotifEnabled(prefsRef.current, "freezerEmpty")) return;
     navigator.vibrate?.([200, 100, 200]);
-    if (Notification.permission === "granted") {
+    if ("Notification" in window && Notification.permission === "granted") {
       showAppNotification("❄️ Freezer empty", {
         body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
         icon: "/icons/icon-192.png",
