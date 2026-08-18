@@ -45,7 +45,7 @@
         }
       ],
       "sanityIssue": null,
-      "promptChunks": 1,
+      "promptChunks": 2,
       "droppedRows": 0
     },
     {
@@ -69,7 +69,7 @@
         }
       ],
       "sanityIssue": null,
-      "promptChunks": 1,
+      "promptChunks": 2,
       "droppedRows": 0
     },
     {
@@ -129,7 +129,7 @@
         }
       ],
       "sanityIssue": null,
-      "promptChunks": 1,
+      "promptChunks": 2,
       "droppedRows": 0
     },
     {
@@ -936,8 +936,8 @@
         }
       ],
       "sanityIssue": null,
-      "promptChunks": 8,
-      "droppedRows": 2632
+      "promptChunks": 32,
+      "droppedRows": 2655
     }
   ]
 }

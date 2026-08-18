@@ -23,7 +23,7 @@ active model or imports silently drop data — no error, just missing profiles.
   (qualifier brands, xlsx round-trip, known-sauce grounding SCENARIO 2).
   Last verified: 2026-08-18, gemini-2.5-flash, all 14 checks passed.
 
-## Current calibrated limits (gemini-2.5-flash — verified 2026-08-18)
+## Current calibrated limits (gemini-2.5-flash)
 - **`maxTotalChars` = 4000** — model self-truncates ("sampled for brevity") at
   8k when a chunk mixes 64+ profiles with any recipes, and unit-converts lbs÷16
   when dense profile context precedes recipe rows. 4k keeps each chunk focused.
@@ -41,6 +41,14 @@ active model or imports silently drop data — no error, just missing profiles.
 **Why:** a repeatable check is the only defense against "model changed, big
 imports quietly drop data." The harness has caught real loss on every
 calibration run.
+
+- **Mixed profile+recipe chunks lose recipe targets** — when a recipe sheet's
+  head packs behind dense profile rows in one chunk, the model sometimes drops
+  the "Brand: flavor" target lines (recipes survive but silently detach from
+  every profile — MISSING TARGET, not MISSING PROFILE). The splitter therefore
+  starts recipe sheets on fresh chunks; scoping matters — flushing at EVERY
+  sheet boundary fragments block-less many-sheet workbooks past the chunk cap
+  and drops MORE rows. Re-verify with the full harness if this is touched.
 
 ## Calibration failure modes
 - **Self-truncation**: model returns partial results, citing "brevity" or

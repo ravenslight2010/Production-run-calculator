@@ -3598,6 +3598,26 @@ export function splitGridsForPrompt(
   for (const sheet of grids) {
     const headerLen = `=== SHEET: ${sheet.name} ===`.length + 1;
     const rows = sheet.rows.map((r) => cleanRowCells(r, lim)).filter((c) => c.length > 0);
+    // If a RECIPE sheet (one carrying "Recipe: …" blocks) won't fit whole in
+    // the current (non-empty) chunk's remaining budget, start it on a fresh
+    // chunk instead of packing its head behind another sheet's rows. Mixed
+    // chunks where dense profile rows precede a recipe sheet's blocks make the
+    // model (gemini-2.5-flash, 2026-08-18) drop the recipe blocks'
+    // "Brand: flavor" target lines — the recipes survive but silently detach
+    // from every profile. Scoped to recipe sheets only: flushing at EVERY
+    // sheet boundary fragments block-less many-sheet workbooks (e.g. the huge
+    // schedule workbook) enough to exhaust maxChunks and drop MORE rows. A
+    // recipe sheet that fits whole may still share a chunk; a sheet larger
+    // than one whole chunk still splits by rows below.
+    const sheetChars =
+      headerLen + rows.reduce((a, r) => a + r.join("\t").length + 1, 0);
+    if (
+      cur.length > 0 &&
+      curChars + sheetChars > budget &&
+      rows.some((r) => isBlockStartRow(r))
+    ) {
+      flush();
+    }
     let i = 0;
     while (i < rows.length) {
       // Open a sheet block in the current chunk; start a fresh chunk first if
