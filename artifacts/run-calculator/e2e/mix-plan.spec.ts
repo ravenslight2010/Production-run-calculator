@@ -3411,4 +3411,148 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
+
+  /**
+   * Test (m): Batch count on a regular mix card updates live when 'already made'
+   * is edited — Task #798.
+   *
+   * Mechanism: onBlur → saveMixes → onSaved → cycleCountQc.setQueryData(["mixes"],
+   * saved) → buildMixPlan re-runs → m.batches = remainingLbs / batchSize
+   * re-derives → the batch count span re-renders immediately without reload.
+   *
+   * Formula (lib/mixes/src/index.ts, computeEntry):
+   *   componentLbs  = (2.0/16) × 800           = 100.00
+   *   wasteLbs      = 100.00 × 0.15             =  15.00
+   *   startupLbs    = 20
+   *   totalLbs      = 100.00 + 15.00 + 20       = 135.00
+   *
+   *   initial  (amountAlreadyMade = 0  ): batches = 135.00 / 10 = 13.50
+   *   partial  (amountAlreadyMade = 50 ): batches =  85.00 / 10 =  8.50
+   *   full     (amountAlreadyMade = 135): batches =   0.00 / 10 =  0.00
+   */
+  test("batch count on a regular mix card updates live when 'already made' is edited", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `batch-live-${suffix}`;
+    const mixName = `BatchLiveMix ${suffix}`;
+    const component = `BatchComp_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const BATCH_SIZE = 10;
+    const PER_PIZZA_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const componentLbs = (PER_PIZZA_OZ / 16) * totalPizzas;               // 100.00
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
+
+    const initialBatches = totalLbs / BATCH_SIZE;           // 13.50
+    const initialBatchesStr = initialBatches.toFixed(2);    // "13.50"
+
+    const EDIT_AMOUNT = 50;
+    const remainingAfterEdit = totalLbs - EDIT_AMOUNT;      //  85.00
+    const batchesAfterEdit = remainingAfterEdit / BATCH_SIZE; //  8.50
+    const batchesAfterEditStr = batchesAfterEdit.toFixed(2); // "8.50"
+
+    const FULL_AMOUNT = Math.ceil(totalLbs); // 135 — covers totalLbs exactly
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        brand,
+        isPrep: false,
+        component,
+        perPizza: PER_PIZZA_OZ,
+        batchSize: BATCH_SIZE,
+        amountAlreadyMade: 0,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject brand + run data via localStorage so the regular mix card appears.
+      await page.evaluate(
+        ({ brand, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing,
+            casesNeeded,
+            pizzasPerCase,
+            casesPerLayer: 0,
+          }));
+        },
+        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // The innermost div containing the mix name is the mix card itself.
+      const mixCard = todayCard.locator("div", { has: page.getByText(mixName, { exact: true }) }).last();
+
+      // ── Step 1: initial batch count (amountAlreadyMade = 0) ──────────────────
+      // batches = 135.00 / 10 = 13.50
+      await expect(mixCard.getByText(new RegExp(initialBatchesStr))).toBeVisible({ timeout: 5_000 });
+      await expect(mixCard.getByText(/batches/, { exact: false })).toBeVisible({ timeout: 3_000 });
+
+      // ── Step 2: type 50 and blur ─────────────────────────────────────────────
+      const alreadyMadeInput = mixCard.locator('input[type="number"]').first();
+      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill(String(EDIT_AMOUNT));
+      await alreadyMadeInput.press("Tab");
+      await page.waitForTimeout(1_500);
+
+      // ── Step 3: batch count updates to 8.50 batches ──────────────────────────
+      await expect(mixCard.getByText(new RegExp(batchesAfterEditStr))).toBeVisible({ timeout: 5_000 });
+      // The "need X lbs" badge reflects the new remainingLbs
+      await expect(
+        todayCard.getByText(`need ${remainingAfterEdit.toFixed(2)} lbs`, { exact: false }),
+      ).toBeVisible({ timeout: 3_000 });
+      // Old batch count is gone
+      await expect(mixCard.getByText(new RegExp(initialBatchesStr))).toHaveCount(0, { timeout: 3_000 });
+
+      // ── Step 4: type amountAlreadyMade >= totalLbs ───────────────────────────
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill(String(FULL_AMOUNT));
+      await alreadyMadeInput.press("Tab");
+      await page.waitForTimeout(1_500);
+
+      // ── Step 5: batch count drops to 0.00 ────────────────────────────────────
+      // remainingLbs = max(0, 135 - 135) = 0 → batches = 0 / 10 = 0.00
+      await expect(mixCard.getByText(/0\.00/, { exact: false })).toBeVisible({ timeout: 5_000 });
+      // Partial batch count from step 3 is gone
+      await expect(mixCard.getByText(new RegExp(batchesAfterEditStr))).toHaveCount(0, { timeout: 3_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
 });
