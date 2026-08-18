@@ -30,10 +30,12 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let mixesTable: DbModule["mixesTable"];
+let dataHealsTable: DbModule["dataHealsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
+let runDataHeals: () => Promise<void>;
 let clearUserValidityCache: () => void;
 
 let adminPool: pg.Pool;
@@ -81,10 +83,12 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   mixesTable = dbMod.mixesTable;
+  dataHealsTable = dbMod.dataHealsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
+  runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
 
   const app: Express = express();
@@ -121,7 +125,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${mixesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${mixesTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([{ id: MANAGER, username: "mgr", passwordHash: "x" }]);
@@ -440,5 +444,74 @@ describe("POST /api/mixes — isPrep round-trip", () => {
     // GET confirms it persisted
     const get = await getMixes();
     expect(get.items[0].isPrep).toBe(true);
+  });
+});
+
+// ── generic-mix-poison-purge-v2 data heal ────────────────────────────────────
+// Confirms that the heal deletes mix rows whose name is a generic slot-type
+// name ("Mix") for EVERY scope — both "live" and "sandbox". The original heal
+// logic uses `tx.select().from(mixesTable).for("update")` with no scope filter,
+// so all scopes are scanned. This block verifies the sandbox path explicitly
+// after it was found to be untested (only live-scope rows were seeded in
+// earlier coverage, meaning a sandbox poison mix would survive undetected).
+describe("generic-mix-poison-purge-v2 data heal", () => {
+  async function seedMixRow(id: string, name: string, scope: "live" | "sandbox") {
+    const t = new Date("2026-01-01T00:00:00Z");
+    await db.insert(mixesTable).values({
+      id,
+      scope,
+      name,
+      brand: "TestBrand",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      notes: "",
+      amountAlreadyMade: 0,
+      components: [],
+      isPrep: false,
+      enabled: true,
+      createdAt: t,
+      updatedAt: t,
+    });
+  }
+
+  async function allMixIds(): Promise<string[]> {
+    const rows = await db.select({ id: mixesTable.id }).from(mixesTable);
+    return rows.map((r) => r.id);
+  }
+
+  it("deletes a sandbox-scope mix whose name is the generic poison name 'Mix'", async () => {
+    await seedMixRow("sandbox-poison-mix", "Mix", "sandbox");
+
+    await runDataHeals();
+
+    const remaining = await allMixIds();
+    expect(remaining).not.toContain("sandbox-poison-mix");
+  });
+
+  it("deletes a live-scope mix with the same poison name 'Mix'", async () => {
+    await seedMixRow("live-poison-mix", "Mix", "live");
+
+    await runDataHeals();
+
+    const remaining = await allMixIds();
+    expect(remaining).not.toContain("live-poison-mix");
+  });
+
+  it("deletes both sandbox and live poison rows in the same heal pass", async () => {
+    // Seeds one poison row in each scope — confirms the no-scope-filter scan
+    // hits every row regardless of scope in a single runDataHeals() call.
+    await seedMixRow("sandbox-poison-both", "Mix", "sandbox");
+    await seedMixRow("live-poison-both", "Mix", "live");
+
+    // A non-poison mix that must survive untouched.
+    await seedMixRow("safe-mix", "White Fajita Mix", "live");
+
+    await runDataHeals();
+
+    const remaining = await allMixIds();
+    expect(remaining).not.toContain("sandbox-poison-both");
+    expect(remaining).not.toContain("live-poison-both");
+    expect(remaining).toContain("safe-mix");
   });
 });
