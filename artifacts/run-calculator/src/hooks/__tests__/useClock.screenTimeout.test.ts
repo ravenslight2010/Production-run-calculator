@@ -366,6 +366,98 @@ describe("useClock — slow-tick path (runStatus=pending) screen timeout handlin
   });
 });
 
+// ── Fast-tick path (runStatus="paused") hidden at mount ───────────────────────
+//
+// "paused" uses the same 1-second interval as "running".  The hidden-at-mount
+// guard (`document.hidden ? null : setInterval(...)`) must suppress the
+// interval regardless of which fast-tick status triggered it.
+//
+// Tests confirm:
+//   P1. While document.hidden=true the 1-second interval is NOT started —
+//       nowTime stays frozen even after 3 s.
+//   P2. visibilitychange (hidden → visible) immediately snaps nowTime to the
+//       current mocked time AND restarts the 1-second interval.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("useClock — fast-tick path (runStatus=paused) hidden at mount", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    setDocumentHidden(false);
+  });
+
+  afterEach(() => {
+    setDocumentHidden(false);
+    vi.useRealTimers();
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P1. While document.hidden=true the 1-second interval does NOT start and
+  //     nowTime stays frozen.
+  //
+  // useClock's start() guards: `id = document.hidden ? null : setInterval(...)`.
+  // With hidden=true at mount and runStatus="paused", id=null.  Advancing the
+  // fake timer clock by 3 s fires nothing; nowTime stays at T0.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P1. while document.hidden=true the 1-second interval does not run (nowTime stays frozen)", () => {
+    setDocumentHidden(true);
+
+    const { result, rerender } = renderHook(() => useClock("paused"));
+    const initialMs = result.current.getTime(); // T0
+
+    // Advance 3 s — no interval registered, no timer callback fires.
+    // vi.advanceTimersByTime also moves the system clock to T0+3000 but since
+    // setNowTime is never called, nowTime stays at T0.
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+      rerender();
+    });
+
+    expect(result.current.getTime()).toBe(initialMs);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P2. visibilitychange (hidden → visible): nowTime snaps to the current
+  //     system time and the 1-second interval restarts.
+  //
+  // After staying hidden for 3 s (system clock = T0+3000, no ticks),
+  // dispatching visibilitychange fires onVisibility which calls
+  // setNowTime(new Date()) — snapping to T0+3000.  A fresh 1-second interval
+  // is then started.  One more vi.advanceTimersByTime(1000) fires that
+  // interval and sets nowTime to T0+4000.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P2. visibilitychange (hidden → visible) snaps nowTime and restarts the 1-second interval", () => {
+    setDocumentHidden(true);
+
+    const { result, rerender } = renderHook(() => useClock("paused"));
+    const initialMs = result.current.getTime(); // T0
+
+    // Advance 3 s while hidden.
+    // System clock reaches T0+3000; nowTime stays T0 (no interval).
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(initialMs);
+
+    // Tab becomes visible.  System clock is now T0+3000.
+    // onVisibility: setNowTime(new Date()) → setNowTime(T0+3000); start() → new 1-second interval.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender(); // flush pending setNowTime() state update
+    });
+    expect(result.current.getTime()).toBe(T0 + 3_000);
+
+    // Verify the 1-second interval was restarted: one more second fires it.
+    // System clock: T0+3000 → T0+4000.  Interval fires → setNowTime(T0+4000).
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 4_000);
+  });
+});
+
 // ── Status transition tests ───────────────────────────────────────────────────
 //
 // The useEffect([runStatus]) cleanup runs when runStatus changes: it clears the
