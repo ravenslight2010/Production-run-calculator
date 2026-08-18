@@ -3353,6 +3353,7 @@ export async function runDataHeals(): Promise<void> {
   await runAugust2026CheeseRecipeLbs();
   await runAugust2026LowesMixFixes();
   await runCheeseComponentOzStrip();
+  await runHannafordTikkaMasalaFix();
 }
 
 // ── Strip all ozPerPizza from cheese recipe components ───────────────────────
@@ -4037,5 +4038,234 @@ async function runAugust2026LowesMixFixes() {
       .set({ result: { updated } })
       .where(eq(dataHealsTable.id, AUG2026_LOWES_MIX_STRAY_ID));
     logger.info({ heal: AUG2026_LOWES_MIX_STRAY_ID, updated }, "Data heal applied");
+  });
+}
+
+// ── Hannaford Chicken Tikka Masala profile fix + masala sauce dedupe ──────────
+// The production profile hannaford__chicken tikka masala was overwritten with
+// data from a different product: it links "Four Hands Red Hot Pizza Sauce"
+// (whose recipe contains 200 lbs of Garlic Sauce, which then leaks into the
+// freeze-pull section) instead of the Tikka Masala sauce. Re-importing the spec
+// sheet can't fix it because the stored profile's LWW stamp is newer than the
+// import's. Production also holds two duplicate masala sauce recipes with
+// identical components: "Tika Masala Sauce" (typo) and "Maria & Son's Tikka
+// Masala" (canonical, per saved_spec_sheets id=337).
+//
+// This heal, in one transaction:
+//   1. Merges the sauce duplicates: canonical row survives (adopting the typo
+//      row's components when the canonical row has none), typo row is deleted —
+//      or renamed to canonical when no canonical row exists (merge-target-must-
+//      survive rule).
+//   2. Learns a spec-import alias (recipeName/sauce) typo → canonical so future
+//      imports link to the surviving name.
+//   3. Re-points every live profile whose frontlineRecipeName is the typo name
+//      to the canonical name (+ fresh components snapshot), bumping LWW stamps.
+//   4. Rewrites the Hannaford tikka masala profile with the correct spec data
+//      (sauce, dough, die, applicator slots/oz) and bumps its updatedAtMs above
+//      the poisoned production stamp (1787063966213) so stale clients can't
+//      re-publish the bad values.
+//
+// Values are hard-coded from the production spec parse (saved_spec_sheets
+// id=337): sauce 3.5 oz/pizza, Naan Dough, 11" dies, App 1 Masala Chicken Mix
+// 2.07 oz, App 2 White Fajita Mix 1.5 oz, App 3 Whole Mozzarella 4.0 oz.
+// ("Whole Milk Mozzarella" folds to the canonical app type "Whole Mozzarella".)
+const HANNAFORD_TIKKA_FIX_ID = "hannaford-tikka-masala-fix-v1";
+
+async function runHannafordTikkaMasalaFix(): Promise<void> {
+  const CANON = "Maria & Son's Tikka Masala";
+  const TYPO = "Tika Masala Sauce";
+  const PROFILE_KEY = "hannaford__chicken tikka masala";
+  // The poisoned production profile's stamp; the heal's stamp must exceed it.
+  const POISONED_STAMP_MS = 1787063966213;
+
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: HANNAFORD_TIKKA_FIX_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // 1. Merge the duplicate masala sauce recipes (live scope only).
+    const sauces = await tx
+      .select()
+      .from(sauceRecipesTable)
+      .where(
+        and(
+          eq(sauceRecipesTable.scope, "live"),
+          sql`lower(${sauceRecipesTable.name}) in (${CANON.toLowerCase()}, ${TYPO.toLowerCase()})`,
+        ),
+      )
+      .for("update");
+    const canonRows = sauces.filter((r) => r.name.toLowerCase() === CANON.toLowerCase());
+    const typoRows = sauces.filter((r) => r.name.toLowerCase() === TYPO.toLowerCase());
+
+    let survivorComponents: Array<{ ingredient: string; lbs: number }> | null = null;
+    let mergedSauces = 0;
+    let renamedSauce = 0;
+    if (canonRows.length > 0) {
+      const canon = canonRows[0];
+      let comps = Array.isArray(canon.components) ? canon.components : [];
+      const typoWithComps = typoRows.find(
+        (r) => Array.isArray(r.components) && r.components.length > 0,
+      );
+      if (comps.length === 0 && typoWithComps) {
+        // Canonical row exists but is empty — adopt the typo row's components.
+        comps = typoWithComps.components;
+        await tx
+          .update(sauceRecipesTable)
+          .set({ components: comps, updatedAt: new Date() })
+          .where(and(eq(sauceRecipesTable.id, canon.id), eq(sauceRecipesTable.scope, "live")));
+      }
+      survivorComponents = comps;
+      for (const t of typoRows) {
+        await tx
+          .delete(sauceRecipesTable)
+          .where(and(eq(sauceRecipesTable.id, t.id), eq(sauceRecipesTable.scope, "live")));
+        mergedSauces++;
+      }
+    } else if (typoRows.length > 0) {
+      // No canonical row — the merge target must survive: promote the typo row
+      // by renaming it (never delete the only copy of the recipe).
+      const t = typoRows[0];
+      await tx
+        .update(sauceRecipesTable)
+        .set({ name: CANON, updatedAt: new Date() })
+        .where(and(eq(sauceRecipesTable.id, t.id), eq(sauceRecipesTable.scope, "live")));
+      survivorComponents = Array.isArray(t.components) ? t.components : [];
+      renamedSauce = 1;
+      // Delete any extra typo duplicates beyond the promoted one.
+      for (const extra of typoRows.slice(1)) {
+        await tx
+          .delete(sauceRecipesTable)
+          .where(and(eq(sauceRecipesTable.id, extra.id), eq(sauceRecipesTable.scope, "live")));
+        mergedSauces++;
+      }
+    }
+
+    // 2. Learn the spec-import alias so future imports link the typo name to
+    // the canonical recipe ("recipeName" kind, context = recipe kind — the same
+    // namespace the import review's "use existing" picks write to).
+    const existingAlias = await tx
+      .select({ id: specImportAliasesTable.id })
+      .from(specImportAliasesTable)
+      .where(
+        and(
+          eq(specImportAliasesTable.scope, "live"),
+          eq(specImportAliasesTable.kind, "recipeName"),
+          eq(sql`lower(${specImportAliasesTable.externalName})`, TYPO.toLowerCase()),
+          eq(specImportAliasesTable.context, "sauce"),
+        ),
+      );
+    if (existingAlias.length === 0) {
+      await tx.insert(specImportAliasesTable).values({
+        scope: "live",
+        kind: "recipeName",
+        externalName: TYPO,
+        canonicalName: CANON,
+        context: "sauce",
+      });
+    }
+
+    // 3. Re-point every live profile still referencing the typo sauce name.
+    let repointedProfiles = 0;
+    const profiles = await tx
+      .select()
+      .from(brandProfilesTable)
+      .where(eq(brandProfilesTable.scope, "live"))
+      .for("update");
+    for (const p of profiles) {
+      if (p.key === PROFILE_KEY) continue; // handled by the targeted rewrite below
+      const values = { ...(p.values ?? {}) } as Record<string, unknown>;
+      const sauce = String(values.frontlineRecipeName ?? "").trim();
+      if (sauce.toLowerCase() !== TYPO.toLowerCase()) continue;
+      values.frontlineRecipeName = CANON;
+      if (survivorComponents) values.frontlineRecipe = survivorComponents;
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(and(eq(brandProfilesTable.key, p.key), eq(brandProfilesTable.scope, "live")));
+      repointedProfiles++;
+    }
+
+    // 4. Targeted rewrite of the corrupted Hannaford tikka masala profile.
+    let fixedProfile = 0;
+    const target = profiles.find((p) => p.key === PROFILE_KEY);
+    if (target) {
+      const values = { ...(target.values ?? {}) } as Record<string, unknown>;
+
+      // Sauce: canonical masala recipe, fresh components snapshot (this is what
+      // removes the Red Hot recipe's 200 lbs Garlic Sauce from freeze pull).
+      values.frontlineRecipeName = CANON;
+      values.frontlineRecipe = survivorComponents ?? [];
+      values.sauceOzPerPizza = 3.5;
+
+      // Dough: Naan Dough, with a fresh rows snapshot from the pool when the
+      // recipe exists (otherwise the form self-heals from the pool by name).
+      values.doughRecipeName = "Naan Dough";
+      const naan = await tx
+        .select()
+        .from(doughRecipesTable)
+        .where(
+          and(
+            eq(doughRecipesTable.scope, "live"),
+            eq(sql`lower(${doughRecipesTable.name})`, "naan dough"),
+          ),
+        );
+      if (naan.length > 0 && Array.isArray(naan[0].components)) {
+        values.doughRecipe = naan[0].components;
+      }
+
+      values.dieType = '11"';
+
+      // Applicator slots per the spec parse (saved_spec_sheets id=337). Clear a
+      // slot's stale components snapshot whenever its linked name changes so a
+      // wrong product's snapshot can't linger (the app re-resolves by name).
+      const slots: Array<{
+        n: 1 | 2 | 3 | 4;
+        type: string;
+        name: string;
+        oz: number;
+      }> = [
+        { n: 1, type: "Mix", name: "Masala Chicken Mix", oz: 2.07 },
+        { n: 2, type: "Mix", name: "White Fajita Mix", oz: 1.5 },
+        { n: 3, type: "Whole Mozzarella", name: "", oz: 4.0 },
+        { n: 4, type: "", name: "", oz: 0 },
+      ];
+      for (const s of slots) {
+        const prevName = String(values[`app${s.n}CheeseRecipeName`] ?? "").trim();
+        values[`app${s.n}Type`] = s.type;
+        values[`app${s.n}CheeseRecipeName`] = s.name;
+        values[`app${s.n}OzPerPizza`] = s.oz;
+        if (prevName.toLowerCase() !== s.name.toLowerCase()) {
+          values[`app${s.n}CheeseRecipe`] = [];
+        }
+      }
+
+      // Win the LWW against the poisoned production stamp AND any current
+      // client clock so a stale device can't re-publish the bad profile.
+      const stamp = Math.max(
+        (target.updatedAtMs ?? 0) + 1,
+        POISONED_STAMP_MS + 1,
+        Date.now(),
+      );
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(and(eq(brandProfilesTable.key, PROFILE_KEY), eq(brandProfilesTable.scope, "live")));
+      fixedProfile = 1;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({
+        result: { mergedSauces, renamedSauce, repointedProfiles, fixedProfile },
+      })
+      .where(eq(dataHealsTable.id, HANNAFORD_TIKKA_FIX_ID));
+    logger.info(
+      { heal: HANNAFORD_TIKKA_FIX_ID, mergedSauces, renamedSauce, repointedProfiles, fixedProfile },
+      "Data heal applied",
+    );
   });
 }
