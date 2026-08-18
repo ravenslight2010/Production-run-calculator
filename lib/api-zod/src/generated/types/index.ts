@@ -24,6 +24,7 @@ export * from './authResponse';
 export * from './brandProfile';
 export * from './brandProfileCrustValues';
 export * from './brandProfileList';
+export * from './brandProfileUpsert';
 export * from './brandProfileValues';
 export * from './capability';
 export * from './changePasswordCredentials';

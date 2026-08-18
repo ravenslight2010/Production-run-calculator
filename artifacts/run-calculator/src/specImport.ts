@@ -92,6 +92,7 @@ import {
   type SpecImportServerPoolRecipe,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
+import { canonicalProfileKey, markProfileForceEdited } from "./profileServerSync";
 import {
   saveSpecSheet,
   fetchSavedSpecSheets,
@@ -2141,6 +2142,18 @@ export async function commitSpecImport(
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
   const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys);
+
+  // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
+  // import touched as a FORCED upsert, so the server-pool push bypasses the
+  // per-profile LWW stamp guard. Without this, a wrong stored profile that
+  // happens to carry a newer stamp (saved after this import was prepared, or
+  // stamped by a fast-clocked device / server heal) silently blocks the
+  // apply — the manager sees "reimport hasn't fixed it" with no explanation
+  // (the Hannaford Tikka Masala incident). The LWW guard stays in place for
+  // ordinary autosaves; only this deliberate Apply action overrides it.
+  for (const { brand, flavor } of touchedProfiles) {
+    markProfileForceEdited(canonicalProfileKey(brand, flavor));
+  }
 
   // For the SERVER-POOL collects below only: backfill "who it goes to"
   // brand/flavor targets onto cheese-kind recipes that arrived unscoped, from

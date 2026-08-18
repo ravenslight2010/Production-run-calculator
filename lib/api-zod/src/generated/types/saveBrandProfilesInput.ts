@@ -5,9 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BrandProfile } from './brandProfile';
+import type { BrandProfileUpsert } from './brandProfileUpsert';
 
 export interface SaveBrandProfilesInput {
   /** The batch of setup profiles to create or update (by key) */
-  items: BrandProfile[];
+  items: BrandProfileUpsert[];
 }

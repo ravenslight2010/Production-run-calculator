@@ -7860,7 +7860,7 @@ export const getSaveBrandProfilesUrl = () => {
 }
 
 /**
- * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Available to any signed-in user (floor staff save profiles from the run form, matching the previous sync-map behavior).
+ * Upserts a batch of setup profiles by key. Each profile carries a client edit stamp (`updatedAt`, ms epoch); the server keeps the existing row unless the incoming stamp is strictly newer (per-profile last-write wins), so a stale device re-publishing an old form cannot clobber a fresher edit. Items may set `force: true` for explicit, authoritative manager actions (e.g. applying a spec import): a forced item always overwrites the stored row regardless of its stamp, and the stored stamp is advanced past the previous one so the write also wins future LWW comparisons. Requests containing any forced item require the `use-ai-tools` capability (the same gate as the spec-import parse flow) and are rejected with 403 otherwise, before any write. Ordinary non-forced saves remain available to any signed-in user (floor staff save profiles from the run form, matching the previous sync-map behavior).
  * @summary Create or update brand+flavor setup profiles (stamp-guarded)
  */
 export const saveBrandProfiles = async (saveBrandProfilesInput: SaveBrandProfilesInput, options?: RequestInit): Promise<BrandProfileList> => {

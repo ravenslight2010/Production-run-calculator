@@ -2561,8 +2561,16 @@ paths:
         edit stamp (`updatedAt`, ms epoch); the server keeps the existing row
         unless the incoming stamp is strictly newer (per-profile last-write
         wins), so a stale device re-publishing an old form cannot clobber a
-        fresher edit. Available to any signed-in user (floor staff save
-        profiles from the run form, matching the previous sync-map behavior).
+        fresher edit. Items may set `force: true` for explicit, authoritative
+        manager actions (e.g. applying a spec import): a forced item always
+        overwrites the stored row regardless of its stamp, and the stored
+        stamp is advanced past the previous one so the write also wins future
+        LWW comparisons. Requests containing any forced item require the
+        `use-ai-tools` capability (the same gate as the spec-import parse
+        flow) and are rejected with 403 otherwise, before any write. Ordinary
+        non-forced saves remain available to any signed-in user (floor staff
+        save profiles from the run form, matching the previous sync-map
+        behavior).
       requestBody:
         required: true
         content:
@@ -8255,6 +8263,21 @@ components:
           items:
             $ref: "#/components/schemas/BrandProfile"
 
+    BrandProfileUpsert:
+      allOf:
+        - $ref: "#/components/schemas/BrandProfile"
+        - type: object
+          properties:
+            force:
+              type: boolean
+              description: >-
+                When true this item is an explicit, authoritative write (a
+                manager Apply action such as a spec import): the server
+                overwrites the stored row even when its stamp is newer, and
+                advances the stored stamp past the previous one so the write
+                also wins future last-write-wins comparisons. Omit or false
+                for ordinary stamp-guarded saves.
+
     SaveBrandProfilesInput:
       type: object
       required:
@@ -8264,7 +8287,7 @@ components:
           type: array
           description: The batch of setup profiles to create or update (by key)
           items:
-            $ref: "#/components/schemas/BrandProfile"
+            $ref: "#/components/schemas/BrandProfileUpsert"
 
     DeleteBrandProfilesInput:
       type: object

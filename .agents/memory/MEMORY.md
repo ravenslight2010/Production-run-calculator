@@ -109,6 +109,7 @@
 - [Spec-import chunk union](spec-import-chunk-union.md) — chunk merges union applicator lists (split blocks are complementary); file merges replace; same type at two weights = two stations, never dedupe.
 - [Import redirect aliases](import-redirect-aliases.md) — cheese/premix "use existing" picks share the context-free appType alias namespace; suggestion-only auto-apply, one-to-one claim guards.
 - [Profile autofill](profile-autofill-from-saved-sheets.md) — planner must mirror applySpecImport EXACTLY, incl. the dough/sauce RECIPE tie loop (not just profile names); form-only until Save Setup.
+- [Profile force-apply override](profile-force-apply.md) — explicit manager Apply (spec import) sends force:true upserts that bypass the brand-profile LWW guard + advance the stamp; never use force for autosaves.
 - [Brand-profile server pool](brand-profile-server-pool.md) — profiles are a server pool w/ per-profile LWW stamps (NOT in sync); marker keys under the blob prefix + snapshot-guard + orphan-purge gotchas.
 - [Phantom recipe names](phantom-recipe-names.md) — merge universe must cover EVERY picker option source; legacy local name lists still feed the schedule editor and sync factory-wide.
 - [Batch upsert atomicity](batch-upsert-transaction.md) — batch master-data POSTs need ONE db.transaction; client heals persist the rename map pre-write or a partial failure strands local refs forever.

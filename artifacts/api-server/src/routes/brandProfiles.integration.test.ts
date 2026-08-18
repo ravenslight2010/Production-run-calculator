@@ -238,6 +238,116 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
     expect(items[0].updatedAt).toBe(1001);
   });
 
+  it("rejects a FORCED upsert from a plain operator (403) without touching the row", async () => {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 5000, values: { dieType: "current" } })],
+    });
+    const res = await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 9000, values: { dieType: "hijacked" }, force: true } as never)],
+    });
+    expect(res.status).toBe(403);
+    const items = await listAs(MANAGER);
+    expect(items).toHaveLength(1);
+    expect(items[0].values.dieType).toBe("current");
+    expect(items[0].updatedAt).toBe(5000);
+  });
+
+  it("rejects a MIXED batch containing a forced item from an operator before any write", async () => {
+    const res = await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [
+        profile({ key: "craft__supreme", brand: "craft", flavor: "supreme", updatedAt: 100 }),
+        profile({ updatedAt: 100, force: true } as never),
+      ],
+    });
+    expect(res.status).toBe(403);
+    const items = await listAs(MANAGER);
+    expect(items).toHaveLength(0);
+  });
+
+  it("still accepts an ordinary non-forced save from an operator", async () => {
+    const res = await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 100, values: { dieType: "staff-save" } })],
+    });
+    expect(res.status).toBe(200);
+    const items = await listAs(MANAGER);
+    expect(items[0].values.dieType).toBe("staff-save");
+  });
+
+  it("a FORCED upsert overwrites a stored row with a NEWER stamp and advances past it", async () => {
+    // The wrong profile got saved with a newer stamp (the Hannaford Tikka
+    // Masala incident): an explicit manager Apply must still win.
+    await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 5000, values: { dieType: "wrong" } })],
+    });
+    const res = await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 1000, values: { dieType: "corrected" }, force: true } as never)],
+    });
+    expect(res.status).toBe(200);
+    const items = await listAs(OPERATOR);
+    expect(items).toHaveLength(1);
+    expect(items[0].values.dieType).toBe("corrected");
+    // Stored stamp advanced PAST the previous one so the forced write also
+    // wins future LWW comparisons (no manual timestamp bump needed).
+    expect(items[0].updatedAt).toBe(5001);
+    const [row] = await db
+      .select()
+      .from(brandProfilesTable)
+      .where(sql`${brandProfilesTable.key} = ${"basha's__pepperoni"}`);
+    expect((row.values as Record<string, unknown>).dieType).toBe("corrected");
+    expect(row.updatedAtMs).toBe(5001);
+  });
+
+  it("a FORCED upsert with a newer stamp keeps its own (already-winning) stamp", async () => {
+    await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 1000, values: { dieType: "old" } })],
+    });
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 9000, values: { dieType: "applied" }, force: true } as never)],
+    });
+    const items = await listAs(OPERATOR);
+    expect(items[0].values.dieType).toBe("applied");
+    expect(items[0].updatedAt).toBe(9000);
+  });
+
+  it("a FORCED upsert inserts normally when no row exists", async () => {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 1234, values: { dieType: "fresh" }, force: true } as never)],
+    });
+    const items = await listAs(OPERATOR);
+    expect(items).toHaveLength(1);
+    expect(items[0].values.dieType).toBe("fresh");
+    expect(items[0].updatedAt).toBe(1234);
+  });
+
+  it("force is sticky across same-key duplicates within one request", async () => {
+    await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 5000, values: { dieType: "wrong" } })],
+    });
+    // The forced (older-stamped) duplicate loses the in-request stamp dedupe,
+    // but the batch's authoritative intent must survive onto the winner.
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [
+        profile({ updatedAt: 900, values: { dieType: "forced-older" }, force: true } as never),
+        profile({ updatedAt: 1000, values: { dieType: "newer" } }),
+      ],
+    });
+    const items = await listAs(OPERATOR);
+    expect(items[0].values.dieType).toBe("newer");
+    expect(items[0].updatedAt).toBe(5001);
+  });
+
+  it("a non-forced upsert is still blocked by a newer stored stamp (guard intact)", async () => {
+    await req(OPERATOR, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 5000, values: { dieType: "current" } })],
+    });
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [profile({ updatedAt: 1000, values: { dieType: "stale" }, force: false } as never)],
+    });
+    const items = await listAs(OPERATOR);
+    expect(items[0].values.dieType).toBe("current");
+    expect(items[0].updatedAt).toBe(5000);
+  });
+
   it("dedupes same-key items within one request keeping the newest stamp", async () => {
     await req(OPERATOR, "POST", "/api/brand-profiles", {
       items: [

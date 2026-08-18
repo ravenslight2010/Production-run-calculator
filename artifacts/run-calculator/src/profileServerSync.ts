@@ -54,7 +54,21 @@ function crustStorageKey(key: string): string {
 }
 
 type StampMap = Record<string, number>;
-type QueueOp = { t: "up" | "del"; key: string };
+// `force` (upserts only) marks an explicit authoritative write (manager Apply
+// — e.g. spec import): the server bypasses its strictly-newer stamp guard and
+// advances the stored stamp, so the apply lands even when the stored profile
+// carries a newer (wrong) stamp. Sticky until flushed.
+// `g` is a per-op generation: a flush may only remove the EXACT op it sent, so
+// an op re-enqueued while a round-trip is in flight (e.g. a forced apply
+// replacing an in-flight plain save) is never mistaken for the completed one
+// and silently dropped before it was ever sent.
+type QueueOp = { t: "up" | "del"; key: string; force?: boolean; g?: number };
+
+let genCounter = Date.now();
+function nextGen(): number {
+  genCounter += 1;
+  return genCounter;
+}
 
 // In-memory fallbacks for when localStorage writes FAIL (quota exceeded).
 // Without these, a full localStorage made enqueue()/writeQueue() silently
@@ -129,10 +143,21 @@ function writeQueue(ops: QueueOp[]): void {
   }
 }
 
-/** Last op per key wins (an edit followed by a delete must delete, and vice versa). */
+/**
+ * Last op per key wins (an edit followed by a delete must delete, and vice
+ * versa). A pending upsert's `force` flag is sticky across later plain edits:
+ * the authoritative write hasn't landed yet, and the newer local blob still
+ * needs to beat the server's (possibly newer-stamped) wrong row.
+ */
 function enqueue(op: QueueOp): void {
+  const prev = readQueue().find((o) => o.key === op.key);
   const ops = readQueue().filter((o) => o.key !== op.key);
-  ops.push(op);
+  const stamped = { ...op, g: nextGen() };
+  if (op.t === "up" && prev?.t === "up" && prev.force && !op.force) {
+    ops.push({ ...stamped, force: true });
+  } else {
+    ops.push(stamped);
+  }
   writeQueue(ops);
 }
 
@@ -157,6 +182,24 @@ export function markProfileEdited(key: string): void {
 }
 
 /**
+ * Record an explicit, AUTHORITATIVE profile write (a manager Apply action —
+ * currently the spec-import commit): like markProfileEdited, but the queued
+ * upsert carries `force: true` so the server overwrites the stored row even
+ * when its LWW stamp is newer. This is what makes "Apply" always win over a
+ * wrong profile that happens to carry a fresher stamp (the Hannaford Tikka
+ * Masala reimport-blocked incident). Call AFTER the localStorage blobs were
+ * written.
+ */
+export function markProfileForceEdited(key: string): void {
+  if (!key || key === "__") return;
+  const stamps = readMap(STAMPS_KEY);
+  stamps[key] = Math.max(Date.now(), (stamps[key] ?? 0) + 1);
+  writeMap(STAMPS_KEY, stamps);
+  enqueue({ t: "up", key, force: true });
+  void flushProfileQueue();
+}
+
+/**
  * Record a local deletion of profile `key`: drop its stamps, enqueue a server
  * delete, kick a flush. Call AFTER the localStorage blobs were removed.
  */
@@ -176,6 +219,8 @@ type ApiProfile = {
   values: Record<string, unknown>;
   crustValues: Record<string, unknown>;
   updatedAt: number;
+  /** Upserts only: authoritative write — server bypasses the LWW stamp guard. */
+  force?: boolean;
 };
 
 function parseBlob(raw: string | null): Record<string, unknown> {
@@ -216,7 +261,15 @@ function chunk<T>(list: T[], size: number): T[][] {
   return out;
 }
 
-async function apiSave(items: ApiProfile[]): Promise<void> {
+/**
+ * POST the items; returns the server's stored stamp per key (from the full
+ * list the save endpoint echoes back). Needed after FORCED saves, where the
+ * server advances the stored stamp past the previous row's — the client must
+ * adopt that authoritative stamp or its next plain edit is stamped below it
+ * and silently rejected by LWW.
+ */
+async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
+  const serverStamps = new Map<string, number>();
   for (const part of chunk(items, SERVER_MAX_BATCH)) {
     const res = await fetch("/api/brand-profiles", {
       method: "POST",
@@ -227,7 +280,18 @@ async function apiSave(items: ApiProfile[]): Promise<void> {
       body: JSON.stringify({ items: part }),
     });
     if (!res.ok) throw new Error(`Save brand profiles failed (${res.status})`);
+    try {
+      const data = (await res.json()) as { items?: ApiProfile[] };
+      for (const item of data.items ?? []) {
+        if (item && typeof item.key === "string" && typeof item.updatedAt === "number") {
+          serverStamps.set(item.key, item.updatedAt);
+        }
+      }
+    } catch {
+      // Malformed echo body — the save still landed; stamps self-heal on reconcile.
+    }
   }
+  return serverStamps;
 }
 
 async function apiDelete(keys: string[]): Promise<void> {
@@ -304,6 +368,7 @@ async function flushOnce(): Promise<void> {
       values: parseBlob(dough),
       crustValues: parseBlob(crust),
       updatedAt: stamps[op.key] ?? 1,
+      ...(op.force ? { force: true } : {}),
     });
     upsertKeys.push(op.key);
   }
@@ -311,9 +376,43 @@ async function flushOnce(): Promise<void> {
   let doneKeys: string[] = [...dropKeys];
 
   if (upserts.length > 0) {
-    await apiSave(upserts);
+    const serverStamps = await apiSave(upserts);
     const synced = readMap(SYNCED_KEY);
-    for (const item of upserts) synced[item.key] = item.updatedAt;
+    const localStamps = readMap(STAMPS_KEY);
+    // Keys re-enqueued while the round-trip was in flight (newer edit or a
+    // forced apply): their pending push must outrank whatever just landed.
+    // The sent ops themselves are still queued at this point (removed below),
+    // so only count queue entries whose generation differs from what was sent.
+    const pendingKeys = new Set(
+      readQueue()
+        .filter((op) => {
+          const sent = ops.find((o) => o.key === op.key);
+          return !sent || sent.t !== op.t || sent.g !== op.g;
+        })
+        .map((o) => o.key),
+    );
+    let localStampsChanged = false;
+    for (const item of upserts) {
+      let stamp = item.updatedAt;
+      if (item.force) {
+        // The server advanced the stored stamp past the previous row's; adopt
+        // it, or the next plain edit here is stamped below the row we just
+        // wrote and gets silently ignored by LWW until a reconcile pass.
+        const s = serverStamps.get(item.key);
+        if (typeof s === "number" && s > stamp) {
+          stamp = s;
+          // An edit queued during the flight must still win: seed its next
+          // push one past the authoritative stamp.
+          const floor = pendingKeys.has(item.key) ? s + 1 : s;
+          if ((localStamps[item.key] ?? 0) < floor) {
+            localStamps[item.key] = floor;
+            localStampsChanged = true;
+          }
+        }
+      }
+      synced[item.key] = stamp;
+    }
+    if (localStampsChanged) writeMap(STAMPS_KEY, localStamps);
     writeMap(SYNCED_KEY, synced);
     doneKeys = doneKeys.concat(upsertKeys);
   }
@@ -326,14 +425,17 @@ async function flushOnce(): Promise<void> {
     doneKeys = doneKeys.concat(deleteKeys);
   }
 
-  // Remove completed ops — but keep any op that was re-enqueued (newer edit)
-  // while the network round-trip was in flight.
+  // Remove completed ops — but ONLY the exact ops that were sent (matched by
+  // generation). An op re-enqueued while the round-trip was in flight (a
+  // newer edit, or a forced apply replacing a plain in-flight save) has a new
+  // generation and MUST survive, or an authoritative write could be marked
+  // done without ever being sent.
   const done = new Set(doneKeys);
   const current = readQueue();
   const remaining = current.filter((op) => {
     if (!done.has(op.key)) return true;
     const sent = ops.find((o) => o.key === op.key);
-    return !sent || sent.t !== op.t;
+    return !sent || sent.t !== op.t || sent.g !== op.g;
   });
   if (remaining.length !== current.length) writeQueue(remaining);
 }

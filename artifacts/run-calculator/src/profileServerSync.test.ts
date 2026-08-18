@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   canonicalProfileKey,
   markProfileEdited,
+  markProfileForceEdited,
   markProfileDeleted,
   flushProfileQueue,
   migrateLocalProfilesToServerIfNeeded,
@@ -127,7 +128,7 @@ describe("persisted push queue", () => {
     await settle();
 
     // Nothing landed, but the op is still persisted for the next kick.
-    expect(readQueue()).toEqual([{ t: "up", key: KEY }]);
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY })]);
     expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined();
 
     calls = []; // failed attempts also hit fetch — count only the retry
@@ -149,6 +150,117 @@ describe("persisted push queue", () => {
     expect(readMap(SYNCED_KEY)[KEY]).toBe(getProfileStamp(KEY));
   });
 
+  it("markProfileForceEdited pushes the item with force:true (authoritative Apply)", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "Corrected" });
+
+    markProfileForceEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+
+    expect(postCalls()).toHaveLength(1);
+    const body = postCalls()[0].body as { items: (ServerItem & { force?: boolean })[] };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0].key).toBe(KEY);
+    expect(body.items[0].force).toBe(true);
+    expect(body.items[0].updatedAt).toBe(getProfileStamp(KEY));
+    // Ordinary edits must NOT carry force.
+    calls = [];
+    markProfileEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+    const body2 = postCalls()[0].body as { items: (ServerItem & { force?: boolean })[] };
+    expect(body2.items[0].force).toBeUndefined();
+  });
+
+  it("a pending force op stays forced when a later plain edit re-enqueues the key", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "Corrected" });
+
+    networkDown = true;
+    markProfileForceEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+    markProfileEdited(KEY); // plain edit while the forced push hasn't landed
+    await flushProfileQueue();
+    await settle();
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY, force: true })]);
+
+    calls = [];
+    networkDown = false;
+    await flushProfileQueue();
+    await settle();
+    const body = postCalls()[0].body as { items: (ServerItem & { force?: boolean })[] };
+    expect(body.items[0].force).toBe(true);
+    // Once flushed the force is spent — the next edit is a plain one.
+    calls = [];
+    markProfileEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+    const body2 = postCalls()[0].body as { items: (ServerItem & { force?: boolean })[] };
+    expect(body2.items[0].force).toBeUndefined();
+  });
+
+  it("a forced apply enqueued while a plain save is IN FLIGHT is still sent", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "V1" });
+
+    // Hold the first POST open so the forced op replaces the queued plain op
+    // while its round-trip is in flight.
+    const releases: Array<() => void> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        await new Promise<void>((r) => releases.push(r));
+        return { ok: true, status: 200, json: async () => ({ items: listItems }) };
+      },
+    );
+
+    markProfileEdited(KEY);
+    await settle(); // plain POST is now in flight
+    expect(postCalls()).toHaveLength(1);
+
+    setLocalBlobs(KEY, { doughRecipeName: "Imported" });
+    markProfileForceEdited(KEY); // replaces the queued op mid-flight
+
+    releases.shift()?.(); // complete the plain POST
+    await settle();
+    // The forced op must NOT have been dropped as "completed" — it was never sent.
+    releases.shift()?.(); // complete the follow-up forced POST
+    await settle();
+
+    expect(postCalls().length).toBeGreaterThanOrEqual(2);
+    const last = postCalls()[postCalls().length - 1].body as {
+      items: (ServerItem & { force?: boolean })[];
+    };
+    expect(last.items[0].force).toBe(true);
+    expect(last.items[0].values).toEqual({ doughRecipeName: "Imported" });
+    expect(readQueue()).toEqual([]);
+  });
+
+  it("adopts the server's advanced stamp after a forced save so the next edit still wins", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "Imported" });
+
+    markProfileForceEdited(KEY);
+    const sentStamp = getProfileStamp(KEY);
+    // Server row had a (wrong) FUTURE stamp; the forced write advanced past it.
+    const serverStamp = sentStamp + 60_000;
+    listItems = [serverItem(KEY, serverStamp, { doughRecipeName: "Imported" })];
+    await flushProfileQueue();
+    await settle();
+
+    // Client adopted the authoritative stamp.
+    expect(getProfileStamp(KEY)).toBe(serverStamp);
+    expect(readMap(SYNCED_KEY)[KEY]).toBe(serverStamp);
+
+    // An immediate follow-up plain edit must be stamped ABOVE it (else the
+    // server's LWW guard silently rejects the edit).
+    calls = [];
+    markProfileEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+    const body = postCalls()[0].body as { items: ServerItem[] };
+    expect(body.items[0].updatedAt).toBeGreaterThan(serverStamp);
+  });
+
   it("a queued delete survives a failed flush and retries", async () => {
     writeMap(SYNCED_KEY, { [KEY]: 5 });
 
@@ -156,7 +268,7 @@ describe("persisted push queue", () => {
     markProfileDeleted(KEY);
     await flushProfileQueue();
     await settle();
-    expect(readQueue()).toEqual([{ t: "del", key: KEY }]);
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "del", key: KEY })]);
 
     calls = []; // failed attempts also hit fetch — count only the retry
     networkDown = false;

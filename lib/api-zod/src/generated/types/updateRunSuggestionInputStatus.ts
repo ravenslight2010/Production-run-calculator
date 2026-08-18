@@ -12,4 +12,5 @@ export type UpdateRunSuggestionInputStatus = typeof UpdateRunSuggestionInputStat
 export const UpdateRunSuggestionInputStatus = {
   accepted: 'accepted',
   dismissed: 'dismissed',
+  pending: 'pending',
 } as const;

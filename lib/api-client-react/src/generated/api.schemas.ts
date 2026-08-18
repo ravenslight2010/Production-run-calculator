@@ -2450,6 +2450,7 @@ export type UpdateRunSuggestionInputStatus = typeof UpdateRunSuggestionInputStat
 export const UpdateRunSuggestionInputStatus = {
   accepted: 'accepted',
   dismissed: 'dismissed',
+  pending: 'pending',
 } as const;
 
 export interface UpdateRunSuggestionInput {
@@ -2768,9 +2769,14 @@ export interface BrandProfileList {
   items: BrandProfile[];
 }
 
+export type BrandProfileUpsert = BrandProfile & {
+  /** When true this item is an explicit, authoritative write (a manager Apply action such as a spec import): the server overwrites the stored row even when its stamp is newer, and advances the stored stamp past the previous one so the write also wins future last-write-wins comparisons. Omit or false for ordinary stamp-guarded saves. */
+  force?: boolean;
+};
+
 export interface SaveBrandProfilesInput {
   /** The batch of setup profiles to create or update (by key) */
-  items: BrandProfile[];
+  items: BrandProfileUpsert[];
 }
 
 export interface DeleteBrandProfilesInput {

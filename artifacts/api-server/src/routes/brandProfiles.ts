@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, brandProfilesTable, type BrandProfileRow } from "@workspace/db";
 import { SaveBrandProfilesBody, DeleteBrandProfilesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
+import { getUserCapabilities } from "../lib/roles";
 
 // Plain generic sauce category labels that imply the spec-sheet parenthetical
 // product name was silently dropped during import (e.g. a row reading
@@ -51,6 +52,12 @@ type ApiProfile = {
   values: Record<string, unknown>;
   crustValues: Record<string, unknown>;
   updatedAt: number;
+  /**
+   * Explicit authoritative write (manager Apply — e.g. spec import): bypass
+   * the strictly-newer stamp guard and advance the stored stamp past the
+   * previous one so the write also wins future LWW comparisons.
+   */
+  force?: boolean;
 };
 
 function toApiItem(row: BrandProfileRow): ApiProfile {
@@ -75,6 +82,7 @@ function sanitizeItem(raw: {
   values: Record<string, unknown>;
   crustValues: Record<string, unknown>;
   updatedAt: number;
+  force?: boolean;
 }): ApiProfile | null {
   const brand = (raw.brand ?? "").trim();
   const flavor = (raw.flavor ?? "").trim();
@@ -109,6 +117,7 @@ function sanitizeItem(raw: {
     values: values as Record<string, unknown>,
     crustValues: crustValues as Record<string, unknown>,
     updatedAt: Math.floor(raw.updatedAt),
+    ...(raw.force === true ? { force: true } : {}),
   };
 }
 
@@ -363,12 +372,70 @@ router.post("/brand-profiles", async (req: Request, res: Response) => {
     const item = sanitizeItem(raw);
     if (!item) continue;
     const prev = byKey.get(item.key);
-    if (!prev || item.updatedAt >= prev.updatedAt) byKey.set(item.key, item);
+    if (!prev || item.updatedAt >= prev.updatedAt) {
+      // A force flag on either duplicate is sticky: the batch asked for an
+      // authoritative write of this key, keep that regardless of which stamp
+      // wins the in-request dedupe.
+      byKey.set(item.key, prev?.force ? { ...item, force: true } : item);
+    } else if (item.force && !prev.force) {
+      byKey.set(item.key, { ...prev, force: true });
+    }
+  }
+
+  // Forced (authoritative) writes bypass the LWW stamp guard, so they must
+  // not be reachable by every signed-in user — otherwise `force: true` is a
+  // client-controlled bypass of the very protection it exists alongside.
+  // Gate them on the same capability that gates the spec-import flow that
+  // issues them ("use-ai-tools", the AI parse endpoint's guard). Ordinary
+  // non-forced saves stay open to all staff (run-form autosaves). Checked
+  // BEFORE any write so a mixed batch never half-applies then 403s.
+  if ([...byKey.values()].some((i) => i.force)) {
+    try {
+      const caps = req.userId ? await getUserCapabilities(req.userId) : [];
+      if (!caps.includes("use-ai-tools")) {
+        res.status(403).json({ error: "Missing capability: use-ai-tools" });
+        return;
+      }
+    } catch (err) {
+      req.log.error({ err }, "capability check failed for forced profile save");
+      res.status(500).json({ error: "Capability check failed" });
+      return;
+    }
   }
 
   try {
     const scope = currentScope();
     for (const item of byKey.values()) {
+      if (item.force) {
+        // AUTHORITATIVE write (explicit manager Apply, e.g. spec import):
+        // overwrite regardless of the stored stamp — the LWW guard exists to
+        // stop a *stale device* republishing an old form, not to block a
+        // manager's deliberate correction. The stored stamp is advanced past
+        // the previous one so this write also wins every future LWW compare
+        // (a wrong profile saved "more recently" can no longer resurrect).
+        await db
+          .insert(brandProfilesTable)
+          .values({
+            key: item.key,
+            scope,
+            brand: item.brand,
+            flavor: item.flavor,
+            values: item.values,
+            crustValues: item.crustValues,
+            updatedAtMs: item.updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: [brandProfilesTable.key, brandProfilesTable.scope],
+            set: {
+              brand: item.brand,
+              flavor: item.flavor,
+              values: item.values,
+              crustValues: item.crustValues,
+              updatedAtMs: sql`GREATEST(${brandProfilesTable.updatedAtMs} + 1, ${item.updatedAt})`,
+            },
+          });
+        continue;
+      }
       // Stamp-guarded upsert: insert when absent; on conflict only overwrite
       // when the incoming stamp is STRICTLY newer than the stored one (older
       // or equal-stamp writes are silently ignored — last-write-wins).
