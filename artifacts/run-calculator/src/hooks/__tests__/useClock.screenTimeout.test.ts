@@ -202,6 +202,150 @@ describe("useClock — screen timeout / visibility event handling", () => {
     // nowTime must not have advanced past the pre-hide tick.
     expect(result.current.getTime()).toBe(timeAfterFirstTick);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 5. Repeated hide/show cycles don't drift the clock or accumulate phantom
+  //    intervals — 3 cycles while status="running".
+  //
+  // Each screen-lock/unlock pair (hide then show) must:
+  //   • Clear the interval while hidden (vi.getTimerCount() === 0 after hide).
+  //   • Restart exactly ONE interval on show (vi.getTimerCount() === 1 after
+  //     show) — stale clearInterval ordering would leave 2+ timers.
+  //   • Snap nowTime to the current system clock on each show, so the clock
+  //     catches up the gap without phantom ticks filling it in.
+  //   • NOT fire any callbacks during the hidden period, so nowTime doesn't
+  //     advance while the device is asleep between cycles.
+  //
+  // cleanup() is called first so stale visibilitychange listeners from
+  // earlier tests in this file don't inflate vi.getTimerCount() when we
+  // dispatch events (same pattern as test M in the status-transition suite).
+  //
+  // Timeline (all times relative to T0):
+  //   Cycle 1: visible 0→1000 (tick→T0+1000), hidden 1000→3000 (sleep 2s),
+  //            show→snap T0+3000, count=1.
+  //   Cycle 2: visible 3000→4000 (tick→T0+4000), hidden 4000→7000 (sleep 3s),
+  //            show→snap T0+7000, count=1.
+  //   Cycle 3: visible 7000→8000 (tick→T0+8000), hidden 8000→10000 (sleep 2s),
+  //            show→snap T0+10000, count=1.
+  //   Final:   advance 1s → nowTime=T0+11000 (exactly one tick, no phantom).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("5. repeated hide/show cycles: exactly one interval active after each show, nowTime snaps correctly, no phantom ticks", () => {
+    // Remove stale listeners from hooks mounted by earlier tests in this
+    // describe so that dispatching visibilitychange events only fires the
+    // single hook under test.
+    cleanup();
+
+    const { result, rerender } = renderHook(() => useClock("running"));
+
+    // One interval must be active immediately after mount (tab is visible).
+    expect(vi.getTimerCount()).toBe(1);
+
+    // ── Cycle 1 ─────────────────────────────────────────────────────────────
+    // Advance 1 s → interval fires once → nowTime = T0 + 1_000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Go hidden: onVisibility clears the interval → 0 active timers.
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Sleep 2 s while hidden — no callback should fire.
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000); // no advance during sleep
+
+    // Show: onVisibility snaps nowTime to system clock (T0+3000) and restarts
+    // exactly one interval.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender(); // flush pending setNowTime()
+    });
+    expect(vi.getTimerCount()).toBe(1); // exactly one interval active
+    expect(result.current.getTime()).toBe(T0 + 3_000); // snapped to current clock
+
+    // ── Cycle 2 ─────────────────────────────────────────────────────────────
+    // Advance 1 s → interval fires → nowTime = T0 + 4_000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 4_000);
+
+    // Go hidden again: interval cleared → 0 active timers.
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Sleep 3 s — no ticks.
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 4_000); // no advance during sleep
+
+    // Show: snap to T0+7000, exactly one interval.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    expect(result.current.getTime()).toBe(T0 + 7_000);
+
+    // ── Cycle 3 ─────────────────────────────────────────────────────────────
+    // Advance 1 s → nowTime = T0 + 8_000.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 8_000);
+
+    // Go hidden a third time → 0 active timers.
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Sleep 2 s — no ticks.
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 8_000); // no advance during sleep
+
+    // Show: snap to T0+10000, exactly one interval.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    expect(result.current.getTime()).toBe(T0 + 10_000);
+
+    // ── Final cadence check ──────────────────────────────────────────────────
+    // After 3 cycles exactly one interval is running.  Advancing 1 s must
+    // advance nowTime by exactly 1_000 ms — no phantom tick doubles it.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 11_000);
+  });
 });
 
 // ── Slow-tick path (runStatus="pending" / "ended") ────────────────────────────
