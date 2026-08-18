@@ -1122,6 +1122,164 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (g): 'need X lbs' badge on a prep mix card updates immediately when
+   * the manager edits the 'Already made' field.
+   *
+   * Mechanism:
+   *   • The badge renders in home.tsx (~line 14646):
+   *       {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
+   *   • MixAlreadyMadeInput saves on blur (onBlur → saveMixes → onSaved).
+   *   • onSaved calls cycleCountQc.setQueryData(["mixes"], saved), which updates
+   *     the `mixes` React-Query cache. Home.tsx uses the live `mixes` array to
+   *     find the mix record (home.tsx ~14677) and passes it to buildMixPlan, so
+   *     remainingLbs re-computes from the new amountAlreadyMade on the next render.
+   *
+   * Formula (lib/mixes/src/index.ts, computeEntryFromComponentLbs):
+   *   componentLbs = (RUN_OZ / 16) × totalPizzas     → 100.00 lbs
+   *   totalLbs     = componentLbs × 1.15 + 20         → 135.00 lbs
+   *   After typing 50:
+   *     remainingLbs = 135.00 − 50 = 85.00            → badge "need 85.00 lbs"
+   *   After clearing to 0:
+   *     remainingLbs = 135.00 = totalLbs              → badge absent
+   */
+  test("'need X lbs' badge updates immediately when 'already made' is edited", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `badge-live-${suffix}`;
+    const mixName = `BadgeLivePrepMix ${suffix}`;
+    const ingredient = `BadgeHerb_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    // Recipe constants — same as existing pull tests so the formulas are verifiable.
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const componentLbs = (RUN_OZ / 16) * totalPizzas;                        // 100.00
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS;    // 135.00
+
+    const EDIT_AMOUNT = 50;
+    const remainingAfterEdit = totalLbs - EDIT_AMOUNT;                        // 85.00
+    const remainingStr = remainingAfterEdit.toFixed(2);                       // "85.00"
+
+    try {
+      // Create the prep mix with amountAlreadyMade = 0 so the badge is initially
+      // absent (remainingLbs == totalLbs → condition false).
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: RUN_OZ,
+        amountAlreadyMade: 0,
+      });
+
+      // Sign up and dismiss onboarding.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject run values into localStorage so the mix card appears.
+      await page.evaluate(
+        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              casesNeeded,
+              pizzasPerCase,
+              casesPerLayer: 0,
+            }),
+          );
+        },
+        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // Reload so the form initialises from the injected localStorage.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // Navigate to the Mixes tab.
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // Confirm the mix card is present.
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // ── Step 1: Badge must be absent before any edit ───────────────────────
+      // amountAlreadyMade = 0 → remainingLbs = totalLbs → condition false.
+      await expect(
+        todayCard.getByText(/need .+ lbs/, { exact: false }),
+      ).toHaveCount(0, { timeout: 3_000 });
+
+      // ── Step 2: Type 50 into the "Already made" input and blur ────────────
+      // MixAlreadyMadeInput saves on blur via onBlur → saveMixes → onSaved.
+      const alreadyMadeInput = todayCard.locator('input[type="number"]').first();
+      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill(String(EDIT_AMOUNT));
+      // Tab away to trigger onBlur → save.
+      await alreadyMadeInput.press("Tab");
+
+      // Give the save round-trip and React re-render time to complete.
+      await page.waitForTimeout(1_500);
+
+      // ── Step 3: Badge must now show "need 85.00 lbs" ──────────────────────
+      // remainingLbs = totalLbs − 50 = 135.00 − 50 = 85.00
+      // The badge span text: `need ${fmtNum(remainingLbs, 2)} lbs`
+      await expect(
+        todayCard.getByText(`need ${remainingStr} lbs`, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── Step 4: Clear the field back to 0 and blur ────────────────────────
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill("0");
+      await alreadyMadeInput.press("Tab");
+
+      // Give the save round-trip and React re-render time to complete.
+      await page.waitForTimeout(1_500);
+
+      // ── Step 5: Badge must disappear again ────────────────────────────────
+      // amountAlreadyMade = 0 → remainingLbs = totalLbs → condition false.
+      await expect(
+        todayCard.getByText(/need .+ lbs/, { exact: false }),
+      ).toHaveCount(0, { timeout: 5_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (f): Mix plan collapses to empty when ALL runs in a shift are ended.
    *
    * Mechanism: liveRunsForMixes (home.tsx ~14469) filters dayState.runs by
