@@ -849,6 +849,74 @@ describe("useClock — status transition interval cleanup", () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // N. running → ended while the tab is hidden: the cleanup path runs but the
+  //    new PENDING_CLOCK_MS interval must NOT start (start() guards:
+  //    document.hidden → id=null).
+  //
+  // This is the analogous test to M (paused → ended hidden-tab), confirming
+  // the fast → slow cadence switch also holds when the tab is hidden at the
+  // moment of the running → ended transition.
+  //
+  // Steps:
+  //   1. Mount with "running" (tab visible); tick once at T0+1000.
+  //   2. Hide the tab, then transition to "ended".
+  //   3. Advance PENDING_CLOCK_MS — nowTime must NOT advance (no phantom slow
+  //      interval was started while the tab was hidden).
+  //   4. Make the tab visible; dispatch visibilitychange so onVisibility snaps
+  //      nowTime and starts the slow interval.  Advance PENDING_CLOCK_MS — the
+  //      interval fires exactly once.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("N. running → ended while tab hidden: slow interval does NOT start until tab is visible again", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "running" | "ended" }) => useClock(status),
+      { initialProps: { status: "running" as const } },
+    );
+
+    // Step 1: first 1-second tick while running (tab visible).
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 2: hide the tab, then transition to "ended".
+    // useClock's useEffect cleanup fires (clearInterval on the running 1-s
+    // interval + removeEventListeners), then re-runs: start() sees
+    // document.hidden=true → id=null (no slow interval created).
+    act(() => {
+      setDocumentHidden(true);
+      rerender({ status: "ended" });
+    });
+    const timeAtTransition = result.current.getTime(); // T0 + 1_000
+
+    // Step 3: advance a full PENDING_CLOCK_MS while hidden.
+    // No interval was registered (document.hidden=true at effect setup time),
+    // so no callback fires and nowTime must not advance.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(timeAtTransition);
+
+    // Step 4: tab becomes visible → onVisibility snaps nowTime to the current
+    // system clock (T0 + 1_000 + PENDING_CLOCK_MS) and starts the slow
+    // interval.  Advancing PENDING_CLOCK_MS more fires it exactly once.
+    const snapTime = T0 + 1_000 + PENDING_CLOCK_MS;
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender({ status: "ended" }); // flush pending setNowTime() state update
+    });
+    expect(result.current.getTime()).toBe(snapTime);
+
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(snapTime + PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // J. running → paused: same-cadence transition keeps exactly one 1-second
   //    interval (no double-tick).
   //
