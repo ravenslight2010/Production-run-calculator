@@ -1,7 +1,7 @@
 #!/bin/bash
 # check-model-version-bump.sh
 #
-# Fails when either of the following changes in a commit without a matching
+# Fails when any of the following changes in a commit without a matching
 # SPEC_PARSE_VERSION bump (i.e. the version value must actually change):
 #
 #   1. AI_MODELS / pickModel is modified in:
@@ -9,6 +9,11 @@
 #
 #   2. The AI parse-spec-sheet prompt builder is modified in:
 #        artifacts/api-server/src/routes/aiParseSpecSheet.ts
+#      (non-trivial changes only — comment-only edits are ignored)
+#
+#   3. The spec-import sanitizer or ParsedRecipe/ParsedProfile type definitions
+#      are modified in:
+#        lib/spec-import/src/index.ts
 #      (non-trivial changes only — comment-only edits are ignored)
 #
 # WHY: the spec importer's per-chunk limits (chunk size, max_completion_tokens,
@@ -23,6 +28,11 @@
 # means stale cached parses (built with the old prompt) keep being served
 # silently — managers re-import the same file and see the old broken parse.
 #
+# The same applies to sanitizer / type-shape changes: sanitizeParsedSpecImport
+# output shape changes and new/removed fields on ParsedRecipe or ParsedProfile
+# alter what the saved parse snapshot encodes — stale snapshots built against
+# the old shape keep being served until the version is bumped.
+#
 # USAGE (called by `pnpm --filter @workspace/scripts run check-model-bump`):
 #   Default: checks HEAD~1..HEAD (last commit).
 #   Override: DIFF_BASE=<ref> DIFF_TARGET=<ref> ./check-model-version-bump.sh
@@ -34,6 +44,7 @@ set -euo pipefail
 
 MODELS_FILE="lib/integrations-openai-ai-server/src/models.ts"
 PROMPT_FILE="artifacts/api-server/src/routes/aiParseSpecSheet.ts"
+SANITIZER_FILE="lib/spec-import/src/index.ts"
 SPEC_FILE="artifacts/run-calculator/src/specImport.ts"
 
 DIFF_BASE="${DIFF_BASE:-HEAD~1}"
@@ -77,16 +88,34 @@ if [ -n "${PROMPT_DIFF}" ]; then
   )
 fi
 
-# ── Early exit when neither trigger fired ─────────────────────────────────────
-if [ -z "${MODEL_VALUE_CHANGE}" ] && [ -z "${PROMPT_MEANINGFUL_CHANGE}" ]; then
-  if [ -z "${MODELS_DIFF}" ] && [ -z "${PROMPT_DIFF}" ]; then
-    echo "OK: neither ${MODELS_FILE} nor ${PROMPT_FILE} changed — no SPEC_PARSE_VERSION bump required."
+# ── Step 3: did the sanitizer / type-definitions file change non-trivially? ───
+SANITIZER_DIFF=$(git diff "${DIFF_BASE}..${DIFF_TARGET}" -- "${SANITIZER_FILE}" 2>/dev/null || true)
+
+SANITIZER_MEANINGFUL_CHANGE=""
+if [ -n "${SANITIZER_DIFF}" ]; then
+  # Look at added OR removed lines ('+'/'-' prefix, not '+++'/---').
+  # Exclude pure comment lines (// …  or  * …  or  /* …  or  */ ) and blank lines.
+  SANITIZER_MEANINGFUL_CHANGE=$(
+    echo "${SANITIZER_DIFF}" \
+      | grep -E '^[+-][^+-]' \
+      | grep -vE '^[+-]\s*(//|/\*|\*/?)\s' \
+      | grep -vE '^[+-]\s*$' \
+      || true
+  )
+fi
+
+# ── Early exit when no trigger fired ──────────────────────────────────────────
+if [ -z "${MODEL_VALUE_CHANGE}" ] && [ -z "${PROMPT_MEANINGFUL_CHANGE}" ] && [ -z "${SANITIZER_MEANINGFUL_CHANGE}" ]; then
+  if [ -z "${MODELS_DIFF}" ] && [ -z "${PROMPT_DIFF}" ] && [ -z "${SANITIZER_DIFF}" ]; then
+    echo "OK: neither ${MODELS_FILE}, ${PROMPT_FILE}, nor ${SANITIZER_FILE} changed — no SPEC_PARSE_VERSION bump required."
   elif [ -z "${MODEL_VALUE_CHANGE}" ] && [ -n "${MODELS_DIFF}" ]; then
     echo "OK: ${MODELS_FILE} changed but no quoted model value lines detected (comments/types only)."
   elif [ -z "${PROMPT_MEANINGFUL_CHANGE}" ] && [ -n "${PROMPT_DIFF}" ]; then
     echo "OK: ${PROMPT_FILE} changed but only comments or whitespace — no SPEC_PARSE_VERSION bump required."
+  elif [ -z "${SANITIZER_MEANINGFUL_CHANGE}" ] && [ -n "${SANITIZER_DIFF}" ]; then
+    echo "OK: ${SANITIZER_FILE} changed but only comments or whitespace — no SPEC_PARSE_VERSION bump required."
   else
-    echo "OK: no meaningful model or prompt changes detected."
+    echo "OK: no meaningful model, prompt, or sanitizer changes detected."
   fi
   exit 0
 fi
@@ -106,8 +135,17 @@ if [ -n "${PROMPT_MEANINGFUL_CHANGE}" ]; then
   fi
   echo ""
 fi
+if [ -n "${SANITIZER_MEANINGFUL_CHANGE}" ]; then
+  echo "Detected non-trivial sanitizer/type change in ${SANITIZER_FILE}:"
+  SANITIZER_LINE_COUNT=$(echo "${SANITIZER_MEANINGFUL_CHANGE}" | wc -l)
+  echo "${SANITIZER_MEANINGFUL_CHANGE}" | sed -n '1,20p' | sed 's/^/  /'
+  if [ "${SANITIZER_LINE_COUNT}" -gt 20 ]; then
+    echo "  … (${SANITIZER_LINE_COUNT} lines total)"
+  fi
+  echo ""
+fi
 
-# ── Step 3: extract SPEC_PARSE_VERSION at base and target, compare values ─────
+# ── Step 4: extract SPEC_PARSE_VERSION at base and target, compare values ─────
 # Use `git show REF:FILE` to read the file at each ref and extract the version
 # string (e.g. "22"). This avoids false-positives from comments or unchanged
 # re-assignments — the version value must actually differ.
@@ -136,17 +174,19 @@ fi
 
 # ── FAIL ──────────────────────────────────────────────────────────────────────
 cat <<EOF
-FAIL: AI model or prompt changed but SPEC_PARSE_VERSION was NOT bumped.
+FAIL: AI model, prompt, or sanitizer/type-shape changed but SPEC_PARSE_VERSION was NOT bumped.
 
   Base version  (${DIFF_BASE}): ${BASE_VERSION:-"<not found>"}
   Target version (${DIFF_TARGET}): ${TARGET_VERSION:-"<not found>"}
 
-Every model change AND every non-trivial prompt rewrite must be paired with a
+Every model change, non-trivial prompt rewrite, AND non-trivial change to the
+sanitizer or ParsedRecipe/ParsedProfile type definitions must be paired with a
 SPEC_PARSE_VERSION bump so that cached spec-sheet parses (saved_spec_sheets DB
 table) are invalidated.
 
 Without the bump, managers re-import the same file and silently receive stale
-parse results built against the old model or old prompt — no error is shown.
+parse results built against the old model, old prompt, or old field shape —
+no error is shown.
 
 Fix:
   1. Increment SPEC_PARSE_VERSION in:
@@ -164,7 +204,7 @@ Fix:
        VERIFY_USERNAME=<manager> VERIFY_PASSWORD=<pass> \\
        pnpm --filter @workspace/scripts run verify-large-spec-import
 
-  3. After a prompt rewrite, also run the parse-rule round-trip harness:
+  3. After a prompt or sanitizer rewrite, also run the parse-rule round-trip harness:
 
        cd artifacts/api-server
        ./node_modules/.bin/esbuild scripts/e2e-spec-roundtrip.ts --bundle \\
