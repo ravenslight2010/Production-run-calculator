@@ -473,6 +473,209 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (d): Per-run breakdown on a prep mix card is correct when two brands
+   * share the same ingredient at different oz/pizza.
+   *
+   * Mechanism:
+   *   1. Insert a prep mix with a single shared ingredient (isPrep = true).
+   *   2. Sign up (fresh account), then inject localStorage so dayState has two
+   *      branded runs that BOTH list the ingredient:
+   *        • Run 1 — brand1, oz1 = 2.0, casesNeeded = 100, pizzasPerCase = 8
+   *                   → 800 pizzas → contribution = (2.0/16) × 800 = 100.00 lbs
+   *        • Run 2 — brand2, oz2 = 1.5, casesNeeded =  50, pizzasPerCase = 8
+   *                   → 400 pizzas → contribution = (1.5/16) × 400 =  37.50 lbs
+   *   3. Reload so the form initialises from injected localStorage.
+   *   4. Navigate to the Mixes tab.
+   *   5. Verify:
+   *        • "Show run breakdown (2 runs)" toggle is visible
+   *        • Clicking it reveals brand1 with 100.00 lbs
+   *        • Clicking it reveals brand2 with  37.50 lbs
+   *        • Pull For Prep = 100.00 + 37.50 = 137.50 lbs
+   *          (amountAlreadyMade = 0 → pull = raw component lbs)
+   *
+   * This exercises the multi-run aggregation path in buildMixPlan
+   * (contributions[] array, lib/mixes/src/index.ts ~line 1057–1115) and the
+   * collapsible breakdown toggle in home.tsx (~line 14649).
+   */
+  test("prep mix card shows correct per-run breakdown when two brands share an ingredient", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-breakdown-${suffix}`;
+    const mixName = `BreakdownPrepMix ${suffix}`;
+    const ingredient = `SharedHerb_${suffix}`;
+
+    // Run 1 values
+    const brand1 = `Alpha_${suffix}`;
+    const OZ1 = 2.0;
+    const CASES1 = 100;
+    const PPC = 8; // pizzasPerCase — shared by both runs
+    // Run 2 values
+    const brand2 = `Beta_${suffix}`;
+    const OZ2 = 1.5;
+    const CASES2 = 50;
+
+    const pizzas1 = CASES1 * PPC; // 800
+    const pizzas2 = CASES2 * PPC; // 400
+    const contrib1Lbs = (OZ1 / 16) * pizzas1; // 100.00
+    const contrib2Lbs = (OZ2 / 16) * pizzas2; //  37.50
+    const pullLbs = contrib1Lbs + contrib2Lbs;  // 137.50
+
+    const today = todayStr();
+
+    try {
+      // Insert a brand-less prep mix (isPrep=true) so it matches any run whose
+      // profile includes the component ingredient, regardless of brand.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: 0.1, // low fallback value so any match with run oz is distinguishable
+      });
+
+      // Sign up and dismiss the onboarding dialog.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // ── Inject two runs into localStorage ─────────────────────────────────
+      // The fresh account starts with one seeded placeholder run. We:
+      //   • Tag run 1 with brand1 and set its ingredient/oz/case values.
+      //   • Append a second run object with brand2 and set its values.
+      // Both runs carry the same ingredient name so buildMixPlan's prep-mix pass
+      // picks up contributions from both.
+      await page.evaluate(
+        ({ brand1, brand2, ingredient, oz1, oz2, cases1, cases2, ppc }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+            currentRunId?: string;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+
+          // ── Run 1: reuse the existing placeholder ──────────────────────────
+          day.runs[0].brand = brand1;
+          const runId1 = day.runs[0].id;
+          const existing1 = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId1)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId1),
+            JSON.stringify({
+              ...existing1,
+              pep1Type: ingredient,
+              pep1OzPerPizza: oz1,
+              casesNeeded: cases1,
+              pizzasPerCase: ppc,
+              casesPerLayer: 0,
+            }),
+          );
+
+          // ── Run 2: append a new minimal run object ─────────────────────────
+          const runId2 = `e2e-run2-${Math.random().toString(36).slice(2, 9)}`;
+          day.runs.push({ id: runId2, brand: brand2 });
+          localStorage.setItem(
+            RUN_KEY(runId2),
+            JSON.stringify({
+              pep1Type: ingredient,
+              pep1OzPerPizza: oz2,
+              casesNeeded: cases2,
+              pizzasPerCase: ppc,
+              casesPerLayer: 0,
+            }),
+          );
+
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+        },
+        { brand1, brand2, ingredient, oz1: OZ1, oz2: OZ2, cases1: CASES1, cases2: CASES2, ppc: PPC },
+      );
+
+      // Reload so the React form initialises from the freshly-written localStorage.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+
+      // The "Get Started" dialog only auto-opens on first login; handle defensively.
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+
+      // Brief pause for startup async effects (useMixes fetch, etc.).
+      await page.waitForTimeout(1_000);
+
+      // ── Navigate to the Mixes tab ──────────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── Verify the group card for today is present ─────────────────────────
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // ── Verify "Ingredient Prep" section heading ───────────────────────────
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── Verify the mix name is visible ─────────────────────────────────────
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── Verify the "Show run breakdown (2 runs)" toggle is visible ─────────
+      // This toggle only renders when contributions.length >= 2 (home.tsx ~14649).
+      const breakdownBtn = todayCard.getByRole("button", {
+        name: /show run breakdown \(2 runs\)/i,
+      });
+      await expect(breakdownBtn).toBeVisible({ timeout: 5_000 });
+
+      // ── Expand the breakdown ───────────────────────────────────────────────
+      await breakdownBtn.click();
+
+      // After clicking, the button text changes to "Hide run breakdown (2 runs)".
+      await expect(
+        todayCard.getByRole("button", { name: /hide run breakdown \(2 runs\)/i }),
+      ).toBeVisible({ timeout: 3_000 });
+
+      // ── Verify brand1 row shows its contribution lbs (100.00) ─────────────
+      const contrib1Str = contrib1Lbs.toFixed(2); // "100.00"
+      const brand1Row = todayCard
+        .locator("div", { has: page.getByText(brand1, { exact: false }) })
+        .last();
+      const brand1Text = await brand1Row.innerText();
+      expect(brand1Text).toContain(contrib1Str);
+
+      // ── Verify brand2 row shows its contribution lbs (37.50) ──────────────
+      const contrib2Str = contrib2Lbs.toFixed(2); // "37.50"
+      const brand2Row = todayCard
+        .locator("div", { has: page.getByText(brand2, { exact: false }) })
+        .last();
+      const brand2Text = await brand2Row.innerText();
+      expect(brand2Text).toContain(contrib2Str);
+
+      // ── Verify Pull For Prep total = sum of both contributions ────────────
+      // Pull For Prep = c.lbs × remainingLbs / totalLbs.
+      // With amountAlreadyMade = 0 → remainingLbs = totalLbs → pull = c.lbs = 137.50.
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+      const pullStr = pullLbs.toFixed(2); // "137.50"
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const ingredientRowText = await ingredientRow.innerText();
+      expect(ingredientRowText).toContain(pullStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (c): Prep mix card shows correct "Pull For Prep" quantities when a run
    * DOES list the component ingredient.
    *
