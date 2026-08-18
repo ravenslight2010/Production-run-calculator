@@ -996,4 +996,178 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // fired yet (its next-due is still in the future).
     expect(store.batchesReady).toBeLessThanOrEqual(batchesAtPause);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 10. Pace gauge (autoTrackSuggestion.expectedCases) matches the case
+  //     counter written to the form in the SAME render pass after a wake tick
+  //
+  // Scenario: running run, device wakes after 5-min screen-off.  The hook
+  // fires the case tick and writes a new total to the form.  In that same
+  // render, autoTrackSuggestion.expectedCases — the value the pace gauge and
+  // time-remaining read — must equal the form total.  If the hook were reading
+  // a stale cached casesCompleted instead of the just-written value, the two
+  // would diverge by one render cycle.
+  //
+  // Key numbers (ppm=100, pizzasPerCase=10, casesPerSkid=10,
+  //              casesNeeded=100, freezerTime=10):
+  //   elapsedBaseline=700 s → afterTunnel≈1.67 min → expectedRaw=16
+  //   elapsedAfterWake=1000 s → afterTunnel≈6.67 min → expectedRaw=66
+  //   delta = 66 − 16 = 50 applied in one wake tick
+  //   autoTrackSuggestion.expectedCases = min(100, 66) = 66 — same as form total
+  // ───────────────────────────────────────────────────────────────────────────
+  it("10. pace gauge (autoTrackSuggestion.expectedCases) matches form total in the same render after wake (running→wake)", () => {
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    const elapsedBaseline = 700;
+    const elapsedAfterWake = 1000;
+
+    type Props10 = Parameters<typeof useAutoTrack>[0];
+    const props10 = (nowMs: number, elapsedSec: number): Props10 => ({
+      runId: "run-10",
+      runStatus: "running" as const,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: BASE_V,
+      form,
+    });
+
+    const { result: result10, rerender: rerender10 } = renderHook(
+      (p: Props10) => useAutoTrack(p),
+      { initialProps: props10(T0, elapsedBaseline) },
+    );
+
+    // ── Tick 1 at T0+500: seeds form from 0 to 16 cases; establishes baseline.
+    // elapsedRaw ≈ 16 → curTotal=0, expectedCases=16 → seed path:
+    //   skidsCompleted ← 1, casesOnCurrentSkid ← 6 (total=16)
+    // lastExpectedCasesRef ← 16; caseNextDueMsRef ← T0+500+CASE_PERIOD_MS
+    const T1_10 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1_10);
+      rerender10(props10(T1_10, elapsedBaseline));
+    });
+    const formTotalAfterBaseline = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+    expect(formTotalAfterBaseline).toBe(16);
+
+    // ── Screen off for 5 minutes — no rerenders during screen-off. ─────────
+    const tWake10 = T1_10 + 5 * 60_000;
+
+    // ── Wake tick: elapsedAfterWake=1000 s → expectedRaw=66, delta=50. ─────
+    // caseNextDueMsRef (T0+6500) is way past-due → tick fires immediately.
+    // curTotal=16 (not 0), prevExpected=16 → normal increment path:
+    //   target = 16 + 50 = 66; newTotal = min(66, max(16, 100)) = 66
+    //   form written: skidsCompleted=6, casesOnCurrentSkid=6 (total=66)
+    //
+    // autoTrackSuggestion.expectedCases (from useMemo, elapsedAfterWake=1000):
+    //   elapsedMinAfterTunnel = (1000/60) − 10 ≈ 6.667
+    //   expectedCasesRaw = floor(6.667 * 100 / 10) = 66
+    //   expectedCases = min(100, 66) = 66
+    //
+    // Consistency invariant: form total === autoTrackSuggestion.expectedCases
+    act(() => {
+      vi.setSystemTime(tWake10);
+      rerender10(props10(tWake10, elapsedAfterWake));
+    });
+
+    const formTotalAfterWake = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+    const suggestion10 = result10.current.autoTrackSuggestion;
+
+    // Form total must have jumped forward by the full delta (≥40).
+    expect(formTotalAfterWake).toBeGreaterThan(formTotalAfterBaseline + 40);
+    // Must not overshoot casesNeeded.
+    expect(formTotalAfterWake).toBeLessThanOrEqual(BASE_V.casesNeeded);
+
+    // Pace gauge source must be non-null for a running run.
+    expect(suggestion10).not.toBeNull();
+
+    // KEY INVARIANT: autoTrackSuggestion.expectedCases must equal the form
+    // total that the tick just wrote.  If the pace gauge were reading a stale
+    // casesCompleted, it would still show 16 while the counter shows 66 —
+    // lagging one tick behind.
+    expect(suggestion10!.expectedCases).toBe(formTotalAfterWake);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 11. Paused→wake: no tick fires — form counter stays frozen, pace gauge
+  //     reflects elapsed time (time-based, not counter-based)
+  //
+  // Scenario: run paused before tablet screen turns off; device wakes 5 min
+  // later with run still paused.  The tick-write effect returns early
+  // (runStatus !== "running" && !drainActive) — no case write fires.
+  //
+  // autoTrackSuggestion IS computed for paused runs (the "ok" gate includes
+  // "paused"), so the pace gauge updates to the new time-based estimate while
+  // the counter stays frozen.  This is the correct no-op path: no spurious
+  // counter increment.
+  //
+  // Key numbers: same as test 10.
+  //   form shows 16 cases after baseline tick (run was running).
+  //   After pause + wake: form still 16; autoTrackSuggestion.expectedCases=66.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("11. paused→wake: case counter stays frozen; no tick fires (paused no-op path)", () => {
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    const elapsedBaseline = 700;
+    const elapsedAfterWake = 1000;
+
+    type Props11 = Parameters<typeof useAutoTrack>[0];
+    const props11 = (
+      status: "running" | "paused",
+      nowMs: number,
+      elapsedSec: number,
+    ): Props11 => ({
+      runId: "run-11",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: BASE_V,
+      form,
+    });
+
+    const { result: result11, rerender: rerender11 } = renderHook(
+      (p: Props11) => useAutoTrack(p),
+      { initialProps: props11("running", T0, elapsedBaseline) },
+    );
+
+    // ── Tick 1 (running) at T0+500: seeds form to 16. ─────────────────────
+    const T1_11 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1_11);
+      rerender11(props11("running", T1_11, elapsedBaseline));
+    });
+    const formTotalBeforePause = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+    expect(formTotalBeforePause).toBe(16);
+
+    // ── Pause the run before screen turns off. ────────────────────────────
+    const tPause11 = T1_11 + 1;
+    act(() => {
+      vi.setSystemTime(tPause11);
+      rerender11(props11("paused", tPause11, elapsedBaseline));
+    });
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(16);
+
+    // ── Screen off for 5 minutes, then wake — run still paused. ──────────
+    const tWake11 = tPause11 + 5 * 60_000;
+
+    act(() => {
+      vi.setSystemTime(tWake11);
+      rerender11(props11("paused", tWake11, elapsedAfterWake));
+    });
+
+    const formTotalAfterWake11 = store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid;
+    const suggestion11 = result11.current.autoTrackSuggestion;
+
+    // KEY INVARIANT: counter must be frozen — no tick fires while paused.
+    // A spurious write would indicate the tick-write effect bypassed the
+    // runStatus guard.
+    expect(formTotalAfterWake11).toBe(16);
+
+    // The pace gauge (autoTrackSuggestion) IS computed for paused runs and
+    // reflects the time-based expected value (66), even though the counter
+    // is frozen.  This is intentional: the suggestion shows where the run
+    // *would* be if it were running, which is useful for planning.
+    expect(suggestion11).not.toBeNull();
+    expect(suggestion11!.expectedCases).toBe(66);
+  });
 });
