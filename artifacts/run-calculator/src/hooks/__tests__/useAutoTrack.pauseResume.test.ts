@@ -1425,4 +1425,93 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(suggestion11).not.toBeNull();
     expect(suggestion11!.expectedCases).toBe(66);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 12. hopperProdNextDueMsRef re-arms in the future after a global pause
+  //
+  // Scenario: run starts; tick 1 arms hopperProdNextDueMsRef to T1+hopperMs;
+  // the run is globally paused for longer than hopperSec; the run resumes.
+  //
+  // On resume the runStatus "running" effect (line ~447 of useAutoTrack.ts)
+  // zeros hopperProdNextDueMsRef.current, then the tick effect fires immediately
+  // (current===0 → first-encounter path) and re-arms it to nowMs+hopperMs.
+  //
+  // Without the reset the ref would still hold T1+hopperMs, which is in the
+  // PAST after a long pause. The UI would read the countdown as 0:00 and flash
+  // "overdue" on the very first tick after resume.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("12. hopperProdNextDueMsRef re-arms to a future timestamp after a global pause/resume", () => {
+    const HOPPER_SEC = 10; // 10-second hopper cycle
+    const HOPPER_MS = HOPPER_SEC * 1000;
+
+    const { form } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    type Props12 = Parameters<typeof useAutoTrack>[0];
+    const props12 = (status: "running" | "paused", nowMs: number): Props12 => ({
+      runId: "run-12",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: { ...BASE_V },
+      form,
+      machine: { spinSec: 0, hopperSec: HOPPER_SEC },
+    });
+
+    const { result: result12, rerender: rerender12 } = renderHook(
+      (p: Props12) => useAutoTrack(p),
+      { initialProps: props12("running", T0) },
+    );
+
+    // ── Initial render at T0 arms the hopper ref ─────────────────────────────
+    // The tick effect fires on mount (hopperProdNextDueMsRef===0, first-encounter
+    // path): ref = T0 + hopperMs. The T0+500 rerender below doesn't fire the
+    // hopper tick again because T0+500 < T0+HOPPER_MS.
+    const hopperAfterMount = result12.current.tickDueRefs.hopperProd.current;
+    expect(hopperAfterMount).toBe(T0 + HOPPER_MS);
+
+    // ── Tick at T0+500 (no change — hopper not yet due) ───────────────────────
+    const T1_12 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1_12);
+      rerender12(props12("running", T1_12));
+    });
+    const hopperAfterTick1 = result12.current.tickDueRefs.hopperProd.current;
+    expect(hopperAfterTick1).toBe(T0 + HOPPER_MS); // unchanged
+
+    // ── Pause at T1+1 ────────────────────────────────────────────────────────
+    const tPause12 = T1_12 + 1;
+    act(() => {
+      vi.setSystemTime(tPause12);
+      rerender12(props12("paused", tPause12));
+    });
+    // Hopper tick only runs while running — ref stays at T0+HOPPER_MS.
+    expect(result12.current.tickDueRefs.hopperProd.current).toBe(T0 + HOPPER_MS);
+
+    // ── Stay paused 60 s (> HOPPER_MS=10 s) so the old due time is now past. ─
+    const tResume12 = tPause12 + 60_000;
+    act(() => {
+      vi.setSystemTime(tResume12);
+      rerender12(props12("paused", tResume12));
+    });
+    // Still paused — ref unchanged (T0+HOPPER_MS), now in the past.
+    expect(result12.current.tickDueRefs.hopperProd.current).toBe(T0 + HOPPER_MS);
+    expect(result12.current.tickDueRefs.hopperProd.current).toBeLessThan(tResume12);
+
+    // ── Resume ────────────────────────────────────────────────────────────────
+    // runStatus effect zeros hopperProdNextDueMsRef; tick effect fires (===0)
+    // and re-arms to nowMs + hopperMs — in the future.
+    const tAfterResume12 = tResume12 + 2;
+    act(() => {
+      vi.setSystemTime(tAfterResume12);
+      rerender12(props12("running", tAfterResume12));
+    });
+
+    const hopperAfterResume = result12.current.tickDueRefs.hopperProd.current;
+    // Must not be 0 (not left un-armed) and must be strictly in the future.
+    expect(hopperAfterResume).not.toBe(0);
+    expect(hopperAfterResume).toBeGreaterThan(tAfterResume12);
+    // Specifically: re-armed to exactly nowMs + hopperMs.
+    expect(hopperAfterResume).toBe(tAfterResume12 + HOPPER_MS);
+  });
 });
