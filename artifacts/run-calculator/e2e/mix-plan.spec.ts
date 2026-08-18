@@ -991,6 +991,16 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // Full componentLbs must NOT appear — that would mean the already-made
       // subtraction was silently skipped.
       expect(rowText).not.toContain(fullStr);
+
+      // ── Verify the "need X lbs" badge next to totalLbs ────────────────────
+      // The badge renders when remainingLbs < totalLbs (home.tsx ~line 14646):
+      //   {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
+      // remainingLbs = totalLbs − amountAlreadyMade = 135.00 − 50 = 85.00
+      // so the badge must read "need 85.00 lbs".
+      const remainingStr = remainingLbs.toFixed(2); // "85.00"
+      await expect(
+        todayCard.getByText(`need ${remainingStr} lbs`, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
@@ -1094,6 +1104,17 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const rowText = await ingredientRow.innerText();
 
       expect(rowText).toContain("0.00");
+
+      // ── Verify the "need X lbs" badge is present and reads "need 0.00 lbs" ──
+      // The badge renders when remainingLbs < totalLbs (home.tsx ~line 14646):
+      //   {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
+      // remainingLbs = max(0, 135 − 200) = 0 and totalLbs = 135 → 0 < 135 is true
+      // so the badge must still appear and must read "need 0.00 lbs".
+      // This confirms fully-covered cards are not hidden and the badge fires on the
+      // `remainingLbs < totalLbs` condition rather than `remainingLbs > 0`.
+      await expect(
+        todayCard.getByText("need 0.00 lbs", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
