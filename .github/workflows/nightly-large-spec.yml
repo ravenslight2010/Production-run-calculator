@@ -1,0 +1,126 @@
+name: Nightly large-spec harness
+
+# Runs the full 30×8 (240-profile) spec-import size verification nightly.
+#
+# WHY: The per-chunk budget (4 000 chars), max_completion_tokens (65 536), and
+# maxProfiles (400) in the spec importer are tuned EMPIRICALLY to the current
+# AI model. A model change that slips through without re-tuning causes silent
+# data loss at import time — the import "succeeds" but quietly drops profiles
+# or recipes. This job catches that regression automatically.
+#
+# The harness exits 1 on any assertion failure and logs full diffs, so any
+# failure here needs immediate investigation (check the model in
+# lib/integrations-openai-ai-server/src/models.ts and the limits in
+# lib/spec-import/src/index.ts).
+#
+# REQUIRED SECRETS (set in repo → Settings → Secrets → Actions):
+#   DATABASE_URL                   — Postgres connection string for the CI database
+#   SESSION_SECRET                 — Express session secret
+#   STAFF_SIGNUP_CODE              — Required by the sign-up route
+#   AI_INTEGRATIONS_GEMINI_API_KEY — Gemini API key (real, not a stub)
+#   AI_INTEGRATIONS_GEMINI_BASE_URL — Gemini base URL
+#   VERIFY_USERNAME                — Username of an existing manager account in CI DB
+#   VERIFY_PASSWORD                — Password for that account
+#
+# OPTIONAL SECRETS / VARS:
+#   VERIFY_BRANDS    — Override dataset width  (default 30)
+#   VERIFY_FLAVORS   — Override dataset height (default 8)
+
+on:
+  schedule:
+    # 03:00 UTC every night — outside business hours, after any model deploys.
+    - cron: '0 3 * * *'
+
+  workflow_dispatch:
+    inputs:
+      brands:
+        description: 'Number of brands (default 30; use 4 for a quick smoke run)'
+        required: false
+        default: ''
+      flavors:
+        description: 'Number of flavors per brand (default 8; max 8)'
+        required: false
+        default: ''
+
+jobs:
+  large-spec-verify:
+    name: Large-spec import (${{ inputs.brands || '30' }}×${{ inputs.flavors || '8' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 75   # Full 30×8 takes ~10-20 min; 75 gives comfortable headroom.
+
+    env:
+      DATABASE_URL:                   ${{ secrets.DATABASE_URL }}
+      SESSION_SECRET:                 ${{ secrets.SESSION_SECRET }}
+      STAFF_SIGNUP_CODE:              ${{ secrets.STAFF_SIGNUP_CODE }}
+      AI_INTEGRATIONS_GEMINI_API_KEY: ${{ secrets.AI_INTEGRATIONS_GEMINI_API_KEY }}
+      AI_INTEGRATIONS_GEMINI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_GEMINI_BASE_URL }}
+      VERIFY_USERNAME:                ${{ secrets.VERIFY_USERNAME }}
+      VERIFY_PASSWORD:                ${{ secrets.VERIFY_PASSWORD }}
+      # Dataset size — prefer workflow_dispatch input, fall back to repo var, then default.
+      BRANDS:  ${{ inputs.brands  || vars.VERIFY_BRANDS  || '30' }}
+      FLAVORS: ${{ inputs.flavors || vars.VERIFY_FLAVORS || '8'  }}
+      # Point the harness at the locally started API server.
+      API_BASE: http://localhost:5000/api
+      NODE_ENV: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build API server
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Start API server (background)
+        run: |
+          PORT=5000 pnpm --filter @workspace/api-server run start \
+            > /tmp/api-server.log 2>&1 &
+          echo "API_SERVER_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for API server
+        run: |
+          echo "Waiting for API server on port 5000…"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5000/api/healthz > /dev/null 2>&1; then
+              echo "API server ready (attempt $i)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: API server did not become ready within 60 s."
+          echo "--- API server log ---"
+          cat /tmp/api-server.log
+          exit 1
+
+      - name: Run large-spec harness
+        run: |
+          echo "Dataset: ${BRANDS} brands × ${FLAVORS} flavors"
+          pnpm --filter @workspace/scripts run verify-large-spec-import
+
+      - name: Upload API server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-server-log
+          path: /tmp/api-server.log
+          retention-days: 7
+
+      - name: Stop API server
+        if: always()
+        run: |
+          if [ -n "${API_SERVER_PID:-}" ]; then
+            kill "$API_SERVER_PID" 2>/dev/null || true
+          fi

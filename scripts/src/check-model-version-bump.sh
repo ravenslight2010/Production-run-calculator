@@ -203,11 +203,16 @@ Fix:
        # Quick smoke run (~2 min, real AI calls):
        BRANDS=4 FLAVORS=3 \\
        VERIFY_USERNAME=<manager> VERIFY_PASSWORD=<pass> \\
-       pnpm --filter @workspace/scripts run verify-large-spec-import
+       bash scripts/run-large-spec-harness.sh --smoke
 
        # Full run (30×8 = 240 profiles, 10–20 min) — required before shipping:
        VERIFY_USERNAME=<manager> VERIFY_PASSWORD=<pass> \\
-       pnpm --filter @workspace/scripts run verify-large-spec-import
+       bash scripts/run-large-spec-harness.sh
+
+     The nightly GitHub Actions workflow (.github/workflows/nightly-large-spec.yml)
+     runs the full 30×8 harness automatically at 03:00 UTC and will catch model
+     regressions the same night they ship. You can also trigger it manually via
+     the GitHub Actions UI ("Run workflow") with optional BRANDS/FLAVORS overrides.
 
   3. After a prompt or sanitizer rewrite, also run the parse-rule round-trip harness:
 
