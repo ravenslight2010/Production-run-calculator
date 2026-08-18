@@ -1269,6 +1269,190 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (daysEarly=0 boundary): A prep mix with daysEarly=0 is ABSENT when
+   * make-day is today (du=1 for a tomorrow run) and IS present when make-day
+   * is tomorrow (du=0 — the run day itself).
+   *
+   * The filter in lib/mixes/src/index.ts is `if (du > mix.daysEarly) continue`.
+   * With daysEarly=0:
+   *   • du=1 (today → tomorrow run) → 1 > 0 is true  → skip → ABSENT ✓
+   *   • du=0 (tomorrow → tomorrow run) → 0 > 0 is false → include → PRESENT ✓
+   *
+   * An off-by-one (`du >= mix.daysEarly`) would include the card one day early,
+   * confusing floor staff who haven't prepped that ingredient yet.
+   */
+  test("prep mix with daysEarly=0 is absent the day before the run and present on the run day", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `days-early-zero-${suffix}`;
+    const mixName = `ZeroEarlyPrepMix ${suffix}`;
+    const ingredient = `ZeroEarlyHerb_${suffix}`;
+    const brand = `ZeroEarlyBrand_${suffix}`;
+    const flavor = "";
+
+    const MIX_CARD_OZ = 0.5;
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+    const expectedPullLbs = (RUN_OZ / 16) * totalPizzas; // 100.00
+
+    const tomorrowLocal = new Date();
+    tomorrowLocal.setDate(tomorrowLocal.getDate() + 1);
+    const tomorrowStr = localDateStr(tomorrowLocal);
+
+    const scheduledRunId = `sched-ze-run-${suffix}`;
+    let preExistingRow: { data: unknown; updated_at: Date } | null = null;
+
+    try {
+      // ── Step 1: Insert the prep mix with daysEarly=0 ─────────────────────────
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: MIX_CARD_OZ,
+        daysEarly: 0,
+      });
+
+      // ── Step 2: Snapshot + upsert a scheduled run for tomorrow in daily_sync ──
+      const existingResult = await db.query<{ data: unknown; updated_at: Date }>(
+        `SELECT data, updated_at FROM daily_sync WHERE date = $1 AND scope = 'live'`,
+        [tomorrowStr],
+      );
+      preExistingRow = existingResult.rows.length > 0 ? existingResult.rows[0] : null;
+
+      const scheduledData = {
+        dayState: {
+          runs: [{ id: scheduledRunId, brand, flavor }],
+        },
+        runValues: {
+          [scheduledRunId]: { casesNeeded: CASES_NEEDED },
+        },
+      };
+      await db.query(
+        `INSERT INTO daily_sync (date, scope, data, updated_at)
+         VALUES ($1, 'live', $2::jsonb, NOW())
+         ON CONFLICT (date, scope) DO UPDATE
+           SET data = $2::jsonb, updated_at = NOW()`,
+        [tomorrowStr, JSON.stringify(scheduledData)],
+      );
+
+      // ── Step 3: Sign up and dismiss onboarding ───────────────────────────────
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.waitForTimeout(1_000);
+
+      // ── Step 4: Inject the profile into localStorage ─────────────────────────
+      // valsToMixRun maps pep1Type → ingredientOzPerPizza so buildMixPlan uses
+      // profile-derived oz instead of the mix-card fallback.
+      await page.evaluate(
+        ({ brand, flavor, ingredient, runOz, pizzasPerCase }) => {
+          const profileKey = `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+          const existing = (() => {
+            try {
+              return JSON.parse(localStorage.getItem(profileKey) ?? "{}");
+            } catch {
+              return {};
+            }
+          })();
+          localStorage.setItem(
+            profileKey,
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              pizzasPerCase,
+            }),
+          );
+        },
+        { brand, flavor, ingredient, runOz: RUN_OZ, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // ── Step 5: Navigate to the Mixes tab ────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── Step 6: Today (default make-day, du=1) → card is ABSENT ─────────────
+      // daysEarly=0 means same-day-only; du=1 > 0 → the filter skips this mix.
+      // The seeded placeholder run has no brand/ingredient, so buildMixPlan
+      // returns [] → empty-state.
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+      // Confirm the mix name really isn't anywhere on the page.
+      await expect(page.getByText(mixName, { exact: false })).toHaveCount(0, { timeout: 3_000 });
+
+      // ── Step 7: Switch make-day to tomorrow (du=0) ───────────────────────────
+      const makeDayPicker = page.locator('[data-testid="mix-make-day"]');
+      await makeDayPicker.fill(tomorrowStr);
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      // ── Step 8: Verify the group card for tomorrow IS present ────────────────
+      // du=0 for the tomorrow run when make-day=tomorrow; 0 > 0 is false → included.
+      const tomorrowCard = page.locator(`[data-testid="mix-plan-${tomorrowStr}"]`);
+      await tomorrowCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(
+        tomorrowCard.getByText("Ingredient Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        tomorrowCard.getByText(mixName, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        tomorrowCard.getByText("Pull For Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        tomorrowCard.getByText(ingredient, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // Pull lbs must use profile oz (100.00), not mix-card fallback (25.00).
+      const ingredientRow = tomorrowCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+      expect(rowText).toContain(expectedPullLbs.toFixed(2)); // "100.00"
+      expect(rowText).not.toContain(((MIX_CARD_OZ / 16) * totalPizzas).toFixed(2)); // not "25.00"
+
+      // ── Step 9: Switch back to today → absent again ───────────────────────────
+      await makeDayPicker.fill(todayStr());
+      await makeDayPicker.press("Tab");
+      await page.waitForTimeout(800);
+
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      if (preExistingRow !== null) {
+        await db
+          .query(
+            `INSERT INTO daily_sync (date, scope, data, updated_at)
+             VALUES ($1, 'live', $2::jsonb, $3)
+             ON CONFLICT (date, scope) DO UPDATE
+               SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+            [tomorrowStr, JSON.stringify(preExistingRow.data), preExistingRow.updated_at],
+          )
+          .catch((err: unknown) => {
+            console.error("WARN: failed to restore daily_sync row:", err);
+          });
+      } else {
+        await db
+          .query(
+            "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+            [tomorrowStr],
+          )
+          .catch(() => {});
+      }
+      await db
+        .query("DELETE FROM users WHERE username = $1", [username])
+        .catch(() => {});
+    }
+  });
+
+  /**
    * Test (g2): Prep mix card appears when a run profile uses a QUALIFIED
    * ingredient name (e.g. "Herb - Dried") whose base name matches the mix
    * component "Herb".
