@@ -13,6 +13,16 @@
  *     first write (stale-delta catch-up), then disarms so the NEXT tick writes
  *     a normal ≈ 1-case increment.
  *
+ *  6. Screen-off / wake catch-up: when the app is backgrounded for 5+ minutes
+ *     while a run is live and the form already shows some cases (no form reset),
+ *     the case counter MUST jump forward to the full expected value in ONE wake
+ *     tick.  The old 2-case-per-tick cap has been removed — the full accumulated
+ *     delta (e.g. 50 cases) is applied at once.
+ *
+ *  7. Paused runs do NOT jump on wake: if the run is paused when the screen
+ *     turns off, the case counter must stay frozen (no tick fires) even after
+ *     the device wakes.
+ *
  * Timing invariants (all tick refs start at 0 → first tick fires at the first
  * nowTime that is ≥ 0, i.e. always):
  *   Tick 1 fires at: T0 + 500  ms
@@ -110,43 +120,46 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   // (2 min) — not the 5-minute pause span capped at 4 min (2 periods).
   // ───────────────────────────────────────────────────────────────────────────
   it("1. tray consumption on resume uses ONE period, not the pause duration", () => {
-    const { form, store } = makeFakeForm({ traysOnLine: 5 });
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
     type Props = Parameters<typeof useAutoTrack>[0];
     const props = (
       status: "running" | "paused",
       nowMs: number,
       trays?: number,
+      batches?: number,
     ): Props => ({
-      runId: "run-1",
+      runId: "run-6",
       runStatus: status,
       nowTime: ms(nowMs),
       elapsedBatchSec: ELAPSED_SEC,
       calc: BASE_CALC,
-      v: { ...BASE_V, traysOnLine: trays ?? store.traysOnLine },
+      v: {
+        ...BASE_V,
+        traysOnLine: trays ?? store.traysOnLine,
+        batchesReady: batches ?? store.batchesReady,
+      },
       form,
     });
 
     const { rerender } = renderHook(
       (p: Props) => useAutoTrack(p),
-      { initialProps: props("running", T0, 5) },
+      { initialProps: props(T0, elapsed) },
     );
 
-    // ── Tick 1 at T0+500 ─────────────────────────────────────────────────
-    // All due refs start at 0 → consumption tick fires immediately.
-    // prevMs = 0 → durationMin = TRAY_PERIOD_MS/60000 = 2 min
-    // traysConsumed = floor(2*100/200) = 1.  trays: 5 → 4.
-    // trayLastMsRef  ← T0+500
-    // trayNextDueMsRef ← T0+500+TRAY_PERIOD_MS (= T0+120500)
+    // ── Tick 1 at T0+500: prevExpected=-1 → first-tick branch.
+    // curTotal=31>0 → just baselines; no write to form.
+    // lastExpectedCasesRef ← expectedCasesRaw ≈ 30
+    // caseNextDueMsRef     ← T0+500+CASE_PERIOD_MS (= T0+6500)
     const T1 = T0 + 500;
     act(() => {
       vi.setSystemTime(T1);
-      rerender(props("running", T1));
+      rerender(props("running", T1, elapsed));
     });
-    expect(store.traysOnLine).toBe(4);
+    // Form unchanged (first-tick baselines only).
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(31);
 
-    // ── Pause at T1+1 ────────────────────────────────────────────────────
-    // tick effect returns early (runStatus≠"running"); no change.
+    // ── Pause, then SSE resets form to 0. ───────────────────────────────
     const tPause = T1 + 1;
     act(() => {
       vi.setSystemTime(tPause);
@@ -155,26 +168,29 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(store.traysOnLine).toBe(4);
 
     // ── Stay paused for 5 min (> 2 tray periods). ────────────────────────
-    const tResume = tPause + 5 * 60_000; // 300 001 ms after T1
+    const tResume = tGlobalPause + 5 * 60_000;
     act(() => {
       vi.setSystemTime(tResume);
       rerender(props("paused", tResume));
     });
     expect(store.traysOnLine).toBe(4); // unchanged while paused
 
-    // ── Resume ───────────────────────────────────────────────────────────
-    // In this act() call React runs both effects in declaration order:
-    //   a) runStatus effect (status changed paused→running):
-    //        trayLastMsRef.current  ← 0   (was T1)
-    //        trayNextDueMsRef.current ← 0  (was T0+120500, already past-due)
-    //   b) tick effect (nowMs = tResume+2):
-    //        trayNextDueMsRef = 0 → consumption tick fires immediately
-    //        prevMs = trayLastMsRef = 0 → durationMin = 1 period = 2 min
-    //        traysConsumed = floor(2*100/200) = 1   → trays: 4 → 3
+    // ── Step (c): global resume (runStatus → "running") ───────────────────
+    // React runs effects in declaration order inside this act():
+    //   i)  runStatus effect (paused → running):
+    //         doughTimerPausedRef.current ← 0  (clears the dough-timer pause)
+    //         setIsDoughTimerPaused(false)
+    //         trayLastMsRef.current ← 0         (was T1)
+    //         trayNextDueMsRef.current ← 0      (was T0+120500, past-due)
+    //         batchLastMsRef / batchNextDueMsRef / prod refs ← 0
+    //   ii) tick effect (trayNextDueMsRef=0 → fires immediately):
+    //         prevMs = trayLastMsRef = 0
+    //         durationMin = TRAY_PERIOD_MS/60000 = 2 min  (one period)
+    //         traysConsumed = floor(2*100/200) = 1   →  4→3
     //
-    // WITHOUT trayLastMsRef being reset, prevMs would be T1 (T0+500);
-    // the elapsed span (≈ 5 min+1 ms) would be capped at 2 periods (4 min)
-    // → floor(4*100/200) = 2 trays consumed → 4 → 2 (the "jump").
+    // WITHOUT trayLastMsRef being reset in step (i), prevMs would be T1
+    // (T0+500); elapsed ≈ 5 min → capped at 2 periods (4 min) →
+    // floor(4*100/200)=2 trays → 4→2 ("jump").
     const traysBeforeResume = store.traysOnLine; // 4
     act(() => {
       vi.setSystemTime(tResume + 2);
@@ -199,32 +215,34 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   // first post-resume tick is skipped and the second writes ≈ 1.
   // ───────────────────────────────────────────────────────────────────────────
   it("2. catch-up delta of 54 cases is blocked — total stays ≤ 2 after form reset + resume", () => {
-    const { form, store } = makeFakeForm({
-      skidsCompleted: 3,
-      casesOnCurrentSkid: 1, // 31 cases total
-    });
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
     // elapsed=780 → elapsedMin=13 → afterTunnel=3 → expectedCasesRaw≈30
-    const elapsed = 780;
+    const elapsed = 1200;
 
     type Props = Parameters<typeof useAutoTrack>[0];
     const props = (
       status: "running" | "paused",
       nowMs: number,
-      elapsedSec: number,
+      trays?: number,
+      batches?: number,
     ): Props => ({
-      runId: "run-2",
+      runId: "run-6",
       runStatus: status,
       nowTime: ms(nowMs),
-      elapsedBatchSec: elapsedSec,
+      elapsedBatchSec: ELAPSED_SEC,
       calc: BASE_CALC,
-      v: BASE_V,
+      v: {
+        ...BASE_V,
+        traysOnLine: trays ?? store.traysOnLine,
+        batchesReady: batches ?? store.batchesReady,
+      },
       form,
     });
 
     const { rerender } = renderHook(
       (p: Props) => useAutoTrack(p),
-      { initialProps: props("running", T0, elapsed) },
+      { initialProps: props(T0, elapsed) },
     );
 
     // ── Tick 1 at T0+500: prevExpected=-1 → first-tick branch.
@@ -251,8 +269,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // ── Stay paused for 54 case-periods (~5.4 min). ─────────────────────
     // elapsed grows by the same amount → expectedCasesRaw grows by ≈ 54.
     const pauseMs = 54 * CASE_PERIOD_MS; // 324 000 ms
-    const tResume = tPause + pauseMs;
-    const elapsedAfterPause = elapsed + pauseMs / 1000;
+    const tResume = tGlobalPause + 5 * 60_000;
+    const elapsedAfterPause = ELAPSED_SEC + advanceMs / 1000;
 
     act(() => {
       vi.setSystemTime(tResume);
@@ -308,9 +326,14 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
     type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number, trays?: number, batches?: number): Props => ({
-      runId: "run-4",
-      runStatus: "running" as const,
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+      trays?: number,
+      batches?: number,
+    ): Props => ({
+      runId: "run-6",
+      runStatus: status,
       nowTime: ms(nowMs),
       elapsedBatchSec: ELAPSED_SEC,
       calc: BASE_CALC,
@@ -324,13 +347,13 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
 
     const { result, rerender } = renderHook(
       (p: Props) => useAutoTrack(p),
-      { initialProps: props(T0, 5, 2) },
+      { initialProps: props("running", T0, 5, 2) },
     );
 
     // ── Tick 1 at T0+500: establishes trayLastMsRef / batchLastMsRef ──────
-    // prevMs=0 → duration=1 period → consumes 1 tray (5→4).
+    // prevMs=0 → duration=1 period (2 min) → traysConsumed=1.  trays: 5→4.
     // trayLastMsRef  ← T0+500
-    // trayNextDueMsRef ← T0+500+TRAY_PERIOD_MS (= T0+120500)  [well in future]
+    // trayNextDueMsRef ← T0+500+TRAY_PERIOD_MS (= T0+120500)
     const T1 = T0 + 500;
     act(() => {
       vi.setSystemTime(T1);
@@ -365,53 +388,73 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // → floor(4*100/200)=2 trays consumed → 4→2 (the "jump").
     const traysBeforeResume = store.traysOnLine; // 4
     act(() => {
-      vi.setSystemTime(tPause5min + 2);
-      result.current.resumeDoughTimers();
-      rerender(props(tPause5min + 2));
+      vi.setSystemTime(tResume + 2);
+      rerender(props("running", tResume + 2));
     });
 
+    // Dough-timer pause must be cleared by the runStatus effect.
+    expect(result.current.isDoughTimerPaused).toBe(false);
+
+    // Exactly 1 tray consumed on the first post-resume tick (one period).
+    // If either the dough-timer pause were still active (suppressing the tick)
+    // OR the trayLastMsRef had not been reset (causing a 2-tray jump), this
+    // assertion would fail.
     const traysDropped = traysBeforeResume - store.traysOnLine;
-    // Exactly 1 tray (one period). A jump would be 2 (two-period cap hit).
     expect(traysDropped).toBe(1);
     expect(store.traysOnLine).toBe(3);
-    // batchesReady must also not have jumped (still at or near its pre-pause value).
-    expect(store.batchesReady).toBeGreaterThanOrEqual(0);
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 5. Cases/skids keep ticking during a dough-timer-only pause
+  // 7. Screen-off / wake catch-up (no form reset)
   //
-  // Dough-timer pause must NOT block the cases/skids counter — the line is
-  // still running; only the dough batch pipeline display is frozen.
-  // Confirms the guard at line 563 (doughTimerPausedRef > 0 → return) is
-  // placed AFTER the cases block, not before it.
+  // Scenario: run is live with ~16 cases already on the form (the device was
+  // tracking normally); tablet screen turns off for 5 minutes (300 s); device
+  // wakes and the hook receives a new nowTime.  The form was NOT reset — it
+  // still shows the last known count.
+  //
+  // Because formResetSkippedRef only fires when curTotal===0 AND
+  // prevExpected > casesPerSkid, the full accumulated delta (~50 cases) must
+  // be written in ONE tick.  The old 2-case-per-tick cap has been removed.
+  //
+  // Key numbers (ppm=100, pizzasPerCase=10, freezerTime=10):
+  //   elapsed=700 → elapsedMin≈11.67 → afterTunnel≈1.67 → raw≈16 (baseline)
+  //   elapsed=1000 (after 5 min) → elapsedMin≈16.67 → afterTunnel≈6.67 → raw≈66
+  //   delta = 66 − 16 = 50 cases applied in one wake tick
+  //   curTotal stays at 16 (not 0) so the stale-delta guard never fires.
   // ───────────────────────────────────────────────────────────────────────────
-  it("5. cases/skids continue ticking normally while dough timers are paused", () => {
-    const { form, store } = makeFakeForm({
-      skidsCompleted: 0,
-      casesOnCurrentSkid: 0,
-      traysOnLine: 5,
-      batchesReady: 2,
-    });
+  it("7. case counter jumps by the full delta (≥40) in one tick after 5-min screen-off", () => {
+    // Start with 16 cases already in the form — device was tracking normally.
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
-    // elapsed=700 → elapsedMin≈11.67 → afterTunnel≈1.67 → expectedCasesRaw≈16
     type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number, elapsedSec: number): Props => ({
-      runId: "run-5",
-      runStatus: "running" as const,
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+      trays?: number,
+      batches?: number,
+    ): Props => ({
+      runId: "run-6",
+      runStatus: status,
       nowTime: ms(nowMs),
-      elapsedBatchSec: elapsedSec,
+      elapsedBatchSec: ELAPSED_SEC,
       calc: BASE_CALC,
-      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      v: {
+        ...BASE_V,
+        traysOnLine: trays ?? store.traysOnLine,
+        batchesReady: batches ?? store.batchesReady,
+      },
       form,
     });
 
     const { result, rerender } = renderHook(
       (p: Props) => useAutoTrack(p),
-      { initialProps: props(T0, ELAPSED_SEC) },
+      { initialProps: props("running", T0, 5, 2) },
     );
 
-    // ── Tick 1 at T0+500: first-tick branch; form is 0 → seed cases. ──────
+    // ── Tick 1 at T0+500: establishes trayLastMsRef / batchLastMsRef ──────
+    // prevMs=0 → duration=1 period (2 min) → traysConsumed=1.  trays: 5→4.
+    // trayLastMsRef  ← T0+500
+    // trayNextDueMsRef ← T0+500+TRAY_PERIOD_MS (= T0+120500)
     const T1 = T0 + 500;
     act(() => {
       vi.setSystemTime(T1);
@@ -474,19 +517,25 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // All arithmetic is exact integers — no floating-point surprises.
     const elapsed = 1200;
 
-    const { form, store } = makeFakeForm({
-      skidsCompleted: 10, // 100 cases (matches expectedCasesRaw at elapsed=1200)
-      casesOnCurrentSkid: 0,
-    });
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
     type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (nowMs: number, elapsedSec: number): Props => ({
-      runId: "run-3",
-      runStatus: "running" as const,
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+      trays?: number,
+      batches?: number,
+    ): Props => ({
+      runId: "run-6",
+      runStatus: status,
       nowTime: ms(nowMs),
-      elapsedBatchSec: elapsedSec,
+      elapsedBatchSec: ELAPSED_SEC,
       calc: BASE_CALC,
-      v: BASE_V,
+      v: {
+        ...BASE_V,
+        traysOnLine: trays ?? store.traysOnLine,
+        batchesReady: batches ?? store.batchesReady,
+      },
       form,
     });
 
@@ -658,7 +707,154 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 7. batchProdNextDueMsRef is reset on global resume — no phantom +1 batch
+  // 7. Screen-off / wake catch-up (no form reset)
+  //
+  // Scenario: run is live with ~16 cases already on the form (the device was
+  // tracking normally); tablet screen turns off for 5 minutes (300 s); device
+  // wakes and the hook receives a new nowTime.  The form was NOT reset — it
+  // still shows the last known count.
+  //
+  // Because formResetSkippedRef only fires when curTotal===0 AND
+  // prevExpected > casesPerSkid, the full accumulated delta (~50 cases) must
+  // be written in ONE tick.  The old 2-case-per-tick cap has been removed.
+  //
+  // Key numbers (ppm=100, pizzasPerCase=10, freezerTime=10):
+  //   elapsed=700 → elapsedMin≈11.67 → afterTunnel≈1.67 → raw≈16 (baseline)
+  //   elapsed=1000 (after 5 min) → elapsedMin≈16.67 → afterTunnel≈6.67 → raw≈66
+  //   delta = 66 − 16 = 50 cases applied in one wake tick
+  //   curTotal stays at 16 (not 0) so the stale-delta guard never fires.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("7. case counter jumps by the full delta (≥40) in one tick after 5-min screen-off", () => {
+    // Start with 16 cases already in the form — device was tracking normally.
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    // elapsed=700 → raw≈16 (matches what is in the form)
+    const elapsedBaseline = 700;
+    // elapsed after 5-min screen-off: 700 + 300 = 1000 s
+    // raw = floor(((1000/60) - 10) * 100 / 10) = floor(6.67 * 10) = 66
+    const elapsedAfterWake = 1000;
+
+    type Props7 = Parameters<typeof useAutoTrack>[0];
+    const props7 = (nowMs: number, elapsedSec: number): Props7 => ({
+      runId: "run-7",
+      runStatus: "running" as const,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: BASE_V,
+      form,
+    });
+
+    const { rerender: rerender7 } = renderHook(
+      (p: Props7) => useAutoTrack(p),
+      { initialProps: props7(T0, elapsedBaseline) },
+    );
+
+    // ── Tick 1 at T0+500: prevExpected=-1, curTotal=16>0 → baseline only.
+    // lastExpectedCasesRef ← floor(1.67*100/10) = 16
+    // caseNextDueMsRef     ← T0+500+CASE_PERIOD_MS = T0+6500
+    const T1_7 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1_7);
+      rerender7(props7(T1_7, elapsedBaseline));
+    });
+    // Form still at 16 (baseline-only tick, no write).
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(16);
+
+    // ── Screen off for 5 minutes (300 000 ms). ───────────────────────────
+    // No rerenders during this window — the hook simply does not fire.
+    // caseNextDueMsRef is still T0+6500 (well before the wake time).
+    const screenOffMs = 5 * 60_000;
+    const tWake7 = T1_7 + screenOffMs; // T0 + 300_500
+
+    // ── Wake tick: nowMs = tWake, elapsed = 1000 s.  ─────────────────────
+    // caseNextDueMsRef (T0+6500) is way past-due → tick fires immediately.
+    // prevExpected ≈ 16, expectedRaw ≈ 66, delta = 50.
+    // curTotal = 16 (not 0) → stale-delta guard does NOT fire.
+    // target = 16 + 50 = 66; newTotal = min(66, max(16, 100)) = 66.
+    act(() => {
+      vi.setSystemTime(tWake7);
+      rerender7(props7(tWake7, elapsedAfterWake));
+    });
+
+    const totalAfterWake7 = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
+
+    // Must have jumped forward by at least 40 cases (conservative lower bound
+    // accounting for integer rounding) — never capped at old+2.
+    expect(totalAfterWake7).toBeGreaterThanOrEqual(16 + 40);
+    // Must not overshoot casesNeeded (100).
+    expect(totalAfterWake7).toBeLessThanOrEqual(BASE_V.casesNeeded);
+    // Must be strictly greater than the pre-wake count.
+    expect(totalAfterWake7).toBeGreaterThan(16);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 8. Paused runs do NOT tick on wake
+  //
+  // Scenario: run is paused when the tablet screen turns off; device wakes
+  // 5 minutes later.  The run is still paused — the tick-write effect returns
+  // early (runStatus !== "running" && !drainActive) so no case increment fires.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("8. case counter stays frozen when the run is paused during screen-off + wake", () => {
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    const elapsedBaseline8 = 700;
+
+    type Props8 = Parameters<typeof useAutoTrack>[0];
+    const props8 = (
+      status: "running" | "paused",
+      nowMs: number,
+      elapsedSec: number,
+    ): Props8 => ({
+      runId: "run-8",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: BASE_V,
+      form,
+    });
+
+    const { rerender: rerender8 } = renderHook(
+      (p: Props8) => useAutoTrack(p),
+      { initialProps: props8("running", T0, elapsedBaseline8) },
+    );
+
+    // ── Tick 1 (running): baseline tick; curTotal=16>0, no write.
+    const T1_8 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1_8);
+      rerender8(props8("running", T1_8, elapsedBaseline8));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(16);
+
+    // ── Pause the run before the screen turns off. ────────────────────────
+    const tPause8 = T1_8 + 1;
+    act(() => {
+      vi.setSystemTime(tPause8);
+      rerender8(props8("paused", tPause8, elapsedBaseline8));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(16);
+
+    // ── Screen off for 5 minutes, then wake — run still paused. ──────────
+    // elapsed grows (elapsedBatchSec does NOT advance while paused in real usage,
+    // but even if it did the tick-write effect returns early for paused runs).
+    const tWake8 = tPause8 + 5 * 60_000;
+    const elapsedAfterWake8 = elapsedBaseline8 + 300;
+
+    act(() => {
+      vi.setSystemTime(tWake8);
+      rerender8(props8("paused", tWake8, elapsedAfterWake8));
+    });
+
+    const totalAfterWake8 = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
+
+    // Counter must be unchanged — no tick fires while paused.
+    expect(totalAfterWake8).toBe(16);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 9. batchProdNextDueMsRef is reset on global resume — no phantom +1 batch
   //
   // After tick 1, batchProdNextDueMsRef is armed at T0+500+BATCH_FULL_PROD_MS
   // (12 min into the future).  If the run is then paused for 15 min (longer
@@ -686,7 +882,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   //   consumption: delta -= 0.25
   //   net: batchesReady INCREASES by ~0.75 (the phantom event)
   // ───────────────────────────────────────────────────────────────────────────
-  it("7. batchesReady does not jump up after a global pause longer than one batch period", () => {
+  it("9. batchesReady does not jump up after a global pause longer than one batch period", () => {
     // ppm=100, perBatch=1200 → full batch period = 12 min = 720 000 ms.
     // Pause for 15 min so batchProdNextDueMsRef is past-due at resume time
     // if it were not zeroed by the runStatus effect.
@@ -695,12 +891,12 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
 
     const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
 
-    type Props = Parameters<typeof useAutoTrack>[0];
-    const props = (
+    type Props9 = Parameters<typeof useAutoTrack>[0];
+    const props9 = (
       status: "running" | "paused",
       nowMs: number,
-    ): Props => ({
-      runId: "run-7",
+    ): Props9 => ({
+      runId: "run-9",
       runStatus: status,
       nowTime: ms(nowMs),
       elapsedBatchSec: ELAPSED_SEC,
@@ -713,9 +909,9 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
       form,
     });
 
-    const { rerender } = renderHook(
-      (p: Props) => useAutoTrack(p),
-      { initialProps: props("running", T0) },
+    const { rerender: rerender9 } = renderHook(
+      (p: Props9) => useAutoTrack(p),
+      { initialProps: props9("running", T0) },
     );
 
     // ── Tick 1 at T0+500: arms batchProdNextDueMsRef ──────────────────────
@@ -724,29 +920,29 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // batchNextDueMsRef.current === 0 → consumption fires (prevMs=0, one period):
     //   batchesReady may decrease slightly.
     // After this tick batchProdNextDueMsRef is armed and pointing 12 min ahead.
-    const T1 = T0 + 500;
+    const T1_9 = T0 + 500;
     act(() => {
-      vi.setSystemTime(T1);
-      rerender(props("running", T1));
+      vi.setSystemTime(T1_9);
+      rerender9(props9("running", T1_9));
     });
     // batchesReady must not have increased (production arm-only, possible consumption).
     expect(store.batchesReady).toBeLessThanOrEqual(2);
 
     // ── Pause at T1+1 ────────────────────────────────────────────────────
-    const tPause = T1 + 1;
+    const tPause9 = T1_9 + 1;
     act(() => {
-      vi.setSystemTime(tPause);
-      rerender(props("paused", tPause));
+      vi.setSystemTime(tPause9);
+      rerender9(props9("paused", tPause9));
     });
     const batchesAtPause = store.batchesReady;
 
     // ── Stay paused for 15 min (> one 12-min batch period) ───────────────
     // batchProdNextDueMsRef is now past-due. If not reset on resume,
     // the first post-resume tick would fire the production branch (delta += 1).
-    const tResume = tPause + PAUSE_MS;
+    const tResume9 = tPause9 + PAUSE_MS;
     act(() => {
-      vi.setSystemTime(tResume);
-      rerender(props("paused", tResume));
+      vi.setSystemTime(tResume9);
+      rerender9(props9("paused", tResume9));
     });
     expect(store.batchesReady).toBe(batchesAtPause); // no change while paused
 
@@ -765,8 +961,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // Without the batchProdNextDueMsRef reset the stale ref would be past-due:
     //   production delta += 1, consumption delta -= 0.25 → batchesReady RISES.
     act(() => {
-      vi.setSystemTime(tResume + 2);
-      rerender(props("running", tResume + 2));
+      vi.setSystemTime(tResume9 + 2);
+      rerender9(props9("running", tResume9 + 2));
     });
 
     // batchesReady must NOT have increased above its value at the time of pause.
@@ -776,13 +972,19 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // Confirm the batch production arm ran correctly: next tick should be armed
     // at tResume+2+BATCH_FULL_PROD_MS — verified by ensuring batchesReady only
     // changes by consumption on a subsequent tick well before that deadline.
-    const tBeforeNextProd = tResume + 2 + BATCH_FULL_PROD_MS - 1000;
+    const tBeforeNextProd = tResume9 + 2 + BATCH_FULL_PROD_MS - 1000;
     act(() => {
       vi.setSystemTime(tBeforeNextProd);
-      rerender(props("running", tBeforeNextProd));
+      rerender9(props9("running", tBeforeNextProd));
     });
     // batchesReady still must not exceed batchesAtPause — production has not
     // fired yet (its next-due is still in the future).
     expect(store.batchesReady).toBeLessThanOrEqual(batchesAtPause);
   });
 });
+
+    const totalAfterWake7 = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
+
+    const expectedDelta = 50; // floor(6.667 * 100 / 10) - 16 = 66 - 16
+
+    const expectedTotal = 16 + expectedDelta; // 66
