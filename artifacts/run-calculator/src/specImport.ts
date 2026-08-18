@@ -1974,6 +1974,13 @@ export async function commitSpecImport(
    * the collapse only happens here.
    */
   appliedParsed: ParsedSpecImport;
+  /**
+   * True when the learned-alias POST failed after the import itself applied:
+   * the user's renames / "use existing" picks were NOT remembered, so the next
+   * re-import of the same sheet will ask again. The caller surfaces a warning
+   * instead of letting the loss stay silent.
+   */
+  aliasSaveFailed: boolean;
 }> {
   // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
   // "…1.75") to one clean name up front, so the profile applicator fields and the
@@ -2361,11 +2368,18 @@ export async function commitSpecImport(
   // aliases), never save poisoned pairs — generic "Mix"/"cheese" names,
   // digit mismatches, cycles. Applies to the corrections mirror too.
   const savableAliases = sanitizeSpecAliases(prepared.newAliases);
+  // Surface (don't just swallow) a failed alias save: the import itself already
+  // applied, but losing the learned aliases means the next re-import of this
+  // sheet won't remember the user's renames / "use existing" picks. The caller
+  // shows a non-blocking warning so the manager knows the memory didn't land.
+  let aliasSaveFailed = false;
   if (savableAliases.length) {
     try {
       await saveSpecImportAliases(savableAliases);
     } catch {
-      // Best-effort: the import already applied; learning is a bonus.
+      // Best-effort: the import already applied; learning is a bonus — but
+      // report it so the UI can warn instead of failing silently.
+      aliasSaveFailed = true;
     }
     // Mirror each learned name mapping into the factory-wide corrections pool
     // (additive — alongside the spec-import aliases above) so every other
@@ -2379,5 +2393,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, aliasSaveFailed };
 }

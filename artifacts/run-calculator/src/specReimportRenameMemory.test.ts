@@ -132,10 +132,12 @@ vi.mock("./namedRecipes", () => ({
 }));
 
 import { prepareSpecImportMulti, hashSpecImportSource } from "./specImport";
+import { recipeLinkSuggestionKey, blendLinkSuggestionKey } from "@workspace/spec-import";
 import { deriveSourceKey } from "./savedSpecSheets";
 import {
   learnSpecImportAliasesForNameChange,
   learnIngredientChangeAliases,
+  learnRecipeNameChangeAliases,
   buildTypeRenameAliases,
   buildIngredientChangeAliases,
 } from "./specImportAliases";
@@ -376,6 +378,37 @@ describe("spec re-import remembers merges/renames (real workbook, deterministic 
     expect(rowNames).toContain("Mozzarella (WMLM)");
     expect(rowNames.map(lc)).not.toContain("wm mozzarella");
     expect(rowNames).toContain("Mozzarella (LMPS)");
+  });
+
+  it("8. dough recipe-name MERGE → re-import pre-links the old name onto the survivor", async () => {
+    const first = await reimport();
+    expect(first.parsed.recipes.some((r) => r.kind === "dough" && r.name === "Aldo Dough")).toBe(true);
+
+    // Merge "Aldo Dough" → "House Dough" the way handleApplyRecipeNameMerge
+    // learns it (kind "recipeName", context = the recipe kind).
+    await learnRecipeNameChangeAliases("dough", ["Aldo Dough"], "House Dough");
+
+    const second = await reimport();
+    // The re-import must remember the merge: the review dialog's "Use existing"
+    // suggestion map pre-selects the survivor for the old sheet name, so it no
+    // longer surfaces as a brand-new/unlinked recipe.
+    expect(second.aliasLinkSuggestions?.[recipeLinkSuggestionKey("dough", "Aldo Dough")]).toBe(
+      "House Dough",
+    );
+  });
+
+  it("9. mix/blend recipe-name MERGE → re-import pre-links via the appType namespace (context-free + brand-scoped)", async () => {
+    // Merge the sheet's blend name → survivor the way handleApplyRecipeNameMerge
+    // learns it for the "mixes" category (appType kind, brand-scoped when the
+    // surviving pool row carries a brand).
+    await learnRecipeNameChangeAliases("mixes", ["Aldo Topping Blend"], "Aldo House Blend", "Aldo's");
+
+    const second = await reimport();
+    const sugg = second.aliasLinkSuggestions ?? {};
+    // Context-free fallback key (plain lower-cased sheet name)...
+    expect(sugg["aldo topping blend"]).toBe("Aldo House Blend");
+    // ...and the brand-scoped key both point at the survivor.
+    expect(sugg[blendLinkSuggestionKey("Aldo's", "aldo topping blend")]).toBe("Aldo House Blend");
   });
 
   it("7. parenthetical ingredient names survive verbatim; (A) vs (B) never auto-collapsed", async () => {

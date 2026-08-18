@@ -10569,8 +10569,19 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed } =
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+      // The import itself succeeded, but the learned rename / "use existing"
+      // aliases failed to save — warn instead of failing silently, since the
+      // next re-import of this sheet would otherwise forget these picks.
+      if (aliasSaveFailed) {
+        toast({
+          title: "Import applied — mappings not remembered",
+          description:
+            "Saving the learned name mappings failed, so the next re-import of this sheet may ask about the same renames and links again. Check your connection and re-apply if needed.",
+          variant: "destructive",
+        });
+      }
       // Tombstone profiles the manager marked as removed from the workbook.
       // Done after commit so the new profiles are written first; deletion is
       // local-only (same tombstone path as manual brand/flavor deletion in the
