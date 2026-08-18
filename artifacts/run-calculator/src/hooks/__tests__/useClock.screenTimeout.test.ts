@@ -610,6 +610,89 @@ describe("useClock — status transition interval cleanup", () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // K. paused → ended: 1-second interval is cleared; advancing 1 s must NOT
+  //    produce a tick (ghost fast interval is gone).
+  //
+  // "paused" uses a 1-second interval (same as "running").  When the status
+  // switches to "ended", React's useEffect cleanup fires clearInterval on the
+  // 1-second interval and registers a fresh PENDING_CLOCK_MS interval.  If
+  // cleanup fails, the phantom 1-second interval would tick and advance
+  // nowTime — this test catches exactly that failure.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("K. paused → ended: old 1-second interval is cleared; 1 s later produces no tick", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "paused" | "ended" }) => useClock(status),
+      { initialProps: { status: "paused" as const } },
+    );
+
+    // First 1-second tick while paused.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "paused" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Transition to "ended": cleanup clears the 1-second interval; a new
+    // PENDING_CLOCK_MS interval is registered from this point.
+    act(() => {
+      rerender({ status: "ended" });
+    });
+    const timeAtTransition = result.current.getTime(); // T0 + 1_000
+
+    // Advance 1 second — the old 1-second interval is gone, so no callback
+    // fires.  nowTime must stay at timeAtTransition.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(timeAtTransition);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // L. paused → ended: new slow interval fires correctly after PENDING_CLOCK_MS.
+  //
+  // Companion to K: confirms the fresh PENDING_CLOCK_MS interval that replaced
+  // the old 1-second interval actually ticks exactly once per slow period,
+  // measured from the moment of the paused → ended transition.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("L. paused → ended: new slow interval fires exactly once after PENDING_CLOCK_MS", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "paused" | "ended" }) => useClock(status),
+      { initialProps: { status: "paused" as const } },
+    );
+
+    // Let the paused 1-second interval tick once to establish a non-T0 baseline.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "paused" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Transition to "ended".
+    act(() => {
+      rerender({ status: "ended" });
+    });
+    const timeAtTransition = result.current.getTime(); // T0 + 1_000
+
+    // Advance (PENDING_CLOCK_MS - 1_000) ms: the new slow interval has NOT
+    // yet completed its first full period from the transition point.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS - 1_000);
+      rerender({ status: "ended" });
+    });
+    // Still no tick — we are 1 second short of the first slow-tick period.
+    expect(result.current.getTime()).toBe(timeAtTransition);
+
+    // Advance the final 1_000 ms to complete the first PENDING_CLOCK_MS period.
+    // The new slow interval fires once → nowTime = T0 + 1_000 + PENDING_CLOCK_MS.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000 + PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // J. running → paused: same-cadence transition keeps exactly one 1-second
   //    interval (no double-tick).
   //
