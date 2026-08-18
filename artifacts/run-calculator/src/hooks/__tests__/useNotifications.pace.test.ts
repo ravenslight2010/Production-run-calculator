@@ -111,7 +111,25 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Remove any per-test Notification stub that a test may have injected.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (window as any).Notification;
 });
+
+// ── Helper: per-test Notification stub ───────────────────────────────────────
+// Injected only inside the test that confirms the OS notification fires when
+// Notification IS present.  NOT installed globally in beforeAll — that is the
+// whole point of this file.
+function injectNotificationStub(permission: NotificationPermission = "granted") {
+  const ctor = vi.fn();
+  const stub = Object.assign(ctor, { permission });
+  Object.defineProperty(window, "Notification", {
+    value: stub,
+    writable: true,
+    configurable: true,
+  });
+  return ctor;
+}
 
 // ── Behind-pace effect tests ──────────────────────────────────────────────────
 
@@ -303,5 +321,31 @@ describe("useNotifications — behind-pace alert (no Notification API)", () => {
     expect(result.current.showPaceAlert).toBe(true);
     expect(result.current.paceAlertMsg).toMatch(/Behind pace|cases short|min remaining/i);
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
+  });
+
+  // ── 9. Notification fires when API IS present (integration path) ──────────
+  it("calls the Notification constructor when Notification IS present and permission is granted", async () => {
+    const notifCtor = injectNotificationStub("granted");
+    const run = makeRun({ startedAt: T0 });
+
+    const { rerender } = renderHook((p: Params) => useNotifications(p), {
+      // Arm tick: elapsedMin = 5 < 10 → paceArmedRef.add(runId), returns early.
+      initialProps: makeArmParams(ARM_TICK, { currentRun: run }),
+    });
+
+    expect(notifCtor).not.toHaveBeenCalled();
+
+    // Eval tick: crosses the shortfall threshold → fires the behind-pace alert.
+    act(() => {
+      rerender(makeArmParams(EVAL_TICK, { currentRun: run }));
+    });
+
+    // Flush the async IIFE inside showAppNotification (service-worker path
+    // falls through to new Notification() in the test environment).
+    await act(async () => { await Promise.resolve(); });
+
+    expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
+    expect(notifCtor).toHaveBeenCalledOnce();
+    expect(notifCtor.mock.calls[0][0]).toBe("⚠️ Behind pace");
   });
 });
