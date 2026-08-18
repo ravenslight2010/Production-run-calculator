@@ -1088,6 +1088,130 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  // 12. fireAutoTrackNow() after a long screen-off + suppress window
+  //     (no dough-timer pause): 2-period cap applies, ≤ 2 trays consumed.
+  //
+  // Unlike resumeDoughTimers() or the runStatus-"running" effect (both of which
+  // zero trayLastMsRef), fireAutoTrackNow() does NOT zero trayLastMsRef when
+  // doughTimerPausedRef is 0.  This means the first post-fire consumption tick
+  // sees the full elapsed time since tick 1 — capped at 2 periods.
+  //
+  // The 2-period cap kicks in only when the device did NOT re-render during
+  // the suppress window (no intermediate tick updated trayLastMsRef).  This
+  // matches a "screen-off while auto-suppressed" scenario: the tablet's display
+  // sleeps, the hook does not fire, and the operator later taps "Resume now".
+  //
+  // On the first post-fire tick:
+  //   prevMs = trayLastMsRef = T1  (from tick 1; unchanged — no mid-gap rerenders)
+  //   elapsed = tFire − T1 > 2 × TRAY_PERIOD_MS
+  //   durationMin = Math.min(2 × TRAY_PERIOD_MS / 60000, elapsed / 60000)
+  //               = 4 min  (2-period cap)
+  //   traysConsumed = floor(4 * 100 / 200) = 2
+  //
+  // Documenting the cap as an explicit assertion makes any future change to
+  // fireAutoTrackNow() (e.g. zeroing trayLastMsRef unconditionally like
+  // resumeDoughTimers()) immediately visible via a test failure.
+  //
+  // Scenario:
+  //   Tick 1 (T0+500): trayLastMsRef ← T0+500; trays: 5→4.
+  //   Suppress window set, screen off — NO rerenders until tFire.
+  //   tFire = T1 + 5 × TRAY_PERIOD_MS  (elapsed >> 2-period cap).
+  //   fireAutoTrackNow() zeros trayNextDueMsRef but NOT trayLastMsRef.
+  //   Re-render: tick fires; elapsed capped → exactly 2 trays consumed → 4→2.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("12. fireAutoTrackNow() after a long screen-off + suppress: 2-period cap, ≤ 2 trays consumed", () => {
+    // Suppress production (+1) ticks so the net tray delta is purely from
+    // consumption and the final count is exact and deterministic.
+    const calcNoProd = { ...BASE_CALC, traysNeeded: 0, batchesNeeded: 0 };
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 0 });
+
+    // externalAutoSuppressRef lets the test control the suppress window without
+    // reaching into private hook state.
+    const autoSuppressRef = { current: 0 } as React.MutableRefObject<number>;
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number): Props => ({
+      runId: "run-12",
+      runStatus: "running" as const,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: calcNoProd,
+      v: {
+        ...BASE_V,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+      externalAutoSuppressRef: autoSuppressRef,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0) },
+    );
+
+    // ── Tick 1 at T0+500: establishes trayLastMsRef ───────────────────────
+    // prevMs=0 → durationMin = 1 period (2 min) → traysConsumed=1. trays: 5→4.
+    // trayLastMsRef    ← T0+500
+    // trayNextDueMsRef ← T0+500 + TRAY_PERIOD_MS  (well in the future)
+    const T1 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1);
+      rerender(props(T1));
+    });
+    expect(store.traysOnLine).toBe(4);
+
+    // ── Screen off + suppress window active — NO rerenders during this gap. ─
+    // Activating the suppress window simulates the operator starting a manual
+    // edit just as the screen turns off.  Crucially, no act()/rerender calls
+    // happen here: without rerenders trayLastMsRef stays at T1.  Any rerender
+    // during the gap would fire the consumption tick (because trayNextDueMsRef
+    // would be past-due) and advance trayLastMsRef to that point, shrinking the
+    // apparent elapsed time seen by the post-fire tick.
+    autoSuppressRef.current = T1 + 6 * TRAY_PERIOD_MS; // still "suppressed" at tFire
+
+    // ── Screen wakes: fireAutoTrackNow() + rerender at T1 + 5 periods. ─────
+    // tFire is 5 tray-periods after tick 1 — far beyond the 2-period cap.
+    // autoSuppressRef is still technically active; but fireAutoTrackNow()
+    // clears the internal "next due" gates (sets them to 0) so the tick fires
+    // on this re-render.  The suppression check (Date.now() < autoSuppressRef)
+    // is against Date.now() which we advance to tFire — we clear it first so
+    // the write is not blocked.
+    //
+    // fireAutoTrackNow() does NOT zero trayLastMsRef (doughTimerPausedRef=0),
+    // so prevMs stays at T1.
+    //
+    // Consumption tick math:
+    //   prevMs = T1  (unchanged — no mid-gap rerenders)
+    //   elapsed = tFire − T1 = 5 × TRAY_PERIOD_MS
+    //   durationMin = min(2 × TRAY_PERIOD_MS / 60000, elapsed / 60000)
+    //               = min(4 min, 10 min) = 4 min   ← 2-period cap
+    //   traysConsumed = floor(4 * 100 / 200) = floor(2) = 2
+    //   → traysOnLine: 4 − 2 = 2
+    const tFire = T1 + 5 * TRAY_PERIOD_MS;
+    autoSuppressRef.current = 0; // expire suppress window so write proceeds
+    act(() => {
+      vi.setSystemTime(tFire);
+      result.current.fireAutoTrackNow();
+      rerender(props(tFire));
+    });
+
+    const traysDropped = 4 - store.traysOnLine;
+
+    // ── Core assertion 1: cap — at most 2 trays consumed. ─────────────────
+    // This is the upper bound regardless of floating-point rounding.
+    expect(traysDropped).toBeLessThanOrEqual(2);
+
+    // ── Core assertion 2: exact cap hit — exactly 2 trays consumed. ───────
+    // elapsed ≈ 5 periods, capped at 2 → floor(4*100/200) = 2.
+    // If this drops to 1 in the future, fireAutoTrackNow() was changed to
+    // also zero trayLastMsRef (like resumeDoughTimers()) — that is a design
+    // choice that should be intentional, not accidental.
+    expect(traysDropped).toBe(2);
+    expect(store.traysOnLine).toBe(2);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   // 11. Paused→wake: no tick fires — form counter stays frozen, pace gauge
   //     reflects elapsed time (time-based, not counter-based)
   //
