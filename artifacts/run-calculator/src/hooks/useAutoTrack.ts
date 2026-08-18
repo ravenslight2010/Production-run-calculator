@@ -432,6 +432,11 @@ export function useAutoTrack({
       // simultaneously-overdue timestamp that collapses the offset to zero.
       trayProdNextDueMsRef.current = 0;
       batchNextDueMsRef.current = 0;
+      // Reset batch-production schedule so a pause longer than one full batch
+      // period (e.g. 12 min) does not trigger a phantom +1 batch production event
+      // on the very first post-resume tick. The ref re-arms at nowMs+fullBatchMs
+      // on the next tick (the same first-encounter path used on run start).
+      batchProdNextDueMsRef.current = 0;
       hopperProdNextDueMsRef.current = 0;
     }
   }, [runStatus]);

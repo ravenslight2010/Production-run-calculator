@@ -656,4 +656,133 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(traysDropped).toBe(1);
     expect(store.traysOnLine).toBe(3);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 7. batchProdNextDueMsRef is reset on global resume — no phantom +1 batch
+  //
+  // After tick 1, batchProdNextDueMsRef is armed at T0+500+BATCH_FULL_PROD_MS
+  // (12 min into the future).  If the run is then paused for 15 min (longer
+  // than one full batch period) and resumed WITHOUT zeroing batchProdNextDueMsRef,
+  // the ref is past-due on the very first post-resume tick: the production
+  // branch fires delta += 1 and batchesReady jumps UP — a phantom "+1 batch"
+  // event that has nothing to do with real mixer output.
+  //
+  // The runStatus "running" effect must reset batchProdNextDueMsRef to 0 so
+  // the first-encounter re-arm path fires instead (no write), and batchesReady
+  // can only decrease (consumption) on that first tick, not increase.
+  //
+  // Constants:
+  //   BATCH_FULL_PROD_MS = (perBatch/ppm)*60000 = (1200/100)*60000 = 720 000 ms
+  //   batchPeriodMs      = BATCH_FULL_PROD_MS / 4                  = 180 000 ms
+  //   Pause duration     = 15 min = 900 000 ms  >  12 min batch period
+  //
+  // Expected on first post-resume tick (batchProdNextDueMsRef reset to 0):
+  //   production: arm only, no delta         → batchesReady unchanged from prod
+  //   consumption: -batchPeriodMs/effDrainMs = -0.25
+  //   net: batchesReady DECREASES (or stays the same if seeded)
+  //
+  // Counterfactual (batchProdNextDueMsRef NOT reset):
+  //   production: past-due → delta += 1
+  //   consumption: delta -= 0.25
+  //   net: batchesReady INCREASES by ~0.75 (the phantom event)
+  // ───────────────────────────────────────────────────────────────────────────
+  it("7. batchesReady does not jump up after a global pause longer than one batch period", () => {
+    // ppm=100, perBatch=1200 → full batch period = 12 min = 720 000 ms.
+    // Pause for 15 min so batchProdNextDueMsRef is past-due at resume time
+    // if it were not zeroed by the runStatus effect.
+    const BATCH_FULL_PROD_MS = (BASE_CALC.perBatch / BASE_CALC.ppm) * 60_000; // 720 000 ms
+    const PAUSE_MS = 15 * 60_000; // 900 000 ms  >  BATCH_FULL_PROD_MS
+
+    const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      status: "running" | "paused",
+      nowMs: number,
+    ): Props => ({
+      runId: "run-7",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props("running", T0) },
+    );
+
+    // ── Tick 1 at T0+500: arms batchProdNextDueMsRef ──────────────────────
+    // batchProdNextDueMsRef.current === 0 → first-encounter path:
+    //   batchProdNextDueMsRef ← T0+500+BATCH_FULL_PROD_MS  (no write)
+    // batchNextDueMsRef.current === 0 → consumption fires (prevMs=0, one period):
+    //   batchesReady may decrease slightly.
+    // After this tick batchProdNextDueMsRef is armed and pointing 12 min ahead.
+    const T1 = T0 + 500;
+    act(() => {
+      vi.setSystemTime(T1);
+      rerender(props("running", T1));
+    });
+    // batchesReady must not have increased (production arm-only, possible consumption).
+    expect(store.batchesReady).toBeLessThanOrEqual(2);
+
+    // ── Pause at T1+1 ────────────────────────────────────────────────────
+    const tPause = T1 + 1;
+    act(() => {
+      vi.setSystemTime(tPause);
+      rerender(props("paused", tPause));
+    });
+    const batchesAtPause = store.batchesReady;
+
+    // ── Stay paused for 15 min (> one 12-min batch period) ───────────────
+    // batchProdNextDueMsRef is now past-due. If not reset on resume,
+    // the first post-resume tick would fire the production branch (delta += 1).
+    const tResume = tPause + PAUSE_MS;
+    act(() => {
+      vi.setSystemTime(tResume);
+      rerender(props("paused", tResume));
+    });
+    expect(store.batchesReady).toBe(batchesAtPause); // no change while paused
+
+    // ── Resume ────────────────────────────────────────────────────────────
+    // React runs effects in declaration order:
+    //   a) runStatus effect (paused → running):
+    //        batchProdNextDueMsRef.current ← 0  (was T0+500+720000, past-due)
+    //        batchNextDueMsRef.current     ← 0
+    //        batchLastMsRef.current        ← 0
+    //   b) tick effect:
+    //        batchProdNextDueMsRef === 0 → arm only; NO +1 delta
+    //        batchNextDueMsRef === 0 → consumption fires (prevMs=0, one period):
+    //          delta -= batchPeriodMs / effDrainMs  ≈ -0.25
+    //        net: batchesReady DECREASES from batchesAtPause (no phantom +1).
+    //
+    // Without the batchProdNextDueMsRef reset the stale ref would be past-due:
+    //   production delta += 1, consumption delta -= 0.25 → batchesReady RISES.
+    act(() => {
+      vi.setSystemTime(tResume + 2);
+      rerender(props("running", tResume + 2));
+    });
+
+    // batchesReady must NOT have increased above its value at the time of pause.
+    // (A phantom production event would push it above batchesAtPause.)
+    expect(store.batchesReady).toBeLessThanOrEqual(batchesAtPause);
+
+    // Confirm the batch production arm ran correctly: next tick should be armed
+    // at tResume+2+BATCH_FULL_PROD_MS — verified by ensuring batchesReady only
+    // changes by consumption on a subsequent tick well before that deadline.
+    const tBeforeNextProd = tResume + 2 + BATCH_FULL_PROD_MS - 1000;
+    act(() => {
+      vi.setSystemTime(tBeforeNextProd);
+      rerender(props("running", tBeforeNextProd));
+    });
+    // batchesReady still must not exceed batchesAtPause — production has not
+    // fired yet (its next-due is still in the future).
+    expect(store.batchesReady).toBeLessThanOrEqual(batchesAtPause);
+  });
 });
