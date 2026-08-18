@@ -348,6 +348,13 @@ export function useAutoTrack({
     trayProdNextDueMsRef.current = 0;
     batchProdNextDueMsRef.current = 0;
     hopperProdNextDueMsRef.current = 0;
+    // If dough timers were paused, zero the consumption-tick anchors so the
+    // first post-resume tick uses ONE clean period instead of the accumulated
+    // pause span (which would be capped at 2 periods → 2 trays consumed).
+    if (doughTimerPausedRef.current > 0) {
+      trayLastMsRef.current = 0;
+      batchLastMsRef.current = 0;
+    }
     doughTimerPausedRef.current = 0;
     setIsDoughTimerPaused(false);
   }, []);
