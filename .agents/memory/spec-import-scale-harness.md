@@ -21,8 +21,9 @@ active model or imports silently drop data — no error, just missing profiles.
   Cannot run inside a 5-min shell; use a long-lived process or workflow.
 - `artifacts/api-server/scripts/e2e-spec-roundtrip.ts` — smaller AI stress test
   (qualifier brands, xlsx round-trip, known-sauce grounding SCENARIO 2).
+  Last verified: 2026-08-18, gemini-2.5-flash, all 14 checks passed.
 
-## Current calibrated limits (gemini-3.2-flash-preview)
+## Current calibrated limits (gemini-2.5-flash — verified 2026-08-18)
 - **`maxTotalChars` = 4000** — model self-truncates ("sampled for brevity") at
   8k when a chunk mixes 64+ profiles with any recipes, and unit-converts lbs÷16
   when dense profile context precedes recipe rows. 4k keeps each chunk focused.
@@ -33,6 +34,9 @@ active model or imports silently drop data — no error, just missing profiles.
 - **`maxProfiles` = 400** — unchanged; 4k chunks never approach this.
 - **`SPEC_PARSE_VERSION`** — bump whenever any of the above change, or prompt
   rewrites land. Stale cached parses resurrect wrong data.
+- **No `thinkingConfig`** — gemini-2.5-flash does NOT support `thinkingLevel`;
+  the config block was removed from `client.ts`. Former Gemini 3.x note about
+  `thinkingBudget: 0` fallback no longer applies.
 
 **Why:** a repeatable check is the only defense against "model changed, big
 imports quietly drop data." The harness has caught real loss on every

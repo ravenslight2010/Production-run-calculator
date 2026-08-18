@@ -10,7 +10,7 @@
 // async iterable of { choices: [{ delta: { content } }] } (stream). Vision is
 // supported via `image_url` data-URI parts. Everything else in the app (routes,
 // prompts, parsing) stays byte-for-byte unchanged.
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import type { Content, Part, GenerateContentConfig } from "@google/genai";
 
 type TextPart = { type: "text"; text: string };
@@ -123,18 +123,9 @@ function buildConfig(
   systemInstruction?: string,
 ): GenerateContentConfig {
   const config: GenerateContentConfig = {
-    // Minimize Gemini's internal "thinking". These tasks are structured
-    // extraction / classification / advisory generation, not deep multi-step
-    // reasoning. IMPORTANT: do NOT use `thinkingBudget: 0` here — Gemini 3
-    // models treat a zero budget as unsupported and silently fall back to
-    // DYNAMIC thinking on complex prompts. Thinking tokens come out of the
-    // same maxOutputTokens pool as visible text, so that fallback starves the
-    // reply: the model burns the whole budget "thinking", finishes with
-    // MAX_TOKENS, and returns EMPTY content (seen in prod on /ai/match-premix
-    // with a real facility-memory-laden prompt). `thinkingLevel: "low"` is the
-    // supported knob for this model family and keeps latency low and output
-    // intact.
-    thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+    // No thinkingConfig — gemini-2.5-flash does not support thinkingLevel.
+    // (Gemini 3.x models used thinkingLevel: "low" to avoid thinking tokens
+    // consuming the maxOutputTokens budget, but that knob is absent in 2.5.)
   };
   if (systemInstruction) config.systemInstruction = systemInstruction;
   if (params.response_format?.type === "json_object") {

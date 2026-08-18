@@ -19,7 +19,7 @@
 // "ALL CHECKS PASSED — full round-trip with no data loss." Raw AI output and
 // the sanitized parse are dumped to /tmp/spec-e2e-{raw,parsed}.json for triage
 // (scenario 2 dumps to /tmp/spec-sauce-e2e-{raw,parsed}.json).
-// Last verified passing (2 consecutive runs): 2026-07-03, gemini-3.1-pro-preview.
+// Last verified passing (2 consecutive runs): 2026-08-18, gemini-2.5-flash.
 //
 // SCENARIO 2 (same run): known-sauce grounding — a sheet abbreviating ready-made
 // sauces the factory already has (known.sauceNames) must import with NO false
