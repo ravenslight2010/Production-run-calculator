@@ -29,6 +29,10 @@
  *
  *   (j) Mix plan collapses to empty when ALL runs in a shift are ended.
  *
+ *   (k) Empty state is preserved after a full page reload when all runs are
+ *       ended — exercises the localStorage + React hydration path separately
+ *       from the in-memory state path.
+ *
  * Relevant files:
  *   artifacts/run-calculator/src/pages/home.tsx  — mix plan section, ~14402–14700
  *   lib/mixes/src/index.ts          — buildMixPlan, computeEntryFromComponentLbs
@@ -2644,6 +2648,288 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       expect(rowText).not.toContain(wrongFallbackStr);
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (k): Empty state is preserved after a full page reload when all runs
+   * are ended — exercises the localStorage + React hydration path separately
+   * from the in-memory state path.
+   *
+   * Mechanism: liveRunsForMixes (home.tsx ~14462) re-derives its list from
+   * dayState.runs on every render. loadDayState() on mount reads the persisted
+   * day state from localStorage, which carries endedAt on every run. If the
+   * filter regresses on the hydration path (e.g. endedAt is lost during
+   * serialisation), the plan would wrongly re-appear after reload even though
+   * it was empty in the same browser session.
+   *
+   * This test shares the same two-run stop sequence as test (j) and then adds
+   * a full page reload before the final empty-state assertion.
+   */
+  /**
+   * Test (k): "Already made" value persists after a page reload.
+   *
+   * Verifies that the onBlur → POST /api/mixes path actually writes to the
+   * server (not just the React Query cache), so a hard reload re-fetches the
+   * updated value and the Pull For Prep lbs remain reduced accordingly.
+   *
+   * Formula (same as test f):
+   *   componentLbs  = (2.0/16) × 800  = 100.00
+   *   totalLbs      = 100.00 × 1.15 + 20 = 135.00
+   *   remainingLbs  = 135.00 − 50        =  85.00
+   *   pullLbs       = 100.00 × 85.00 / 135.00 ≈ 62.96
+   */
+  test("'already made' value persists after a page reload (saved to server)", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `persist-reload-${suffix}`;
+    const mixName = `PersistReloadPrepMix ${suffix}`;
+    const ingredient = `PersistHerb_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const componentLbs = (RUN_OZ / 16) * totalPizzas;                     // 100.00
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
+
+    const EDIT_AMOUNT = 50;
+    const remainingAfterEdit = totalLbs - EDIT_AMOUNT;                     //  85.00
+    const expectedPullLbs = componentLbs * remainingAfterEdit / totalLbs;  // ≈62.96
+    const expectedPullStr = expectedPullLbs.toFixed(2);                    // "62.96"
+    const fullPullStr = componentLbs.toFixed(2);                           // "100.00"
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: RUN_OZ,
+        amountAlreadyMade: 0,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject run data into localStorage so the mix card appears
+      await page.evaluate(
+        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: ingredient, pep1OzPerPizza: runOz,
+            casesNeeded, pizzasPerCase, casesPerLayer: 0,
+          }));
+        },
+        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // Navigate to Mixes and find the mix card
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // Step 1: type 50 into "Already made" and blur to trigger POST /api/mixes
+      const alreadyMadeInput = todayCard.locator('input[type="number"]').first();
+      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
+      await alreadyMadeInput.click();
+      await alreadyMadeInput.fill(String(EDIT_AMOUNT));
+      await alreadyMadeInput.press("Tab");
+
+      // Wait for the save round-trip to complete before reloading
+      await page.waitForTimeout(2_000);
+
+      // Step 2: Hard-reload the page — flushes the React Query cache entirely
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // Navigate back to Mixes
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const reloadedCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await reloadedCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(reloadedCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // Step 3: "Already made" input must show the saved value (50)
+      const savedInput = reloadedCard.locator('input[type="number"]').first();
+      await savedInput.waitFor({ state: "visible", timeout: 5_000 });
+      await expect(savedInput).toHaveValue(String(EDIT_AMOUNT), { timeout: 5_000 });
+
+      // Step 4: Pull For Prep lbs must reflect the reduced amount (≈62.96), not the full 100.00
+      await expect(reloadedCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      const ingredientRow = reloadedCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+      expect(rowText).toContain(expectedPullStr);
+      expect(rowText).not.toContain(fullPullStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (l): Empty state is preserved after a full page reload when all runs
+   * are ended — exercises the localStorage + React hydration path separately
+   * from the in-memory state path.
+   */
+  test("empty state is preserved after a page reload when all runs are ended", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId1 = `reload-ended-mix-a-${suffix}`;
+    const mixId2 = `reload-ended-mix-b-${suffix}`;
+    const mixName1 = `ReloadEndedMixA ${suffix}`;
+    const mixName2 = `ReloadEndedMixB ${suffix}`;
+    const component1 = `ReloadEndedCompA_${suffix}`;
+    const component2 = `ReloadEndedCompB_${suffix}`;
+    const brand1 = `ReloadEndedBrandA_${suffix}`;
+    const brand2 = `ReloadEndedBrandB_${suffix}`;
+    const today = todayStr();
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId1,
+        name: mixName1,
+        brand: brand1,
+        isPrep: false,
+        component: component1,
+        perPizza: 2.0,
+        batchSize: 10,
+      });
+      await dbCreateMix(db, {
+        id: mixId2,
+        name: mixName2,
+        brand: brand2,
+        isPrep: false,
+        component: component2,
+        perPizza: 2.0,
+        batchSize: 10,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.waitForTimeout(1_000);
+
+      // Set brand on run 1
+      await page.locator('[data-testid="tab-run"]').click();
+      const brandInput = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput.click();
+      await brandInput.fill(brand1);
+      await brandInput.press("Enter");
+      await page.waitForTimeout(800);
+
+      // Add run 2 and set brand2
+      const newRunBtn = page.getByRole("button", { name: /new run/i });
+      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await newRunBtn.click();
+      await page.waitForTimeout(800);
+
+      const brandInput2 = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput2.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput2.click();
+      await brandInput2.fill(brand2);
+      await brandInput2.press("Enter");
+      await page.waitForTimeout(800);
+
+      // Both cards visible before any run is stopped
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName1, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName2, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // Switch to run 1 via Prev, start + stop it
+      await page.locator('[data-testid="tab-run"]').click();
+      const prevBtn = page.getByRole("button", { name: /prev/i });
+      await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await prevBtn.click();
+      await page.waitForTimeout(600);
+
+      const startBtn1 = page.locator('[data-testid="button-start-run"]');
+      await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
+      await startBtn1.click();
+
+      const stopBtn1 = page.getByRole("button", { name: /stop run/i });
+      await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
+      await stopBtn1.click();
+      await page.waitForTimeout(800);
+
+      // Switch to run 2 via Next, start + stop it
+      const nextBtn = page.getByRole("button", { name: /next/i });
+      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await nextBtn.click();
+      await page.waitForTimeout(600);
+
+      const startBtn2 = page.locator('[data-testid="button-start-run"]');
+      await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
+      await startBtn2.click();
+
+      const stopBtn2 = page.getByRole("button", { name: /stop run/i });
+      await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
+      await stopBtn2.click();
+      // Allow endRun() to persist endedAt to localStorage before reloading.
+      await page.waitForTimeout(1_000);
+
+      // ── Full page reload ──────────────────────────────────────────────────────
+      // This exercises the localStorage → loadDayState() → React hydration path.
+      // endedAt must survive serialisation so liveRunsForMixes returns [] and
+      // buildMixPlan returns [] after mount.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      // Dismiss onboarding if it reappears after reload (it should not, but be safe).
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // Navigate to Mixes and assert empty state is still shown
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      await expect(
+        page.locator(`[data-testid="mix-plan-${today}"]`),
+      ).toHaveCount(0, { timeout: 5_000 });
+      await expect(
+        page.locator('[data-testid="mix-plan-empty"]'),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByText(mixName1, { exact: false })).toHaveCount(0, { timeout: 3_000 });
+      await expect(page.getByText(mixName2, { exact: false })).toHaveCount(0, { timeout: 3_000 });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
