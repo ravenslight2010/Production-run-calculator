@@ -151,4 +151,47 @@ describe("RunInsightsCard — accept warning visibility", () => {
     expect(onAccept).toHaveBeenCalledOnce();
     expect(onAccept).toHaveBeenCalledWith(expect.objectContaining({ id: "sug-1" }));
   });
+
+  it("warning clears automatically when getAcceptWarning switches to null (profile saved mid-session)", async () => {
+    // Start with a warning — no profile saved yet
+    const onAccept = vi.fn().mockResolvedValue("Applied.");
+    const qc = makeQueryClient();
+
+    let getAcceptWarningFn: (s: RunSuggestion) => string | null | undefined =
+      () => "No saved setup for this product — open its Setup profile first.";
+
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <RunInsightsCard onAccept={onAccept} getAcceptWarning={(s) => getAcceptWarningFn(s)} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("suggestion-speed-target")).toBeTruthy(),
+    );
+
+    // Warning is shown before the profile is saved
+    expect(screen.getByTestId("text-run-insights-accept-warning")).toBeTruthy();
+
+    // Simulate manager saving the profile — getAcceptWarning now returns null
+    getAcceptWarningFn = () => null;
+
+    rerender(
+      <QueryClientProvider client={qc}>
+        <RunInsightsCard onAccept={onAccept} getAcceptWarning={(s) => getAcceptWarningFn(s)} />
+      </QueryClientProvider>,
+    );
+
+    // Warning must be gone without a manual refresh
+    expect(screen.queryByTestId("text-run-insights-accept-warning")).toBeNull();
+
+    // Accept button is still present and functional
+    const acceptBtn = screen.getByTestId("button-run-insights-accept");
+    expect(acceptBtn).toBeTruthy();
+
+    await userEvent.click(acceptBtn);
+
+    expect(onAccept).toHaveBeenCalledOnce();
+    expect(onAccept).toHaveBeenCalledWith(expect.objectContaining({ id: "sug-1" }));
+  });
 });
