@@ -115,6 +115,7 @@ async function dbCreateMix(
     component: string;
     perPizza?: number;
     batchSize?: number;
+    amountAlreadyMade?: number;
   },
 ): Promise<void> {
   const components = JSON.stringify([
@@ -124,10 +125,10 @@ async function dbCreateMix(
     `INSERT INTO mixes
        (id, scope, name, brand, flavor, batch_size, days_early, notes,
         amount_already_made, components, is_prep, enabled, created_at, updated_at)
-     VALUES ($1, 'live', $2, $3, '', $4, 0, '', 0, $5::jsonb, $6, true, NOW(), NOW())
+     VALUES ($1, 'live', $2, $3, '', $4, 0, '', $7, $5::jsonb, $6, true, NOW(), NOW())
      ON CONFLICT (id, scope) DO UPDATE
        SET name=$2, brand=$3, batch_size=$4, components=$5::jsonb,
-           is_prep=$6, updated_at=NOW()`,
+           is_prep=$6, amount_already_made=$7, updated_at=NOW()`,
     [
       opts.id,
       opts.name,
@@ -135,6 +136,7 @@ async function dbCreateMix(
       opts.batchSize ?? 0,
       components,
       opts.isPrep ?? false,
+      opts.amountAlreadyMade ?? 0,
     ],
   );
 }
@@ -661,6 +663,234 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // instead, it would display 25.00 — asserting the fallback is absent
       // proves the run-profile lookup path was exercised.
       expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (d): Pull For Prep quantity is reduced proportionally when some of the
+   * mix is already made (amountAlreadyMade > 0 but < totalLbs).
+   *
+   * Formula (lib/mixes/src/index.ts, computeEntryFromComponentLbs):
+   *   componentLbs = (runOz / 16) × totalPizzas          → 100.00 lbs
+   *   totalLbs     = componentLbs × 1.15 + 20             → 135.00 lbs
+   *   remainingLbs = totalLbs − amountAlreadyMade          →  85.00 lbs
+   *   pull display = c.lbs × remainingLbs / totalLbs
+   *                = 100.00 × 85.00 / 135.00              →  62.96 lbs
+   *
+   * The displayed value must be strictly less than the full componentLbs
+   * (100.00), proving the already-made subtraction is applied before rendering.
+   */
+  test("Pull For Prep is reduced proportionally when some of the mix is already made", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-partial-${suffix}`;
+    const mixName = `PartialPrepMix ${suffix}`;
+    const ingredient = `PartialHerb_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    // Recipe constants.
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+
+    // Expected math.
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const AMOUNT_ALREADY_MADE = 50;
+    const componentLbs = (RUN_OZ / 16) * totalPizzas;           // 100.00
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
+    const remainingLbs = totalLbs - AMOUNT_ALREADY_MADE;          // 85.00
+    const expectedPullLbs = componentLbs * remainingLbs / totalLbs; // 62.96...
+    const expectedStr = expectedPullLbs.toFixed(2);               // "62.96"
+    const fullStr = componentLbs.toFixed(2);                       // "100.00"
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: RUN_OZ,
+        amountAlreadyMade: AMOUNT_ALREADY_MADE,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject run values into localStorage so the form has the expected recipe.
+      await page.evaluate(
+        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              casesNeeded,
+              pizzasPerCase,
+              casesPerLayer: 0,
+            }),
+          );
+        },
+        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // "Ingredient Prep" heading and mix name must be visible.
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // "Pull For Prep" heading must be visible.
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // The ingredient row must show the reduced lbs, not the full componentLbs.
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      // Displayed value must equal the proportionally-reduced amount.
+      expect(rowText).toContain(expectedStr);
+      // Full componentLbs must NOT appear — that would mean the already-made
+      // subtraction was silently skipped.
+      expect(rowText).not.toContain(fullStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (e): Pull For Prep shows 0.00 lbs when amountAlreadyMade >= totalLbs
+   * (the batch is fully covered). The card itself must still be visible so staff
+   * can confirm coverage; only the pull quantity must be zero.
+   *
+   * Formula:
+   *   remainingLbs = max(0, totalLbs − amountAlreadyMade) = max(0, 135 − 200) = 0
+   *   pull display = c.lbs × 0 / totalLbs = 0.00
+   */
+  test("Pull For Prep shows 0.00 lbs when the mix is fully covered by amountAlreadyMade", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-full-${suffix}`;
+    const mixName = `FullCoveredPrepMix ${suffix}`;
+    const ingredient = `CoveredHerb_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    // Set amountAlreadyMade well above totalLbs (135.00) to guarantee full coverage.
+    const AMOUNT_ALREADY_MADE = 200;
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: RUN_OZ,
+        amountAlreadyMade: AMOUNT_ALREADY_MADE,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              casesNeeded,
+              pizzasPerCase,
+              casesPerLayer: 0,
+            }),
+          );
+        },
+        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // The card must still appear — fully-covered cards are kept so staff can
+      // confirm coverage (line 14618–14622 comment in home.tsx).
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      // Pull quantity must be 0.00 — remainingLbs = max(0, 135 − 200) = 0.
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      const rowText = await ingredientRow.innerText();
+
+      expect(rowText).toContain("0.00");
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
