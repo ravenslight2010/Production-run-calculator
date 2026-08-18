@@ -38,6 +38,7 @@ import { useForm } from "react-hook-form";
 import type { ReactNode } from "react";
 import { type FormValues, DEFAULT_VALUES } from "../../types";
 import { LiveRunProvider, useLiveRun } from "../../contexts/LiveRunContext";
+import { PENDING_CLOCK_MS } from "../../hooks/useClock";
 
 // ── Stub heavy side-effect hooks (same pattern as clock-isolation.test.tsx) ──
 vi.mock("../../hooks/useNotifications");
@@ -67,6 +68,29 @@ function TestProviderWrapper({ children }: { children: ReactNode }) {
       runStatus="running"
       currentRun={undefined}
       currentRunId="test-run-wake"
+      form={form}
+      dayState={{ runs: [], currentIndex: 0 }}
+      doughSubTab="dough"
+      upcomingRunLabels={[]}
+      prefs={undefined}
+      screenMode={null}
+      machine={{ spinSec: 0, hopperSec: 0 }}
+    >
+      {children}
+    </LiveRunProvider>
+  );
+}
+
+// ── Provider wrapper for slow-cadence (pending) tests ────────────────────────
+function PendingProviderWrapper({ children }: { children: ReactNode }) {
+  const form = useForm<FormValues>({ defaultValues: DEFAULT_VALUES });
+  return (
+    <LiveRunProvider
+      v={DEFAULT_VALUES}
+      ve={DEFAULT_VALUES}
+      runStatus="pending"
+      currentRun={undefined}
+      currentRunId="test-run-wake-pending"
       form={form}
       dayState={{ runs: [], currentIndex: 0 }}
       doughSubTab="dough"
@@ -277,5 +301,211 @@ describe("LiveRunProvider — wake-snap integration (useClock → useLiveRun cha
       vi.advanceTimersByTime(1_000);
     });
     expect(nowTimeHistory.at(-1)).toBe(T0 + 2_500);
+  });
+});
+
+// ── Slow-cadence integration (runStatus="pending") ───────────────────────────
+//
+// Task #861: The existing wakeSnap suite (above) covers the fast path
+// (runStatus="running", 1-second tick).  This suite confirms that the focus
+// wake path works identically when the run is pending or ended — where useClock
+// uses PENDING_CLOCK_MS (10 s) instead of 1 s.
+//
+// The slow-cadence unit tests (C, D in useClock.screenTimeout.test.ts) verify
+// the hook in isolation.  These tests verify the path end-to-end through
+// LiveRunProvider into a useLiveRun() subscriber — a different code path because
+// the interval delay differs and LiveRunProvider forwards runStatus to useClock.
+//
+// What these tests cover over the unit tests:
+//   • The PENDING_CLOCK_MS delay actually flows through LiveRunProvider's
+//     useClock call (runStatus="pending" is forwarded correctly).
+//   • nowTime produced by the slow-cadence snap propagates through the provider
+//     value memo into useLiveRun() consumers.
+//   • No regression where LiveRunProvider accidentally hard-codes the fast
+//     cadence regardless of runStatus.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("LiveRunProvider — wake-snap integration (slow cadence, runStatus=pending)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    setDocumentHidden(false);
+  });
+
+  afterEach(() => {
+    setDocumentHidden(false);
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P1. window "focus" at PENDING_CLOCK_MS/2 (mid-period, no tick yet) snaps
+  //     nowTime through LiveRunProvider into the useLiveRun() subscriber.
+  //
+  // With the slow cadence the first interval tick would not fire until
+  // PENDING_CLOCK_MS (10 s) has elapsed.  Dispatching "focus" at the midpoint
+  // (5 s) must immediately update the subscriber to the mid-period snap,
+  // not leave it at the stale mount value T0.
+  //
+  // Sequence:
+  //   a) Mount with tab visible; slow interval starts (PENDING_CLOCK_MS).
+  //      nowTime = T0.
+  //   b) Advance PENDING_CLOCK_MS/2 — no tick yet.  System clock = T0+5000.
+  //      nowTime still = T0.
+  //   c) Dispatch window "focus" → onFocus snaps nowTime = T0+5000; restarts.
+  //   d) Assert subscriber nowTime = T0+5000 (mid-period snap propagated).
+  //   e) Advance PENDING_CLOCK_MS → new slow interval fires.
+  //      nowTime = T0+5000+PENDING_CLOCK_MS.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P1. window focus at mid-period snaps nowTime through LiveRunProvider (slow cadence)", async () => {
+    const nowTimeHistory: number[] = [];
+
+    function LiveSubscriber() {
+      const { nowTime } = useLiveRun();
+      nowTimeHistory.push(nowTime.getTime());
+      return null;
+    }
+
+    render(
+      <PendingProviderWrapper>
+        <LiveSubscriber />
+      </PendingProviderWrapper>,
+    );
+
+    // Mount: T0.
+    expect(nowTimeHistory.at(-1)).toBe(T0);
+
+    // Advance to mid-period — no slow-interval tick yet.
+    const halfPeriod = PENDING_CLOCK_MS / 2;
+    await act(async () => {
+      vi.advanceTimersByTime(halfPeriod);
+    });
+    // No tick has fired; subscriber still sees T0.
+    expect(nowTimeHistory.at(-1)).toBe(T0);
+
+    // Focus snap at system clock T0 + halfPeriod.
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    // Subscriber must now reflect the mid-period snap.
+    expect(nowTimeHistory.at(-1)).toBe(T0 + halfPeriod);
+
+    // Verify the slow interval was restarted: fires PENDING_CLOCK_MS after snap.
+    await act(async () => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+    });
+    expect(nowTimeHistory.at(-1)).toBe(T0 + halfPeriod + PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P2. The focus snap and the first post-focus slow-interval tick arrive as
+  //     SEPARATE render cycles on the slow cadence.
+  //
+  // Mirrors integration test 2 (above) but on PENDING_CLOCK_MS timing.  The
+  // snap value must appear in nowTimeHistory before the first post-snap tick.
+  //
+  // Sequence:
+  //   a) Mount visible; advance PENDING_CLOCK_MS/2 (no tick).
+  //   b) Dispatch "focus" → snap render (nowTime = T0 + halfPeriod).
+  //   c) Advance PENDING_CLOCK_MS → interval fires → tick render
+  //      (nowTime = T0 + halfPeriod + PENDING_CLOCK_MS).
+  //   d) Verify snap appears before tick in the history — two distinct cycles.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P2. slow-cadence focus snap and first post-snap tick are separate render cycles", async () => {
+    const nowTimeHistory: number[] = [];
+
+    function LiveSubscriber() {
+      const { nowTime } = useLiveRun();
+      nowTimeHistory.push(nowTime.getTime());
+      return null;
+    }
+
+    render(
+      <PendingProviderWrapper>
+        <LiveSubscriber />
+      </PendingProviderWrapper>,
+    );
+
+    const halfPeriod = PENDING_CLOCK_MS / 2;
+
+    // Advance to mid-period.
+    await act(async () => {
+      vi.advanceTimersByTime(halfPeriod);
+    });
+
+    // Focus snap.
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    const snapRenderCount = nowTimeHistory.length;
+    const snapValue = nowTimeHistory.at(-1)!;
+    expect(snapValue).toBe(T0 + halfPeriod);
+
+    // First post-snap slow-interval tick.
+    await act(async () => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+    });
+
+    const tickValue = T0 + halfPeriod + PENDING_CLOCK_MS;
+
+    // A new render must have occurred after the snap render.
+    expect(nowTimeHistory.length).toBeGreaterThan(snapRenderCount);
+    // The final value must be the tick value.
+    expect(nowTimeHistory.at(-1)).toBe(tickValue);
+
+    // Critical ordering: snap appears before tick — two separate render cycles.
+    const snapIdx = nowTimeHistory.indexOf(T0 + halfPeriod);
+    const tickIdx = nowTimeHistory.lastIndexOf(tickValue);
+    expect(snapIdx).toBeGreaterThanOrEqual(0); // snap was observed
+    expect(tickIdx).toBeGreaterThan(snapIdx);  // tick came after snap
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // P3. visibilitychange (hidden → visible) on the slow cadence also snaps
+  //     nowTime through LiveRunProvider into the useLiveRun() subscriber.
+  //
+  // Complements P1 (focus) with the primary visibility-change path.
+  //
+  // Sequence:
+  //   a) Mount hidden; advance PENDING_CLOCK_MS/2 while hidden.
+  //      System clock = T0 + halfPeriod; nowTime stays T0.
+  //   b) Tab becomes visible; dispatch visibilitychange → snap to T0+halfPeriod.
+  //   c) Assert subscriber sees T0+halfPeriod (not stale T0).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("P3. visibilitychange on slow cadence snaps nowTime through LiveRunProvider", async () => {
+    const nowTimeHistory: number[] = [];
+
+    function LiveSubscriber() {
+      const { nowTime } = useLiveRun();
+      nowTimeHistory.push(nowTime.getTime());
+      return null;
+    }
+
+    setDocumentHidden(true);
+    render(
+      <PendingProviderWrapper>
+        <LiveSubscriber />
+      </PendingProviderWrapper>,
+    );
+
+    expect(nowTimeHistory.at(-1)).toBe(T0);
+
+    const halfPeriod = PENDING_CLOCK_MS / 2;
+
+    // Advance while hidden — no slow interval running, nowTime stays T0.
+    await act(async () => {
+      vi.advanceTimersByTime(halfPeriod);
+    });
+    expect(nowTimeHistory.at(-1)).toBe(T0);
+
+    // Tab becomes visible → visibilitychange snap.
+    await act(async () => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Subscriber must reflect the snap value.
+    expect(nowTimeHistory.at(-1)).toBe(T0 + halfPeriod);
   });
 });
