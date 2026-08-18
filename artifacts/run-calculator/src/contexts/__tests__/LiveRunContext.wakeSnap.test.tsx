@@ -214,4 +214,68 @@ describe("LiveRunProvider — wake-snap integration (useClock → useLiveRun cha
     expect(snapIdx).toBeGreaterThanOrEqual(0); // snap was observed
     expect(tickIdx).toBeGreaterThan(snapIdx);  // tick came after snap
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Test 3: The window "focus" fallback path propagates through LiveRunProvider
+  // into a useLiveRun() subscriber.
+  //
+  // Some devices/browsers (e.g. some iOS Safari and Android tablets) do not
+  // fire visibilitychange reliably on screen wake or app-switch.  useClock
+  // registers a "focus" handler as a fallback snap.  This test confirms that
+  // the focus snap reaches useLiveRun() consumers end-to-end through
+  // LiveRunProvider — not just the isolated useClock unit test (test 3 in
+  // useClock.screenTimeout.test.ts).
+  //
+  // Sequence (mirrors the isolated unit test, but at the integration level):
+  //   a) Mount with visible tab — interval starts immediately.
+  //   b) Advance 1.5 s: interval fires once at T0+1000; system clock = T0+1500.
+  //      nowTime = T0+1000.
+  //   c) Dispatch window "focus" at mid-period (system clock T0+1500).
+  //      onFocus: setNowTime(new Date()) → T0+1500 (snap); interval restarted.
+  //   d) Assert subscriber's nowTime = T0+1500 (the mid-period snap, not the
+  //      stale interval value T0+1000).
+  //   e) Advance 1 s: new interval fires → nowTime = T0+2500.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("3. window focus fallback snap propagates through LiveRunProvider into useLiveRun() subscriber", async () => {
+    const nowTimeHistory: number[] = [];
+
+    function LiveSubscriber() {
+      const { nowTime } = useLiveRun();
+      nowTimeHistory.push(nowTime.getTime());
+      return null;
+    }
+
+    // Mount with tab visible — interval starts immediately.
+    render(
+      <TestProviderWrapper>
+        <LiveSubscriber />
+      </TestProviderWrapper>,
+    );
+
+    // Should have mounted once at T0.
+    expect(nowTimeHistory.at(-1)).toBe(T0);
+
+    // Advance 1.5 s: interval fires at T0+1000; system clock ends at T0+1500.
+    // The subscriber should see T0+1000 from the interval callback.
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(nowTimeHistory.at(-1)).toBe(T0 + 1_000);
+
+    // Dispatch window "focus" at mid-period (system clock = T0+1500).
+    // onFocus: setNowTime(new Date()) → T0+1500; start() restarts the interval.
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    // The subscriber must now reflect the focus snap, not the stale interval value.
+    expect(nowTimeHistory.at(-1)).toBe(T0 + 1_500);
+
+    // Verify the interval was restarted: new interval fires 1 s after the snap.
+    // System clock: T0+1500 → T0+2500.
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(nowTimeHistory.at(-1)).toBe(T0 + 2_500);
+  });
 });
