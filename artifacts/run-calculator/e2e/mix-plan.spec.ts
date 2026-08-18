@@ -1813,4 +1813,278 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         .catch(() => {});
     }
   });
+
+  /**
+   * Test (i): "need X lbs" badge on a regular (non-prep) mix card reflects
+   * the correct remaining amount when amountAlreadyMade < totalLbs.
+   *
+   * Mechanism:
+   *   Regular (brand/flavor) mixes use computeEntry() in lib/mixes/src/index.ts
+   *   which scales each component's perPizza (oz) against the run's pizza count:
+   *
+   *     componentLbs = (perPizza / OZ_PER_LB) × pizzas  → 100.00
+   *     totalLbs     = componentLbs × 1.15 + 20          → 135.00
+   *     remainingLbs = totalLbs − amountAlreadyMade       → 115.00
+   *
+   *   The badge at home.tsx ~14556:
+   *     {m.remainingLbs < m.totalLbs && <span>need {fmtNum(m.remainingLbs, 2)} lbs</span>}
+   *   must display "need 115.00 lbs" and the "Pull For Mix" component row must
+   *   show the proportionally-reduced pull (100.00 × 115/135 ≈ 85.19 lbs).
+   *
+   * Setup: inject localStorage so the placeholder run has brand=mix.brand,
+   * casesNeeded=100, pizzasPerCase=8 → 800 pizzas → correct lbs. The mix's
+   * perPizza=2.0 is the only oz source for regular mixes (no ingredient map
+   * lookup is performed — that path is prep-mix-only).
+   */
+  test("need X lbs badge on regular mix card shows correct remaining amount", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `reg-need-${suffix}`;
+    const mixName = `RegNeedMix ${suffix}`;
+    const component = `RegComp_${suffix}`;
+    const brand = `RegBrand_${suffix}`;
+    const today = todayStr();
+
+    // Mix constants.
+    const PER_PIZZA_OZ = 2.0;
+    const BATCH_SIZE = 10;
+    const AMOUNT_ALREADY_MADE = 20;
+
+    // Run constants.
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+
+    // Expected math (mirrors computeEntry in lib/mixes/src/index.ts).
+    const pizzas = CASES_NEEDED * PIZZAS_PER_CASE;            // 800
+    const componentLbs = (PER_PIZZA_OZ * pizzas) / 16;        // 100.00
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
+    const remainingLbs = totalLbs - AMOUNT_ALREADY_MADE;       // 115.00
+    // Pull For Mix per-component = c.lbs × remainingLbs / totalLbs.
+    const pullLbs = componentLbs * remainingLbs / totalLbs;    // ≈ 85.19
+
+    try {
+      // Insert the regular (non-prep) mix before the browser loads.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        brand,
+        isPrep: false,
+        component,
+        perPizza: PER_PIZZA_OZ,
+        batchSize: BATCH_SIZE,
+        amountAlreadyMade: AMOUNT_ALREADY_MADE,
+      });
+
+      // Sign up and dismiss the onboarding dialog.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // ── Inject run values into localStorage ────────────────────────────────
+      // Brand the placeholder run (so liveRunsForMixes includes it and the
+      // brand/flavor key matches the mix). casesNeeded+pizzasPerCase drive the
+      // pizza count, which drives componentLbs in computeEntry().
+      await page.evaluate(
+        ({ brand, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({ ...existing, casesNeeded, pizzasPerCase, casesPerLayer: 0 }),
+          );
+        },
+        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // Reload so the form initialises from the injected localStorage.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // ── Navigate to the Mixes tab ──────────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── The group card for today must be present ───────────────────────────
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // ── The mix name must appear inside the card ───────────────────────────
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── "need X lbs" badge must show remainingLbs (115.00) ────────────────
+      // Condition (home.tsx ~14556): m.remainingLbs < m.totalLbs
+      //   → 115.00 < 135.00 is true → badge fires.
+      const needStr = remainingLbs.toFixed(2); // "115.00"
+      await expect(
+        todayCard.getByText(`need ${needStr} lbs`, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── "Pull For Mix" section must be present ────────────────────────────
+      await expect(
+        todayCard.getByText("Pull For Mix", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── Pull For Mix component row shows the reduced lbs (≈ 85.19) ────────
+      // pullLbs = c.lbs × remainingLbs / totalLbs = 100.00 × 115/135 ≈ 85.19
+      const pullStr = pullLbs.toFixed(2); // "85.19"
+      const componentRow = todayCard
+        .locator("div", { has: page.getByText(component, { exact: true }) })
+        .last();
+      const componentRowText = await componentRow.innerText();
+      expect(componentRowText).toContain(pullStr);
+
+      // The full componentLbs (100.00) must NOT appear in the pull row —
+      // that would mean amountAlreadyMade subtraction was silently skipped.
+      const fullComponentStr = componentLbs.toFixed(2); // "100.00"
+      expect(componentRowText).not.toContain(fullComponentStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (h): "need 0.00 lbs" badge on a regular mix card when
+   * amountAlreadyMade >= totalLbs (the batch is fully covered).
+   *
+   * Formula:
+   *   totalLbs     = 100.00 × 1.15 + 20 = 135.00
+   *   remainingLbs = max(0, 135.00 − 200) = 0
+   *
+   * Condition (home.tsx ~14556): m.remainingLbs < m.totalLbs → 0 < 135 = true.
+   * So the badge fires and reads "need 0.00 lbs" — this is the correct
+   * "already fully covered" display that lets staff confirm coverage.
+   */
+  test("need 0.00 lbs badge appears on regular mix card when amountAlreadyMade >= totalLbs", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `reg-full-${suffix}`;
+    const mixName = `RegFullMix ${suffix}`;
+    const component = `RegFullComp_${suffix}`;
+    const brand = `RegFullBrand_${suffix}`;
+    const today = todayStr();
+
+    // Mix constants — amountAlreadyMade (200) is well above totalLbs (135).
+    const PER_PIZZA_OZ = 2.0;
+    const BATCH_SIZE = 10;
+    const AMOUNT_ALREADY_MADE = 200;
+
+    // Run constants.
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+
+    try {
+      // Insert the regular (non-prep) mix before the browser loads.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        brand,
+        isPrep: false,
+        component,
+        perPizza: PER_PIZZA_OZ,
+        batchSize: BATCH_SIZE,
+        amountAlreadyMade: AMOUNT_ALREADY_MADE,
+      });
+
+      // Sign up and dismiss the onboarding dialog.
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // ── Inject run values into localStorage ────────────────────────────────
+      await page.evaluate(
+        ({ brand, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({ ...existing, casesNeeded, pizzasPerCase, casesPerLayer: 0 }),
+          );
+        },
+        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+      );
+
+      // Reload so the form initialises from the injected localStorage.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      // ── Navigate to the Mixes tab ──────────────────────────────────────────
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── The group card must still appear ──────────────────────────────────
+      // Fully-covered cards stay visible so staff can confirm the batch is
+      // ready (home.tsx comment ~14618–14622: "cards with totalLbs > 0 but
+      // remainingLbs === 0 still show").
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      // ── The mix name must appear ───────────────────────────────────────────
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // ── "need 0.00 lbs" badge must be visible ─────────────────────────────
+      // remainingLbs = max(0, 135 − 200) = 0; totalLbs = 135 → 0 < 135 = true.
+      await expect(
+        todayCard.getByText("need 0.00 lbs", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── "Pull For Mix" section must be present ─────────────────────────────
+      await expect(
+        todayCard.getByText("Pull For Mix", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // ── The component row must show 0.00 lbs (not the full componentLbs) ──
+      // pullLbs = c.lbs × 0 / totalLbs = 0.00
+      const componentRow = todayCard
+        .locator("div", { has: page.getByText(component, { exact: true }) })
+        .last();
+      const componentRowText = await componentRow.innerText();
+      expect(componentRowText).toContain("0.00");
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
 });
