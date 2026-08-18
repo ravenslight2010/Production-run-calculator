@@ -1,3 +1,4 @@
+import { applySuppress, applyResume } from "@/utils/autoTrackTimers";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   AppState as RNAppState,
@@ -3312,21 +3313,31 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const suppressAutoTrack = useCallback(() => {
-    const until = Date.now() + 1 * 60 * 1000;
-    autoSuppressRef.current = until;
-    setAutoSuppressUntil(until);
+    setAutoSuppressUntil(applySuppress({
+      autoSuppressRef,
+      caseNextDueMsRef,
+      trayNextDueMsRef,
+      batchNextDueMsRef,
+      trayLastMsRef,
+      batchLastMsRef,
+    }, Date.now()));
   }, []);
 
   // Cancel an active manual-override window so auto-track resumes immediately.
   // Mirrors web's "Resume now": clear suppression and force every counter's next
   // tick to fire (without re-baselining the expectedCases delta, so no catch-up
-  // jump).
+  // jump).  Also zeros trayLastMsRef + batchLastMsRef so the first post-resume
+  // tick uses ONE full period's duration — not the accumulated pause span —
+  // preventing a tray/batch jump on resume (web pauseDoughTimers parity).
   const resumeAutoTrack = useCallback(() => {
-    autoSuppressRef.current = 0;
-    setAutoSuppressUntil(0);
-    caseNextDueMsRef.current = 0;
-    trayNextDueMsRef.current = 0;
-    batchNextDueMsRef.current = 0;
+    setAutoSuppressUntil(applyResume({
+      autoSuppressRef,
+      caseNextDueMsRef,
+      trayNextDueMsRef,
+      batchNextDueMsRef,
+      trayLastMsRef,
+      batchLastMsRef,
+    }));
   }, []);
 
   // Keep the override banner's countdown ticking and guarantee it clears at expiry
