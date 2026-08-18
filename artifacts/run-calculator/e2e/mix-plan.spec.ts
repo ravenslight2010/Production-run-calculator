@@ -1622,4 +1622,195 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
+
+  /**
+   * Test (h): Pull For Prep quantity updates immediately when a manager edits
+   * the "Already made" field in the UI — without a page reload.
+   *
+   * This covers the interactive path no other test reaches:
+   *   • Page loads with amountAlreadyMade = 0 → full pull = componentLbs.
+   *   • Manager types 50 into MixAlreadyMadeInput and blurs.
+   *   • MixAlreadyMadeInput.onBlur POSTs the new value, then onSaved calls
+   *     cycleCountQc.setQueryData(["mixes"], saved) — updating the React Query
+   *     cache. buildMixPlan re-runs and the Pull For Prep lbs on the card drop
+   *     without a page reload.
+   *   • A second edit of 200 (>= totalLbs 135.00) drives pull to 0.00.
+   *
+   * Formula (lib/mixes/src/index.ts, computeEntryFromComponentLbs):
+   *   componentLbs = (2.0/16) × 800 = 100.00
+   *   totalLbs     = 100 × 1.15 + 20 = 135.00
+   *
+   *   After typing 50 lbs:
+   *     remainingLbs = 135.00 − 50 = 85.00
+   *     pull = componentLbs × remainingLbs / totalLbs = 100 × 85 / 135 ≈ 62.96
+   *
+   *   After typing 200 lbs (>= totalLbs):
+   *     remainingLbs = max(0, 135 − 200) = 0  →  pull = 0.00
+   */
+  test("Pull For Prep updates live when the already-made field is edited in the UI", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-live-edit-${suffix}`;
+    const mixName = `LiveEditPrepMix ${suffix}`;
+    const ingredient = `LiveEditHerb_${suffix}`;
+    const brand = `Brand_${suffix}`;
+    const today = todayStr();
+
+    // Recipe constants.
+    const RUN_OZ = 2.0;
+    const CASES_NEEDED = 100;
+    const PIZZAS_PER_CASE = 8;
+    const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
+
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const componentLbs = (RUN_OZ / 16) * totalPizzas;                         // 100.00
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS;     // 135.00
+
+    // Step A — initial state: amountAlreadyMade = 0 → pull = full componentLbs.
+    const fullPullStr = componentLbs.toFixed(2); // "100.00"
+
+    // Step B — type 50 lbs partial.
+    const PARTIAL_ALREADY_MADE = 50;
+    const remainingAfterPartial = totalLbs - PARTIAL_ALREADY_MADE;             // 85.00
+    const partialPullLbs = componentLbs * remainingAfterPartial / totalLbs;    // ≈62.96
+    const partialPullStr = partialPullLbs.toFixed(2);                          // "62.96"
+
+    // Step C — type 200 lbs (>= totalLbs) → pull = 0.00.
+    const FULL_COVERAGE = 200;
+
+    try {
+      // Insert the prep mix with amountAlreadyMade = 0 so the initial pull
+      // equals the full componentLbs.
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: RUN_OZ,
+        amountAlreadyMade: 0,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject run values into localStorage so the form has the expected
+      // ingredient/oz/case values that drive buildMixPlan.
+      await page.evaluate(
+        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as {
+            runs?: Array<{ id: string; brand?: string }>;
+          };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try {
+              return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}");
+            } catch {
+              return {};
+            }
+          })();
+          localStorage.setItem(
+            RUN_KEY(runId),
+            JSON.stringify({
+              ...existing,
+              pep1Type: ingredient,
+              pep1OzPerPizza: runOz,
+              casesNeeded,
+              pizzasPerCase,
+              casesPerLayer: 0,
+            }),
+          );
+        },
+        {
+          brand,
+          ingredient,
+          runOz: RUN_OZ,
+          casesNeeded: CASES_NEEDED,
+          pizzasPerCase: PIZZAS_PER_CASE,
+        },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page
+        .locator('[data-testid="tab-run"]')
+        .waitFor({ state: "attached", timeout: 25_000 });
+      await page
+        .getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .then((btn) => btn.click())
+        .catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      // ── A: Verify initial Pull For Prep = full componentLbs (100.00) ───────
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+
+      await expect(
+        todayCard.getByText("Ingredient Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        todayCard.getByText(mixName, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(
+        todayCard.getByText("Pull For Prep", { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      // The ingredient row in Pull For Prep must show the full pull initially.
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      expect(await ingredientRow.innerText()).toContain(fullPullStr);
+
+      // ── B: Type 50 lbs into "Already made" and blur ───────────────────────
+      // MixAlreadyMadeInput renders a single <input type="number"> in each prep
+      // mix card. One prep mix is on this page so the first number input inside
+      // todayCard unambiguously belongs to our mix.
+      const alreadyMadeInput = todayCard
+        .locator('input[type="number"]')
+        .first();
+      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
+      await alreadyMadeInput.fill(String(PARTIAL_ALREADY_MADE));
+      // Blurring fires the onBlur save handler: POSTs to /api/mixes, then
+      // onSaved calls cycleCountQc.setQueryData(["mixes"], saved) which updates
+      // the React Query cache → buildMixPlan re-runs → Pull For Prep updates.
+      await alreadyMadeInput.blur();
+
+      // Allow the save round-trip (network POST + cache update + re-render).
+      await page.waitForTimeout(2_500);
+
+      // Pull For Prep must now show the proportionally-reduced amount (≈62.96).
+      const partialText = await ingredientRow.innerText();
+      expect(partialText).toContain(partialPullStr);
+      // Full pull must no longer appear — proving the cache update and
+      // buildMixPlan re-run both fired with the new amountAlreadyMade.
+      expect(partialText).not.toContain(fullPullStr);
+
+      // ── C: Type 200 lbs (>= totalLbs 135.00) → pull must drop to 0.00 ─────
+      await alreadyMadeInput.fill(String(FULL_COVERAGE));
+      await alreadyMadeInput.blur();
+
+      // Allow the second save round-trip.
+      await page.waitForTimeout(2_500);
+
+      // remainingLbs = max(0, 135 − 200) = 0 → pull display = 0.00.
+      const fullCoverageText = await ingredientRow.innerText();
+      expect(fullCoverageText).toContain("0.00");
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db
+        .query("DELETE FROM users WHERE username = $1", [username])
+        .catch(() => {});
+    }
+  });
 });
