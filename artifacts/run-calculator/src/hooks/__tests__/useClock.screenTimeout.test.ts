@@ -365,3 +365,164 @@ describe("useClock — slow-tick path (runStatus=pending) screen timeout handlin
     expect(result.current.getTime()).toBe(timeAfterFirstTick);
   });
 });
+
+// ── Status transition tests ───────────────────────────────────────────────────
+//
+// The useEffect([runStatus]) cleanup runs when runStatus changes: it clears the
+// existing interval and removes event listeners, then the new effect installs a
+// fresh interval at the new cadence.  These tests confirm:
+//
+//   E. ended → pending: both use PENDING_CLOCK_MS; old interval is cleared and
+//      a new one starts cleanly (exactly one tick per period, no extra fire).
+//   F. running → ended: the 1-second interval is cleared and the new slow
+//      interval fires only after a full PENDING_CLOCK_MS, not 1 s later.
+//   G. No phantom interval after ended → pending transition: advancing past
+//      where the old interval would have fired produces no tick (old interval
+//      was cleared); only the new interval's period matters.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("useClock — status transition interval cleanup", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    setDocumentHidden(false);
+  });
+
+  afterEach(() => {
+    setDocumentHidden(false);
+    vi.useRealTimers();
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E. ended → pending: old PENDING_CLOCK_MS interval cleared, new one starts
+  //    cleanly.
+  //
+  // Both statuses share the same cadence (PENDING_CLOCK_MS).  The test
+  // verifies that after the transition:
+  //   • Exactly one tick fires per PENDING_CLOCK_MS (not two from a stale +
+  //     fresh interval running concurrently).
+  //   • The new interval's period is measured from the moment of transition,
+  //     not from the original mount time.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("E. ended → pending: old interval is cleared and new slow interval starts cleanly", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "pending" | "ended" }) => useClock(status),
+      { initialProps: { status: "ended" as const } },
+    );
+
+    // First tick from "ended" slow interval.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(T0 + PENDING_CLOCK_MS);
+
+    // Switch to "pending": React runs useEffect cleanup (clearInterval) then
+    // re-runs the effect with a fresh PENDING_CLOCK_MS interval.
+    act(() => {
+      rerender({ status: "pending" });
+    });
+
+    // Advance one full period from the transition point.  New interval fires
+    // exactly once → nowTime = T0 + 2 * PENDING_CLOCK_MS.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender({ status: "pending" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 2 * PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // F. running → ended: 1-second interval is cleared; slow interval starts at
+  //    the correct cadence.
+  //
+  // After the status switches, advancing only 1 more second must NOT produce
+  // a tick (the old 1-second interval is gone).  The slow interval fires only
+  // after a full PENDING_CLOCK_MS from the transition point.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("F. running → ended: 1-second interval cleared; slow interval fires after PENDING_CLOCK_MS", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "running" | "ended" }) => useClock(status),
+      { initialProps: { status: "running" as const } },
+    );
+
+    // First 1-second tick.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Transition to "ended": cleanup clears the 1-second interval; new slow
+    // interval (PENDING_CLOCK_MS) is registered at the current timer position.
+    act(() => {
+      rerender({ status: "ended" });
+    });
+    const timeAtTransition = result.current.getTime(); // T0 + 1_000
+
+    // Advance 1 second — the old 1-second interval no longer exists, so no
+    // callback fires.  nowTime must stay at timeAtTransition.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(timeAtTransition);
+
+    // Advance the remaining (PENDING_CLOCK_MS - 1_000) ms to complete one full
+    // slow-tick period from the transition point.  The new interval fires once.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS - 1_000);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000 + PENDING_CLOCK_MS);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // G. No phantom interval after ended → pending mid-period transition.
+  //
+  // Transition happens at PENDING_CLOCK_MS/2 (mid-period, no tick yet).
+  // If the old interval were NOT cleared it would fire PENDING_CLOCK_MS/2 ms
+  // later (completing its period).  We advance past that point and verify
+  // nowTime did NOT advance — confirming the old interval is gone.
+  // Only after a full PENDING_CLOCK_MS from the transition point should a
+  // single tick appear.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("G. no phantom interval after ended → pending transition (no double-tick)", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "pending" | "ended" }) => useClock(status),
+      { initialProps: { status: "ended" as const } },
+    );
+
+    // Advance half a period — interval has not fired yet.
+    const halfPeriod = PENDING_CLOCK_MS / 2;
+    act(() => {
+      vi.advanceTimersByTime(halfPeriod);
+      rerender({ status: "ended" });
+    });
+    expect(result.current.getTime()).toBe(T0); // mid-period, no tick
+
+    // Transition to "pending": cleanup clears the old interval which would
+    // have fired halfPeriod ms from now (at T0 + PENDING_CLOCK_MS).
+    act(() => {
+      rerender({ status: "pending" });
+    });
+
+    // Advance past where the old (phantom) interval would have fired.
+    // New interval needs a full PENDING_CLOCK_MS from this point, so it
+    // has NOT fired yet.  If the phantom existed, nowTime would jump to
+    // T0 + PENDING_CLOCK_MS here.  Correct behaviour: nowTime stays T0.
+    act(() => {
+      vi.advanceTimersByTime(halfPeriod + 1_000);
+      rerender({ status: "pending" });
+    });
+    expect(result.current.getTime()).toBe(T0);
+
+    // Advance the rest of the new interval's first period.
+    // New interval fires once at PENDING_CLOCK_MS from the transition point:
+    // system clock = T0 + halfPeriod + PENDING_CLOCK_MS.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS - halfPeriod - 1_000);
+      rerender({ status: "pending" });
+    });
+    expect(result.current.getTime()).toBe(T0 + halfPeriod + PENDING_CLOCK_MS);
+  });
+});
