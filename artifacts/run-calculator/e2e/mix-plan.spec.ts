@@ -1638,6 +1638,151 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (h3): Pull For Prep updates live when "already made" is edited and TWO
+   * runs share the prep ingredient.
+   *
+   * This is the multi-run live-reactivity counterpart to test (h2).
+   * After editing amountAlreadyMade the ingredient-row pull quantity must
+   * recalculate immediately without a page reload, using the same proportional
+   * formula as the static multi-run case (test h):
+   *
+   *   contrib1Lbs = (2.0/16) × 800  = 100.00
+   *   contrib2Lbs = (1.5/16) × 400  =  37.50
+   *   componentLbs                   = 137.50
+   *   totalLbs    = 137.50×1.15 + 20 = 178.125
+   *
+   *   amountAlreadyMade = 0   → pull = componentLbs         = 137.50
+   *   amountAlreadyMade = 50  → pull = 137.50×128.125/178.125 ≈  98.90
+   *   amountAlreadyMade = 300 → pull = max(0,…)              =   0.00
+   */
+  test("Pull For Prep updates live when already-made is edited and two runs share the prep ingredient", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-live-multi-${suffix}`;
+    const mixName = `LiveMultiPrepMix ${suffix}`;
+    const ingredient = `LiveMultiHerb_${suffix}`;
+    const today = todayStr();
+
+    const brand1 = `AlphaLive_${suffix}`;
+    const OZ1 = 2.0;
+    const CASES1 = 100;
+    const PPC = 8;
+
+    const brand2 = `BetaLive_${suffix}`;
+    const OZ2 = 1.5;
+    const CASES2 = 50;
+
+    const pizzas1 = CASES1 * PPC;  // 800
+    const pizzas2 = CASES2 * PPC;  // 400
+
+    const contrib1Lbs = (OZ1 / 16) * pizzas1;  // 100.00
+    const contrib2Lbs = (OZ2 / 16) * pizzas2;  //  37.50
+    const componentLbs = contrib1Lbs + contrib2Lbs; // 137.50
+
+    const MIX_WASTE_FACTOR = 0.15;
+    const STARTUP_LBS = 20;
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 178.125
+
+    const fullPullStr = componentLbs.toFixed(2); // "137.50"
+
+    const PARTIAL_ALREADY_MADE = 50;
+    const remainingAfterPartial = totalLbs - PARTIAL_ALREADY_MADE;         // 128.125
+    const partialPullLbs = componentLbs * remainingAfterPartial / totalLbs; // ≈98.90
+    const partialPullStr = partialPullLbs.toFixed(2);                       // "98.90"
+
+    const FULL_COVERAGE = 300;
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: OZ1,
+        amountAlreadyMade: 0,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      // Inject two runs sharing the same ingredient via localStorage
+      await page.evaluate(
+        ({ brand1, brand2, ingredient, oz1, oz2, cases1, cases2, ppc }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+
+          day.runs[0].brand = brand1;
+          const runId1 = day.runs[0].id;
+          const existing1 = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId1)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId1), JSON.stringify({
+            ...existing1, pep1Type: ingredient, pep1OzPerPizza: oz1,
+            casesNeeded: cases1, pizzasPerCase: ppc, casesPerLayer: 0,
+          }));
+
+          const runId2 = `e2e-livemulti-run2-${Math.random().toString(36).slice(2, 9)}`;
+          day.runs.push({ id: runId2, brand: brand2 });
+          localStorage.setItem(RUN_KEY(runId2), JSON.stringify({
+            pep1Type: ingredient, pep1OzPerPizza: oz2,
+            casesNeeded: cases2, pizzasPerCase: ppc, casesPerLayer: 0,
+          }));
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+        },
+        { brand1, brand2, ingredient, oz1: OZ1, oz2: OZ2, cases1: CASES1, cases2: CASES2, ppc: PPC },
+      );
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText("Ingredient Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+
+      // Step A: amountAlreadyMade = 0 → pull = componentLbs (137.50)
+      expect(await ingredientRow.innerText()).toContain(fullPullStr);
+
+      // Step B: edit to 50 → pull ≈ 98.90
+      const alreadyMadeInput = todayCard.locator('input[type="number"]').first();
+      await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
+      await alreadyMadeInput.fill(String(PARTIAL_ALREADY_MADE));
+      await alreadyMadeInput.blur();
+      await page.waitForTimeout(2_500);
+
+      const partialText = await ingredientRow.innerText();
+      expect(partialText).toContain(partialPullStr);
+      expect(partialText).not.toContain(fullPullStr);
+
+      // Step C: edit to 300 (>= totalLbs 178.125) → pull = 0.00
+      await alreadyMadeInput.fill(String(FULL_COVERAGE));
+      await alreadyMadeInput.blur();
+      await page.waitForTimeout(2_500);
+
+      expect(await ingredientRow.innerText()).toContain("0.00");
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (j): Mix plan collapses to empty when ALL runs in a shift are ended.
    *
    * After both runs are stopped, liveRunsForMixes returns [] so buildMixPlan
