@@ -290,6 +290,47 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
     const rows = await db.select().from(cheeseRecipesTable);
     expect(rows).toHaveLength(2);
   });
+
+  it("removes sandbox-scope duplicates, keeping the row with curated lbs", async () => {
+    const t = new Date("2026-07-15T10:00:00Z");
+    // Two sandbox rows with the same name: "sbx-keep" has curated lbs, "sbx-drop" has none.
+    await db.insert(cheeseRecipesTable).values({
+      id: "sbx-keep",
+      scope: "sandbox",
+      name: "Provolone Cheese Mix",
+      brand: "",
+      flavors: [],
+      shredderSetting: "",
+      cellulose: "",
+      notes: "",
+      components: [{ ingredient: "Provolone", lbs: 8, ozPerPizza: 0 }] as never,
+      enabled: true,
+      createdAt: t,
+      updatedAt: t,
+    });
+    await db.insert(cheeseRecipesTable).values({
+      id: "sbx-drop",
+      scope: "sandbox",
+      name: "provolone cheese mix ", // trimmed ci-equal name
+      brand: "",
+      flavors: [],
+      shredderSetting: "",
+      cellulose: "",
+      notes: "",
+      components: [] as never,
+      enabled: true,
+      createdAt: t,
+      updatedAt: t,
+    });
+
+    await runDataHeals();
+
+    const rows = await db.select().from(cheeseRecipesTable);
+    // Only the keeper survives; scope must be sandbox.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe("sbx-keep");
+    expect(rows[0].scope).toBe("sandbox");
+  });
 });
 
 // ── cheese-component-oz-strip-v2 data heal ────────────────────────────────────
