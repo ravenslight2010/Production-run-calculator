@@ -1,4 +1,5 @@
-// Integration tests for the cheese-recipes duplicate-name protections:
+// Integration tests for the cheese-recipes duplicate-name protections and the
+// cheese-component-oz-strip-v2 data heal:
 //
 //   1. POST /cheese-recipes must NOT insert a NEW id whose trimmed,
 //      case-insensitive name already exists in the scope — this is the race
@@ -9,6 +10,9 @@
 //   2. The boot data heal (cheese-recipe-name-dedupe-v1) removes exact-name
 //      duplicates that already exist, keeping the best row per (scope, name):
 //      curated per-batch lbs beats none, then more components, then oldest.
+//   3. The boot data heal (cheese-component-oz-strip-v2) strips ozPerPizza from
+//      cheese recipe components and recomputes sharePct from lbs so shares are
+//      fully lbs-authoritative — no silent oz fallback.
 //
 // Same disposable-Postgres pattern as cycleCount.integration.test.ts: the
 // throwaway DB is created and DATABASE_URL repointed BEFORE any dynamic import
@@ -285,5 +289,203 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
     await runDataHeals();
     const rows = await db.select().from(cheeseRecipesTable);
     expect(rows).toHaveLength(2);
+  });
+});
+
+// ── cheese-component-oz-strip-v2 data heal ────────────────────────────────────
+// Verifies that after runDataHeals():
+//   1. Both the v1 no-op guard and v2 marker rows exist in data_heals.
+//   2. The v2 result carries plausible scanned/updatedRows/strippedComponents.
+//   3. ozPerPizza is stripped from every component (by property presence).
+//   4. sharePct is recomputed from lbs so shares are lbs-authoritative — the
+//      "v1 already ran but left stale oz-derived sharePct" scenario is fixed.
+//   5. A recipe that was already clean (correct lbs-derived sharePct, no oz)
+//      is not touched (updatedRows does not include it).
+//   6. cheeseComponentShares() on the post-heal rows returns lbs-based fractions.
+//   7. The heal is marker-guarded (a second runDataHeals() is a no-op).
+describe("cheese-component-oz-strip-v2 data heal", () => {
+  // Shared component helper — typed so TS catches field typos but flexible
+  // enough to inject ozPerPizza for the "pre-heal" seeding.
+  type RawComp = { ingredient: string; lbs: number; ozPerPizza?: number; sharePct?: number };
+
+  async function seedCheeseRow(id: string, name: string, components: RawComp[]) {
+    const t = new Date("2026-01-01T00:00:00Z");
+    await db.insert(cheeseRecipesTable).values({
+      id,
+      scope: "live",
+      name,
+      brand: "TestBrand",
+      flavors: [],
+      shredderSetting: "",
+      cellulose: "",
+      notes: "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      components: components as any,
+      enabled: true,
+      createdAt: t,
+      updatedAt: t,
+    });
+  }
+
+  async function loadComponents(id: string): Promise<RawComp[]> {
+    const rows = await db.select().from(cheeseRecipesTable);
+    const row = rows.find((r) => r.id === id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (row?.components ?? []) as any;
+  }
+
+  async function loadHealRow(healId: string) {
+    const rows = await db.select().from(dataHealsTable);
+    return rows.find((r) => r.id === healId) ?? null;
+  }
+
+  it("claims both the v1 no-op marker and the v2 marker after running heals", async () => {
+    await runDataHeals();
+    const v1 = await loadHealRow("cheese-component-oz-strip-v1");
+    const v2 = await loadHealRow("cheese-component-oz-strip-v2");
+    expect(v1).not.toBeNull();
+    expect(v2).not.toBeNull();
+  });
+
+  it("strips ozPerPizza and recomputes sharePct from lbs (fresh-DB / oz-still-present scenario)", async () => {
+    // Recipe A: both components carry ozPerPizza AND oz-derived (wrong) sharePct.
+    // lbs proportions: 20/(20+8) ≈ 71.43%, 8/(20+8) ≈ 28.57%.
+    // oz proportions:  4/(4+1.5) ≈ 72.73%, 1.5/(4+1.5) ≈ 27.27% — different enough to detect.
+    await seedCheeseRow("oz-strip-a", "Whole Mozz Cheese Mix", [
+      { ingredient: "Mozzarella", lbs: 20, ozPerPizza: 4,   sharePct: 72.73 },
+      { ingredient: "Provolone",  lbs: 8,  ozPerPizza: 1.5, sharePct: 27.27 },
+    ]);
+
+    await runDataHeals();
+
+    const comps = await loadComponents("oz-strip-a");
+
+    // ozPerPizza must be gone from both components.
+    expect(comps.every((c) => !("ozPerPizza" in c))).toBe(true);
+
+    // sharePct must now reflect lbs proportions, not oz proportions.
+    // 20/28 ≈ 71.43, 8/28 ≈ 28.57
+    expect(comps[0].sharePct).toBeCloseTo(71.43, 1);
+    expect(comps[1].sharePct).toBeCloseTo(28.57, 1);
+  });
+
+  it("fixes stale oz-derived sharePct even when ozPerPizza was already removed (v1 scenario)", async () => {
+    // Recipe B: v1 heal already stripped ozPerPizza but left behind oz-derived
+    // sharePct (20% / 80%) that does NOT match lbs proportions (80% / 20%).
+    // cheeseComponentShares() would have returned the wrong oz-derived shares.
+    await seedCheeseRow("oz-strip-b", "Skim Mozzarella Blend", [
+      { ingredient: "Mozzarella", lbs: 20, sharePct: 20 }, // stale oz-derived, wrong
+      { ingredient: "Provolone",  lbs: 5,  sharePct: 80 }, // stale oz-derived, wrong
+    ]);
+
+    await runDataHeals();
+
+    const comps = await loadComponents("oz-strip-b");
+
+    // No ozPerPizza was ever stored here, so none to check.
+    expect(comps.every((c) => !("ozPerPizza" in c))).toBe(true);
+
+    // sharePct must now match lbs: 20/(20+5) = 80, 5/(20+5) = 20.
+    expect(comps[0].sharePct).toBeCloseTo(80, 1);
+    expect(comps[1].sharePct).toBeCloseTo(20, 1);
+  });
+
+  it("does not touch a recipe that is already clean (correct lbs-derived sharePct, no oz)", async () => {
+    // Recipe C: already lbs-correct — 15/(15+5)=75%, 5/(15+5)=25%.
+    const cleanComps: RawComp[] = [
+      { ingredient: "Mozzarella", lbs: 15, sharePct: 75 },
+      { ingredient: "Parmesan",   lbs: 5,  sharePct: 25 },
+    ];
+    await seedCheeseRow("oz-strip-c", "Already Clean Blend", cleanComps);
+
+    await runDataHeals();
+
+    const comps = await loadComponents("oz-strip-c");
+    expect(comps[0].sharePct).toBeCloseTo(75, 1);
+    expect(comps[1].sharePct).toBeCloseTo(25, 1);
+  });
+
+  it("heal result carries plausible scanned / updatedRows / strippedComponents counts", async () => {
+    // Three recipes: A (ozPerPizza + wrong sharePct), B (stale sharePct, no oz),
+    // C (already clean).  Expected: scanned=3, updatedRows=2, strippedComponents=2.
+    await seedCheeseRow("count-a", "Count Mix A", [
+      { ingredient: "Mozz",     lbs: 20, ozPerPizza: 4,   sharePct: 72 },
+      { ingredient: "Provolone",lbs: 8,  ozPerPizza: 1.5, sharePct: 28 },
+    ]);
+    await seedCheeseRow("count-b", "Count Mix B", [
+      { ingredient: "Mozz",     lbs: 20, sharePct: 20 },
+      { ingredient: "Provolone",lbs: 5,  sharePct: 80 },
+    ]);
+    await seedCheeseRow("count-c", "Count Mix C", [
+      { ingredient: "Mozz",     lbs: 15, sharePct: 75 },
+      { ingredient: "Parmesan", lbs: 5,  sharePct: 25 },
+    ]);
+
+    await runDataHeals();
+
+    const healRow = await loadHealRow("cheese-component-oz-strip-v2");
+    expect(healRow).not.toBeNull();
+    const result = healRow!.result as { scanned: number; updatedRows: number; strippedComponents: number } | null;
+    expect(result).not.toBeNull();
+    // All three rows are scanned.
+    expect(result!.scanned).toBeGreaterThanOrEqual(3);
+    // A (oz present) and B (stale sharePct) are both written; C is left alone.
+    expect(result!.updatedRows).toBeGreaterThanOrEqual(2);
+    // A has 2 components with ozPerPizza; B has none.
+    expect(result!.strippedComponents).toBeGreaterThanOrEqual(2);
+  });
+
+  it("cheeseComponentShares returns lbs-based fractions after the heal (no oz influence)", async () => {
+    // Seed a recipe where oz proportions would give ≈73% / 27% but lbs give 80% / 20%.
+    // After the heal, shares must track lbs.
+    await seedCheeseRow("shares-check", "Share Verification Blend", [
+      { ingredient: "Mozz",     lbs: 20, ozPerPizza: 4,   sharePct: 72.73 },
+      { ingredient: "Provolone",lbs: 5,  ozPerPizza: 1.5, sharePct: 27.27 },
+    ]);
+
+    await runDataHeals();
+
+    const comps = await loadComponents("shares-check");
+
+    // cheeseComponentShares prefers sharePct (priority 1) over lbs.
+    // After the heal sharePct must equal lbs proportions: 20/25=80%, 5/25=20%.
+    const totalLbs = comps.reduce((s, c) => s + (c.lbs ?? 0), 0);
+    const expectedShares = comps.map((c) => (totalLbs > 0 ? (c.lbs ?? 0) / totalLbs : 0));
+
+    // sharePct (used by cheeseComponentShares) must match lbs-derived shares to 1dp.
+    comps.forEach((c, i) => {
+      expect((c.sharePct ?? 0) / 100).toBeCloseTo(expectedShares[i], 2);
+    });
+
+    // Spot-check absolute values: Mozz 80%, Provolone 20%.
+    expect(comps[0].sharePct).toBeCloseTo(80, 1);
+    expect(comps[1].sharePct).toBeCloseTo(20, 1);
+  });
+
+  it("is marker-guarded: a second runDataHeals() does not re-process recipes", async () => {
+    await seedCheeseRow("guard-a", "Guard Test Blend", [
+      { ingredient: "Mozz", lbs: 20, ozPerPizza: 4, sharePct: 72 },
+      { ingredient: "Prov", lbs: 8,  ozPerPizza: 1.5, sharePct: 28 },
+    ]);
+
+    // First run: heal fires.
+    await runDataHeals();
+    const afterFirst = await loadComponents("guard-a");
+    expect(afterFirst.every((c) => !("ozPerPizza" in c))).toBe(true);
+
+    // Manually re-introduce stale oz data to prove the second run does NOT pick it up.
+    await db.execute(
+      sql`UPDATE cheese_recipes SET components = ${JSON.stringify([
+        { ingredient: "Mozz", lbs: 20, ozPerPizza: 99, sharePct: 99 },
+        { ingredient: "Prov", lbs: 8,  ozPerPizza: 99, sharePct: 1  },
+      ])}::jsonb WHERE id = 'guard-a'`,
+    );
+
+    // Second run: marker already claimed → heal is a no-op.
+    await runDataHeals();
+    const afterSecond = await loadComponents("guard-a");
+
+    // The manually-injected poison was NOT cleaned (marker guarded it).
+    expect(afterSecond[0].ozPerPizza).toBe(99);
   });
 });
