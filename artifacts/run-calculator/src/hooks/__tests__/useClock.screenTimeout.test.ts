@@ -608,4 +608,55 @@ describe("useClock — status transition interval cleanup", () => {
     });
     expect(result.current.getTime()).toBe(T0 + 1_000 + PENDING_CLOCK_MS);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // J. running → paused: same-cadence transition keeps exactly one 1-second
+  //    interval (no double-tick).
+  //
+  // Both "running" and "paused" share the same 1-second delay, so the
+  // useEffect([runStatus]) cleanup-and-reinstall cycle must clear the old
+  // interval before registering the new one.  If cleanup is broken both
+  // intervals survive and nowTime advances twice per second.
+  //
+  // Steps:
+  //   1. Mount with "running"; advance 1 s → nowTime = T0 + 1_000 (one tick).
+  //   2. Transition to "paused"; advance 1 s → nowTime = T0 + 2_000 (exactly
+  //      ONE tick, not two from a stale + fresh interval).
+  //   3. Advance 1 more second → nowTime = T0 + 3_000 (each subsequent second
+  //      also advances by exactly 1 s).
+  // ──────────────────────────────────────────────────────────────────────────
+  it("J. running → paused: exactly one 1-second interval ticks (no double-tick)", () => {
+    const { result, rerender } = renderHook(
+      ({ status }: { status: "running" | "paused" }) => useClock(status),
+      { initialProps: { status: "running" as const } },
+    );
+
+    // Step 1: first 1-second tick while running.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "running" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 1_000);
+
+    // Step 2: transition to "paused".  React runs the useEffect cleanup
+    // (clears the old interval) then re-runs the effect registering a fresh
+    // 1-second interval.  Advance exactly 1 s — if both intervals were alive
+    // nowTime would jump by 2_000 ms; correct behaviour is +1_000.
+    act(() => {
+      rerender({ status: "paused" });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "paused" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 2_000);
+
+    // Step 3: subsequent seconds each advance by exactly 1 s.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender({ status: "paused" });
+    });
+    expect(result.current.getTime()).toBe(T0 + 3_000);
+  });
 });
