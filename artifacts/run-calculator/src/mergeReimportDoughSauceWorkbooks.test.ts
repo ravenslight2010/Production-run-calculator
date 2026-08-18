@@ -193,6 +193,10 @@ vi.mock("./parseSpecSheet", () => ({
     }
     throw new Error("unrecognized workbook in scripted check");
   },
+
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
 }));
 
 // REAL ./namedRecipes module (fetchNamedRecipes / addNamedRecipesToServerIfAbsent)

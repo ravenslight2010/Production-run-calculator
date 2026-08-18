@@ -151,7 +151,12 @@ vi.mock("./savedSpecSheets", () => ({
   deriveSourceKey: () => "",
   loadCurrentReconcileRecipes: () => [],
 }));
-vi.mock("./parseSpecSheet", () => ({ requestParseSpecSheet: parseSpy }));
+vi.mock("./parseSpecSheet", () => ({
+  requestParseSpecSheet: parseSpy,
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
+}));
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => {
     throw new Error("no AI matcher in tests");

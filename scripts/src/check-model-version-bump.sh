@@ -22,7 +22,7 @@
 #   1. Cached parse snapshots (saved_spec_sheets) built against the OLD model
 #      keep being served — the new model's output is never tested at import time.
 #   2. No one is reminded to re-run the large-spec harness to verify the new
-#      model can handle the 16 k-char chunk budget.
+#      model can handle the current chunk budget (DEFAULT_LIMITS.maxTotalChars in lib/spec-import).
 #
 # The same applies to prompt rewrites: a prompt change without a version bump
 # means stale cached parses (built with the old prompt) keep being served
@@ -41,6 +41,11 @@
 # Exit 1 = meaningful change but SPEC_PARSE_VERSION value was not changed.
 
 set -euo pipefail
+
+# Resolve the repository root so all paths work regardless of which directory
+# pnpm invokes this script from (e.g. scripts/ vs the repo root).
+GIT_ROOT=$(git rev-parse --show-toplevel)
+cd "${GIT_ROOT}"
 
 MODELS_FILE="lib/integrations-openai-ai-server/src/models.ts"
 PROMPT_FILE="artifacts/api-server/src/routes/aiParseSpecSheet.ts"
@@ -193,7 +198,7 @@ Fix:
        ${SPEC_FILE}
 
   2. After a model change, run the large-spec harness to re-verify that the new
-     model can still handle the 16 k-char chunk budget:
+     model can still handle the current chunk budget (DEFAULT_LIMITS.maxTotalChars in lib/spec-import):
 
        # Quick smoke run (~2 min, real AI calls):
        BRANDS=4 FLAVORS=3 \\

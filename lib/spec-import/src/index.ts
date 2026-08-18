@@ -3256,9 +3256,13 @@ const DEFAULT_LIMITS: Required<GridTextLimits> = {
   // ~56k chunks truncated past the completion cap (non-JSON → empty), and even
   // ~30k chunks (~240 profiles) were flaky — the model sometimes returned
   // valid-but-empty JSON. ~16k chunks (~100-130 profiles) parsed correctly
-  // every time. splitGridsForPrompt sends multiple chunks, so nothing is
+  // in the 2026-07-03 calibration run, but a subsequent model behavior change
+  // caused two failures: (a) self-truncation at ~80 profiles/chunk, and (b)
+  // "sampling" when a single chunk mixes dense profiles (~64) with any recipes.
+  // ~4k chunks (~20 profiles or ~15 recipes each) verified correct every time
+  // (2026-08-17). splitGridsForPrompt sends multiple chunks, so nothing is
   // dropped — smaller chunks just mean more (reliable) calls.
-  maxTotalChars: 16000,
+  maxTotalChars: 4000,
 };
 
 /** Clamp a row's cells the same way for prompt text + chunking (shared so they
@@ -3540,10 +3544,15 @@ export type GridSplit = {
   droppedRows: number;
 };
 
-/** Default cap on parse calls for ONE oversized workbook (mirrors the
- * multi-file MAX_SPEC_IMPORT_FILES spirit so a single file can't fan out into a
- * flood of AI calls). */
-export const DEFAULT_MAX_PROMPT_CHUNKS = 8;
+/** Default cap on parse calls for ONE oversized workbook.
+ *
+ * Calibration (2026-08-17, gemini-3.2-flash-preview, 4k char budget):
+ * a 30-brand × 8-flavor workbook produces ~12-15 chunks at the 4k limit.
+ * The previous value of 8 silently dropped rows 9+ for large imports.
+ * 32 provides comfortable headroom for the verified production scale
+ * (30×8 = 240 profiles + 90 recipes) without allowing runaway fan-out.
+ */
+export const DEFAULT_MAX_PROMPT_CHUNKS = 32;
 
 /** A row that begins a new logical block within a sheet — the exporter's (and
  * many hand-made workbooks') "Recipe: <name>" header. Chunking treats these as

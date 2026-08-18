@@ -94,7 +94,12 @@ vi.mock("./storage", () => ({
   applySpecImport: vi.fn(),
 }));
 // Deterministic "AI" parse: the fixture below, regardless of prompt text.
-vi.mock("./parseSpecSheet", () => ({ requestParseSpecSheet: parseSpy }));
+vi.mock("./parseSpecSheet", () => ({
+  requestParseSpecSheet: parseSpy,
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
+}));
 // No AI matcher — the pipeline must stay deterministic when it throws.
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => {

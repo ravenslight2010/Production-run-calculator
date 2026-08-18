@@ -11,6 +11,56 @@
 //
 // This module NEVER writes anything. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/parseSpecSheet.ts (replit.md parity).
+//
+// Rate-limit constants (server: 10 req / 60 s per user).  Exported so
+// parseWorkbookCore and tests can share them.
+/** Server rate-limit window in ms (slightly over 60 s for clock skew). */
+export const PARSE_RATE_WINDOW_MS = 62_000;
+/** Max parse calls to send within one window — keeps headroom for retries. */
+export const PARSE_PACE_SAFE_MAX = 8;
+
+/**
+ * Thrown by requestParseSpecSheet when the server returns HTTP 429.
+ * parseWorkbookCore catches this to pause and retry the affected chunk.
+ */
+export class ParseSpecRateLimitError extends Error {
+  constructor(detail?: string) {
+    super(detail || "Too many spec-parse requests — please wait a moment");
+    this.name = "ParseSpecRateLimitError";
+  }
+}
+
+/**
+ * Creates a per-import sliding-window rate pacer.  Await `pace()` before
+ * every requestParseSpecSheet call; it sleeps when PARSE_PACE_SAFE_MAX calls
+ * have already been issued within the current PARSE_RATE_WINDOW_MS window.
+ *
+ * Injectable `now` is provided for deterministic testing with fake timers.
+ */
+export function makeParseCallPacer(opts?: {
+  windowMs?: number;
+  maxCalls?: number;
+  now?: () => number;
+}): () => Promise<void> {
+  const windowMs = opts?.windowMs ?? PARSE_RATE_WINDOW_MS;
+  const maxCalls = opts?.maxCalls ?? PARSE_PACE_SAFE_MAX;
+  const getNow = opts?.now ?? (() => Date.now());
+  const timestamps: number[] = [];
+
+  return async function pace(): Promise<void> {
+    const now = getNow();
+    const cutoff = now - windowMs;
+    while (timestamps.length && timestamps[0] < cutoff) timestamps.shift();
+    if (timestamps.length >= maxCalls) {
+      // Sleep until the oldest call exits the window (+ 100 ms buffer).
+      const waitMs = timestamps[0] + windowMs - now + 100;
+      if (waitMs > 0) await new Promise<void>((r) => setTimeout(r, waitMs));
+      const newCutoff = getNow() - windowMs;
+      while (timestamps.length && timestamps[0] < newCutoff) timestamps.shift();
+    }
+    timestamps.push(getNow());
+  };
+}
 
 import type {
   ParsedSpecImport,
@@ -79,6 +129,7 @@ export async function requestParseSpecSheet(
     try {
       detail = ((await res.json()) as { error?: string }).error ?? "";
     } catch {}
+    if (res.status === 429) throw new ParseSpecRateLimitError(detail);
     throw new Error(detail || `Parse-spec-sheet request failed (${res.status})`);
   }
   return (await res.json()) as ParseSpecSheetResult;

@@ -73,6 +73,10 @@ vi.mock("./parseSpecSheet", () => ({
     profiles: [{ brand: "Acme", flavor: "Classic", applicators: [], pepperonis: [] }],
     recipes: [],
   }),
+
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
 }));
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => {

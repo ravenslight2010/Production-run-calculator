@@ -52,7 +52,11 @@ vi.mock("./savedSpecSheets", async (importOriginal) => {
   };
 });
 
-vi.mock("./parseSpecSheet", () => ({ requestParseSpecSheet: vi.fn() }));
+vi.mock("./parseSpecSheet", () => ({ requestParseSpecSheet: vi.fn() ,
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
+}));
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => { throw new Error("no AI matcher in tests"); },
 }));

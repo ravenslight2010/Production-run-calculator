@@ -628,6 +628,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   // ───────────────────────────────────────────────────────────────────────────
   // 6. dough-timer pause + global pause + global resume: clears dough pause
   //    and no tray jump.
+  // ───────────────────────────────────────────────────────────────────────────
+  // 6. Dough-timer pause + global run pause + global run resume
   //
   // Scenario:
   //   a) pauseDoughTimers() — dough ticks freeze; runStatus stays "running"

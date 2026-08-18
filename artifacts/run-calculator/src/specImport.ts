@@ -102,7 +102,12 @@ import {
   type SavedSpecSheet,
   loadCurrentReconcileRecipes,
 } from "./savedSpecSheets";
-import { requestParseSpecSheet } from "./parseSpecSheet";
+import {
+  requestParseSpecSheet,
+  makeParseCallPacer,
+  ParseSpecRateLimitError,
+  PARSE_RATE_WINDOW_MS,
+} from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
@@ -609,20 +614,41 @@ async function parseWorkbookCore(
     cheeseRecipes: known.cheeseRecipes,
   };
 
+  // Rate-limit-safe pacing: the server permits 10 req/min per user.  Large
+  // imports with DEFAULT_MAX_PROMPT_CHUNKS chunks would hit the cap without
+  // pacing.  The pacer sleeps before each call when PARSE_PACE_SAFE_MAX calls
+  // have already been issued in the current window, leaving headroom for one
+  // automatic retry per chunk.
+  const pace = makeParseCallPacer();
+
   const rawList: ParsedSpecImport[] = [];
   const flagged: SpecFlaggedItem[] = [];
   for (const chunk of chunks) {
     const workbookText = gridsToPromptText(chunk);
     if (!workbookText.trim()) continue;
-    let ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
+    await pace();
+    let ai: Awaited<ReturnType<typeof requestParseSpecSheet>>;
+    try {
+      ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
+    } catch (err) {
+      if (err instanceof ParseSpecRateLimitError) {
+        // Unexpected 429 despite pacing (e.g. concurrent imports by the same
+        // user).  Wait out the full window and retry once with a clean slate.
+        await new Promise<void>((r) => setTimeout(r, PARSE_RATE_WINDOW_MS));
+        await pace();
+        ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
+      } else {
+        throw err;
+      }
+    }
     // One automatic retry for a failed pass on a non-trivial chunk: the model
     // occasionally returns an empty/cut-off response for a single chunk, and
     // without a retry the user's only recourse is re-running (and re-billing)
-    // the WHOLE import. A single retry per chunk stays well under the server's
-    // 10/min parse rate limit. Fail-safe: if the retry itself throws, keep the
+    // the WHOLE import. Fail-safe: if the retry itself throws, keep the
     // first (noted) result instead of failing the whole import.
     if (shouldRetryParsePass(ai, workbookText)) {
       try {
+        await pace();
         const retry = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
         ai = resolveRetriedParsePass(ai, retry);
       } catch {
@@ -1177,7 +1203,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "22";
+export const SPEC_PARSE_VERSION = "23";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file

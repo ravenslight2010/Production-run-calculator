@@ -55,6 +55,10 @@ vi.mock("./parseSpecSheet", () => ({
   requestParseSpecSheet: async () => {
     throw new Error("no AI parse in this test");
   },
+
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
 }));
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => {

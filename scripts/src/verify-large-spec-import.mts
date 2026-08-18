@@ -16,23 +16,23 @@
 // qualifier brands, size-in-brand, shared targets). THIS script covers SIZE —
 // that one won't catch chunk/output-budget regressions, this one will.
 //
-// CURRENT VERIFIED LIMITS (verified with gemini-3.1-pro-preview)
-// ──────────────────────────────────────────────────────────────
-// - Per-chunk prompt budget: 16,000 chars
-//   (DEFAULT_LIMITS.maxTotalChars in lib/spec-import/src/index.ts). Parse
-//   output is roughly input-proportional — a dense one-profile-per-row sheet
-//   makes a big chunk demand hundreds of JSON objects back. Verified: ~56k
-//   chunks truncated past the completion cap (non-JSON → empty), ~30k chunks
-//   (~240 profiles) were flaky (sometimes valid-but-EMPTY JSON), ~16k chunks
-//   (~100-130 profiles) parsed correctly every time.
+// CURRENT VERIFIED LIMITS (verified with gemini-3.1-pro-preview, 2026-08-17)
+// ────────────────────────────────────────────────────────────────────────────
+// - Per-chunk prompt budget: 4,000 chars
+//   (DEFAULT_LIMITS.maxTotalChars in lib/spec-import/src/index.ts).
+//   4k chunks (~20 profiles or ~15 recipes each) verified correct with zero
+//   loss or unit-conversion errors across smoke (4×3), 4×8, and 10×4 runs.
 // - max_completion_tokens: 65,536 on POST /ai/parse-spec-sheet
 //   (artifacts/api-server/src/routes/ai.ts). A chunk carrying ~240 profiles
 //   overflowed 32,768 output tokens, so the route uses the model's full 64k
-//   output budget.
+//   output budget. Unchanged from the prior calibration.
 // - Sanitizer maxProfiles: 400 (DEFAULT_SPEC_LIMITS in
-//   lib/spec-import/src/index.ts). A ~30k chunk can legitimately carry ~240
-//   profile rows; at the old cap of 100 the sanitizer silently sliced off
-//   valid profiles.
+//   lib/spec-import/src/index.ts). Unchanged — 4k chunks carry at most ~20
+//   profiles so this limit is never reached.
+// - Test data: harness ingredient weights use realistic per-ingredient bases
+//   (Flour ~50 lbs, Yeast ~0.5 lbs, etc.) so the model does not "correct"
+//   them from oz to lbs. Unrealistic values (10–22 lbs of yeast) triggered
+//   model grounding that divided all weights by 16.
 //
 // WHAT IT DOES
 // ────────────
@@ -129,8 +129,19 @@ const APP_TYPES = ["Shredded Mozzarella", "Provolone Blend", "Cheddar Mix"];
 const PEP_TYPES = ["Standard Pepperoni", "Cup Char Pepperoni"];
 
 const DOUGH_INGREDIENTS = ["Flour", "Water", "Yeast", "Salt", "Sugar", "Olive Oil"];
+// Realistic per-ingredient base lbs so the model does not "correct" values
+// it thinks look wrong. Yeast/Salt/Sugar are small; Flour/Water are large.
+// Per-brand step adds variety without leaving the realistic range.
+const DOUGH_LBS_BASE = [50, 28, 0.5, 1.5, 3.0, 5.0];
+const DOUGH_LBS_STEP = [2.0, 1.0, 0.05, 0.1, 0.1, 0.2];
+
 const SAUCE_INGREDIENTS = ["Tomato Paste", "Water", "Spice Blend", "Sugar", "Salt"];
+const SAUCE_LBS_BASE = [15, 20, 0.5, 2.0, 0.5];
+const SAUCE_LBS_STEP = [1.0, 0.5, 0.05, 0.1, 0.05];
+
 const CHEESE_INGREDIENTS = ["Mozzarella", "Provolone", "Cheese Substitute"];
+const CHEESE_LBS_BASE = [20, 5, 3];
+const CHEESE_LBS_STEP = [1.0, 0.5, 0.3];
 
 function brandName(i: number): string {
   return `${BRAND_WORDS_A[i % BRAND_WORDS_A.length]} ${BRAND_WORDS_B[i % BRAND_WORDS_B.length]}`;
@@ -154,21 +165,21 @@ function buildDataset(brandCount: number, flavorCount: number): Dataset {
       name: doughName,
       rows: DOUGH_INGREDIENTS.map((ingredient, ri) => ({
         ingredient,
-        lbs: 10 + bi + ri * 2.5,
+        lbs: Math.round((DOUGH_LBS_BASE[ri] + bi * DOUGH_LBS_STEP[ri]) * 100) / 100,
       })),
     });
     sauceRecipes.push({
       name: sauceName,
       rows: SAUCE_INGREDIENTS.map((ingredient, ri) => ({
         ingredient,
-        lbs: 5 + bi + ri * 1.5,
+        lbs: Math.round((SAUCE_LBS_BASE[ri] + bi * SAUCE_LBS_STEP[ri]) * 100) / 100,
       })),
     });
     cheeseRecipes.push({
       name: cheeseName,
       rows: CHEESE_INGREDIENTS.map((ingredient, ri) => ({
         ingredient,
-        lbs: 20 + bi + ri * 3,
+        lbs: Math.round((CHEESE_LBS_BASE[ri] + bi * CHEESE_LBS_STEP[ri]) * 100) / 100,
       })),
     });
     flavors.forEach((flavor, fi) => {
@@ -364,7 +375,7 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
-  console.log(`Split into ${split.chunks.length} chunks (16k-char budget each).`);
+  console.log(`Split into ${split.chunks.length} chunks (4k-char budget each).`);
 
   const token = await signIn();
 
@@ -390,7 +401,7 @@ async function main(): Promise<void> {
     if (failures.length > 60) console.error(`  … and ${failures.length - 60} more`);
     console.error(
       "\nData was lost or corrupted between export → chunk → AI parse → merge." +
-        "\nIf the AI model recently changed, re-tune: the 16k chunk budget" +
+        "\nIf the AI model recently changed, re-tune: the current chunk budget (DEFAULT_LIMITS.maxTotalChars in lib/spec-import)" +
         "\n(DEFAULT_LIMITS.maxTotalChars in lib/spec-import), the 65536" +
         "\nmax_completion_tokens on /ai/parse-spec-sheet, and maxProfiles (400).",
     );

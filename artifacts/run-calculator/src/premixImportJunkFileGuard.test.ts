@@ -84,6 +84,10 @@ vi.mock("./savedPremixSheets", () => ({
 // of them the same way specImportJunkFileGuard.test.ts does.
 vi.mock("./parseSpecSheet", () => ({
   requestParseSpecSheet: async () => ({ profiles: [], recipes: [] }),
+
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
 }));
 vi.mock("./matchImport", () => ({
   requestMatchImport: async () => {

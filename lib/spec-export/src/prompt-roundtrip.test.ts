@@ -22,6 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_MAX_PROMPT_CHUNKS,
   PROMPT_MAX_CELL_CHARS,
   gridsToPromptText,
   splitGridsForPrompt,
@@ -63,10 +64,11 @@ const CHEESE_INGREDIENTS = ["Mozzarella", "Provolone", "Cheese Substitute"];
 
 const BRAND_COUNT = 30;
 const FLAVOR_COUNT = 8;
-// The production importer caps a single file at DEFAULT_MAX_PROMPT_CHUNKS; the
-// harness (and this test) raise the cap because they verify CHUNK SIZE, not
-// the per-file call cap — nothing may be dropped at this dataset size.
-const MAX_CHUNKS = 32;
+// Must equal DEFAULT_MAX_PROMPT_CHUNKS — the production importer uses this cap,
+// so if the 30×8 export exceeds it, rows are silently dropped in production.
+// If this test ever fails with "chunk count exceeded", reduce maxTotalChars or
+// raise DEFAULT_MAX_PROMPT_CHUNKS and re-run the real-AI harness to re-calibrate.
+const MAX_CHUNKS = DEFAULT_MAX_PROMPT_CHUNKS;
 
 function brandName(i: number): string {
   return `${BRAND_WORDS_A[i % BRAND_WORDS_A.length]} ${BRAND_WORDS_B[i % BRAND_WORDS_B.length]}`;
@@ -178,6 +180,14 @@ describe("large export survives the prompt-text/chunking path with zero string l
     // Sanity: the workbook is genuinely oversized for a single prompt chunk,
     // otherwise this test wouldn't exercise the chunking path at all.
     expect(split.chunks.length).toBeGreaterThan(1);
+  });
+
+  it("fits within DEFAULT_MAX_PROMPT_CHUNKS so the production importer drops nothing", () => {
+    // The production splitGridsForPrompt call in specImport.ts uses the default
+    // maxChunks cap. If this assertion fails, reduce maxTotalChars or raise
+    // DEFAULT_MAX_PROMPT_CHUNKS and re-run the real-AI harness to re-calibrate.
+    expect(split.chunks.length).toBeLessThanOrEqual(DEFAULT_MAX_PROMPT_CHUNKS);
+    expect(split.droppedRows).toBe(0);
   });
 
   it("drops zero rows when chunked", () => {

@@ -119,6 +119,9 @@ vi.mock("./savedSpecSheets", () => ({
 }));
 vi.mock("./parseSpecSheet", () => ({
   requestParseSpecSheet: parseSpy,
+  makeParseCallPacer: () => async () => {},
+  ParseSpecRateLimitError: class extends Error {},
+  PARSE_RATE_WINDOW_MS: 62_000,
 }));
 vi.mock("./matchImport", () => ({
   // No AI matcher in tests — the import must fall back to the canonical parse.
