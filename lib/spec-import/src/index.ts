@@ -170,21 +170,6 @@ export type ParsedRecipe = {
    * profiles, leaving the saved recipe exactly as-is. `rows` are ignored at apply.
    */
   referenceOnly?: boolean;
-  /**
-   * Import review only: the user LINKED this recipe to an existing saved
-   * recipe (its `name` is the existing recipe's name) AND checked "update it
-   * with this sheet". The recipe applies like a normal one (library copy +
-   * profile ties get the sheet's rows) and the commit pass also replaces the
-   * matching server-pool recipe's ingredient rows. DOUGH/SAUCE ONLY: their
-   * recipe workbooks carry per-batch rows matching what their pools store.
-   * Cheese never sets this — spec sheets express cheese as per-PIZZA ounces
-   * while the cheese pool stores per-BATCH pounds, so a spec-driven update
-   * would corrupt the pool; the cheese workbook importer owns those updates.
-   * Mutually exclusive with `referenceOnly`. The re-import prune must never
-   * demote such a recipe to referenceOnly — the user explicitly asked for the
-   * update THIS import, regardless of whether the sheet changed since then.
-   */
-  updateExisting?: boolean;
   rows: RecipeRow[];
 };
 
@@ -5496,20 +5481,6 @@ export function resolveRetriedParsePass<T extends ParsePassLike>(original: T, re
 
 const ciTrim = (s: string | undefined | null): string => (s ?? "").trim().toLowerCase();
 
-function rowsEqual(a: ReadonlyArray<RecipeRow>, b: ReadonlyArray<RecipeRow>): boolean {
-  if (a.length !== b.length) return false;
-  const key = (r: RecipeRow) => `${ciTrim(r.ingredient)}\u0000${r.lbs}`;
-  const counts = new Map<string, number>();
-  for (const r of a) counts.set(key(r), (counts.get(key(r)) ?? 0) + 1);
-  for (const r of b) {
-    const k = key(r);
-    const n = counts.get(k);
-    if (!n) return false;
-    counts.set(k, n - 1);
-  }
-  return true;
-}
-
 function pepperonisEqual(
   a: ReadonlyArray<ParsedPepperoni>,
   b: ReadonlyArray<ParsedPepperoni>,
@@ -5530,7 +5501,12 @@ function pepperonisEqual(
  * Merge-alias categories relevant to spec-import name resolution. These are a
  * subset of the server's merge_aliases categories (MergeSuggestCategory).
  */
-export type ImportMergeAliasCategory = "sauce" | "dough" | "mixes" | "cheese";
+export type ImportMergeAliasCategory =
+  | "sauce"
+  | "dough"
+  | "mixes"
+  | "cheese"
+  | "ingredient";
 
 /** One merge_aliases row: a merged-away name → its surviving canonical name. */
 export type ImportMergeAlias = {
@@ -5639,9 +5615,9 @@ export function mergePruneSnapshots(
  * - A profile with nothing left to write is dropped entirely (it also no longer
  *   clears delete/merge tombstones, so a profile the user removed since the
  *   last import is NOT resurrected by an unchanged re-import).
- * - A recipe whose rows (order-insensitive) and dough numbers are identical to
- *   the snapshot is flipped to `referenceOnly`: the library copy (possibly
- *   user-edited since) is left untouched and profile ties hydrate from it.
+ * - Recipes are NEVER pruned (spec-wins policy): parsed recipe rows always
+ *   flow through to apply/commit, so a correcting re-import of a byte-identical
+ *   sheet still overwrites drifted saved/pool recipe content.
  *
  * Matching is loose on names (specImportNameMatchKey for recipes, ci-trim for
  * brand/flavor) because AI parses of the same workbook are not byte-stable.
@@ -5659,13 +5635,8 @@ export function pruneSpecImportAgainstSnapshot(
   for (const p of previous.profiles ?? []) {
     prevProfiles.set(`${ciTrim(p.brand)}\u0000${ciTrim(p.flavor)}`, p);
   }
-  const prevRecipes = new Map<string, ParsedRecipe>();
-  for (const r of previous.recipes ?? []) {
-    prevRecipes.set(`${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}`, r);
-  }
-
   let unchangedProfiles = 0;
-  let unchangedRecipes = 0;
+  const unchangedRecipes = 0;
 
   const profiles: ParsedProfile[] = [];
   for (const p of parsed.profiles ?? []) {
@@ -5707,24 +5678,16 @@ export function pruneSpecImportAgainstSnapshot(
     profiles.push(out);
   }
 
-  const recipes: ParsedRecipe[] = (parsed.recipes ?? []).map((r) => {
-    if (r.referenceOnly) return r;
-    // The user explicitly checked "update the existing recipe with this
-    // sheet" in the review — the saved/pool copy may have drifted from the
-    // sheet even when the sheet itself is unchanged since the last import,
-    // so this must never be demoted to referenceOnly.
-    if (r.updateExisting) return r;
-    const prev = prevRecipes.get(`${r.kind}\u0000${specImportNameMatchKey(r.name ?? "")}`);
-    if (!prev || prev.referenceOnly) return r;
-    const unchanged =
-      rowsEqual(r.rows ?? [], prev.rows ?? []) &&
-      (r.doughballOz ?? null) === (prev.doughballOz ?? null) &&
-      (r.doughBatchYield ?? null) === (prev.doughBatchYield ?? null) &&
-      (r.doughballsPerTray ?? null) === (prev.doughballsPerTray ?? null);
-    if (!unchanged) return r;
-    unchangedRecipes += 1;
-    return { ...r, referenceOnly: true };
-  });
+  // Recipes are deliberately NEVER pruned as "unchanged" (spec-wins policy):
+  // the snapshot records what the sheet said last time, not what the saved /
+  // pool recipe actually stores now. A previous import may have written wrong
+  // rows (or the pool copy drifted since) while the sheet is byte-identical —
+  // demoting an unchanged recipe to referenceOnly made a correcting re-import
+  // a silent no-op. The spec sheet is authoritative for recipe content, so
+  // every parsed recipe always flows through to apply/commit. Explicit
+  // referenceOnly ("use existing, don't touch it") review picks still pass
+  // through untouched.
+  const recipes: ParsedRecipe[] = [...(parsed.recipes ?? [])];
 
   return { parsed: { ...parsed, profiles, recipes }, unchangedProfiles, unchangedRecipes };
 }

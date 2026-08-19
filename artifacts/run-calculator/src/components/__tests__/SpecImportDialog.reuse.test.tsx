@@ -92,7 +92,7 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(optionValues).toEqual(["", "House Dough", "Thin Crust"]);
   });
 
-  it("emits a referenceOnly recipe pointing at the chosen existing name on apply", () => {
+  it("emits an updating recipe pointing at the chosen existing name on apply (spec wins)", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",
       name: "Sheet Dough",
@@ -116,11 +116,14 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
     expect(out.recipes).toHaveLength(1);
+    // A linked dough pick with parsed rows UPDATES the existing recipe with
+    // the sheet's rows (spec-wins) — never a reference-only no-op link.
     expect(out.recipes[0]).toMatchObject({
       name: "House Dough",
       kind: "dough",
-      referenceOnly: true,
+      userNamed: true,
     });
+    expect(out.recipes[0].referenceOnly).toBeUndefined();
   });
 
   it("suppresses the shared-library note for a reused recipe", () => {
@@ -390,7 +393,7 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     });
   });
 
-  it("offers an 'update with this sheet' checkbox on a linked recipe and emits updateExisting", () => {
+  it("always updates a linked dough/sauce recipe with the sheet's rows — no checkbox, spec wins", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",
       name: "Sheet Dough",
@@ -401,19 +404,13 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     const onConfirm = vi.fn();
     renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), onConfirm);
 
-    // No checkbox before a link is picked.
-    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
-
     fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
       target: { value: "House Dough" },
     });
-    // Linked → checkbox appears, default unchecked, note says "won't be changed".
-    const checkbox = screen.getByTestId("spec-recipe-update-existing-rk0") as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
-    expect(screen.getByText(/won't be changed/)).toBeTruthy();
-
-    fireEvent.click(checkbox);
+    // No opt-in checkbox anymore — the note says the ingredients WILL be replaced.
+    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
     expect(screen.getByText(/will be replaced/)).toBeTruthy();
+    expect(screen.getByText(/Will change to:/)).toBeTruthy();
 
     fireEvent.click(screen.getByText(/^Apply/));
 
@@ -421,43 +418,13 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(out.recipes[0]).toMatchObject({
       name: "House Dough",
       kind: "dough",
-      updateExisting: true,
       userNamed: true,
     });
-    // updateExisting replaces referenceOnly — the sheet's rows must apply.
+    // The update replaces referenceOnly — the sheet's rows must apply.
     expect(out.recipes[0].referenceOnly).toBeUndefined();
   });
 
-  it("resets the update checkbox when the linked recipe changes", () => {
-    const recipe: ParsedRecipe = {
-      kind: "dough",
-      name: "Sheet Dough",
-      brand: "Corner Booth",
-      flavor: "PLAIN",
-      rows: [{ ingredient: "Flour", lbs: 40 }],
-    };
-    const onConfirm = vi.fn();
-    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), onConfirm);
-
-    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
-      target: { value: "House Dough" },
-    });
-    fireEvent.click(screen.getByTestId("spec-recipe-update-existing-rk0"));
-
-    // Consent to overwrite "House Dough" must NOT carry over to "Thin Crust".
-    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
-      target: { value: "Thin Crust" },
-    });
-    const checkbox = screen.getByTestId("spec-recipe-update-existing-rk0") as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
-
-    fireEvent.click(screen.getByText(/^Apply/));
-    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
-    expect(out.recipes[0]).toMatchObject({ name: "Thin Crust", referenceOnly: true });
-    expect(out.recipes[0].updateExisting).toBeUndefined();
-  });
-
-  it("hides the update checkbox when the sheet parsed no ingredient rows", () => {
+  it("keeps a linked dough pick reference-only when the sheet parsed no ingredient rows", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",
       name: "Sheet Dough",
@@ -465,15 +432,21 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
       flavor: "PLAIN",
       rows: [],
     };
-    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), () => {});
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared(recipe, [{ brand: "Corner Booth", flavor: "PLAIN" }]), onConfirm);
 
     fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
       target: { value: "House Dough" },
     });
-    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
+    // Nothing to replace with → the existing recipe is left untouched.
+    expect(screen.getByText(/won't be changed/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/^Apply/));
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({ name: "House Dough", referenceOnly: true });
   });
 
-  it("never offers the update checkbox on a linked CHEESE pick (per-pizza vs per-batch units)", () => {
+  it("never updates a linked CHEESE pick (per-pizza vs per-batch units)", () => {
     const recipe: ParsedRecipe = {
       kind: "cheese",
       name: "Aldo's Spinach Blend",
@@ -487,10 +460,9 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
       target: { value: "Lowe's Spinach Cheese Mix" },
     });
-    // Even with parsed rows, cheese picks get NO update checkbox — spec sheets
-    // carry per-pizza ounces while the cheese pool stores per-batch pounds.
+    // Even with parsed rows, cheese picks never update — spec sheets carry
+    // per-pizza ounces while the cheese pool stores per-batch pounds.
     // The hint explains the sheet's ounces land in the oz-per-pizza column only.
-    expect(screen.queryByTestId("spec-recipe-update-existing-rk0")).toBeNull();
     expect(screen.getByText(/won't be changed/)).toBeTruthy();
     expect(screen.getByText(/batch pounds are kept as-is/)).toBeTruthy();
 
@@ -501,7 +473,6 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
       name: "Lowe's Spinach Cheese Mix",
       referenceOnly: true,
     });
-    expect(out.recipes[0].updateExisting).toBeUndefined();
   });
 
   it("does NOT let a sauce-scoped remembered link pre-select on a dough row", () => {

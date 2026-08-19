@@ -586,13 +586,13 @@ export function fillSpecMixTags(
 }
 
 /**
- * Backfill per-pizza oz amounts onto already-saved mixes from a new spec-import
+ * Apply per-pizza oz amounts onto already-saved mixes from a new spec-import
  * batch. For each update that matches an existing mix by NAME and BRAND SCOPE,
- * fill in any component whose `perPizza` is currently 0 with the incoming
- * value. Components that already have a nonzero `perPizza` are NEVER touched —
- * the app has no provenance field to distinguish a manager-typed value from a
- * prior import, so the rule is: nonzero wins and is never overwritten. Only
- * updates with perPizza > 0 are applied; zeros are ignored.
+ * write the incoming value onto matching components. SPEC-WINS: a positive
+ * spec value always overwrites what's stored — the spec sheet is the source
+ * of truth, so a correcting re-import fixes a prior bad value. Only updates
+ * with perPizza > 0 are applied; zeros are ignored (a sheet that expresses no
+ * amount never zeroes a stored one).
  *
  * Brand-scope rule (mirrors addSpecMixesIfAbsent): a branded update only
  * matches existing mixes with the SAME brand (case-insensitive). An unbranded
@@ -635,11 +635,11 @@ export function applyMixPerPizza(
     if (!oz) return m;
     let changed = false;
     const components = m.components.map((c) => {
-      // Never overwrite a nonzero value — no provenance to distinguish manager
-      // entry from a prior import; preserve whatever is already there.
-      if (c.perPizza !== 0) return c;
+      // SPEC-WINS: a positive spec-sheet value always overwrites what's stored
+      // (a prior bad import must not survive a correcting re-import). Updates
+      // without a value (zero/absent) never touch the stored number.
       const v = oz.get(c.ingredient.trim().toLowerCase());
-      if (v === undefined) return c;
+      if (v === undefined || v === c.perPizza) return c;
       changed = true;
       return { ...c, perPizza: v };
     });

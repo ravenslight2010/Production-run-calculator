@@ -155,7 +155,9 @@ describe("commitSpecImport re-import prune wiring", () => {
     // for those links (a prior bad import may have stored a wrong link while
     // the sheet stayed identical).
     expect(prof.applicators).toHaveLength(1);
-    expect(applied.recipes[0].referenceOnly).toBe(true); // unchanged recipe demoted
+    // SPEC-WINS: recipes are never demoted by the snapshot diff — an
+    // unchanged sheet still re-applies its rows on re-import.
+    expect(applied.recipes[0].referenceOnly).toBeUndefined();
 
     // New snapshot must be the FULL unpruned parse.
     const savedParsed = saveSheetSpy.mock.calls[0][1] as ParsedSpecImport;
@@ -205,7 +207,8 @@ describe("commitSpecImport re-import prune wiring", () => {
     // re-apply) but its unchanged scalars are pruned.
     expect(applied.profiles).toHaveLength(1);
     expect(applied.profiles[0].dieType).toBeUndefined();
-    expect(applied.recipes[0].referenceOnly).toBe(true); // unchanged recipe demoted
+    // SPEC-WINS: the unchanged recipe still applies (never demoted).
+    expect(applied.recipes[0].referenceOnly).toBeUndefined();
   });
 
   it("prunes a multi-file batch re-import against earlier SINGLE-FILE snapshots", async () => {
@@ -235,7 +238,8 @@ describe("commitSpecImport re-import prune wiring", () => {
     expect(applied.profiles[0].dieType).toBeUndefined();
     const a = applied.recipes.find((r) => r.name === "House Marinara");
     const b = applied.recipes.find((r) => r.name === "Sauce B");
-    expect(a?.referenceOnly).toBe(true); // unchanged → demoted
+    // SPEC-WINS: both apply — unchanged recipes are never demoted.
+    expect(a?.referenceOnly).toBeUndefined();
     expect(b?.referenceOnly).toBeUndefined(); // changed → applied
   });
 
@@ -350,7 +354,7 @@ describe("commitSpecImport re-import prune wiring", () => {
     expect(sauce?.referenceOnly).toBeUndefined(); // promoted, not demoted
   });
 
-  it("keeps the prune demotion when the (collapsed) dough family still exists in the pool", async () => {
+  it("still applies a (collapsed) dough family that exists in the pool — spec wins over pool edits", async () => {
     const doughRows = [{ ingredient: "Flour", lbs: 100 }];
     const doughParse: ParsedSpecImport = {
       profiles: [],
@@ -371,8 +375,9 @@ describe("commitSpecImport re-import prune wiring", () => {
 
     const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
     const dough = applied.recipes.filter((r) => r.kind === "dough");
-    // Unchanged sheet + intact pool → stays demoted (manual edits survive).
-    for (const r of dough) expect(r.referenceOnly).toBe(true);
+    // SPEC-WINS: even with an intact pool copy, the sheet's rows re-apply —
+    // recipe content is never gated by the snapshot diff.
+    for (const r of dough) expect(r.referenceOnly).toBeUndefined();
   });
 
   it("applies the full parse when the snapshot fetch fails (best-effort)", async () => {

@@ -123,13 +123,18 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     expect(out.unchangedProfiles).toBe(0);
   });
 
-  it("flips an unchanged recipe to referenceOnly (rows order-insensitive)", () => {
+  it("never prunes an unchanged recipe — spec wins, rows always flow through (re-import overwrite)", () => {
+    // SPEC-WINS regression guard: the snapshot records what the sheet said,
+    // not what the saved/pool recipe stores now. A byte-identical re-import
+    // must still carry its rows through so a correcting re-import overwrites
+    // drifted recipe content — never demote to referenceOnly.
     const out = pruneSpecImportAgainstSnapshot(
       parsedOf([], [recipe({ rows: [{ ingredient: "Water", lbs: 10 }, { ingredient: "tomato paste", lbs: 20 }] })]),
       parsedOf([], [recipe()]),
     );
-    expect(out.parsed.recipes[0].referenceOnly).toBe(true);
-    expect(out.unchangedRecipes).toBe(1);
+    expect(out.parsed.recipes[0].referenceOnly).toBeUndefined();
+    expect(out.parsed.recipes[0].rows).toHaveLength(2);
+    expect(out.unchangedRecipes).toBe(0);
   });
 
   it("keeps a recipe whose rows changed", () => {
@@ -139,14 +144,6 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     );
     expect(out.parsed.recipes[0].referenceOnly).toBeUndefined();
     expect(out.unchangedRecipes).toBe(0);
-  });
-
-  it("matches recipes by loose name key (case/punctuation drift across parses)", () => {
-    const out = pruneSpecImportAgainstSnapshot(
-      parsedOf([], [recipe({ name: "bashas sauce" })]),
-      parsedOf([], [recipe({ name: "Basha's  Sauce" })]),
-    );
-    expect(out.parsed.recipes[0].referenceOnly).toBe(true);
   });
 
   it("keeps a dough recipe whose doughball weight changed even with identical rows", () => {
@@ -173,20 +170,6 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     );
     expect(out.parsed.recipes[0]).toEqual(userPick);
     expect(out.parsed.recipes[1].referenceOnly).toBeUndefined();
-  });
-
-  it("never demotes an explicit 'update existing' pick, even when the sheet is unchanged", () => {
-    // The user linked the parsed recipe to an existing pool recipe AND checked
-    // "update it with this sheet" — the pool copy may have drifted from the
-    // sheet, so an unchanged re-import must still carry the update through.
-    const userPick = recipe({ updateExisting: true });
-    const out = pruneSpecImportAgainstSnapshot(
-      parsedOf([], [userPick]),
-      parsedOf([], [recipe()]),
-    );
-    expect(out.parsed.recipes[0]).toEqual(userPick);
-    expect(out.parsed.recipes[0].referenceOnly).toBeUndefined();
-    expect(out.unchangedRecipes).toBe(0);
   });
 
   it("does not mutate its inputs", () => {

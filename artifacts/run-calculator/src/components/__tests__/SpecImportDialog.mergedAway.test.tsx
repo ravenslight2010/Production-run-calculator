@@ -196,12 +196,13 @@ describe("SpecImportDialog merged-away dough/sauce re-import", () => {
 
     fireEvent.click(screen.getByText(/^Apply/));
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
-    // Re-checked merged-away row rides along as a reference-only link to the
-    // survivor — it still can't resurrect the old name.
+    // Re-checked merged-away row rides along pointing at the survivor — it
+    // still can't resurrect the old name. Under spec-wins a linked dough pick
+    // with rows applies as an update (not reference-only).
     expect(out.recipes.map((r) => r.name).sort()).toEqual([
       "Masa Dough",
       "Masa Dough",
     ]);
-    expect(out.recipes.some((r) => r.referenceOnly)).toBe(true);
+    expect(out.recipes.every((r) => !r.referenceOnly)).toBe(true);
   });
 });

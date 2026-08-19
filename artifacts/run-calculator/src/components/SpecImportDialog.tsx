@@ -139,13 +139,6 @@ type RecipeItem = {
    * instead of creating/overwriting one from the sheet. Empty = create new.
    */
   linkExisting?: string;
-  /**
-   * With `linkExisting` set: the user also checked "update it with this
-   * sheet", so the linked existing recipe's ingredient rows are REPLACED with
-   * the sheet's on Apply (instead of the default reference-only link that
-   * leaves the saved recipe untouched). Reset whenever the link pick changes.
-   */
-  updateExisting?: boolean;
   include: boolean;
   tombstoned: boolean;
   /**
@@ -749,25 +742,24 @@ export default function SpecImportDialog({
       .filter((r) => r.include)
       .map((r): ParsedRecipe => {
         const linked = r.linkExisting?.trim();
-        // Linked + "update it with this sheet" checked → apply like a NORMAL
-        // recipe under the linked name (library copy + profile ties get the
-        // sheet's rows) and flag it so commit also replaces the server-pool
-        // recipe's rows. Only Dough/Sauce ever update: mix amounts are
-        // manager-entered, and cheese is a units mismatch (spec sheets are
+        // SPEC-WINS: a linked Dough/Sauce pick with parsed rows applies like a
+        // NORMAL recipe under the linked name — library copy + profile ties get
+        // the sheet's rows, and commit also replaces the server-pool recipe's
+        // rows. No "update it" opt-in anymore; the spec sheet is the source of
+        // truth for recipe content. Only Dough/Sauce ever update: mix amounts
+        // are manager-entered, and cheese is a units mismatch (spec sheets are
         // per-PIZZA ounces, the cheese pool is per-BATCH pounds — the cheese
-        // workbook importer owns those updates).
+        // workbook importer owns those updates); those stay reference-only.
         const wantsUpdate =
           !!linked &&
-          !!r.updateExisting &&
           (r.kind === "dough" || r.kind === "sauce") &&
           (r.orig.rows?.length ?? 0) > 0;
         const out: ParsedRecipe = linked
           ? wantsUpdate
-            ? { ...r.orig, name: linked, kind: parseKindOf(r.kind), updateExisting: true }
+            ? { ...r.orig, name: linked, kind: parseKindOf(r.kind) }
             : { ...r.orig, name: linked, kind: parseKindOf(r.kind), referenceOnly: true }
           : { ...r.orig, name: r.name.trim(), kind: parseKindOf(r.kind) };
         if (!linked || wantsUpdate) delete out.referenceOnly;
-        if (!wantsUpdate) delete out.updateExisting;
         // The user typed a different name than the parse suggested — flag it so
         // the commit-time name passes (canonicalize / snap-to-existing) leave
         // the rename exactly as typed instead of reverting to the suggestion.
@@ -1145,7 +1137,6 @@ export default function SpecImportDialog({
                             setRecipe(r.key, {
                               kind,
                               linkExisting: undefined,
-                              updateExisting: false,
                               // The merge note describes the ORIGINAL suggested
                               // link; a kind change clears that link, so the
                               // note must go too.
@@ -1153,20 +1144,13 @@ export default function SpecImportDialog({
                             })
                           }
                           onLinkExisting={(linkExisting) =>
-                            // Changing the pick resets the "update it" checkbox —
-                            // consent to overwrite one recipe must never carry
-                            // over to a different one.
                             setRecipe(r.key, {
                               linkExisting: linkExisting || undefined,
-                              updateExisting: false,
                               // The merge note only applies to the originally
                               // suggested survivor link — picking a different
                               // recipe (or clearing the pick) retires it.
                               mergedAway: false,
                             })
-                          }
-                          onUpdateExisting={(updateExisting) =>
-                            setRecipe(r.key, { updateExisting })
                           }
                         />
                       );
@@ -1623,7 +1607,6 @@ function RecipeRow({
   onName,
   onKind,
   onLinkExisting,
-  onUpdateExisting,
 }: {
   item: RecipeItem;
   /** Existing saved recipes of this kind the user can reuse instead of creating one. */
@@ -1638,7 +1621,6 @@ function RecipeRow({
   onName: (v: string) => void;
   onKind: (v: SpecImportDisplayKind) => void;
   onLinkExisting: (v: string) => void;
-  onUpdateExisting: (v: boolean) => void;
 }) {
   const linked = item.linkExisting?.trim() ?? "";
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
@@ -1654,13 +1636,14 @@ function RecipeRow({
   // list differs), so existence checks use the underlying parse kind.
   const isNew = !linked && (!name || !recipeExistsForImport(parseKindOf(item.kind), name));
   const rowsPreview = recipeRowsPreview(item.orig);
-  // "Update it with this sheet" is only offered for Dough/Sauce picks with
-  // parsed rows. Mix amounts are manager-entered (a spec sheet can't express
-  // them), and Cheese is a UNITS mismatch: spec sheets carry per-PIZZA ounces
-  // while the saved cheese recipes store per-BATCH pounds — updating would
-  // overwrite good batch pounds with per-pizza numbers. Cheese batch pounds
-  // update via the Cheese Mix Recipe Specs workbook importer instead.
-  const updateOffered =
+  // SPEC-WINS: a linked Dough/Sauce pick with parsed rows always replaces the
+  // existing recipe's ingredients on Apply — no opt-in checkbox. Mix amounts
+  // are manager-entered (a spec sheet can't express them), and Cheese is a
+  // UNITS mismatch: spec sheets carry per-PIZZA ounces while the saved cheese
+  // recipes store per-BATCH pounds — updating would overwrite good batch
+  // pounds with per-pizza numbers. Cheese batch pounds update via the Cheese
+  // Mix Recipe Specs workbook importer instead.
+  const willUpdate =
     (item.kind === "dough" || item.kind === "sauce") && (item.orig.rows?.length ?? 0) > 0;
   // Recipes attach by NAME only — profiles link a dough/sauce recipe name (or
   // a cheese/mix applicator-slot name) and hydrate from the library by that
@@ -1779,7 +1762,7 @@ function RecipeRow({
           )}
           {linked && (
             <div className="mt-1.5 text-xs text-muted-foreground">
-              {item.updateExisting && updateOffered
+              {willUpdate
                 ? `Using your existing “${linked}” — its ingredients will be replaced with this sheet's.`
                 : `Using your existing “${linked}” — it won't be changed.`}
               {item.kind === "cheese" && (
@@ -1792,22 +1775,7 @@ function RecipeRow({
             </div>
           )}
 
-          {linked && updateOffered && (
-            <label className="mt-1.5 flex items-start gap-2">
-              <input
-                type="checkbox"
-                checked={!!item.updateExisting}
-                onChange={(e) => onUpdateExisting(e.target.checked)}
-                className="mt-0.5 h-3.5 w-3.5 accent-primary"
-                data-testid={`spec-recipe-update-existing-${item.key}`}
-              />
-              <span className="text-xs text-foreground">
-                Update “{linked}” with this sheet's ingredients
-              </span>
-            </label>
-          )}
-
-          {linked && item.updateExisting && updateOffered && rowsPreview && (
+          {linked && willUpdate && rowsPreview && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Will change to: {rowsPreview}
             </div>

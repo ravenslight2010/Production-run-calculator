@@ -74,6 +74,7 @@ import {
   type OverflowColumnRow,
   type TruncatedCell,
   type ImportMergeAliasMap,
+  resolveImportName,
 } from "@workspace/spec-import";
 import {
   reconcileSpecWithRecipes,
@@ -1207,7 +1208,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "27";
+export const SPEC_PARSE_VERSION = "28";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -2152,15 +2153,39 @@ export async function commitSpecImport(
   // written, the pre-fix behavior).
   let importMergeAliases: ImportMergeAliasMap | undefined;
   try {
-    const [sauce, dough, mixes, cheese] = await Promise.all([
+    const [sauce, dough, mixes, cheese, ingredient] = await Promise.all([
       fetchMergeAliases("sauce"),
       fetchMergeAliases("dough"),
       fetchMergeAliases("mixes"),
       fetchMergeAliases("cheese"),
+      fetchMergeAliases("ingredient"),
     ]);
-    importMergeAliases = { sauce, dough, mixes, cheese };
+    importMergeAliases = { sauce, dough, mixes, cheese, ingredient };
   } catch {
     // Offline / server error — apply names as written.
+  }
+
+  // Resolve every recipe row's INGREDIENT name through the factory's merge
+  // history BEFORE anything applies — a sheet naming an ingredient that was
+  // since merged away must write the surviving canonical name everywhere
+  // (local presets, ingredient lists, AND the server pools below), never
+  // resurrect the old one. Done once here so all downstream writes see the
+  // same resolved payload.
+  if (importMergeAliases?.ingredient?.length) {
+    applyParsed = {
+      ...applyParsed,
+      recipes: (applyParsed.recipes ?? []).map((r) => {
+        if (!r.rows?.length) return r;
+        let changed = false;
+        const rows = r.rows.map((row) => {
+          const resolved = resolveImportName(row.ingredient ?? "", "ingredient", importMergeAliases);
+          if (resolved === row.ingredient) return row;
+          changed = true;
+          return { ...row, ingredient: resolved };
+        });
+        return changed ? { ...r, rows } : r;
+      }),
+    };
   }
 
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[]; nameCorrections?: SpecImportNameCorrection[] } = {};
@@ -2366,8 +2391,10 @@ export async function commitSpecImport(
       const tagRes = fillSpecMixTags(addRes.merged, candidates);
       tagged = tagRes.tagged;
       // Refresh per-pizza oz on already-saved mixes from spec-sheet amounts.
-      // Only updates components that already exist on the mix AND where the
-      // incoming value is > 0, so a manager's hand-typed value is never zeroed.
+      // SPEC-WINS: a positive spec value always overwrites what's stored (so a
+      // correcting re-import fixes a prior bad value); only components that
+      // already exist on the mix are touched, and a zero/absent spec value
+      // never zeroes a manager's hand-typed number.
       const ozRes = applyMixPerPizza(tagRes.next, candidates);
       updated = ozRes.updated;
       workingMixes = ozRes.next;
@@ -2407,18 +2434,18 @@ export async function commitSpecImport(
   // recipe — it simply links to it. Manager-gated on the server and fully
   // best-effort: the recipes already applied locally, so a failed sync must
   // never surface as an import error.
-  // "Update the existing recipe with this sheet" picks from the review: the
-  // recipe applied locally like a normal one (under the linked existing name),
-  // and here the matching SERVER pool recipe's ingredient rows are replaced
-  // too — the dough/sauce pickers hydrate rows from the pools, so without
-  // this the on-screen recipe would keep its old rows. DOUGH/SAUCE ONLY:
+  // SPEC-WINS: every dough/sauce recipe this sheet carries rows for also
+  // replaces the matching SERVER pool recipe's ingredient rows — the
+  // dough/sauce pickers hydrate rows from the pools, so without this the
+  // on-screen recipe would keep its old rows after a correcting re-import.
+  // No "update existing" opt-in anymore: the spec sheet is the source of
+  // truth for recipe content. Explicit referenceOnly review picks ("use my
+  // existing recipe, don't touch it") are still honored. DOUGH/SAUCE ONLY:
   // cheese rows are never replaced here — spec sheets carry per-PIZZA ounces
   // while the cheese pool's rows are per-BATCH pounds (the Cheese Mix Recipe
-  // Specs workbook importer owns those). Instead the cheese block below
-  // refreshes ONLY the components' separate per-pizza-oz column.
+  // Specs workbook importer owns those).
   const updateTargets = (applyParsed.recipes ?? []).filter(
     (r): r is typeof r & { name: string } =>
-      Boolean(r.updateExisting) &&
       !r.referenceOnly &&
       (r.kind === "dough" || r.kind === "sauce") &&
       Boolean((r.name ?? "").trim()) &&
@@ -2453,6 +2480,9 @@ export async function commitSpecImport(
   // Same update step for the Dough / Sauce named-recipe pools. Best-effort for
   // the same reasons — the sheet's rows already applied locally either way.
   for (const kind of ["dough", "sauce"] as const) {
+    // Ingredient names inside the rows were already resolved through the
+    // factory's merge history above (resolveImportName on applyParsed), so
+    // the pool write sees the same canonical names as the local apply.
     const updates = updateTargets
       .filter((r) => r.kind === kind)
       .map((r) => ({ name: r.name.trim(), rows: r.rows ?? [] }));

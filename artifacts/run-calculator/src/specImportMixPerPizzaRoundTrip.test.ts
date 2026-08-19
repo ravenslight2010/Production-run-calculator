@@ -244,7 +244,7 @@ describe("applyMixPerPizza: backfills perPizza=0 slots from spec import batch", 
     expect(next[0].components[1].perPizza).toBe(0.8);
   });
 
-  it("preserves a nonzero perPizza the manager already typed in (nonzero wins)", () => {
+  it("overwrites a nonzero perPizza with the spec value (spec wins on re-import)", () => {
     const existingMix: Mix = {
       id: "premix-aldos-fajita-white-fajita-mix",
       name: "White Fajita Mix",
@@ -263,8 +263,8 @@ describe("applyMixPerPizza: backfills perPizza=0 slots from spec import batch", 
       components: [{ ingredient: "Monterey Jack", perPizza: 9.9 }],
     })!;
     const { next, updated } = applyMixPerPizza([existingMix], [candidate]);
-    expect(updated).toBe(0);
-    expect(next[0].components[0].perPizza).toBe(3.0); // manager's value wins
+    expect(updated).toBe(1);
+    expect(next[0].components[0].perPizza).toBe(9.9); // spec value wins
   });
 });
 
@@ -396,10 +396,10 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     expect(plan[0].runs[0].mixes[0].totalLbs).toBeCloseTo(163.75);
   });
 
-  it("mix from a prior premix import (non-zero perPizza) is preserved after a subsequent spec import", () => {
-    // The spec import's applyMixPerPizza must NOT clobber a mix that already
-    // has non-zero perPizza values — it may only fill in zeros. This is the
-    // "nonzero wins" invariant that protects manager-entered/premix values.
+  it("mix from a prior premix import gets its perPizza refreshed by a subsequent spec import (spec wins)", () => {
+    // SPEC-WINS: a subsequent spec import overwrites stored perPizza values
+    // with the sheet's positive amounts — a prior bad value must not survive
+    // a correcting re-import. Zero/absent spec values still never zero.
     const existingFromPremixImport: Mix = {
       id: "premix-aldos-fajita-white-fajita-mix",
       name: "White Fajita Mix",
@@ -415,7 +415,7 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
       enabled: true,
     };
 
-    // New spec sheet has DIFFERENT (lower) amounts — must be ignored.
+    // New spec sheet has DIFFERENT (lower) amounts — they take over.
     const candidate = specMixDraftToMix({
       name: "White Fajita Mix",
       brand: "Aldo's",
@@ -431,15 +431,15 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     expect(added).toBe(0);
     expect(merged).toHaveLength(1);
 
-    // applyMixPerPizza: existing components have perPizza > 0 → "nonzero wins".
+    // applyMixPerPizza: spec values overwrite the stored premix values.
     const { next: finalMixes, updated } = applyMixPerPizza(merged, [candidate]);
-    expect(updated).toBe(0);
-    expect(finalMixes[0].components[0].perPizza).toBe(3.0); // unchanged
-    expect(finalMixes[0].components[1].perPizza).toBe(1.0); // unchanged
+    expect(updated).toBe(1);
+    expect(finalMixes[0].components[0].perPizza).toBe(1.0); // spec wins
+    expect(finalMixes[0].components[1].perPizza).toBe(0.2); // spec wins
 
-    // buildMixPlan still shows correct lbs from the premix values.
-    // Component lbs: 3.0 * 800 / 16 = 150; 1.0 * 800 / 16 = 50; componentLbs = 200
-    // totalLbs = 200 * 1.15 + 20 = 250 (waste buffer + startup buffer applied)
+    // buildMixPlan reflects the sheet's values.
+    // Component lbs: 1.0 * 800 / 16 = 50; 0.2 * 800 / 16 = 10; componentLbs = 60
+    // totalLbs = 60 * 1.15 + 20 = 89 (waste buffer + startup buffer applied)
     const plan = buildMixPlan({
       runs: [{ date: TODAY, brand: "Aldo's", flavor: "Fajita", pizzas: 800, cases: 80 }],
       mixes: finalMixes,
@@ -447,9 +447,9 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     });
     expect(plan).toHaveLength(1);
     const entry = plan[0].runs[0].mixes[0];
-    expect(entry.totalLbs).toBeCloseTo(250);
-    expect(entry.components[0].lbs).toBeCloseTo(150);
-    expect(entry.components[1].lbs).toBeCloseTo(50);
+    expect(entry.totalLbs).toBeCloseTo(89);
+    expect(entry.components[0].lbs).toBeCloseTo(50);
+    expect(entry.components[1].lbs).toBeCloseTo(10);
   });
 
   it("mix newly added from spec import with oz amounts: re-import detects it as existing (no duplicate, no clobber)", () => {

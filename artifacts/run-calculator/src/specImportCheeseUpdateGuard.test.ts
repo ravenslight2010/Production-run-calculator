@@ -2,7 +2,7 @@
 //
 // Commit-level UNITS guard: a spec import must NEVER overwrite the server
 // cheese pool's per-BATCH pounds — even for a payload that flags a cheese
-// recipe `updateExisting: true`.
+// recipe under the spec-wins overwrite policy.
 //
 // Spec sheets express cheese amounts as PER-PIZZA ounces (dumped into the
 // RecipeRow `lbs` field — long-standing parser quirk), while the server cheese
@@ -33,13 +33,19 @@ const EMPTY_KNOWN = {
   cheeseRecipes: [] as string[],
 };
 
+const { appliedLocally } = vi.hoisted(() => ({
+  appliedLocally: { last: null as ParsedSpecImport | null },
+}));
 vi.mock("./storage", () => ({
   loadSpecImportKnown: () => ({ ...EMPTY_KNOWN }),
   profileExistsForImport: () => false,
   recipeExistsForImport: () => false,
   importProfileIsTombstoned: () => false,
   recipeNameIsTombstoned: () => false,
-  applySpecImport: () => ({ touchedProfiles: [], crustProfiles: [] }),
+  applySpecImport: (parsed: ParsedSpecImport) => {
+    appliedLocally.last = parsed;
+    return { touchedProfiles: [], crustProfiles: [] };
+  },
 }));
 vi.mock("./specImportAliases", () => ({
   fetchSpecImportAliases: async () => [],
@@ -68,6 +74,23 @@ vi.mock("./matchImport", () => ({
 vi.mock("./aiCorrections", () => ({
   saveAiCorrections: async () => {},
 }));
+
+// Factory merge history: commit resolves recipe ingredient names through the
+// "ingredient" category before writing pool rows (spec-wins re-import).
+const { mergeAliasesByCategory } = vi.hoisted(() => ({
+  mergeAliasesByCategory: {} as Record<
+    string,
+    Array<{ externalName: string; canonicalName: string }>
+  >,
+}));
+vi.mock("./mergeSuggest", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./mergeSuggest")>();
+  return {
+    ...actual,
+    fetchMergeAliases: async (category?: string) =>
+      mergeAliasesByCategory[category ?? "ingredient"] ?? [],
+  };
+});
 
 // The curated pool recipe: per-BATCH pounds a manager refined by hand.
 const CURATED_CHEESE: CheeseRecipe = {
@@ -140,17 +163,18 @@ beforeEach(() => {
   savedCheese.last = null;
   savedCheese.calls = 0;
   savedNamed.byKind = {};
+  appliedLocally.last = null;
+  for (const k of Object.keys(mergeAliasesByCategory)) delete mergeAliasesByCategory[k];
 });
 
 describe("commitSpecImport — cheese batch pounds are never overwritten (per-pizza vs per-batch)", () => {
-  it("leaves the curated pool recipe byte-identical — no oz written, no save triggered, even with updateExisting flagged", async () => {
+  it("leaves the curated pool recipe byte-identical — no oz written, no save triggered, even under spec-wins overwrite", async () => {
     const prepared = makePrepared({
       profiles: [],
       recipes: [
         {
           kind: "cheese",
           name: "Aldo's Cheese Mix",
-          updateExisting: true,
           userNamed: true,
           // Per-pizza ounces in the lbs field (parser quirk) — the values that
           // must NEVER land in the pool's per-batch lbs column or ozPerPizza.
@@ -172,15 +196,13 @@ describe("commitSpecImport — cheese batch pounds are never overwritten (per-pi
     expect(savedCheese.calls).toBe(0);
   });
 
-  it("still applies a dough updateExisting (per-batch workbook rows)", async () => {
+  it("always overwrites a dough pool recipe's rows on re-import — no updateExisting opt-in (spec wins)", async () => {
     const prepared = makePrepared({
       profiles: [],
       recipes: [
         {
           kind: "dough",
           name: "House Dough",
-          updateExisting: true,
-          userNamed: true,
           rows: [{ ingredient: "New Flour", lbs: 42 }],
         },
       ],
@@ -195,5 +217,60 @@ describe("commitSpecImport — cheese batch pounds are never overwritten (per-pi
     ]);
     // Cheese pool untouched throughout.
     expect(savedCheese.calls).toBe(0);
+  });
+
+  it("never touches the pool for an explicit referenceOnly ('use existing, keep it') pick", async () => {
+    const prepared = makePrepared({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "House Dough",
+          referenceOnly: true,
+          rows: [{ ingredient: "New Flour", lbs: 42 }],
+        },
+      ],
+    });
+
+    const { recipesUpdated } = await commitSpecImport(prepared);
+
+    expect(recipesUpdated).toBe(0);
+    expect(savedNamed.byKind["dough"]).toBeUndefined();
+  });
+
+  it("writes a merge-source ingredient name as its merge target (resolveImportName)", async () => {
+    mergeAliasesByCategory["ingredient"] = [
+      { externalName: "Old Flour", canonicalName: "High Gluten Flour" },
+    ];
+    const prepared = makePrepared({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "House Dough",
+          rows: [
+            { ingredient: "Old Flour", lbs: 42 },
+            { ingredient: "Water", lbs: 20 },
+          ],
+        },
+      ],
+    });
+
+    const { recipesUpdated } = await commitSpecImport(prepared);
+
+    expect(recipesUpdated).toBe(1);
+    const dough = savedNamed.byKind["dough"] ?? [];
+    expect(dough.find((r) => r.name === "House Dough")?.components).toEqual([
+      { ingredient: "High Gluten Flour", lbs: 42 },
+      { ingredient: "Water", lbs: 20 },
+    ]);
+    // The LOCAL apply (presets + ingredient lists) must see the SAME canonical
+    // name — resolution happens once, before applySpecImport, so client-side
+    // recipe state never diverges from the server pool.
+    const localRows = appliedLocally.last?.recipes?.[0]?.rows ?? [];
+    expect(localRows.map((r) => r.ingredient)).toEqual([
+      "High Gluten Flour",
+      "Water",
+    ]);
   });
 });

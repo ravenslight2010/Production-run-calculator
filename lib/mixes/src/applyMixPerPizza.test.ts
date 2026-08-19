@@ -46,7 +46,9 @@ describe("applyMixPerPizza", () => {
     expect(next[0].components[1].perPizza).toBe(1.5);
   });
 
-  it("never overwrites a nonzero perPizza (preserves manager-entered values)", () => {
+  it("overwrites a nonzero perPizza with the spec value (spec-wins re-import)", () => {
+    // A prior bad import (or stale value) must not survive a correcting
+    // re-import — a positive spec-sheet value always wins.
     const existing = [
       mix("Buffalo Mix", {
         brand: "Aldo's",
@@ -58,18 +60,18 @@ describe("applyMixPerPizza", () => {
         name: "Buffalo Mix",
         brand: "Aldo's",
         components: [
-          { ingredient: "Sauce", perPizza: 9.9 },   // existing is 3.0 — must NOT change
-          { ingredient: "Spices", perPizza: 0.5 },  // existing is 0 — backfill OK
+          { ingredient: "Sauce", perPizza: 9.9 },   // existing is 3.0 — spec wins
+          { ingredient: "Spices", perPizza: 0.5 },  // existing is 0 — filled
         ],
       },
     ];
     const { next, updated } = applyMixPerPizza(existing, updates);
     expect(updated).toBe(1);
-    expect(next[0].components[0].perPizza).toBe(3.0); // unchanged
+    expect(next[0].components[0].perPizza).toBe(9.9); // overwritten
     expect(next[0].components[1].perPizza).toBe(0.5); // filled in
   });
 
-  it("returns updated=0 and same array when all components are already nonzero", () => {
+  it("returns updated=0 and same array when all spec values already match", () => {
     const existing = [
       mix("Veggie Mix", {
         brand: "Aldo's",
@@ -81,14 +83,33 @@ describe("applyMixPerPizza", () => {
         name: "Veggie Mix",
         brand: "Aldo's",
         components: [
-          { ingredient: "Bell Peppers", perPizza: 9.9 },
-          { ingredient: "Onions", perPizza: 9.9 },
+          { ingredient: "Bell Peppers", perPizza: 1.0 },
+          { ingredient: "Onions", perPizza: 0.5 },
         ],
       },
     ];
     const { next, updated } = applyMixPerPizza(existing, updates);
     expect(updated).toBe(0);
     expect(next[0]).toBe(existing[0]); // same reference — no copy made
+  });
+
+  it("never zeroes a stored value from a zero/absent spec value", () => {
+    const existing = [
+      mix("Buffalo Mix", {
+        brand: "Aldo's",
+        components: [component("Sauce", 3.0)],
+      }),
+    ];
+    const updates = [
+      {
+        name: "Buffalo Mix",
+        brand: "Aldo's",
+        components: [{ ingredient: "Sauce", perPizza: 0 }],
+      },
+    ];
+    const { next, updated } = applyMixPerPizza(existing, updates);
+    expect(updated).toBe(0);
+    expect(next[0].components[0].perPizza).toBe(3.0);
   });
 
   it("ignores incoming zero perPizza values (never fills a zero-from-zero update)", () => {
