@@ -6,8 +6,8 @@ This is a **web-first, read-only audit** of the Production Run Calculator. It in
 navigation and user-facing notice surfaces in the current application so placement and copy can
 be reviewed before any behavior changes are made.
 
-**No navigation, notice, badge, preference, or alert behavior was changed as part of this
-audit.**
+The original audit was read-only. Product subsequently approved the manager-attention model in
+section 4, and the implemented header/menu behavior follows that decision.
 
 ### Terminology used below
 
@@ -79,10 +79,7 @@ Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 
 | Badge | Who sees it | Trigger | Expected action | Current location |
 | --- | --- | --- | --- | --- |
-| Combined attention count | Staff-management-capable users | Pending password resets and/or unreviewed incidents | Open the relevant management destination and resolve the queue | Header / overflow-menu entry point |
-| Reported issues count | Managers | Unreviewed incidents exist | Open **Reported issues** and review them | On Reported issues menu item |
-| Staff roster count | Users who can manage staff or approve resets | Pending reset requests exist | Open **Staff roster** and approve/decline | On Staff roster menu item |
-| Settings count | Eligible users | Attention-worthy manager/settings condition is present | Open Manage Lists & Settings and resolve the condition | On Settings menu item |
+| Manager attention count | Users with at least one manager-resolution capability | Any durable, actionable manager work exists | Open **Manager attention** and resolve the highest-priority item | Header overflow trigger and the **Manager attention** menu item |
 | Schedule count | Supervisors | Scheduled production days exist | Open Schedule and review upcoming work | On Schedule menu item |
 
 ### 1.5 Manage Lists & Settings dialog
@@ -266,16 +263,15 @@ These can be implemented without changing the underlying alert rules, permission
    warehouse switchover notice to **Stage next run**. The wording should identify the affected
    station before asking for action.
 
-### Priority 2 — needs a product decision before implementation
+### Priority 2 — approved manager-attention model
 
-1. **Define one manager attention model.**  
-   Pending reset counts, incident counts, Settings counts, proactive alerts, and card-level
-   errors all signal manager work. Decide whether the header should expose:
-   - one unified **Manager attention** inbox with typed items, or
-   - separate badges with a documented priority order and no combined count.
-
-   This changes discoverability and potentially the operational management workflow, so it should
-   be approved before implementation.
+1. **One unified Manager attention inbox (approved).**
+   The header/menu carries one authoritative count and opens a typed manager queue. Its priority
+   order is: **(1) password-reset approvals, (2) unreviewed incident reports, (3) scheduled
+   recipe/profile setup, (4) proactive shift alerts.** Each row opens the owning workflow; the
+   separate Reported issues, Staff roster, and Settings rows intentionally carry no duplicate
+   badges. Local inline form errors remain beside their source form and do not inflate the global
+   count, because only the person who caused them has enough context to correct or retry them.
 
 2. **Decide whether Setup is an operator destination or a supervisor configuration destination.**  
    Setup is visible to every signed-in user, but important editors are disabled for

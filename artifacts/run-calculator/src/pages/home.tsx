@@ -120,6 +120,7 @@ import {
   dropTombstonesForAliveNames,
   clearRecipeNameSelections,
   loadProfile,
+  loadRawProfile,
   profileHasRealData,
   backfillFromProfile,
   saveProfile,
@@ -247,6 +248,11 @@ import CycleCountManager from "../components/CycleCountManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
+import ManagerAttentionDialog, {
+  buildManagerAttentionItems,
+  managerAttentionCount,
+  type ManagerAttentionKind,
+} from "../components/ManagerAttentionDialog";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
 import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
@@ -330,6 +336,7 @@ import {
 } from "../aiRecipe";
 import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
+import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
 import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
 import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { buildAnomalyInput } from "../aiAnomaly";
@@ -3789,6 +3796,7 @@ export default function Home() {
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
   const canApproveResets = hasCapability("approve-password-resets");
+  const canReviewIncidents = hasCapability("review-incidents");
   const canManageFactorySettings = hasCapability("manage-factory-settings");
 
   // One-time pool-aware applicator-slot heal (v2 of the mix-slot cleanup).
@@ -4783,6 +4791,9 @@ export default function Home() {
   const [showFloorMode, setShowFloorMode] = useState(false);
   // Combined per-user "Alerts & Floor Mode" settings panel (header menu).
   const [showAlertSettings, setShowAlertSettings] = useState(false);
+  // One durable inbox for manager work. This is deliberately separate from
+  // account alert preferences and local form errors.
+  const [showManagerAttention, setShowManagerAttention] = useState(false);
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
@@ -6633,6 +6644,7 @@ export default function Home() {
     if (showMobileQrDialog)     { setShowMobileQrDialog(false);     return; }
     if (showReorderDialog)      { setShowReorderDialog(false);      return; }
     if (showReportIssue)        { setShowReportIssue(false);        return; }
+    if (showManagerAttention)   { setShowManagerAttention(false);   return; }
     if (showAlertSettings)      { setShowAlertSettings(false);      return; }
     if (showGlance)             { setShowGlance(false);             return; }
     if (showFloorMode)          { setShowFloorMode(false);          return; }
@@ -6990,6 +7002,74 @@ export default function Home() {
       };
     },
   });
+
+  // This is the same shared check shown in Schedule. It supplies the durable
+  // configuration count for Manager attention, so the two surfaces cannot
+  // disagree about which scheduled recipes still need setup.
+  const scheduledRecipeIssues = useMemo(
+    () =>
+      findScheduledRecipeIssues(
+        scheduledDays.flatMap((day) =>
+          (day.runs ?? [])
+            .filter((run) => run.brand)
+            .map((run) => ({
+              date: day.date,
+              brand: run.brand,
+              flavor: run.flavor,
+              casesNeeded: run.casesNeeded,
+            })),
+        ),
+        loadRawProfile,
+      ),
+    [scheduledDays],
+  );
+  const managerAttentionItems = useMemo(
+    () =>
+      buildManagerAttentionItems({
+        pendingResetCount,
+        canApproveResets,
+        unreviewedIncidentCount,
+        canReviewIncidents,
+        scheduledRecipeIssueCount: scheduledRecipeIssues.length,
+        canManageProfiles,
+        proactiveAlert,
+        isManager,
+      }),
+    [
+      pendingResetCount,
+      canApproveResets,
+      unreviewedIncidentCount,
+      canReviewIncidents,
+      scheduledRecipeIssues.length,
+      canManageProfiles,
+      proactiveAlert,
+      isManager,
+    ],
+  );
+  const managerAttentionTotal = managerAttentionCount(managerAttentionItems);
+  const canViewManagerAttention =
+    isManager || canApproveResets || canReviewIncidents || canManageProfiles;
+
+  function resolveManagerAttention(kind: ManagerAttentionKind) {
+    setShowManagerAttention(false);
+    if (kind === "password-resets") {
+      setActiveTab("staff");
+      return;
+    }
+    if (kind === "incidents") {
+      setActiveTab("incidents");
+      return;
+    }
+    if (kind === "recipe-setup") {
+      const next = scheduledRecipeIssues[0];
+      if (next) openSetupEditor(next.brand, next.flavor);
+      return;
+    }
+    // The existing banner owns proactive alert state and Apply/Dismiss behavior.
+    // Returning to Run keeps this inbox from becoming a second alert lifecycle.
+    setActiveTab("run");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   // Update the apply-sync callback so it always captures fresh form/state refs
   useEffect(() => {
@@ -12371,6 +12451,12 @@ export default function Home() {
         floorModeEnabled={floorModeEnabled}
         onToggleFloorMode={toggleFloorModeEnabled}
       />
+      <ManagerAttentionDialog
+        open={showManagerAttention}
+        onOpenChange={setShowManagerAttention}
+        items={managerAttentionItems}
+        onResolve={resolveManagerAttention}
+      />
 
       {/* ── Floor Mode overlay ──────────────────────────────────────────── */}
       {showFloorMode && <FloorModeView />}
@@ -13860,24 +13946,34 @@ export default function Home() {
                 <button
                   type="button"
                   title={
-                    pendingResetCount + unreviewedIncidentCount > 0
-                      ? `${pendingResetCount + unreviewedIncidentCount} item${pendingResetCount + unreviewedIncidentCount === 1 ? "" : "s"} need attention`
+                    managerAttentionTotal > 0
+                      ? `${managerAttentionTotal} manager action${managerAttentionTotal === 1 ? "" : "s"} need attention`
                       : "More"
                   }
                   className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <Menu className="w-4 h-4" />
-                  {pendingResetCount + unreviewedIncidentCount > 0 && (
+                  {managerAttentionTotal > 0 && (
                     <span
-                      aria-label={`${pendingResetCount + unreviewedIncidentCount} items need attention`}
+                      aria-label={`${managerAttentionTotal} manager actions need attention`}
                       className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
                     >
-                      {pendingResetCount + unreviewedIncidentCount}
+                      {managerAttentionTotal}
                     </span>
                   )}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {canViewManagerAttention && (
+                  <DropdownMenuItem onClick={() => setShowManagerAttention(true)}>
+                    <AlertTriangle className="w-4 h-4 mr-2" /> Manager attention
+                    {managerAttentionTotal > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                        {managerAttentionTotal}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => setActiveTab("stoppages")}>
                   <OctagonX className="w-4 h-4 mr-2" /> Stoppages
                 </DropdownMenuItem>
@@ -13899,11 +13995,6 @@ export default function Home() {
                 {isManager && (
                   <DropdownMenuItem onClick={() => setActiveTab("incidents")}>
                     <LifeBuoy className="w-4 h-4 mr-2" /> Reported issues
-                    {unreviewedIncidentCount > 0 && (
-                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
-                        {unreviewedIncidentCount}
-                      </span>
-                    )}
                   </DropdownMenuItem>
                 )}
                 {isManager && (
@@ -13919,11 +14010,6 @@ export default function Home() {
                 {(canManageStaff || canApproveResets) && (
                   <DropdownMenuItem onClick={() => setActiveTab("staff")}>
                     <Users className="w-4 h-4 mr-2" /> Staff roster
-                    {pendingResetCount > 0 && (
-                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
-                        {pendingResetCount}
-                      </span>
-                    )}
                   </DropdownMenuItem>
                 )}
                 {isSupervisor && (
@@ -13944,11 +14030,6 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
-                  {pendingResetCount > 0 && (
-                    <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
-                      {pendingResetCount}
-                    </span>
-                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowPasswordDialog(true)}>
                   <KeyRound className="w-4 h-4 mr-2" /> Password
