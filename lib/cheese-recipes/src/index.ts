@@ -410,7 +410,7 @@ function mergeSpecCheeseComponents(
 
   let changed = false;
   const seen = new Set<string>();
-  const merged = existing.map((component) => {
+  const merged: CheeseComponent[] = existing.map((component): CheeseComponent => {
     const key = component.ingredient.trim().toLowerCase();
     seen.add(key);
     const sharePct = sharesByIngredient.get(key);
