@@ -7,6 +7,7 @@ import {
   type PremixFreezerPull,
   type SpecImportAlias,
 } from "@workspace/premix-import";
+import { isCelluloseIngredient } from "@workspace/mixes";
 import type { Mix } from "@workspace/mixes";
 import type { PremixImportPrepared } from "@/premixImport";
 
@@ -536,7 +537,10 @@ export default function PremixImportDialog({
                               const existingComponents = existingMixById.get(m.id)?.components ?? [];
                               const importedIngredientKeys = new Set(m.components.map(c => c.ingredient.trim().toLowerCase()).filter(Boolean));
                               const removedComponents = c.status === "update"
-                                ? existingComponents.filter(ec => !importedIngredientKeys.has(ec.ingredient.trim().toLowerCase()))
+                                ? existingComponents.filter(ec =>
+                                    !isCelluloseIngredient(ec.ingredient) &&
+                                    !importedIngredientKeys.has(ec.ingredient.trim().toLowerCase()),
+                                  )
                                 : [];
                               return removedComponents.length > 0 ? (
                                 <div

@@ -52,6 +52,7 @@ function makePrepared(
 function renderDialog(
   prepared: SpecImportPrepared,
   onConfirm: (p: ParsedSpecImport, learned?: unknown) => void,
+  existingMixNames: string[] = [],
 ) {
   const result = render(
     <SpecImportDialog
@@ -65,7 +66,7 @@ function renderDialog(
         dough: ["House Dough", "Thin Crust"],
         sauce: [],
         cheese: ["Aldo's Cheese Mix", "Lowe's Spinach Cheese Mix"],
-        mix: [],
+        mix: existingMixNames,
       }}
       onConfirm={onConfirm}
     />,
@@ -444,6 +445,42 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     fireEvent.click(screen.getByText(/^Apply/));
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
     expect(out.recipes[0]).toMatchObject({ name: "House Dough", referenceOnly: true });
+  });
+
+  it("updates a linked mix with the sheet's ingredients", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Sheet Fajita Mix",
+      brand: "Basha's",
+      flavor: "RED",
+      rows: [{ ingredient: "Red Pepper", lbs: 1.4 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Basha's", flavor: "RED" }]),
+      onConfirm,
+      ["Basha's Red Fajita Mix"],
+    );
+
+    fireEvent.change(screen.getByTestId("spec-recipe-kind-rk0"), {
+      target: { value: "mix" },
+    });
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Basha's Red Fajita Mix" },
+    });
+
+    expect(screen.getByText(/ingredients will be replaced/)).toBeTruthy();
+    expect(screen.getByText(/Will change to:/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/^Apply/));
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({
+      name: "Basha's Red Fajita Mix",
+      kind: "cheese",
+      forcedCategory: "mix",
+      userNamed: true,
+    });
+    expect(out.recipes[0].referenceOnly).toBeUndefined();
   });
 
   it("never updates a linked CHEESE pick (per-pizza vs per-batch units)", () => {

@@ -31,7 +31,12 @@ import {
   type SpecImportAlias,
   type SpecMixDraft,
 } from "@workspace/spec-import";
-import { normalizeMix, type Mix, type MixComponent } from "@workspace/mixes";
+import {
+  isCelluloseIngredient,
+  normalizeMix,
+  type Mix,
+  type MixComponent,
+} from "@workspace/mixes";
 
 export type { SheetGrid, SpecImportAlias };
 
@@ -1122,6 +1127,8 @@ function mergeMixNotes(existingNotes: string | undefined, importedNotes: string 
  * on-hand amount (`amountAlreadyMade`), its `enabled` flag, or free-form custom
  * notes — so on an id-matched update those are kept from the existing mix
  * instead of being reset by the import (see mergeMixNotes for the note policy).
+ * Cellulose is also retained when omitted because it is a manager-maintained
+ * preservative addition rather than a reliably sheet-carried component.
  * Existing mixes not in the import are preserved. Pure.
  */
 export function mergePremixIntoMixes(
@@ -1136,8 +1143,17 @@ export function mergePremixIntoMixes(
       byId.set(m.id, m);
       continue;
     }
+    const importedHasCellulose = m.components.some((c) =>
+      isCelluloseIngredient(c.ingredient),
+    );
     const merged: Mix = {
       ...m,
+      components: [
+        ...m.components,
+        ...(importedHasCellulose
+          ? []
+          : prev.components.filter((c) => isCelluloseIngredient(c.ingredient))),
+      ],
       amountAlreadyMade: prev.amountAlreadyMade,
       enabled: prev.enabled,
     };

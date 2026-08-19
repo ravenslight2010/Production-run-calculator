@@ -155,6 +155,30 @@ describe("addSpecMixesIfAbsent spec-wins update", () => {
     expect(merged[0].components).toEqual([{ ingredient: "New Onion", perPizza: 0.6 }]);
   });
 
+  it("retains an existing cellulose component when the spec omits it", () => {
+    const existing = [
+      mix("Basha's Red Fajita Mix", {
+        id: "basha-red-fajita",
+        components: [
+          { ingredient: "Red Pepper", perPizza: 1.2 },
+          { ingredient: "Cellulose", perPizza: 0.03 },
+        ],
+      }),
+    ];
+    const incoming = mix("Basha's Red Fajita Mix", {
+      id: "from-sheet",
+      components: [{ ingredient: "Red Pepper", perPizza: 1.4 }],
+    });
+
+    const { merged, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Red Pepper", perPizza: 1.4 },
+      { ingredient: "Cellulose", perPizza: 0.03 },
+    ]);
+  });
+
   it("does NOT count as updated when components are identical (no spurious saves)", () => {
     const comp = { ingredient: "Pepper", perPizza: 1.0 };
     const existing = [mix("Fajita Mix", { id: "kept", components: [comp] })];

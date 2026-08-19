@@ -31,6 +31,7 @@ import {
   specImportRecipeDisplayKind,
   type SpecImportDisplayKind,
 } from "@/storage";
+import { isCelluloseIngredient } from "@workspace/mixes";
 import ReviewBadge from "./ReviewBadge";
 
 type Props = {
@@ -746,13 +747,13 @@ export default function SpecImportDialog({
         // NORMAL recipe under the linked name — library copy + profile ties get
         // the sheet's rows, and commit also replaces the server-pool recipe's
         // rows. No "update it" opt-in anymore; the spec sheet is the source of
-        // truth for recipe content. Only Dough/Sauce ever update: mix amounts
-        // are manager-entered, and cheese is a units mismatch (spec sheets are
-        // per-PIZZA ounces, the cheese pool is per-BATCH pounds — the cheese
-        // workbook importer owns those updates); those stay reference-only.
+        // truth for recipe content. Mixes also update from their per-pizza
+        // sheet rows (while the mix layer preserves manager-added cellulose);
+        // cheese is the only units mismatch (spec sheets are per-PIZZA ounces,
+        // the cheese pool is per-BATCH pounds), so it stays reference-only.
         const wantsUpdate =
           !!linked &&
-          (r.kind === "dough" || r.kind === "sauce") &&
+          (r.kind === "dough" || r.kind === "sauce" || r.kind === "mix") &&
           (r.orig.rows?.length ?? 0) > 0;
         const out: ParsedRecipe = linked
           ? wantsUpdate
@@ -802,6 +803,10 @@ export default function SpecImportDialog({
     const map = new Map<string, string[]>();
     for (const d of discrepancies) {
       if (d.type !== "extra-ingredient" || !d.ingredient) continue;
+      // Cellulose is a manager-maintained preservative addition. The mix and
+      // cheese import paths retain it when the source sheet omits it, so do not
+      // warn the manager that this import will remove something it preserves.
+      if (isCelluloseIngredient(d.ingredient)) continue;
       const key = `${d.kind}\u0000${d.recipeName.trim().toLowerCase()}`;
       const arr = map.get(key);
       if (arr) arr.push(d.ingredient);
@@ -1636,15 +1641,16 @@ function RecipeRow({
   // list differs), so existence checks use the underlying parse kind.
   const isNew = !linked && (!name || !recipeExistsForImport(parseKindOf(item.kind), name));
   const rowsPreview = recipeRowsPreview(item.orig);
-  // SPEC-WINS: a linked Dough/Sauce pick with parsed rows always replaces the
-  // existing recipe's ingredients on Apply — no opt-in checkbox. Mix amounts
-  // are manager-entered (a spec sheet can't express them), and Cheese is a
-  // UNITS mismatch: spec sheets carry per-PIZZA ounces while the saved cheese
-  // recipes store per-BATCH pounds — updating would overwrite good batch
-  // pounds with per-pizza numbers. Cheese batch pounds update via the Cheese
-  // Mix Recipe Specs workbook importer instead.
+  // SPEC-WINS: a linked Dough/Sauce/Mix pick with parsed rows always replaces
+  // the existing recipe's sheet-carried ingredients on Apply — no opt-in
+  // checkbox. Mix imports retain manager-added cellulose when the sheet omits
+  // it. Cheese is a UNITS mismatch: spec sheets carry per-PIZZA ounces while
+  // the saved cheese recipes store per-BATCH pounds — updating would overwrite
+  // good batch pounds with per-pizza numbers. Cheese batch pounds update via
+  // the Cheese Mix Recipe Specs workbook importer instead.
   const willUpdate =
-    (item.kind === "dough" || item.kind === "sauce") && (item.orig.rows?.length ?? 0) > 0;
+    (item.kind === "dough" || item.kind === "sauce" || item.kind === "mix") &&
+    (item.orig.rows?.length ?? 0) > 0;
   // Recipes attach by NAME only — profiles link a dough/sauce recipe name (or
   // a cheese/mix applicator-slot name) and hydrate from the library by that
   // name. There is no brand/flavor attach editor anymore: showing where a

@@ -820,6 +820,29 @@ describe("re-import always updates components via mergePremixIntoMixes", () => {
     expect(updated.notes).toBe("Mix cold");
   });
 
+  it("retains existing cellulose when a premix workbook omits it", () => {
+    const existing = mkMix({
+      id: "saved-basha",
+      name: "Basha's Red Fajita Mix",
+      components: [
+        { ingredient: "Red Pepper", perPizza: 1.2 },
+        { ingredient: "Cellulose", perPizza: 0.03 },
+      ],
+    });
+    const imported = mkMix({
+      id: "saved-basha",
+      name: "Basha's Red Fajita Mix",
+      components: [{ ingredient: "Red Pepper", perPizza: 1.4 }],
+    });
+
+    const [merged] = mergePremixIntoMixes([existing], [imported]);
+
+    expect(merged.components).toEqual([
+      { ingredient: "Red Pepper", perPizza: 1.4 },
+      { ingredient: "Cellulose", perPizza: 0.03 },
+    ]);
+  });
+
   it("an exact-id re-import (no redirect needed) also updates components", () => {
     const existing = mkMix({
       id: "premix-bobo-s-deluxe-bobo-s-deluxe-veggie-mix",

@@ -418,6 +418,15 @@ function mixNameMatchKey(name: string): string {
   return looseNameKey(name);
 }
 
+/**
+ * Cellulose is a manager-maintained preservative addition. Production spec and
+ * premix sheets commonly omit it, so an omitted cellulose row must not be
+ * interpreted as an instruction to remove it.
+ */
+export function isCelluloseIngredient(name: string | null | undefined): boolean {
+  return /\bcellulose\b/i.test(name?.trim() ?? "");
+}
+
 export function addSpecMixesIfAbsent(
   existing: ReadonlyArray<Mix>,
   candidates: ReadonlyArray<Mix>,
@@ -466,12 +475,24 @@ export function addSpecMixesIfAbsent(
   };
 
   // Apply a spec-wins update to `merged[idx]` from `candidate`. Replaces the
-  // components list; preserves every operational manager-controlled field.
+  // sheet-carried components while retaining a manager-maintained cellulose row
+  // the sheet omits, plus every operational manager-controlled field.
   // Returns 1 when the mix actually changed, 0 when nothing was different.
   const applyUpdate = (idx: number, candidate: Mix): number => {
     if (!candidate.components.length) return 0; // no ingredients from spec → nothing to overwrite
     const prev = merged[idx];
-    const newComponents = candidate.components.slice();
+    const importedHasCellulose = candidate.components.some((c) =>
+      isCelluloseIngredient(c.ingredient),
+    );
+    const newComponents = [
+      ...candidate.components,
+      // A sheet may deliberately include cellulose; in that case it is the
+      // source of truth. Otherwise keep the manager's existing preservative
+      // amount rather than deleting it during a component-list replacement.
+      ...(importedHasCellulose
+        ? []
+        : prev.components.filter((c) => isCelluloseIngredient(c.ingredient))),
+    ];
     // Skip the write when components are identical (avoid spurious saves).
     const same =
       prev.components.length === newComponents.length &&
