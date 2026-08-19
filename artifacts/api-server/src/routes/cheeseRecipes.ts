@@ -127,7 +127,12 @@ router.post(
                 brand: values.brand,
                 flavors: values.flavors,
                 shredderSetting: values.shredderSetting,
-                cellulose: values.cellulose,
+                // Cellulose (anti-caking agent) is never on spec sheets but is
+                // present in recipes — a manager's stored value must never be
+                // wiped by a code path that writes blank cellulose (e.g. spec
+                // import creates new recipes with cellulose: ""). Only update
+                // when the incoming value is non-blank.
+                cellulose: sql`CASE WHEN ${values.cellulose} != '' THEN ${values.cellulose} ELSE ${cheeseRecipesTable.cellulose} END`,
                 notes: values.notes,
                 components: values.components,
                 enabled: values.enabled,
