@@ -798,8 +798,8 @@ export async function commitSpecImport(
       .filter((r): r is CheeseRecipe => r != null);
     if (candidates.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
-      const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
-      if (added > 0) {
+      const { merged, added, updated } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
+      if (added > 0 || updated > 0) {
         await saveCheeseRecipes(merged);
         cheeseRecipesAdded = added;
       }

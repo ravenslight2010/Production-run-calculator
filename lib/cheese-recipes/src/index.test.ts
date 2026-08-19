@@ -195,22 +195,74 @@ describe("specCheeseDraftToRecipe", () => {
 });
 
 describe("addCheeseRecipesIfAbsentByName", () => {
-  it("skips a candidate whose name already exists (case-insensitive) — match, don't clobber", () => {
-    const existing = [make({ id: "curated", name: "Cheese Blend", brand: "Curated" })];
-    // Same brand scope — a cross-brand collision now brand-prefixes instead
-    // (see the brand-scope describe block below).
-    const candidate = make({ id: "cheese:spec:cheese-blend", name: "cheese blend", brand: "Curated" });
-    const { merged, added } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
+  it("updates a candidate whose name already exists in the same scope (spec wins on content)", () => {
+    const existing = [
+      make({
+        id: "curated",
+        name: "Cheese Blend",
+        brand: "Curated",
+        components: [{ ingredient: "OldMozz", lbs: 10 }],
+        shredderSetting: "3",
+        cellulose: "Low",
+        enabled: false,
+        notes: "Manager note",
+      }),
+    ];
+    const candidate = make({
+      id: "cheese:spec:cheese-blend",
+      name: "cheese blend",
+      brand: "Curated",
+      components: [{ ingredient: "NewMozz", lbs: 20 }],
+      flavors: ["Pepperoni"],
+      shredderSetting: "",
+      cellulose: "",
+      enabled: true,
+      notes: "",
+    });
+    const { merged, added, updated } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
     expect(added).toBe(0);
+    expect(updated).toBe(1);
     expect(merged).toHaveLength(1);
-    expect(merged[0].brand).toBe("Curated");
+    // Content updated from the sheet.
+    expect(merged[0].components).toEqual([{ ingredient: "NewMozz", lbs: 20 }]);
+    expect(merged[0].flavors).toEqual(["Pepperoni"]);
+    // Stable identity preserved.
+    expect(merged[0].id).toBe("curated");
+    expect(merged[0].name).toBe("Cheese Blend");
+    // Manager-typed fields preserved even when the candidate sends blank/defaults.
+    expect(merged[0].shredderSetting).toBe("3");
+    expect(merged[0].cellulose).toBe("Low");
+    expect(merged[0].enabled).toBe(false);
+    expect(merged[0].notes).toBe("Manager note");
   });
-  it("skips a candidate whose id already exists", () => {
-    const existing = [make({ id: "cheese:spec:x", name: "Existing" })];
-    const candidate = make({ id: "cheese:spec:x", name: "Different Name" });
-    const { added } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
+
+  it("updates a candidate whose id already exists (same recipe, fresh import)", () => {
+    const existing = [
+      make({
+        id: "cheese:spec:x",
+        name: "Existing",
+        components: [{ ingredient: "Old", lbs: 5 }],
+        cellulose: "High",
+      }),
+    ];
+    const candidate = make({
+      id: "cheese:spec:x",
+      name: "Different Name",
+      components: [{ ingredient: "New", lbs: 8 }],
+      cellulose: "",
+    });
+    const { added, updated, merged } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
     expect(added).toBe(0);
+    expect(updated).toBe(1);
+    // Content from fresh import.
+    expect(merged[0].components).toEqual([{ ingredient: "New", lbs: 8 }]);
+    // Manager-typed cellulose preserved.
+    expect(merged[0].cellulose).toBe("High");
+    // Stable id + existing name kept.
+    expect(merged[0].id).toBe("cheese:spec:x");
+    expect(merged[0].name).toBe("Existing");
   });
+
   it("appends genuinely new recipes and de-dupes within the candidate batch", () => {
     const existing: CheeseRecipe[] = [];
     const { merged, added } = addCheeseRecipesIfAbsentByName(existing, [
@@ -220,6 +272,73 @@ describe("addCheeseRecipesIfAbsentByName", () => {
     ]);
     expect(added).toBe(2);
     expect(merged.map((r) => r.name)).toEqual(["Blend A", "Blend B"]);
+  });
+
+  it("first candidate in the batch wins; duplicate candidates for the same recipe are ignored", () => {
+    const existing = [make({ id: "e1", name: "Cheese Blend", components: [{ ingredient: "Old", lbs: 1 }] })];
+    const first = make({ id: "spec:1", name: "Cheese Blend", components: [{ ingredient: "First", lbs: 2 }] });
+    const second = make({ id: "spec:2", name: "Cheese Blend", components: [{ ingredient: "Second", lbs: 3 }] });
+    const { merged, updated } = addCheeseRecipesIfAbsentByName(existing, [first, second]);
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([{ ingredient: "First", lbs: 2 }]);
+  });
+
+  it("takes the candidate cellulose when the existing value is blank", () => {
+    const existing = [make({ id: "e1", name: "Blend", cellulose: "" })];
+    const candidate = make({ id: "spec:1", name: "Blend", cellulose: "0.5%" });
+    const { merged } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
+    expect(merged[0].cellulose).toBe("0.5%");
+  });
+
+  it("two same-name candidates in an empty pool — first candidate's components survive, no update count", () => {
+    // Regression guard: when the first candidate is genuinely new (appended),
+    // a later same-name candidate must not overwrite it via the name-match
+    // upsert path. alreadyUpdated must include newly-appended recipe ids.
+    const first = make({ id: "a", name: "Blend A", components: [{ ingredient: "Mozz", lbs: 10 }] });
+    const second = make({ id: "b", name: "blend a", components: [{ ingredient: "Provolone", lbs: 5 }] });
+    const { merged, added, updated } = addCheeseRecipesIfAbsentByName([], [first, second]);
+    expect(added).toBe(1);
+    expect(updated).toBe(0);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].components).toEqual([{ ingredient: "Mozz", lbs: 10 }]);
+  });
+
+  it("spec-sheet stub (all lbs=0) does not overwrite existing per-batch lbs — no save triggered", () => {
+    // Spec sheets produce candidates with lbs=0 (per-pizza oz are stored as
+    // sharePct only). Writing those zeros over a manager's curated batch lbs
+    // would corrupt the pool. The function must detect this and skip the update.
+    // Both use brand="" to mirror the real scenario (unbranded curated recipe
+    // matched by an unbranded spec import).
+    const existing = [
+      make({
+        id: "curated",
+        name: "Aldo's Cheese Mix",
+        brand: "",
+        components: [
+          { ingredient: "Pizella", lbs: 207 },
+          { ingredient: "Part Skim Mozzarella", lbs: 119 },
+        ],
+      }),
+    ];
+    // Simulate what collectSpecImportCheeseRecipes + specCheeseDraftToRecipe produce:
+    // lbs=0, sharePct derived from oz proportions.
+    const specStub = make({
+      id: "cheese:spec:aldo-s-cheese-mix",
+      name: "Aldo's Cheese Mix",
+      brand: "",
+      components: [
+        { ingredient: "Pizella", lbs: 0, sharePct: 63.49 },
+        { ingredient: "Part Skim Mozzarella", lbs: 0, sharePct: 36.51 },
+      ],
+    });
+    const { merged, added, updated } = addCheeseRecipesIfAbsentByName(existing, [specStub]);
+    // No save should be triggered — the spec stub must not corrupt batch lbs.
+    expect(added).toBe(0);
+    expect(updated).toBe(0);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Pizella", lbs: 207 },
+      { ingredient: "Part Skim Mozzarella", lbs: 119 },
+    ]);
   });
 });
 
@@ -558,32 +677,46 @@ describe("addCheeseRecipesIfAbsentByName brand scope", () => {
     expect(merged[1].id).toBe("cheese:spec:lucia-s-taco-mix");
   });
 
-  it("re-import converges on the prefixed row (idempotent, no dup)", () => {
+  it("re-import of a cross-brand prefixed row updates it in place (no dup)", () => {
     const first = addCheeseRecipesIfAbsentByName(
       [make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Marco's" })],
-      [make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" })],
+      [make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's", components: [{ ingredient: "Old", lbs: 1 }] })],
     ).merged;
-    const { merged, added } = addCheeseRecipesIfAbsentByName(first, [
-      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" }),
+    const { merged, added, updated } = addCheeseRecipesIfAbsentByName(first, [
+      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's", components: [{ ingredient: "New", lbs: 2 }] }),
     ]);
     expect(added).toBe(0);
+    expect(updated).toBe(1);
     expect(merged).toHaveLength(2);
+    // Components refreshed on the prefixed row.
+    expect(merged[1].components).toEqual([{ ingredient: "New", lbs: 2 }]);
   });
 
-  it("same-brand collision still links by name (never adds)", () => {
-    const existing = [make({ id: "kept", name: "Taco Mix", brand: "Lucia's" })];
-    const { added } = addCheeseRecipesIfAbsentByName(existing, [
-      make({ id: "cheese:spec:taco-mix", name: "taco mix", brand: "Lucia's" }),
+  it("same-brand name match updates the existing recipe (spec wins, never forks)", () => {
+    const existing = [make({
+      id: "kept",
+      name: "Taco Mix",
+      brand: "Lucia's",
+      components: [{ ingredient: "Old", lbs: 5 }],
+    })];
+    const { added, updated, merged } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "cheese:spec:taco-mix", name: "taco mix", brand: "Lucia's", components: [{ ingredient: "New", lbs: 7 }] }),
     ]);
     expect(added).toBe(0);
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([{ ingredient: "New", lbs: 7 }]);
+    expect(merged[0].id).toBe("kept");
   });
 
-  it("an unbranded pool recipe is shared — branded candidate links, not forks", () => {
-    const existing = [make({ id: "shared", name: "Taco Mix", brand: "" })];
-    const { added } = addCheeseRecipesIfAbsentByName(existing, [
-      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's" }),
+  it("an unbranded pool recipe matched by a branded candidate is updated (spec wins, not forked)", () => {
+    const existing = [make({ id: "shared", name: "Taco Mix", brand: "", components: [{ ingredient: "OldIng", lbs: 4 }] })];
+    const { added, updated, merged } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "cheese:spec:taco-mix", name: "Taco Mix", brand: "Lucia's", components: [{ ingredient: "NewIng", lbs: 6 }] }),
     ]);
     expect(added).toBe(0);
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([{ ingredient: "NewIng", lbs: 6 }]);
+    expect(merged[0].id).toBe("shared");
   });
 
   it("non-spec ids are kept as-is on prefix rename", () => {

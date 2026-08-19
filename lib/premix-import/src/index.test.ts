@@ -751,6 +751,122 @@ describe("redirect onto an existing mix", () => {
   });
 });
 
+describe("re-import always updates components via mergePremixIntoMixes", () => {
+  function mkMix(over: Partial<Mix> & { id: string; name: string }): Mix {
+    return {
+      brand: "",
+      flavor: "",
+      batchSize: 0,
+      daysEarly: 0,
+      amountAlreadyMade: 0,
+      components: [],
+      enabled: true,
+      ...over,
+    };
+  }
+
+  it("a redirect onto an existing mix updates components while preserving amountAlreadyMade, enabled, and notes", () => {
+    const existing = mkMix({
+      id: "saved-corner-booth",
+      name: "Corner Booth House Mix",
+      brand: "Corner Booth",
+      components: [{ ingredient: "OldSauce", perPizza: 0.1 }],
+      amountAlreadyMade: 42,
+      enabled: false,
+      notes: "Mix cold\nPull 3 Days Early",
+    });
+
+    // Sheet parses to a different id/name but the manager has a learned redirect.
+    const fromSheet = mkMix({
+      id: "premix-corner-booth-house-blend",
+      name: "Corner Booth House Blend",
+      brand: "Corner Booth",
+      batchSize: 80,
+      components: [
+        { ingredient: "NewSauce", perPizza: 0.15 },
+        { ingredient: "Garlic", perPizza: 0.05 },
+      ],
+    });
+
+    // redirectPremixCandidate maps the sheet mix onto the existing id.
+    const redirected = redirectPremixCandidate(
+      { mix: fromSheet, status: "new" },
+      existing,
+      (id) => id === existing.id,
+    );
+    expect(redirected.mix.id).toBe("saved-corner-booth");
+    // Sheet quantities preserved through the redirect.
+    expect(redirected.mix.batchSize).toBe(80);
+    expect(redirected.mix.components).toEqual([
+      { ingredient: "NewSauce", perPizza: 0.15 },
+      { ingredient: "Garlic", perPizza: 0.05 },
+    ]);
+
+    // mergePremixIntoMixes applies the redirected mix, updating content while
+    // preserving amountAlreadyMade, enabled, and manager-custom notes.
+    const merged = mergePremixIntoMixes([existing], [redirected.mix]);
+    expect(merged).toHaveLength(1);
+    const updated = merged[0];
+    // Sheet-carried fields come from the import.
+    expect(updated.batchSize).toBe(80);
+    expect(updated.components).toEqual([
+      { ingredient: "NewSauce", perPizza: 0.15 },
+      { ingredient: "Garlic", perPizza: 0.05 },
+    ]);
+    // Manager-only fields preserved.
+    expect(updated.amountAlreadyMade).toBe(42);
+    expect(updated.enabled).toBe(false);
+    // Custom notes line preserved; pull note follows import (absent in new import).
+    expect(updated.notes).toBe("Mix cold");
+  });
+
+  it("an exact-id re-import (no redirect needed) also updates components", () => {
+    const existing = mkMix({
+      id: "premix-bobo-s-deluxe-bobo-s-deluxe-veggie-mix",
+      name: "Bobo's Deluxe Veggie Mix",
+      brand: "Bobo's",
+      components: [{ ingredient: "OldOnion", perPizza: 0.3 }],
+      amountAlreadyMade: 15,
+    });
+    const freshImport = mkMix({
+      id: "premix-bobo-s-deluxe-bobo-s-deluxe-veggie-mix",
+      name: "Bobo's Deluxe Veggie Mix",
+      brand: "Bobo's",
+      batchSize: 147,
+      components: [
+        { ingredient: "Red Onion, FR Strips", perPizza: 0.4 },
+        { ingredient: "Bacon", perPizza: 0.75 },
+      ],
+    });
+    const merged = mergePremixIntoMixes([existing], [freshImport]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Red Onion, FR Strips", perPizza: 0.4 },
+      { ingredient: "Bacon", perPizza: 0.75 },
+    ]);
+    expect(merged[0].batchSize).toBe(147);
+    // amountAlreadyMade preserved.
+    expect(merged[0].amountAlreadyMade).toBe(15);
+  });
+
+  it("mixes absent from the import are left entirely alone", () => {
+    const unrelated = mkMix({
+      id: "other-mix",
+      name: "Other Mix",
+      components: [{ ingredient: "Spinach", perPizza: 0.3 }],
+    });
+    const imported = mkMix({
+      id: "premix-bobo-s-supreme",
+      name: "Supreme Mix",
+      components: [{ ingredient: "Basil", perPizza: 0.1 }],
+    });
+    const merged = mergePremixIntoMixes([unrelated], [imported]);
+    expect(merged).toHaveLength(2);
+    const untouched = merged.find((m) => m.id === "other-mix")!;
+    expect(untouched.components).toEqual([{ ingredient: "Spinach", perPizza: 0.3 }]);
+  });
+});
+
 describe("collectPremixFreezerPulls", () => {
   it("collects flagged ingredients keyed by the mix's deterministic id", () => {
     const parsed = parsePremixWorkbook([BREAKFAST]);

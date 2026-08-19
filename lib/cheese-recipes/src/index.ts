@@ -376,65 +376,147 @@ export function specCheeseDraftToRecipe(draft: {
 }
 
 /**
- * Add spec-import cheese recipes to the existing pool, skipping any whose NAME
- * already exists (case-insensitive) IN THE SAME BRAND SCOPE or whose id already
- * exists. This is the "match, don't clobber" rule: a manager's curated recipe of
- * the same name is left untouched — the run applicator simply links to it by
- * name — while a genuinely new blend is appended.
+ * Upsert spec-import cheese recipes into the existing pool. For each candidate:
  *
- * BRAND SCOPE: a name match only counts when the candidate and the pool row
- * belong to the same customer or either side is unbranded (an unbranded pool
- * row is shared/curated master-data any brand may link to). When a BRANDED
- * candidate's name collides only with a DIFFERENT brand's recipe, it is not a
- * duplicate — it is a different customer's blend that happens to share a
- * generic name — so it is added under a brand-prefixed name ("Lucia's Taco
- * Mix"). The prefix is idempotent (see brandPrefixedName) and a `cheese:spec:`
- * id is re-derived from the prefixed name so two brands' spec imports never
- * collide on the name-derived id either; re-imports of the same sheet match
- * their own prefixed row and skip. Pure. Returns the merged list plus how many
- * were actually added.
+ * • Same-scope name match (same brand, or either side unbranded): update the
+ *   existing recipe's components and flavors from the sheet while preserving
+ *   manager-typed fields the spec sheet never carries (`cellulose`,
+ *   `shredderSetting`, `enabled`, `notes`). The stable pool id and the display
+ *   name casing from the existing record are kept.
+ * • Same id, different name: also updates the existing recipe (same recipe,
+ *   re-imported with fresh data).
+ * • Cross-brand-only collision on a BRANDED candidate: kept apart by prefixing
+ *   the new entry with its brand ("Lucia's Taco Mix"). A re-import of that
+ *   workbook will find the prefixed row by name and update it in place.
+ * • Genuinely new (no name or id match): appended as-is.
+ *
+ * BRAND SCOPE: a match only counts when the candidate and the pool row belong
+ * to the same customer or either side is unbranded (an unbranded pool row is
+ * shared/curated master-data any brand may link to).
+ *
+ * Within a single candidate batch the first entry for a given name wins;
+ * subsequent candidates for the same existing recipe are silently ignored.
+ * Pure. Returns the merged list plus how many were added (new) and updated.
  */
 export function addCheeseRecipesIfAbsentByName(
   existing: ReadonlyArray<CheeseRecipe>,
   candidates: ReadonlyArray<CheeseRecipe>,
-): { merged: CheeseRecipe[]; added: number } {
+): { merged: CheeseRecipe[]; added: number; updated: number } {
   const brandKeyOf = (r: { brand?: string }) => (r.brand ?? "").trim().toLowerCase();
-  const rows = existing.map((r) => ({
-    nameKey: r.name.trim().toLowerCase(),
-    brandKey: brandKeyOf(r),
-  }));
-  const haveIds = new Set(existing.map((r) => r.id));
   const merged: CheeseRecipe[] = [...existing];
   let added = 0;
+  let updated = 0;
+  // Track which existing-recipe ids were already updated this pass so two
+  // candidates naming the same recipe don't both apply.
+  const alreadyUpdated = new Set<string>();
+  // Track names and ids now represented in `merged` (existing + newly added) for
+  // within-batch dedup of genuinely new candidates.
+  const mergedIds = new Set<string>(existing.map((r) => r.id));
   // Same scope = same brand, or either side unbranded.
   const inScope = (candBrand: string, rowBrand: string) =>
     !candBrand || !rowBrand || candBrand === rowBrand;
+
+  // Apply an import upsert onto an existing recipe: overwrite content fields
+  // (components, flavors, brand) but preserve manager-typed fields the spec
+  // sheet cannot carry. Keeps the existing stable id and display name.
+  //
+  // COMPONENT GUARD: spec sheets store per-pizza ounces in the `lbs` field as a
+  // parser quirk; `collectSpecImportCheeseRecipes` normalises these to `lbs: 0`
+  // with `sharePct` as the ratio seed. Overwriting a manager's curated
+  // per-BATCH pounds (e.g. 207 lbs) with those zero stubs would corrupt the
+  // pool, so components are only replaced when the candidate carries at least
+  // one component with lbs > 0 (i.e. it comes from a Cheese Mix Recipe Specs
+  // workbook, not a regular spec sheet). When the candidate has all lbs=0 we
+  // keep the existing components and only update flavors and brand, which are
+  // always safe to refresh from the import.
+  const upsertAtIdx = (idx: number, c: CheeseRecipe): void => {
+    const prev = merged[idx];
+    if (alreadyUpdated.has(prev.id)) return; // first candidate wins per existing recipe
+    alreadyUpdated.add(prev.id);
+    const candidateHasRealLbs = c.components.some((comp) => (comp.lbs ?? 0) > 0);
+    const next: CheeseRecipe = {
+      ...c,
+      id: prev.id,    // keep stable existing id
+      name: prev.name, // keep existing display name / casing
+      // Components: use candidate's when it carries real per-batch lbs (cheese
+      // workbook); otherwise preserve the existing manager-entered lbs.
+      components: candidateHasRealLbs ? c.components : prev.components,
+      // Preserve manager-typed fields the spec sheet cannot carry.
+      // cellulose: keep any non-empty stored value; fall back to candidate's.
+      cellulose: (prev.cellulose ?? "") || (c.cellulose ?? ""),
+      // shredderSetting / enabled / notes: manager's stored value always wins
+      // (even an empty-string clear or a false flag is intentional).
+      shredderSetting: prev.shredderSetting !== undefined ? prev.shredderSetting : (c.shredderSetting ?? ""),
+      enabled: prev.enabled !== undefined ? prev.enabled : (c.enabled ?? true),
+      notes: prev.notes !== undefined ? prev.notes : c.notes,
+    };
+    // Only mark as updated (and trigger a save) when the resulting recipe
+    // actually differs from the stored one — avoids spurious saves when a
+    // spec-sheet re-import produces a candidate byte-identical to the pool.
+    // Optional string fields normalize to "" so undefined vs "" is not a diff.
+    const differs =
+      next.components !== prev.components || // reference equality: same ref = no change
+      JSON.stringify(next.flavors) !== JSON.stringify(prev.flavors ?? []) ||
+      (next.brand ?? "") !== (prev.brand ?? "") ||
+      (next.cellulose ?? "") !== (prev.cellulose ?? "") ||
+      (next.shredderSetting ?? "") !== (prev.shredderSetting ?? "") ||
+      (next.enabled ?? true) !== (prev.enabled ?? true) ||
+      (next.notes ?? "") !== (prev.notes ?? "");
+    if (!differs) return;
+    merged[idx] = next;
+    updated++;
+  };
+
   for (const c of candidates) {
     const name = c.name.trim();
     let nameKey = name.toLowerCase();
     if (!nameKey) continue;
     const candBrand = brandKeyOf(c);
-    // A same-scope name match → link by name, never add (original behavior).
-    if (rows.some((r) => r.nameKey === nameKey && inScope(candBrand, r.brandKey))) continue;
+
+    // Same-scope name match → update existing recipe's content (spec wins).
+    const nameMatchIdx = merged.findIndex(
+      (r) => r.name.trim().toLowerCase() === nameKey && inScope(candBrand, brandKeyOf(r)),
+    );
+    if (nameMatchIdx >= 0) {
+      upsertAtIdx(nameMatchIdx, c);
+      continue;
+    }
+
     let next = c;
-    if (candBrand && rows.some((r) => r.nameKey === nameKey)) {
+    if (candBrand && merged.some((r) => r.name.trim().toLowerCase() === nameKey)) {
       // Cross-brand-only collision on a branded candidate: keep both apart by
       // prefixing the new one with its brand.
       const prefixed = brandPrefixedName((c.brand ?? "").trim(), name);
       const prefixedKey = prefixed.toLowerCase();
       if (prefixedKey === nameKey) continue; // already brand-prefixed yet still colliding — treat as dup
-      // Re-import: the prefixed row already exists in this brand's scope.
-      if (rows.some((r) => r.nameKey === prefixedKey && inScope(candBrand, r.brandKey))) continue;
+      // Re-import: the prefixed row may already exist in this brand's scope.
+      const prefixedMatchIdx = merged.findIndex(
+        (r) => r.name.trim().toLowerCase() === prefixedKey && inScope(candBrand, brandKeyOf(r)),
+      );
+      if (prefixedMatchIdx >= 0) {
+        upsertAtIdx(prefixedMatchIdx, { ...c, name: prefixed, id: respecCheeseId(c.id, prefixed) });
+        continue;
+      }
       next = { ...c, name: prefixed, id: respecCheeseId(c.id, prefixed) };
       nameKey = prefixedKey;
     }
-    if (haveIds.has(next.id)) continue;
-    rows.push({ nameKey, brandKey: candBrand });
-    haveIds.add(next.id);
+
+    // Same-id match (same recipe re-imported under a different or unresolved name).
+    if (mergedIds.has(next.id)) {
+      const idMatchIdx = merged.findIndex((r) => r.id === next.id);
+      if (idMatchIdx >= 0) upsertAtIdx(idMatchIdx, next);
+      continue;
+    }
+
+    // Genuinely new recipe: append and track so later candidates can't re-add
+    // or overwrite it (alreadyUpdated prevents upsertAtIdx from firing on the
+    // newly-appended row; mergedIds prevents the id-match path from reaching it).
+    mergedIds.add(next.id);
+    alreadyUpdated.add(next.id);
     merged.push(next);
     added++;
   }
-  return { merged, added };
+  return { merged, added, updated };
 }
 
 /**

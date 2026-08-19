@@ -2463,12 +2463,12 @@ export async function commitSpecImport(
       .filter((r): r is CheeseRecipe => r != null);
     if (drafts.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
-      const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
+      const { merged, added, updated } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
       // Backfill customer tags onto already-saved UNBRANDED pool recipes this
       // sheet scopes (e.g. a prior import saved them with no customer) — a
       // recipe that already has a brand is never re-scoped.
       const tagRes = fillCheeseRecipeTags(merged, drafts);
-      if (added > 0 || tagRes.tagged > 0) {
+      if (added > 0 || updated > 0 || tagRes.tagged > 0) {
         await saveCheeseRecipes(tagRes.next);
         cheeseRecipesAdded = added;
       }
