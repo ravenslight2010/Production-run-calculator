@@ -32,6 +32,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let cheeseRecipesTable: DbModule["cheeseRecipesTable"];
+let brandProfilesTable: DbModule["brandProfilesTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
@@ -80,6 +81,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   cheeseRecipesTable = dbMod.cheeseRecipesTable;
+  brandProfilesTable = dbMod.brandProfilesTable;
   dataHealsTable = dbMod.dataHealsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
@@ -244,7 +246,8 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
     await seedRow("keep", "Mozzarella Cheese Mix", [{ ingredient: "Mozz", lbs: 10, ozPerPizza: 0 }], t);
     await seedRow("drop1", "mozzarella cheese mix ", [], t);
     await seedRow("drop2", "Mozzarella Cheese Mix", [{ ingredient: "Mozz", lbs: 0, ozPerPizza: 2 }], new Date("2026-07-10T00:00:00Z"));
-    await seedRow("other", "Monterey Jack Cheese Mix", [], t);
+    // Non-zero components so the later orphan-stub purge heal doesn't remove it.
+    await seedRow("other", "Monterey Jack Cheese Mix", [{ ingredient: "Jack", lbs: 3, ozPerPizza: 0 }], t);
 
     await runDataHeals();
 
@@ -268,7 +271,9 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
       shredderSetting: "",
       cellulose: "",
       notes: "",
-      components: [],
+      // Non-zero components so the later orphan-stub purge heal doesn't remove
+      // the surviving sandbox copy.
+      components: [{ ingredient: "Mozz", lbs: 2, ozPerPizza: 0 }],
       enabled: true,
       createdAt: t,
       updatedAt: t,
@@ -286,6 +291,18 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
     const newer = new Date("2026-07-01T08:00:00Z");
     await seedRow("older-row", "American Cheese Blend", [], older);
     await seedRow("newer-row", "American Cheese Blend", [], newer);
+    // A live profile reference keeps the surviving zero-value row from being
+    // removed as an orphan stub by the later orphan-stub purge heal.
+    await db
+      .insert(brandProfilesTable)
+      .values({
+        key: "acme__american",
+        scope: "live",
+        brand: "Acme",
+        flavor: "american",
+        values: { app1CheeseRecipeName: "American Cheese Blend" },
+      })
+      .onConflictDoNothing();
 
     await runDataHeals();
 

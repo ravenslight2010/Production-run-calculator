@@ -21,6 +21,8 @@ import {
   cleanSpecNamedRecipeName,
   specImportNamedRecipeNamesEqual,
   stripPurchasedCrustDie,
+  resolveImportName,
+  type ImportMergeAliasMap,
   type SpecImportAlias as SpecAliasEntry,
 } from "@workspace/spec-import";
 import {
@@ -3354,6 +3356,7 @@ export async function runDataHeals(): Promise<void> {
   await runAugust2026LowesMixFixes();
   await runCheeseComponentOzStrip();
   await runHannafordTikkaMasalaFix();
+  await runProfileNameLinkStubPurge();
 }
 
 // ── Strip all ozPerPizza from cheese recipe components ───────────────────────
@@ -4267,5 +4270,239 @@ async function runHannafordTikkaMasalaFix(): Promise<void> {
       { heal: HANNAFORD_TIKKA_FIX_ID, mergedSauces, renamedSauce, repointedProfiles, fixedProfile },
       "Data heal applied",
     );
+  });
+}
+
+// ── Profile name-link heal + orphaned zero-value stub purge ───────────────────
+// Profiles already in the database with wrong sauce/dough name links (from
+// imports before the name-link authority fixes) are corrected against the
+// LATEST saved spec snapshot for their brand/flavor, with merge-target
+// resolution (merge_aliases chain) applied before writing. Profiles belonging
+// to a started run are skipped (started-run snapshots are frozen by design);
+// profiles with no saved snapshot are left untouched (no source of truth).
+// Afterwards, orphaned zero-value stub pool rows (dough / sauce / cheese /
+// mixes with no non-zero component and no live profile reference) are deleted.
+const PROFILE_NAME_LINK_STUB_PURGE_ID = "profile-name-link-stub-purge-v1";
+
+const ciName = (s: unknown): string => String(s ?? "").trim().toLowerCase();
+
+type SnapshotNames = { sauceName?: string; doughName?: string };
+
+export async function runProfileNameLinkStubPurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: PROFILE_NAME_LINK_STUB_PURGE_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Latest snapshot names per scope+brand+flavor (newest sheet wins).
+    const sheets = await tx
+      .select()
+      .from(savedSpecSheetsTable)
+      .orderBy(sql`${savedSpecSheetsTable.createdAt} DESC, ${savedSpecSheetsTable.id} DESC`);
+    const snapByProfile = new Map<string, SnapshotNames>();
+    for (const sheet of sheets) {
+      const data = sheet.data as { profiles?: unknown } | null;
+      const profiles = Array.isArray(data?.profiles) ? (data!.profiles as Array<Record<string, unknown>>) : [];
+      for (const p of profiles) {
+        if (!p || typeof p !== "object") continue;
+        const key = `${sheet.scope}\u0000${ciName(p.brand)}\u0000${ciName(p.flavor)}`;
+        if (snapByProfile.has(key)) continue; // newest-first: first wins
+        snapByProfile.set(key, {
+          sauceName: typeof p.sauceName === "string" ? p.sauceName.trim() : undefined,
+          doughName: typeof p.doughName === "string" ? p.doughName.trim() : undefined,
+        });
+      }
+    }
+
+    // Merge aliases (sauce + dough) per scope, plus canonical-name sets: a
+    // stored name that IS a merge target was re-pointed intentionally by a
+    // manager merge and must not be reverted to the (older) spec name.
+    const aliasRows = await tx
+      .select()
+      .from(mergeAliasesTable)
+      .where(sql`${mergeAliasesTable.category} IN ('sauce', 'dough')`);
+    const aliasesByScope = new Map<string, ImportMergeAliasMap>();
+    const canonicalByScope = new Map<string, { sauce: Set<string>; dough: Set<string> }>();
+    for (const a of aliasRows) {
+      const cat = a.category as "sauce" | "dough";
+      let map = aliasesByScope.get(a.scope);
+      if (!map) aliasesByScope.set(a.scope, (map = {}));
+      const list = ((map as Record<string, unknown>)[cat] ??= []) as Array<{
+        externalName: string;
+        canonicalName: string;
+      }>;
+      list.push({ externalName: a.externalName, canonicalName: a.canonicalName });
+      let canon = canonicalByScope.get(a.scope);
+      if (!canon) canonicalByScope.set(a.scope, (canon = { sauce: new Set(), dough: new Set() }));
+      canon[cat].add(ciName(a.canonicalName));
+    }
+
+    // Brand+flavor pairs of STARTED runs (any date) per scope — their profile
+    // snapshots are frozen by design and must not be rewritten.
+    const days = await tx.select().from(dailySyncTable);
+    const startedPairs = new Set<string>();
+    for (const day of days) {
+      const data = day.data as Record<string, unknown> | null;
+      const runs = Array.isArray(data?.runs) ? (data!.runs as Array<Record<string, unknown>>) : [];
+      for (const r of runs) {
+        if (!r || typeof r !== "object") continue;
+        if (r.startedAt == null) continue;
+        startedPairs.add(`${day.scope}\u0000${ciName(r.brand)}\u0000${ciName(r.flavor)}`);
+      }
+    }
+
+    // Correct mismatched profile name links.
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    let correctedProfiles = 0;
+    let skippedStarted = 0;
+    const correctedValues = new Map<string, Record<string, unknown>>(); // key\0scope → values
+    for (const p of profiles) {
+      const profKey = `${p.scope}\u0000${ciName(p.brand)}\u0000${ciName(p.flavor)}`;
+      const snap = snapByProfile.get(profKey);
+      if (!snap) continue; // no snapshot — no source of truth, leave untouched
+      const aliasMap = aliasesByScope.get(p.scope);
+      const canon = canonicalByScope.get(p.scope);
+      const values = { ...(p.values as Record<string, unknown>) };
+      const fields: Array<{
+        field: "frontlineRecipeName" | "doughRecipeName";
+        specName: string | undefined;
+        cat: "sauce" | "dough";
+      }> = [
+        { field: "frontlineRecipeName", specName: snap.sauceName, cat: "sauce" },
+        { field: "doughRecipeName", specName: snap.doughName, cat: "dough" },
+      ];
+      let wouldChange = false;
+      for (const { field, specName, cat } of fields) {
+        if (!specName) continue;
+        const resolved = resolveImportName(specName, cat, aliasMap);
+        if (!resolved) continue;
+        const stored = String(values[field] ?? "").trim();
+        if (ciName(stored) === ciName(resolved)) continue;
+        // Stored name is a merge target (canonical_name) — intentional, keep.
+        if (stored && canon?.[cat].has(ciName(stored))) continue;
+        wouldChange = true;
+        values[field] = resolved;
+      }
+      if (!wouldChange) continue;
+      if (startedPairs.has(profKey)) {
+        skippedStarted++;
+        continue;
+      }
+      const stamp = Math.max((p.updatedAtMs ?? 0) + 1, Date.now());
+      await tx
+        .update(brandProfilesTable)
+        .set({ values, updatedAtMs: stamp })
+        .where(and(eq(brandProfilesTable.key, p.key), eq(brandProfilesTable.scope, p.scope)));
+      correctedProfiles++;
+      correctedValues.set(`${p.key}\u0000${p.scope}`, values);
+    }
+
+    // Collect live profile references (using the CORRECTED values) per scope.
+    const doughRefs = new Set<string>();
+    const sauceRefs = new Set<string>();
+    const slotRefs = new Set<string>(); // cheese recipes + mixes (applicator slots)
+    const addRefs = (scope: string, vals: Record<string, unknown> | null | undefined) => {
+      if (!vals || typeof vals !== "object") return;
+      const dough = ciName(vals.doughRecipeName);
+      if (dough) doughRefs.add(`${scope}\u0000${dough}`);
+      const sauce = ciName(vals.frontlineRecipeName);
+      if (sauce) sauceRefs.add(`${scope}\u0000${sauce}`);
+      for (const f of [
+        "app1CheeseRecipeName",
+        "app2CheeseRecipeName",
+        "app3CheeseRecipeName",
+        "app4CheeseRecipeName",
+      ]) {
+        const n = ciName(vals[f]);
+        if (n) slotRefs.add(`${scope}\u0000${n}`);
+      }
+    };
+    for (const p of profiles) {
+      const healed = correctedValues.get(`${p.key}\u0000${p.scope}`);
+      addRefs(p.scope, healed ?? (p.values as Record<string, unknown>));
+      addRefs(p.scope, p.crustValues as Record<string, unknown>);
+    }
+
+    // Orphaned zero-value stub purge. A stub has NO non-zero component amount;
+    // an orphan additionally has no live profile reference to its name.
+    const num = (v: unknown): number => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const isZeroNamedComponents = (components: unknown): boolean =>
+      !Array.isArray(components) ||
+      components.every((c) => {
+        if (!c || typeof c !== "object") return true;
+        const row = c as Record<string, unknown>;
+        return num(row.lbs) <= 0 && num(row.ozPerPizza) <= 0 && num(row.perPizza) <= 0;
+      });
+
+    let removedDough = 0;
+    let removedSauce = 0;
+    let removedCheese = 0;
+    let removedMix = 0;
+
+    const doughRows = await tx.select().from(doughRecipesTable).for("update");
+    for (const r of doughRows) {
+      if (!isZeroNamedComponents(r.components)) continue;
+      if (doughRefs.has(`${r.scope}\u0000${ciName(r.name)}`)) continue;
+      await tx
+        .delete(doughRecipesTable)
+        .where(and(eq(doughRecipesTable.id, r.id), eq(doughRecipesTable.scope, r.scope)));
+      removedDough++;
+    }
+
+    const sauceRows = await tx.select().from(sauceRecipesTable).for("update");
+    for (const r of sauceRows) {
+      if (!isZeroNamedComponents(r.components)) continue;
+      if (sauceRefs.has(`${r.scope}\u0000${ciName(r.name)}`)) continue;
+      await tx
+        .delete(sauceRecipesTable)
+        .where(and(eq(sauceRecipesTable.id, r.id), eq(sauceRecipesTable.scope, r.scope)));
+      removedSauce++;
+    }
+
+    const cheeseRows = await tx.select().from(cheeseRecipesTable).for("update");
+    for (const r of cheeseRows) {
+      if (!isZeroNamedComponents(r.components)) continue;
+      if (slotRefs.has(`${r.scope}\u0000${ciName(r.name)}`)) continue;
+      await tx
+        .delete(cheeseRecipesTable)
+        .where(and(eq(cheeseRecipesTable.id, r.id), eq(cheeseRecipesTable.scope, r.scope)));
+      removedCheese++;
+    }
+
+    const mixRows = await tx.select().from(mixesTable).for("update");
+    for (const r of mixRows) {
+      if (!isZeroNamedComponents(r.components)) continue;
+      // A mix with live "already made" progress or a stated batch size carries
+      // real data even with zero per-pizza rows — never treat it as a stub.
+      if (num(r.batchSize) > 0 || num(r.amountAlreadyMade) > 0) continue;
+      if (slotRefs.has(`${r.scope}\u0000${ciName(r.name)}`)) continue;
+      await tx
+        .delete(mixesTable)
+        .where(and(eq(mixesTable.id, r.id), eq(mixesTable.scope, r.scope)));
+      removedMix++;
+    }
+
+    const result = {
+      scannedProfiles: profiles.length,
+      correctedProfiles,
+      skippedStarted,
+      removedStubs: {
+        dough: removedDough,
+        sauce: removedSauce,
+        cheese: removedCheese,
+        mix: removedMix,
+      },
+    };
+    await tx
+      .update(dataHealsTable)
+      .set({ result })
+      .where(eq(dataHealsTable.id, PROFILE_NAME_LINK_STUB_PURGE_ID));
+    logger.info({ heal: PROFILE_NAME_LINK_STUB_PURGE_ID, ...result }, "Data heal applied");
   });
 }

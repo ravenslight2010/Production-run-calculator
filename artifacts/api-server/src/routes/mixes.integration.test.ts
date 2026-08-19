@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
@@ -504,8 +504,13 @@ describe("generic-mix-poison-purge-v2 data heal", () => {
     await seedMixRow("sandbox-poison-both", "Mix", "sandbox");
     await seedMixRow("live-poison-both", "Mix", "live");
 
-    // A non-poison mix that must survive untouched.
+    // A non-poison mix that must survive untouched. Give it a non-zero
+    // component so the later orphan-stub purge heal doesn't remove it either.
     await seedMixRow("safe-mix", "White Fajita Mix", "live");
+    await db
+      .update(mixesTable)
+      .set({ components: [{ ingredient: "peppers", perPizza: 0.5 }] })
+      .where(eq(mixesTable.id, "safe-mix"));
 
     await runDataHeals();
 
