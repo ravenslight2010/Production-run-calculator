@@ -532,6 +532,28 @@ export function maybeLearnTypeRename(
   })().catch(() => {});
 }
 
+/**
+ * Delete specific KNOWN-BAD alias rows (exact kind + externalName +
+ * canonicalName match, case-insensitive). Used after a correcting re-import:
+ * when the sheet overwrote a wrong stored name, the alias that produced the
+ * wrong name must be removed or the next import re-applies the mistake.
+ * Entries with a null context match rows under ANY context; a provided
+ * context must match. Callers treat failure as best-effort (the import
+ * already applied), mirroring saveSpecImportAliases.
+ */
+export async function deleteSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {
+  if (aliases.length === 0) return;
+  const res = await fetch("/api/spec-import-aliases/delete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ aliases }),
+  });
+  if (!res.ok) throw new Error(`Delete spec-import aliases failed (${res.status})`);
+}
+
 export async function saveSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {
   if (aliases.length === 0) return;
   const res = await fetch("/api/spec-import-aliases", {

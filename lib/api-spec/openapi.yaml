@@ -2895,6 +2895,35 @@ paths:
         "400":
           description: Invalid input
 
+  /spec-import-aliases/delete:
+    post:
+      operationId: deleteSpecImportAliases
+      tags: [specImport]
+      summary: Delete specific learned spec-import aliases (bad-mapping cleanup)
+      description: >-
+        Deletes alias rows that exactly match the given kind + externalName +
+        canonicalName (case-insensitive). Used after a correcting re-import to
+        remove a bad alias that mapped a sheet label onto a wrong stored name,
+        so the next import doesn't re-apply the mistake. When an entry's
+        context is null/omitted, rows with ANY context are matched; when
+        provided, only rows with that context (case-insensitive) match.
+        Available to any signed-in user (operators included).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteSpecImportAliasesInput"
+      responses:
+        "200":
+          description: The full updated alias list after the deletion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecImportAliasList"
+        "400":
+          description: Invalid input
+
   /spec-sheets:
     get:
       operationId: listSpecSheets
@@ -8479,6 +8508,17 @@ components:
         aliases:
           type: array
           description: The batch of spec-import aliases to upsert
+          items:
+            $ref: "#/components/schemas/SpecImportAlias"
+
+    DeleteSpecImportAliasesInput:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: The exact alias mappings to delete
           items:
             $ref: "#/components/schemas/SpecImportAlias"
 

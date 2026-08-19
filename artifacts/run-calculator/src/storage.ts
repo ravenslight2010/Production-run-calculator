@@ -92,7 +92,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, type ImportMergeAliasMap } from "@workspace/spec-import";
+import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, type ImportMergeAliasMap, type SpecAliasKind } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import type {
   ParsedSpecImport,
@@ -3536,9 +3536,29 @@ export type SpecImportServerPoolRecipe = {
   doughballVariants?: unknown;
 };
 
+/**
+ * A name CORRECTION this import applied: the sheet wrote `newName` over a
+ * DIFFERENT previously stored `oldName` (profile sauce/dough link, applicator
+ * mix/cheese slot link, or a recipe ingredient row). The commit glue uses
+ * these to clean up the spec-import alias table — deleting the bad alias that
+ * minted the old wrong name (unless the old name is a live pool recipe) and
+ * learning the reverse old→new mapping so older workbooks still redirect.
+ */
+export type SpecImportNameCorrection = {
+  kind: SpecAliasKind;
+  /** Alias context for the kind ("dough"/"sauce" for recipeName), else null. */
+  context: string | null;
+  /** The raw sheet label as this parse carried it (the bad alias's externalName). */
+  specRawName: string;
+  /** The wrong name that was stored before this import. */
+  oldName: string;
+  /** The correct name this import wrote. */
+  newName: string;
+};
+
 export function applySpecImport(
   parsed: ParsedSpecImport,
-  out?: { recipePlaceholders?: SpecImportRecipePlaceholder[] },
+  out?: { recipePlaceholders?: SpecImportRecipePlaceholder[]; nameCorrections?: SpecImportNameCorrection[] },
   serverPools?: {
     dough?: SpecImportServerPoolRecipe[];
     sauce?: SpecImportServerPoolRecipe[];
@@ -3696,6 +3716,12 @@ export function applySpecImport(
     clearMergedAway(name);
   }
 
+  // Name corrections this import applied (new name written over a DIFFERENT
+  // stored one) — reported to the commit glue for alias-table cleanup.
+  // Declared before the recipe-library loop: ingredient renames are detected
+  // there, profile link corrections in the profile loop below.
+  const nameCorrections: SpecImportNameCorrection[] = [];
+
   // ── Recipe libraries (overwrite by name + register names/ingredients) ──
   const doughPresets = loadDoughRecipePresets();
   const saucePresets = loadFrontlineRecipePresets();
@@ -3715,6 +3741,37 @@ export function applySpecImport(
     const name = r.name.trim();
     if (!name || r.rows.length === 0) continue;
     const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
+    // Detect ingredient RENAMES vs the previously stored preset of the same
+    // recipe: positional compare, same row count, same lbs — only then is a
+    // differing ingredient name treated as a correction of a wrong stored
+    // name (anything looser would flag legitimate row edits). Reported to the
+    // commit glue so the bad ingredient alias can be cleaned up.
+    {
+      const presetMap: Record<string, unknown> =
+        r.kind === "dough" ? doughPresets : r.kind === "sauce" ? saucePresets : cheesePresets;
+      const prevKey = Object.keys(presetMap).find(k => k.trim().toLowerCase() === name.toLowerCase());
+      const prevEntry = prevKey ? presetMap[prevKey] : undefined;
+      const prevRows: Array<{ ingredient: string; lbs: number }> | undefined =
+        r.kind === "dough"
+          ? (prevEntry as { rows?: Array<{ ingredient: string; lbs: number }> } | undefined)?.rows
+          : (prevEntry as Array<{ ingredient: string; lbs: number }> | undefined);
+      if (prevRows && prevRows.length === rows.length) {
+        for (let i = 0; i < rows.length; i++) {
+          const oldIng = (prevRows[i]?.ingredient ?? "").trim();
+          const newIng = (rows[i]?.ingredient ?? "").trim();
+          if (!oldIng || !newIng) continue;
+          if (oldIng.toLowerCase() === newIng.toLowerCase()) continue;
+          if (Math.abs(Number(prevRows[i]?.lbs ?? 0) - Number(rows[i]?.lbs ?? 0)) > 1e-6) continue;
+          nameCorrections.push({
+            kind: r.kind === "dough" ? "doughIngredient" : r.kind === "sauce" ? "sauceIngredient" : "cheeseIngredient",
+            context: null,
+            specRawName: newIng,
+            oldName: oldIng,
+            newName: newIng,
+          });
+        }
+      }
+    }
     if (r.kind === "dough") {
       // Keep the doughball weight with the preset: the import's value wins,
       // otherwise preserve any weight the preset already carried.
@@ -3900,6 +3957,19 @@ export function applySpecImport(
     // recipes always win over a bare name; the recipe-tie loop below further
     // overwrites with actual row data when available.
     if (specSauceName && !hasMixedSauce) {
+      // The sheet is overwriting a DIFFERENT stored sauce name — a correction.
+      // Report it so the commit glue can clean up the alias that minted the
+      // old wrong name and learn the reverse mapping.
+      const priorSauceName = String(values.frontlineRecipeName ?? "").trim();
+      if (priorSauceName && priorSauceName.toLowerCase() !== specSauceName.toLowerCase()) {
+        nameCorrections.push({
+          kind: "recipeName",
+          context: "sauce",
+          specRawName: (p.sauceName ?? "").trim() || specSauceName,
+          oldName: priorSauceName,
+          newName: specSauceName,
+        });
+      }
       values.frontlineRecipeName = specSauceName;
     }
     // The sheet may name a sauce whose recipe already exists in the library
@@ -3941,6 +4011,17 @@ export function applySpecImport(
     // Same principle as sauce above: spec sheet is authoritative for the dough
     // name link — always write it, no equality guard.
     if (specDoughName && !hasMixedDough) {
+      // Same correction reporting as sauce above.
+      const priorDoughName = String(values.doughRecipeName ?? "").trim();
+      if (priorDoughName && priorDoughName.toLowerCase() !== specDoughName.toLowerCase()) {
+        nameCorrections.push({
+          kind: "recipeName",
+          context: "dough",
+          specRawName: (p.doughName ?? "").trim() || specDoughName,
+          oldName: priorDoughName,
+          newName: specDoughName,
+        });
+      }
       values.doughRecipeName = specDoughName;
     }
     // Same library hydration for dough: an assigned dough name whose recipe
@@ -4075,12 +4156,36 @@ export function applySpecImport(
     // a cheese blend / mix that was since merged away must link the slot to
     // the surviving canonical recipe, not resurrect the old name.
     for (const link of cheeseLinks) {
-      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] =
-        resolveImportName(link.recipeName, "cheese", importMergeAliases);
+      const field = `app${link.slot}CheeseRecipeName`;
+      const priorLink = String((values as Record<string, unknown>)[field] ?? "").trim();
+      const resolved = resolveImportName(link.recipeName, "cheese", importMergeAliases).trim();
+      // Overwriting a DIFFERENT stored blend link is a correction — report it
+      // for alias cleanup (blend-name aliases live in the appType namespace).
+      if (priorLink && resolved && priorLink.toLowerCase() !== resolved.toLowerCase()) {
+        nameCorrections.push({
+          kind: "appType",
+          context: null,
+          specRawName: link.recipeName.trim() || resolved,
+          oldName: priorLink,
+          newName: resolved,
+        });
+      }
+      (values as Record<string, unknown>)[field] = resolved;
     }
     for (const link of mixLinks) {
-      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] =
-        resolveImportName(link.recipeName, "mixes", importMergeAliases);
+      const field = `app${link.slot}CheeseRecipeName`;
+      const priorLink = String((values as Record<string, unknown>)[field] ?? "").trim();
+      const resolved = resolveImportName(link.recipeName, "mixes", importMergeAliases).trim();
+      if (priorLink && resolved && priorLink.toLowerCase() !== resolved.toLowerCase()) {
+        nameCorrections.push({
+          kind: "appType",
+          context: null,
+          specRawName: link.recipeName.trim() || resolved,
+          oldName: priorLink,
+          newName: resolved,
+        });
+      }
+      (values as Record<string, unknown>)[field] = resolved;
     }
     // Post-correct any stale "cheese"-typed slot whose linked recipe is actually
     // a mix (e.g. the profile predates mix-pool awareness, or a prior import ran
@@ -4457,6 +4562,19 @@ export function applySpecImport(
       return presets.some((k) => specImportNamedRecipeNamesEqual(k, c.name));
     };
     out.recipePlaceholders = placeholderCandidates.filter((c) => !backed(c));
+  }
+  if (out && nameCorrections.length) {
+    // Dedupe (same correction can fire once per profile that carried the old
+    // name) — keyed on the full tuple, case-insensitive.
+    const seenCorr = new Set<string>();
+    out.nameCorrections = nameCorrections.filter((c) => {
+      const key = [c.kind, c.context ?? "", c.specRawName, c.oldName, c.newName]
+        .map((s) => s.trim().toLowerCase())
+        .join("\u0000");
+      if (seenCorr.has(key)) return false;
+      seenCorr.add(key);
+      return true;
+    });
   }
 
   // Every brand+flavor profile this import wrote (spec fields and/or recipe

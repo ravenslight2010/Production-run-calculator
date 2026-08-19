@@ -91,8 +91,9 @@ import {
   flavorNamespace,
   type SpecImportRecipePlaceholder,
   type SpecImportServerPoolRecipe,
+  type SpecImportNameCorrection,
 } from "./storage";
-import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
+import { fetchSpecImportAliases, saveSpecImportAliases, deleteSpecImportAliases } from "./specImportAliases";
 import { canonicalProfileKey, markProfileForceEdited } from "./profileServerSync";
 import {
   saveSpecSheet,
@@ -2162,7 +2163,7 @@ export async function commitSpecImport(
     // Offline / server error — apply names as written.
   }
 
-  const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
+  const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[]; nameCorrections?: SpecImportNameCorrection[] } = {};
   const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases);
 
   // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
@@ -2175,6 +2176,96 @@ export async function commitSpecImport(
   // ordinary autosaves; only this deliberate Apply action overrides it.
   for (const { brand, flavor } of touchedProfiles) {
     markProfileForceEdited(canonicalProfileKey(brand, flavor));
+  }
+
+  // ── Bad-alias cleanup after a CORRECTING import ──
+  // applySpecImport reported every name this import overwrote with a DIFFERENT
+  // value (profile sauce/dough links, mix/cheese slot links, ingredient rows).
+  // For each correction: delete the alias that minted the old wrong name
+  // (spec raw label -> old name) so the next import can't re-apply the
+  // mistake — UNLESS the old name is a live pool entry (then it's a real,
+  // different recipe and the alias may be legitimate elsewhere) — and learn
+  // the REVERSE mapping (old wrong name -> correct name) so older workbooks
+  // that still use the wrong name redirect to the right one. The reverse
+  // aliases ride the normal newAliases save below (sanitize + corrections
+  // mirror included). Deletion is synchronous within the commit but
+  // best-effort: the import itself already applied.
+  const corrections = applyOut.nameCorrections ?? [];
+  if (corrections.length) {
+    // Liveness universes for the "old name is a real recipe" guard. A failed
+    // fetch means "unknown" — deletion is skipped for that kind (fail safe).
+    let mixesLive: { name: string; components?: Array<{ ingredient: string }> }[] | null = null;
+    try {
+      mixesLive = await fetchMixes();
+    } catch {
+      // Unknown — skip deletions that need the mixes universe.
+    }
+    let cheeseLive: { name: string; components?: Array<{ ingredient: string }> }[] | null =
+      existingCheeseForLink;
+    if (!cheeseLive) {
+      try {
+        cheeseLive = await fetchCheeseRecipes();
+      } catch {
+        // Unknown — skip deletions that need the cheese universe.
+      }
+    }
+    const ciEq = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+    const oldNameIsLive = (c: SpecImportNameCorrection): boolean | null => {
+      if (c.kind === "recipeName" && (c.context === "dough" || c.context === "sauce")) {
+        const pool = livePools[c.context];
+        if (!pool) return null; // pool fetch failed — unknown
+        return pool.some((r) => specImportNamedRecipeNamesEqual(r.name, c.oldName));
+      }
+      if (c.kind === "appType") {
+        if (mixesLive === null || cheeseLive === null) return null;
+        return [...mixesLive.map((m) => m.name), ...cheeseLive.map((r) => r.name)].some((n) =>
+          specImportNamedRecipeNamesEqual(n, c.oldName),
+        );
+      }
+      if (c.kind === "doughIngredient" || c.kind === "sauceIngredient") {
+        const pool = livePools[c.kind === "doughIngredient" ? "dough" : "sauce"];
+        if (!pool) return null;
+        return pool.some((r) => (r.components ?? []).some((row) => ciEq(row.ingredient, c.oldName)));
+      }
+      if (c.kind === "cheeseIngredient") {
+        // Cheese-kind imported recipes can be routed to EITHER the cheese
+        // pool or the Mixes pool, so the old ingredient must be checked
+        // against BOTH universes; if either is unknown, liveness is unknown.
+        if (cheeseLive === null || mixesLive === null) return null;
+        return (
+          cheeseLive.some((r) => (r.components ?? []).some((row) => ciEq(row.ingredient ?? "", c.oldName))) ||
+          mixesLive.some((m) => (m.components ?? []).some((row) => ciEq(row.ingredient ?? "", c.oldName)))
+        );
+      }
+      return null; // unexpected kind — never delete
+    };
+    const toDelete = corrections
+      .filter((c) => oldNameIsLive(c) === false)
+      .map((c) => ({
+        kind: c.kind,
+        externalName: (c.specRawName || c.newName).trim(),
+        canonicalName: c.oldName,
+        context: c.kind === "recipeName" ? c.context : null,
+      }));
+    if (toDelete.length) {
+      try {
+        await deleteSpecImportAliases(toDelete);
+      } catch {
+        // Best-effort — the import already applied; a surviving bad alias is
+        // caught again by the next correcting re-import.
+      }
+    }
+    // Reverse mapping learned for EVERY correction (live-pool old names too:
+    // redirecting old workbooks is still right even when deletion is skipped).
+    prepared.newAliases = [
+      ...prepared.newAliases,
+      ...corrections.map((c) => ({
+        kind: c.kind,
+        externalName: c.oldName,
+        canonicalName: c.newName,
+        context: c.kind === "recipeName" ? c.context : null,
+      })),
+    ];
   }
 
   // For the SERVER-POOL collects below only: backfill "who it goes to"

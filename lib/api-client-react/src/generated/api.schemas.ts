@@ -2888,6 +2888,11 @@ export interface SaveSpecImportAliasesInput {
   aliases: SpecImportAlias[];
 }
 
+export interface DeleteSpecImportAliasesInput {
+  /** The exact alias mappings to delete */
+  aliases: SpecImportAlias[];
+}
+
 export type ParseSpecSheetKnownFlavorsByBrand = {[key: string]: string[]};
 
 /**

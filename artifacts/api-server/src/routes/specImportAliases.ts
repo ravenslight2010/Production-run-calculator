@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
-import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
+import { SaveSpecImportAliasesBody, DeleteSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, isCrossFamilyMixCheesePair, type SpecAliasKind } from "@workspace/spec-import";
 
@@ -141,6 +141,65 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "failed to save spec-import aliases");
     res.status(500).json({ error: "Failed to save spec-import aliases" });
+  }
+});
+
+// Targeted deletion of KNOWN-BAD alias rows: after a correcting re-import
+// overwrites a wrong stored name, the alias that minted the mistake
+// (external label -> wrong canonical name) must be removed or the next import
+// re-applies it and undoes the correction. Matching is exact-by-names
+// (case-insensitive) on kind + externalName + canonicalName; when an entry's
+// context is null/omitted, rows with ANY context match (the client can't
+// always know which brand context a poisoned appType alias was learned
+// under), otherwise the context must match case-insensitively too. This is
+// deliberately NOT a broad sweep — only rows whose full mapping is named get
+// deleted.
+router.post("/spec-import-aliases/delete", async (req: Request, res: Response) => {
+  const parsed = DeleteSpecImportAliasesBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid input" });
+    return;
+  }
+
+  type DeleteEntry = { kind: SpecAliasKind; externalName: string; canonicalName: string; context: string | null };
+  const entries: DeleteEntry[] = [];
+  for (const a of parsed.data.aliases.slice(0, MAX_BATCH)) {
+    if (!KIND_SET.has(a.kind)) continue;
+    const externalName = (a.externalName ?? "").trim().slice(0, MAX_NAME_LEN);
+    const canonicalName = (a.canonicalName ?? "").trim().slice(0, MAX_NAME_LEN);
+    const context = a.context ? a.context.trim().slice(0, MAX_NAME_LEN) || null : null;
+    if (!externalName || !canonicalName) continue;
+    entries.push({ kind: a.kind as SpecAliasKind, externalName, canonicalName, context });
+  }
+
+  try {
+    if (entries.length > 0) {
+      const existing = await db
+        .select()
+        .from(specImportAliasesTable)
+        .where(eq(specImportAliasesTable.scope, currentScope()));
+      const idsToDelete = existing
+        .filter((row) =>
+          entries.some(
+            (e) =>
+              row.kind === e.kind &&
+              row.externalName.trim().toLowerCase() === e.externalName.toLowerCase() &&
+              row.canonicalName.trim().toLowerCase() === e.canonicalName.toLowerCase() &&
+              (e.context === null ||
+                (row.context ?? "").trim().toLowerCase() === e.context.toLowerCase()),
+          ),
+        )
+        .map((row) => row.id);
+      for (const id of idsToDelete) {
+        await db.delete(specImportAliasesTable).where(eq(specImportAliasesTable.id, id));
+      }
+    }
+
+    const aliases = await listAll();
+    res.json({ aliases });
+  } catch (err) {
+    req.log.error({ err }, "failed to delete spec-import aliases");
+    res.status(500).json({ error: "Failed to delete spec-import aliases" });
   }
 });
 

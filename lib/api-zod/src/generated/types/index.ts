@@ -55,6 +55,7 @@ export * from './deleteMixesInput';
 export * from './deleteNamedRecipesInput';
 export * from './deleteProductionRulesInput';
 export * from './deleteRunTemplatesInput';
+export * from './deleteSpecImportAliasesInput';
 export * from './deniedMerge';
 export * from './deniedMergeList';
 export * from './dieLineDefaultsEntry';

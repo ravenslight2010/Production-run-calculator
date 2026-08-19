@@ -3221,6 +3221,29 @@ export const SaveSpecImportAliasesResponse = zod.object({
 
 
 /**
+ * Deletes alias rows that exactly match the given kind + externalName + canonicalName (case-insensitive). Used after a correcting re-import to remove a bad alias that mapped a sheet label onto a wrong stored name, so the next import doesn't re-apply the mistake. When an entry's context is null/omitted, rows with ANY context are matched; when provided, only rows with that context (case-insensitive) match. Available to any signed-in user (operators included).
+ * @summary Delete specific learned spec-import aliases (bad-mapping cleanup)
+ */
+export const DeleteSpecImportAliasesBody = zod.object({
+  "aliases": zod.array(zod.object({
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
+  "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).describe('The exact alias mappings to delete')
+})
+
+export const DeleteSpecImportAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient', 'recipeName', 'dieType', 'crossFamilyRouting']).describe('Which name-space the mapping lives in'),
+  "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
+})
+
+
+/**
  * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
  * @summary List saved spec sheets (most recent first, up to two)
  */

@@ -53,6 +53,7 @@ import type {
   DeleteNamedRecipesInput,
   DeleteProductionRulesInput,
   DeleteRunTemplatesInput,
+  DeleteSpecImportAliasesInput,
   DeniedMergeList,
   DieLineDefaultsList,
   DieTypeList,
@@ -8888,6 +8889,78 @@ export const useSaveSpecImportAliases = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveSpecImportAliasesMutationOptions(options));
+    }
+
+export const getDeleteSpecImportAliasesUrl = () => {
+
+
+
+
+  return `/api/spec-import-aliases/delete`
+}
+
+/**
+ * Deletes alias rows that exactly match the given kind + externalName + canonicalName (case-insensitive). Used after a correcting re-import to remove a bad alias that mapped a sheet label onto a wrong stored name, so the next import doesn't re-apply the mistake. When an entry's context is null/omitted, rows with ANY context are matched; when provided, only rows with that context (case-insensitive) match. Available to any signed-in user (operators included).
+ * @summary Delete specific learned spec-import aliases (bad-mapping cleanup)
+ */
+export const deleteSpecImportAliases = async (deleteSpecImportAliasesInput: DeleteSpecImportAliasesInput, options?: RequestInit): Promise<SpecImportAliasList> => {
+
+  return customFetch<SpecImportAliasList>(getDeleteSpecImportAliasesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteSpecImportAliasesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteSpecImportAliasesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSpecImportAliases>>, TError,{data: BodyType<DeleteSpecImportAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSpecImportAliases>>, TError,{data: BodyType<DeleteSpecImportAliasesInput>}, TContext> => {
+
+const mutationKey = ['deleteSpecImportAliases'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSpecImportAliases>>, {data: BodyType<DeleteSpecImportAliasesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteSpecImportAliases(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSpecImportAliasesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSpecImportAliases>>>
+    export type DeleteSpecImportAliasesMutationBody = BodyType<DeleteSpecImportAliasesInput>
+    export type DeleteSpecImportAliasesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete specific learned spec-import aliases (bad-mapping cleanup)
+ */
+export const useDeleteSpecImportAliases = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSpecImportAliases>>, TError,{data: BodyType<DeleteSpecImportAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSpecImportAliases>>,
+        TError,
+        {data: BodyType<DeleteSpecImportAliasesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteSpecImportAliasesMutationOptions(options));
     }
 
 export const getListSpecSheetsUrl = () => {
