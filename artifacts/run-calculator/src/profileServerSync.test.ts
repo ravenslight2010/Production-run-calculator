@@ -40,6 +40,7 @@ type FetchCall = { method: string; body?: unknown };
 let calls: FetchCall[] = [];
 let listItems: ServerItem[] = [];
 let networkDown = false;
+let writesForbidden = false;
 
 function postCalls(): FetchCall[] {
   return calls.filter((c) => c.method === "POST");
@@ -93,6 +94,7 @@ beforeEach(() => {
   calls = [];
   listItems = [];
   networkDown = false;
+  writesForbidden = false;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init?: RequestInit) => {
@@ -102,6 +104,13 @@ beforeEach(() => {
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
       if (networkDown) throw new Error("network down");
+      if (writesForbidden && (method === "POST" || method === "DELETE")) {
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({ error: "Forbidden" }),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -599,5 +608,49 @@ describe("one-time migration key filter", () => {
     await settle();
     expect(readQueue()).toEqual([]);
     expect(readMap(STAMPS_KEY)).toEqual({});
+  });
+});
+
+describe("manage-profiles 403 handling (non-manager device)", () => {
+  // The server gates POST/DELETE /brand-profiles on the manage-profiles
+  // capability. A queued write that 403s must be DROPPED, not retried forever
+  // (real incident risk: a non-manager device with legacy local data would
+  // hammer the server on every kick, and its queue would grow unboundedly).
+
+  it("drops a queued upsert on 403 without marking it synced", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "V1" });
+    writesForbidden = true;
+    markProfileEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+
+    expect(postCalls()).toHaveLength(1); // one attempt, no retries
+    expect(readQueue()).toEqual([]); // dropped, not left to retry
+    expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined(); // never marked synced
+
+    // A later kick does not re-send anything.
+    calls = [];
+    await flushProfileQueue();
+    await settle();
+    expect(postCalls()).toHaveLength(0);
+  });
+
+  it("drops a queued delete on 403 the same way", async () => {
+    writesForbidden = true;
+    markProfileDeleted(KEY);
+    await flushProfileQueue();
+    await settle();
+
+    expect(deleteCalls()).toHaveLength(1);
+    expect(readQueue()).toEqual([]);
+  });
+
+  it("a non-403 failure still keeps the queue for retry (guard intact)", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "V1" });
+    networkDown = true;
+    markProfileEdited(KEY);
+    await flushProfileQueue();
+    await settle();
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY })]);
   });
 });

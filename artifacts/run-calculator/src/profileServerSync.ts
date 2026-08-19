@@ -268,6 +268,18 @@ function chunk<T>(list: T[], size: number): T[][] {
  * adopt that authoritative stamp or its next plain edit is stamped below it
  * and silently rejected by LWW.
  */
+/**
+ * Thrown when the server rejects a profile write with 403: this device's user
+ * lacks the manage-profiles capability. Retrying is pointless — the queue op
+ * is dropped instead of retried forever (the profile pool is server-truth for
+ * non-managers; a manager device performs the write).
+ */
+class ProfileWriteForbiddenError extends Error {
+  constructor(kind: string) {
+    super(`${kind} brand profiles forbidden (403)`);
+  }
+}
+
 async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
   const serverStamps = new Map<string, number>();
   for (const part of chunk(items, SERVER_MAX_BATCH)) {
@@ -279,6 +291,7 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
       },
       body: JSON.stringify({ items: part }),
     });
+    if (res.status === 403) throw new ProfileWriteForbiddenError("Save");
     if (!res.ok) throw new Error(`Save brand profiles failed (${res.status})`);
     try {
       const data = (await res.json()) as { items?: ApiProfile[] };
@@ -304,6 +317,7 @@ async function apiDelete(keys: string[]): Promise<void> {
       },
       body: JSON.stringify({ keys: part }),
     });
+    if (res.status === 403) throw new ProfileWriteForbiddenError("Delete");
     if (!res.ok) throw new Error(`Delete brand profiles failed (${res.status})`);
   }
 }
@@ -376,7 +390,17 @@ async function flushOnce(): Promise<void> {
   let doneKeys: string[] = [...dropKeys];
 
   if (upserts.length > 0) {
-    const serverStamps = await apiSave(upserts);
+    let serverStamps: Map<string, number> | null = null;
+    try {
+      serverStamps = await apiSave(upserts);
+    } catch (err) {
+      if (!(err instanceof ProfileWriteForbiddenError)) throw err;
+      // Not authorized to write profiles (manage-profiles capability) — drop
+      // the ops instead of retrying forever; the server pool stays truth and
+      // a manager device performs the write. Do NOT mark the keys synced.
+      doneKeys = doneKeys.concat(upsertKeys);
+    }
+    if (serverStamps) {
     const synced = readMap(SYNCED_KEY);
     const localStamps = readMap(STAMPS_KEY);
     // Keys re-enqueued while the round-trip was in flight (newer edit or a
@@ -415,13 +439,23 @@ async function flushOnce(): Promise<void> {
     if (localStampsChanged) writeMap(STAMPS_KEY, localStamps);
     writeMap(SYNCED_KEY, synced);
     doneKeys = doneKeys.concat(upsertKeys);
+    }
   }
 
   if (deleteKeys.length > 0) {
-    await apiDelete(deleteKeys);
-    const synced = readMap(SYNCED_KEY);
-    for (const key of deleteKeys) delete synced[key];
-    writeMap(SYNCED_KEY, synced);
+    let deleted = true;
+    try {
+      await apiDelete(deleteKeys);
+    } catch (err) {
+      if (!(err instanceof ProfileWriteForbiddenError)) throw err;
+      // Same terminal 403 handling as upserts: drop, never retry.
+      deleted = false;
+    }
+    if (deleted) {
+      const synced = readMap(SYNCED_KEY);
+      for (const key of deleteKeys) delete synced[key];
+      writeMap(SYNCED_KEY, synced);
+    }
     doneKeys = doneKeys.concat(deleteKeys);
   }
 

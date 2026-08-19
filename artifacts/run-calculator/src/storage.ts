@@ -684,7 +684,27 @@ function rememberProfileSnapshot(key: string, snap: { dough: string; crust: stri
 
 // Returns true when a change was actually persisted (callers use this to
 // decide whether to fan the profile out to pending/scheduled runs).
+
+// ─── Central profile-write gate (manage-profiles capability) ─────────────────
+// Brand/flavor profiles are manager-configured setup data: the server rejects
+// POST/DELETE /brand-profiles without the manage-profiles capability. Every
+// profile-writing helper below consults this switch so a non-manager device
+// never mutates local profile blobs or enqueues doomed (403) server writes —
+// not even through indirect paths like rename/merge fan-outs, Move-to-Mixes
+// relinks, or packaging import patches. Home sets it once the signed-in
+// user's capabilities resolve (default true keeps unit tests and the brief
+// pre-resolution window permissive; all interactive paths are ALSO gated at
+// the call site on the same capability).
+let profileWritesAllowed = true;
+export function setProfileWritesAllowed(allowed: boolean): void {
+  profileWritesAllowed = allowed;
+}
+export function profileWritesEnabled(): boolean {
+  return profileWritesAllowed;
+}
+
 export function saveProfile(brand: string, flavor: string, values: FormValues): boolean {
+  if (!profileWritesAllowed) return false;
   if (!brand && !flavor) return false;
   // Never persist a blank/default form as a brand+flavor profile. A profile only
   // holds recipe/topping/template data; an all-empty form is always the result of
@@ -763,6 +783,7 @@ export function saveProfileSubTab(
   flavor: string,
   subTab: "dough" | "crusts",
 ): void {
+  if (!profileWritesAllowed) return;
   if (!brand && !flavor) return;
   const profileKey = canonicalProfileKey(brand, flavor);
   const subtabStorageKey = profileKey + ":subtab";
@@ -829,6 +850,7 @@ export function applyPackagingPatchToProfile(
   flavor: string,
   patch: Partial<FormValues>,
 ): void {
+  if (!profileWritesAllowed) return;
   if (!brand) return;
   const keys = Object.keys(patch) as (keyof FormValues)[];
   if (keys.length === 0) return;
@@ -987,6 +1009,7 @@ export function refreshProfilesFromNamedRecipes(
     emptyRowsOnly?: boolean;
   },
 ): { brand: string; flavor: string }[] {
+  if (!profileWritesAllowed) return [];
   if (typeof localStorage === "undefined" || changed.length === 0) return [];
   const byName = new Map<string, NamedRecipePoolPatch>();
   for (const c of changed) {
@@ -1083,6 +1106,7 @@ export function refreshCheeseOrMixProfileRows(
   targetRows: ReadonlyArray<{ ingredient: string; lbs: number }>,
   opts?: { emptyRowsOnly?: boolean },
 ): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined" || !targetName.trim() || targetRows.length === 0) return;
   const nameLc = targetName.trim().toLowerCase();
   const prefixes = ["run-calc-profile-", "run-calc-crust-profile-"];
@@ -2609,6 +2633,7 @@ export function applyPoolAwareSlotHealIfNeeded(
  * mirroring applyPoolAwareSlotHealIfNeeded. Returns how many profiles changed.
  */
 export function relinkCheeseSlotsToMixInProfiles(recipeName: string): number {
+  if (!profileWritesAllowed) return 0;
   if (typeof localStorage === "undefined") return 0;
   const nameLc = recipeName.trim().toLowerCase();
   if (!nameLc) return 0;
@@ -2738,6 +2763,7 @@ export function applyMixCheeseOverlapDedupeIfNeeded(): void {
  * re-import. Purge them so a deleted brand fully disappears.
  */
 export function deleteProfilesForBrand(brand: string): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined") return;
   const brandLc = brand.toLowerCase().trim();
   if (!brandLc) return;
@@ -2768,6 +2794,7 @@ export function deleteProfilesForBrand(brand: string): void {
  * which rewrites `dieType` on each brandProfiles entry.
  */
 export function rewriteDieTypeInProfiles(oldName: string, newName: string): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined") return;
   const from = oldName.trim();
   const to = newName.trim();
@@ -2799,6 +2826,7 @@ export function rewriteDieTypeInProfiles(oldName: string, newName: string): void
  * merged-away name next time they are applied.
  */
 export function rewritePepTypeInProfiles(oldName: string, newName: string): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined") return;
   const from = oldName.trim();
   const to = newName.trim();
@@ -2838,6 +2866,7 @@ export function rewritePepTypeInProfiles(oldName: string, newName: string): void
  * merged-away name next time they are applied.
  */
 export function rewriteAppTypeInProfiles(oldName: string, newName: string): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined") return;
   const from = oldName.trim();
   const to = newName.trim();
@@ -2888,6 +2917,7 @@ export function rewriteRecipeNameInProfiles(
   oldName: string,
   newName: string,
 ): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined") return;
   const from = oldName.trim();
   const to = newName.trim();
@@ -2932,6 +2962,7 @@ export function rewriteRecipeNameInProfiles(
  * profile entry orphans and can resurrect stale data on a later re-import.
  */
 export function deleteProfileEntry(brand: string, flavor: string): void {
+  if (!profileWritesAllowed) return;
   if (typeof localStorage === "undefined") return;
   try { localStorage.removeItem(PROFILE_KEY(brand, flavor)); } catch {}
   try { localStorage.removeItem(CRUST_PROFILE_KEY(brand, flavor)); } catch {}

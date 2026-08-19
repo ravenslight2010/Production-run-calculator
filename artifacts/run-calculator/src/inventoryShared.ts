@@ -749,6 +749,7 @@ export const CAPABILITIES = [
   "approve-password-resets",
   "review-incidents",
   "use-ai-tools",
+  "manage-profiles",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const CAPABILITY_LABELS: Record<Capability, string> = {
@@ -759,6 +760,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "approve-password-resets": "Approve password resets",
   "review-incidents": "Review incidents",
   "use-ai-tools": "Use AI tools",
+  "manage-profiles": "Manage setup profiles",
 };
 export type RoleDefinition = {
   name: string;

@@ -199,6 +199,12 @@ export interface SetupProfileEditorProps {
   initialBrand?: string;
   initialFlavor?: string;
   isSupervisor: boolean;
+  /**
+   * Profile writes are manager-only. A supervisor-PIN-unlocked non-manager
+   * can still browse the editor, but Save shows a clear "manager access
+   * required" error instead of silently failing with a server 403.
+   */
+  canManageProfiles: boolean;
   brands: string[];
   brandFlavors: Record<string, string[]>;
   /** Custom allergens (beyond egg/soy) already used by saved profiles, so they stay pickable. */
@@ -259,6 +265,7 @@ export default function SetupProfileEditor({
   initialBrand,
   initialFlavor,
   isSupervisor,
+  canManageProfiles,
   brands,
   brandFlavors,
   allergenExtra,
@@ -514,6 +521,14 @@ export default function SetupProfileEditor({
   const flavorOptions = brandFlavors[brand] ?? [];
 
   function handleSave() {
+    if (!canManageProfiles) {
+      toast({
+        title: "Only managers can save profile changes",
+        description: "Ask a manager to save this setup for you.",
+        variant: "destructive",
+      });
+      return;
+    }
     const b = brand.trim();
     const f = flavor.trim();
     if (!b || !f) {

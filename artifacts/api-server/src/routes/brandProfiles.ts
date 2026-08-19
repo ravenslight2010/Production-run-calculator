@@ -9,6 +9,7 @@ import { getUserCapabilities } from "../lib/roles";
 // product name was silently dropped during import (e.g. a row reading
 // "BBQ Sauce (Hoosier Daddy Sweet & Sassy)" stored only "BBQ Sauce").
 // Compared case-insensitively against the stored frontlineRecipeName.
+import { requireCapability } from "../middlewares/requireCapability";
 export const GENERIC_SAUCE_NAMES = [
   "BBQ Sauce",
   "Ranch",
@@ -27,11 +28,13 @@ export const GENERIC_SAUCE_NAMES = [
 // map and last-push-won — into their own master-data pool like Cheese / Dough /
 // Sauce recipes.
 //
-// Reads and writes are open to any signed-in user (requireAuth is applied at
-// the router mount): floor staff have always saved profiles implicitly from
-// the run form (every nav path persists the open form), and profile deletion
-// rides along with the master-list flows staff already perform through sync.
-// No capability gate is added so no existing flow silently starts failing.
+// Reads are open to any signed-in user (requireAuth is applied at the router
+// mount). WRITES (POST/DELETE) are gated on the manage-profiles capability:
+// profiles are manager-configured setup data, and the only allowed write paths
+// are explicit manager actions (Setup Profile editor, AI recommendation
+// acceptance) and spec imports/reimports (manager-only UI flow). Clients gate
+// their implicit run-form/nav profile saves on the same capability so floor
+// staff never even attempt the write; this server gate is belt-and-suspenders.
 //
 // The upsert is STAMP-GUARDED server-side (per-profile last-write-wins): each
 // profile carries a client edit stamp (`updatedAt`, ms epoch) and the row is
@@ -358,7 +361,7 @@ router.get("/brand-profiles/stale-sauce-names", async (req: Request, res: Respon
   }
 });
 
-router.post("/brand-profiles", async (req: Request, res: Response) => {
+router.post("/brand-profiles", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = SaveBrandProfilesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });
@@ -470,7 +473,7 @@ router.post("/brand-profiles", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/brand-profiles", async (req: Request, res: Response) => {
+router.delete("/brand-profiles", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = DeleteBrandProfilesBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid input" });

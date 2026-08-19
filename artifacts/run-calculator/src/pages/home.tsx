@@ -145,6 +145,7 @@ import {
   applyMachineTimeDefaultsHealIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
   applyMixSlotRecategorizeIfNeeded,
+  setProfileWritesAllowed,
   applyPoolAwareSlotHealIfNeeded,
   loadPendingServerMixPushes,
   clearPendingServerMixPushes,
@@ -567,10 +568,11 @@ applyPepTaxonomyMigrationIfNeeded();
 applyIngredientDedupeMigrationIfNeeded();
 applyMachineTimeDefaultsHealIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
-applyMixSlotRecategorizeIfNeeded();
 applyMixCheeseOverlapDedupeIfNeeded();
-applyProfileCleanupIfNeeded();
-purgeOrphanedProfilesIfNeeded();
+// applyMixSlotRecategorizeIfNeeded / applyProfileCleanupIfNeeded /
+// purgeOrphanedProfilesIfNeeded rewrite PROFILES, which are manager-only
+// writes (manage-profiles capability) — they run in a capability-gated effect
+// inside Home instead of at module init (see the profile-heal effect there).
 
 type NeedRow = { label: string; value: string; sub?: string };
 
@@ -3719,6 +3721,40 @@ export default function Home() {
     [mixes],
   );
 
+  const { isManager, hasCapability } = useMe();
+  // Profile writes are gated on the manage-profiles capability (NOT the
+  // manage-staff-derived isManager alias) so a custom role granted
+  // manage-profiles can save profiles without full manager rights — matching
+  // the server's POST/DELETE /brand-profiles gate exactly.
+  const canManageProfiles = hasCapability("manage-profiles");
+  // Flip the central storage-level profile-write gate in lockstep: it stops
+  // EVERY profile-writing helper (saveProfile, rename/merge fan-outs,
+  // Move-to-Mixes relinks, packaging import patches, delete helpers) from
+  // mutating local blobs or enqueuing doomed 403 server writes for
+  // non-managers — including helpers called from components that don't know
+  // about capabilities.
+  useEffect(() => {
+    setProfileWritesAllowed(canManageProfiles);
+  }, [canManageProfiles]);
+  // One-time profile-rewriting boot heals, deferred from module init until the
+  // signed-in user's capabilities resolve: they call saveProfile/deleteProfile
+  // helpers (markProfileEdited/markProfileDeleted → server POST/DELETE), so a
+  // non-manager device must never run them — the server pool stays truth and a
+  // manager device performs the heal. Each is marker-guarded (no-op re-runs).
+  const profileBootHealsRef = useRef(false);
+  useEffect(() => {
+    if (!canManageProfiles || profileBootHealsRef.current) return;
+    profileBootHealsRef.current = true;
+    applyMixSlotRecategorizeIfNeeded();
+    applyProfileCleanupIfNeeded();
+    purgeOrphanedProfilesIfNeeded();
+  }, [canManageProfiles]);
+  const canEditRules = hasCapability("edit-production-rules");
+  const canManageInventory = hasCapability("manage-inventory");
+  const canManageStaff = hasCapability("manage-staff");
+  const canApproveResets = hasCapability("approve-password-resets");
+  const canManageFactorySettings = hasCapability("manage-factory-settings");
+
   // One-time pool-aware applicator-slot heal (v2 of the mix-slot cleanup).
   // Must wait for the server cheese/mix pools — the v1 pass ran at boot without
   // them, which is why slots holding exact pool names (or names without the
@@ -3728,6 +3764,9 @@ export default function Home() {
   const slotHealRanRef = useRef(false);
   useEffect(() => {
     if (slotHealRanRef.current) return;
+    // Profile-rewriting heal — manager-only (manage-profiles), like the other
+    // boot heals; a non-manager device waits for a manager device to heal.
+    if (!canManageProfiles) return;
     if (serverCheeseNames.length === 0 && serverMixNames.length === 0) return;
     slotHealRanRef.current = true;
     const affectedRunIds = applyPoolAwareSlotHealIfNeeded(serverCheeseNames, serverMixNames);
@@ -3742,7 +3781,7 @@ export default function Home() {
       schedulePush(dayStateRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverCheeseNames, serverMixNames]);
+  }, [serverCheeseNames, serverMixNames, canManageProfiles]);
 
   // Dough & Sauce recipes are now server-backed factory-wide master-data (like
   // Cheese Recipes / Mixes): managers define them once, they are shared across
@@ -4057,6 +4096,11 @@ export default function Home() {
     [form],
   );
 
+  // Server-side role (distinct from the local supervisor PIN toggle below).
+  // Declared BEFORE the propagation callbacks below so they can list isManager
+  // in their deps (referencing it in a deps array before declaration would be
+  // a render-time TDZ crash — see home-render-tdz).
+
   // After a batch weight is saved to the server, fan the new weight into every
   // saved brand/flavor profile that uses that ingredient in a plain applicator
   // slot (not recipe-backed). Also updates the open form and pending runs.
@@ -4169,7 +4213,9 @@ export default function Home() {
         if (Object.keys(updates).length === 0) continue;
 
         const updated = { ...profile, ...updates } as FormValues;
-        const saved = saveProfile(brand, flavor, updated);
+        // Profile writes are manager-only; non-managers still get the
+        // in-memory heal (open-form update below) but never persist it.
+        const saved = canManageProfiles && saveProfile(brand, flavor, updated);
         if (saved) {
           updatedCount++;
           propagations.push(propagateProfileToPendingRuns(brand, flavor));
@@ -4200,7 +4246,7 @@ export default function Home() {
     },
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form],
+    [form, canManageProfiles],
   );
 
   // After a cheese recipe workbook import, fan the updated per-batch lbs into
@@ -4292,7 +4338,9 @@ export default function Home() {
         if (Object.keys(updates).length === 0) continue;
 
         const updated = { ...profile, ...updates } as FormValues;
-        const saved = saveProfile(brand, flavor, updated);
+        // Profile writes are manager-only; non-managers still get the
+        // in-memory heal (open-form update below) but never persist it.
+        const saved = canManageProfiles && saveProfile(brand, flavor, updated);
         if (saved) {
           updatedCount++;
           propagations.push(propagateProfileToPendingRuns(brand, flavor));
@@ -4319,15 +4367,8 @@ export default function Home() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form],
+    [form, canManageProfiles],
   );
-  // Server-side role (distinct from the local supervisor PIN toggle below).
-  const { isManager, hasCapability } = useMe();
-  const canEditRules = hasCapability("edit-production-rules");
-  const canManageInventory = hasCapability("manage-inventory");
-  const canManageStaff = hasCapability("manage-staff");
-  const canApproveResets = hasCapability("approve-password-resets");
-  const canManageFactorySettings = hasCapability("manage-factory-settings");
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
   const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
@@ -4589,8 +4630,11 @@ export default function Home() {
                 rec.doughballsPerTray = perTray;
               }
             }
-            saveProfile(brand, flavor, saved);
-            mergedAny = true;
+            // Profile writes are manager-only (manage-profiles capability).
+            if (canManageProfiles) {
+              saveProfile(brand, flavor, saved);
+              mergedAny = true;
+            }
           }
         }
       }
@@ -8082,7 +8126,10 @@ export default function Home() {
     // Stamp this run's edit time so an in-flight stale remote can't clobber it
     // (the "click away and my change disappeared" lost-update).
     markRunValuesUpdated(runId, now);
-    if (run?.brand || run?.flavor) {
+    // Profile writes are manager-only: floor staff editing the run form must
+    // never silently overwrite the manager-configured profile (run values
+    // above still save for everyone).
+    if (canManageProfiles && (run?.brand || run?.flavor)) {
       if (saveProfile(run.brand, run.flavor, v)) {
         void propagateProfileToPendingRuns(run.brand, run.flavor);
       }
@@ -8485,10 +8532,14 @@ export default function Home() {
   // One-time boot heal: write preTunnelMin = postTunnelMin = 2.5 into every
   // saved profile that still has 0 stored (from before the default was raised).
   // Also updates the open form if it loaded with 0 values.
+  // Profile writes are manager-only: the persist loop below only runs for a
+  // manager (the marker is only set then, so a manager device still heals
+  // later); non-managers just get the open-form fix on every boot.
   useEffect(() => {
     const MARKER = "run-calc-tunnel-pre-post-default-v1";
-    if (localStorage.getItem(MARKER)) return;
-    localStorage.setItem(MARKER, "1");
+    const alreadyHealed = !!localStorage.getItem(MARKER);
+    if (!alreadyHealed && canManageProfiles) {
+      localStorage.setItem(MARKER, "1");
 
     const PREFIX = "run-calc-profile-";
     const toHeal: { brand: string; flavor: string }[] = [];
@@ -8515,16 +8566,19 @@ export default function Home() {
         postTunnelMin: Number(p.postTunnelMin) > 0 ? Number(p.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN,
       } as FormValues);
     }
-    // Fix the open form too if it loaded with 0 from a legacy profile.
+    }
+    // Fix the open form too if it loaded with 0 from a legacy profile
+    // (in-memory heal for everyone, manager or not).
     if (!(Number(form.getValues("preTunnelMin")) > 0)) {
       form.setValue("preTunnelMin", PRE_POST_TUNNEL_DEFAULT_MIN, { shouldDirty: true });
     }
     if (!(Number(form.getValues("postTunnelMin")) > 0)) {
       form.setValue("postTunnelMin", PRE_POST_TUNNEL_DEFAULT_MIN, { shouldDirty: true });
     }
-  // Run once on mount; form ref is stable.
+  // Re-runs when canManageProfiles resolves (marker keeps the persist loop
+  // one-time); form ref is stable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canManageProfiles]);
 
   // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
   // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
@@ -8581,7 +8635,9 @@ export default function Home() {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) {
+    // Profile writes are manager-only: run values still save for everyone,
+    // but only a manager's open form persists back to the shared profile.
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
       if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
         void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
       }
@@ -8674,7 +8730,9 @@ export default function Home() {
     if (dayState.runs.length >= MAX_RUNS) return;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) {
+    // Profile writes are manager-only: run values still save for everyone,
+    // but only a manager's open form persists back to the shared profile.
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
       if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
         void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
       }
@@ -8798,7 +8856,9 @@ export default function Home() {
     if (dayState.runs.length >= MAX_RUNS) return false;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) {
+    // Profile writes are manager-only: run values still save for everyone,
+    // but only a manager's open form persists back to the shared profile.
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
       if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
         void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
       }
@@ -8833,7 +8893,9 @@ export default function Home() {
     // Save current values to old profile
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) {
+    // Profile writes are manager-only: run values still save for everyone,
+    // but only a manager's open form persists back to the shared profile.
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
       if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
         void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
       }
@@ -8912,7 +8974,10 @@ export default function Home() {
     // left the per-profile localStorage entries orphaned — they got re-pushed on
     // every sync and resurrected stale data if the tombstone was later cleared by
     // a re-import (root cause of the "two brands merged back" bug).
-    deleteProfilesForBrand(name);
+    // Profile deletion is a profile write — manager-only (manage-profiles).
+    // Non-managers still remove the list entry + tombstone; the profile purge
+    // is skipped so we never queue server deletes that would 403 forever.
+    if (canManageProfiles) deleteProfilesForBrand(name);
     schedulePush(dayStateRef.current);
   }
 
@@ -9015,7 +9080,8 @@ export default function Home() {
     tombstoneDeleted(flavorNamespace(b), name);
     // Also purge the flavor's saved profile so it can't orphan + resurrect on a
     // later re-import (see deleteProfilesForBrand / the merge-back bug).
-    deleteProfileEntry(b, name);
+    // Manager-only profile purge (manage-profiles), same as removeBrand.
+    if (canManageProfiles) deleteProfileEntry(b, name);
     schedulePush(dayStateRef.current);
   }
 
@@ -9540,7 +9606,7 @@ export default function Home() {
       // existing profile with only cycleSpeed changed.
       const profile = loadProfile(s.brand, s.flavor);
       if (profile) {
-        if (saveProfile(s.brand, s.flavor, { ...profile, cycleSpeed: s.recommendedValue })) {
+        if (canManageProfiles && saveProfile(s.brand, s.flavor, { ...profile, cycleSpeed: s.recommendedValue })) {
           void propagateProfileToPendingRuns(s.brand, s.flavor);
           changed.push(`saved setup for ${[s.brand, s.flavor].filter(Boolean).join(" ")}`);
         }
@@ -9586,7 +9652,7 @@ export default function Home() {
     }
     const profile = loadProfile(s.brand, s.flavor);
     if (profile && profile.freezerTime > 0) {
-      if (saveProfile(s.brand, s.flavor, { ...profile, freezerTime: s.recommendedValue })) {
+      if (canManageProfiles && saveProfile(s.brand, s.flavor, { ...profile, freezerTime: s.recommendedValue })) {
         void propagateProfileToPendingRuns(s.brand, s.flavor);
         changed.push(`saved setup for ${[s.brand, s.flavor].filter(Boolean).join(" ")}`);
       }
@@ -9664,7 +9730,9 @@ export default function Home() {
     if (!currentRun?.startedAt) return;
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
-    if (currentRun?.brand || currentRun?.flavor) {
+    // Profile writes are manager-only: run values still save for everyone,
+    // but only a manager's open form persists back to the shared profile.
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
       if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
         void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
       }
@@ -10553,6 +10621,16 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
   ) {
     if (!specImportPrepared) return;
+    // Explicit capability guard (not just the manager-only UI gating): profile
+    // writes require manage-profiles, and the commit force-pushes profiles.
+    if (!canManageProfiles) {
+      toast({
+        title: "Only managers can apply a spec import",
+        description: "Applying a spec import rewrites setup profiles, which requires the manage-profiles permission.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSpecImportApplying(true);
     // Apply exactly what the user kept/corrected in the review — not the raw
     // parse. Everything else on `prepared` (source names for the snapshot) is
@@ -15634,6 +15712,7 @@ export default function Home() {
           initialBrand={setupEditorBrand}
           initialFlavor={setupEditorFlavor}
           isSupervisor={isSupervisor}
+          canManageProfiles={canManageProfiles}
           brands={brands}
           brandFlavors={brandFlavors}
           allergenExtra={customAllergens}

@@ -27,6 +27,7 @@ import { useMixes } from "@/hooks/useMixes";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { useMe } from "@/hooks/useRole";
+import { showNote } from "@/utils/notify";
 import { allergenOptions, normalizeAllergen } from "@workspace/allergen";
 
 function toNum(s: string | undefined | null): number {
@@ -157,7 +158,8 @@ export default function SetupProfilesScreen() {
     loadProfileFor,
     supervisorPin,
   } = useRun();
-  const { isManager } = useMe();
+  const { isManager, hasCapability } = useMe();
+  const canManageProfiles = hasCapability("manage-profiles");
   const { items: serverMixes } = useMixes();
   const { items: cheeseRecipesList } = useCheeseRecipes();
 
@@ -311,6 +313,17 @@ export default function SetupProfilesScreen() {
   const isSupervisor = isManager || !supervisorPin || unlocked;
 
   const save = () => {
+    // Profile writes are manager-only. A supervisor-PIN-unlocked non-manager
+    // can browse this editor, but saving must show a clear error instead of
+    // silently failing with a server 403.
+    if (!canManageProfiles) {
+      showNote(
+        "Only managers can save profile changes",
+        "Ask a manager to save this setup for you.",
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
     commitForm();
     const b = brand.trim();
     const f = flavor.trim();

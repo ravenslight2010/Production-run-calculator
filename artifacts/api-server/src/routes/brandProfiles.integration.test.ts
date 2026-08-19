@@ -184,10 +184,20 @@ describe("brand-profiles auth boundary", () => {
     expect(resPost.status).toBe(401);
   });
 
-  it("lets a plain operator save and a manager read the shared pool", async () => {
+  it("rejects profile writes from a plain operator with 403 (manage-profiles gate)", async () => {
     const save = await req(OPERATOR, "POST", "/api/brand-profiles", { items: [profile()] });
+    expect(save.status).toBe(403);
+    const del = await req(OPERATOR, "DELETE", "/api/brand-profiles", { keys: ["basha's__pepperoni"] });
+    expect(del.status).toBe(403);
+    // Reads stay open to any signed-in user.
+    const items = await listAs(OPERATOR);
+    expect(items).toHaveLength(0);
+  });
+
+  it("lets a manager save and any signed-in user read the shared pool", async () => {
+    const save = await req(MANAGER, "POST", "/api/brand-profiles", { items: [profile()] });
     expect(save.status).toBe(200);
-    const items = await listAs(MANAGER);
+    const items = await listAs(OPERATOR);
     expect(items).toHaveLength(1);
     expect(items[0].key).toBe("basha's__pepperoni");
     expect(items[0].values.dieType).toBe("12in");
@@ -198,7 +208,7 @@ describe("brand-profiles auth boundary", () => {
 
 describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   it("ignores an upsert carrying an OLDER stamp (stale republish)", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 2000, values: { dieType: "Argus" } })],
     });
     // A stale device pushes an older form with an older stamp — must be a no-op.
@@ -220,7 +230,7 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   });
 
   it("ignores an EQUAL stamp (idempotent migration push) and accepts a strictly newer one", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 1000, values: { dieType: "first" } })],
     });
     // Equal stamp from a second migrating device: first write wins.
@@ -264,8 +274,8 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
     expect(items).toHaveLength(0);
   });
 
-  it("still accepts an ordinary non-forced save from an operator", async () => {
-    const res = await req(OPERATOR, "POST", "/api/brand-profiles", {
+  it("still accepts an ordinary non-forced save from a manager", async () => {
+    const res = await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 100, values: { dieType: "staff-save" } })],
     });
     expect(res.status).toBe(200);
@@ -276,7 +286,7 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   it("a FORCED upsert overwrites a stored row with a NEWER stamp and advances past it", async () => {
     // The wrong profile got saved with a newer stamp (the Hannaford Tikka
     // Masala incident): an explicit manager Apply must still win.
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 5000, values: { dieType: "wrong" } })],
     });
     const res = await req(MANAGER, "POST", "/api/brand-profiles", {
@@ -298,7 +308,7 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   });
 
   it("a FORCED upsert with a newer stamp keeps its own (already-winning) stamp", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 1000, values: { dieType: "old" } })],
     });
     await req(MANAGER, "POST", "/api/brand-profiles", {
@@ -320,7 +330,7 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   });
 
   it("force is sticky across same-key duplicates within one request", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 5000, values: { dieType: "wrong" } })],
     });
     // The forced (older-stamped) duplicate loses the in-request stamp dedupe,
@@ -337,7 +347,7 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   });
 
   it("a non-forced upsert is still blocked by a newer stored stamp (guard intact)", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ updatedAt: 5000, values: { dieType: "current" } })],
     });
     await req(MANAGER, "POST", "/api/brand-profiles", {
@@ -349,7 +359,7 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   });
 
   it("dedupes same-key items within one request keeping the newest stamp", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [
         profile({ updatedAt: 500, values: { dieType: "older" } }),
         profile({ updatedAt: 900, values: { dieType: "newer" } }),
@@ -361,15 +371,43 @@ describe("brand-profiles per-profile last-write-wins stamp guard", () => {
   });
 });
 
+describe("brand-profiles applicator-audit route", () => {
+  it("returns audit findings (not the raw profile pool) for any signed-in user", async () => {
+    // Profile A owns "Mozz Blend" as its primary app1; profile B wrongly has
+    // it at app3 — the cross-profile contamination signal.
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [
+        profile({ values: { app1CheeseRecipeName: "Mozz Blend" } }),
+        profile({
+          key: "craft__supreme",
+          brand: "craft",
+          flavor: "supreme",
+          values: { app3CheeseRecipeName: "Mozz Blend", app3Type: "cheese" },
+        }),
+      ],
+    });
+    const res = await req(OPERATOR, "GET", "/api/brand-profiles/applicator-audit");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<Record<string, unknown>> };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      key: "craft__supreme",
+      slot: "app3",
+      recipeName: "Mozz Blend",
+      reason: "cross-profile",
+    });
+  });
+});
+
 describe("brand-profiles delete + input hygiene", () => {
   it("deletes rows by key", async () => {
-    await req(OPERATOR, "POST", "/api/brand-profiles", {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [
         profile(),
         profile({ key: "craft__supreme", brand: "craft", flavor: "supreme" }),
       ],
     });
-    const del = await req(OPERATOR, "DELETE", "/api/brand-profiles", {
+    const del = await req(MANAGER, "DELETE", "/api/brand-profiles", {
       keys: ["basha's__pepperoni"],
     });
     expect(del.status).toBe(200);
@@ -382,7 +420,7 @@ describe("brand-profiles delete + input hygiene", () => {
     // The web spec-sheet cleanup marker ("run-calc-profile-cleanup-v1") shares
     // the profile localStorage prefix; a client sweep that picks it up must not
     // be able to create a junk pool row.
-    const res = await req(OPERATOR, "POST", "/api/brand-profiles", {
+    const res = await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [
         { key: "cleanup-v1", brand: "cleanup-v1", flavor: "", values: {}, crustValues: {}, updatedAt: 1 },
       ],
@@ -393,7 +431,7 @@ describe("brand-profiles delete + input hygiene", () => {
   });
 
   it("silently drops items whose key disagrees with brand+flavor", async () => {
-    const res = await req(OPERATOR, "POST", "/api/brand-profiles", {
+    const res = await req(MANAGER, "POST", "/api/brand-profiles", {
       items: [profile({ key: "someone-else__cheese" })],
     });
     expect(res.status).toBe(200);
@@ -402,7 +440,7 @@ describe("brand-profiles delete + input hygiene", () => {
   });
 
   it("rejects a malformed body with 400", async () => {
-    const res = await req(OPERATOR, "POST", "/api/brand-profiles", { items: "nope" });
+    const res = await req(MANAGER, "POST", "/api/brand-profiles", { items: "nope" });
     expect(res.status).toBe(400);
   });
 });

@@ -2565,12 +2565,14 @@ paths:
         manager actions (e.g. applying a spec import): a forced item always
         overwrites the stored row regardless of its stamp, and the stored
         stamp is advanced past the previous one so the write also wins future
-        LWW comparisons. Requests containing any forced item require the
-        `use-ai-tools` capability (the same gate as the spec-import parse
-        flow) and are rejected with 403 otherwise, before any write. Ordinary
-        non-forced saves remain available to any signed-in user (floor staff
-        save profiles from the run form, matching the previous sync-map
-        behavior).
+        LWW comparisons. ALL profile writes require the `manage-profiles`
+        capability (rejected with 403 otherwise): profiles are
+        manager-configured setup data, and the only allowed write paths are
+        explicit manager actions (Setup Profile editor, AI recommendation
+        acceptance) and spec imports/reimports. Requests containing any
+        forced item additionally require the `use-ai-tools` capability (the
+        same gate as the spec-import parse flow) and are rejected with 403
+        otherwise, before any write.
       requestBody:
         required: true
         content:
@@ -2591,9 +2593,9 @@ paths:
       tags: [brandProfiles]
       summary: Delete brand+flavor setup profiles by key
       description: >-
-        Removes a batch of setup profiles by key. Available to any signed-in
-        user (profile deletion accompanies brand/flavor deletion, which floor
-        clients already perform through the master-list flows).
+        Removes a batch of setup profiles by key. Requires the
+        `manage-profiles` capability (403 otherwise) — profile deletion is a
+        manager action, like every other profile write.
       requestBody:
         required: true
         content:

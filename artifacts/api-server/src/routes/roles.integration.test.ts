@@ -40,6 +40,7 @@ const ALL_CAPS: Capability[] = [
   "review-incidents",
   "use-ai-tools",
   "manage-factory-settings",
+  "manage-profiles",
 ];
 
 // The capability set each seeded role grants (must match ROLE_SEEDS in

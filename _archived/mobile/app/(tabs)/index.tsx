@@ -46,6 +46,7 @@ import {
 } from "@/context/RunContext";
 import { reportRunInsightsAfterFinalize } from "@/context/runInsights";
 import { useColors } from "@/hooks/useColors";
+import { useMe } from "@/hooks/useRole";
 import { useNotifications } from "@/hooks/useNotifications";
 import FloorMode from "@/components/FloorMode";
 
@@ -246,6 +247,11 @@ export default function CalculatorScreen() {
   // Manager-defined production rules (factory-wide). "strict" violations block
   // starting the run; the Configure tab shows the full warning text.
   const { rules: productionRules } = useProductionRules();
+  // Profile writes are gated on the manage-profiles capability (server
+  // enforces it on POST /brand-profiles too); run-value saves stay open to
+  // everyone.
+  const { hasCapability } = useMe();
+  const canManageProfiles = hasCapability("manage-profiles");
   const ruleViolations = useMemo(() => {
     const s = run.settings;
     const effectiveLineSpeed =
@@ -373,6 +379,16 @@ export default function CalculatorScreen() {
               // setAppState updater runs before saveProfile's, so the profile
               // is keyed/saved off the latest brand+flavor.
               commitId();
+              // Profile writes are manager-only: run values still save for
+              // everyone (commitId above), but only a manager persists the
+              // form back to the shared brand/flavor profile.
+              if (!canManageProfiles) {
+                showNote(
+                  "Only managers can save profile changes",
+                  "Your run values are saved, but the shared setup profile was not changed.",
+                );
+                return;
+              }
               saveProfile();
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             }}

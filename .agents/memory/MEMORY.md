@@ -130,3 +130,4 @@
 - [Bare-qualifier pep names](natural-pep-name-poison.md) — pep type = full product name; canonical "Pepperoni Stick - NATURAL"; synced-name poison needs a write-time sync guard, not just a one-time heal.
 - [Spec re-import rename memory](spec-reimport-rename-memory.md) — EVERY merge/rename entry point must learn spec-import aliases (ingredients under all 3 kinds; brand learns re-context flavor aliases); paren guard: "X (A)" never fuzzes onto "X (B)".
 - [Name-only recipe attachment](recipe-name-only-attachment.md) + [historical fan narrowing](brand-fan-linked-name-narrowing.md) — brand/flavor apply-target fan RETIRED; recipes attach by name link/slot match; same-sheet tie is the only brand/flavor path.
+- [Profile write gating](profile-write-gating.md) — profile saves/deletes gate on hasCapability("manage-profiles") not isManager; boot heals deferred to a capability-gated effect; push queue drops 403s as terminal.
