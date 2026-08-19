@@ -804,7 +804,10 @@ export default function SpecImportDialog({
   }, [profiles, recipes, prepared]);
 
   const discrepancies = useMemo(
-    () => (prepared ? buildDiscrepancies(edited) : []),
+    () =>
+      prepared
+        ? buildDiscrepancies(edited, prepared.ingredientMergeAliases)
+        : [],
     [edited, prepared],
   );
 

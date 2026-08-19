@@ -274,9 +274,9 @@ describe("commitSpecImport — regular spec cheese updates preserve batch pounds
     expect(savedNamed.byKind["dough"]).toBeUndefined();
   });
 
-  it("writes a merge-source ingredient name as its merge target (resolveImportName)", async () => {
+  it("writes Fresh Spinach under its canonical Spinach survivor (resolveImportName)", async () => {
     mergeAliasesByCategory["ingredient"] = [
-      { externalName: "Old Flour", canonicalName: "High Gluten Flour" },
+      { externalName: "Fresh Spinach (broken up)", canonicalName: "Spinach" },
     ];
     const prepared = makePrepared({
       profiles: [],
@@ -285,7 +285,7 @@ describe("commitSpecImport — regular spec cheese updates preserve batch pounds
           kind: "dough",
           name: "House Dough",
           rows: [
-            { ingredient: "Old Flour", lbs: 42 },
+            { ingredient: "Fresh Spinach (broken up)", lbs: 42 },
             { ingredient: "Water", lbs: 20 },
           ],
         },
@@ -297,7 +297,7 @@ describe("commitSpecImport — regular spec cheese updates preserve batch pounds
     expect(recipesUpdated).toBe(1);
     const dough = savedNamed.byKind["dough"] ?? [];
     expect(dough.find((r) => r.name === "House Dough")?.components).toEqual([
-      { ingredient: "High Gluten Flour", lbs: 42 },
+      { ingredient: "Spinach", lbs: 42 },
       { ingredient: "Water", lbs: 20 },
     ]);
     // The LOCAL apply (presets + ingredient lists) must see the SAME canonical
@@ -305,7 +305,7 @@ describe("commitSpecImport — regular spec cheese updates preserve batch pounds
     // recipe state never diverges from the server pool.
     const localRows = appliedLocally.last?.recipes?.[0]?.rows ?? [];
     expect(localRows.map((r) => r.ingredient)).toEqual([
-      "High Gluten Flour",
+      "Spinach",
       "Water",
     ]);
   });

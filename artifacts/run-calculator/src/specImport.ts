@@ -73,6 +73,7 @@ import {
   type SpecMatchKnown,
   type OverflowColumnRow,
   type TruncatedCell,
+  type ImportMergeAlias,
   type ImportMergeAliasMap,
   resolveImportName,
 } from "@workspace/spec-import";
@@ -80,6 +81,7 @@ import {
   reconcileSpecWithRecipes,
   toReconcileRecipes,
   type Discrepancy,
+  type ReconcileRecipe,
 } from "@workspace/spec-reconcile";
 import {
   loadSpecImportKnown,
@@ -147,6 +149,14 @@ export type SpecImportPrepared = {
    * AI involved.
    */
   discrepancies: Discrepancy[];
+  /**
+   * Factory ingredient-merge history captured during preparation. The review
+   * dialog reuses it when edited rows are reconciled synchronously, so a current
+   * legacy ingredient and its canonical sheet name compare as the same item.
+   * Omitted when the alias request is unavailable; reconciliation then keeps its
+   * prior exact-name behavior and never suppresses a real warning.
+   */
+  ingredientMergeAliases?: ReadonlyArray<ImportMergeAlias>;
   /**
    * Profiles/recipes this import would have re-created but the user previously
    * merged or deleted away. Excluded from `parsed` (so the merge sticks), but
@@ -1110,12 +1120,52 @@ function specMatchAliasKey(a: SpecImportAlias): string {
   return `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`;
 }
 
+/**
+ * Best-effort ingredient merge history for review reconciliation. Keep this in
+ * the asynchronous preparation boundary: the dialog's edited-review diff stays
+ * synchronous and a failed request falls back to the prior exact-name behavior.
+ */
+async function fetchIngredientMergeAliasesBestEffort(): Promise<
+  ReadonlyArray<ImportMergeAlias> | undefined
+> {
+  try {
+    return await fetchMergeAliases("ingredient");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve ingredient rows only; recipe/profile names remain untouched. */
+function normalizeReconcileIngredientAliases(
+  recipes: ReconcileRecipe[],
+  ingredientMergeAliases?: ReadonlyArray<ImportMergeAlias>,
+): ReconcileRecipe[] {
+  if (!ingredientMergeAliases?.length) return recipes;
+  const mergeAliases: ImportMergeAliasMap = { ingredient: ingredientMergeAliases };
+  return recipes.map((recipe) => ({
+    ...recipe,
+    rows: recipe.rows.map((row) => {
+      const ingredient = resolveImportName(row.ingredient, "ingredient", mergeAliases);
+      return ingredient === row.ingredient ? row : { ...row, ingredient };
+    }),
+  }));
+}
+
 /** Build the "what will change" diff of the incoming spec vs current recipes. */
-export function buildDiscrepancies(parsed: ParsedSpecImport): Discrepancy[] {
+export function buildDiscrepancies(
+  parsed: ParsedSpecImport,
+  ingredientMergeAliases?: ReadonlyArray<ImportMergeAlias>,
+): Discrepancy[] {
   try {
     return reconcileSpecWithRecipes({
-      specRecipes: toReconcileRecipes(parsed.recipes),
-      currentRecipes: loadCurrentReconcileRecipes(),
+      specRecipes: normalizeReconcileIngredientAliases(
+        toReconcileRecipes(parsed.recipes),
+        ingredientMergeAliases,
+      ),
+      currentRecipes: normalizeReconcileIngredientAliases(
+        loadCurrentReconcileRecipes(),
+        ingredientMergeAliases,
+      ),
     });
   } catch {
     return [];
@@ -1279,6 +1329,7 @@ async function buildReusedPrepared(
   known: ReturnType<typeof loadSpecImportKnown>,
   aliases: SpecImportAlias[],
   sourceHash: string | undefined,
+  ingredientMergeAliases?: ReadonlyArray<ImportMergeAlias>,
 ): Promise<SpecImportPrepared> {
   // Remap merged/renamed-away brand+flavor names through the learned aliases
   // FIRST — a snapshot saved before a merge/rename still carries the old name,
@@ -1344,7 +1395,7 @@ async function buildReusedPrepared(
   });
 
   const summary = summarizeSpecImport(working, profileExistsForImport, recipeExistsForImport);
-  const discrepancies = buildDiscrepancies(working);
+  const discrepancies = buildDiscrepancies(working, ingredientMergeAliases);
   const reuseNote =
     "This exact file was imported before — reused the earlier read (no new AI parse), so unchanged values stay identical to the previous import.";
   const note = working.note ? `${working.note}\n${reuseNote}` : reuseNote;
@@ -1356,6 +1407,7 @@ async function buildReusedPrepared(
     newAliases: [],
     flagged: [],
     discrepancies,
+    ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
@@ -1586,6 +1638,7 @@ export async function prepareSpecImport(
   data: ArrayBuffer,
   name?: string,
 ): Promise<SpecImportPrepared> {
+  const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
 
   // Exact re-import of an unchanged file: reuse the previous import's stored
@@ -1599,7 +1652,13 @@ export async function prepareSpecImport(
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
   if (snapshot) {
-    const reused = await buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
+    const reused = await buildReusedPrepared(
+      snapshot.data,
+      known,
+      aliases,
+      sourceHash,
+      await ingredientMergeAliasesPromise,
+    );
     // Detect new mix ingredients even on a reused parse — the mixes pool may
     // have changed since the snapshot was taken (manager added a mix).
     const newMixIngredients = await computeNewMixIngredients(reused.parsed);
@@ -1645,7 +1704,8 @@ export async function prepareSpecImport(
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
   const newAliases = [...collectSpecAliases(resolved), ...matchAliases];
-  const discrepancies = buildDiscrepancies(parsed);
+  const ingredientMergeAliases = await ingredientMergeAliasesPromise;
+  const discrepancies = buildDiscrepancies(parsed, ingredientMergeAliases);
   const note = appendOverflowNote(
     appendTruncatedNote(appendDroppedNote(parsed.note, droppedRows), truncatedCells),
     overflowRows,
@@ -1676,6 +1736,7 @@ export async function prepareSpecImport(
     newAliases,
     flagged,
     discrepancies,
+    ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
@@ -1707,6 +1768,7 @@ export async function prepareSpecImportMulti(
   onProgress?: (done: number, total: number) => void,
   names?: string[],
 ): Promise<SpecImportPrepared> {
+  const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
 
   // Exact re-import of the SAME unchanged file set: reuse the stored parse
@@ -1715,7 +1777,13 @@ export async function prepareSpecImportMulti(
   const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
   if (snapshot) {
     onProgress?.(buffers.length, buffers.length);
-    return buildReusedPrepared(snapshot.data, known, aliases, sourceHash);
+    return buildReusedPrepared(
+      snapshot.data,
+      known,
+      aliases,
+      sourceHash,
+      await ingredientMergeAliasesPromise,
+    );
   }
 
   const parsedList: ParsedSpecImport[] = [];
@@ -1864,7 +1932,8 @@ export async function prepareSpecImportMulti(
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
   const newAliases = [...collectSpecAliases(allResolved), ...matchAliases];
-  const discrepancies = buildDiscrepancies(parsed);
+  const ingredientMergeAliases = await ingredientMergeAliasesPromise;
+  const discrepancies = buildDiscrepancies(parsed, ingredientMergeAliases);
 
   const noteParts: string[] = [];
   if (parsed.note) noteParts.push(parsed.note);
@@ -1906,6 +1975,7 @@ export async function prepareSpecImportMulti(
     newAliases,
     flagged,
     discrepancies,
+    ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
