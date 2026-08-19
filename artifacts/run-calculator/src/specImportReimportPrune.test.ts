@@ -150,7 +150,11 @@ describe("commitSpecImport re-import prune wiring", () => {
     const prof = applied.profiles[0];
     expect(prof.sauceOzPerPizza).toBe(6); // the real change survives
     expect(prof.dieType).toBeUndefined(); // unchanged scalar pruned
-    expect(prof.applicators).toEqual([]); // unchanged applicators pruned
+    // Applicators are NEVER pruned as "unchanged" — the mix/cheese slot name
+    // links re-resolve from them at apply time and the sheet is authoritative
+    // for those links (a prior bad import may have stored a wrong link while
+    // the sheet stayed identical).
+    expect(prof.applicators).toHaveLength(1);
     expect(applied.recipes[0].referenceOnly).toBe(true); // unchanged recipe demoted
 
     // New snapshot must be the FULL unpruned parse.
@@ -197,7 +201,10 @@ describe("commitSpecImport re-import prune wiring", () => {
     await commitSpecImport(preparedOf(fixtureParse(), ["Aldo Sauce.xlsx"]));
 
     const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
-    expect(applied.profiles).toHaveLength(0); // unchanged profile dropped
+    // Profile survives (it carries applicators, whose slot links must always
+    // re-apply) but its unchanged scalars are pruned.
+    expect(applied.profiles).toHaveLength(1);
+    expect(applied.profiles[0].dieType).toBeUndefined();
     expect(applied.recipes[0].referenceOnly).toBe(true); // unchanged recipe demoted
   });
 
@@ -223,7 +230,9 @@ describe("commitSpecImport re-import prune wiring", () => {
     await commitSpecImport(preparedOf(batch, ["a.xlsx", "b.xlsx"]));
 
     const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
-    expect(applied.profiles).toHaveLength(0); // unchanged profile dropped
+    // Profile survives (applicator slot links always re-apply); scalars pruned.
+    expect(applied.profiles).toHaveLength(1);
+    expect(applied.profiles[0].dieType).toBeUndefined();
     const a = applied.recipes.find((r) => r.name === "House Marinara");
     const b = applied.recipes.find((r) => r.name === "Sauce B");
     expect(a?.referenceOnly).toBe(true); // unchanged → demoted

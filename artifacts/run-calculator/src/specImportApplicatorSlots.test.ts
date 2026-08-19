@@ -108,6 +108,67 @@ describe("applySpecImport cheese applicator vs existing pool", () => {
   });
 });
 
+// ── Merged-away names resolve through the factory merge history ──
+// A sheet can name a blend/mix that has since been merged into another recipe
+// (merge_aliases row). A spec-only workbook carries no recipe under the old
+// name and the pool holds only the canonical one, so the resolvers must accept
+// the merged-away name as a candidate and the written slot link must be the
+// CANONICAL name — never the resurrected old one.
+describe("applySpecImport merged-away applicator names", () => {
+  it("links an old merged-away MIX name to the surviving canonical mix (profile-only workbook)", () => {
+    saveList(MIX_RECIPE_NAMES_KEY, ["Fajita Blend Mix"]);
+    applySpecImport(
+      parsedWith([{ type: "White Fajita Mix", ozPerPizza: 3 }]),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { mixes: [{ externalName: "White Fajita Mix", canonicalName: "Fajita Blend Mix" }] },
+    );
+    const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
+    expect(prof.app1Type).toBe("Mix");
+    expect(prof.app1CheeseRecipeName).toBe("Fajita Blend Mix");
+  });
+
+  it("links an old merged-away CHEESE blend name to the surviving canonical blend (profile-only workbook)", () => {
+    localStorage.setItem(
+      "run-calc-cheese-recipe-presets",
+      JSON.stringify({ "House Blend Cheese": [{ ingredient: "Mozzarella", lbs: 100 }] }),
+    );
+    applySpecImport(
+      parsedWith([{ type: "Old House Blend", ozPerPizza: 3.5 }]),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { cheese: [{ externalName: "Old House Blend", canonicalName: "House Blend Cheese" }] },
+    );
+    const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
+    expect(prof.app1Type).toBe("cheese");
+    expect(prof.app1CheeseRecipeName).toBe("House Blend Cheese");
+  });
+
+  it("follows a chained merge on a slot link to the current canonical name", () => {
+    saveList(MIX_RECIPE_NAMES_KEY, ["Fajita Blend Mix"]);
+    applySpecImport(
+      parsedWith([{ type: "Fajita Mix", ozPerPizza: 3 }]),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        mixes: [
+          { externalName: "Fajita Mix", canonicalName: "White Fajita Mix" },
+          { externalName: "White Fajita Mix", canonicalName: "Fajita Blend Mix" },
+        ],
+      },
+    );
+    const prof = loadProfile("Corner Booth", "SUPREME") as Record<string, unknown>;
+    expect(prof.app1Type).toBe("Mix");
+    expect(prof.app1CheeseRecipeName).toBe("Fajita Blend Mix");
+  });
+});
+
 // ── Profile's own generic-typed links count as resolver candidates ──
 // A mix the factory never defined as a Mixes recipe (e.g. "Hot Giardiniera
 // Mix") can exist ONLY as a profile's slot link. A re-import whose sheet names

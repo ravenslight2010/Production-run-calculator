@@ -92,7 +92,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, type ImportMergeAliasMap } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import type {
   ParsedSpecImport,
@@ -3558,6 +3558,14 @@ export function applySpecImport(
    * without hunting through the recipe manager.
    */
   forceUpdateProfileKeys?: ReadonlySet<string>,
+  /**
+   * Factory merge history (merge_aliases rows) per category, fetched by the
+   * commit glue. Spec-named sauce/dough/mix/cheese links are resolved through
+   * this map so a sheet naming a recipe that has since been merged away links
+   * the profile to the CURRENT canonical name instead of resurrecting the old
+   * one. Optional and best-effort — when absent, names apply as written.
+   */
+  importMergeAliases?: ImportMergeAliasMap,
 ): { touchedProfiles: Array<{ brand: string; flavor: string }>; crustProfiles: Array<{ brand: string; flavor: string }> } {
   if (typeof localStorage === "undefined") return { touchedProfiles: [], crustProfiles: [] };
 
@@ -3794,6 +3802,16 @@ export function applySpecImport(
   // the pool mirror's keys must be filtered against the Mix name list or mix
   // slots would be re-typed "cheese" here before the mix resolver ever runs.
   const mixNamesLowerNow = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.trim().toLowerCase()));
+  // Merged-away names from the factory merge history are ALSO candidates: a
+  // sheet may name a blend/mix that was since merged into another recipe, and
+  // a spec-only workbook carries no recipe under the old name — without these
+  // the slot resolvers find no match, the raw old name stays as the applicator
+  // type, and the link-time resolveImportName pass below never runs. The slot
+  // link is resolved to the CANONICAL name at write time.
+  const mergedAwayNames = (cat: "cheese" | "mixes"): string[] =>
+    (importMergeAliases?.[cat] ?? [])
+      .map((a) => (a.externalName ?? "").trim())
+      .filter(Boolean);
   const cheeseCandidateNames = [
     ...parsed.recipes
       .filter(r => r.kind === "cheese" && !routesToMix(r))
@@ -3801,6 +3819,7 @@ export function applySpecImport(
     ...Object.keys(loadCheeseRecipePresets()).filter(
       (n) => !mixNamesLowerNow.has(n.toLowerCase()),
     ),
+    ...mergedAwayNames("cheese"),
   ];
   // Every MIX-routed recipe name — the same treatment for mix applicator slots:
   // re-type them to the generic "Mix" and reference the pool recipe by name,
@@ -3812,6 +3831,7 @@ export function applySpecImport(
       .filter(r => r.kind === "cheese" && routesToMix(r))
       .map(r => r.name),
     ...loadList(MIX_RECIPE_NAMES_KEY, []),
+    ...mergedAwayNames("mixes"),
   ];
 
   for (const p of parsed.profiles) {
@@ -3853,7 +3873,12 @@ export function applySpecImport(
     // pull it as-is by name. Never clobber an existing mixed sauce recipe or a
     // name the user already set; a sauce-recipe tie later in this import still
     // overwrites (correctly) via the recipe apply loop below.
-    const specSauceName = snapToPoolName("sauce", (p.sauceName ?? "").trim());
+    // Resolve through the factory merge history FIRST (a sheet may name a
+    // sauce that was since merged away), then snap onto the pool spelling.
+    const specSauceName = snapToPoolName(
+      "sauce",
+      resolveImportName((p.sauceName ?? "").trim(), "sauce", importMergeAliases),
+    );
     if (specSauceName) {
       // Register the bought/ready-made sauce name as a selectable Sauce Recipe
       // option regardless of whether this profile keeps it — otherwise the name
@@ -3868,12 +3893,13 @@ export function applySpecImport(
       placeholderCandidates.push({ kind: "sauce", name: specSauceName, brand, flavor });
     }
     const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    // Update the sauce name when the spec carries one and it differs from what's
-    // stored — the spec sheet is authoritative (covers first-import blanks AND
-    // corrections of values that a previous bad import set incorrectly).
-    // Mixed-sauce recipes always win over a bare name; the recipe-tie loop
-    // below further overwrites with actual row data when available.
-    if (specSauceName && !hasMixedSauce && (isForced || specSauceName !== (values.frontlineRecipeName ?? "").trim())) {
+    // The spec sheet is authoritative for the sauce name link: always write it
+    // when the sheet carries one (covers first-import blanks AND corrections of
+    // values that a previous bad import set incorrectly — no equality guard, a
+    // stored name matching the sheet is simply a no-op write). Mixed-sauce
+    // recipes always win over a bare name; the recipe-tie loop below further
+    // overwrites with actual row data when available.
+    if (specSauceName && !hasMixedSauce) {
       values.frontlineRecipeName = specSauceName;
     }
     // The sheet may name a sauce whose recipe already exists in the library
@@ -3898,7 +3924,10 @@ export function applySpecImport(
     // and a later dough-recipe import re-links rows/weights onto every profile
     // pointing at this name (see the name-match pass in the tie loop below).
     // Never clobber an existing dough recipe or a name the user already set.
-    const specDoughName = snapToPoolName("dough", (p.doughName ?? "").trim());
+    const specDoughName = snapToPoolName(
+      "dough",
+      resolveImportName((p.doughName ?? "").trim(), "dough", importMergeAliases),
+    );
     if (specDoughName) {
       // Register the name as a selectable Dough Recipe option regardless of
       // whether this profile keeps it, and clear any delete/merge tombstone so
@@ -3909,8 +3938,9 @@ export function applySpecImport(
       placeholderCandidates.push({ kind: "dough", name: specDoughName, brand, flavor });
     }
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
-    // Same principle as sauce above: spec sheet is authoritative for dough name.
-    if (specDoughName && !hasMixedDough && (isForced || specDoughName !== (values.doughRecipeName ?? "").trim())) {
+    // Same principle as sauce above: spec sheet is authoritative for the dough
+    // name link — always write it, no equality guard.
+    if (specDoughName && !hasMixedDough) {
       values.doughRecipeName = specDoughName;
     }
     // Same library hydration for dough: an assigned dough name whose recipe
@@ -4041,11 +4071,16 @@ export function applySpecImport(
       }
       newAppTypes.push(type);
     });
+    // Slot link names also resolve through the merge history — a sheet naming
+    // a cheese blend / mix that was since merged away must link the slot to
+    // the surviving canonical recipe, not resurrect the old name.
     for (const link of cheeseLinks) {
-      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
+      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] =
+        resolveImportName(link.recipeName, "cheese", importMergeAliases);
     }
     for (const link of mixLinks) {
-      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
+      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] =
+        resolveImportName(link.recipeName, "mixes", importMergeAliases);
     }
     // Post-correct any stale "cheese"-typed slot whose linked recipe is actually
     // a mix (e.g. the profile predates mix-pool awareness, or a prior import ran

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   mergePruneSnapshots,
   pruneSpecImportAgainstSnapshot,
+  resolveImportName,
+  type ImportMergeAliasMap,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedSpecImport,
@@ -34,16 +36,45 @@ const parsedOf = (p: ParsedProfile[], r: ParsedRecipe[] = []): ParsedSpecImport 
 });
 
 describe("pruneSpecImportAgainstSnapshot", () => {
-  it("drops a fully unchanged profile", () => {
-    const out = pruneSpecImportAgainstSnapshot(parsedOf([profile()]), parsedOf([profile()]));
+  it("drops a fully unchanged profile with no name links or applicators", () => {
+    const bare = { applicators: [], sauceName: undefined, doughName: undefined };
+    const out = pruneSpecImportAgainstSnapshot(
+      parsedOf([profile(bare)]),
+      parsedOf([profile(bare)]),
+    );
     expect(out.parsed.profiles).toHaveLength(0);
     expect(out.unchangedProfiles).toBe(1);
   });
 
+  it("keeps an otherwise-unchanged profile that carries applicators (slot links always re-apply)", () => {
+    // Applicator lists are never pruned as "unchanged": the mix/cheese slot
+    // name links are re-resolved from them at apply time, and the snapshot
+    // records what the sheet said — not what the profile actually stores.
+    const out = pruneSpecImportAgainstSnapshot(parsedOf([profile()]), parsedOf([profile()]));
+    expect(out.parsed.profiles).toHaveLength(1);
+    expect(out.parsed.profiles[0].applicators).toHaveLength(1);
+    expect(out.unchangedProfiles).toBe(0);
+  });
+
+  it("always keeps sauceName/doughName even when identical to the snapshot", () => {
+    // Regression guard (Hannaford Tikka Masala): a prior bad import wrote a
+    // wrong name link while the sheet stayed identical — a correcting
+    // re-import must still push the sheet's name through to the apply step.
+    const withNames = { applicators: [] as ParsedProfile["applicators"], sauceName: "Tikka Masala Sauce", doughName: "CRB Dough" };
+    const out = pruneSpecImportAgainstSnapshot(
+      parsedOf([profile(withNames)]),
+      parsedOf([profile(withNames)]),
+    );
+    expect(out.parsed.profiles).toHaveLength(1);
+    expect(out.parsed.profiles[0].sauceName).toBe("Tikka Masala Sauce");
+    expect(out.parsed.profiles[0].doughName).toBe("CRB Dough");
+    expect(out.unchangedProfiles).toBe(0);
+  });
+
   it("keeps only the changed scalar fields of a partially changed profile", () => {
     const out = pruneSpecImportAgainstSnapshot(
-      parsedOf([profile({ sauceOzPerPizza: 5 })]),
-      parsedOf([profile()]),
+      parsedOf([profile({ sauceOzPerPizza: 5, applicators: [] })]),
+      parsedOf([profile({ applicators: [] })]),
     );
     expect(out.parsed.profiles).toHaveLength(1);
     const p = out.parsed.profiles[0];
@@ -79,8 +110,8 @@ describe("pruneSpecImportAgainstSnapshot", () => {
 
   it("compares brand/flavor and names case-insensitively with trim", () => {
     const out = pruneSpecImportAgainstSnapshot(
-      parsedOf([profile({ brand: "  basha's ", flavor: "CHEESE", dieType: "12 INCH " })]),
-      parsedOf([profile()]),
+      parsedOf([profile({ brand: "  basha's ", flavor: "CHEESE", dieType: "12 INCH ", applicators: [] })]),
+      parsedOf([profile({ applicators: [] })]),
     );
     expect(out.parsed.profiles).toHaveLength(0);
   });
@@ -164,6 +195,55 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     const parsedCopy = JSON.parse(JSON.stringify(parsed));
     pruneSpecImportAgainstSnapshot(parsed, snapshot);
     expect(parsed).toEqual(parsedCopy);
+  });
+});
+
+describe("resolveImportName", () => {
+  const aliases: ImportMergeAliasMap = {
+    sauce: [
+      { externalName: "Old Tikka Sauce", canonicalName: "Tikka Masala Sauce" },
+    ],
+    mixes: [
+      { externalName: "Fajita Mix", canonicalName: "White Fajita Mix" },
+      { externalName: "White Fajita Mix", canonicalName: "Fajita Blend Mix" },
+    ],
+    cheese: [
+      // Malformed cycle — must not loop.
+      { externalName: "Blend A", canonicalName: "Blend B" },
+      { externalName: "Blend B", canonicalName: "Blend A" },
+    ],
+  };
+
+  it("returns the spec name unchanged when no mapping exists", () => {
+    expect(resolveImportName("Marinara Sauce", "sauce", aliases)).toBe("Marinara Sauce");
+    expect(resolveImportName("Marinara Sauce", "sauce", undefined)).toBe("Marinara Sauce");
+    expect(resolveImportName("  Marinara Sauce ", "dough", aliases)).toBe("Marinara Sauce");
+  });
+
+  it("writes the merge target when the spec name is a merge source", () => {
+    expect(resolveImportName("Old Tikka Sauce", "sauce", aliases)).toBe("Tikka Masala Sauce");
+  });
+
+  it("matches the merged-away side case-insensitively with trim", () => {
+    expect(resolveImportName("  old tikka SAUCE ", "sauce", aliases)).toBe("Tikka Masala Sauce");
+  });
+
+  it("only consults the given category", () => {
+    expect(resolveImportName("Old Tikka Sauce", "dough", aliases)).toBe("Old Tikka Sauce");
+  });
+
+  it("follows chained merges to the current canonical name", () => {
+    expect(resolveImportName("Fajita Mix", "mixes", aliases)).toBe("Fajita Blend Mix");
+  });
+
+  it("is cycle-safe on malformed alias data", () => {
+    expect(resolveImportName("Blend A", "cheese", aliases)).toBe("Blend B");
+    expect(resolveImportName("Blend B", "cheese", aliases)).toBe("Blend A");
+  });
+
+  it("handles blank input", () => {
+    expect(resolveImportName("", "sauce", aliases)).toBe("");
+    expect(resolveImportName("   ", "sauce", aliases)).toBe("");
   });
 });
 

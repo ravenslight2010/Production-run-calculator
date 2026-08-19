@@ -5510,22 +5510,6 @@ function rowsEqual(a: ReadonlyArray<RecipeRow>, b: ReadonlyArray<RecipeRow>): bo
   return true;
 }
 
-function applicatorsEqual(
-  a: ReadonlyArray<ParsedApplicator>,
-  b: ReadonlyArray<ParsedApplicator>,
-): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((x, i) => {
-    const y = b[i];
-    return (
-      ciTrim(x.type) === ciTrim(y.type) &&
-      x.ozPerPizza === y.ozPerPizza &&
-      (x.batchLbs ?? null) === (y.batchLbs ?? null) &&
-      (x.slot ?? null) === (y.slot ?? null)
-    );
-  });
-}
-
 function pepperonisEqual(
   a: ReadonlyArray<ParsedPepperoni>,
   b: ReadonlyArray<ParsedPepperoni>,
@@ -5540,6 +5524,64 @@ function pepperonisEqual(
       (x.batchLbs ?? null) === (y.batchLbs ?? null)
     );
   });
+}
+
+/**
+ * Merge-alias categories relevant to spec-import name resolution. These are a
+ * subset of the server's merge_aliases categories (MergeSuggestCategory).
+ */
+export type ImportMergeAliasCategory = "sauce" | "dough" | "mixes" | "cheese";
+
+/** One merge_aliases row: a merged-away name → its surviving canonical name. */
+export type ImportMergeAlias = {
+  externalName: string;
+  canonicalName: string;
+};
+
+/** Per-category merge-alias lists, as fetched from GET /api/merge-aliases. */
+export type ImportMergeAliasMap = Partial<
+  Record<ImportMergeAliasCategory, ReadonlyArray<ImportMergeAlias>>
+>;
+
+/**
+ * Resolve a spec-sheet name through the factory's merge history: when the
+ * sheet names a recipe that has since been merged away (a merge_aliases row
+ * exists for the category), follow the alias chain to the CURRENT canonical
+ * name so the import writes a link that actually resolves to a pool recipe.
+ * Case-insensitive on the merged-away (external) side; returns the canonical
+ * spelling stored on the alias. No mapping (or no aliases) returns the input
+ * trimmed but otherwise unchanged. Cycle-safe: a chain that revisits a name
+ * stops at the last new name reached.
+ */
+export function resolveImportName(
+  specName: string,
+  category: ImportMergeAliasCategory,
+  mergeAliases: ImportMergeAliasMap | undefined,
+): string {
+  const start = (specName ?? "").trim();
+  if (!start) return start;
+  const aliases = mergeAliases?.[category];
+  if (!aliases || aliases.length === 0) return start;
+  const byExternal = new Map<string, string>();
+  for (const a of aliases) {
+    const ext = (a.externalName ?? "").trim().toLowerCase();
+    const canon = (a.canonicalName ?? "").trim();
+    if (!ext || !canon) continue;
+    if (!byExternal.has(ext)) byExternal.set(ext, canon);
+  }
+  let current = start;
+  const seen = new Set<string>([current.toLowerCase()]);
+  // Bounded walk: chains are short in practice (A→B→C); the bound plus the
+  // seen-set guard make malformed alias data (cycles) safe.
+  for (let hops = 0; hops < 20; hops++) {
+    const next = byExternal.get(current.toLowerCase());
+    if (!next) break;
+    const nextKey = next.toLowerCase();
+    if (nextKey === current.toLowerCase() || seen.has(nextKey)) break;
+    current = next;
+    seen.add(nextKey);
+  }
+  return current;
 }
 
 export type SpecImportPruneResult = {
@@ -5635,12 +5677,18 @@ export function pruneSpecImportAgainstSnapshot(
     const out: ParsedProfile = { ...p };
     if (out.dieType !== undefined && ciTrim(out.dieType) === ciTrim(prev.dieType)) delete out.dieType;
     if (out.allergen !== undefined && ciTrim(out.allergen) === ciTrim(prev.allergen)) delete out.allergen;
-    if (out.sauceName !== undefined && ciTrim(out.sauceName) === ciTrim(prev.sauceName)) delete out.sauceName;
-    if (out.doughName !== undefined && ciTrim(out.doughName) === ciTrim(prev.doughName)) delete out.doughName;
+    // sauceName / doughName / applicators are deliberately NEVER pruned as
+    // "unchanged": the snapshot records what the sheet said last time, not what
+    // the profile actually stores. A previous import may have written the wrong
+    // link (or a later merge/rename may have re-pointed it) while the sheet is
+    // byte-identical — pruning here made a correcting re-import a silent no-op
+    // (the Hannaford Tikka Masala incident). The spec sheet is authoritative
+    // for the profile's sauce/dough name links and the applicator mix/cheese
+    // slot links (which are re-resolved from the applicator list at apply
+    // time), so they must always flow through to applySpecImport.
     if (out.sauceOzPerPizza !== undefined && out.sauceOzPerPizza === prev.sauceOzPerPizza) delete out.sauceOzPerPizza;
     if (out.pizzasPerCase !== undefined && out.pizzasPerCase === prev.pizzasPerCase) delete out.pizzasPerCase;
     if (out.sauceBarrelLbs !== undefined && out.sauceBarrelLbs === prev.sauceBarrelLbs) delete out.sauceBarrelLbs;
-    if (applicatorsEqual(out.applicators ?? [], prev.applicators ?? [])) out.applicators = [];
     if (pepperonisEqual(out.pepperonis ?? [], prev.pepperonis ?? [])) out.pepperonis = [];
     const nothingLeft =
       out.dieType === undefined &&
@@ -5650,7 +5698,7 @@ export function pruneSpecImportAgainstSnapshot(
       out.sauceOzPerPizza === undefined &&
       out.pizzasPerCase === undefined &&
       out.sauceBarrelLbs === undefined &&
-      out.applicators.length === 0 &&
+      (out.applicators ?? []).length === 0 &&
       out.pepperonis.length === 0;
     if (nothingLeft) {
       unchangedProfiles += 1;

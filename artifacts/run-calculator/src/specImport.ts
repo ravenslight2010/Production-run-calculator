@@ -73,6 +73,7 @@ import {
   type SpecMatchKnown,
   type OverflowColumnRow,
   type TruncatedCell,
+  type ImportMergeAliasMap,
 } from "@workspace/spec-import";
 import {
   reconcileSpecWithRecipes,
@@ -110,6 +111,7 @@ import {
   PARSE_RATE_WINDOW_MS,
 } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
+import { fetchMergeAliases } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
@@ -1204,7 +1206,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "26";
+export const SPEC_PARSE_VERSION = "27";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -2140,8 +2142,28 @@ export async function commitSpecImport(
     // Offline / server error — applySpecImport falls back to the built-in map.
   }
 
+  // Factory merge history for the categories a spec sheet can name-link
+  // (sauce/dough via profile fields, mixes/cheese via applicator slots).
+  // applySpecImport resolves every spec-named link through this map so a
+  // sheet naming a recipe that was since merged away links the profile to
+  // the surviving canonical name instead of resurrecting the old one.
+  // Best-effort — a failed fetch never blocks the import (names apply as
+  // written, the pre-fix behavior).
+  let importMergeAliases: ImportMergeAliasMap | undefined;
+  try {
+    const [sauce, dough, mixes, cheese] = await Promise.all([
+      fetchMergeAliases("sauce"),
+      fetchMergeAliases("dough"),
+      fetchMergeAliases("mixes"),
+      fetchMergeAliases("cheese"),
+    ]);
+    importMergeAliases = { sauce, dough, mixes, cheese };
+  } catch {
+    // Offline / server error — apply names as written.
+  }
+
   const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[] } = {};
-  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys);
+  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases);
 
   // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
   // import touched as a FORCED upsert, so the server-pool push bypasses the
