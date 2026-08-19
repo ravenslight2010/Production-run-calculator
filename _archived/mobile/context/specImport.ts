@@ -767,14 +767,14 @@ export async function commitSpecImport(
       .map((d) => specMixDraftToMix(d))
       .filter((m): m is Mix => m != null);
     if (candidates.length) {
-      const { merged, added } = addSpecMixesIfAbsent(existingMixes, candidates);
+      const addRes = addSpecMixesIfAbsent(existingMixes, candidates);
       // Refresh per-pizza oz on already-saved mixes from spec-sheet amounts.
       // Only updates components that already exist on the mix AND where the
       // incoming value is > 0, so a manager's hand-typed value is never zeroed.
-      const ozRes = applyMixPerPizza(merged, candidates);
-      if (added > 0 || ozRes.updated > 0) {
+      const ozRes = applyMixPerPizza(addRes.merged, candidates);
+      if (addRes.added > 0 || addRes.updated > 0 || ozRes.updated > 0) {
         await saveMixes(ozRes.next);
-        mixesAdded = added;
+        mixesAdded = addRes.added;
       }
     }
   } catch {

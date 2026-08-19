@@ -176,7 +176,7 @@ describe("addSpecMixesIfAbsent: new mixes enter pool with perPizza intact", () =
     expect(merged[0].components[1].perPizza).toBe(0.8);
   });
 
-  it("does not duplicate an existing mix (dedup by loose name)", () => {
+  it("updates an existing mix's components without duplicating it (dedup by loose name)", () => {
     const existing: Mix = {
       id: "white-fajita-mix",
       name: "White Fajita Mix",
@@ -197,11 +197,11 @@ describe("addSpecMixesIfAbsent: new mixes enter pool with perPizza intact", () =
       flavor: "Fajita",
       components: [{ ingredient: "Monterey Jack", perPizza: 9.9 }],
     })!;
-    const { merged, added } = addSpecMixesIfAbsent([existing], [candidate]);
+    const { merged, added, updated } = addSpecMixesIfAbsent([existing], [candidate]);
     expect(added).toBe(0);
+    expect(updated).toBe(1);
     expect(merged).toHaveLength(1);
-    // Existing value preserved — candidate is a dup, not an update path.
-    expect(merged[0].components[0].perPizza).toBe(2.5);
+    expect(merged[0].components).toEqual([{ ingredient: "Monterey Jack", perPizza: 9.9 }]);
   });
 });
 
@@ -426,14 +426,16 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
       ],
     })!;
 
-    // addSpecMixesIfAbsent: existing mix name → candidate skipped (dup).
-    const { merged, added } = addSpecMixesIfAbsent([existingFromPremixImport], [candidate]);
+    // addSpecMixesIfAbsent: existing mix name → components replaced (spec wins).
+    const { merged, added, updated: addUpdated } = addSpecMixesIfAbsent([existingFromPremixImport], [candidate]);
     expect(added).toBe(0);
+    expect(addUpdated).toBe(1);
     expect(merged).toHaveLength(1);
 
-    // applyMixPerPizza: spec values overwrite the stored premix values.
+    // The component replacement already applied the spec values, so this
+    // narrower perPizza refresh does no additional work.
     const { next: finalMixes, updated } = applyMixPerPizza(merged, [candidate]);
-    expect(updated).toBe(1);
+    expect(updated).toBe(0);
     expect(finalMixes[0].components[0].perPizza).toBe(1.0); // spec wins
     expect(finalMixes[0].components[1].perPizza).toBe(0.2); // spec wins
 

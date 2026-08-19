@@ -394,13 +394,19 @@ export function backfillMixFromMergedSources(
 }
 
 /**
- * Add spec-import-detected mixes to the existing list, skipping any whose name
- * already exists (case-insensitive). A spec sheet can only supply a mix's
- * ingredient NAMES (per-pizza amount and batch size come in blank), so this
- * only ADDS mixes the manager doesn't already keep — it never clobbers an
- * existing hand-made or premix-imported mix's real amounts with blanks, and
- * never produces a duplicate of it. Pure. Returns the merged list plus how many
- * mixes were actually added.
+ * Add spec-import-detected mixes to the existing list, and UPDATE the
+ * components of any mix whose name already exists (case-insensitive).
+ *
+ * SPEC-WINS for components: when a same-scope name match is found the
+ * existing mix's `components` list is replaced by the candidate's (so a
+ * correcting re-import fixes stale ingredients). Operational fields that
+ * only the manager controls — `amountAlreadyMade`, `enabled`, `notes`,
+ * `batchSize`, and `daysEarly` — are always preserved from the existing
+ * row. A candidate with an empty components list (typical for a pure
+ * spec-sheet where the AI produced no ingredients) does NOT overwrite.
+ *
+ * Pure. Returns the merged list plus how many mixes were added and how many
+ * existing mixes had their components updated.
  */
 // Loose match key: the shared @workspace/name-match normalization (lowercase,
 // drop apostrophes/quotes, fold other punctuation to a single space, drop
@@ -415,7 +421,7 @@ function mixNameMatchKey(name: string): string {
 export function addSpecMixesIfAbsent(
   existing: ReadonlyArray<Mix>,
   candidates: ReadonlyArray<Mix>,
-): { merged: Mix[]; added: number } {
+): { merged: Mix[]; added: number; updated: number } {
   // Near-dup layers (word order / single typo, each with ambiguity + digit
   // guards) catch workbook label drift the loose key alone misses, so a
   // re-import doesn't fork a parallel mix. The extra-word layer stays OFF:
@@ -427,8 +433,8 @@ export function addSpecMixesIfAbsent(
   // mix is a different customer's mix that happens to share a generic name
   // ("Taco Mix"): it is added under an idempotent brand-prefixed name
   // ("Lucia's Taco Mix") so both survive, and a re-import of the same workbook
-  // matches its own prefixed row and skips. Matchers are built ONCE per brand
-  // scope (never per candidate) to keep large imports linear.
+  // matches its own prefixed row and updates it. Matchers are built ONCE per
+  // brand scope (never per candidate) to keep large imports linear.
   const brandKeyOf = (m: { brand?: string }) => (m.brand ?? "").trim().toLowerCase();
   // Loose keys per brand scope ("" = unbranded pool mixes).
   const scopeNames = new Map<string, Set<string>>();
@@ -458,8 +464,57 @@ export function addSpecMixesIfAbsent(
     }
     return m;
   };
+
+  // Apply a spec-wins update to `merged[idx]` from `candidate`. Replaces the
+  // components list; preserves every operational manager-controlled field.
+  // Returns 1 when the mix actually changed, 0 when nothing was different.
+  const applyUpdate = (idx: number, candidate: Mix): number => {
+    if (!candidate.components.length) return 0; // no ingredients from spec → nothing to overwrite
+    const prev = merged[idx];
+    const newComponents = candidate.components.slice();
+    // Skip the write when components are identical (avoid spurious saves).
+    const same =
+      prev.components.length === newComponents.length &&
+      prev.components.every((c, i) => {
+        const n = newComponents[i];
+        return (
+          c.ingredient === n.ingredient &&
+          c.perPizza === n.perPizza &&
+          (c.perBatchLbs ?? 0) === (n.perBatchLbs ?? 0)
+        );
+      });
+    if (same) return 0;
+    // SPEC-WINS: replace components. Operational fields from the existing
+    // row are kept via the spread; we only override `components`.
+    merged[idx] = { ...prev, components: newComponents };
+    return 1;
+  };
+
+  // Find the index in `merged` of the existing mix that a same-scope candidate
+  // matches, by loose key. Returns -1 if not found.
+  const findByKey = (k: string, candidateBrand: string): number =>
+    merged.findIndex((m) => {
+      const mb = brandKeyOf(m);
+      const inScope =
+        candidateBrand === "" ? mb === "" : mb === "" || mb === candidateBrand;
+      return inScope && mixNameMatchKey(m.name) === k;
+    });
+
+  // Find the index in `merged` of the existing mix whose name the near-dup
+  // matcher returned (matcher returns the matched canonical name string).
+  const findByMatchedName = (matchedName: string, candidateBrand: string): number => {
+    const mk = mixNameMatchKey(matchedName);
+    return merged.findIndex((m) => {
+      const mb = brandKeyOf(m);
+      const inScope =
+        candidateBrand === "" ? mb === "" : mb === "" || mb === candidateBrand;
+      return inScope && (m.name === matchedName || (mk && mixNameMatchKey(m.name) === mk));
+    });
+  };
+
   const merged: Mix[] = [...existing];
   let added = 0;
+  let updated = 0;
   for (const c of candidates) {
     let name = c.name.trim();
     let key = mixNameMatchKey(name);
@@ -471,16 +526,39 @@ export function addSpecMixesIfAbsent(
       brand === ""
         ? allNames.has(k)
         : (scopeNames.get("")?.has(k) ?? false) || (scopeNames.get(brand)?.has(k) ?? false);
-    // Same-scope duplicate (exact loose key or near-dup) → link, never add.
-    if (seenInScope(key) || matcherFor(brand)(name) !== null) continue;
+
+    // Same-scope duplicate (exact loose key) → update components, never add.
+    if (seenInScope(key)) {
+      const idx = findByKey(key, brand);
+      if (idx >= 0) updated += applyUpdate(idx, c);
+      continue;
+    }
+    // Same-scope near-dup → update components of the matched mix.
+    const nearDupName = matcherFor(brand)(name);
+    if (nearDupName !== null) {
+      const idx = findByMatchedName(nearDupName, brand);
+      if (idx >= 0) updated += applyUpdate(idx, c);
+      continue;
+    }
+
     if (brand !== "" && (allNames.has(key) || matchAll(name) !== null)) {
       // Cross-brand-only collision on a branded candidate: keep both apart by
       // prefixing the new mix with its brand.
       const prefixed = brandPrefixedName((c.brand ?? "").trim(), name);
       const prefixedKey = mixNameMatchKey(prefixed);
       if (prefixedKey === key) continue; // already brand-prefixed yet still colliding — treat as dup
-      // Re-import: the prefixed mix already exists in this brand's scope.
-      if (seenInScope(prefixedKey) || matcherFor(brand)(prefixed) !== null) continue;
+      // Re-import: the prefixed mix already exists in this brand's scope → update.
+      if (seenInScope(prefixedKey)) {
+        const idx = findByKey(prefixedKey, brand);
+        if (idx >= 0) updated += applyUpdate(idx, c);
+        continue;
+      }
+      const nearDupPrefixed = matcherFor(brand)(prefixed);
+      if (nearDupPrefixed !== null) {
+        const idx = findByMatchedName(nearDupPrefixed, brand);
+        if (idx >= 0) updated += applyUpdate(idx, c);
+        continue;
+      }
       name = prefixed;
       key = prefixedKey;
     }
@@ -491,7 +569,7 @@ export function addSpecMixesIfAbsent(
     merged.push(name === c.name ? c : { ...c, name });
     added++;
   }
-  return { merged, added };
+  return { merged, added, updated };
 }
 
 /**

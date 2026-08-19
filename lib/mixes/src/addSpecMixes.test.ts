@@ -109,6 +109,121 @@ describe("addSpecMixesIfAbsent", () => {
   });
 });
 
+describe("addSpecMixesIfAbsent spec-wins update", () => {
+  it("re-import overwrites components of an existing mix when names match exactly", () => {
+    const existing = [
+      mix("White Fajita Mix", {
+        id: "kept",
+        batchSize: 40,
+        components: [{ ingredient: "Old Pepper", perPizza: 0.5 }],
+      }),
+    ];
+    const incoming = mix("White Fajita Mix", {
+      id: "incoming",
+      batchSize: 0,
+      components: [{ ingredient: "New Pepper", perPizza: 1.2 }],
+    });
+    const { merged, added, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+    expect(added).toBe(0);
+    expect(updated).toBe(1);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("kept");
+    expect(merged[0].components).toEqual([{ ingredient: "New Pepper", perPizza: 1.2 }]);
+  });
+
+  it("preserves amountAlreadyMade, enabled, and notes on update", () => {
+    const existing: Mix[] = [
+      {
+        ...mix("Veggie Mix", {
+          id: "kept",
+          amountAlreadyMade: 12,
+          enabled: false,
+          components: [{ ingredient: "Old Onion", perPizza: 0.3 }],
+        }),
+        notes: "Pull 2 days early",
+      },
+    ];
+    const incoming = mix("Veggie Mix", {
+      id: "incoming",
+      components: [{ ingredient: "New Onion", perPizza: 0.6 }],
+    });
+    const { merged, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+    expect(updated).toBe(1);
+    expect(merged[0].amountAlreadyMade).toBe(12);
+    expect(merged[0].enabled).toBe(false);
+    expect(merged[0].notes).toBe("Pull 2 days early");
+    expect(merged[0].components).toEqual([{ ingredient: "New Onion", perPizza: 0.6 }]);
+  });
+
+  it("does NOT count as updated when components are identical (no spurious saves)", () => {
+    const comp = { ingredient: "Pepper", perPizza: 1.0 };
+    const existing = [mix("Fajita Mix", { id: "kept", components: [comp] })];
+    const incoming = mix("Fajita Mix", { id: "incoming", components: [comp] });
+    const { added, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+    expect(added).toBe(0);
+    expect(updated).toBe(0);
+  });
+
+  it("does NOT overwrite when candidate has an empty components list", () => {
+    const existing = [
+      mix("Fajita Mix", {
+        id: "kept",
+        components: [{ ingredient: "Pepper", perPizza: 1.5 }],
+      }),
+    ];
+    const incoming = mix("Fajita Mix", { id: "incoming", components: [] });
+    const { merged, added, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+    expect(added).toBe(0);
+    expect(updated).toBe(0);
+    expect(merged[0].components).toEqual([{ ingredient: "Pepper", perPizza: 1.5 }]);
+  });
+
+  it("updates an existing mix matched via near-dup (punctuation drift)", () => {
+    const existing = [
+      mix("Aldo's Fajita Mix", {
+        id: "kept",
+        components: [{ ingredient: "Old Pepper", perPizza: 0.5 }],
+      }),
+    ];
+    const incoming = mix("Aldos  FAJITA mix", {
+      id: "incoming",
+      components: [{ ingredient: "New Pepper", perPizza: 1.2 }],
+    });
+    const { merged, added, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+    expect(added).toBe(0);
+    expect(updated).toBe(1);
+    expect(merged[0].id).toBe("kept");
+    expect(merged[0].components).toEqual([{ ingredient: "New Pepper", perPizza: 1.2 }]);
+  });
+
+  it("updates the prefixed mix on a cross-brand re-import", () => {
+    // First import creates "Lucia's Taco Mix" as prefixed
+    const first = addSpecMixesIfAbsent(
+      [mix("Taco Mix", { id: "marcos", brand: "Marco's" })],
+      [mix("Taco Mix", { id: "lucias", brand: "Lucia's", components: [{ ingredient: "Old", perPizza: 1.0 }] })],
+    ).merged;
+    // Re-import with updated components
+    const { merged, added, updated } = addSpecMixesIfAbsent(first, [
+      mix("Taco Mix", {
+        id: "lucias-2",
+        brand: "Lucia's",
+        components: [{ ingredient: "New", perPizza: 2.0 }],
+      }),
+    ]);
+    expect(added).toBe(0);
+    expect(updated).toBe(1);
+    const lucias = merged.find((m) => m.brand === "Lucia's");
+    expect(lucias?.components).toEqual([{ ingredient: "New", perPizza: 2.0 }]);
+  });
+
+  it("returns updated:0 when no candidates match any existing mix", () => {
+    const existing = [mix("White Fajita Mix")];
+    const { added, updated } = addSpecMixesIfAbsent(existing, [mix("Buffalo Mix")]);
+    expect(added).toBe(1);
+    expect(updated).toBe(0);
+  });
+});
+
 describe("addSpecMixesIfAbsent brand scope", () => {
   it("same name under a DIFFERENT brand is added brand-prefixed, both survive", () => {
     const existing = [mix("Taco Mix", { id: "marcos", brand: "Marco's", batchSize: 40 })];

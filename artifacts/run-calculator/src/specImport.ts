@@ -1377,8 +1377,7 @@ async function buildReusedPrepared(
  * mix scope:
  *  1. fillSpecCheeseTargetsFromProfiles — brand-fills candidate recipes whose
  *     brand comes from a profile applicator slot (not a direct recipe target).
- *  2. addSpecMixesIfAbsent — establishes which candidates are new vs existing.
- *  3. fillSpecMixTags — assigns the candidate's brand to any previously
+ *  2. fillSpecMixTags — assigns the candidate's brand to any previously
  *     unbranded existing mix that the candidate name-matches.
  *
  * Without step 3, detectNewMixComponents's strict same-brand check rejects a
@@ -1399,9 +1398,13 @@ async function buildReusedPrepared(
  * Then mirrors the full commit pipeline:
  *  1. fillSpecCheeseTargetsFromProfiles — brand-fills recipes referenced via
  *     profile applicators (not direct recipe targets).
- *  2. addSpecMixesIfAbsent — establishes which candidates are new vs existing.
- *  3. fillSpecMixTags — assigns the candidate's brand to any previously
+ *  2. fillSpecMixTags — assigns the candidate's brand to any previously
  *     unbranded existing mix that name-matches, matching commit's scope.
+ *
+ * Deliberately do NOT run addSpecMixesIfAbsent here: it now applies the
+ * spec-wins component replacement used during commit. Detection needs the
+ * pre-update component snapshot in order to identify ingredient rows the
+ * review dialog should surface.
  *
  * Exported for unit testing; callers outside specImport.ts should treat this
  * as an implementation detail (it is async and touches the network).
@@ -1421,11 +1424,10 @@ export async function computeNewMixIngredients(
       .map((d) => specMixDraftToMix(d))
       .filter((m): m is Mix => m != null);
     if (!candidates.length) return [];
-    // Steps 2–3: apply the same new-vs-existing and tag-backfill pipeline that
-    // commit uses, so an unbranded saved mix that a branded candidate matches
-    // gets its brand assigned before detection runs.
-    const { merged } = addSpecMixesIfAbsent(existingMixes, candidates);
-    const { next: taggedMixes } = fillSpecMixTags(merged, candidates);
+    // Apply only commit's scope tag-backfill. Keep existing components intact
+    // so detectNewMixComponents can compare incoming rows against the saved
+    // snapshot rather than the spec-wins replacement.
+    const { next: taggedMixes } = fillSpecMixTags(existingMixes, candidates);
     return detectNewMixComponents(taggedMixes, candidates);
   } catch {
     return [];
@@ -2385,6 +2387,7 @@ export async function commitSpecImport(
     if (candidates.length) {
       const addRes = addSpecMixesIfAbsent(existingMixes, candidates);
       added = addRes.added;
+      updated = addRes.updated;
       // Backfill product tags onto already-saved UNBRANDED mixes this sheet
       // scopes (e.g. a prior import saved them with no customer) — a mix that
       // already has a brand is never re-scoped.
@@ -2396,7 +2399,7 @@ export async function commitSpecImport(
       // already exist on the mix are touched, and a zero/absent spec value
       // never zeroes a manager's hand-typed number.
       const ozRes = applyMixPerPizza(tagRes.next, candidates);
-      updated = ozRes.updated;
+      updated += ozRes.updated;
       workingMixes = ozRes.next;
     }
 
