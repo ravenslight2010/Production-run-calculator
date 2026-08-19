@@ -131,28 +131,42 @@ describe("addSpecMixesIfAbsent spec-wins update", () => {
     expect(merged[0].components).toEqual([{ ingredient: "New Pepper", perPizza: 1.2 }]);
   });
 
-  it("preserves amountAlreadyMade, enabled, and notes on update", () => {
+  it("updates Basha's Red Fajita Mix components and oz/pizza while preserving operational settings", () => {
     const existing: Mix[] = [
       {
-        ...mix("Veggie Mix", {
+        ...mix("Basha's Red Fajita Mix", {
           id: "kept",
+          brand: "Basha's",
+          flavor: "RED FAJITA",
+          batchSize: 55,
+          daysEarly: 2,
           amountAlreadyMade: 12,
           enabled: false,
-          components: [{ ingredient: "Old Onion", perPizza: 0.3 }],
+          components: [{ ingredient: "Old Pepper", perPizza: 0.3 }],
         }),
         notes: "Pull 2 days early",
       },
     ];
-    const incoming = mix("Veggie Mix", {
+    const incoming = mix("Basha's Red Fajita Mix", {
       id: "incoming",
-      components: [{ ingredient: "New Onion", perPizza: 0.6 }],
+      brand: "Basha's",
+      flavor: "RED FAJITA",
+      components: [
+        { ingredient: "Red Pepper", perPizza: 1.25 },
+        { ingredient: "Onion", perPizza: 0.75 },
+      ],
     });
     const { merged, updated } = addSpecMixesIfAbsent(existing, [incoming]);
     expect(updated).toBe(1);
+    expect(merged[0].batchSize).toBe(55);
+    expect(merged[0].daysEarly).toBe(2);
     expect(merged[0].amountAlreadyMade).toBe(12);
     expect(merged[0].enabled).toBe(false);
     expect(merged[0].notes).toBe("Pull 2 days early");
-    expect(merged[0].components).toEqual([{ ingredient: "New Onion", perPizza: 0.6 }]);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Red Pepper", perPizza: 1.25 },
+      { ingredient: "Onion", perPizza: 0.75 },
+    ]);
   });
 
   it("retains an existing cellulose component when the spec omits it", () => {
@@ -175,6 +189,36 @@ describe("addSpecMixesIfAbsent spec-wins update", () => {
     expect(updated).toBe(1);
     expect(merged[0].components).toEqual([
       { ingredient: "Red Pepper", perPizza: 1.4 },
+      { ingredient: "Cellulose", perPizza: 0.03 },
+    ]);
+  });
+
+  it("keeps a positive saved oz/pizza value when the linked sheet leaves that ingredient at zero", () => {
+    const existing = [
+      mix("Basha's Red Fajita Mix", {
+        id: "basha-red-fajita",
+        components: [
+          { ingredient: "Red Pepper", perPizza: 1.2 },
+          { ingredient: "Cellulose", perPizza: 0.03 },
+        ],
+      }),
+    ];
+    const incoming = mix("Basha's Red Fajita Mix", {
+      id: "from-sheet",
+      components: [
+        // Blank sheet amounts normalize to 0; they must not erase a manager's
+        // existing usable oz/pizza amount.
+        { ingredient: "Red Pepper", perPizza: 0 },
+        { ingredient: "Onion", perPizza: 0.75 },
+      ],
+    });
+
+    const { merged, updated } = addSpecMixesIfAbsent(existing, [incoming]);
+
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Red Pepper", perPizza: 1.2 },
+      { ingredient: "Onion", perPizza: 0.75 },
       { ingredient: "Cellulose", perPizza: 0.03 },
     ]);
   });

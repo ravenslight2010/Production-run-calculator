@@ -399,11 +399,13 @@ export function backfillMixFromMergedSources(
  *
  * SPEC-WINS for components: when a same-scope name match is found the
  * existing mix's `components` list is replaced by the candidate's (so a
- * correcting re-import fixes stale ingredients). Operational fields that
- * only the manager controls — `amountAlreadyMade`, `enabled`, `notes`,
- * `batchSize`, and `daysEarly` — are always preserved from the existing
- * row. A candidate with an empty components list (typical for a pure
- * spec-sheet where the AI produced no ingredients) does NOT overwrite.
+ * correcting re-import fixes stale ingredients). A zero/absent sheet amount
+ * never erases a positive per-pizza value already saved for the same
+ * ingredient. Operational fields that only the manager controls —
+ * `amountAlreadyMade`, `enabled`, `notes`, `batchSize`, and `daysEarly` —
+ * are always preserved from the existing row. A candidate with an empty
+ * components list (typical for a pure spec-sheet where the AI produced no
+ * ingredients) does NOT overwrite.
  *
  * Pure. Returns the merged list plus how many mixes were added and how many
  * existing mixes had their components updated.
@@ -475,17 +477,35 @@ export function addSpecMixesIfAbsent(
   };
 
   // Apply a spec-wins update to `merged[idx]` from `candidate`. Replaces the
-  // sheet-carried components while retaining a manager-maintained cellulose row
-  // the sheet omits, plus every operational manager-controlled field.
+  // sheet-carried components while retaining a positive existing per-pizza
+  // amount if the sheet left that same ingredient's amount blank/zero, plus a
+  // manager-maintained cellulose row the sheet omits and every operational
+  // manager-controlled field.
   // Returns 1 when the mix actually changed, 0 when nothing was different.
   const applyUpdate = (idx: number, candidate: Mix): number => {
     if (!candidate.components.length) return 0; // no ingredients from spec → nothing to overwrite
     const prev = merged[idx];
-    const importedHasCellulose = candidate.components.some((c) =>
+    const existingByIngredient = new Map(
+      prev.components.map((component) => [
+        component.ingredient.trim().toLowerCase(),
+        component,
+      ]),
+    );
+    const sheetComponents = candidate.components.map((component) => {
+      const existing = existingByIngredient.get(component.ingredient.trim().toLowerCase());
+      // Spec-wins only when the sheet actually supplies an ounce amount. The
+      // parser represents a blank amount as 0, so retain the manager's
+      // positive value instead of silently turning production math into zero.
+      if (existing && component.perPizza <= 0 && existing.perPizza > 0) {
+        return { ...component, perPizza: existing.perPizza };
+      }
+      return component;
+    });
+    const importedHasCellulose = sheetComponents.some((c) =>
       isCelluloseIngredient(c.ingredient),
     );
     const newComponents = [
-      ...candidate.components,
+      ...sheetComponents,
       // A sheet may deliberately include cellulose; in that case it is the
       // source of truth. Otherwise keep the manager's existing preservative
       // amount rather than deleting it during a component-list replacement.

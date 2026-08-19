@@ -18,7 +18,7 @@ vi.mock("@/storage", () => ({
   profileExistsForImport: () => false,
   recipeExistsForImport: () => false,
   existingDieTypesForImport: () => [],
-  specImportRecipeDisplayKind: (r: ParsedRecipe) => r.kind,
+  specImportRecipeDisplayKind: (r: ParsedRecipe) => r.forcedCategory ?? r.kind,
 }));
 
 afterEach(() => cleanup());
@@ -52,7 +52,7 @@ function makePrepared(
 function renderDialog(
   prepared: SpecImportPrepared,
   onConfirm: (p: ParsedSpecImport, learned?: unknown) => void,
-  existingMixNames: string[] = [],
+  existingRecipeNamesByKind: Partial<Record<"dough" | "sauce" | "cheese" | "mix", string[]>> = {},
 ) {
   const result = render(
     <SpecImportDialog
@@ -66,7 +66,8 @@ function renderDialog(
         dough: ["House Dough", "Thin Crust"],
         sauce: [],
         cheese: ["Aldo's Cheese Mix", "Lowe's Spinach Cheese Mix"],
-        mix: existingMixNames,
+        mix: [],
+        ...existingRecipeNamesByKind,
       }}
       onConfirm={onConfirm}
     />,
@@ -447,19 +448,23 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(out.recipes[0]).toMatchObject({ name: "House Dough", referenceOnly: true });
   });
 
-  it("updates a linked mix with the sheet's ingredients", () => {
+  it("updates a linked existing mix from usable sheet rows and previews its oz-per-pizza components", () => {
     const recipe: ParsedRecipe = {
+      // Mix is a display category of the parsed cheese kind.
       kind: "cheese",
-      name: "Sheet Fajita Mix",
+      name: "Basha Red Fajita",
       brand: "Basha's",
-      flavor: "RED",
-      rows: [{ ingredient: "Red Pepper", lbs: 1.4 }],
+      flavor: "RED FAJITA",
+      rows: [
+        { ingredient: "Red Pepper", lbs: 1.25 },
+        { ingredient: "Onion", lbs: 0.75 },
+      ],
     };
     const onConfirm = vi.fn();
     renderDialog(
-      makePrepared(recipe, [{ brand: "Basha's", flavor: "RED" }]),
+      makePrepared(recipe, [{ brand: "Basha's", flavor: "RED FAJITA" }]),
       onConfirm,
-      ["Basha's Red Fajita Mix"],
+      { mix: ["Basha's Red Fajita Mix"] },
     );
 
     fireEvent.change(screen.getByTestId("spec-recipe-kind-rk0"), {
@@ -469,10 +474,12 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
       target: { value: "Basha's Red Fajita Mix" },
     });
 
-    expect(screen.getByText(/ingredients will be replaced/)).toBeTruthy();
-    expect(screen.getByText(/Will change to:/)).toBeTruthy();
+    expect(screen.getByText(/ingredients and oz-per-pizza amounts will be replaced/)).toBeTruthy();
+    expect(screen.getByText(/mix settings stay as-is/)).toBeTruthy();
+    expect(screen.getByText(/Will change to: Red Pepper 1.25 oz\/pizza · Onion 0.75 oz\/pizza/)).toBeTruthy();
 
     fireEvent.click(screen.getByText(/^Apply/));
+
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
     expect(out.recipes[0]).toMatchObject({
       name: "Basha's Red Fajita Mix",
@@ -481,6 +488,73 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
       userNamed: true,
     });
     expect(out.recipes[0].referenceOnly).toBeUndefined();
+  });
+
+  it("treats an automatically linked existing mix as the same spec-wins update", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      forcedCategory: "mix",
+      name: "Basha Red Fajita",
+      brand: "Basha's",
+      flavor: "RED FAJITA",
+      rows: [{ ingredient: "Red Pepper", lbs: 1.25 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Basha's", flavor: "RED FAJITA" }], {
+        "basha red fajita": "Basha's Red Fajita Mix",
+      }),
+      onConfirm,
+      { mix: ["Basha's Red Fajita Mix"] },
+    );
+
+    expect((screen.getByTestId("spec-recipe-link-rk0") as HTMLSelectElement).value)
+      .toBe("Basha's Red Fajita Mix");
+    expect(screen.getByText(/ingredients and oz-per-pizza amounts will be replaced/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({
+      name: "Basha's Red Fajita Mix",
+      forcedCategory: "mix",
+      userNamed: true,
+    });
+    expect(out.recipes[0].referenceOnly).toBeUndefined();
+  });
+
+  it("keeps a linked mix reference-only when the sheet has only blank ingredient rows", () => {
+    const recipe: ParsedRecipe = {
+      kind: "cheese",
+      name: "Basha Red Fajita",
+      brand: "Basha's",
+      flavor: "RED FAJITA",
+      rows: [{ ingredient: "   ", lbs: 0 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(
+      makePrepared(recipe, [{ brand: "Basha's", flavor: "RED FAJITA" }]),
+      onConfirm,
+      { mix: ["Basha's Red Fajita Mix"] },
+    );
+
+    fireEvent.change(screen.getByTestId("spec-recipe-kind-rk0"), {
+      target: { value: "mix" },
+    });
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "Basha's Red Fajita Mix" },
+    });
+
+    expect(screen.getByText(/won't be changed/)).toBeTruthy();
+    expect(screen.queryByText(/Will change to:/)).toBeNull();
+
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({
+      name: "Basha's Red Fajita Mix",
+      referenceOnly: true,
+    });
   });
 
   it("never updates a linked CHEESE pick (per-pizza vs per-batch units)", () => {

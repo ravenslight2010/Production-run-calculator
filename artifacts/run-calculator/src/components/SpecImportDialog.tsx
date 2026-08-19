@@ -31,7 +31,6 @@ import {
   specImportRecipeDisplayKind,
   type SpecImportDisplayKind,
 } from "@/storage";
-import { isCelluloseIngredient } from "@workspace/mixes";
 import ReviewBadge from "./ReviewBadge";
 
 type Props = {
@@ -366,11 +365,23 @@ function profileSummary(p: ParsedProfile): string {
   return parts.join(" · ");
 }
 
+// A row with a real ingredient name is the minimum useful recipe data. This
+// deliberately mirrors the mix collector, which skips blank ingredient rows
+// before building components. A blank parsed row must never make a linked mix
+// look like it will overwrite the manager's saved components.
+function hasUsableIngredientRows(r: ParsedRecipe): boolean {
+  return (r.rows ?? []).some((row) => (row.ingredient ?? "").trim().length > 0);
+}
+
 // Preview of the ingredient rows a recipe parsed to (first few + overflow count).
-function recipeRowsPreview(r: ParsedRecipe): string {
-  const rows = r.rows ?? [];
-  const shown = rows.slice(0, 4).map((row) => `${row.ingredient} ${row.lbs} lb`);
-  const extra = rows.length - shown.length;
+// Mix rows use the parser's `lbs` slot for per-pizza ounces, so callers can
+// supply the correct label rather than exposing that implementation quirk.
+function recipeRowsPreview(r: ParsedRecipe, amountLabel = "lb"): string {
+  const usableRows = (r.rows ?? []).filter((row) => (row.ingredient ?? "").trim());
+  const shown = usableRows
+    .slice(0, 4)
+    .map((row) => `${row.ingredient} ${row.lbs} ${amountLabel}`);
+  const extra = usableRows.length - shown.length;
   return shown.join(" · ") + (extra > 0 ? ` · +${extra} more` : "");
 }
 
@@ -747,14 +758,16 @@ export default function SpecImportDialog({
         // NORMAL recipe under the linked name — library copy + profile ties get
         // the sheet's rows, and commit also replaces the server-pool recipe's
         // rows. No "update it" opt-in anymore; the spec sheet is the source of
-        // truth for recipe content. Mixes also update from their per-pizza
-        // sheet rows (while the mix layer preserves manager-added cellulose);
-        // cheese is the only units mismatch (spec sheets are per-PIZZA ounces,
-        // the cheese pool is per-BATCH pounds), so it stays reference-only.
+        // truth for recipe content. Mixes also update when the sheet has usable
+        // ingredient rows: their components and per-pizza ounces come from the
+        // spec, while operational fields remain manager-controlled. Cheese is a
+        // units mismatch (spec sheets are per-PIZZA ounces, the cheese pool is
+        // per-BATCH pounds — the cheese workbook importer owns those updates);
+        // cheese links stay reference-only.
         const wantsUpdate =
           !!linked &&
           (r.kind === "dough" || r.kind === "sauce" || r.kind === "mix") &&
-          (r.orig.rows?.length ?? 0) > 0;
+          hasUsableIngredientRows(r.orig);
         const out: ParsedRecipe = linked
           ? wantsUpdate
             ? { ...r.orig, name: linked, kind: parseKindOf(r.kind) }
@@ -803,10 +816,6 @@ export default function SpecImportDialog({
     const map = new Map<string, string[]>();
     for (const d of discrepancies) {
       if (d.type !== "extra-ingredient" || !d.ingredient) continue;
-      // Cellulose is a manager-maintained preservative addition. The mix and
-      // cheese import paths retain it when the source sheet omits it, so do not
-      // warn the manager that this import will remove something it preserves.
-      if (isCelluloseIngredient(d.ingredient)) continue;
       const key = `${d.kind}\u0000${d.recipeName.trim().toLowerCase()}`;
       const arr = map.get(key);
       if (arr) arr.push(d.ingredient);
@@ -1630,27 +1639,34 @@ function RecipeRow({
   const linked = item.linkExisting?.trim() ?? "";
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
   const name = linked || item.name.trim();
+  // A linked mix is a deliberate spec-wins update only when the sheet supplied
+  // at least one usable ingredient. Keep blank-row links reference-only so they
+  // cannot erase the manager's saved mix.
+  const willUpdate =
+    (item.kind === "dough" || item.kind === "sauce" || item.kind === "mix") &&
+    hasUsableIngredientRows(item.orig);
   const candidate: ParsedRecipe = {
     ...item.orig,
     name,
     kind: parseKindOf(item.kind),
-    ...(linked ? { referenceOnly: true } : {}),
+    ...(linked && !willUpdate ? { referenceOnly: true } : {}),
   };
   const issue = linked ? undefined : recipeApplyIssue(candidate);
   // Mixes live in the same preset library as cheese recipes (only the NAME
   // list differs), so existence checks use the underlying parse kind.
   const isNew = !linked && (!name || !recipeExistsForImport(parseKindOf(item.kind), name));
-  const rowsPreview = recipeRowsPreview(item.orig);
-  // SPEC-WINS: a linked Dough/Sauce/Mix pick with parsed rows always replaces
-  // the existing recipe's sheet-carried ingredients on Apply — no opt-in
-  // checkbox. Mix imports retain manager-added cellulose when the sheet omits
-  // it. Cheese is a UNITS mismatch: spec sheets carry per-PIZZA ounces while
-  // the saved cheese recipes store per-BATCH pounds — updating would overwrite
-  // good batch pounds with per-pizza numbers. Cheese batch pounds update via
-  // the Cheese Mix Recipe Specs workbook importer instead.
-  const willUpdate =
-    (item.kind === "dough" || item.kind === "sauce" || item.kind === "mix") &&
-    (item.orig.rows?.length ?? 0) > 0;
+  const rowsPreview = recipeRowsPreview(
+    item.orig,
+    item.kind === "mix" ? "oz/pizza" : "lb",
+  );
+  // SPEC-WINS: a linked Dough/Sauce pick with parsed rows always replaces the
+  // existing recipe's ingredients on Apply — no opt-in checkbox. Linked mixes
+  // follow the same explicit update decision: sheet components and per-pizza
+  // ounces replace saved mix components, but manager-controlled operational
+  // fields remain intact. Cheese is a UNITS mismatch: spec sheets carry
+  // per-PIZZA ounces while the saved cheese recipes store per-BATCH pounds —
+  // updating would overwrite good batch pounds with per-pizza numbers. Cheese
+  // batch pounds update via the Cheese Mix Recipe Specs workbook importer instead.
   // Recipes attach by NAME only — profiles link a dough/sauce recipe name (or
   // a cheese/mix applicator-slot name) and hydrate from the library by that
   // name. There is no brand/flavor attach editor anymore: showing where a
@@ -1769,7 +1785,9 @@ function RecipeRow({
           {linked && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               {willUpdate
-                ? `Using your existing “${linked}” — its ingredients will be replaced with this sheet's.`
+                ? item.kind === "mix"
+                  ? `Using your existing “${linked}” — its ingredients and oz-per-pizza amounts will be replaced with this sheet's. Your mix settings stay as-is.`
+                  : `Using your existing “${linked}” — its ingredients will be replaced with this sheet's.`
                 : `Using your existing “${linked}” — it won't be changed.`}
               {item.kind === "cheese" && (
                 <>

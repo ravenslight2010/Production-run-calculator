@@ -306,4 +306,55 @@ describe("commitSpecImport — accepted new mix ingredients on snapshot-pruned r
     expect(basil).toBeDefined();
     expect(basil!.perPizza).toBe(0);
   });
+
+  it("keeps a saved mix's positive oz/pizza when its linked spec row has no amount", async () => {
+    mixStore.existing = [
+      {
+        ...makeMix("Basha's Red Fajita Mix", "Basha's", [
+          { ingredient: "Red Pepper", perPizza: 1.25 },
+          { ingredient: "Cellulose", perPizza: 0.03 },
+        ]),
+        flavor: "RED FAJITA",
+        batchSize: 55,
+        daysEarly: 2,
+        amountAlreadyMade: 12,
+        enabled: false,
+        notes: "Pull 2 days early",
+      },
+    ];
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          forcedCategory: "mix",
+          name: "Basha's Red Fajita Mix",
+          brand: "Basha's",
+          flavor: "RED FAJITA",
+          // Spec parser carries per-pizza ounces in `lbs`. Red Pepper's blank
+          // sheet amount becomes 0; Onion's positive sheet amount must win.
+          rows: [
+            { ingredient: "Red Pepper", lbs: 0 },
+            { ingredient: "Onion", lbs: 0.75 },
+          ],
+        },
+      ],
+    };
+
+    await commitSpecImport(minimalPrepared(parsed));
+
+    const saved = (mixStore.saved ?? []).find((m) => m.name === "Basha's Red Fajita Mix");
+    expect(saved).toMatchObject({
+      batchSize: 55,
+      daysEarly: 2,
+      amountAlreadyMade: 12,
+      enabled: false,
+      notes: "Pull 2 days early",
+    });
+    expect(saved?.components).toEqual([
+      { ingredient: "Red Pepper", perPizza: 1.25 },
+      { ingredient: "Onion", perPizza: 0.75 },
+      { ingredient: "Cellulose", perPizza: 0.03 },
+    ]);
+  });
 });
