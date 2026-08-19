@@ -2592,6 +2592,9 @@ export function crossFamilyRoutingSuggestionKey(name: string): string {
  *   the pool recipe (an empty parse must not wipe a curated recipe);
  * - a pool recipe whose components already equal the sheet rows (same order,
  *   ci-name + lbs) is left as the SAME object so callers can skip the save;
+ * - cellulose rows that exist in the current recipe but are absent from the
+ *   spec sheet are carried over unchanged — cellulose (anti-caking agent) is
+ *   never listed on spec sheets but is a real ingredient in the recipes;
  * - everything else on the pool recipe (id, brand, flavors, notes, enabled…)
  *   is preserved.
  * Pure; never mutates its inputs.
@@ -2615,6 +2618,21 @@ export function updateRecipePoolComponents<
       .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: r.lbs ?? 0 }))
       .filter((c) => c.ingredient);
     if (components.length === 0) return rec;
+
+    // Carry over any cellulose rows from the existing recipe that the spec
+    // sheet didn't include — cellulose is a practical ingredient (anti-caking
+    // agent) that is never listed on spec sheets but managers add to recipes.
+    const isCellulose = (name: string) =>
+      name.trim().toLowerCase().includes("cellulose");
+    const sheetHasCellulose = components.some((c) => isCellulose(c.ingredient));
+    if (!sheetHasCellulose) {
+      for (const existing of rec.components) {
+        if (isCellulose(existing.ingredient)) {
+          components.push({ ingredient: existing.ingredient, lbs: existing.lbs });
+        }
+      }
+    }
+
     const same =
       rec.components.length === components.length &&
       rec.components.every(
