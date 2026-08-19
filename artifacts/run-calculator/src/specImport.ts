@@ -2433,10 +2433,12 @@ export async function commitSpecImport(
   // Add any named cheese blends detected in this import to the factory-wide
   // Cheese Recipes pool so the run applicator "Cheese" cards (pick-only, they
   // hydrate rows from the pool) can select them. Matched by name against the
-  // existing pool so an import never duplicates or clobbers a manager's curated
-  // recipe — it simply links to it. Manager-gated on the server and fully
-  // best-effort: the recipes already applied locally, so a failed sync must
-  // never surface as an import error.
+  // existing pool so an import never duplicates a manager's curated recipe.
+  // A regular spec refreshes compatible blend shares and recipe assignment
+  // details, but never turns its per-pizza ounces into the pool's per-batch
+  // pounds. Manager-gated on the server and fully best-effort: the recipes
+  // already applied locally, so a failed sync must never surface as an import
+  // error.
   // SPEC-WINS: every dough/sauce recipe this sheet carries rows for also
   // replaces the matching SERVER pool recipe's ingredient rows — the
   // dough/sauce pickers hydrate rows from the pools, so without this the

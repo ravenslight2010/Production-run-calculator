@@ -43,19 +43,23 @@ apps start empty and users re-import their own spec sheets (see one-time-data-pu
 seeding/migrating cheese would resurrect purged data and break web+mobile parity (web did
 not migrate either). Users re-populate cheese via the importer.
 
-**Dual weight columns (2026-07-12).** Cheese components carry BOTH `lbs` (per-batch,
-curated via the Cheese Mix Recipe Specs workbook or hand edits) and optional
-`ozPerPizza` (from pizza spec sheets). Mix components similarly gained optional
-`perBatchLbs` (reference-only — plan math still uses per-pizza oz). Rules:
-- Spec-sheet cheese amounts arrive in the parsed rows' `lbs` field (parser quirk) but
-  are TRUE per-pizza ounces; `collectSpecImportCheeseRecipes` surfaces them as
-  `ozPerPizza` and `specCheeseDraftToRecipe` writes them to the oz column with lbs=0.
-- On commit, spec imports refresh ONLY the oz column of name-matched pool recipes via
-  pure `applyCheeseOzPerPizza` (ci name+ingredient match) — curated batch lbs must stay
-  byte-identical. Guard test: specImportCheeseUpdateGuard.test.ts.
-- Applicator card hydration (`serverCheeseRowsByName`) falls back to oz values only when
-  a recipe has NO component with lbs>0, so spec-created recipes still show their ratio.
-- Any new write path into cheese components must never copy oz values into `lbs`.
+**Batch pounds + ratio shares.** Cheese components store `lbs` as curated
+per-batch pounds and optional `sharePct` as the blend ratio; they do not store
+per-pizza ounces. A regular spec sheet's cheese amounts arrive in parsed
+`RecipeRow.lbs` but are actually per-pizza ounces. The importer converts them
+to `sharePct` and keeps component `lbs` at zero.
+
+**Why:** ounces and batch pounds are incompatible units. Saving spec ounces as
+pounds poisons batch planning, while ignoring them leaves re-imported blend
+ratios stale.
+
+**How to apply:** a name-matched regular spec re-import treats its positive
+component shares as the current ratio (clearing stale shares omitted by the
+sheet, while retaining their batch-pound rows) and can add a newly named
+ingredient with zero batch pounds. It preserves every existing batch-pound value
+and manager-owned recipe metadata. The Cheese Mix Recipe Specs workbook remains
+the source that may replace per-batch component pounds. Never copy regular-spec
+ounces into cheese `lbs`.
 
 ## Duplicate-name protection (applies to any name-keyed server pool)
 Rule: a name-keyed master-data pool whose POST accepts client-minted ids MUST enforce name uniqueness server-side — client-side "add if absent" dedupes against a stale pool snapshot, so multi-file imports and racing devices insert exact same-name rows the merge UI can't even show (identical names collapse).

@@ -303,12 +303,12 @@ describe("addCheeseRecipesIfAbsentByName", () => {
     expect(merged[0].components).toEqual([{ ingredient: "Mozz", lbs: 10 }]);
   });
 
-  it("spec-sheet stub (all lbs=0) does not overwrite existing per-batch lbs — no save triggered", () => {
+  it("refreshes spec-sheet shares without overwriting curated per-batch pounds", () => {
     // Spec sheets produce candidates with lbs=0 (per-pizza oz are stored as
     // sharePct only). Writing those zeros over a manager's curated batch lbs
-    // would corrupt the pool. The function must detect this and skip the update.
-    // Both use brand="" to mirror the real scenario (unbranded curated recipe
-    // matched by an unbranded spec import).
+    // would corrupt the pool, but ignoring the shares makes regular re-imports
+    // stale. Both use brand="" to mirror an unbranded curated recipe matched
+    // by an unbranded spec import.
     const existing = [
       make({
         id: "curated",
@@ -332,13 +332,65 @@ describe("addCheeseRecipesIfAbsentByName", () => {
       ],
     });
     const { merged, added, updated } = addCheeseRecipesIfAbsentByName(existing, [specStub]);
-    // No save should be triggered — the spec stub must not corrupt batch lbs.
     expect(added).toBe(0);
-    expect(updated).toBe(0);
+    expect(updated).toBe(1);
     expect(merged[0].components).toEqual([
-      { ingredient: "Pizella", lbs: 207 },
-      { ingredient: "Part Skim Mozzarella", lbs: 119 },
+      { ingredient: "Pizella", lbs: 207, sharePct: 63.49 },
+      { ingredient: "Part Skim Mozzarella", lbs: 119, sharePct: 36.51 },
     ]);
+  });
+
+  it("adds a newly specified spec ingredient at zero batch pounds", () => {
+    const existing = [
+      make({
+        id: "curated",
+        name: "Aldo's Cheese Mix",
+        components: [{ ingredient: "Mozzarella", lbs: 207, sharePct: 100 }],
+      }),
+    ];
+    const specStub = make({
+      id: "cheese:spec:aldo-s-cheese-mix",
+      name: "Aldo's Cheese Mix",
+      components: [
+        { ingredient: "Mozzarella", lbs: 0, sharePct: 75 },
+        { ingredient: "Provolone", lbs: 0, sharePct: 25 },
+      ],
+    });
+
+    const { merged, updated } = addCheeseRecipesIfAbsentByName(existing, [specStub]);
+
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Mozzarella", lbs: 207, sharePct: 75 },
+      { ingredient: "Provolone", lbs: 0, sharePct: 25 },
+    ]);
+  });
+
+  it("clears a stale share when a correcting spec removes an ingredient, while retaining its batch pounds", () => {
+    const existing = [
+      make({
+        id: "curated",
+        name: "Aldo's Cheese Mix",
+        components: [
+          { ingredient: "Mozzarella", lbs: 207, sharePct: 50 },
+          { ingredient: "Provolone", lbs: 119, sharePct: 50 },
+        ],
+      }),
+    ];
+    const specStub = make({
+      id: "cheese:spec:aldo-s-cheese-mix",
+      name: "Aldo's Cheese Mix",
+      components: [{ ingredient: "Mozzarella", lbs: 0, sharePct: 100 }],
+    });
+
+    const { merged, updated } = addCheeseRecipesIfAbsentByName(existing, [specStub]);
+
+    expect(updated).toBe(1);
+    expect(merged[0].components).toEqual([
+      { ingredient: "Mozzarella", lbs: 207, sharePct: 100 },
+      { ingredient: "Provolone", lbs: 119 },
+    ]);
+    expect(cheeseComponentShares(merged[0].components)).toEqual([1, 0]);
   });
 });
 

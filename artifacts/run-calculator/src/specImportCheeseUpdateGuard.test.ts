@@ -1,16 +1,14 @@
 // @vitest-environment node
 //
-// Commit-level UNITS guard: a spec import must NEVER overwrite the server
-// cheese pool's per-BATCH pounds — even for a payload that flags a cheese
-// recipe under the spec-wins overwrite policy.
+// Commit-level UNITS guard: a regular spec import must refresh compatible
+// cheese-pool data without ever overwriting the server's per-BATCH pounds.
 //
 // Spec sheets express cheese amounts as PER-PIZZA ounces (dumped into the
 // RecipeRow `lbs` field — long-standing parser quirk), while the server cheese
-// pool stores PER-BATCH pounds. Spec imports do NOT write ozPerPizza onto
-// cheese recipe components (that column belongs to applicator slots, not
-// recipes). An existing pool recipe matched by name is left byte-identical.
-// Dough/sauce updates (whose workbooks ARE per-batch) still replace rows
-// wholesale.
+// pool stores PER-BATCH pounds. The importer converts the sheet amounts into
+// component share percentages, retaining batch pounds and manager-owned
+// metadata. Dough/sauce updates (whose workbooks ARE per-batch) still replace
+// rows wholesale.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ParsedSpecImport } from "@workspace/spec-import";
@@ -96,6 +94,12 @@ vi.mock("./mergeSuggest", async (importOriginal) => {
 const CURATED_CHEESE: CheeseRecipe = {
   id: "aldos-cheese-mix",
   name: "Aldo's Cheese Mix",
+  brand: "",
+  flavors: [],
+  shredderSetting: "3",
+  cellulose: "Manager cellulose",
+  notes: "Manager note",
+  enabled: false,
   components: [
     { ingredient: "Pizella", lbs: 207 },
     { ingredient: "Part Skim Mozzarella", lbs: 119 },
@@ -167,17 +171,27 @@ beforeEach(() => {
   for (const k of Object.keys(mergeAliasesByCategory)) delete mergeAliasesByCategory[k];
 });
 
-describe("commitSpecImport — cheese batch pounds are never overwritten (per-pizza vs per-batch)", () => {
-  it("leaves the curated pool recipe byte-identical — no oz written, no save triggered, even under spec-wins overwrite", async () => {
+describe("commitSpecImport — regular spec cheese updates preserve batch pounds", () => {
+  it("refreshes matching recipe shares and assignment data without duplicating or overwriting manager fields", async () => {
     const prepared = makePrepared({
-      profiles: [],
+      profiles: [
+        {
+          brand: "Aldo's",
+          flavor: "Pepperoni",
+          app1: "Cheese",
+          app1OzPerPizza: 3.26,
+          app1CheeseRecipeName: "Aldo's Cheese Mix",
+        },
+      ],
       recipes: [
         {
           kind: "cheese",
           name: "Aldo's Cheese Mix",
+          brand: "Aldo's",
+          flavor: "Pepperoni",
           userNamed: true,
-          // Per-pizza ounces in the lbs field (parser quirk) — the values that
-          // must NEVER land in the pool's per-batch lbs column or ozPerPizza.
+          // Per-pizza ounces in the lbs field (parser quirk). They become
+          // sharePct values and must NEVER land in the pool's batch lbs column.
           rows: [
             { ingredient: "Pizella", lbs: 2.07 },
             { ingredient: "Part Skim Mozzarella", lbs: 1.19 },
@@ -189,11 +203,33 @@ describe("commitSpecImport — cheese batch pounds are never overwritten (per-pi
     const { recipesUpdated, cheeseRecipesAdded } =
       await commitSpecImport(prepared);
 
-    // No wholesale cheese row replacement, nothing added (the recipe already
-    // exists), and no oz refresh — nothing was written, so nothing was saved.
     expect(recipesUpdated).toBe(0);
     expect(cheeseRecipesAdded).toBe(0);
-    expect(savedCheese.calls).toBe(0);
+    expect(savedCheese.calls).toBe(1);
+    expect(savedCheese.last).toEqual([
+      expect.objectContaining({
+        id: "aldos-cheese-mix",
+        name: "Aldo's Cheese Mix",
+        brand: "Aldo's",
+        flavors: ["Pepperoni"],
+        shredderSetting: "3",
+        cellulose: "Manager cellulose",
+        notes: "Manager note",
+        enabled: false,
+        components: [
+          { ingredient: "Pizella", lbs: 207, sharePct: 63.5 },
+          { ingredient: "Part Skim Mozzarella", lbs: 119, sharePct: 36.5 },
+        ],
+      }),
+    ]);
+    expect(savedCheese.last).toHaveLength(1);
+    // Commit hands the existing apply path the sheet's applicator assignment;
+    // that path updates the run/profile link independently of the server pool.
+    expect(appliedLocally.last?.profiles[0]).toMatchObject({
+      app1: "Cheese",
+      app1OzPerPizza: 3.26,
+      app1CheeseRecipeName: "Aldo's Cheese Mix",
+    });
   });
 
   it("always overwrites a dough pool recipe's rows on re-import — no updateExisting opt-in (spec wins)", async () => {

@@ -376,13 +376,78 @@ export function specCheeseDraftToRecipe(draft: {
 }
 
 /**
+ * Apply the compatible portion of a regular production spec to a curated
+ * cheese recipe. Regular specs express component weights as per-pizza ounces;
+ * collectSpecImportCheeseRecipes turns those amounts into `sharePct`, while
+ * keeping `lbs` at zero because the pool's pounds are per-batch.
+ *
+ * A spec refresh therefore treats its positive component shares as the current
+ * ratio definition. It keeps every existing per-batch pound value, clears a
+ * stale explicit share from components the sheet no longer mentions, and adds
+ * newly mentioned ingredients at zero batch pounds. This lets the current sheet
+ * update the blend used on the line without turning ounces into erroneous batch
+ * pounds.
+ */
+function mergeSpecCheeseComponents(
+  existing: CheeseComponent[],
+  specComponents: ReadonlyArray<CheeseComponent>,
+): CheeseComponent[] {
+  const sharesByIngredient = new Map<string, number>();
+  for (const component of specComponents) {
+    const ingredient = component.ingredient.trim();
+    const sharePct = Number(component.sharePct);
+    if (
+      !ingredient ||
+      !Number.isFinite(sharePct) ||
+      sharePct <= 0 ||
+      sharesByIngredient.has(ingredient.toLowerCase())
+    ) {
+      continue;
+    }
+    sharesByIngredient.set(ingredient.toLowerCase(), sharePct);
+  }
+  if (sharesByIngredient.size === 0) return existing;
+
+  let changed = false;
+  const seen = new Set<string>();
+  const merged = existing.map((component) => {
+    const key = component.ingredient.trim().toLowerCase();
+    seen.add(key);
+    const sharePct = sharesByIngredient.get(key);
+    if (sharePct === undefined) {
+      if (component.sharePct === undefined) return component;
+      changed = true;
+      const { sharePct: _staleShare, ...withoutShare } = component;
+      return withoutShare;
+    }
+    if (component.sharePct === sharePct) return component;
+    changed = true;
+    return { ...component, sharePct };
+  });
+
+  for (const component of specComponents) {
+    const ingredient = component.ingredient.trim();
+    const key = ingredient.toLowerCase();
+    const sharePct = sharesByIngredient.get(key);
+    if (!ingredient || sharePct === undefined || seen.has(key)) continue;
+    changed = true;
+    seen.add(key);
+    merged.push({ ingredient, lbs: 0, sharePct });
+  }
+
+  return changed ? merged : existing;
+}
+
+/**
  * Upsert spec-import cheese recipes into the existing pool. For each candidate:
  *
  * • Same-scope name match (same brand, or either side unbranded): update the
- *   existing recipe's components and flavors from the sheet while preserving
- *   manager-typed fields the spec sheet never carries (`cellulose`,
- *   `shredderSetting`, `enabled`, `notes`). The stable pool id and the display
- *   name casing from the existing record are kept.
+ *   existing recipe's flavors and compatible component data from the sheet
+ *   while preserving manager-typed fields the spec sheet never carries
+ *   (`cellulose`, `shredderSetting`, `enabled`, `notes`). Regular production
+ *   specs refresh component shares only; cheese-workbook candidates carrying
+ *   real per-batch pounds still replace components wholesale. The stable pool
+ *   id and the display name casing from the existing record are kept.
  * • Same id, different name: also updates the existing recipe (same recipe,
  *   re-imported with fresh data).
  * • Cross-brand-only collision on a BRANDED candidate: kept apart by prefixing
@@ -434,13 +499,17 @@ export function addCheeseRecipesIfAbsentByName(
     if (alreadyUpdated.has(prev.id)) return; // first candidate wins per existing recipe
     alreadyUpdated.add(prev.id);
     const candidateHasRealLbs = c.components.some((comp) => (comp.lbs ?? 0) > 0);
+    const components = candidateHasRealLbs
+      ? c.components
+      : mergeSpecCheeseComponents(prev.components, c.components);
     const next: CheeseRecipe = {
       ...c,
       id: prev.id,    // keep stable existing id
       name: prev.name, // keep existing display name / casing
       // Components: use candidate's when it carries real per-batch lbs (cheese
-      // workbook); otherwise preserve the existing manager-entered lbs.
-      components: candidateHasRealLbs ? c.components : prev.components,
+      // workbook); regular specs refresh only explicit ratios and keep the
+      // manager-entered per-batch pounds intact.
+      components,
       // Preserve manager-typed fields the spec sheet cannot carry.
       // cellulose: keep any non-empty stored value; fall back to candidate's.
       cellulose: (prev.cellulose ?? "") || (c.cellulose ?? ""),
