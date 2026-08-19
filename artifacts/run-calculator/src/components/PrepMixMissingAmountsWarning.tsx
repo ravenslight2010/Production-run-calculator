@@ -32,7 +32,7 @@ export function PrepMixMissingAmountsWarning({ entry }: { entry: Pick<MixPlanEnt
       {entry.missingComponentIngredients && entry.missingComponentIngredients.length > 0 && (
         <span data-testid="prep-mix-missing-ingredients-list" className="pl-5 text-amber-400/80">
           {entry.missingComponentIngredients.join(", ")} — check that these names exactly match
-          ingredient names in the run profiles, or open the Mixes editor to enter oz/pizza amounts
+          ingredient names in the run profiles, or open Mix Recipes to enter oz/pizza amounts
           directly.
         </span>
       )}

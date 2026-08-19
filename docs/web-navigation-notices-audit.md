@@ -35,7 +35,7 @@ section 4, and the implemented header/menu behavior follows that decision.
 
 The bottom navigation is deliberately limited to six operational stations. The following
 destinations are still tab panels in the web shell, but are reached through the overflow menu
-instead of becoming additional bottom tabs: Stoppages, Summary, Stock/Inventory, Mixes, AI
+instead of becoming additional bottom tabs: Stoppages, Summary, Stock/Inventory, Mix Plan, AI
 Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 
 ### 1.2 Header controls outside the overflow menu
@@ -58,7 +58,7 @@ Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 | Summary | All signed-in users | Always | Review run/day summary | Header menu → hidden panel |
 | Stock | All signed-in users | Always | Open the inventory editor/stock view | Header menu → `inventory` panel |
 | AI Assistant | All signed-in users | Always | Ask operational questions or use available AI assistance | Header menu → `ai` panel |
-| Mixes | All signed-in users | Always | View operational mix plan and make-day needs | Header menu → `mixes` panel |
+| Mix Plan | All signed-in users | Always | View operational mix plan and make-day needs | Header menu → `mixes` panel |
 | Report an issue | All signed-in users | Always | Submit a product/operational issue | Header menu → issue dialog |
 | Reported issues | Managers (`manage-staff`) | Always for eligible role | Review and act on reported issues | Header menu → `incidents` panel |
 | Quality history | Managers | Always for eligible role | Review quality history | Header menu → `quality` panel |
@@ -89,7 +89,7 @@ section pills are assembled from the current user’s available tabs.
 
 | Section / actions | Who sees or can use it | Expected action | Current location |
 | --- | --- | --- | --- |
-| Recipes: Dough, Sauce, Mixes, Cheese Recipes | Inventory-management-capable users for editor access | Create, edit, or delete shared recipe data | Settings → Recipes |
+| Recipes: Dough, Sauce, Mix Recipes, Cheese Recipes | Inventory-management-capable users for editor access | Create, edit, or delete shared recipe data | Settings → Recipes |
 | Lists: Brands, Flavors, Pep Types, Applicator Types, Die Types | Users shown the Lists section; individual writes are server-authorized | Maintain selectable master lists, including rename/merge where offered | Settings → Lists |
 | Ingredient Weights | Users shown the Lists section | Review/manage learned ingredient batch-weight data where controls are available | Settings → Lists |
 | Shift Times | Users shown this settings tab | Configure shift timing | Settings → Settings |
@@ -231,11 +231,11 @@ that alter navigation, role behavior, information priority, or operational workf
 
 These can be implemented without changing the underlying alert rules, permissions, or data flow.
 
-1. **Label the two Mixes destinations by job, not by shared noun.**  
-   The header’s **Mixes** is an operational make-day view, while Settings → Recipes → **Mixes**
-   is master-data editing. Use labels such as **Mix Plan** and **Mix Recipes** (or add short
-   descriptions under the existing labels). This removes a high-probability navigation ambiguity
-   without moving either workflow.
+1. **Label the two mix destinations by job, not by shared noun.**
+   The header’s **Mix Plan** is an operational make-day view, while Settings → Recipes →
+   **Mix Recipes** is master-data editing. Their supporting copy explains whether staff should
+   plan upcoming production or maintain the shared recipe definition. This removes a
+   high-probability navigation ambiguity without moving either workflow.
 
 2. **Make “Stock” and “Warehouse” terminology consistent.**  
    The bottom tab says **Whse**, the menu says **Stock**, and cast screens say **Warehouse**.
@@ -327,7 +327,7 @@ These can be implemented without changing the underlying alert rules, permission
 
 Before changing a menu or notice, review these decisions with product/operations:
 
-1. Confirm the preferred terms for **Mix Plan / Mix Recipes** and **Warehouse / Stock**.
+1. Confirm the preferred terminology for **Warehouse / Stock**.
 2. Choose the manager attention model and owner for each count/badge.
 3. Approve a notification escalation policy for batch, pace, completion, and manual-override
    signals.

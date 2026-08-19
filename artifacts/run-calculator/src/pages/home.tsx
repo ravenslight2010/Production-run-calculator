@@ -3679,12 +3679,12 @@ export default function Home() {
   const { templates: serverTemplates, isLoaded: templatesLoaded } = useRunTemplates();
   const { pin: serverPin } = useSupervisorPin();
   // Factory-wide mixes (open to all signed-in users) — drives the Mixes
-  // make-day plan and the manager Mixes editor.
+  // make-day plan and the manager Mix Recipes editor.
   const { items: mixes } = useMixes();
   // Imported mixes by name (case-insensitive) → recipe rows for the per-run
   // Mix Recipe card. The old built-in factory presets were purged, so the
   // server-side Mixes master data (from premix sheet imports / the Settings
-  // Mixes editor) is the real ingredient source when a mix name is picked.
+  // Mix Recipes editor) is the real ingredient source when a mix name is picked.
   const serverMixRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const mix of mixes) {
@@ -4066,7 +4066,7 @@ export default function Home() {
       return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
     };
   }, [enabledCheeseRecipes, serverCheeseNames]);
-  // The make-day chosen on the Mixes tab (defaults to today).
+  // The make-day chosen on the Mix Plan tab (defaults to today).
   const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
   const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
@@ -5283,7 +5283,7 @@ export default function Home() {
     if (cat !== "mixes" && cat !== "dough" && cat !== "sauce" && cat !== "cheese") {
       return [] as string[];
     }
-    // On the Mixes tab, factory MIX_SEED names count as "known" too: they are
+    // On the Mix Plan tab, factory MIX_SEED names count as "known" too: they are
     // locally seeded (not stale), unmergeable by the apply guardrail, and
     // would just be re-seeded if merged away — treating them as stale would
     // surface selectable-but-unmergeable rows.
@@ -5315,7 +5315,7 @@ export default function Home() {
     // lives on every device forever. Any entry that matches NO pool name is a
     // stale reference too — offer it here (applyRecipeNameMerge already
     // rewrites + tombstones these lists). Factory MIX_SEED names are excluded
-    // on the Mixes tab: they are locally seeded (not stale) and would be
+    // on the Mix Plan tab: they are locally seeded (not stale) and would be
     // re-seeded if merged away.
     const legacyList =
       cat === "dough" ? doughRecipeNames
@@ -5415,7 +5415,7 @@ export default function Home() {
   // Human label for the active recipe tab's real-recipe home (Manage Lists
   // section) — used by the "old reference" tag and the cleanup panel copy.
   const mergePoolLabel =
-    mergeCategory === "mixes" ? "Mixes"
+    mergeCategory === "mixes" ? "Mix Recipes"
     : mergeCategory === "dough" ? "Dough Recipes"
     : mergeCategory === "sauce" ? "Sauce Recipes"
     : "Cheese Recipes";
@@ -11043,7 +11043,7 @@ export default function Home() {
         void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
       }
       // Any mixes detected in the sheet were added to the factory-wide Mixes
-      // list — refresh the Mixes screen so they appear right away.
+      // list — refresh Mix Recipes so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
       // so the run applicator "Cheese" pickers list them right away. Existing
@@ -11074,7 +11074,7 @@ export default function Home() {
       setSheetListSignal((c) => c + 1);
       const mixNote =
         mixesAdded > 0
-          ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to the Mixes screen — set batch size and per-pizza amounts there.`
+          ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to Mix Recipes — set batch size and per-pizza amounts there.`
           : "";
       const cheeseNote =
         cheeseRecipesAdded > 0
@@ -12780,7 +12780,7 @@ export default function Home() {
           ...(isSupervisor ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
-          ...(canManageInventory ? [{ key: "mixes", label: "Mixes" }] : []),
+          ...(canManageInventory ? [{ key: "mixes", label: "Mix Recipes" }] : []),
           ...(canManageInventory ? [{ key: "cheeseRecipes", label: "Cheese Recipes" }] : []),
           ...(canManageInventory ? [{ key: "dieDefaults", label: "Die Defaults" }] : []),
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
@@ -12795,7 +12795,7 @@ export default function Home() {
 
         // ── 2-level navigation: section pills → sub-tabs ──────────────────────
         const tabLabel: Record<string, string> = {
-          dough: "Dough", sauce: "Sauce", cheeseRecipes: "Cheese", mixes: "Mixes",
+          dough: "Dough", sauce: "Sauce", cheeseRecipes: "Cheese", mixes: "Mix Recipes",
           brands: "Brands", flavors: "Flavors", ingredientTypes: "Applicator Types",
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
@@ -13038,7 +13038,7 @@ export default function Home() {
                     <div className="flex flex-wrap gap-1.5">
                       {([
                         ["ingredients", "Ingredients"],
-                        ["mixes", "Mixes"],
+                        ["mixes", "Mix Recipes"],
                         ["dough", "Dough"],
                         ["sauce", "Sauce"],
                         ["cheese", "Cheese mixes"],
@@ -13524,7 +13524,7 @@ export default function Home() {
                           <li><span className="font-medium text-foreground">Pizza Spec Sheets</span> — Import Spec Sheet (below), first</li>
                           <li><span className="font-medium text-foreground">Dough recipe sheets</span> — Import Spec Sheet (below)</li>
                           <li><span className="font-medium text-foreground">Sauce recipe sheets</span> — Import Spec Sheet (below)</li>
-                          <li><span className="font-medium text-foreground">Pre-Mix Sheets</span> — Manage Lists ▸ Mixes</li>
+                          <li><span className="font-medium text-foreground">Pre-Mix Sheets</span> — Manage Lists ▸ Mix Recipes</li>
                           <li><span className="font-medium text-foreground">Cheese Mix Recipe Specs</span> — Manage Lists ▸ Cheese Recipes, last</li>
                         </ol>
                         <p className="text-[11px] text-muted-foreground">If a name still doesn&apos;t match (e.g. an extra word or a typo), confirm the match once in the review step — the app remembers it next time.</p>
@@ -13572,7 +13572,7 @@ export default function Home() {
                             ["dough", "Dough Recipes"],
                             ["sauce", "Sauce Recipes"],
                             ["cheese", "Cheese Recipes"],
-                            ["mixes", "Mixes"],
+                            ["mixes", "Mix Recipes"],
                           ] as [keyof ExportSelection, string][]).map(([key, label]) => (
                             <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
                               <input
@@ -13679,7 +13679,7 @@ export default function Home() {
                   />
                 )}
 
-                {/* Mixes (pre-blended mix definitions) */}
+                {/* Mix Recipes (pre-blended mix definitions) */}
                 {manageCategory === "mixes" && canManageInventory && (
                   <div className="space-y-3">
                     {isManager && (
@@ -13987,7 +13987,7 @@ export default function Home() {
                   <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("mixes")}>
-                  <Blend className="w-4 h-4 mr-2" /> Mixes
+                  <Blend className="w-4 h-4 mr-2" /> Mix Plan
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowReportIssue(true)}>
                   <LifeBuoy className="w-4 h-4 mr-2" /> Report an issue
@@ -14661,7 +14661,7 @@ export default function Home() {
                 })()}
               </TabsContent>
 
-              {/* ─── MIXES ─── */}
+              {/* ─── MIX PLAN ─── */}
               <TabsContent value="mixes">
                 {/* Pre-blended mixes made ahead for a product. Pick a make-day;
                     for every scheduled run within a matching mix's days-early
@@ -14674,7 +14674,10 @@ export default function Home() {
                 <div className="space-y-4 max-w-2xl mx-auto pb-8">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Blend className="w-5 h-5 text-emerald-400" />
-                    <h2 className="text-lg font-semibold">Mixes</h2>
+                    <h2 className="text-lg font-semibold">Mix Plan</h2>
+                    <p className="basis-full text-sm text-muted-foreground">
+                      Plan which mixes to make ahead for upcoming scheduled production.
+                    </p>
                   </div>
                   <Card>
                     <CardContent className="px-4 py-3 flex items-center gap-3 flex-wrap">
@@ -14695,7 +14698,7 @@ export default function Home() {
                     if (mixes.length === 0) {
                       return (
                         <p className="text-sm text-muted-foreground px-1">
-                          No mixes defined yet.{canManageInventory ? " Add mixes under Settings → Mixes." : " Ask a manager to add mixes under Settings."}
+                          No mix recipes defined yet.{canManageInventory ? " Add them under Settings → Mix Recipes." : " Ask a manager to add them under Settings."}
                         </p>
                       );
                     }
@@ -14791,7 +14794,7 @@ export default function Home() {
                           >
                             <CardHeader className="pb-2 pt-4 px-5">
                               <CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
-                                <Blend className="w-4 h-4" /> Mixes for {group.date}
+                                <Blend className="w-4 h-4" /> Mix Plan for {group.date}
                                 <span className="ml-1 font-normal normal-case text-xs text-emerald-400/80">
                                   ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
                                 </span>
@@ -14859,7 +14862,7 @@ export default function Home() {
                                         {m.missingAmounts && (
                                           <div className="flex items-center gap-1.5 rounded bg-amber-900/30 border border-amber-700/40 px-2 py-1.5 mb-1.5 text-xs text-amber-300">
                                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                            No oz/pizza amounts — open the Mixes editor to enter them
+                                            No oz/pizza amounts — open Mix Recipes to enter them
                                           </div>
                                         )}
                                         <div className="space-y-1 pt-1 border-t border-emerald-800/30">

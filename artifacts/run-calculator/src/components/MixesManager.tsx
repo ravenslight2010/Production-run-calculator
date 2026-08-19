@@ -173,17 +173,14 @@ export default function MixesManager({
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Blend className="w-4 h-4" />
-          Mixes
+          Mix Recipes
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Define pre-blended mixes made ahead for a product. Match a mix to a
-          product by <span className="font-semibold">brand + flavor</span>, set
-          its batch size and components (oz per pizza). The Mixes tab shows what
-          to make for a chosen day — within the{" "}
-          <span className="font-semibold text-sky-300">days-early</span> window
-          (default {DEFAULT_DAYS_EARLY}).
+          Define shared pre-blended recipes made ahead for a product. Match a
+          recipe to a product by <span className="font-semibold">brand + flavor</span>,
+          then set its batch size and per-pizza components.
         </p>
 
         {error && (
