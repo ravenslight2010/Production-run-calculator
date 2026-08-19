@@ -121,9 +121,11 @@ function blankCheeseRecipe(): CheeseRecipe {
 // SEPARATE pool (cheese is not routed into Mixes). The server enforces the
 // manager role on writes; this card is only rendered for managers.
 export default function CheeseRecipesManager({
+  brands = [],
   ingredientSuggestions = [],
   onSaved,
 }: {
+  brands?: string[];
   ingredientSuggestions?: string[];
   /** Called with the full server-normalized pool after any successful save. */
   onSaved?: (saved: CheeseRecipe[]) => void;
@@ -406,6 +408,7 @@ export default function CheeseRecipesManager({
                                 <CheeseRecipeEditor
                                   recipe={recipe}
                                   disabled={busy}
+                                    brands={brands}
                                   ingredientSuggestions={ingredientSuggestions}
                                   onChange={(next) => {
                                     maybeLearnPoolRename("cheese", recipe.name, next.name, next.brand);
@@ -458,6 +461,7 @@ export default function CheeseRecipesManager({
 export function CheeseRecipeEditor({
   recipe,
   disabled,
+  brands,
   ingredientSuggestions,
   onChange,
   onDelete,
@@ -465,6 +469,7 @@ export function CheeseRecipeEditor({
 }: {
   recipe: CheeseRecipe;
   disabled: boolean;
+  brands: string[];
   ingredientSuggestions: string[];
   onChange: (recipe: CheeseRecipe) => void;
   onDelete: () => void;
@@ -520,6 +525,9 @@ export function CheeseRecipeEditor({
   // sharePct first, then ozPerPizza proportions, then lbs proportions. Drives
   // the Share % column's derived placeholder.
   const shares = useMemo(() => cheeseComponentShares(draft.components), [draft.components]);
+  const brandOptions = draft.brand && !brands.includes(draft.brand)
+    ? [draft.brand, ...brands]
+    : brands;
 
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 p-2.5 space-y-2">
@@ -603,15 +611,21 @@ export function CheeseRecipeEditor({
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Customer (brand)</span>
-          <input
-            type="text"
+          <select
             value={draft.brand}
             onChange={(e) => patch({ brand: e.target.value })}
             onBlur={() => commit()}
             disabled={disabled}
-            placeholder="Any customer"
+            aria-label="Customer (brand)"
             className="w-40 rounded-md border border-input bg-background px-2 py-1 text-xs"
-          />
+          >
+            <option value="">Any customer</option>
+            {brandOptions.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand === draft.brand && !brands.includes(brand) ? `${brand} (current)` : brand}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Shredder setting</span>

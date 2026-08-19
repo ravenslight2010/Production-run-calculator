@@ -381,7 +381,7 @@ export default function MixesManager({
   );
 }
 
-function MixEditor({
+export function MixEditor({
   mix,
   disabled,
   brands,
@@ -446,6 +446,20 @@ function MixEditor({
   }
 
   const flavorOptions = brandFlavors[draft.brand] ?? [];
+  const brandOptions = draft.brand && !brands.includes(draft.brand)
+    ? [draft.brand, ...brands]
+    : brands;
+  const flavorOptionsWithCurrent = draft.flavor && !flavorOptions.includes(draft.flavor)
+    ? [draft.flavor, ...flavorOptions]
+    : flavorOptions;
+
+  function changeBrand(brand: string) {
+    const nextFlavor =
+      brand === draft.brand || (draft.flavor && (brandFlavors[brand] ?? []).includes(draft.flavor))
+        ? draft.flavor
+        : "";
+    setDraft((current) => ({ ...current, brand, flavor: nextFlavor }));
+  }
 
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 p-2.5 space-y-2">
@@ -493,39 +507,39 @@ function MixEditor({
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Brand</span>
-          <input
-            type="text"
-            list={`mix-brands-${draft.id}`}
+          <select
             value={draft.brand}
-            onChange={(e) => patch({ brand: e.target.value })}
+            onChange={(e) => changeBrand(e.target.value)}
             onBlur={() => commit()}
             disabled={disabled}
-            placeholder="Any brand"
+            aria-label="Brand"
             className="w-36 rounded-md border border-input bg-background px-2 py-1 text-xs"
-          />
-          <datalist id={`mix-brands-${draft.id}`}>
-            {brands.map((b) => (
-              <option key={b} value={b} />
+          >
+            <option value="">Any brand</option>
+            {brandOptions.map((b) => (
+              <option key={b} value={b}>
+                {b === draft.brand && !brands.includes(b) ? `${b} (current)` : b}
+              </option>
             ))}
-          </datalist>
+          </select>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Flavor</span>
-          <input
-            type="text"
-            list={`mix-flavors-${draft.id}`}
+          <select
             value={draft.flavor}
             onChange={(e) => patch({ flavor: e.target.value })}
             onBlur={() => commit()}
             disabled={disabled}
-            placeholder="Any flavor"
+            aria-label="Flavor"
             className="w-36 rounded-md border border-input bg-background px-2 py-1 text-xs"
-          />
-          <datalist id={`mix-flavors-${draft.id}`}>
-            {flavorOptions.map((f) => (
-              <option key={f} value={f} />
+          >
+            <option value="">Any flavor</option>
+            {flavorOptionsWithCurrent.map((f) => (
+              <option key={f} value={f}>
+                {f === draft.flavor && !flavorOptions.includes(f) ? `${f} (current)` : f}
+              </option>
             ))}
-          </datalist>
+          </select>
         </div>
       </div>
 

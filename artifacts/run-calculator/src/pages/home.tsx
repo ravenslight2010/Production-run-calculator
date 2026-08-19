@@ -13622,6 +13622,7 @@ export default function Home() {
                       </button>
                     )}
                     <CheeseRecipesManager
+                      brands={brands}
                       ingredientSuggestions={unifiedIngredientUniverse}
                       onSaved={propagateCheeseRecipeUpdates}
                     />
