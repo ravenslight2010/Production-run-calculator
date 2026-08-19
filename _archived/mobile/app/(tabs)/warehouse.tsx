@@ -20,6 +20,8 @@ import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import { useFreezerPullItems } from "@/hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
+import { OZ_PER_LB } from "@workspace/mixes";
+import { useMixes } from "@/hooks/useMixes";
 import { useCycleCountSchedules } from "@/hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "@/context/cycleCount";
 import { buildCycleCountDueList } from "@workspace/cycle-count";
@@ -93,6 +95,99 @@ function buildRunNeedRows(c: RunCalc, s: RunSettings): NeedRow[] {
   return rows;
 }
 
+// Build the per-run rows sent to the freezer-pull planner. Unlike the general
+// mobile warehouse summary, freezer tags may target a recipe component, so
+// dough, sauce, cheese, and mix components must be expanded into their scaled
+// pounds. This mirrors the web warehouse aggregation.
+function buildFreezerRunNeedRows(
+  c: RunCalc,
+  s: RunSettings,
+  mixComponentsByName: ReadonlyMap<string, readonly { ingredient: string; perPizza: number }[]>,
+): NeedRow[] {
+  const rows = new Map<string, { label: string; num: number; unit: string; order: number }>();
+  let order = 0;
+  const add = (label: string, num: number, unit: string) => {
+    const cleanedLabel = label.trim();
+    if (!cleanedLabel || !Number.isFinite(num) || num <= 0) return;
+    const key = `${cleanedLabel.toLowerCase()}__${unit}`;
+    const existing = rows.get(key);
+    if (existing) existing.num += num;
+    else rows.set(key, { label: cleanedLabel, num, unit, order: order++ });
+  };
+  const addRecipe = (recipe: RunSettings["doughRecipe"], multiplier: number) => {
+    for (const row of recipe ?? []) {
+      const ingredient = row.ingredient?.trim();
+      const lbs = Number(row.lbs);
+      if (ingredient && lbs > 0) add(ingredient, lbs * multiplier, "lbs");
+    }
+  };
+  const hasRecipeRows = (recipe: RunSettings["doughRecipe"]) =>
+    recipe.some((row) => row.ingredient?.trim() && Number(row.lbs) > 0);
+
+  if (c.doughBatches > 0) {
+    if (hasRecipeRows(s.doughRecipe)) addRecipe(s.doughRecipe, c.doughBatches);
+    else add(s.doughRecipeName || "Dough", c.doughBatches, "batches");
+  }
+
+  if (c.sauceBatches > 0) {
+    if (hasRecipeRows(s.frontlineRecipe)) addRecipe(s.frontlineRecipe, c.sauceBatches);
+    else if (s.frontlineRecipeName.trim()) add(s.frontlineRecipeName, c.sauceBatches, "batches");
+  }
+
+  const apps = [
+    { type: s.app1Type, lbs: c.app1Lbs, batches: c.app1Batches, name: s.app1CheeseRecipeName, recipe: s.app1CheeseRecipe },
+    { type: s.app2Type, lbs: c.app2Lbs, batches: c.app2Batches, name: s.app2CheeseRecipeName, recipe: s.app2CheeseRecipe },
+    { type: s.app3Type, lbs: c.app3Lbs, batches: c.app3Batches, name: s.app3CheeseRecipeName, recipe: s.app3CheeseRecipe },
+    { type: s.app4Type, lbs: c.app4Lbs, batches: c.app4Batches, name: s.app4CheeseRecipeName, recipe: s.app4CheeseRecipe },
+  ];
+  const scheduledPizzas = s.casesNeeded * s.pizzasPerCase;
+  for (const app of apps) {
+    const type = app.type.trim();
+    if (!type) continue;
+    const lower = type.toLowerCase();
+    const isMix = lower.includes("mix");
+    const isCheese = lower.includes("cheese");
+    const recipeName = app.name.trim();
+    const label = recipeName && (isMix || isCheese) ? `${type} — ${recipeName}` : type;
+
+    if (isMix && app.lbs > 0) {
+      add(label, app.lbs, "lbs");
+      for (const component of mixComponentsByName.get(recipeName.toLowerCase()) ?? []) {
+        const ingredient = component.ingredient.trim();
+        const perPizzaOz = Number(component.perPizza);
+        if (ingredient && perPizzaOz > 0) {
+          add(ingredient, (perPizzaOz * scheduledPizzas) / OZ_PER_LB, "lbs");
+        }
+      }
+    } else if (isCheese && app.batches > 0 && hasRecipeRows(app.recipe)) {
+      addRecipe(app.recipe, Math.max(1, app.batches));
+    } else if (app.batches > 0) {
+      add(label, app.batches, "batches");
+    } else if (app.lbs > 0) {
+      add(label, app.lbs, "lbs");
+    }
+  }
+
+  const peps = [
+    { type: s.pep1Type, lbs: c.pep1Lbs, batches: c.pep1Batches },
+    { type: s.pep2Type, lbs: c.pep2Lbs, batches: c.pep2Batches },
+  ];
+  for (const pep of peps) {
+    if (!pep.type || pep.lbs <= 0) continue;
+    if (DEFAULT_PEP_TYPES.includes(pep.type)) add(pep.type, pep.lbs, "lbs");
+    else if (pep.batches > 0) add(pep.type, pep.batches, "batches");
+    else add(pep.type, pep.lbs, "lbs");
+  }
+
+  return [...rows.values()]
+    .sort((a, b) => a.order - b.order)
+    .map((row) => ({
+      label: row.label,
+      value: fmtNum(row.num, row.unit === "batches" ? 2 : 1),
+      sub: row.unit,
+    }));
+}
+
 // Packaging consumables for a SINGLE cartoned run (mirrors the all-runs roll-up).
 function buildRunPackagingRows(s: RunSettings): NeedRow[] {
   const rows: NeedRow[] = [];
@@ -124,6 +219,7 @@ export default function WarehouseScreen() {
   const router = useRouter();
   const { isManager } = useMe();
   const { items: freezerPullItems } = useFreezerPullItems();
+  const { items: mixes } = useMixes();
   const { schedules: cycleCountSchedules } = useCycleCountSchedules();
   const cycleCountQc = useQueryClient();
   const markCountedMutation = useMutation({
@@ -221,6 +317,14 @@ export default function WarehouseScreen() {
     packagingRows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" });
 
   const today = todayStr();
+  const mixComponentsByName = React.useMemo(() => {
+    const map = new Map<string, { ingredient: string; perPizza: number }[]>();
+    for (const mix of mixes) {
+      const key = mix.name.trim().toLowerCase();
+      if (key) map.set(key, mix.components);
+    }
+    return map;
+  }, [mixes]);
   const scheduledDays = Object.keys(scheduled)
     .filter((d) => (scheduled[d]?.length ?? 0) > 0 && d >= today)
     .sort();
@@ -252,7 +356,7 @@ export default function WarehouseScreen() {
         };
         const c = computeCalc(runState, nowMs);
         const needRows = [
-          ...buildRunNeedRows(c, settings),
+          ...buildFreezerRunNeedRows(c, settings, mixComponentsByName),
           ...buildRunPackagingRows(settings),
         ];
         return {

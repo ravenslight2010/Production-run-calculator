@@ -271,6 +271,7 @@ import {
 import { buildIngredientUniverse, type IngredientCategory } from "@workspace/ingredient-catalog";
 import {
   buildMixPlan,
+  OZ_PER_LB,
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
   repointMixIngredients,
@@ -657,14 +658,25 @@ function NeedsList({ rows }: { rows: NeedRow[] }) {
 // (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
 // applicator rows are labeled with the specific blend name so staff know
 // exactly WHICH cheese/mix to pull.
-function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean }): NeedRow[] {
-  const map = new Map<string, { num: number; unit: string; order: number }>();
+function aggregateNeedRows(
+  valsList: FormValues[],
+  opts?: {
+    warehouse?: boolean;
+    mixComponentsByName?: ReadonlyMap<string, readonly { ingredient: string; perPizza: number }[]>;
+  },
+): NeedRow[] {
+  const map = new Map<string, { label: string; num: number; unit: string; order: number }>();
   let order = 0;
   const add = (label: string, num: number, unit: string) => {
-    const key = `${label}__${unit}`;
+    const cleanedLabel = label.trim();
+    if (!cleanedLabel || !Number.isFinite(num) || num <= 0) return;
+    // A freezer-pull item matches case-insensitively. Keep ingredient rows
+    // coalesced by that same key so one scheduled run never shows a component
+    // twice when it appears in multiple recipe sources.
+    const key = `${cleanedLabel.toLowerCase()}__${unit}`;
     const ex = map.get(key);
     if (ex) ex.num += num;
-    else map.set(key, { num, unit, order: order++ });
+    else map.set(key, { label: cleanedLabel, num, unit, order: order++ });
   };
   for (const vals of valsList) {
     const s = computeSummaryStats(vals);
@@ -742,6 +754,19 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
           : a.type;
       if (isMix && a.lbs > 0) {
         add(label, a.lbs, "lbs");
+        // Mix library components are per-pizza ounces, not per-recipe-batch
+        // pounds. Scale them from this scheduled run's total pizza count so a
+        // tagged component gets the real warehouse pull amount.
+        if (opts?.warehouse && blendName) {
+          const components = opts.mixComponentsByName?.get(blendName.toLowerCase()) ?? [];
+          for (const component of components) {
+            const ingredient = component.ingredient.trim();
+            const perPizzaOz = Number(component.perPizza);
+            if (ingredient && perPizzaOz > 0) {
+              add(ingredient, (perPizzaOz * s.totalPizzas) / OZ_PER_LB, "lbs");
+            }
+          }
+        }
         // Also emit the specific blend name as a separate alias row so
         // managers can tag individual mix names (e.g. "Italian Blend") in the
         // freezer-pull config instead of just the generic "Mix" type.
@@ -796,8 +821,8 @@ function aggregateNeedRows(valsList: FormValues[], opts?: { warehouse?: boolean 
   }
   return [...map.entries()]
     .sort((a, b) => a[1].order - b[1].order)
-    .map(([key, val]) => ({
-      label: key.slice(0, key.lastIndexOf("__")),
+    .map(([, val]) => ({
+      label: val.label,
       value: fmtNum(val.num, val.unit === "batches" ? 2 : 1),
       sub: val.unit,
     }));
@@ -3660,6 +3685,17 @@ export default function Home() {
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
       if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
+    }
+    return map;
+  }, [mixes]);
+  // Mix components retain their per-pizza-ounce unit here. The warehouse need
+  // aggregation converts them to pounds for each run, the same basis used by
+  // the make-day plan.
+  const serverMixComponentsByName = useMemo(() => {
+    const map = new Map<string, { ingredient: string; perPizza: number }[]>();
+    for (const mix of mixes) {
+      const key = mix.name.trim().toLowerCase();
+      if (key) map.set(key, mix.components);
     }
     return map;
   }, [mixes]);
@@ -14210,30 +14246,11 @@ export default function Home() {
                           ...(r.dieType ? { dieType: r.dieType } : {}),
                         };
                         const needRows: NeedRow[] = [
-                          ...aggregateNeedRows([vals]),
+                          ...aggregateNeedRows([vals], {
+                            warehouse: true,
+                            mixComponentsByName: serverMixComponentsByName,
+                          }),
                           ...aggregatePackagingNeeds([vals]),
-                          // Individual dough recipe sub-ingredients (e.g.
-                          // "Butter", "SAF Yeast") so managers can tag frozen
-                          // dough components for early pull.
-                          ...(vals.doughRecipe ?? [])
-                            .filter(r => r.ingredient?.trim() && Number(r.lbs ?? 0) > 0)
-                            .map(r => ({ label: r.ingredient.trim(), value: fmtNum(Number(r.lbs), 1), sub: "lbs" })),
-                          // Individual frontline/sauce recipe sub-ingredients.
-                          ...(vals.frontlineRecipe ?? [])
-                            .filter(r => r.ingredient?.trim() && Number(r.lbs ?? 0) > 0)
-                            .map(r => ({ label: r.ingredient.trim(), value: fmtNum(Number(r.lbs), 1), sub: "lbs" })),
-                          // Mix component ingredients — looked up from the
-                          // factory mix library by the mix name linked to each
-                          // applicator slot so individual frozen components can
-                          // be tagged (e.g. "Basil Pesto" inside "Veggie Mix").
-                          ...([vals.app1CheeseRecipeName, vals.app2CheeseRecipeName, vals.app3CheeseRecipeName, vals.app4CheeseRecipeName] as (string | undefined)[])
-                            .filter((n): n is string => Boolean(n?.trim()))
-                            .flatMap(mixName => {
-                              const components = serverMixRowsByName.get(mixName.trim().toLowerCase()) ?? [];
-                              return components
-                                .filter(c => c.ingredient?.trim())
-                                .map(c => ({ label: c.ingredient.trim(), value: "", sub: "" }));
-                            }),
                         ];
                         return {
                           date: day.date,

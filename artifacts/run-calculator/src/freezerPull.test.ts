@@ -129,6 +129,48 @@ describe("buildFreezerPullPlan", () => {
     expect(plan[0].runs[0].items.map((i) => i.name)).toEqual(["sausage mix"]);
   });
 
+  it("keeps the scaled dough ingredient quantity for a 336-case freezer pull", () => {
+    const plan = buildFreezerPullPlan({
+      runs: [
+        {
+          date: "2026-06-26",
+          brand: "Hannaford",
+          flavor: "4 Meat",
+          ingredients: [
+            // 11 scaled dough batches × 22 lb per batch, not the 22 lb
+            // recipe input. The app's warehouse resolver owns this math; the
+            // shared pull planner must preserve the formatted result verbatim.
+            { name: "Malted Barley", quantity: "242.0", unit: "lbs" },
+            { name: "malted barley", quantity: "242.0", unit: "lbs" },
+            // Mix components are also already scaled from per-pizza ounces.
+            { name: "Basil Pesto", quantity: "126.0", unit: "lbs" },
+            { name: "Flour", quantity: "1804.0", unit: "lbs" },
+          ],
+        },
+      ],
+      freezerItems: [item("malted barley", 3), item("Basil Pesto", 3)],
+      today,
+    });
+
+    expect(plan).toHaveLength(1);
+    expect(plan[0].runs[0].items).toEqual([
+      expect.objectContaining({
+        name: "Malted Barley",
+        quantity: "242.0",
+        unit: "lbs",
+        daysEarly: 3,
+      }),
+      expect.objectContaining({
+        name: "Basil Pesto",
+        quantity: "126.0",
+        unit: "lbs",
+        daysEarly: 3,
+      }),
+    ]);
+    expect(plan[0].runs[0].items.filter((entry) => entry.name.toLowerCase() === "malted barley")).toHaveLength(1);
+    expect(plan[0].runs[0].items.map((entry) => entry.name)).not.toContain("Flour");
+  });
+
   it("groups multiple runs under the same date, sorted by date", () => {
     const items = [item("Sausage Mix", 5)];
     const plan = buildFreezerPullPlan({
