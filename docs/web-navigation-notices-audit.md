@@ -88,7 +88,6 @@ Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 | Settings | All signed-in users | Always | Open **Manage Lists & Settings**; available tabs vary by capability | Header menu → dialog |
 | Password | All signed-in users | Always | Change own password | Header menu → dialog |
 | Get Started | All signed-in users | Always | Open product onboarding | Header menu |
-| Mobile App | All signed-in users | Always | Open mobile-app information | Header menu |
 | Guided Tour | All signed-in users | Always | Start/restart guided tour | Header menu |
 | Reset sandbox | Sandbox users only | Sandbox environment only | Reset sandbox data after confirmation | Header menu |
 | Sign out | All signed-in users | Always | End the session | Header menu |
@@ -335,9 +334,8 @@ These can be implemented without changing the underlying alert rules, permission
    currently a user-facing defect by itself, but it raises the chance that a menu item, badge, or
    capability rule will be added to one model and not the other.
 
-2. **Document the web/mobile intentional differences per notice.**  
-   This audit is web-first. Before moving notices, make a small parity matrix so a web placement
-   improvement does not accidentally change a deliberately different mobile workflow.
+2. **Keep the responsive browser boundary explicit.**
+   This audit covers the maintained web application across desktop, phone, and tablet browsers.
 
 ---
 
@@ -350,7 +348,5 @@ Before changing a menu or notice, review these decisions with product/operations
 3. Approve a notification escalation policy for batch, pace, completion, and manual-override
    signals.
 4. Decide whether global configuration remains a single dialog.
-5. Identify which changes must preserve exact web/mobile placement parity and which are
-   intentionally web-only.
 
 Only after those choices are made should navigation or notice behavior be changed.

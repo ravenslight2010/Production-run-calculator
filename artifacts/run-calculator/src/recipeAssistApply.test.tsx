@@ -3,21 +3,14 @@
 // End-to-end coverage for the AI recipe assistant's confirm-first Apply + 6s
 // Undo flow on the CLIENT. The server-side sanitize logic is unit-tested
 // elsewhere, but the part that actually mutates a run's recipe rows — a returned
-// suggestion renders → tap Apply → rows change → tap Undo → rows restore — had no
-// coverage on either platform. That flow drives the existing recipe write paths,
-// so a regression could silently corrupt a run's recipe rows.
+// suggestion renders → tap Apply → rows change → tap Undo → rows restore — drives
+// the existing recipe write path, so a regression could silently corrupt a run's
+// recipe rows.
 //
 // The web SuggestionCard (artifacts/run-calculator/src/components/AssistantTab.tsx)
-// is imported and rendered directly. The mobile SuggestionCard
-// (artifacts/run-calculator-mobile/app/(tabs)/assistant.tsx) carries byte-for-byte
-// identical apply/undo logic behind a React Native / Expo import graph that can't
-// load in node, so it is pulled in through the strip-imports -> transpile ->
-// inject-React pipeline documented in .agents/memory/web-test-harness.md (a stub
-// prelude + injected real React supply the symbols the stripped imports used to
-// provide), and the SAME suite is run against it. This enforces the replit.md
-// web<->mobile parity rule for the apply/undo BEHAVIOR, not just its source bytes.
+// is imported and rendered directly.
 //
-// What is asserted on BOTH platforms:
+// What is asserted:
 //  1. A returned suggestion renders its proposed rows but writes NOTHING until the
 //     worker taps Apply (the AI never edits a recipe on its own).
 //  2. Tapping Apply calls the run's write path exactly once and the recipe rows
@@ -46,10 +39,10 @@ type SuggestionCardFn = (props: {
 
 // ── A representative run's recipe store + the real apply contract ─────────────
 // Stands in for the run-data write path (web applyRecipeSuggestion in pages/home
-// .tsx, mobile applyRecipeSuggestion in (tabs)/assistant.tsx). Both replace the
-// targeted recipe field's rows with the suggestion's rows and hand back an `undo`
-// that restores the exact previous rows. The handler is the boundary the AI must
-// not cross without an explicit Apply, so it counts its own calls.
+// .tsx). It replaces the targeted recipe field's rows with the suggestion's rows
+// and hands back an `undo` that restores the exact previous rows. The handler is
+// the boundary the AI must not cross without an explicit Apply, so it counts its
+// own calls.
 type Row = { ingredient: string; lbs: number };
 
 function makeRecipeStore(initial: Row[]) {

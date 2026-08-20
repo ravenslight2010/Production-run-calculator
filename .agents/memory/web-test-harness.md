@@ -1,47 +1,14 @@
 ---
-name: web run-calculator vitest harness
-description: How the web artifact's vitest suite is wired, and the contention rules that keep it from flaking.
+name: Web run-calculator Vitest harness
+description: How the web artifact's Vitest suite is wired, and the contention rules that keep it from flaking.
 ---
 
-# run-calculator (web) vitest harness
-
-The web artifact (`artifacts/run-calculator`) is the home for shared web+mobile
-unit tests. The mobile artifact has no vitest of its own.
-
-## Testing the mobile module without its native import graph
-The mobile copy of a shared pure-logic module (e.g.
-`artifacts/run-calculator-mobile/context/fillMissing.ts`) cannot be imported
-directly in node/jsdom — its React Native / Expo import graph won't load. The
-parity test loads it via a **strip-imports → `typescript.transpileModule` →
-temp `.mjs` import** pipeline, with a STUB_PRELUDE supplying the symbols the
-stripped imports used to provide. `typescript` resolves from the web artifact
-(root devDep); esbuild does not resolve directly. Use this same pattern for any
-future web↔mobile parity test of a byte-identical shared module.
-
-**Why:** lets one test drive both the real web module and the mobile source and
-assert identical output, satisfying the replit.md parity rule, without standing
-up a second RN-capable test runner.
-
-### Rendering a mobile RN *component* (not just pure logic) through the harness
-To exercise a mobile React-Native component's behavior in jsdom, strip its
-imports, transpile to **CommonJS**, and run it via `new Function("exports",
-"require", "React", PRELUDE + outputText)` — inject the test's OWN React (same
-instance @testing-library/react renders with; a 2nd copy breaks the hook
-dispatcher) and a PRELUDE of tiny host-element stubs for the RN/custom UI the
-stripped imports used to provide (`View/Card -> div`, `Text -> span`, `Button ->
-real <button>` wired to `onPress` so `fireEvent.click` drives it, the rest ->
-null). Export the inner component (e.g. `SuggestionCard`) so it's reachable on
-`exports`. Gotcha: every symbol referenced at **module-eval time** must be in the
-prelude — `const styles = StyleSheet.create({ ... fontFamily: FONTS.x })` touches
-both `StyleSheet` AND `FONTS`, so stub `FONTS` as a `new Proxy({}, { get: () =>
-"System" })`. Symbols used only inside un-called functions stay harmless free
-identifiers under strict mode. See `recipeAssistApply.test.tsx`.
+# Run-calculator web Vitest harness
 
 ## Contention is the enemy, not logic
-Validation runs **alongside the 4 dev workflows**, which starves Vitest. With
-defaults this produced two non-logic failures: a `beforeAll` hook hitting the
-10s default while transpiling the mobile module, and "Failed to start forks
-worker" when files spin up workers concurrently.
+Validation runs alongside the development workflows, which can starve Vitest.
+Concurrent workers have previously caused "Failed to start forks worker"
+failures.
 
 **How to apply:** `vitest.config.ts` sets `fileParallelism: false` (one worker
 at a time — kills concurrent fork-startup starvation), `hookTimeout: 60000`,

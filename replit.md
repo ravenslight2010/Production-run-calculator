@@ -27,38 +27,34 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-- **Web app:** `artifacts/run-calculator` (React + Vite). The bulk of the UI/logic lives in `src/pages/home.tsx` (Tabs/activeTab system, run identity, packaging, draining panel). Per-run form values are persisted in localStorage.
-- **Mobile app:** `artifacts/run-calculator-mobile` (Expo / React Native). Local-only state in `app/RunContext.tsx` (+ a per-second clock in `useRunClock()`), AsyncStorage key `run-calc-mobile-v2`, additive migration via `normalizeState`/`normalizeSettings`. Tabs under `app/(tabs)/`.
+- **Web app:** `artifacts/run-calculator` (React + Vite), responsive for desktop, phone, and tablet browsers. The bulk of the UI/logic lives in `src/pages/home.tsx` (Tabs/activeTab system, run identity, packaging, draining panel). Per-run form values are persisted in localStorage.
 - **API server:** `artifacts/api-server` (Express 5). Routes in `src/routes/*` (~70 files; AI endpoints prefixed `ai*`). Server validates with Zod schemas from `@workspace/api-zod` and never uses `console.log` (use `req.log` / the singleton `logger`).
 - **API contract (source of truth):** `lib/api-spec/openapi.yaml`. Run `pnpm --filter @workspace/api-spec run codegen` to regenerate React Query hooks (`@workspace/api-client-react`) and Zod schemas (`@workspace/api-zod`). Do NOT edit generated files or the OpenAPI `info.title` (it controls generated filenames).
 - **DB schema (source of truth):** `lib/db/src/schema/*` (Drizzle), barrelled via `lib/db/src/schema/index.ts`. Push with `pnpm --filter @workspace/db run push`.
-- **Shared pure logic:** `lib/*` — e.g. `inventory-math`, `fill-missing`, `recipe-apply`, `spec-import`, `production-rules`, `allergen`, `voice-commands`, `merge-suggest`, `ai-memory`, `ai-review`, `onboarding`, `cheese-recipes`, `cheese-import`. Web/mobile keep only thin platform glue and re-export from these; tests import the lib directly.
+- **Shared pure logic:** `lib/*` — e.g. `inventory-math`, `fill-missing`, `recipe-apply`, `spec-import`, `production-rules`, `allergen`, `voice-commands`, `merge-suggest`, `ai-memory`, `ai-review`, `onboarding`, `cheese-recipes`, `cheese-import`. The web app keeps only thin platform glue and tests import the libraries directly.
 - **Cheese recipes** are server-backed factory-wide master-data (own `cheese_recipes` table, managed like Mixes but deliberately NOT routed through Mixes — cheese components are per-BATCH lbs, mixes are per-pizza oz). Managers manage them under Manage Lists → Cheese Recipes and import "Cheese Mix Recipe Specs" workbooks (deterministic, no AI). Run applicator "Cheese" cards are pick-only and hydrate rows read-only from the pool. See `.agents/memory/cheese-server-master-data.md`.
-- **Shared web+mobile vitest harness:** lives in the web artifact; the mobile module is loaded via strip-imports → transpile → temp-mjs (see `.agents/memory/web-test-harness.md`).
 
 ## Architecture decisions
 
 - **Contract-first API.** The OpenAPI spec is authoritative; clients consume generated hooks and the server validates with generated Zod schemas. Heavy shaping (e.g. AI prompt building) lives server-side so both clients stay thin and identical.
-- **Pure logic lives in `lib/*`, not in the apps.** Any non-trivial formula or decision belongs in a shared lib so web and mobile can't drift; the apps keep only platform glue (storage, UI). This is how strict web+mobile parity is kept enforceable.
+- **Pure logic lives in `lib/*`, not in the app.** Any non-trivial formula or decision belongs in a shared library; the web app keeps only platform glue (storage, UI).
 - **Live day-state sync via `/api/sync`** with additive, non-clobber union merges (echo / lost-update guards). Merges need a synced `mergedAway` tombstone to survive the additive union. Some master-data (production rules, denied merges, change history) is intentionally NOT in sync.
-- **Auth is self-contained username+password** (Clerk removed): web uses an httpOnly cookie, mobile threads a bearer token; `requireAuth` gates all `/api` except `/healthz` and `/auth/*`. First registered user becomes a manager. Roles are DB rows resolved per-request via `requireCapability`.
+- **Auth is self-contained username+password** (Clerk removed): the web app uses an httpOnly cookie; `requireAuth` gates all `/api` except `/healthz` and `/auth/*`. First registered user becomes a manager. Roles are DB rows resolved per-request via `requireCapability`.
 - **Sign-up is gated by a facility access code** (`STAFF_SIGNUP_CODE` env var, timing-safe compare, fails closed if unset) — public self-registration otherwise exposes internal factory data. Public auth endpoints are also rate-limited. See `.agents/memory/signup-bootstrap-hardening.md`.
 - **AI features never edit code or auto-write data.** They are advisory/fail-safe: a "fix" is an explanation, suggestions require per-field user confirmation through existing write paths, and AI output is canonicalized/sanitized server-side before use.
 
 ## Product
 
-- Pizza production line planning, scheduling, and inventory for floor staff (web + mobile).
+- Pizza production line planning, scheduling, and inventory for floor staff in responsive desktop, phone, and tablet browsers.
 - **AI issue diagnosis & manager alerts:** any signed-in user can report an issue and get an immediate plain-language AI diagnosis plus a safe workaround; uncaught crashes are auto-captured. Each becomes a server-side "incident" with an AI diagnosis. Managers get an incident list, an unreviewed-count nav badge, and can mark incidents reviewed. The AI never edits code — a "fix" is an explanation plus safe-recovery steps. See `.agents/memory/incident-diagnosis.md`.
 
 ## User preferences
 
 - **Fix all errors immediately.** Any TypeScript, test, or build error encountered during any task — whether directly related to the current work or not — must be fixed before moving on. Do not let errors accumulate.
-- **CURRENT FOCUS: WEB ONLY — parity paused.** As of 2026-07-06 the user is focusing on the web app (`artifacts/run-calculator`) only; the mobile app has not been used or tested yet. Do NOT do web+mobile parity work for now — build/change web only unless the user explicitly asks for mobile. The parity rule below is retained for when mobile work resumes.
-- **(Paused) Keep web and mobile at parity.** Any feature added, removed, or changed must be applied to BOTH `artifacts/run-calculator` (web) and `artifacts/run-calculator-mobile` (Expo). Match formulas exactly across both. Mobile is local-only (AsyncStorage `run-calc-mobile-v2`, additive migration via `normalizeState`/`normalizeSettings`); web is its own app — adapt storage/UI per platform but keep behavior identical.
+- **Web-only product:** The maintained application is `artifacts/run-calculator`, and it must remain usable in responsive desktop, phone, and tablet browsers.
 
 ## Gotchas
 
-- **Web+mobile parity is currently PAUSED** (see User preferences — web-only focus as of 2026-07-06). When parity resumes: every behavior change must land in BOTH apps with formulas matching exactly. Most logic lives in `lib/*` to make this enforceable — change the lib, then update each app's thin wrapper.
 - **Run `pnpm run typecheck:libs` after any `lib/*` change** before leaf typechecks. "Missing `@workspace/db` export" usually means stale lib declarations, not a bad import.
 - **Verify artifacts with `typecheck`, not `build`.** `build` needs workflow-provided `PORT`/`BASE_PATH` and can fail from a plain shell even when the code is fine. Don't run `pnpm dev` at the workspace root — use workflows.
 - **Run tests via the configured test workflows** (`test`, `test:client`, `test:rules`, `test:inventory-math`); web tests run single-file (`fileParallelism: false`) with big timeouts because validation runs alongside dev workflows. A single test file from bash is fine; the full suite from bash can starve.

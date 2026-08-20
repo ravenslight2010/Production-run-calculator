@@ -7,13 +7,7 @@
 // mirrors the server's requireCapability("manage-profiles") gate on
 // POST/DELETE /api/brand-profiles exactly.
 //
-// The web and mobile capability catalogs must also stay in lockstep, or one
-// app's role editor could mint a role the other app (and the server) doesn't
-// understand.
-
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   CAPABILITIES as WEB_CAPABILITIES,
   CAPABILITY_LABELS as WEB_LABELS,
@@ -29,34 +23,19 @@ import {
   defaultValues,
 } from "./storage";
 
-// The mobile module can't be imported directly (its tsconfig extends an expo
-// base unavailable here), so extract its CAPABILITIES array from source text —
-// same lockstep-by-text approach other parity tests use.
-function mobileCapabilities(): string[] {
-  const src = readFileSync(
-    join(__dirname, "../../../_archived/mobile/context/inventoryShared.ts"),
-    "utf8",
-  );
-  const m = src.match(/export const CAPABILITIES = \[([\s\S]*?)\] as const;/);
-  if (!m) throw new Error("CAPABILITIES array not found in mobile inventoryShared.ts");
-  return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
-}
-
-// The predicate every client-side profile-write gate uses (home.tsx
-// canManageProfiles, mobile index/setup-profiles): capability membership.
+// The predicate the client-side profile-write gate uses (home.tsx
+// canManageProfiles): capability membership.
 function canManageProfiles(capabilities: Capability[]): boolean {
   return capabilities.includes("manage-profiles");
 }
 
 describe("manage-profiles capability contract", () => {
-  it("is a known capability on both web and mobile, with a label", () => {
+  it("is a known web capability with a label", () => {
     expect(WEB_CAPABILITIES).toContain("manage-profiles");
-    expect(mobileCapabilities()).toContain("manage-profiles");
     expect(WEB_LABELS["manage-profiles"]).toBeTruthy();
   });
 
-  it("web and mobile capability catalogs stay in lockstep", () => {
-    expect([...WEB_CAPABILITIES].sort()).toEqual([...mobileCapabilities()].sort());
+  it("every web capability has a label", () => {
     expect(Object.keys(WEB_LABELS).sort()).toEqual([...WEB_CAPABILITIES].sort());
   });
 

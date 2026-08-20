@@ -520,7 +520,6 @@ const DIALOG_REGISTRY: ReadonlyArray<{ field: string; openValue: unknown }> = [
   { field: "showScheduleDialog",       openValue: true                 },
   { field: "showPasswordDialog",       openValue: true                 },
   { field: "showPinDialog",            openValue: true                 },
-  { field: "showMobileQrDialog",       openValue: true                 },
   { field: "showScreensDialog",        openValue: true                 },
   { field: "showEditReasonsDialog",    openValue: true                 },
   { field: "showBrandDrop",            openValue: true                 },

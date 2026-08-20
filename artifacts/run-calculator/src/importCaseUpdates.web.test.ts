@@ -8,11 +8,7 @@
 // `madeAlready`) offers whose new target is BELOW what the floor already
 // produced — accepting one makes the run instantly "over target". A regression
 // here (flag missing, flag on the wrong side, finished runs picked up, warning
-// line dropped) would only be caught on the floor, so it's locked down here,
-// including a parity assertion against the mobile module
-// (artifacts/run-calculator-mobile/utils/importCaseUpdates.ts) loaded via the
-// strip-imports -> transpile -> temp-file-import pipeline documented in
-// .agents/memory/web-test-harness.md.
+// line dropped) would only be caught on the floor, so it's locked down here.
 
 import { describe, it, expect } from "vitest";
 

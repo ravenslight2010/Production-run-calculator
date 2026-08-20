@@ -186,29 +186,6 @@ export default defineConfig({
     fs: {
       strict: true,
     },
-    // Dev-only (Replit): the workspace router serves the Expo web build under
-    // /mobile/, but that page requests its Metro JS bundle and assets via
-    // root-absolute paths (/node_modules/...entry.bundle, /assets/?unstable_path=...)
-    // which the router sends HERE (the web app) instead of to Metro. Without
-    // this proxy Vite answers those with its SPA index.html and the mobile
-    // preview renders a blank page. Forward Metro-shaped requests to the Expo
-    // dev server (local port 20191).
-    proxy: process.env.REPL_ID
-      ? {
-          "^.+\\.bundle(\\?.*)?$": {
-            target: "http://localhost:20191",
-            changeOrigin: true,
-          },
-          "^/assets/\\?unstable_path=.*$": {
-            target: "http://localhost:20191",
-            changeOrigin: true,
-          },
-          "^/symbolicate$": {
-            target: "http://localhost:20191",
-            changeOrigin: true,
-          },
-        }
-      : undefined,
   },
   preview: {
     port,
