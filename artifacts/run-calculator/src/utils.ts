@@ -22,18 +22,13 @@ export { computeCheesePull, computeCheesePerPizzaOz } from "@workspace/inventory
  * @param startedAt  Original run start timestamp (ms since epoch)
  * @param pausedAt   Timestamp when the run was paused (ms since epoch)
  * @param now        Current timestamp (ms since epoch)
- * @param freezerEmpty  When true the run restarts fresh from `now`
  */
 export function computeResumedStartedAt(
   startedAt: number,
   pausedAt: number,
   now: number,
-  freezerEmpty: boolean,
 ): number {
-  if (freezerEmpty) {
-    return now;
-  }
-  const pauseDuration = now - pausedAt;
+  const pauseDuration = Math.max(0, now - pausedAt);
   return startedAt + pauseDuration;
 }
 
@@ -44,7 +39,7 @@ export function computeResumedStartedAt(
  * new run object with:
  *   - startedAt advanced by computeResumedStartedAt
  *   - pausedAt cleared (set to undefined)
- *   - any open pause stoppage closed with endedAt = now
+ *   - the active pause stoppage closed with endedAt = now
  *
  * Mirrors exactly what the resumeRun closure in home.tsx does to the run
  * object, so this function can be unit-tested independently of the component.
@@ -53,15 +48,28 @@ export function computeResumedStartedAt(
  */
 export function applyResumeToRun(
   run: RunMeta,
-  freezerEmpty: boolean,
   now: number,
 ): RunMeta | null {
   if (!run.pausedAt) return null;
-  const newStartedAt = computeResumedStartedAt(run.startedAt!, run.pausedAt, now, freezerEmpty);
+  const newStartedAt = computeResumedStartedAt(run.startedAt!, run.pausedAt, now);
+  // Legacy paused runs have no identity field. Pick only one matching, latest
+  // open pause instead of accidentally closing duplicate same-millisecond rows.
+  const activePauseId = run.pausedStoppageId ??
+    (run.stoppages ?? [])
+      .filter(s => s.type === "pause" && !s.endedAt && s.startedAt === run.pausedAt)
+      .sort((a, b) => b.id.localeCompare(a.id))[0]?.id;
   const updatedStoppages = (run.stoppages ?? []).map(s =>
-    s.type === "pause" && !s.endedAt ? { ...s, endedAt: now } : s,
+    s.id === activePauseId
+      ? { ...s, endedAt: now }
+      : s,
   );
-  return { ...run, startedAt: newStartedAt, pausedAt: undefined, stoppages: updatedStoppages };
+  return {
+    ...run,
+    startedAt: newStartedAt,
+    pausedAt: undefined,
+    pausedStoppageId: undefined,
+    stoppages: updatedStoppages,
+  };
 }
 
 export function fmtElapsed(ms: number): string {

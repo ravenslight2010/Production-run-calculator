@@ -84,7 +84,6 @@ import {
   computeSummaryStats,
   computeCheesePull,
   computeCheesePerPizzaOz,
-  computeResumedStartedAt,
   applyResumeToRun,
   sauceBarrelBreakdown,
   genId,
@@ -95,6 +94,12 @@ import {
 import { setActiveSubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
+import {
+  pauseDecisionRemainingMs,
+  pauseStopsTunnel,
+  canChoosePauseTunnelPolicy,
+  shouldClosePauseDecision,
+} from "../pausePolicy";
 import {
   acceptPackagingSpeedNudge,
   canDetectPackagingSpeedNudge,
@@ -4770,7 +4775,11 @@ export default function Home() {
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
   const [confirmRemoveBlanks, setConfirmRemoveBlanks] = useState(false);
-  const [resumeDialog, setResumeDialog] = useState(false);
+  // The safe policy is persisted by pauseRun before this local prompt opens.
+  // This state only controls the short-lived operator decision UI; it is never
+  // required to keep a paused run safe across a reload, sync, or hidden screen.
+  const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
+  const pauseDecisionPauseIdRef = useRef<string | null>(null);
   const savedFlashRef = useRef<HTMLSpanElement>(null);
   const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeState = useRef<SwipeGestureState | null>(null);
@@ -6661,7 +6670,7 @@ export default function Home() {
     if (showGlance)             { setShowGlance(false);             return; }
     if (showFloorMode)          { setShowFloorMode(false);          return; }
     if (sauceWeightsOpen)       { setSauceWeightsOpen(false);       return; }
-    if (resumeDialog)           { setResumeDialog(false);           return; }
+    if (pauseDecisionRunId)     { setPauseDecisionRunId(null);      return; }
     if (showPasswordDialog)     { setShowPasswordDialog(false);     return; }
     if (showTour)               { setShowTour(false);               return; }
     if (showGetStarted)         { setShowGetStarted(false);         return; }
@@ -7403,11 +7412,19 @@ export default function Home() {
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
-          if (JSON.stringify(newDs) === JSON.stringify(prev)) return prev;
+          if (JSON.stringify(newDs) === JSON.stringify(prev)) {
+            dayStateRef.current = prev;
+            return prev;
+          }
           // stampMeta:false — the merged runs carry the winning side's stamp
           // already; re-stamping a remote-adopted run here would re-claim it as
           // a local edit and defeat the newer-stamp-wins merge on every peer.
           saveDayState(newDs, { stampMeta: false });
+          // Event handlers such as a visible pause-policy prompt read this ref
+          // before the render effect runs. Advance it in the same accepted-sync
+          // transaction so a late local click cannot write an old paused run
+          // back over a remote Resume.
+          dayStateRef.current = newDs;
           return newDs;
         });
         if (atomicSeedSnapshot) {
@@ -9831,33 +9848,134 @@ export default function Home() {
   }
 
   function pauseRun() {
+    const base = dayStateRef.current;
+    const index = base.currentIndex;
+    const run = base.runs[index];
+    // A double click or a stale compact strip must never create concurrent pause
+    // records for one lifecycle.
+    if (!run?.startedAt || run.pausedAt || run.endedAt) return;
     const now = Date.now();
-    const pauseStop: Stoppage = { id: genId(), reason: "", type: "pause", startedAt: now };
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
-        ? { ...r, pausedAt: now, stoppages: [...(r.stoppages ?? []), pauseStop] }
+    // Persist the conservative default before displaying the question. This is
+    // intentionally not deferred to the ten-second timer: a reload, a lost
+    // foreground event, or another tablet must all see the same safe choice.
+    const pauseStop: Stoppage = {
+      id: genId(), reason: "", type: "pause", startedAt: now, stopTunnel: true,
+    };
+    const newRuns = base.runs.map((r, i) =>
+      i === index
+        ? {
+          ...r,
+          pausedAt: now,
+          pausedStoppageId: pauseStop.id,
+          stoppages: [...(r.stoppages ?? []), pauseStop],
+        }
         : r
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const newDs = { ...base, runs: newRuns };
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
+    setActiveTab("run");
+    pauseDecisionPauseIdRef.current = pauseStop.id;
+    setPauseDecisionRunId(run.id);
   }
 
-  function resumeRun(freezerEmpty: boolean) {
-    const run = dayState.runs[dayState.currentIndex];
+  function setPauseTunnelPolicy(stopTunnel: boolean) {
+    const runId = pauseDecisionRunId ?? currentRunId;
+    const pauseId = pauseDecisionPauseIdRef.current;
+    const base = dayStateRef.current;
+    const run = base.runs.find((candidate) => candidate.id === runId);
+    if (
+      !pauseId ||
+      !run?.pausedAt ||
+      run.pausedStoppageId !== pauseId ||
+      !canChoosePauseTunnelPolicy(run.pausedAt, Date.now())
+    ) {
+      setPauseDecisionRunId(null);
+      return;
+    }
+    let changed = false;
+    const stoppages = (run.stoppages ?? []).map((stoppage) => {
+      if (
+        stoppage.id === pauseId && stoppage.type === "pause" && !stoppage.endedAt
+      ) {
+        changed = true;
+        return { ...stoppage, stopTunnel };
+      }
+      return stoppage;
+    });
+    if (changed) {
+      const newDs = {
+        ...base,
+        runs: base.runs.map((candidate) =>
+          candidate.id === runId ? { ...candidate, stoppages } : candidate,
+        ),
+      };
+      dayStateRef.current = newDs;
+      setDayState(newDs);
+      saveDayState(newDs);
+      schedulePush(newDs, 0);
+    }
+    setPauseDecisionRunId(null);
+  }
+
+  function resumeRun() {
+    const base = dayStateRef.current;
+    const index = base.currentIndex;
+    const run = base.runs[index];
     if (!run) return;
     const now = Date.now();
-    const resumed = applyResumeToRun(run, freezerEmpty, now);
+    const resumed = applyResumeToRun(run, now);
     if (!resumed) return;
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? resumed : r
+    const newRuns = base.runs.map((r, i) =>
+      i === index ? resumed : r
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const newDs = { ...base, runs: newRuns };
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
+    setPauseDecisionRunId(null);
   }
+
+  useEffect(() => {
+    if (!pauseDecisionRunId) return;
+    // Closing the prompt is deliberately harmless: the pause record already
+    // contains stopTunnel:true unless the operator explicitly chose No.
+    const pauseId = pauseDecisionPauseIdRef.current;
+    const pausedAt = currentRun?.id === pauseDecisionRunId ? currentRun.pausedAt : undefined;
+    if (!pausedAt || currentRun?.pausedStoppageId !== pauseId) {
+      setPauseDecisionRunId(null);
+      return;
+    }
+    const close = () => setPauseDecisionRunId(null);
+    const timer = window.setTimeout(
+      close,
+      pauseDecisionRemainingMs(pausedAt, Date.now()),
+    );
+    const closeWhenHidden = () => {
+      if (
+        shouldClosePauseDecision(pausedAt, Date.now(), document.visibilityState === "visible")
+      ) {
+        close();
+      }
+    };
+    document.addEventListener("visibilitychange", closeWhenHidden);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", closeWhenHidden);
+    };
+  }, [currentRun, pauseDecisionRunId]);
+
+  useEffect(() => {
+    if (
+      pauseDecisionRunId &&
+      (!currentRun || currentRun.id !== pauseDecisionRunId || !currentRun.pausedAt)
+    ) {
+      setPauseDecisionRunId(null);
+    }
+  }, [currentRun, pauseDecisionRunId]);
 
   // Run Insights: apply an accepted setting suggestion. Manager-tapped only —
   // never called automatically. Returns a confirmation line for the card.
@@ -12360,7 +12478,7 @@ export default function Home() {
     mgPresetRows, mgSelectedPreset, mgStandaloneInput, mixIngredients, mixMakeDay, mixNameBrandTags,
     mixRecipeNames, mixes, moveRecipeName, moveRecipePresetKey, moveRun, nameCleanupRef,
     nameConsolidationRef, namedPoolSnapRef, newPin, newPinConfirm, newReasonInput, nextRunDieType,
-    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseRun, pendingMixPushRef,
+    noFacilityPin, noteChange, openScheduleEditor, openSetupEditor, pauseDecisionRunId, pauseRun, pendingMixPushRef,
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
@@ -12373,7 +12491,7 @@ export default function Home() {
     renameBrand, renameCatalogEntry, renameCheeseIngredient, renameCheeseRecipeName, renameDieType, renameDoughIngredient,
     renameDoughRecipeName, renameFlavor, renameFrontlineIngredient, renameFrontlineRecipeName, renameIngredientType, renameMixIngredient,
     renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
-    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin, resumeDialog,
+    replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin,
     resumeRun, revalidate, role, ruleViolations, runStatus, runToTime,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
@@ -12397,7 +12515,7 @@ export default function Home() {
     setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
     setNewPin, setNewPinConfirm, setNewReasonInput, setPep1ShowB, setPep2ShowB, setPepTypes,
     setPinChangeMsg, setPinError, setPinInput, setPremixImportApplying, setPremixImportError, setPremixImportLoading,
-    setPremixImportPrepared, setPremixImportProgress, setPromotingRecipeKind, setResumeDialog, setRole, setRunBrandFlavor,
+    setPauseDecisionRunId, setPauseTunnelPolicy, setPremixImportPrepared, setPremixImportProgress, setPromotingRecipeKind, setRole, setRunBrandFlavor,
     setRunToTime, setSauceWeightsOpen, setScheduleAdvancedRunId, setScheduleDeleteConfirm, setScheduleEditorDate, setScheduleEditorIsLiveDay,
     setScheduleEditorRunValues, setScheduleEditorRuns, setScheduleMove, setScheduleMoveDate, setScheduleMoving, setScheduleSaving,
     setScheduleView, setScheduledDays, setSetupEditorBrand, setSetupEditorFlavor, setSetupEditorOpen, setSheetListSignal,
@@ -12467,7 +12585,7 @@ export default function Home() {
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
     premixImportPrepared, premixImportProgress, proactiveAlert, productionRules,
-    promotingRecipeKind, resolvedPin, resumeDialog, role, ruleViolations,
+    promotingRecipeKind, resolvedPin, pauseDecisionRunId, role, ruleViolations,
     runStatus, runToTime, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
     scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
@@ -16722,8 +16840,8 @@ export default function Home() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extracted sub-components — co-located with Home
-// ScreenModeView, GlanceOverlay, and FloorModeView all use useHomeTabCtx()
-// (narrow context — no re-render on manage/import/merge state changes).
+// ScreenModeView and GlanceOverlay use the narrow HomeTab context. FloorModeView
+// uses HomeCtx because it must surface the short-lived pause decision overlay.
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ScreenModeView() {
@@ -17393,17 +17511,58 @@ function ScreenModeView() {
   return null;
 }
 
+function PauseTunnelDecision({
+  pausedAt,
+  onChoose,
+  onDismiss,
+}: {
+  pausedAt: number;
+  onChoose: (stopTunnel: boolean) => void;
+  onDismiss: () => void;
+}) {
+  const { nowTime } = useLiveRun();
+  const remainingSec = Math.ceil(pauseDecisionRemainingMs(pausedAt, nowTime.getTime()) / 1000);
+  return (
+    <div
+      className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-amber-600/40 bg-amber-950/20 py-3 px-4 flex-wrap"
+      data-testid="pause-tunnel-decision"
+    >
+      <div className="min-w-[150px]">
+        <p className="text-sm font-bold text-amber-300">Stopping freezer?</p>
+        <p className="text-xs text-muted-foreground">
+          Defaults to Yes in <span className="font-bold tabular-nums text-amber-300">{remainingSec}s</span>
+        </p>
+      </div>
+      <button
+        type="button"
+        data-testid="pause-stop-tunnel-yes"
+        className="px-4 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors"
+        onClick={() => onChoose(true)}
+      >Yes</button>
+      <button
+        type="button"
+        data-testid="pause-stop-tunnel-no"
+        className="px-4 py-1.5 rounded-md bg-muted hover:bg-muted/70 text-muted-foreground text-sm font-semibold transition-colors"
+        onClick={() => onChoose(false)}
+      >No</button>
+      <button
+        type="button"
+        aria-label="Keep safe stop-tunnel default"
+        className="text-xs text-muted-foreground hover:text-foreground underline"
+        onClick={onDismiss}
+      >Use default</button>
+    </div>
+  );
+}
+
 function FloorModeView() {
   const {
     activeStopId, allergenWarnings, autoSuppressUntilRef, currentRun, doughSubTab,
-    endStop, floorDimmed, form, pauseRun, resumeRun, runStatus,
+    endStop, floorDimmed, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
     v, ve,
-  } = useHomeTabCtx();
-  // Floor Mode manages its own resume-dialog state so the "Freezer empty?" prompt
-  // renders inside this overlay rather than in LiveRunTabContent (which sits behind
-  // the z-40 overlay and is invisible when Floor Mode is active).
-  const [floorResumeDialog, setFloorResumeDialog] = useState(false);
+  } = useHomeCtx();
 
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
@@ -17589,6 +17748,13 @@ function FloorModeView() {
                 );
               })()}
 
+              {pauseDecisionRunId === currentRun?.id && currentRun?.pausedAt && (
+                <PauseTunnelDecision
+                  pausedAt={currentRun.pausedAt}
+                  onChoose={setPauseTunnelPolicy}
+                  onDismiss={() => setPauseDecisionRunId(null)}
+                />
+              )}
               {/* Action buttons */}
               <div className="flex gap-3">
                 {hasActiveStop ? (
@@ -17621,32 +17787,14 @@ function FloorModeView() {
                   </button>
                 )}
                 {runStatus === "paused" && (
-                  floorResumeDialog ? (
-                    <div className="flex-1 flex items-center justify-center gap-2 rounded-2xl border px-3 py-2 flex-wrap"
-                      style={{ background: "rgba(22,101,52,0.15)", borderColor: "rgba(74,222,128,0.3)" }}>
-                      <span className="text-sm font-medium" style={{ color: "#86efac" }}>Freezer empty?</span>
-                      <button
-                        type="button"
-                        className="px-4 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors"
-                        onClick={() => { resumeRun(true); setFloorResumeDialog(false); }}
-                      >Yes</button>
-                      <button
-                        type="button"
-                        className="px-4 py-1.5 rounded-md text-sm font-semibold transition-colors"
-                        style={{ background: "rgba(255,255,255,0.1)", color: "#86efac" }}
-                        onClick={() => { resumeRun(false); setFloorResumeDialog(false); }}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setFloorResumeDialog(true)}
-                      className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
-                      style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
-                    >
-                      ▶ Resume
-                    </button>
-                  )
+                  <button
+                    type="button"
+                    onClick={resumeRun}
+                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
+                  >
+                    ▶ Resume
+                  </button>
                 )}
                 {(runStatus === "running" || runStatus === "paused") && (
                   <button
@@ -17763,11 +17911,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
     initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
     logStop, nextRunDieType, pauseRun, removeBlankRuns, removeBrand,
-    removeFlavor, removeRun, resumeDialog, resumeRun, ruleViolations,
+    removeFlavor, removeRun, pauseDecisionRunId, resumeRun, ruleViolations,
     runStatus, setBrandInput, setConfirmDeleteBrand, setConfirmDeleteFlavor,
     setConfirmRemoveBlanks, setConfirmRemoveRun, setDayState, setDoughSubTab,
     setFlavorInput, setManageCategory, setManageInput, setPinChangeMsg,
-    setResumeDialog, setRunBrandFlavor, setShowBrandDrop, setShowFlavorDrop,
+    setPauseDecisionRunId, setPauseTunnelPolicy, setRunBrandFlavor, setShowBrandDrop, setShowFlavorDrop,
     setShowGlance, setShowManageDialog, setShowReorderDialog, setShowStopDialog,
     setStopNotes, setStopReason, showBrandDrop, showFlavorDrop, startRun, swipeCue,
     switchToRun, toggleAck, upcomingRunLabels, v, ve,
@@ -18184,29 +18332,23 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     </div>
                   ) : null}
                   {runStatus === "paused" && (
-                    resumeDialog ? (
-                      <div className="flex items-center justify-center gap-2.5 rounded-xl border border-amber-600/40 bg-amber-950/20 py-4 px-4 flex-wrap">
-                        <span className="text-sm text-muted-foreground font-medium">Freezer empty?</span>
-                        <button
-                          type="button"
-                          className="px-4 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors"
-                          onClick={() => { resumeRun(true); setResumeDialog(false); }}
-                        >Yes</button>
-                        <button
-                          type="button"
-                          className="px-4 py-1.5 rounded-md bg-muted hover:bg-muted/70 text-muted-foreground text-sm font-semibold transition-colors"
-                          onClick={() => { resumeRun(false); setResumeDialog(false); }}
-                        >No</button>
-                      </div>
-                    ) : (
+                    <>
+                      {pauseDecisionRunId === currentRun?.id && currentRun?.pausedAt && (
+                        <PauseTunnelDecision
+                          pausedAt={currentRun.pausedAt}
+                          onChoose={setPauseTunnelPolicy}
+                          onDismiss={() => setPauseDecisionRunId(null)}
+                        />
+                      )}
                       <button
                         type="button"
-                        onClick={() => setResumeDialog(true)}
+                        data-testid="resume-run"
+                        onClick={resumeRun}
                         className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors"
                       >
                         <Play className="w-6 h-6 fill-current" /> RESUME RUN
                       </button>
-                    )
+                    </>
                   )}
                   {runStatus === "ended" && (
                     <div className="flex items-center justify-center py-1">
@@ -18235,6 +18377,8 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   pausedAt: null,
                   lastResumeWallMs: 0,
                   lastPauseStartWallMs: 0,
+                  pauseStopsTunnel: true,
+                  lastPauseStopsTunnel: true,
                   runStatus: "ended",
                   preTunnelMin: preTun2,
                   postTunnelMin: postTun2,
@@ -18313,11 +18457,16 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
                     const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
                     const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
+                    const openPause = (currentRun?.stoppages ?? [])
+                      .filter((s: any) => s.type === "pause" && !s.endedAt)
+                      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
                     const phases = computeLinePhases({
                       elapsedBatchSec,
                       pausedAt: currentRun?.pausedAt ?? null,
                       lastResumeWallMs,
                       lastPauseStartWallMs,
+                      pauseStopsTunnel: pauseStopsTunnel(openPause),
+                      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
                       runStatus: runStatus as string,
                       preTunnelMin: preTun,
                       postTunnelMin: postTun,
@@ -19515,6 +19664,10 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                       pausedAt: currentRun?.pausedAt ?? null,
                       lastResumeWallMs: lastResumeWallMs2,
                       lastPauseStartWallMs: lastPauseStartWallMs2,
+                      pauseStopsTunnel: pauseStopsTunnel((currentRun?.stoppages ?? [])
+                        .filter((s: any) => s.type === "pause" && !s.endedAt)
+                        .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any)),
+                      lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause2),
                       runStatus: runStatus as string,
                       preTunnelMin: preTun,
                       postTunnelMin: postTun,
@@ -19539,6 +19692,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                       pausedAt: null,
                       lastResumeWallMs: 0,
                       lastPauseStartWallMs: 0,
+                      pauseStopsTunnel: true,
+                      lastPauseStopsTunnel: true,
                       runStatus: "ended",
                       preTunnelMin: preTun,
                       postTunnelMin: postTun,

@@ -58,6 +58,9 @@ const ALLOWED_CALLERS = new Set<string>([
   "ScreenModeView",
   // FloorModeView — idle floor-mode big-numbers monitor
   "FloorModeView",
+  // PauseTunnelDecision — its visible ten-second safety countdown must tick
+  // while the paused Run/Floor view is open.
+  "PauseTunnelDecision",
   // GlanceOverlay was extracted to src/components/GlanceOverlay.tsx so it can
   // be tested in isolation.  It is listed in ALLOWED_FILES below instead.
   // CompactRunStrip was extracted to src/components/CompactRunStrip.tsx so it

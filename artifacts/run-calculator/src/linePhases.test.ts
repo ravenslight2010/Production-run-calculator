@@ -1,6 +1,6 @@
 // Unit tests for computeLinePhases covering all phase transitions:
 //   • Filling sequence (Stage 1 → 2 → 3 in virtual elapsed order)
-//   • Pause propagation (Stage 2 still draining at pausedAt+1min, stopped at pausedAt+3min)
+//   • Persisted-policy pause sequence (safe stop-tunnel or normal line drain)
 //   • Resume propagation — short pause (Stage 2 never stopped, no resuming shown)
 //   • Resume propagation — long pause (Stage 2 + Stage 3 both show resuming)
 //   • Drain sequence (Stage 1 drains first, Stage 3 drains last — pressDone)
@@ -102,7 +102,7 @@ describe("computeLinePhases — filling sequence", () => {
 // (any product was pressed at all). The line isn't clear until freezerTime from
 // when the press stopped.
 describe("computeLinePhases — occupancy gates (early-run pause)", () => {
-  it("Stage 1 paused, Stage 2 & 3 draining when pausing early (product propagates from Stage 1)", () => {
+  it("defaults legacy pauses to safe frontline drain before the tunnel stops", () => {
     // Pause 1 min in — only Stage 1 filled, but Stage 1's product drains into
     // Stage 2 (and eventually Stage 3) during the propagation delay.
     const phases = computeLinePhases({
@@ -112,12 +112,12 @@ describe("computeLinePhases — occupancy gates (early-run pause)", () => {
       pausedAt: T0,
       nowMs: T0 + 30 * 1000,  // 30s after pause — stop-wave not yet reached Stage 2
     });
-    expect(phases.stage1.state).toBe("paused");   // Stage 1: press stopped
-    expect(phases.stage2.state).toBe("draining"); // Stage 1's contents flowing in; stop-wave in transit
-    expect(phases.stage3.state).toBe("draining"); // Stop-wave not yet reached Stage 3 either
+    expect(phases.stage1.state).toBe("draining");
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
   });
 
-  it("Stage 1 paused, Stage 2 draining, Stage 3 draining when pausing mid-tunnel (stop-wave in transit)", () => {
+  it("uses the same safe default for a run that was already full", () => {
     // Pause at 5 min: Stage 1 done filling, Stage 2 partially filled, Stage 3 not yet
     const phases = computeLinePhases({
       ...BASE,
@@ -126,9 +126,9 @@ describe("computeLinePhases — occupancy gates (early-run pause)", () => {
       pausedAt: T0,
       nowMs: T0 + 30 * 1000,    // 30s after pause — stop-wave has not yet reached Stage 2
     });
-    expect(phases.stage1.state).toBe("paused");
-    expect(phases.stage2.state).toBe("draining");  // stop-wave not arrived yet
-    expect(phases.stage3.state).toBe("draining");  // stop-wave far from Stage 3
+    expect(phases.stage1.state).toBe("draining");
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
   });
 
   it("all stages empty when pausing before any product is pressed", () => {
@@ -260,7 +260,7 @@ describe("computeEndedRunElapsedSec", () => {
 describe("computeLinePhases — pause propagation", () => {
   const pausedAt = T0;
 
-  it("Stage 1 stops immediately on pause", () => {
+  it("frontline drains first after a safe stop-tunnel pause", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 10 * 60,
@@ -268,10 +268,10 @@ describe("computeLinePhases — pause propagation", () => {
       pausedAt,
       nowMs: T0 + 30 * 1000,   // 30s after pause
     });
-    expect(phases.stage1.state).toBe("paused");
+    expect(phases.stage1.state).toBe("draining");
   });
 
-  it("Stage 2 still draining at pausedAt + 1 min (preTunnelMin=2.5)", () => {
+  it("the tunnel is not marked stopped until frontline has drained", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 10 * 60,
@@ -279,8 +279,9 @@ describe("computeLinePhases — pause propagation", () => {
       pausedAt,
       nowMs: T0 + 1 * 60000,   // 1 min after pause — before the 2.5 min delay
     });
-    expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage2.remainMs).toBeCloseTo(1.5 * 60000, -2);
+    expect(phases.stage1.state).toBe("draining");
+    expect(phases.stage1.remainMs).toBeCloseTo(1.5 * 60000, -2);
+    expect(phases.stage2.state).toBe("empty");
   });
 
   it("Stage 2 stopped at pausedAt + 3 min (past 2.5 min preTunnelMin)", () => {
@@ -294,35 +295,30 @@ describe("computeLinePhases — pause propagation", () => {
     expect(phases.stage2.state).toBe("paused");
   });
 
-  it("Stage 3 keeps draining while tunnel contents still flowing after Stage 2 stops", () => {
-    // Stage 3 stop-wave arrives at pausedAt + preTunnelMin + tunnelMin = 2.5+15 = 17.5 min
-    // Run must have elapsed past preTunnelMin+tunnelMin (17.5 min) so Stage 3 has product.
+  it("wrapper drains after the tunnel stops", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 20 * 60,  // 20 min — Stage 3 is occupied (17.5 min threshold passed)
       runStatus: "paused",
       pausedAt,
-      nowMs: T0 + 5 * 60000,  // 5 min — Stage 2 paused, Stage 3 still draining
+      nowMs: T0 + 3 * 60000,
     });
     expect(phases.stage2.state).toBe("paused");
     expect(phases.stage3.state).toBe("draining");
   });
 
-  it("Stage 3 stops once preTunnelMin + tunnelMin wall-clock time has elapsed since pause", () => {
-    // Stage 3 pauses at pausedAt + 2.5 + 15 = 17.5 min
-    // Run must have elapsed past 17.5 min so Stage 3 has product.
+  it("wrapper is clear after its own drain window", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 20 * 60,  // 20 min — Stage 3 is occupied
       runStatus: "paused",
       pausedAt,
-      nowMs: T0 + 18 * 60000,  // 18 min after pause — past 17.5 min
+      nowMs: T0 + 6 * 60000,
     });
-    expect(phases.stage3.state).toBe("paused");
+    expect(phases.stage3.state).toBe("empty");
   });
 
-  it("compact strip during pause shows Stage 2 draining (nearest active countdown) not Stage 1 paused", () => {
-    // Stage 2 is still draining with a countdown — that's more informative than Stage 1 "stopped"
+  it("compact strip chooses the current frontline drain countdown", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 10 * 60,
@@ -332,7 +328,38 @@ describe("computeLinePhases — pause propagation", () => {
     });
     const pick = pickMostActivePhase(phases);
     expect(pick?.state).toBe("draining");
-    expect(pick?.label).toContain("tunnel");
+    expect(pick?.label).toContain("Frontline");
+  });
+
+  it("keeps the tunnel running only when the saved policy explicitly says No", () => {
+    const beforeTunnel = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 10 * 60,
+      runStatus: "paused",
+      pausedAt,
+      pauseStopsTunnel: false,
+      nowMs: T0 + 1 * 60000,
+    });
+    const tunnelDraining = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 10 * 60,
+      runStatus: "paused",
+      pausedAt,
+      pauseStopsTunnel: false,
+      nowMs: T0 + 3 * 60000,
+    });
+    const wrapperDraining = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 10 * 60,
+      runStatus: "paused",
+      pausedAt,
+      pauseStopsTunnel: false,
+      nowMs: T0 + 18 * 60000,
+    });
+
+    expect(beforeTunnel.stage1.state).toBe("draining");
+    expect(tunnelDraining.stage2.state).toBe("draining");
+    expect(wrapperDraining.stage3.state).toBe("draining");
   });
 });
 
@@ -497,7 +524,7 @@ describe("computeLinePhases — resume propagation: MEDIUM pause (preTunnelMin <
   const pauseStart = T0 - 5 * 60000;
   const resumeTime = T0;
 
-  it("Stage 2 shows resuming (it was stopped) but Stage 3 does not (it kept flowing)", () => {
+  it("both downstream stages use the persisted stop-tunnel restart path", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 25 * 60,
@@ -507,7 +534,7 @@ describe("computeLinePhases — resume propagation: MEDIUM pause (preTunnelMin <
       nowMs: T0 + 30 * 1000,   // 30s after resume
     });
     expect(phases.stage2.state).toBe("resuming");
-    expect(phases.stage3.state).toBe("active");  // Stage 3 never stopped
+    expect(phases.stage3.state).toBe("resuming");
   });
 });
 

@@ -337,34 +337,21 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Scenario F: resumed run with freezerEmpty=true (full restart path).
+  // Scenario F: direct resume retains elapsed production time.
   //
-  // resumeRun(freezerEmpty=true) resets startedAt to now and clears pausedAt,
-  // regardless of how long the run was paused or whether pausedAt was drifted.
-  //
-  //   computeResumedStartedAt(..., freezerEmpty=true) => now
-  //
-  // Post-resume state: startedAt = resumeInstant, pausedAt = null.
-  // Elapsed always counts fresh from the resume moment — no cap expression is
-  // needed, but a regression (e.g. accidentally carrying over a stale pausedAt)
-  // would inflate the display.  This scenario pins the correct behaviour:
-  //
-  //   - Right at resume (nowMs === startedAt): runAge = 0 ms → "0m".
-  //   - After 25 minutes: runAge = 25 min → "25m".
+  // Direct Resume does not restart production timing. With 30 minutes of
+  // production before the pause, elapsed stays at 30m at resume and then
+  // continues normally. pausedAt must still be cleared.
   //
   // Both call sites (CompactRunStrip "strip-elapsed" + Elapsed Time card
   // "elapsed-card-value") are covered.
   // -------------------------------------------------------------------------
-  describe("resumed run (freezerEmpty=true) — full restart path", () => {
-    // Arbitrary anchor; resumeRun sets startedAt = now at this instant.
+  describe("directly resumed run — elapsed production time retained", () => {
     const resumeInstant = 2_000_000_000;
-    // Post-resume state: startedAt = resumeInstant, pausedAt = null.
-    const postResumeStartedAt = resumeInstant;
+    const postResumeStartedAt = resumeInstant - 30 * 60_000;
 
     // ── right at resume ───────────────────────────────────────────────────
-    // nowMs === startedAt → runAge = 0 → fmtElapsed clamps to 0 → "0m".
-
-    it("CompactRunStrip: right at resume shows 0m", () => {
+    it("CompactRunStrip: right at resume shows prior 30m of active time", () => {
       render(
         <ElapsedTimeBadge
           data-testid="strip-elapsed"
@@ -373,10 +360,10 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={null}
         />,
       );
-      expect(screen.getByTestId("strip-elapsed").textContent).toBe("0m");
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("30m");
     });
 
-    it("ElapsedCard: right at resume shows 0m", () => {
+    it("ElapsedCard: right at resume shows prior 30m of active time", () => {
       render(
         <ElapsedTimeBadge
           data-testid="elapsed-card-value"
@@ -385,13 +372,13 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={null}
         />,
       );
-      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("0m");
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("30m");
     });
 
     // ── 25 min after resume ───────────────────────────────────────────────
-    // nowMs = resumeInstant + 25 min → runAge = 25 min → "25m".
+    // nowMs = resumeInstant + 25 min → 30 min retained + 25 new = "55m".
 
-    it("CompactRunStrip: 25 min after resume shows 25m (normal accumulation)", () => {
+    it("CompactRunStrip: 25 min after resume shows 55m", () => {
       render(
         <ElapsedTimeBadge
           data-testid="strip-elapsed"
@@ -400,10 +387,10 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={null}
         />,
       );
-      expect(screen.getByTestId("strip-elapsed").textContent).toBe("25m");
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("55m");
     });
 
-    it("ElapsedCard: 25 min after resume shows 25m (normal accumulation)", () => {
+    it("ElapsedCard: 25 min after resume shows 55m", () => {
       render(
         <ElapsedTimeBadge
           data-testid="elapsed-card-value"
@@ -412,7 +399,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={null}
         />,
       );
-      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("25m");
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("55m");
     });
 
     // ── stale pausedAt must NOT be carried over ───────────────────────────
@@ -431,7 +418,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={null}
         />,
       );
-      expect(screen.getByTestId("strip-elapsed").textContent).toBe("45m");
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("1h 15m");
     });
 
     it("ElapsedCard: elapsed equals raw run age — no stale pausedAt addend", () => {
@@ -444,12 +431,12 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={null}
         />,
       );
-      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("45m");
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("1h 15m");
     });
   });
 
   // -------------------------------------------------------------------------
-  // Scenario G: resumeRun(freezerEmpty=true) → state → ElapsedTimeBadge
+  // Scenario G: direct resume → state → ElapsedTimeBadge
   // full pipeline guard.
   //
   // This scenario closes the gap left by Scenario F: rather than hardcoding
@@ -468,15 +455,15 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
   //   run.startedAt  = START (run started 60 min ago)
   //   run.pausedAt   = START + 30 min (paused 30 min in, still open)
   //
-  // applyResumeToRun(run, freezerEmpty=true, resumeInstant) returns:
-  //   startedAt = resumeInstant   (fresh-start branch always returns now)
+  // applyResumeToRun(run, resumeInstant) returns:
+  //   startedAt = START + pause duration
   //   pausedAt  = undefined       (explicitly cleared)
   //
   // Regression sentinel: renders ElapsedTimeBadge with the stale pausedAt
   // still set (as it would be in a broken resumeRun) and proves elapsed is
   // inflated, confirming the cleared-pausedAt invariant is load-bearing.
   // -------------------------------------------------------------------------
-  describe("Scenario G: applyResumeToRun(freezerEmpty=true) → state → ElapsedTimeBadge pipeline", () => {
+  describe("Scenario G: direct applyResumeToRun → ElapsedTimeBadge pipeline", () => {
     const START = 3_000_000_000;
     // Run was paused 30 min after start.
     const stalePausedAt = START + 30 * 60_000;
@@ -495,7 +482,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
     // Call the real production transformation used by resumeRun in home.tsx.
     // This is the function under test — if it ever stops clearing pausedAt,
     // the assertions below will fail.
-    const resumedRun = applyResumeToRun(pausedRun, true, resumeInstant);
+    const resumedRun = applyResumeToRun(pausedRun, resumeInstant);
 
     // ------------------------------------------------------------------
     // State assertions: verify the output of applyResumeToRun directly.
@@ -511,8 +498,8 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
       expect(resumedRun!.pausedAt).toBeUndefined();
     });
 
-    it("post-resume run has startedAt === resumeInstant (fresh-start branch)", () => {
-      expect(resumedRun!.startedAt).toBe(resumeInstant);
+    it("post-resume run has startedAt shifted only by the pause duration", () => {
+      expect(resumedRun!.startedAt).toBe(START + 30 * 60_000);
     });
 
     // ------------------------------------------------------------------
@@ -521,7 +508,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
     // If applyResumeToRun sets the wrong startedAt or forgets to clear
     // pausedAt, the rendered output below will also be wrong.
     // ------------------------------------------------------------------
-    it("CompactRunStrip: right at resume shows 0m (pausedAt cleared, startedAt = now)", () => {
+    it("CompactRunStrip: right at resume shows 30m (pausedAt cleared)", () => {
       render(
         <ElapsedTimeBadge
           data-testid="strip-elapsed"
@@ -530,10 +517,10 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={resumedRun!.pausedAt ?? null}
         />,
       );
-      expect(screen.getByTestId("strip-elapsed").textContent).toBe("0m");
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("30m");
     });
 
-    it("ElapsedCard: right at resume shows 0m (pausedAt cleared, startedAt = now)", () => {
+    it("ElapsedCard: right at resume shows 30m (pausedAt cleared)", () => {
       render(
         <ElapsedTimeBadge
           data-testid="elapsed-card-value"
@@ -542,10 +529,10 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={resumedRun!.pausedAt ?? null}
         />,
       );
-      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("0m");
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("30m");
     });
 
-    it("CompactRunStrip: 25 min after resume shows 25m (normal accumulation from fresh start)", () => {
+    it("CompactRunStrip: 25 min after resume shows 55m", () => {
       render(
         <ElapsedTimeBadge
           data-testid="strip-elapsed"
@@ -554,10 +541,10 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={resumedRun!.pausedAt ?? null}
         />,
       );
-      expect(screen.getByTestId("strip-elapsed").textContent).toBe("25m");
+      expect(screen.getByTestId("strip-elapsed").textContent).toBe("55m");
     });
 
-    it("ElapsedCard: 25 min after resume shows 25m (normal accumulation from fresh start)", () => {
+    it("ElapsedCard: 25 min after resume shows 55m", () => {
       render(
         <ElapsedTimeBadge
           data-testid="elapsed-card-value"
@@ -566,7 +553,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
           pausedAt={resumedRun!.pausedAt ?? null}
         />,
       );
-      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("25m");
+      expect(screen.getByTestId("elapsed-card-value").textContent).toBe("55m");
     });
 
     // ------------------------------------------------------------------
@@ -659,7 +646,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
     // Call the real production transformation used by resumeRun in home.tsx.
     // freezerEmpty=false: shifts startedAt forward by pauseDuration (30 min),
     // so newStartedAt = START + 30 min = resumeInstant − 30 min.
-    const resumedRun = applyResumeToRun(pausedRun, false, resumeInstant);
+    const resumedRun = applyResumeToRun(pausedRun, resumeInstant);
 
     // Expected post-resume startedAt: START + (resumeInstant − stalePausedAt)
     //   = START + (60 min − 30 min) = START + 30 min.
@@ -835,7 +822,7 @@ describe("ElapsedTimeBadge — cap rendered via real component", () => {
 
     // Call the real production transformation.
     // freezerEmpty=false: newStartedAt = START + 120 min (shift by full 120-min pause).
-    const resumedRun = applyResumeToRun(pausedRun, false, resumeInstant);
+    const resumedRun = applyResumeToRun(pausedRun, resumeInstant);
 
     // Expected post-resume startedAt: START + (resumeInstant − stalePausedAt)
     //   = START + 120 min.

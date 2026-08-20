@@ -10,23 +10,13 @@
 // The total line time (freezerTime) is unchanged — this function overlays the
 // phase display on top of the existing timing model without altering case counts.
 //
-// Pause/resume propagation wave model
+// Pause/resume propagation model
 // ────────────────────────────────────
-// When the operator pauses (wall-clock = pausedAt):
-//   Stage 1 stops immediately.
-//   Stage 2 stops when the stop-wave travels through Stage 1 (preTunnelMin later).
-//   Stage 3 stops when the stop-wave travels through Stage 2 (preTunnelMin + tunnelMin later).
-//
-// If the pause was SHORT, the stop wave may not have reached Stage 2 or 3 yet,
-// so those stages were never actually stopped — no resuming countdown is needed.
-//
-// When the operator resumes (wall-clock = lastResumeWallMs):
-//   Stage 1 starts immediately.
-//   Stage 2 shows "product arriving" only if it was actually stopped during the pause
-//     (pause lasted >= preTunnelMin). The countdown is preTunnelMin of wall time.
-//   Stage 3 shows "product arriving" only if it was actually stopped
-//     (pause lasted >= preTunnelMin + tunnelMin). The countdown is
-//     (preTunnelMin + tunnelMin) of wall time from resume.
+// The pause record stores the operator's stop-tunnel decision. With the safe
+// stop-tunnel policy, frontline drains, the tunnel stops, then packaging drains.
+// With keep-tunnel-running, the three stages drain in normal sequence. The saved
+// policy, rather than elapsed wall time alone, also decides whether a resumed
+// tunnel needs a restart propagation countdown.
 
 export type PhaseState =
   | "filling"   // product entering this stage at run start
@@ -60,6 +50,10 @@ export interface ComputeLinePhasesArgs {
   /** Wall-clock ms when the most recent pause began (startedAt of last closed "pause" stoppage).
    *  0 if unknown. Used to compute pause duration so we know which stages were actually stopped. */
   lastPauseStartWallMs: number;
+  /** Open pause policy. Missing legacy values default to the safe stop-tunnel policy. */
+  pauseStopsTunnel?: boolean;
+  /** Most recent closed pause policy. Missing legacy values default to stop tunnel. */
+  lastPauseStopsTunnel?: boolean;
   runStatus: "running" | "paused" | "ended" | string;
   /** Duration of Stage 1 (press/oven/frontline), in minutes. */
   preTunnelMin: number;
@@ -87,6 +81,8 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     pausedAt,
     lastResumeWallMs,
     lastPauseStartWallMs,
+    pauseStopsTunnel = true,
+    lastPauseStopsTunnel = true,
     runStatus,
     freezerTime,
     nowMs,
@@ -177,36 +173,41 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     return sequentialDrain(freezerTime - elapsed / 60000);
   }
 
-  // ── Paused run: propagation delay model ──────────────────────────────────
+  // ── Paused run: persisted-policy staged drain ─────────────────────────────
   if (runStatus === "paused" && pausedAt != null) {
-    // Product in Stage 1 drains into Stage 2 during the propagation delay
-    // (the physical line keeps moving after the press stops). Stage 2 then
-    // drains into Stage 3 over the next tunnelMin. Even a short run with
-    // product only in Stage 1 should show downstream stages as draining:
-    // the stop-wave hasn't reached them yet and they are still receiving product.
-    // Only exception: no product was ever pressed (elapsedMin == 0).
     if (elapsedMin <= 0) {
+      return emptyPhases();
+    }
+
+    const pauseElapsedMin = Math.max(0, nowMs - pausedAt) / 60000;
+    if (!pauseStopsTunnel) {
+      // Tunnel remains powered: the whole line clears in its normal, one-stage
+      // at-a-time order (frontline → tunnel → wrapper).
+      return sequentialDrain(freezerTime - pauseElapsedMin);
+    }
+
+    // Safe policy: frontline drains before the tunnel is stopped. Once stopped,
+    // wrapper/packaging drains independently until clear; product held in the
+    // stopped tunnel remains visible as a stable stopped stage.
+    if (preTunnelMin > 0 && pauseElapsedMin < preTunnelMin) {
       return {
-        stage1: mk(S1, "empty"),
+        stage1: mk(S1, "draining", (preTunnelMin - pauseElapsedMin) * 60000),
         stage2: mk(S2, "empty"),
         stage3: mk(S3, "empty"),
       };
     }
-    // Stage 1 stops the moment the operator pauses.
-    // Stage 2 keeps draining Stage 1's contents until preTunnelMin wall-time later.
-    const s2PausedAt = pausedAt + preTunnelMin * 60000;
-    const s2Paused = nowMs >= s2PausedAt;
-    // Stage 3 keeps draining Stage 2's in-flight product until tunnelMin after Stage 2 stops.
-    const s3PausedAt = s2PausedAt + tunnelMin * 60000;
-    const s3Paused = nowMs >= s3PausedAt;
+    const wrapperElapsedMin = Math.max(0, pauseElapsedMin - preTunnelMin);
+    if (postTunnelMin > 0 && wrapperElapsedMin < postTunnelMin) {
+      return {
+        stage1: mk(S1, "empty"),
+        stage2: mk(S2, "paused"),
+        stage3: mk(S3, "draining", (postTunnelMin - wrapperElapsedMin) * 60000),
+      };
+    }
     return {
-      stage1: mk(S1, "paused"),
-      stage2: s2Paused
-        ? mk(S2, "paused")
-        : mk(S2, "draining", s2PausedAt - nowMs),
-      stage3: s3Paused
-        ? mk(S3, "paused")
-        : mk(S3, "draining", s3PausedAt - nowMs),
+      stage1: mk(S1, "empty"),
+      stage2: mk(S2, "paused"),
+      stage3: mk(S3, "empty"),
     };
   }
 
@@ -236,24 +237,19 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
       };
     }
 
-    // Resume propagation: a stage shows "resuming" only if it was actually
-    // stopped during the preceding pause (i.e., the pause lasted long enough
-    // for the stop-wave to reach it).
-    //
-    // Stage 2 was stopped if pause lasted >= preTunnelMin.
-    // Stage 3 was stopped if pause lasted >= preTunnelMin + tunnelMin.
-    //
-    // On resume the restart-wave travels the same path: Stage 2 sees new
-    // product after preTunnelMin of wall time; Stage 3 sees it after
-    // (preTunnelMin + tunnelMin) of wall time.
+    // A resume wave exists only for a pause that was configured to stop the
+    // tunnel and lasted long enough for frontline to drain into it. This uses
+    // the persisted policy as well as timing, so two devices never infer
+    // different restart states from the same wall-clock duration.
     const lastPauseDurationMs =
       lastResumeWallMs > 0 && lastPauseStartWallMs > 0
         ? Math.max(0, lastResumeWallMs - lastPauseStartWallMs)
         : 0;
 
-    const s2WasStopped = lastPauseDurationMs >= preTunnelMin * 60000;
-    const s3WasStopped =
-      lastPauseDurationMs >= (preTunnelMin + tunnelMin) * 60000;
+    const tunnelWasStopped =
+      lastPauseStopsTunnel && lastPauseDurationMs >= preTunnelMin * 60000;
+    const s2WasStopped = tunnelWasStopped;
+    const s3WasStopped = tunnelWasStopped;
 
     const s2ResumeDeadlineMs =
       s2WasStopped && lastResumeWallMs > 0

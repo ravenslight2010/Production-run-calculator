@@ -5,6 +5,7 @@ import { useLiveRun } from "../contexts/LiveRunContext";
 import { fmtElapsed, fmtComma, fmtClock, fmtCountdownParts } from "../utils";
 import { computeLinePhases, pickMostActivePhase, type PhaseInfo } from "../linePhases";
 import { PRE_POST_TUNNEL_DEFAULT_MIN } from "../types";
+import { pauseStopsTunnel } from "../pausePolicy";
 
 // ─── CompactRunStrip ──────────────────────────────────────────────────────────
 // Condensed run-summary header shown on every tab except the Run tab.
@@ -181,11 +182,16 @@ const CompactRunStrip = memo(function CompactRunStrip() {
             .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
           const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
           const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
+          const openPause = (currentRun?.stoppages ?? [])
+            .filter((s: any) => s.type === "pause" && !s.endedAt)
+            .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
           const phases = computeLinePhases({
             elapsedBatchSec,
             pausedAt: currentRun?.pausedAt ?? null,
             lastResumeWallMs,
             lastPauseStartWallMs,
+            pauseStopsTunnel: pauseStopsTunnel(openPause),
+            lastPauseStopsTunnel: pauseStopsTunnel(lastClosedPause),
             runStatus: runStatus as string,
             preTunnelMin: preTun,
             postTunnelMin: postTun,

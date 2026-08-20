@@ -304,6 +304,11 @@ export type Stoppage = {
   endedAt?: number;
   notes?: string;
   type?: "stop" | "pause" | "manual";
+  /**
+   * Pause-time line policy. A missing value is deliberately treated as `true`
+   * so legacy/open records retain the safe "stop tunnel" behavior on reload.
+   */
+  stopTunnel?: boolean;
 };
 
 export type RunMeta = {
@@ -312,6 +317,12 @@ export type RunMeta = {
   flavor: string;
   startedAt?: number;
   pausedAt?: number;
+  /**
+   * Identity of the currently-open pause stoppage. It prevents a resume or
+   * policy decision from touching a different pause record created in the same
+   * millisecond, and is cleared together with pausedAt on resume.
+   */
+  pausedStoppageId?: string;
   endedAt?: number;
   subTab?: "dough" | "crusts";
   notes?: string;
