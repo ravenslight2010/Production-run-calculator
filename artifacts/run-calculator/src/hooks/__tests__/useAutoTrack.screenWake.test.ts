@@ -403,4 +403,71 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
     // Must be a small increment — never the stale 200+ case catch-up.
     expect(totalAfterWakeTick2).toBeLessThanOrEqual(BASE_V.casesPerSkid);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 5. Foreground sync barrier: a second device corrected Cases on Skid while
+  // this screen was asleep. The remote value must survive the wake snap, and
+  // the first later production interval may add only one normal case.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("5. re-bases after foreground sync so a remote skid correction is not replaced by hidden-time catch-up", () => {
+    const elapsed0 = 780; // expectedCasesRaw ≈ 30
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1, // local total = 31 before sleep
+    });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      nowMs: number,
+      elapsedSec: number,
+      autoTrackBlocked = false,
+    ): Props => ({
+      runId: "wake-foreground-sync-5",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      autoTrackBlocked,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, elapsed0) },
+    );
+
+    // A long screen-off interval gives the old baseline a large potential
+    // catch-up delta. During the foreground pull, the active device's manual
+    // correction is adopted into the form while auto-track is held.
+    const sleepMs = 20 * 60_000;
+    const wakeAt = T0 + sleepMs;
+    const elapsedAtWake = elapsed0 + sleepMs / 1000;
+    store.skidsCompleted = 0;
+    store.casesOnCurrentSkid = 4; // remote shared correction
+    act(() => {
+      vi.setSystemTime(wakeAt);
+      rerender(props(wakeAt, elapsedAtWake, true));
+      // Focus and visibility can both fire while one pull is active. A second
+      // blocked render must remain inert and must not reintroduce a delta.
+      rerender(props(wakeAt, elapsedAtWake, true));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(4);
+
+    // Successful pull applied: release the barrier at the same production
+    // timeline. The barrier re-bases expectedCasesRaw and schedules the next
+    // tick in the future, so the correction remains visible.
+    act(() => {
+      rerender(props(wakeAt, elapsedAtWake, false));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(4);
+
+    // One normal case period later, only the normal +1 increment is allowed.
+    const nextTick = wakeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(nextTick);
+      rerender(props(nextTick, elapsedAtWake + CASE_PERIOD_MS / 1000 + 1, false));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(5);
+  });
 });

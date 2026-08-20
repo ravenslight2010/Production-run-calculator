@@ -100,6 +100,12 @@ interface AutoTrackParams {
    * by the auto-track write loop.
    */
   externalAutoSuppressRef?: React.MutableRefObject<number>;
+  /**
+   * A foreground sync pull is applying the newest shared run values. Hold all
+   * counter ticks until that pull completes, then re-base from the adopted
+   * values instead of applying the time elapsed while the screen was hidden.
+   */
+  autoTrackBlocked?: boolean;
 }
 
 interface AutoTrackResult {
@@ -185,6 +191,7 @@ export function useAutoTrack({
   machine,
   disabled = false,
   externalAutoSuppressRef,
+  autoTrackBlocked = false,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
@@ -448,9 +455,67 @@ export function useAutoTrack({
     }
   }, [runStatus]);
 
+  // This barrier is declared before the tick-write effect below. React runs
+  // effects in declaration order, so releasing a successful foreground sync
+  // always establishes fresh baselines before the first visible clock tick can
+  // turn hidden time into a new counter write.
+  const previouslyBlockedRef = useRef(autoTrackBlocked);
+  const rebaseAfterForegroundSync = useCallback(() => {
+    const nowMs = nowTime.getTime();
+    const casePeriodMs =
+      calc.ppm > 0 && v.pizzasPerCase > 0
+        ? clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000)
+        : 0;
+    const trayPeriodMs =
+      calc.ppm > 0 && calc.perTray > 0
+        ? clampPeriodMs((calc.perTray / calc.ppm) * 60000)
+        : 0;
+    const batchPeriodMs =
+      calc.ppm > 0 && calc.perBatch > 0
+        ? clampPeriodMs((calc.perBatch / calc.ppm / 4) * 60000)
+        : 0;
+
+    caseNextDueMsRef.current = casePeriodMs > 0 ? nowMs + casePeriodMs : 0;
+    trayNextDueMsRef.current = trayPeriodMs > 0 ? nowMs + trayPeriodMs : 0;
+    trayProdNextDueMsRef.current = trayPeriodMs > 0 ? nowMs + trayPeriodMs / 2 : 0;
+    batchNextDueMsRef.current = batchPeriodMs > 0 ? nowMs + batchPeriodMs : 0;
+    batchProdNextDueMsRef.current = batchPeriodMs > 0 ? nowMs + batchPeriodMs : 0;
+    hopperProdNextDueMsRef.current =
+      machine && machine.hopperSec > 0 ? nowMs + machine.hopperSec * 1000 : 0;
+    trayLastMsRef.current = nowMs;
+    batchLastMsRef.current = nowMs;
+    lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+    drainFreezerRef.current = Math.max(0, Math.floor(calc.casesInFreezer));
+    traysRemainderRef.current = 0;
+    formResetSkippedRef.current = false;
+    // A non-zero value received from the shared snapshot is already staged. A
+    // zero remains eligible for the hook's existing one-shot Suggest behavior.
+    traySeededRef.current = (Number(form.getValues("traysOnLine")) || 0) > 0;
+    batchSeededRef.current = (Number(form.getValues("batchesReady")) || 0) > 0;
+  }, [
+    autoTrackSuggestion?.expectedCasesRaw,
+    calc.casesInFreezer,
+    calc.perBatch,
+    calc.perTray,
+    calc.ppm,
+    form,
+    machine,
+    nowTime,
+    v.pizzasPerCase,
+  ]);
+
+  useEffect(() => {
+    if (autoTrackBlocked) {
+      resetBookkeeping();
+    } else if (previouslyBlockedRef.current) {
+      rebaseAfterForegroundSync();
+    }
+    previouslyBlockedRef.current = autoTrackBlocked;
+  }, [autoTrackBlocked, rebaseAfterForegroundSync, resetBookkeeping]);
+
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
-    if (disabled || !autoTrackProgress || !(runStatus === "running" || drainActive) || !autoTrackSuggestion) return;
+    if (autoTrackBlocked || disabled || !autoTrackProgress || !(runStatus === "running" || drainActive) || !autoTrackSuggestion) return;
 
     const nowMs = nowTime.getTime();
     // While the manual-edit suppression window is open, keep baselines current
@@ -742,7 +807,7 @@ export function useAutoTrack({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nowTime]);
+  }, [autoTrackBlocked, nowTime]);
 
   return {
     autoTrackProgress,

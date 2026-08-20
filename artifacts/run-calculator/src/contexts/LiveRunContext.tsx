@@ -142,6 +142,7 @@ export interface LiveRunProviderProps {
   screenMode: string | null;
   machine: { spinSec: number; hopperSec: number };
   externalAutoSuppressRef?: React.MutableRefObject<number>;
+  autoTrackBlocked?: boolean;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -169,6 +170,7 @@ export function LiveRunProvider({
   screenMode,
   machine,
   externalAutoSuppressRef,
+  autoTrackBlocked = false,
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus);
 
@@ -491,6 +493,7 @@ export function LiveRunProvider({
       // Pass Home's ref so the hook's own suppression check reads from it —
       // manual-edit latches written by UI consumers are honoured by the write loop.
       externalAutoSuppressRef,
+      autoTrackBlocked,
     });
 
   // ── Pre-seed next run's dough counters when this run's press is done ─────

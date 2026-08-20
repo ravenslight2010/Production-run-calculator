@@ -43,3 +43,24 @@ between ticks (write at T=0 → push at T=600ms, next write at T=1000ms).
 **Why:** Both fixes together: push starvation meant the server had stale counts
 for up to 30s; the stale-delta guard prevents the wrong catch-up write even if
 the form was reset to 0 by an SSE echo carrying that stale data.
+
+## Foreground reconciliation rule
+
+A hidden browser can wake with both a large clock jump and a stale local
+case/skid baseline while another device has corrected the shared count. Treat
+foregrounding as a brief synchronization boundary: block auto-track and queued
+pushes, pull the client-date snapshot, and apply it through the normal inbound
+merge before counting resumes.
+
+**Why:** The stale-delta guard only recognizes the special zero-form shape. A
+valid remote correction such as 31 → 4 would otherwise look like an ordinary
+non-zero total, so the waking device could add its hidden-time backlog and
+publish a freshly stamped overwrite.
+
+**How to apply:** Release the barrier only after the pull path has either
+adopted the normal merge result or failed without changing local state. On
+release, re-base auto-track timing and expected-case bookkeeping from the
+currently held form/timeline so the next write is one normal increment, never
+the hidden interval. Failed pulls must remain visibly unsynchronized (normal
+retry/push handling continues); they must not be recorded as a successful
+remote reconciliation.

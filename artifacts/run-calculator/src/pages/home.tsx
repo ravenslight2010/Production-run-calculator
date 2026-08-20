@@ -6962,6 +6962,13 @@ export default function Home() {
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncBaselineGateRef = useRef(createSyncBaselineGate());
   const isSyncApplyingRef = useRef(false);
+  // Foreground reconciliation fence. A clock snap can arrive in the same
+  // frame as a stale recovery push, so keep auto-track and outgoing pushes
+  // blocked until the date-scoped shared row has been pulled and applied.
+  const foregroundSyncBarrierRef = useRef(false);
+  const foregroundSyncInFlightRef = useRef<Promise<boolean> | null>(null);
+  const foregroundPushPendingRef = useRef(false);
+  const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
   const applySyncCallbackRef = useRef<
     (p: SyncPayload, options?: { initialSnapshot?: boolean }) => void
   >(() => {});
@@ -7848,6 +7855,94 @@ export default function Home() {
     return () => { setSyncConnected(false); es.close(); };
   }, []);
 
+  // Reconcile the shared live row before a screen-wake clock snap can turn
+  // hidden time into a stale Cases on Skid write. Focus is a fallback for
+  // browsers that do not reliably emit visibilitychange on tablet wake.
+  useEffect(() => {
+    let cancelled = false;
+
+    const reconcileForeground = async (): Promise<boolean> => {
+      if (foregroundSyncInFlightRef.current) return foregroundSyncInFlightRef.current;
+
+      foregroundSyncBarrierRef.current = true;
+      setAutoTrackBlocked(true);
+      if (pushTimerRef.current) {
+        clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+        foregroundPushPendingRef.current = true;
+      }
+      if (!pushAcknowledgedRef.current) foregroundPushPendingRef.current = true;
+
+      const work = (async () => {
+        let reconciled = false;
+        try {
+          // Check the reset epoch first because a device can miss the SSE reset
+          // frame while asleep. The ordinary reset wipe remains the single
+          // authority for clearing pre-reset local state.
+          const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+          if (epochRes.ok) {
+            const epochBody = await epochRes.json().catch(() => null) as { epoch?: number } | null;
+            if (typeof epochBody?.epoch === "number" && applyResetWipe(epochBody.epoch)) {
+              window.location.reload();
+              return false;
+            }
+          }
+
+          const res = await fetch(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" });
+          if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
+          const payload = await res.json() as SyncPayload | null;
+          // A missing row is a valid empty baseline, but do not erase local
+          // offline work here. The normal stamped push path will seed it.
+          if (payload) {
+            applySyncCallbackRef.current(payload);
+          }
+          reconciled = true;
+          return true;
+        } catch {
+          // Failed pulls are not successful reconciliation. Release the
+          // barrier so local tracking continues, and let the existing retry /
+          // stamped push behavior handle connectivity recovery.
+          return false;
+        } finally {
+          if (!cancelled) {
+            foregroundSyncBarrierRef.current = false;
+            setAutoTrackBlocked(false);
+            const shouldPush = foregroundPushPendingRef.current;
+            foregroundPushPendingRef.current = false;
+            if (shouldPush || !reconciled) {
+              requestAnimationFrame(() => {
+                if (!cancelled) schedulePush(dayStateRef.current, 0);
+              });
+            }
+          }
+        }
+      })();
+
+      foregroundSyncInFlightRef.current = work;
+      try {
+        return await work;
+      } finally {
+        if (foregroundSyncInFlightRef.current === work) {
+          foregroundSyncInFlightRef.current = null;
+        }
+      }
+    };
+
+    function onVisibility() {
+      if (document.visibilityState === "visible") void reconcileForeground();
+    }
+    function onFocus() {
+      void reconcileForeground();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
   // ── Durable merged-away tombstone (once on mount) ──
   // The per-day sync blob can't carry a merge across a day boundary: a new day's
   // row starts empty and whichever device seeds it wins. So on load we fetch the
@@ -8252,6 +8347,10 @@ export default function Home() {
   }
 
   function schedulePush(ds: DayState, delay = 600) {
+    if (foregroundSyncBarrierRef.current) {
+      foregroundPushPendingRef.current = true;
+      return;
+    }
     if (isSyncApplyingRef.current || formHandoffRef.current) return;
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
@@ -16828,6 +16927,7 @@ export default function Home() {
           spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
           hopperSec: Number(v.hopperSec) || 0,
         }}
+        autoTrackBlocked={autoTrackBlocked}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
