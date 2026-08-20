@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,6 +12,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Landing from "@/pages/landing";
 import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
+import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { useRegisterSW } from "virtual:pwa-register/react";
 
 const queryClient = new QueryClient();
@@ -42,12 +43,32 @@ function AppRoutes() {
 }
 
 function AppUpdatePrompt() {
+  const stopUpdateChecksRef = useRef<(() => void) | undefined>(undefined);
+  const onRegisteredSW = useCallback(
+    (
+      _serviceWorkerUrl: string,
+      registration: ServiceWorkerRegistration | undefined,
+    ) => {
+      stopUpdateChecksRef.current?.();
+      stopUpdateChecksRef.current = registration
+        ? startServiceWorkerUpdateChecks(registration)
+        : undefined;
+    },
+    [],
+  );
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
-  } = useRegisterSW();
+  } = useRegisterSW({ onRegisteredSW });
   const { toast } = useToast();
   const toastedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      stopUpdateChecksRef.current?.();
+      stopUpdateChecksRef.current = undefined;
+    };
+  }, []);
 
   useEffect(() => {
     if (!needRefresh || toastedRef.current) return;
