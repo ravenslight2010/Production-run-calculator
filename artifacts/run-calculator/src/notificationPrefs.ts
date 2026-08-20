@@ -13,8 +13,7 @@ export type NotificationKind =
   | "batchDue"
   | "warehouseStaging"
   | "runComplete"
-  | "freezerEmpty"
-  | "slowPace";
+  | "freezerEmpty";
 
 export type NotificationPrefs = Record<string, boolean>;
 
@@ -27,7 +26,7 @@ export const NOTIFICATION_KINDS: Array<{
   {
     kind: "batchDue",
     label: "Dough batch due",
-    description: "When it's time to start the next dough batch (banner + push).",
+    description: "Browser reminder when a new batch is due while the app is out of view. The Dough action card stays visible in the app.",
   },
   {
     kind: "fifteenMin",
@@ -48,11 +47,6 @@ export const NOTIFICATION_KINDS: Array<{
     kind: "freezerEmpty",
     label: "Freezer empty",
     description: "When an ended run's freezer has fully drained.",
-  },
-  {
-    kind: "slowPace",
-    label: "Behind pace alert",
-    description: "Mid-run warning when actual throughput is too slow to finish on time.",
   },
 ];
 

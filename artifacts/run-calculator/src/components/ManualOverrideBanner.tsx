@@ -38,10 +38,13 @@ export function manualOverrideBannerShow(
  */
 export function ManualOverrideBanner({
   show,
+  station = "Dough",
   minsLeft,
   onResume,
 }: {
   show: boolean;
+  /** The station whose counters are being held in manual mode. */
+  station?: "Dough" | "Packaging";
   minsLeft: number;
   onResume: () => void;
 }) {
@@ -49,7 +52,7 @@ export function ManualOverrideBanner({
   return (
     <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left" data-testid="manual-override-banner">
       <span className="text-amber-400 font-semibold">
-        Manual override active · auto resumes in ~{fmtMins(minsLeft)}
+        {station} station — manual override active. Resume auto tracking now or it resumes in ~{fmtMins(minsLeft)}.
       </span>
       <button
         type="button"
@@ -57,7 +60,7 @@ export function ManualOverrideBanner({
         className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0"
         data-testid="btn-resume-now"
       >
-        Resume now
+        Resume auto tracking
       </button>
     </div>
   );

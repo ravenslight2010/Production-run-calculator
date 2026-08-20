@@ -18,6 +18,24 @@ section 4, and the implemented header/menu behavior follows that decision.
 - **Capability-gated** — visibility or usefulness depends on the user role/capability. Server
   authorization remains the source of truth even where a client surface is visible.
 
+### Approved production-reminder escalation policy
+
+The goal is one immediate attention channel for a given condition, with a station-local
+instruction remaining visible when staff are already in the application:
+
+| Condition | Primary notice | Browser escalation | Expected action |
+| --- | --- | --- | --- |
+| Dough batch due | Persistent Dough action card | Only while the app is out of view; controlled by **Dough batch due** preference | Dough station: start the next batch, then acknowledge the card |
+| Behind pace | Persistent Run-station action banner plus the pace KPI | None | Run station: investigate throughput before the projected shortfall grows |
+| Manual auto-track override | Persistent Dough or Packaging station banner | None | Resume auto tracking now, or deliberately allow the scheduled resume |
+| Packaging lag | Packaging station inline quick check | None | Update packed cases or clear the packaging backlog |
+| Run time / freezer completion | Existing Run or Pack status | Only while the app is out of view; controlled by the matching notification preference | End the run when time is complete; transition once the freezer is clear |
+| Warehouse staging | Warehouse checklist | Only while the app is out of view; controlled by **Warehouse staging** preference | Stage frontline or packaging for the named next run |
+
+Browser notifications are therefore an away-from-app escalation, not a duplicate for the
+operator already viewing the station. Behind-pace is deliberately not a notification-preference
+key: its in-app Run action banner must remain visible until acknowledged.
+
 ---
 
 ## 1. Navigation inventory

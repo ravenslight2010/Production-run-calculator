@@ -55,6 +55,13 @@ function makeProps(overrides: {
 beforeEach(() => {
   shown.length = 0;
   vi.stubGlobal("Notification", FakeNotification);
+  // Browser notices are intentionally an away-from-app escalation. These
+  // timing tests exercise that path; visible-app behavior is covered by the
+  // Dough batch test that asserts the local action card replaces the push.
+  Object.defineProperty(document, "visibilityState", {
+    value: "hidden",
+    configurable: true,
+  });
   // Force the constructor path (no service worker) synchronously.
   Object.defineProperty(navigator, "serviceWorker", {
     value: undefined,

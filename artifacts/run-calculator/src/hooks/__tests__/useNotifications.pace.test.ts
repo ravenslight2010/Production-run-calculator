@@ -280,7 +280,7 @@ describe("useNotifications — behind-pace alert (no Notification API)", () => {
     expect(vibrateMock).not.toHaveBeenCalled();
   });
 
-  it("latches silently when slowPace pref is off, preventing fire on re-enable", () => {
+  it("keeps the Run-station pace action visible even when an obsolete slowPace value exists", () => {
     const run = makeRun({ startedAt: T0 });
     const prefOff = { slowPace: false } as import("../../notificationPrefs").NotificationPrefs;
 
@@ -288,19 +288,20 @@ describe("useNotifications — behind-pace alert (no Notification API)", () => {
       initialProps: makeArmParams(ARM_TICK, { currentRun: run, prefs: prefOff }),
     });
 
-    // Cross the threshold with pref OFF → paceFiredRef latches silently (no vibrate).
+    // Behind pace is no longer a browser-notification preference: it must
+    // remain visible as the Run-station action banner.
     act(() => {
       rerender(makeArmParams(EVAL_TICK, { currentRun: run, prefs: prefOff }));
     });
 
-    expect(vibrateMock).not.toHaveBeenCalled();
+    expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
 
-    // Re-enable the pref — milestone already latched, must NOT fire.
+    // Subsequent ticks are still latched, so it does not re-fire.
     act(() => {
       rerender(makeArmParams(EVAL_TICK + 1_000, { currentRun: run, prefs: undefined }));
     });
 
-    expect(vibrateMock).not.toHaveBeenCalled();
+    expect(vibrateMock).toHaveBeenCalledOnce();
   });
 
   it("showPaceAlert and paceAlertMsg are set when the alert fires", () => {
@@ -323,8 +324,8 @@ describe("useNotifications — behind-pace alert (no Notification API)", () => {
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
   });
 
-  // ── 9. Notification fires when API IS present (integration path) ──────────
-  it("calls the Notification constructor when Notification IS present and permission is granted", async () => {
+  // ── 9. Pace stays in-app even when browser notifications are available ─────
+  it("does not call the Notification constructor for behind pace", async () => {
     const notifCtor = injectNotificationStub("granted");
     const run = makeRun({ startedAt: T0 });
 
@@ -340,12 +341,7 @@ describe("useNotifications — behind-pace alert (no Notification API)", () => {
       rerender(makeArmParams(EVAL_TICK, { currentRun: run }));
     });
 
-    // Flush the async IIFE inside showAppNotification (service-worker path
-    // falls through to new Notification() in the test environment).
-    await act(async () => { await Promise.resolve(); });
-
     expect(vibrateMock).toHaveBeenCalledWith([200, 100, 200]);
-    expect(notifCtor).toHaveBeenCalledOnce();
-    expect(notifCtor.mock.calls[0][0]).toBe("⚠️ Behind pace");
+    expect(notifCtor).not.toHaveBeenCalled();
   });
 });

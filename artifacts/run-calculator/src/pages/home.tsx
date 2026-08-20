@@ -19549,6 +19549,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                             <>
                               <ManualOverrideBanner
                                 show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current)}
+                                station="Packaging"
                                 minsLeft={suppressedMinsLeft}
                                 onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                               />
@@ -20281,7 +20282,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           <div className={`mb-4 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Packaging — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
+                Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
               </p>
               {hasCps && expectedTotal !== null && (
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
@@ -20331,7 +20332,8 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                   <>
                     Packed <span className="text-foreground font-semibold">{packedTotal}</span> cases vs{" "}
                     <span className="text-foreground font-semibold">{expectedTotal}</span> expected at line speed —
-                    that's <span className="text-amber-400 font-semibold">{fmtMS(packBehindSec)}</span> behind.
+                    <span className="text-amber-400 font-semibold"> update packed cases or clear the packaging backlog</span>.
+                    That is {fmtMS(packBehindSec)} behind.
                   </>
                 )}
               </p>
@@ -20741,6 +20743,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     <>
                       <ManualOverrideBanner
                         show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef.current)}
+                        station="Dough"
                         minsLeft={suppressedMinsLeftNow}
                         onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
                       />
@@ -21096,7 +21099,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
                               <div className="flex items-center justify-between mb-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Packaging — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
+                                  Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
                                 </p>
                                 {hasCps && expectedTotal !== null && (
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
@@ -21146,9 +21149,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                     <>
                                       Packed <span className="text-foreground font-semibold">{packedTotal}</span> cases vs{" "}
                                       <span className="text-foreground font-semibold">{expectedTotal}</span> expected at line speed —
-                                      that's <span className="text-amber-400 font-semibold">{fmtMS(packBehindSec)}</span> of production not
-                                      boxed yet. Dough keeps feeding the line either way; this is your heads-up before trays pile up at the
-                                      wrapper.
+                                      <span className="text-amber-400 font-semibold"> update packed cases or clear the packaging backlog</span>.
+                                      That is {fmtMS(packBehindSec)} of production not boxed yet; dough keeps feeding the line either way.
                                     </>
                                   )}
                                 </p>
@@ -21235,7 +21237,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
                           <div className="min-w-0">
                             <p className={`text-sm font-bold ${showBatchDue ? "text-orange-400" : "text-foreground"}`}>
-                              {showBatchDue ? "Start next dough batch now" : "Next batch due"}
+                              {showBatchDue ? "Dough station — start next batch now" : "Dough station — next batch due"}
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               {showBatchDue ? `Time per batch: ${fmtTime(calc.timePerBatchSec)}` : "Countdown to the next mixer batch at current pace"}

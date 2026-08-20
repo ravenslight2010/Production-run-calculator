@@ -107,6 +107,16 @@ export function showAppNotification(title: string, options: NotificationOptions)
 }
 
 /**
+ * A browser notification is an escalation for an operator who has left the
+ * app, not a second alert for someone already looking at its action card.
+ * Keep this separate from showAppNotification(): the sauce tab also uses that
+ * utility for its own local alert behavior.
+ */
+export function shouldEscalateToBrowser(): boolean {
+  return typeof document !== "undefined" && document.visibilityState !== "visible";
+}
+
+/**
  * Fires browser Notifications and haptic vibrations at key run milestones:
  *  - 15 minutes remaining before end of run
  *  - Each dough-batch cycle boundary
@@ -152,7 +162,6 @@ export function useNotifications({
   // remainMs is already 0 — fired the alert immediately on every completed run.
   const freezerDrainingRef = useRef<Set<string>>(new Set());
   const freezerDoneNotifRef = useRef<Set<string>>(new Set());
-  const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
 
   // ── Pace alert state ───────────────────────────────────────────────────────
@@ -199,6 +208,13 @@ export function useNotifications({
         notifiedRunRef.current = runId;
         return;
       }
+      // The Run station's countdown is already visible, so do not stack an OS
+      // notification on top of it. Latch this milestone so hiding the app later
+      // does not turn an old heads-up into a new browser alert.
+      if (!shouldEscalateToBrowser()) {
+        notifiedRunRef.current = runId;
+        return;
+      }
       if ("Notification" in window) {
         const fire = () => {
           notifiedRunRef.current = runId;
@@ -242,7 +258,6 @@ export function useNotifications({
     if (cps <= 0 || needed <= 0) return;
     const pressLeft = calc.pressCasesLeft;
     if (pressLeft <= 0) return;
-    if (!("Notification" in window)) return;
     const runId = currentRun.id;
     const shortRun = needed < 2 * cps;
     const nextTxt = nextRunLabels.length > 0
@@ -272,9 +287,15 @@ export function useNotifications({
     if (pressLeft <= 2 * cps && !frontlineNotifRef.current.has(runId)) dueStages.push("frontline");
     if (pressLeft <= cps && !packagingNotifRef.current.has(runId)) dueStages.push("packaging");
     if (dueStages.length === 0) return;
-    // Turned off by this user: latch the due stages silently so re-enabling
-    // mid-run doesn't retroactively fire an already-passed staging alert.
-    if (!isNotifEnabled(prefsRef.current, "warehouseStaging")) {
+    // Browser notices are only for an operator who is away from the app. When
+    // the warehouse view is visible, its staging checklist is the one source
+    // of direction. In every silent path we still latch the milestone so a
+    // later tab/background change cannot retroactively alert.
+    if (
+      !isNotifEnabled(prefsRef.current, "warehouseStaging") ||
+      !shouldEscalateToBrowser() ||
+      !("Notification" in window)
+    ) {
       dueStages.forEach((stage) => {
         (stage === "frontline" ? frontlineNotifRef : packagingNotifRef).current.add(runId);
       });
@@ -316,13 +337,15 @@ export function useNotifications({
     const key = `${currentRun.id}-${batchNum}`;
     if (batchNotifRef.current === key) return;
     batchNotifRef.current = key;
-    // Turned off by this user: the cycle key above is already latched, so
-    // re-enabling mid-run only alerts on the NEXT batch boundary.
-    if (!isNotifEnabled(prefsRef.current, "batchDue")) return;
-    navigator.vibrate?.([100, 50, 100]);
+    // The Dough card is the primary action surface. It stays visible until the
+    // crew acknowledges the batch, even when this user's browser-alert setting
+    // is off. The preference controls only the out-of-app escalation below.
     setShowBatchDue(true);
-    if (batchDismissRef.current) clearTimeout(batchDismissRef.current);
-    batchDismissRef.current = setTimeout(() => setShowBatchDue(false), 10000);
+    // Turned off by this user, or already looking at the app: the batch key
+    // above is still latched so a later preference/visibility change cannot
+    // re-fire this completed boundary.
+    if (!isNotifEnabled(prefsRef.current, "batchDue") || !shouldEscalateToBrowser()) return;
+    navigator.vibrate?.([100, 50, 100]);
     if ("Notification" in window) {
       if (Notification.permission === "granted") {
         showAppNotification("🍕 Start next dough batch", {
@@ -334,7 +357,6 @@ export function useNotifications({
         Notification.requestPermission();
       }
     }
-    return () => { if (batchDismissRef.current) clearTimeout(batchDismissRef.current); };
   }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust, calc.pressDone]);
 
   // ── Run time complete alert ────────────────────────────────────────────────
@@ -360,6 +382,7 @@ export function useNotifications({
     // re-enabling later never fires a stale "time's up".
     if (!isNotifEnabled(prefsRef.current, "runComplete")) return;
     navigator.vibrate?.([300, 100, 300, 100, 300]);
+    if (!shouldEscalateToBrowser()) return;
     if ("Notification" in window && Notification.permission === "granted") {
       showAppNotification("✅ Run time complete", {
         body: `${runLabel(currentRun)} — time's up, end the run.`,
@@ -388,6 +411,7 @@ export function useNotifications({
     // re-enabling later never fires a stale "freezer empty".
     if (!isNotifEnabled(prefsRef.current, "freezerEmpty")) return;
     navigator.vibrate?.([200, 100, 200]);
+    if (!shouldEscalateToBrowser()) return;
     if ("Notification" in window && Notification.permission === "granted") {
       showAppNotification("❄️ Freezer empty", {
         body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
@@ -456,21 +480,12 @@ export function useNotifications({
     if (!paceArmedRef.current.has(runId)) return;
     paceFiredRef.current.add(runId);
 
-    // Silent latch when the user has turned this alert off — future re-enable
-    // won't retroactively fire for a milestone that's already passed.
-    if (!isNotifEnabled(prefsRef.current, "slowPace")) return;
-
     const rateRounded = Math.round(actualRateCasesPerHr);
     const remainMin = Math.round(timeRemainingMin);
-    const msg = `At current pace (~${rateRounded}/hr), you'll finish ~${shortfall} cases short. ${remainMin} min remaining.`;
+    const msg = `Run station — behind pace. Investigate throughput: ~${rateRounded}/hr projects ~${shortfall} cases short with ${remainMin} min remaining.`;
     setPaceAlertMsg(msg);
     setShowPaceAlert(true);
     navigator.vibrate?.([200, 100, 200]);
-    showAppNotification("⚠️ Behind pace", {
-      body: msg,
-      icon: "/icons/icon-192.png",
-      tag: `slow-pace-${runId}`,
-    });
   }, [
     runStatus,
     currentRun?.id,

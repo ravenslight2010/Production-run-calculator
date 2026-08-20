@@ -39,9 +39,10 @@ describe("ManualOverrideBanner — manual override active banner", () => {
     // Minutes left must appear (fmtMins(1) = "1 min")
     expect(banner.textContent).toMatch(/1 min/);
 
-    // "Resume now" button must be visible and clickable
+    // Station-specific resume action must be visible and clickable.
     expect(screen.getByTestId("btn-resume-now")).toBeTruthy();
-    expect(screen.getByTestId("btn-resume-now").textContent).toMatch(/Resume now/i);
+    expect(banner.textContent).toMatch(/Dough station/i);
+    expect(screen.getByTestId("btn-resume-now").textContent).toMatch(/Resume auto tracking/i);
   });
 
   it("calls onResume when 'Resume now' is clicked", () => {

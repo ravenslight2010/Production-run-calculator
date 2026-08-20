@@ -137,6 +137,7 @@ function injectNotificationStub(permission: NotificationPermission = "granted") 
     writable: true,
     configurable: true,
   });
+  Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
   return ctor;
 }
 

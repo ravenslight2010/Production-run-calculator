@@ -127,7 +127,10 @@ afterEach(() => {
 // The Notification constructor is called one microtask after the effect runs
 // (inside an async IIFE in showAppNotification), so callers must
 // `await act(async () => {})` before asserting on the returned ctor mock.
-function injectNotificationStub(permission: NotificationPermission = "granted") {
+function injectNotificationStub(
+  permission: NotificationPermission = "granted",
+  visibility: DocumentVisibilityState = "hidden",
+) {
   const ctor = vi.fn();
   const stub = Object.assign(ctor, { permission });
   Object.defineProperty(window, "Notification", {
@@ -135,6 +138,7 @@ function injectNotificationStub(permission: NotificationPermission = "granted") 
     writable: true,
     configurable: true,
   });
+  Object.defineProperty(document, "visibilityState", { value: visibility, configurable: true });
   return ctor;
 }
 
@@ -168,8 +172,9 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
       });
     }).not.toThrow();
 
-    // vibrate fires (it is before the Notification guard).
-    expect(vibrateMock).toHaveBeenCalledWith([100, 50, 100]);
+    // The visible Dough action card is the only immediate notice while the app
+    // is in view, so it does not also vibrate as an away-from-app escalation.
+    expect(vibrateMock).not.toHaveBeenCalled();
   });
 
   it("shows the in-app banner when a batch boundary is first crossed", () => {
@@ -180,7 +185,7 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
 
     // At T0: elapsed = 30 min, batchNum = 3 → banner should appear.
     expect(result.current.showBatchDue).toBe(true);
-    expect(vibrateMock).toHaveBeenCalledWith([100, 50, 100]);
+    expect(vibrateMock).not.toHaveBeenCalled();
   });
 
   it("does NOT fire when no batch boundary has been crossed yet (batchNum < 1)", () => {
@@ -204,7 +209,7 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
 
     // First render: batchNum=3, fires.
     expect(result.current.showBatchDue).toBe(true);
-    expect(vibrateMock).toHaveBeenCalledOnce();
+    expect(vibrateMock).not.toHaveBeenCalled();
 
     vibrateMock.mockClear();
 
@@ -254,8 +259,9 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
       initialProps: makeParams(T0, { currentRun: run, prefs: prefOff }),
     });
 
-    // Pref suppressed → latch applied but no vibrate, no banner.
-    expect(result.current.showBatchDue).toBe(false);
+    // Pref suppresses only the browser escalation. The Dough action card stays
+    // visible so a staff member already in the app is not left without direction.
+    expect(result.current.showBatchDue).toBe(true);
     expect(vibrateMock).not.toHaveBeenCalled();
 
     // Re-enable pref — same batch key is already latched, must NOT retroactively fire.
@@ -263,7 +269,7 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
       rerender(makeParams(T0 + 1_000, { currentRun: run, prefs: undefined }));
     });
 
-    expect(result.current.showBatchDue).toBe(false);
+    expect(result.current.showBatchDue).toBe(true);
     expect(vibrateMock).not.toHaveBeenCalled();
   });
 
@@ -386,6 +392,19 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
     // vibrate and banner still fire (before the Notification guard).
     expect(vibrateMock).toHaveBeenCalledWith([100, 50, 100]);
     // But the Notification constructor must not be called.
+    expect(notifCtor).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Dough action card but does not show a browser notification while the app is visible", async () => {
+    const notifCtor = injectNotificationStub("granted", "visible");
+    const run = makeRun();
+
+    const { result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, { currentRun: run }),
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current.showBatchDue).toBe(true);
     expect(notifCtor).not.toHaveBeenCalled();
   });
 });
