@@ -2143,6 +2143,37 @@ export interface SaveAiCorrectionsInput {
   corrections: AiCorrection[];
 }
 
+export type AiMemoryHealthFindingEntry = AiCorrection & {
+  id: number;
+};
+
+export type AiMemoryHealthFindingStatus = typeof AiMemoryHealthFindingStatus[keyof typeof AiMemoryHealthFindingStatus];
+
+
+export const AiMemoryHealthFindingStatus = {
+  healthy: 'healthy',
+  duplicate: 'duplicate',
+  'covered-by-merge': 'covered-by-merge',
+  'outdated-target': 'outdated-target',
+  chain: 'chain',
+  cycle: 'cycle',
+  orphaned: 'orphaned',
+  'needs-review': 'needs-review',
+} as const;
+
+/**
+ * A deterministic correction-only repair. Facility facts are never included.
+ */
+export type AiMemoryHealthFindingSafeRepair = { [key: string]: unknown };
+
+export interface AiMemoryHealthFinding {
+  entry: AiMemoryHealthFindingEntry;
+  status: AiMemoryHealthFindingStatus;
+  evidence: string[];
+  /** A deterministic correction-only repair. Facility facts are never included. */
+  safeRepair?: AiMemoryHealthFindingSafeRepair;
+}
+
 /**
  * A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.
  */
@@ -2153,6 +2184,53 @@ export interface FacilityKnowledge {
   key: string;
   /** The durable observation in plain language */
   fact: string;
+}
+
+export type FacilityKnowledgeHealthFindingEntry = FacilityKnowledge & ({
+  id: number;
+  source?: string | null;
+});
+
+export type FacilityKnowledgeHealthFindingStatus = typeof FacilityKnowledgeHealthFindingStatus[keyof typeof FacilityKnowledgeHealthFindingStatus];
+
+
+export const FacilityKnowledgeHealthFindingStatus = {
+  'exact-duplicate': 'exact-duplicate',
+  'stale-source-reference': 'stale-source-reference',
+  'superseded-name-reference': 'superseded-name-reference',
+  'needs-review': 'needs-review',
+} as const;
+
+export interface FacilityKnowledgeHealthFinding {
+  entry: FacilityKnowledgeHealthFindingEntry;
+  status: FacilityKnowledgeHealthFindingStatus;
+  evidence: string[];
+}
+
+export type AiMemoryHealthReportSafeRepairsItem = { [key: string]: unknown };
+
+export type AiMemoryHealthReportSummary = {[key: string]: number};
+
+export interface AiMemoryHealthReport {
+  correctionFindings: AiMemoryHealthFinding[];
+  facilityKnowledgeFindings: FacilityKnowledgeHealthFinding[];
+  safeRepairs: AiMemoryHealthReportSafeRepairsItem[];
+  summary: AiMemoryHealthReportSummary;
+  conversationHistoryExcluded: true;
+}
+
+export type AiMemoryHealthApplyResultAppliedItem = { [key: string]: unknown };
+
+export type AiMemoryHealthApplyResultSummary = {
+  deleted: number;
+  retargeted: number;
+};
+
+export interface AiMemoryHealthApplyResult {
+  before: AiMemoryHealthReport;
+  after: AiMemoryHealthReport;
+  applied: AiMemoryHealthApplyResultAppliedItem[];
+  summary: AiMemoryHealthApplyResultSummary;
 }
 
 export interface FacilityKnowledgeList {
@@ -3287,5 +3365,9 @@ export type ObserveRunSuggestion200 = {
 
 export type FollowUpRunSuggestion200 = {
   ok: boolean;
+};
+
+export type AuditAiMemoryHealth200 = {
+  report: AiMemoryHealthReport;
 };
 

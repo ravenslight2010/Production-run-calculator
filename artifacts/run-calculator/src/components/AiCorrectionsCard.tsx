@@ -1,9 +1,17 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Brain, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
+import { Loader2, Brain, Trash2, RefreshCw, ShieldCheck, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fetchAiCorrections, deleteAiCorrection, collapseAiCorrectionChains, type AiCorrectionWithId } from "@/aiCorrections";
+import {
+  fetchAiCorrections,
+  deleteAiCorrection,
+  fetchAiMemoryHealth,
+  applyAiMemorySafeFixes,
+  type AiCorrectionWithId,
+  type AiMemoryHealthApplyResult,
+} from "@/aiCorrections";
+import type { AiMemoryHealthReport } from "@workspace/ai-memory";
 
 // Domain display labels — falls back to the raw domain string for unknown ones.
 const DOMAIN_LABELS: Record<string, string> = {
@@ -24,35 +32,6 @@ function domainBadgeClass(domain: string): string {
     case "die":        return "bg-orange-500/15 text-orange-400";
     default:           return "bg-muted text-muted-foreground";
   }
-}
-
-// Returns the set of IDs that would be dropped by dropConflictingCorrections —
-// i.e. entries whose fromText or toText appears on BOTH sides of the pool for
-// their domain. These are stale chains/cycles that the AI silently ignores.
-function computeConflictedIds(corrections: AiCorrectionWithId[]): Set<number> {
-  const dl = (s: string) => s.trim().toLowerCase();
-  const froms = new Map<string, Set<string>>();
-  const tos   = new Map<string, Set<string>>();
-  for (const c of corrections) {
-    const d = dl(c.domain);
-    let f = froms.get(d);
-    if (!f) froms.set(d, (f = new Set()));
-    f.add(dl(c.fromText));
-    let t = tos.get(d);
-    if (!t) tos.set(d, (t = new Set()));
-    t.add(dl(c.toText));
-  }
-  const conflictedIds = new Set<number>();
-  for (const c of corrections) {
-    const d = dl(c.domain);
-    const f = froms.get(d);
-    const t = tos.get(d);
-    const isConflicted = (name: string) => !!f && !!t && f.has(name) && t.has(name);
-    if (isConflicted(dl(c.fromText)) || isConflicted(dl(c.toText))) {
-      conflictedIds.add(c.id);
-    }
-  }
-  return conflictedIds;
 }
 
 // Group corrections by domain, sorted alphabetically by domain then fromText.
@@ -76,6 +55,8 @@ function groupByDomain(corrections: AiCorrectionWithId[]): [string, AiCorrection
 export default function AiCorrectionsCard() {
   const qc = useQueryClient();
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmingSafeFixes, setConfirmingSafeFixes] = useState(false);
+  const [applyResult, setApplyResult] = useState<AiMemoryHealthApplyResult | null>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["ai-corrections"],
@@ -88,21 +69,43 @@ export default function AiCorrectionsCard() {
     onMutate: (id) => setDeletingId(id),
     onSuccess: (updated) => {
       qc.setQueryData(["ai-corrections"], updated);
+      void qc.invalidateQueries({ queryKey: ["ai-memory-health"] });
     },
     onSettled: () => setDeletingId(null),
   });
 
-  const collapseMutation = useMutation({
-    mutationFn: collapseAiCorrectionChains,
-    onSuccess: (updated) => {
-      qc.setQueryData(["ai-corrections"], updated);
+  const healthQuery = useQuery({
+    queryKey: ["ai-memory-health"],
+    queryFn: fetchAiMemoryHealth,
+    enabled: false,
+    staleTime: 0,
+  });
+
+  const applyMutation = useMutation({
+    mutationFn: applyAiMemorySafeFixes,
+    onSuccess: (result) => {
+      setApplyResult(result);
+      setConfirmingSafeFixes(false);
+      qc.setQueryData<AiMemoryHealthReport>(["ai-memory-health"], result.after);
+      void qc.invalidateQueries({ queryKey: ["ai-corrections"] });
     },
   });
 
   const corrections = data ?? [];
-  const conflictedIds = computeConflictedIds(corrections);
   const groups = groupByDomain(corrections);
-  const hasConflicts = conflictedIds.size > 0;
+  const report = healthQuery.data;
+  const reviewFindings = report?.correctionFindings.filter(
+    (finding) => finding.status !== "healthy" && finding.status !== "covered-by-merge",
+  ) ?? [];
+  const facilityFindings = report?.facilityKnowledgeFindings ?? [];
+
+  const statusLabel = (status: string) => status.replaceAll("-", " ");
+  const statusClass = (status: string) =>
+    ["healthy", "covered-by-merge"].includes(status)
+      ? "bg-emerald-500/15 text-emerald-400"
+      : ["cycle", "orphaned", "outdated-target"].includes(status)
+        ? "bg-amber-500/15 text-amber-400"
+        : "bg-muted text-muted-foreground";
 
   return (
     <Card>
@@ -113,23 +116,20 @@ export default function AiCorrectionsCard() {
             Name Equivalences
           </CardTitle>
           <div className="flex items-center gap-1">
-            {hasConflicts && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => collapseMutation.mutate()}
-                disabled={collapseMutation.isPending}
-                className="h-7 px-2 text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-                title="Automatically resolve stale chains and cycles in the AI memory"
-              >
-                {collapseMutation.isPending ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <AlertTriangle className="w-3 h-3" />
-                )}
-                Fix stale entries
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setApplyResult(null);
+                setConfirmingSafeFixes(false);
+                void healthQuery.refetch();
+              }}
+              disabled={healthQuery.isFetching}
+              className="h-7 px-2 text-xs gap-1.5"
+            >
+              {healthQuery.isFetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+              Health check
+            </Button>
             <button
               type="button"
               onClick={() => refetch()}
@@ -144,10 +144,8 @@ export default function AiCorrectionsCard() {
         <p className="text-xs text-muted-foreground mt-1">
           Corrections the AI has learned — whenever a name is renamed or merged, an entry is
           recorded here so every AI feature treats the old name as equal to the new one.
-          Delete an entry to stop the AI from applying that substitution.
-          Entries marked with <AlertTriangle className="inline w-3 h-3 text-amber-400 mx-0.5 mb-0.5" /> are
-          part of a chain or cycle and are currently <strong>ignored by the AI</strong> — use
-          "Fix stale entries" to auto-resolve them, or delete manually.
+            Run the health check before removing an entry: it compares correction memory to confirmed
+            merges and current master data. It never includes anyone&apos;s private conversation history.
         </p>
       </CardHeader>
       <CardContent>
@@ -161,11 +159,29 @@ export default function AiCorrectionsCard() {
             <p className="text-sm text-destructive mb-3">Failed to load corrections.</p>
             <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
           </div>
-        ) : corrections.length === 0 ? (
+        ) : (
+          <div className="space-y-5">
+            <HealthCheckResults
+              report={report}
+              isLoading={healthQuery.isFetching}
+              isError={healthQuery.isError}
+              findings={reviewFindings}
+              facilityFindings={facilityFindings}
+              confirmingSafeFixes={confirmingSafeFixes}
+              onStartConfirm={() => setConfirmingSafeFixes(true)}
+              onCancelConfirm={() => setConfirmingSafeFixes(false)}
+              onApply={() => applyMutation.mutate()}
+              isApplying={applyMutation.isPending}
+              applyError={applyMutation.isError}
+              applyResult={applyResult}
+              statusLabel={statusLabel}
+              statusClass={statusClass}
+            />
+            {corrections.length === 0 ? (
           <p className="text-sm text-muted-foreground italic py-4 text-center">
             No name equivalences recorded yet.
           </p>
-        ) : (
+            ) : (
           <div className="space-y-4">
             {groups.map(([domain, items]) => (
               <div key={domain}>
@@ -177,22 +193,11 @@ export default function AiCorrectionsCard() {
                 </div>
                 <div className="space-y-1">
                   {items.map((c) => {
-                    const isConflicted = conflictedIds.has(c.id);
                     return (
                       <div
                         key={c.id}
-                        className={`flex items-center gap-2 px-3 py-2 rounded border bg-background/40 ${
-                          isConflicted
-                            ? "border-amber-500/40 bg-amber-500/5"
-                            : "border-border"
-                        }`}
+                        className="flex items-center gap-2 px-3 py-2 rounded border border-border bg-background/40"
                       >
-                        {isConflicted && (
-                          <AlertTriangle
-                            className="shrink-0 w-3.5 h-3.5 text-amber-400"
-                            aria-label="This entry is part of a rename chain or cycle and is currently ignored by the AI. Delete the stale entry to restore it."
-                          />
-                        )}
                         <div className="min-w-0 flex-1">
                           <span className="text-xs font-medium text-muted-foreground truncate" title={c.fromText}>
                             {c.fromText}
@@ -222,8 +227,127 @@ export default function AiCorrectionsCard() {
               </div>
             ))}
           </div>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function HealthCheckResults({
+  report,
+  isLoading,
+  isError,
+  findings,
+  facilityFindings,
+  confirmingSafeFixes,
+  onStartConfirm,
+  onCancelConfirm,
+  onApply,
+  isApplying,
+  applyError,
+  applyResult,
+  statusLabel,
+  statusClass,
+}: {
+  report?: AiMemoryHealthReport;
+  isLoading: boolean;
+  isError: boolean;
+  findings: AiMemoryHealthReport["correctionFindings"];
+  facilityFindings: AiMemoryHealthReport["facilityKnowledgeFindings"];
+  confirmingSafeFixes: boolean;
+  onStartConfirm: () => void;
+  onCancelConfirm: () => void;
+  onApply: () => void;
+  isApplying: boolean;
+  applyError: boolean;
+  applyResult: AiMemoryHealthApplyResult | null;
+  statusLabel: (status: string) => string;
+  statusClass: (status: string) => string;
+}) {
+  if (isLoading) {
+    return <div className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking correction and facility memory…</div>;
+  }
+  if (isError) {
+    return <p className="text-xs text-destructive">The health check could not be completed. No AI memory was changed.</p>;
+  }
+  if (!report) return null;
+  return (
+    <section className="rounded border border-primary/25 bg-primary/5 p-3 space-y-3" aria-live="polite">
+      <div className="flex items-start gap-2">
+        <ShieldCheck className="w-4 h-4 mt-0.5 text-primary shrink-0" />
+        <div>
+          <p className="text-sm font-semibold">AI Memory Health Check</p>
+          <p className="text-xs text-muted-foreground">
+            Read-only review of {report.correctionFindings.length} correction{report.correctionFindings.length === 1 ? "" : "s"} and {facilityFindings.length} facility fact{facilityFindings.length === 1 ? "" : "s"}. Per-user conversation history is excluded.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {Object.entries(report.summary).map(([status, count]) => (
+          <span key={status} className={`px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${statusClass(status)}`}>
+            {count} {statusLabel(status)}
+          </span>
+        ))}
+      </div>
+      {findings.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold">Correction findings</p>
+          {findings.map((finding) => (
+            <div key={finding.entry.id} className="rounded border border-border bg-background/60 px-2.5 py-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium truncate">{finding.entry.fromText} → {finding.entry.toText}</span>
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${statusClass(finding.status)}`}>{statusLabel(finding.status)}</span>
+              </div>
+              <p className="mt-1 text-muted-foreground">{finding.evidence.join(" ")}</p>
+              {finding.safeRepair && <p className="mt-1 text-primary">Safe repair: {finding.safeRepair.action === "delete" ? "remove this duplicate/cycle row" : `retarget to "${finding.safeRepair.after.toText}"`}.</p>}
+            </div>
+          ))}
+        </div>
+      ) : <p className="text-xs text-emerald-400">No correction entries need deterministic repair.</p>}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold">Facility knowledge (review only)</p>
+        {facilityFindings.length === 0 ? <p className="text-xs text-muted-foreground">No facility facts recorded.</p> : facilityFindings.map((finding) => (
+          <div key={finding.entry.id} className="rounded border border-border bg-background/60 px-2.5 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium truncate">{finding.entry.key}</span>
+              <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${statusClass(finding.status)}`}>{statusLabel(finding.status)}</span>
+            </div>
+            <p className="mt-1 text-muted-foreground">{finding.evidence.join(" ")}</p>
+          </div>
+        ))}
+      </div>
+      {report.safeRepairs.length > 0 && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
+          <p className="text-xs text-amber-300">
+            {report.safeRepairs.length} deterministic repair{report.safeRepairs.length === 1 ? "" : "s"} listed above. Applying only updates or removes those correction rows; facility facts and conversations stay untouched.
+          </p>
+          {!confirmingSafeFixes ? (
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onStartConfirm}>Review safe fixes</Button>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" className="h-7 text-xs" onClick={onApply} disabled={isApplying}>
+                {isApplying ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}
+                Apply listed safe fixes
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancelConfirm} disabled={isApplying}>Cancel</Button>
+            </div>
+          )}
+          {applyError && <p className="text-xs text-destructive">No fixes were applied because the safe-repair transaction failed.</p>}
+        </div>
+      )}
+      {applyResult && (
+        <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-300">
+          <p className="font-semibold">Safe repair summary</p>
+          <p className="mt-1">
+            Applied safely: {applyResult.summary.retargeted} retargeted and {applyResult.summary.deleted} removed.
+          </p>
+          <p className="mt-1 text-emerald-200/90">
+            Before: {applyResult.before.correctionFindings.length} correction finding{applyResult.before.correctionFindings.length === 1 ? "" : "s"} and {applyResult.before.safeRepairs.length} deterministic repair{applyResult.before.safeRepairs.length === 1 ? "" : "s"} listed. After: {applyResult.after.correctionFindings.length} correction finding{applyResult.after.correctionFindings.length === 1 ? "" : "s"} and {applyResult.after.safeRepairs.length} deterministic repair{applyResult.after.safeRepairs.length === 1 ? "" : "s"} remaining. Facility facts and conversation history were not changed.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }

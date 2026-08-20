@@ -22,12 +22,14 @@ import type {
 import type {
   AdjustInput,
   AiCorrectionList,
+  AiMemoryHealthApplyResult,
   AnomalyInput,
   AnomalyResult,
   AppendConversationInput,
   ApprovePasswordResetResult,
   AskInput,
   AskResult,
+  AuditAiMemoryHealth200,
   AuthCredentials,
   AuthResponse,
   BrandProfileList,
@@ -8439,6 +8441,155 @@ export const useSaveAiCorrections = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveAiCorrectionsMutationOptions(options));
+    }
+
+export const getAuditAiMemoryHealthUrl = () => {
+
+
+
+
+  return `/api/ai-memory/health-check`
+}
+
+/**
+ * Manager-only, read-only audit of factory-wide correction memory and facility knowledge. It compares corrections to confirmed merge aliases, merged-away names, and active master-data names. Per-user conversation history is explicitly excluded from the audit and cleanup.
+ * @summary Preview AI memory health and deterministic safe repairs
+ */
+export const auditAiMemoryHealth = async ( options?: RequestInit): Promise<AuditAiMemoryHealth200> => {
+
+  return customFetch<AuditAiMemoryHealth200>(getAuditAiMemoryHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAuditAiMemoryHealthQueryKey = () => {
+    return [
+    `/api/ai-memory/health-check`
+    ] as const;
+    }
+
+
+export const getAuditAiMemoryHealthQueryOptions = <TData = Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAuditAiMemoryHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof auditAiMemoryHealth>>> = ({ signal }) => auditAiMemoryHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AuditAiMemoryHealthQueryResult = NonNullable<Awaited<ReturnType<typeof auditAiMemoryHealth>>>
+export type AuditAiMemoryHealthQueryError = ErrorType<void>
+
+
+/**
+ * @summary Preview AI memory health and deterministic safe repairs
+ */
+
+export function useAuditAiMemoryHealth<TData = Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditAiMemoryHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAuditAiMemoryHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getApplyAiMemorySafeFixesUrl = () => {
+
+
+
+
+  return `/api/ai-memory/health-check/apply`
+}
+
+/**
+ * Manager-only atomic repair. The server re-runs the health audit inside the transaction and applies only its listed duplicate, chain, cycle, or canonical-target correction repairs. It never changes facility facts or per-user conversation history.
+ * @summary Apply only the current deterministic AI correction repairs
+ */
+export const applyAiMemorySafeFixes = async ( options?: RequestInit): Promise<AiMemoryHealthApplyResult> => {
+
+  return customFetch<AiMemoryHealthApplyResult>(getApplyAiMemorySafeFixesUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApplyAiMemorySafeFixesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyAiMemorySafeFixes>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyAiMemorySafeFixes>>, TError,void, TContext> => {
+
+const mutationKey = ['applyAiMemorySafeFixes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyAiMemorySafeFixes>>, void> = () => {
+
+
+          return  applyAiMemorySafeFixes(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyAiMemorySafeFixesMutationResult = NonNullable<Awaited<ReturnType<typeof applyAiMemorySafeFixes>>>
+
+    export type ApplyAiMemorySafeFixesMutationError = ErrorType<void>
+
+    /**
+ * @summary Apply only the current deterministic AI correction repairs
+ */
+export const useApplyAiMemorySafeFixes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyAiMemorySafeFixes>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyAiMemorySafeFixes>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getApplyAiMemorySafeFixesMutationOptions(options));
     }
 
 export const getListFacilityKnowledgeUrl = () => {

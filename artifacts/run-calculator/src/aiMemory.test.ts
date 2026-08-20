@@ -20,6 +20,7 @@ import {
   buildConversationBlock,
   MAX_TURN_TEXT_LEN,
   type ConversationTurn,
+  auditAiMemory,
 } from "@workspace/ai-memory";
 
 describe("correctionKey", () => {
@@ -345,5 +346,88 @@ describe("buildConversationBlock", () => {
     const block = buildConversationBlock(turns, { limit: 1 });
     expect(block).toContain("Three.");
     expect(block).not.toContain("How many runs left?");
+  });
+});
+
+describe("auditAiMemory", () => {
+  const correction = (id: number, fromText: string, toText: string, domain = "ingredient") => ({
+    id,
+    domain,
+    fromText,
+    toText,
+  });
+
+  it("returns a read-only deterministic plan for duplicates, chains, cycles, and canonical target changes", () => {
+    const input = {
+      corrections: [
+        correction(1, "Old Mozz", "Mozz"),
+        correction(2, "Old Mozz", "Mozz"), // duplicate database row
+        correction(3, "Legacy", "Middle"),
+        correction(4, "Middle", "Current"),
+        correction(5, "Round", "Square", "die"),
+        correction(6, "Square", "Round", "die"),
+        correction(7, "Old Brand", "No Longer Current", "brand"),
+      ],
+      facilityKnowledge: [],
+      canonicalAliases: [
+        { domain: "brand", fromText: "Old Brand", toText: "Current Brand", source: "merge alias" },
+      ],
+      activeNamesByDomain: {
+        ingredient: ["Mozz", "Current"],
+        brand: ["Current Brand"],
+        die: ["Round", "Square"],
+      },
+    };
+    const before = JSON.parse(JSON.stringify(input));
+    const report = auditAiMemory(input);
+
+    expect(report.correctionFindings.find((f) => f.entry.id === 2)?.status).toBe("duplicate");
+    expect(report.correctionFindings.find((f) => f.entry.id === 3)?.status).toBe("chain");
+    expect(report.correctionFindings.find((f) => f.entry.id === 5)?.status).toBe("cycle");
+    expect(report.correctionFindings.find((f) => f.entry.id === 6)?.status).toBe("cycle");
+    const outdated = report.correctionFindings.find((f) => f.entry.id === 7);
+    expect(outdated?.status).toBe("outdated-target");
+    expect(outdated?.safeRepair).toMatchObject({
+      action: "retarget",
+      after: { toText: "Current Brand" },
+    });
+    expect(report.safeRepairs).toHaveLength(5);
+    expect(input).toEqual(before);
+    expect(report.conversationHistoryExcluded).toBe(true);
+  });
+
+  it("keeps historic merged-away source aliases and only flags a missing target for review", () => {
+    const report = auditAiMemory({
+      corrections: [
+        correction(1, "Historic Source", "Active Ingredient"),
+        correction(2, "Unknown Source", "Missing Target"),
+      ],
+      facilityKnowledge: [],
+      canonicalAliases: [],
+      activeNamesByDomain: { ingredient: ["Active Ingredient"] },
+      mergedAwayNames: ["historic source"],
+    });
+    expect(report.correctionFindings.map((finding) => finding.status)).toEqual(["healthy", "orphaned"]);
+    expect(report.safeRepairs).toHaveLength(0);
+  });
+
+  it("reports facility facts separately without generating a delete plan", () => {
+    const report = auditAiMemory({
+      corrections: [],
+      facilityKnowledge: [
+        { id: 10, domain: "general", key: "first", fact: "Old Mozz is preferred.", source: "retired-tool" },
+        { id: 11, domain: "general", key: "second", fact: "Old Mozz is preferred.", source: "retired-tool" },
+      ],
+      canonicalAliases: [
+        { domain: "ingredient", fromText: "Old Mozz", toText: "Whole Mozz", source: "merge alias" },
+      ],
+      activeNamesByDomain: { ingredient: ["Whole Mozz"] },
+      knownFacilitySources: ["current-tool"],
+    });
+    expect(report.facilityKnowledgeFindings.map((finding) => finding.status)).toEqual([
+      "superseded-name-reference",
+      "exact-duplicate",
+    ]);
+    expect(report.safeRepairs).toEqual([]);
   });
 });

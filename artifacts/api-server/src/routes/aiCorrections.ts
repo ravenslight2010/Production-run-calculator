@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, aiCorrectionsTable, type AiCorrectionRow } from "@workspace/db";
 import { SaveAiCorrectionsBody } from "@workspace/api-zod";
-import { collapseChains, correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@workspace/ai-memory";
+import { correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@workspace/ai-memory";
 import { isModifierDropNamePair } from "@workspace/spec-import";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -77,55 +77,6 @@ router.delete(
     } catch (err) {
       req.log.error({ err }, "failed to delete ai correction");
       res.status(500).json({ error: "Failed to delete ai correction" });
-    }
-  },
-);
-
-router.post(
-  "/ai-corrections/collapse-chains",
-  requireCapability("manage-staff"),
-  async (req: Request, res: Response) => {
-    try {
-      const scope = currentScope();
-      const existing = await db
-        .select()
-        .from(aiCorrectionsTable)
-        .where(eq(aiCorrectionsTable.scope, scope));
-
-      // Build the desired pool after chain-collapse.
-      const desired = collapseChains(
-        existing.map((r) => ({ domain: r.domain, fromText: r.fromText, toText: r.toText })),
-      );
-
-      // Index the desired pool by correctionKey for fast lookup.
-      const desiredByKey = new Map<string, AiCorrection>();
-      for (const c of desired) {
-        desiredByKey.set(correctionKey(c.domain, c.fromText), c);
-      }
-
-      // Diff: delete rows that were removed (cycles) and update rows whose
-      // toText changed (intermediate chain hops resolved to their terminal).
-      for (const row of existing) {
-        const key = correctionKey(row.domain, row.fromText);
-        const want = desiredByKey.get(key);
-        if (!want) {
-          // Part of a cycle — delete.
-          await db.delete(aiCorrectionsTable).where(eq(aiCorrectionsTable.id, row.id));
-        } else if (want.toText !== row.toText) {
-          // Intermediate hop collapsed to terminal — update.
-          await db
-            .update(aiCorrectionsTable)
-            .set({ toText: want.toText, updatedAt: new Date() })
-            .where(eq(aiCorrectionsTable.id, row.id));
-        }
-        // Otherwise: no change needed.
-      }
-
-      const corrections = await listAll();
-      res.json({ corrections });
-    } catch (err) {
-      req.log.error({ err }, "failed to collapse ai correction chains");
-      res.status(500).json({ error: "Failed to collapse chains" });
     }
   },
 );

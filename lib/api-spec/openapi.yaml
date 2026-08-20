@@ -2756,6 +2756,50 @@ paths:
         "400":
           description: Invalid input
 
+  /ai-memory/health-check:
+    get:
+      operationId: auditAiMemoryHealth
+      tags: [aiMemory]
+      summary: Preview AI memory health and deterministic safe repairs
+      description: >-
+        Manager-only, read-only audit of factory-wide correction memory and
+        facility knowledge. It compares corrections to confirmed merge aliases,
+        merged-away names, and active master-data names. Per-user conversation
+        history is explicitly excluded from the audit and cleanup.
+      responses:
+        "200":
+          description: Read-only health report and safe correction repair candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report]
+                properties:
+                  report:
+                    $ref: "#/components/schemas/AiMemoryHealthReport"
+        "403":
+          description: Missing manager capability
+
+  /ai-memory/health-check/apply:
+    post:
+      operationId: applyAiMemorySafeFixes
+      tags: [aiMemory]
+      summary: Apply only the current deterministic AI correction repairs
+      description: >-
+        Manager-only atomic repair. The server re-runs the health audit inside
+        the transaction and applies only its listed duplicate, chain, cycle, or
+        canonical-target correction repairs. It never changes facility facts or
+        per-user conversation history.
+      responses:
+        "200":
+          description: Complete before/after report and applied repair summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiMemoryHealthApplyResult"
+        "403":
+          description: Missing manager capability
+
   /ai-memory/facility:
     get:
       operationId: listFacilityKnowledge
@@ -7123,6 +7167,100 @@ components:
           description: The batch of confirmed corrections to upsert into the shared pool
           items:
             $ref: "#/components/schemas/AiCorrection"
+
+    AiMemoryHealthFinding:
+      type: object
+      required: [entry, status, evidence]
+      properties:
+        entry:
+          allOf:
+            - $ref: "#/components/schemas/AiCorrection"
+            - type: object
+              required: [id]
+              properties:
+                id:
+                  type: integer
+        status:
+          type: string
+          enum: [healthy, duplicate, covered-by-merge, outdated-target, chain, cycle, orphaned, needs-review]
+        evidence:
+          type: array
+          items:
+            type: string
+        safeRepair:
+          type: object
+          description: A deterministic correction-only repair. Facility facts are never included.
+          additionalProperties: true
+
+    FacilityKnowledgeHealthFinding:
+      type: object
+      required: [entry, status, evidence]
+      properties:
+        entry:
+          allOf:
+            - $ref: "#/components/schemas/FacilityKnowledge"
+            - type: object
+              required: [id]
+              properties:
+                id:
+                  type: integer
+                source:
+                  type: string
+                  nullable: true
+        status:
+          type: string
+          enum: [exact-duplicate, stale-source-reference, superseded-name-reference, needs-review]
+        evidence:
+          type: array
+          items:
+            type: string
+
+    AiMemoryHealthReport:
+      type: object
+      required: [correctionFindings, facilityKnowledgeFindings, safeRepairs, summary, conversationHistoryExcluded]
+      properties:
+        correctionFindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/AiMemoryHealthFinding"
+        facilityKnowledgeFindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityKnowledgeHealthFinding"
+        safeRepairs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        summary:
+          type: object
+          additionalProperties:
+            type: integer
+        conversationHistoryExcluded:
+          type: boolean
+          enum: [true]
+
+    AiMemoryHealthApplyResult:
+      type: object
+      required: [before, after, applied, summary]
+      properties:
+        before:
+          $ref: "#/components/schemas/AiMemoryHealthReport"
+        after:
+          $ref: "#/components/schemas/AiMemoryHealthReport"
+        applied:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        summary:
+          type: object
+          required: [deleted, retargeted]
+          properties:
+            deleted:
+              type: integer
+            retargeted:
+              type: integer
 
     FacilityKnowledge:
       type: object

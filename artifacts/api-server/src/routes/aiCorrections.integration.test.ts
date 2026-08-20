@@ -38,6 +38,11 @@ let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let aiCorrectionsTable: DbModule["aiCorrectionsTable"];
+let facilityKnowledgeTable: DbModule["facilityKnowledgeTable"];
+let aiConversationTurnsTable: DbModule["aiConversationTurnsTable"];
+let mergeAliasesTable: DbModule["mergeAliasesTable"];
+let importAliasesTable: DbModule["importAliasesTable"];
+let ingredientsTable: DbModule["ingredientsTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
 
@@ -82,6 +87,11 @@ beforeAll(async () => {
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   aiCorrectionsTable = dbMod.aiCorrectionsTable;
+  facilityKnowledgeTable = dbMod.facilityKnowledgeTable;
+  aiConversationTurnsTable = dbMod.aiConversationTurnsTable;
+  mergeAliasesTable = dbMod.mergeAliasesTable;
+  importAliasesTable = dbMod.importAliasesTable;
+  ingredientsTable = dbMod.ingredientsTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   pool.on("error", () => {});
 
@@ -113,7 +123,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${aiCorrectionsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${ingredientsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
 });
@@ -123,6 +133,14 @@ async function freshManager(): Promise<string> {
   const id = `manager-${nextUser++}-${Math.floor(Math.random() * 1e6)}`;
   await db.insert(usersTable).values({ id, username: id, passwordHash: "x" });
   await db.insert(userRolesTable).values({ userId: id, role: "manager" });
+  clearUserValidityCache();
+  return id;
+}
+
+async function freshOperator(): Promise<string> {
+  const id = `operator-${nextUser++}-${Math.floor(Math.random() * 1e6)}`;
+  await db.insert(usersTable).values({ id, username: id, passwordHash: "x" });
+  await db.insert(userRolesTable).values({ userId: id, role: "operator" });
   clearUserValidityCache();
   return id;
 }
@@ -251,5 +269,124 @@ describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", 
     );
     expect(byFrom["oldrecipe"]).toBe("NewRecipe");
     expect(byFrom["midrecipe"]).toBe("NewRecipe");
+  });
+});
+
+describe("AI memory health check", () => {
+  it("is manager-only and its preview does not mutate corrections, facility facts, or conversations", async () => {
+    const manager = await freshManager();
+    const operator = await freshOperator();
+    await db.insert(aiCorrectionsTable).values([
+      { scope: "live", domain: "brand", fromText: "Old Mozz", toText: "Middle Mozz" },
+      { scope: "live", domain: "brand", fromText: "Middle Mozz", toText: "Whole Mozz" },
+    ]);
+    await db.insert(facilityKnowledgeTable).values({
+      scope: "live",
+      domain: "general",
+      key: "old-mozz-note",
+      fact: "Old Mozz is preferred on the line.",
+      source: "retired-tool",
+    });
+    await db.insert(aiConversationTurnsTable).values({
+      userId: manager,
+      role: "user",
+      content: "Do not include this private conversation in the audit.",
+    });
+    await db.insert(importAliasesTable).values({
+      scope: "live",
+      type: "brand",
+      externalName: "Old Mozz",
+      canonicalName: "Whole Mozz",
+    });
+    await db.insert(ingredientsTable).values({
+      id: "whole-mozz",
+      scope: "live",
+      name: "Whole Mozz",
+      categories: ["cheese"],
+      enabled: true,
+    });
+
+    const denied = await fetch(`${baseUrl}/api/ai-memory/health-check`, {
+      headers: { authorization: `Bearer ${signToken(operator)}` },
+    });
+    expect(denied.status).toBe(403);
+
+    const beforeCorrections = await db.select().from(aiCorrectionsTable);
+    const beforeKnowledge = await db.select().from(facilityKnowledgeTable);
+    const beforeTurns = await db.select().from(aiConversationTurnsTable);
+    const res = await fetch(`${baseUrl}/api/ai-memory/health-check`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      report: {
+        conversationHistoryExcluded: boolean;
+        correctionFindings: Array<{ status: string }>;
+        facilityKnowledgeFindings: Array<{ status: string }>;
+        safeRepairs: unknown[];
+      };
+    };
+    expect(body.report.conversationHistoryExcluded).toBe(true);
+    expect(body.report.correctionFindings.map((finding) => finding.status)).toContain("outdated-target");
+    expect(body.report.facilityKnowledgeFindings[0]?.status).toBe("superseded-name-reference");
+    expect(body.report.safeRepairs.length).toBeGreaterThan(0);
+    expect(await db.select().from(aiCorrectionsTable)).toEqual(beforeCorrections);
+    expect(await db.select().from(facilityKnowledgeTable)).toEqual(beforeKnowledge);
+    expect(await db.select().from(aiConversationTurnsTable)).toEqual(beforeTurns);
+  });
+
+  it("applies only the current deterministic correction plan atomically", async () => {
+    const manager = await freshManager();
+    const operator = await freshOperator();
+    await db.insert(aiCorrectionsTable).values([
+      { scope: "live", domain: "ingredient", fromText: "Legacy Mozz", toText: "Old Target" },
+      { scope: "live", domain: "ingredient", fromText: "Duplicate", toText: "Whole Mozz" },
+      { scope: "live", domain: "ingredient", fromText: "Duplicate", toText: "Whole Mozz" },
+    ]);
+    await db.insert(facilityKnowledgeTable).values({
+      scope: "live",
+      domain: "general",
+      key: "keep-me",
+      fact: "A natural-language facility fact must remain untouched.",
+      source: "retired-tool",
+    });
+    await db.insert(mergeAliasesTable).values({
+      scope: "live",
+      category: "ingredient",
+      externalName: "Legacy Mozz",
+      canonicalName: "Whole Mozz",
+    });
+    await db.insert(ingredientsTable).values({
+      id: "whole-mozz",
+      scope: "live",
+      name: "Whole Mozz",
+      categories: ["cheese"],
+      enabled: true,
+    });
+
+    const denied = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(operator)}` },
+    });
+    expect(denied.status).toBe(403);
+
+    const res = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      summary: { deleted: number; retargeted: number };
+      before: { safeRepairs: unknown[] };
+      after: { safeRepairs: unknown[] };
+    };
+    expect(body.before.safeRepairs).toHaveLength(2);
+    expect(body.summary).toEqual({ deleted: 1, retargeted: 1 });
+    expect(body.after.safeRepairs).toHaveLength(0);
+
+    const corrections = await db.select().from(aiCorrectionsTable);
+    expect(corrections).toHaveLength(2);
+    expect(corrections.find((row) => row.fromText === "Legacy Mozz")?.toText).toBe("Whole Mozz");
+    expect(await db.select().from(facilityKnowledgeTable)).toHaveLength(1);
   });
 });

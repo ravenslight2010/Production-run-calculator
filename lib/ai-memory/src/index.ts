@@ -391,3 +391,401 @@ export function buildConversationBlock(
   const lines = list.map((t) => `  ${t.role === "assistant" ? "Assistant" : "User"}: ${t.text}`);
   return [heading, ...lines].join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// Manager-facing AI memory health check
+// ---------------------------------------------------------------------------
+//
+// This is intentionally pure: the API reads the current rows and canonical
+// master-data records, calls this analysis for a preview, then re-runs it inside
+// its repair transaction. Keeping the judgement here makes it testable and,
+// importantly, prevents a UI from inventing its own destructive rules.
+
+export type CorrectionHealthStatus =
+  | "healthy"
+  | "duplicate"
+  | "covered-by-merge"
+  | "outdated-target"
+  | "chain"
+  | "cycle"
+  | "orphaned"
+  | "needs-review";
+
+export type FacilityKnowledgeHealthStatus =
+  | "exact-duplicate"
+  | "stale-source-reference"
+  | "superseded-name-reference"
+  | "needs-review";
+
+export type SafeCorrectionRepair =
+  | {
+      action: "delete";
+      correctionId: number;
+      reason: "duplicate" | "cycle";
+      before: AiCorrection;
+    }
+  | {
+      action: "retarget";
+      correctionId: number;
+      reason: "outdated-target" | "chain";
+      before: AiCorrection;
+      after: AiCorrection;
+    };
+
+export interface AiCorrectionAuditRow extends AiCorrection {
+  id: number;
+}
+
+export interface FacilityKnowledgeAuditRow extends FacilityKnowledge {
+  id: number;
+  source?: string | null;
+}
+
+export interface CanonicalNameAlias extends AiCorrection {
+  // The source is displayed as evidence only. It never changes the analysis
+  // result, and it is deliberately broad so legacy import/merge sources can be
+  // identified without coupling this library to database tables.
+  source?: string;
+}
+
+export interface CorrectionHealthFinding {
+  entry: AiCorrectionAuditRow;
+  status: CorrectionHealthStatus;
+  evidence: string[];
+  safeRepair?: SafeCorrectionRepair;
+}
+
+export interface FacilityKnowledgeHealthFinding {
+  entry: FacilityKnowledgeAuditRow;
+  status: FacilityKnowledgeHealthStatus;
+  evidence: string[];
+}
+
+export interface AiMemoryHealthReport {
+  correctionFindings: CorrectionHealthFinding[];
+  facilityKnowledgeFindings: FacilityKnowledgeHealthFinding[];
+  safeRepairs: SafeCorrectionRepair[];
+  summary: Record<CorrectionHealthStatus | FacilityKnowledgeHealthStatus, number>;
+  conversationHistoryExcluded: true;
+}
+
+export interface AiMemoryHealthInput {
+  corrections: ReadonlyArray<AiCorrectionAuditRow>;
+  facilityKnowledge: ReadonlyArray<FacilityKnowledgeAuditRow>;
+  canonicalAliases: ReadonlyArray<CanonicalNameAlias>;
+  activeNamesByDomain: Readonly<Record<string, ReadonlyArray<string>>>;
+  // Names that were deliberately merged away but do not carry a target in the
+  // legacy tombstone record. Their absence from current menus must never cause a
+  // historical correction to be deleted.
+  mergedAwayNames?: ReadonlyArray<string>;
+  // Facility source values currently emitted by live features. An unknown source
+  // is review-only; it is never a deletion candidate.
+  knownFacilitySources?: ReadonlyArray<string>;
+}
+
+function healthTextKey(raw: string): string {
+  return raw.trim().toLocaleLowerCase();
+}
+
+function healthAliasKey(domain: string, fromText: string): string {
+  return `${healthTextKey(domain)}::${healthTextKey(fromText)}`;
+}
+
+function terminalFor(
+  start: string,
+  aliases: Map<string, CanonicalNameAlias>,
+): CanonicalNameAlias | undefined {
+  let current = start;
+  let last: CanonicalNameAlias | undefined;
+  const seen = new Set<string>();
+  while (!seen.has(healthTextKey(current))) {
+    seen.add(healthTextKey(current));
+    const next = aliases.get(healthTextKey(current));
+    if (!next) return last;
+    last = next;
+    current = next.toText;
+  }
+  return undefined;
+}
+
+function cycleEntryIds(corrections: ReadonlyArray<AiCorrectionAuditRow>): Set<number> {
+  const byDomain = new Map<string, AiCorrectionAuditRow[]>();
+  for (const entry of corrections) {
+    const domain = healthTextKey(entry.domain);
+    const group = byDomain.get(domain) ?? [];
+    group.push(entry);
+    byDomain.set(domain, group);
+  }
+
+  const inCycle = new Set<number>();
+  for (const group of byDomain.values()) {
+    // A duplicate source cannot form one unambiguous graph edge. Leave it to the
+    // duplicate rule, which safely keeps the first stored row.
+    const byFrom = new Map<string, AiCorrectionAuditRow>();
+    for (const entry of group) {
+      const key = healthTextKey(entry.fromText);
+      if (!byFrom.has(key)) byFrom.set(key, entry);
+    }
+    for (const start of byFrom.keys()) {
+      const path: string[] = [];
+      const onPath = new Set<string>();
+      let node = start;
+      while (byFrom.has(node) && !onPath.has(node)) {
+        path.push(node);
+        onPath.add(node);
+        node = healthTextKey(byFrom.get(node)!.toText);
+      }
+      if (!onPath.has(node)) continue;
+      const cycleAt = path.lastIndexOf(node);
+      for (const name of path.slice(cycleAt)) {
+        inCycle.add(byFrom.get(name)!.id);
+      }
+    }
+  }
+  return inCycle;
+}
+
+function containsNameReference(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Use word boundaries for ordinary labels, but retain a lower-risk substring
+  // match for names that are entirely punctuation or other non-word characters.
+  return new RegExp(`(?:^|\\W)${escaped}(?:$|\\W)`, "i").test(text);
+}
+
+// Analyze correction and facility-knowledge rows without writing anything.
+// `safeRepairs` intentionally contains corrections only: natural language facts
+// can be duplicated or refer to stale labels, but their meaning needs a human.
+export function auditAiMemory(input: AiMemoryHealthInput): AiMemoryHealthReport {
+  const canonicalByDomain = new Map<string, Map<string, CanonicalNameAlias>>();
+  const ambiguousCanonicalKeys = new Set<string>();
+  for (const alias of input.canonicalAliases) {
+    const domain = healthTextKey(alias.domain);
+    const from = healthTextKey(alias.fromText);
+    const key = healthAliasKey(domain, from);
+    let byFrom = canonicalByDomain.get(domain);
+    if (!byFrom) canonicalByDomain.set(domain, (byFrom = new Map()));
+    const existing = byFrom.get(from);
+    if (existing && healthTextKey(existing.toText) !== healthTextKey(alias.toText)) {
+      ambiguousCanonicalKeys.add(key);
+    } else if (!existing) {
+      byFrom.set(from, alias);
+    }
+  }
+
+  const activeByDomain = new Map<string, Set<string>>();
+  for (const [domain, names] of Object.entries(input.activeNamesByDomain)) {
+    activeByDomain.set(healthTextKey(domain), new Set(names.map(healthTextKey)));
+  }
+  const mergedAway = new Set((input.mergedAwayNames ?? []).map(healthTextKey));
+
+  const duplicateIds = new Set<number>();
+  const seenExact = new Set<string>();
+  for (const entry of input.corrections) {
+    const exact = `${healthAliasKey(entry.domain, entry.fromText)}::${healthTextKey(entry.toText)}`;
+    if (seenExact.has(exact)) duplicateIds.add(entry.id);
+    else seenExact.add(exact);
+  }
+  const cycles = cycleEntryIds(input.corrections);
+  const correctionsByDomainFrom = new Map<string, AiCorrectionAuditRow>();
+  for (const entry of input.corrections) {
+    const key = healthAliasKey(entry.domain, entry.fromText);
+    if (!correctionsByDomainFrom.has(key)) correctionsByDomainFrom.set(key, entry);
+  }
+
+  const correctionFindings: CorrectionHealthFinding[] = [];
+  const safeRepairs: SafeCorrectionRepair[] = [];
+  for (const entry of input.corrections) {
+    const domain = healthTextKey(entry.domain);
+    const fromKey = healthAliasKey(domain, entry.fromText);
+    const aliases = canonicalByDomain.get(domain) ?? new Map<string, CanonicalNameAlias>();
+    const canonical = !ambiguousCanonicalKeys.has(fromKey)
+      ? terminalFor(entry.fromText, aliases)
+      : undefined;
+    const targetCanonical = !ambiguousCanonicalKeys.has(healthAliasKey(domain, entry.toText))
+      ? terminalFor(entry.toText, aliases)
+      : undefined;
+    const directNext = correctionsByDomainFrom.get(healthAliasKey(domain, entry.toText));
+    const active = activeByDomain.get(domain);
+    const targetIsActive = !!active?.has(healthTextKey(entry.toText));
+    const isHistoricMergedSource =
+      (domain === "ingredient" || domain === "die") && mergedAway.has(healthTextKey(entry.fromText));
+
+    let finding: CorrectionHealthFinding;
+    if (duplicateIds.has(entry.id)) {
+      const safeRepair: SafeCorrectionRepair = {
+        action: "delete",
+        correctionId: entry.id,
+        reason: "duplicate",
+        before: entry,
+      };
+      finding = {
+        entry,
+        status: "duplicate",
+        evidence: ["An earlier row has the same domain, source, and target."],
+        safeRepair,
+      };
+    } else if (cycles.has(entry.id)) {
+      const safeRepair: SafeCorrectionRepair = {
+        action: "delete",
+        correctionId: entry.id,
+        reason: "cycle",
+        before: entry,
+      };
+      finding = {
+        entry,
+        status: "cycle",
+        evidence: ["The source/target graph returns to this name, so the correction is ambiguous."],
+        safeRepair,
+      };
+    } else if (canonical && healthTextKey(canonical.toText) !== healthTextKey(entry.toText)) {
+      const after = { ...entry, toText: canonical.toText };
+      const safeRepair: SafeCorrectionRepair = {
+        action: "retarget",
+        correctionId: entry.id,
+        reason: "outdated-target",
+        before: entry,
+        after,
+      };
+      finding = {
+        entry,
+        status: "outdated-target",
+        evidence: [
+          `Canonical ${canonical.source ?? "merge"} record maps "${entry.fromText}" to "${canonical.toText}".`,
+        ],
+        safeRepair,
+      };
+    } else if (
+      directNext &&
+      healthTextKey(directNext.toText) !== healthTextKey(entry.fromText) &&
+      healthTextKey(directNext.toText) !== healthTextKey(entry.toText)
+    ) {
+      const after = { ...entry, toText: directNext.toText };
+      const safeRepair: SafeCorrectionRepair = {
+        action: "retarget",
+        correctionId: entry.id,
+        reason: "chain",
+        before: entry,
+        after,
+      };
+      finding = {
+        entry,
+        status: "chain",
+        evidence: [`"${entry.toText}" is also corrected to "${directNext.toText}".`],
+        safeRepair,
+      };
+    } else if (targetCanonical && healthTextKey(targetCanonical.toText) !== healthTextKey(entry.toText)) {
+      const after = { ...entry, toText: targetCanonical.toText };
+      const safeRepair: SafeCorrectionRepair = {
+        action: "retarget",
+        correctionId: entry.id,
+        reason: "outdated-target",
+        before: entry,
+        after,
+      };
+      finding = {
+        entry,
+        status: "outdated-target",
+        evidence: [
+          `The target "${entry.toText}" was subsequently merged into "${targetCanonical.toText}".`,
+        ],
+        safeRepair,
+      };
+    } else if (canonical) {
+      finding = {
+        entry,
+        status: "covered-by-merge",
+        evidence: [
+          `Canonical ${canonical.source ?? "merge"} record already confirms this mapping.`,
+        ],
+      };
+    } else if (targetIsActive || isHistoricMergedSource) {
+      finding = {
+        entry,
+        status: "healthy",
+        evidence: isHistoricMergedSource
+          ? ["The source is a preserved merged-away label; historical aliases are retained."]
+          : ["The target is active master data."],
+      };
+    } else if (active?.size) {
+      finding = {
+        entry,
+        status: "orphaned",
+        evidence: [
+          `The target "${entry.toText}" is not active in the matching master-data domain.`,
+          "Historical sources are retained; this entry needs manager review.",
+        ],
+      };
+    } else {
+      finding = {
+        entry,
+        status: "needs-review",
+        evidence: ["No authoritative active-name set exists for this correction domain."],
+      };
+    }
+    correctionFindings.push(finding);
+    if (finding.safeRepair) safeRepairs.push(finding.safeRepair);
+  }
+
+  const knownSources = new Set((input.knownFacilitySources ?? []).map(healthTextKey));
+  const factFirstSeen = new Map<string, number>();
+  const factKey = (entry: FacilityKnowledgeAuditRow) =>
+    `${healthTextKey(entry.domain)}::${healthTextKey(entry.fact).replace(/\s+/g, " ")}`;
+  const allAliases = [...canonicalByDomain.values()].flatMap((items) => [...items.values()]);
+  const facilityKnowledgeFindings = input.facilityKnowledge.map((entry) => {
+    const duplicate = factFirstSeen.has(factKey(entry));
+    if (!duplicate) factFirstSeen.set(factKey(entry), entry.id);
+    const text = `${entry.key} ${entry.fact} ${entry.source ?? ""}`;
+    const replaced = allAliases.find(
+      (alias) =>
+        healthTextKey(alias.fromText) !== healthTextKey(alias.toText) &&
+        containsNameReference(text, alias.fromText),
+    );
+    const staleSource =
+      !!entry.source?.trim() && knownSources.size > 0 && !knownSources.has(healthTextKey(entry.source));
+    if (duplicate) {
+      return {
+        entry,
+        status: "exact-duplicate" as const,
+        evidence: [`Matches facility fact row ${factFirstSeen.get(factKey(entry))}. Review before removing either fact.`],
+      };
+    }
+    if (replaced) {
+      return {
+        entry,
+        status: "superseded-name-reference" as const,
+        evidence: [
+          `References "${replaced.fromText}", which a confirmed merge maps to "${replaced.toText}".`,
+          "Natural-language facts are never changed automatically.",
+        ],
+      };
+    }
+    if (staleSource) {
+      return {
+        entry,
+        status: "stale-source-reference" as const,
+        evidence: [
+          `The source "${entry.source}" is not emitted by a current facility-memory feature.`,
+          "Natural-language facts are never changed automatically.",
+        ],
+      };
+    }
+    return {
+      entry,
+      status: "needs-review" as const,
+      evidence: ["Natural-language facility knowledge requires manager judgement."],
+    };
+  });
+
+  const summary = Object.create(null) as AiMemoryHealthReport["summary"];
+  for (const finding of correctionFindings) summary[finding.status] = (summary[finding.status] ?? 0) + 1;
+  for (const finding of facilityKnowledgeFindings) {
+    summary[finding.status] = (summary[finding.status] ?? 0) + 1;
+  }
+  return {
+    correctionFindings,
+    facilityKnowledgeFindings,
+    safeRepairs,
+    summary,
+    conversationHistoryExcluded: true,
+  };
+}

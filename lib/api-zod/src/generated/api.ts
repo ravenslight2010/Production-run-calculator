@@ -3119,6 +3119,114 @@ export const SaveAiCorrectionsResponse = zod.object({
 
 
 /**
+ * Manager-only, read-only audit of factory-wide correction memory and facility knowledge. It compares corrections to confirmed merge aliases, merged-away names, and active master-data names. Per-user conversation history is explicitly excluded from the audit and cleanup.
+ * @summary Preview AI memory health and deterministic safe repairs
+ */
+export const AuditAiMemoryHealthResponse = zod.object({
+  "report": zod.object({
+  "correctionFindings": zod.array(zod.object({
+  "entry": zod.object({
+  "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
+  "toText": zod.string().describe('The canonical name it should be read as')
+}).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.').and(zod.object({
+  "id": zod.number()
+})),
+  "status": zod.enum(['healthy', 'duplicate', 'covered-by-merge', 'outdated-target', 'chain', 'cycle', 'orphaned', 'needs-review']),
+  "evidence": zod.array(zod.string()),
+  "safeRepair": zod.record(zod.string(), zod.unknown()).optional().describe('A deterministic correction-only repair. Facility facts are never included.')
+})),
+  "facilityKnowledgeFindings": zod.array(zod.object({
+  "entry": zod.object({
+  "domain": zod.string().describe('Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)'),
+  "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
+  "fact": zod.string().describe('The durable observation in plain language')
+}).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.').and(zod.object({
+  "id": zod.number(),
+  "source": zod.string().nullish()
+})),
+  "status": zod.enum(['exact-duplicate', 'stale-source-reference', 'superseded-name-reference', 'needs-review']),
+  "evidence": zod.array(zod.string())
+})),
+  "safeRepairs": zod.array(zod.record(zod.string(), zod.unknown())),
+  "summary": zod.record(zod.string(), zod.number()),
+  "conversationHistoryExcluded": zod.literal(true)
+})
+})
+
+
+/**
+ * Manager-only atomic repair. The server re-runs the health audit inside the transaction and applies only its listed duplicate, chain, cycle, or canonical-target correction repairs. It never changes facility facts or per-user conversation history.
+ * @summary Apply only the current deterministic AI correction repairs
+ */
+export const ApplyAiMemorySafeFixesResponse = zod.object({
+  "before": zod.object({
+  "correctionFindings": zod.array(zod.object({
+  "entry": zod.object({
+  "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
+  "toText": zod.string().describe('The canonical name it should be read as')
+}).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.').and(zod.object({
+  "id": zod.number()
+})),
+  "status": zod.enum(['healthy', 'duplicate', 'covered-by-merge', 'outdated-target', 'chain', 'cycle', 'orphaned', 'needs-review']),
+  "evidence": zod.array(zod.string()),
+  "safeRepair": zod.record(zod.string(), zod.unknown()).optional().describe('A deterministic correction-only repair. Facility facts are never included.')
+})),
+  "facilityKnowledgeFindings": zod.array(zod.object({
+  "entry": zod.object({
+  "domain": zod.string().describe('Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)'),
+  "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
+  "fact": zod.string().describe('The durable observation in plain language')
+}).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.').and(zod.object({
+  "id": zod.number(),
+  "source": zod.string().nullish()
+})),
+  "status": zod.enum(['exact-duplicate', 'stale-source-reference', 'superseded-name-reference', 'needs-review']),
+  "evidence": zod.array(zod.string())
+})),
+  "safeRepairs": zod.array(zod.record(zod.string(), zod.unknown())),
+  "summary": zod.record(zod.string(), zod.number()),
+  "conversationHistoryExcluded": zod.literal(true)
+}),
+  "after": zod.object({
+  "correctionFindings": zod.array(zod.object({
+  "entry": zod.object({
+  "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
+  "toText": zod.string().describe('The canonical name it should be read as')
+}).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.').and(zod.object({
+  "id": zod.number()
+})),
+  "status": zod.enum(['healthy', 'duplicate', 'covered-by-merge', 'outdated-target', 'chain', 'cycle', 'orphaned', 'needs-review']),
+  "evidence": zod.array(zod.string()),
+  "safeRepair": zod.record(zod.string(), zod.unknown()).optional().describe('A deterministic correction-only repair. Facility facts are never included.')
+})),
+  "facilityKnowledgeFindings": zod.array(zod.object({
+  "entry": zod.object({
+  "domain": zod.string().describe('Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)'),
+  "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
+  "fact": zod.string().describe('The durable observation in plain language')
+}).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.').and(zod.object({
+  "id": zod.number(),
+  "source": zod.string().nullish()
+})),
+  "status": zod.enum(['exact-duplicate', 'stale-source-reference', 'superseded-name-reference', 'needs-review']),
+  "evidence": zod.array(zod.string())
+})),
+  "safeRepairs": zod.array(zod.record(zod.string(), zod.unknown())),
+  "summary": zod.record(zod.string(), zod.number()),
+  "conversationHistoryExcluded": zod.literal(true)
+}),
+  "applied": zod.array(zod.record(zod.string(), zod.unknown())),
+  "summary": zod.object({
+  "deleted": zod.number(),
+  "retargeted": zod.number()
+})
+})
+
+
+/**
  * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
  * @summary List the shared facility-wide AI knowledge pool
  */
