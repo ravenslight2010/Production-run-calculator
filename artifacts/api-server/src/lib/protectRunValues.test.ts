@@ -325,6 +325,25 @@ describe("protectRunValues", () => {
     expect(out.runValuesUpdatedAt.r2).toBe(1000);
   });
 
+  it("keeps same-day runs when a stale client carries a newer reset marker", () => {
+    const existing = {
+      dayState: {
+        runs: [{ id: "a" }, { id: "b" }, { id: "c" }],
+        resetAt: 1000,
+      },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 }, c: { casesNeeded: 30 } },
+      runValuesUpdatedAt: { a: 1, b: 1, c: 1 },
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "a" }], resetAt: 2000 },
+      runValues: { a: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { a: 1 },
+    };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect((out.dayState?.runs ?? []).map((run: any) => run.id).sort()).toEqual(["a", "b", "c"]);
+    expect(out.runValues.b).toEqual({ casesNeeded: 20 });
+  });
+
   it("accepts a brand-new run not present in the stored row", () => {
     const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
     const incoming: Payload = {
@@ -521,8 +540,8 @@ describe("protectRunValues additive list union (brands / name registries)", () =
     expect(bf["Brand C"]).toEqual(expect.arrayContaining(["Flavor 5"]));
   });
 
-  it("list union does NOT apply during a wholesale daily reset (fresh-day wipe is intentional)", () => {
-    // exReset > 0 && inReset > exReset → wholesale adopt path, no union protection.
+  it("allows a future scheduled-day replacement to bypass list union", () => {
+    // Only the route for a FUTURE scheduled row passes this explicit option.
     const existing = {
       ...base,
       dayState: { runs: [], resetAt: 100 },
@@ -531,14 +550,12 @@ describe("protectRunValues additive list union (brands / name registries)", () =
     };
     const incoming = {
       ...base,
-      dayState: { runs: [], resetAt: 200 }, // strictly newer → wholesale adopt
+      dayState: { runs: [], resetAt: 200 }, // strictly newer → replacement
       brands: [],
       brandFlavors: {},
     };
-    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
-    // Wholesale reset: incoming wins; brands may be empty (intentional reset)
-    // The test confirms the union guard does NOT fire here.
-    // (The existing reset path returns before reaching the union block.)
+    const out = protectRunValues(incoming, existing, { allowRunListReplacement: true }) as Record<string, unknown>;
+    // Scheduled replacement: incoming wins; brands may be empty (intentional).
     expect((out.brands as string[]).length).toBe(0);
   });
 });
@@ -562,10 +579,10 @@ describe("protectRunValues delete/un-delete stamp preservation", () => {
     expect(out.undeletedStamps).toEqual({ [ns]: { "house special": 800, supreme: 900, "3 meat": 300 } });
   });
 
-  it("carries stamp maps across a wholesale daily-reset adoption", () => {
+  it("carries stamp maps across a scheduled-day replacement", () => {
     const existing = { ...base, dayState: { runs: [], resetAt: 100 }, undeletedStamps: { [ns]: { "house special": 500 } } };
     const incoming = { ...base, dayState: { runs: [], resetAt: 200 } }; // strictly-newer reset
-    const out = protectRunValues(incoming, existing) as Record<string, unknown>;
+    const out = protectRunValues(incoming, existing, { allowRunListReplacement: true }) as Record<string, unknown>;
     expect(out.undeletedStamps).toEqual({ [ns]: { "house special": 500 } });
   });
 

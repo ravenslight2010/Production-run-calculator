@@ -372,10 +372,15 @@ function withMergedStamps(
  * Merge `incoming` against the already-stored `existing` payload so that:
  *   - a run's stored VALUE only changes on a strictly-newer-stamped edit, and
  *   - a stored RUN is never dropped by a push that omits it (additive run list),
- *   - unless the run was explicitly deleted (tombstoned) or the day was reset.
+ *   - unless the run was explicitly deleted (tombstoned), or the caller is
+ *     replacing a future scheduled-day row.
  * Returns a new payload object. Non-object payloads are returned unchanged.
  */
-export function protectRunValues(incoming: unknown, existing: unknown): unknown {
+export function protectRunValues(
+  incoming: unknown,
+  existing: unknown,
+  options: { allowRunListReplacement?: boolean } = {},
+): unknown {
   if (!isPlainObject(incoming)) return incoming;
   // Nothing stored yet (first write for this scope+date) — accept as-is.
   if (!isPlainObject(existing)) return incoming;
@@ -383,9 +388,10 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   const inDay = isPlainObject(incoming.dayState) ? incoming.dayState : undefined;
   const exDay = isPlainObject(existing.dayState) ? existing.dayState : undefined;
 
-  // A true daily reset bumps resetAt strictly forward and intends a fresh day:
-  // adopt the incoming payload wholesale (matches the clients' reset semantics)
-  // so its empty maps clear the stored day rather than being protected back in.
+  // A future scheduled-day replacement bumps resetAt strictly forward and
+  // intentionally replaces that future row. Current-day writes must NOT use this
+  // escape hatch: a fresh/stale device can have a newer local reset marker before
+  // it adopts today's shared row, and a marker alone is not a deletion.
   //
   // GUARD: only honor this when the STORED row already carries a real reset
   // baseline (exReset > 0). A missing / 0 stored resetAt (a legacy row, or a peer
@@ -411,7 +417,7 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   // guard those values are erased wholesale. Mirror the per-run
   // empty-over-populated logic from the additive path: keep the stored value
   // and advance its stamp so the surviving value wins on every peer.
-  if (exReset > 0 && inReset > exReset) {
+  if (options.allowRunListReplacement && exReset > 0 && inReset > exReset) {
     const inVals = isPlainObject(incoming.runValues) ? incoming.runValues : {};
     const inUpd  = isPlainObject(incoming.runValuesUpdatedAt) ? incoming.runValuesUpdatedAt : {};
     const exVals = isPlainObject(existing.runValues) ? existing.runValues : {};

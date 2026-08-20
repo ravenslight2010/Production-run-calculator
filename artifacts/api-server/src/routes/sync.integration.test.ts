@@ -299,8 +299,9 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
 describe("/sync — additive run-list protection (whole-run loss guard)", () => {
   // A device that briefly holds a SHORTER run list (post-refresh / before it has
   // seen a peer's runs) must not be able to drop everyone's runs by pushing that
-  // short dayState.runs. The server union-merges the run list by id; only an
-  // explicit tombstone (or a true daily reset) removes a run.
+  // short dayState.runs. The server union-merges today's run list by id; only an
+  // explicit tombstone removes a run. Future scheduled rows retain their
+  // deliberate replacement path.
   const DATE = "2030-06-01";
   function put(payload: unknown) {
     return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
@@ -405,21 +406,46 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b", "c"]);
   });
 
-  it("a true daily reset (strictly-newer resetAt) adopts the incoming runs wholesale", async () => {
+  it("keeps every populated same-day run when a fresh client races in with a newer reset marker", async () => {
     await put({
       dayState: { runs: [run("a"), run("b"), run("c")], resetAt: 1000 },
       runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 }, c: { casesNeeded: 30 } },
       runValuesUpdatedAt: { a: 1, b: 1, c: 1 },
     });
-    // New shift: resetAt jumps forward and the day starts fresh with one run.
+    // This is the exact fresh-device race: before it consumes SSE's initial
+    // snapshot, it has only a short/stale local day and a newer marker.
     await put({
+      dayState: { runs: [run("a")], resetAt: 2000 },
+      runValues: { a: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { a: 1 },
+    });
+    const row = await readRow();
+    expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b", "c"]);
+    expect(row?.runValues?.b?.casesNeeded).toBe(20);
+    expect(row?.runValues?.c?.casesNeeded).toBe(30);
+  });
+
+  it("allows an intentional future scheduled-day replacement", async () => {
+    const future = "2030-06-10";
+    const putFuture = (payload: unknown) =>
+      fetch(`${baseUrl}/api/sync/${future}?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId: "schedule-editor", payload }),
+      });
+    await putFuture({
+      dayState: { runs: [run("a"), run("b")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 } },
+      runValuesUpdatedAt: { a: 1, b: 1 },
+    });
+    await putFuture({
       dayState: { runs: [run("z")], resetAt: 2000 },
       runValues: { z: { casesNeeded: 99 } },
       runValuesUpdatedAt: { z: 5 },
     });
-    const row = await readRow();
+    const res = await fetch(`${baseUrl}/api/sync/${future}`, { headers: authHeaders() });
+    const row = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
     expect((row?.dayState?.runs ?? []).map((r) => r.id)).toEqual(["z"]);
-    expect(row?.runValues?.a).toBeUndefined();
   });
 });
 

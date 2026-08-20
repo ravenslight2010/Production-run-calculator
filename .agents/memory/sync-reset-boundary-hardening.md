@@ -18,3 +18,10 @@ Two related trust boundaries in `artifacts/api-server/src/routes/sync.ts` must s
 **Why:** making a server guard fail-closed is only half the change — every writer must be audited to supply the credential, and a 200-with-stale body means clients must parse the body, never trust `res.ok` alone. The web client now has one `handleStaleSyncWrite` helper (adopt reset via `applyResetWipe` + reload); any NEW sync write path must append `epoch=${getStoredResetEpoch()}` and route its response through it. Mobile does not yet send epoch — must be fixed when mobile work resumes.
 
 **Verification lesson:** a browser e2e that checks persistence by reloading the SAME browser is fooled by localStorage — server sync must be verified against the `daily_sync` DB row (dev scope epoch is >0, so dev reproduces the drop).
+
+4. **A newer `resetAt` is not a deletion authorization.** Current-day run lists remain additive unless a run carries an explicit tombstone; schedule replacement is only valid in its distinct future-day context.
+
+**Why:** a new or stale device can create a newer local marker before reading the shared day, so treating it as a destructive reset erases real schedules.
+
+**How to apply:** establish the server snapshot as a client baseline before background upload and keep destructive intent explicit.
+

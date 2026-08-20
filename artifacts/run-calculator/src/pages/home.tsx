@@ -196,6 +196,8 @@ import {
   rewriteRecipeNameInProfiles,
   saveProfileSubTab,
   loadProfileSubTab,
+  createSyncBaselineGate,
+  shouldAcceptSyncDaySnapshot,
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer, seedProfilesFromServer } from "../profileServerSync";
@@ -6935,8 +6937,11 @@ export default function Home() {
   // Guard: skip the autosave whenever the form ID and the current run ID disagree.
   const lastFormRunIdRef = useRef<string>("");
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncBaselineGateRef = useRef(createSyncBaselineGate());
   const isSyncApplyingRef = useRef(false);
-  const applySyncCallbackRef = useRef<(p: SyncPayload) => void>(() => {});
+  const applySyncCallbackRef = useRef<
+    (p: SyncPayload, options?: { initialSnapshot?: boolean }) => void
+  >(() => {});
   const initialFinishTimestampRef = useRef<number>(0);
   const pushAcknowledgedRef = useRef(true);
   // Signature of the last payload we successfully pushed. Idle clients must not
@@ -7073,7 +7078,10 @@ export default function Home() {
 
   // Update the apply-sync callback so it always captures fresh form/state refs
   useEffect(() => {
-    applySyncCallbackRef.current = (payload: SyncPayload) => {
+    applySyncCallbackRef.current = (
+      payload: SyncPayload,
+      options?: { initialSnapshot?: boolean },
+    ) => {
       isSyncApplyingRef.current = true;
       const arraysEqual = (a: string[], b: string[]) =>
         a.length === b.length && a.every((x, i) => x === b[i]);
@@ -7083,8 +7091,14 @@ export default function Home() {
       const remoteResetAt = payload.dayState.resetAt ?? 0;
       const localResetAt = dayStateRef.current.resetAt ?? 0;
       const remoteDate = payload.dayState.date;
-      const remoteDateOk = !remoteDate || remoteDate === todayStr();
-      const acceptRemoteDay = remoteDateOk && remoteResetAt >= localResetAt;
+      const initialSnapshot = options?.initialSnapshot === true;
+      const acceptRemoteDay = shouldAcceptSyncDaySnapshot({
+        remoteDate,
+        localDate: todayStr(),
+        remoteResetAt,
+        localResetAt,
+        initialSnapshot,
+      });
 
       // Per-run lost-update guard: compare each run's edit timestamp. We only
       // REJECT a remote run's values when our local edit is STRICTLY newer — so
@@ -7197,7 +7211,11 @@ export default function Home() {
           })) rejectedStale = true;
         }
         setDayState(prev => {
-          const isReset = remoteResetAt > localResetAt;
+          // The first server frame is the baseline for this connection. It is
+          // authoritative even when a stale local device has a newer marker;
+          // otherwise the client would keep its short local run list forever
+          // while the server safely preserved the missing runs.
+          const isReset = initialSnapshot || remoteResetAt > localResetAt;
           // Runs are day-state and converge like the substitution/staging overlays
           // below: on a true daily reset adopt the remote runs wholesale (the reset's
           // empty set replaces ours); during same-day concurrent editing union by id
@@ -7676,11 +7694,13 @@ export default function Home() {
 
   // SSE connection — receives updates from other clients
   useEffect(() => {
+    syncBaselineGateRef.current.beginConnection();
     const es = new EventSource(`/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`);
     es.onopen = () => {
       setSyncConnected(true);
-      // Re-push our current state after every (re)connect so the server always has our latest,
-      // even if pushes failed while the server was restarting.
+      // Queue the reconnect recovery push. It is released only after the stream's
+      // first frame has established a baseline, so a new/stale device cannot
+      // upload its local day before applying today's shared row.
       schedulePush(dayStateRef.current, 1000);
     };
     es.onmessage = (e: MessageEvent) => {
@@ -7689,6 +7709,7 @@ export default function Home() {
           data?: SyncPayload | null;
           reset?: boolean;
           resetEpoch?: number;
+          initial?: boolean;
         };
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
@@ -7696,10 +7717,28 @@ export default function Home() {
           if (applyResetWipe(msg.resetEpoch)) window.location.reload();
           return;
         }
-        if (msg.data) applySyncCallbackRef.current(msg.data);
+        if (msg.data) {
+          applySyncCallbackRef.current(msg.data, {
+            initialSnapshot: msg.initial === true,
+          });
+        }
+        if (msg.initial) {
+          // applySyncCallbackRef clears its sync-apply suppression in a
+          // requestAnimationFrame. Queue behind that same frame so the recovery
+          // push builds from the adopted snapshot and is not discarded by the
+          // suppression guard.
+          const shouldPush = syncBaselineGateRef.current.completeInitialSnapshot();
+          if (shouldPush) {
+            requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
+          }
+        }
       } catch {}
     };
     es.onerror = () => {
+      // EventSource reconnects itself after an error without recreating this
+      // effect. Fence automatic pushes until that reconnect delivers its own
+      // initial snapshot.
+      syncBaselineGateRef.current.beginConnection();
       setSyncConnected(false);
       // EventSource can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me; if the session is gone we land on login.
@@ -8111,6 +8150,10 @@ export default function Home() {
 
   function schedulePush(ds: DayState, delay = 600) {
     if (isSyncApplyingRef.current) return;
+    // Automatic pushes (open/reconnect, interval, visibility, and local edits)
+    // may occur before SSE has told us whether today's server row exists. Keep
+    // one pending recovery push instead of letting any of them race that read.
+    if (!syncBaselineGateRef.current.requestPush()) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     pushAcknowledgedRef.current = false;
     pushTimerRef.current = setTimeout(() => {

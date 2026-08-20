@@ -140,11 +140,11 @@ function isUniqueViolation(e: unknown): boolean {
 // The daily-reset SESSION FENCE (see sessionBoundary.getSessionBoundaryMs) reads
 // `dayState.resetBoundaryAt`, NOT `dayState.resetAt`. They mean different things:
 //   - `resetAt` is advanced on FUTURE-day writes too, purely to trigger the
-//     wholesale-adopt merge (protectRunValues) when a scheduled day is
-//     (re)written. It is keyed to the client's LOCAL calendar, so a user behind
-//     UTC stamps their "tomorrow" — which can equal the SERVER's UTC "today". If
-//     the fence read `resetAt`, that future-day override would look like today's
-//     reset and log the whole shift out hours before their real local midnight.
+//     scheduled-day replacement merge when a future row is (re)written. It is
+//     keyed to the client's LOCAL calendar, so a user behind UTC stamps their
+//     "tomorrow" — which can equal the SERVER's UTC "today". If the fence read
+//     `resetAt`, that future-day override would look like today's reset and log
+//     the whole shift out hours before their real local midnight.
 //   - `resetBoundaryAt` is set ONLY when a row is written as the writer's ACTUAL
 //     current local day (target date === the client's `today`). So only a genuine
 //     same-day rollover can ever fence sessions; a future/past write cannot.
@@ -347,7 +347,13 @@ async function upsertProtected(
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
         existingData = existing?.data;
-        const m = capMergedResult(protectRunValues(payload, existing?.data));
+        // Only a FUTURE scheduled row may use resetAt to replace its run list.
+        // Today's row must always be additive/tombstone-driven: a new device can
+        // hold a newer local marker before it receives this row, but that marker
+        // must never erase other operators' scheduled or live runs.
+        const m = capMergedResult(protectRunValues(payload, existing?.data, {
+          allowRunListReplacement: date > clientTodayDate,
+        }));
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
         if (existing) {
@@ -450,9 +456,10 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
     .select()
     .from(dailySyncTable)
     .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
-  if (row) {
-    res.write(`data: ${JSON.stringify({ data: row.data, senderId: null })}\n\n`);
-  }
+  // Always send a first frame, including when no row exists. The web client uses
+  // this acknowledgement as its sync baseline and must not upload local state
+  // before it has either applied the row or learned that the row is absent.
+  res.write(`data: ${JSON.stringify({ data: row?.data ?? null, senderId: null, initial: true })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.

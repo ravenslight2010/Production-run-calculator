@@ -1169,6 +1169,50 @@ export function freshDayState(): DayState {
   };
 }
 
+/**
+ * Holds automatic sync writes until the SSE connection has delivered its first
+ * frame. A first frame can carry either the server row or an explicit null when
+ * the row does not exist; both establish the baseline. This keeps a new device's
+ * local placeholder or stale day from racing ahead of the shared snapshot.
+ */
+export function createSyncBaselineGate() {
+  let ready = false;
+  let pushPending = false;
+  return {
+    beginConnection(): void {
+      ready = false;
+      pushPending = false;
+    },
+    requestPush(): boolean {
+      if (ready) return true;
+      pushPending = true;
+      return false;
+    },
+    completeInitialSnapshot(): boolean {
+      ready = true;
+      const shouldPush = pushPending;
+      pushPending = false;
+      return shouldPush;
+    },
+    isReady(): boolean {
+      return ready;
+    },
+  };
+}
+
+export function shouldAcceptSyncDaySnapshot(args: {
+  remoteDate?: string;
+  localDate?: string;
+  remoteResetAt: number;
+  localResetAt: number;
+  initialSnapshot?: boolean;
+}): boolean {
+  const dateMatches = !args.remoteDate || !args.localDate || args.remoteDate === args.localDate;
+  return dateMatches && (
+    args.initialSnapshot === true || args.remoteResetAt >= args.localResetAt
+  );
+}
+
 // True when a run is still the untouched auto-created placeholder: flagged
 // `seeded` (freshDayState / daily rollover — never New Run, imports, or
 // schedule pull-ups), with blank identity/lifecycle meta AND an all-default
