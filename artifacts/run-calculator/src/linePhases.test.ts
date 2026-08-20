@@ -146,9 +146,9 @@ describe("computeLinePhases — occupancy gates (early-run pause)", () => {
 });
 
 describe("computeLinePhases — occupancy gates (early-run ended)", () => {
-  it("all three stages drain when run ends early (Stage 1's product travels through all stages)", () => {
-    // Run ended after only 1 min. Product in Stage 1 must drain through Stages 2+3
-    // before the line is clear — total drain window is still freezerTime (20 min).
+  it("shows only Stage 1's countdown when a run ends early", () => {
+    // Product still travels through every stage, but the display counts down one
+    // operator-facing stage at a time.
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 1 * 60,
@@ -156,13 +156,12 @@ describe("computeLinePhases — occupancy gates (early-run ended)", () => {
       nowMs: T0 + 30 * 1000,
       endedAt: T0,
     });
-    expect(phases.stage1.state).toBe("draining");  // Stage 1 draining immediately
-    expect(phases.stage2.state).toBe("draining");  // Stage 1's product will flow through
-    expect(phases.stage3.state).toBe("draining");  // line not clear until freezerTime
+    expect(phases.stage1.state).toBe("draining");
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
   });
 
-  it("all stages drain when run ends mid-tunnel (Stage 2 had product, Stage 3 fills as it drains)", () => {
-    // Run ended after 5 min — Stage 2 partially filled; it drains into Stage 3.
+  it("keeps later drain phases hidden until their turn when a run ends mid-tunnel", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 5 * 60,
@@ -171,8 +170,8 @@ describe("computeLinePhases — occupancy gates (early-run ended)", () => {
       endedAt: T0,
     });
     expect(phases.stage1.state).toBe("draining");
-    expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage3.state).toBe("draining");  // product will eventually reach Stage 3
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
   });
 
   it("all stages empty when no product was ever pressed", () => {
@@ -565,7 +564,7 @@ describe("pickMostActivePhase — compact strip selection priority", () => {
 
 // ── Drain sequence (pressDone) ───────────────────────────────────────────────
 describe("computeLinePhases — drain sequence (pressDone, running)", () => {
-  it("all three stages draining when casesInFreezer covers all stages", () => {
+  it("shows only Stage 1 while a full line begins draining", () => {
     // casesInFreezer=200, ppm=100, ppc=10 → drainTotal=20min > tunnelMin+postTun=17.5
     const phases = computeLinePhases({
       ...BASE,
@@ -576,11 +575,13 @@ describe("computeLinePhases — drain sequence (pressDone, running)", () => {
       nowMs: T0,
     });
     expect(phases.stage1.state).toBe("draining");
-    expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage3.state).toBe("draining");
+    expect(phases.stage1.remainMs).toBeCloseTo(2.5 * 60000, -2);
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
+    expect(pickMostActivePhase(phases)?.label).toContain("Frontline");
   });
 
-  it("Stage 1 empty but Stage 2 & 3 still draining", () => {
+  it("starts Stage 2 only after Stage 1's drain window reaches zero", () => {
     // casesInFreezer=100 → drainTotal=10min; s1Rem=max(0,10-15-2.5)=0
     const phases = computeLinePhases({
       ...BASE,
@@ -592,11 +593,11 @@ describe("computeLinePhases — drain sequence (pressDone, running)", () => {
     });
     expect(phases.stage1.state).toBe("empty");
     expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage3.state).toBe("draining");
+    expect(phases.stage3.state).toBe("empty");
     expect(phases.stage2.remainMs).toBeCloseTo(7.5 * 60000, -2);
   });
 
-  it("Stage 1 & 2 empty, Stage 3 last to drain", () => {
+  it("starts Stage 3 only after Stage 2's drain window reaches zero", () => {
     // casesInFreezer=20 → drainTotal=2min; s3Rem=2min
     const phases = computeLinePhases({
       ...BASE,
@@ -610,6 +611,53 @@ describe("computeLinePhases — drain sequence (pressDone, running)", () => {
     expect(phases.stage2.state).toBe("empty");
     expect(phases.stage3.state).toBe("draining");
     expect(phases.stage3.remainMs).toBeCloseTo(2 * 60000, -2);
+  });
+
+  it("switches from Stage 1 to Stage 2 at the exact boundary", () => {
+    // 175 cases = 17.5 min of remaining flow, exactly Stage 1 + Tunnel boundaries.
+    const phases = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 30 * 60,
+      runStatus: "running",
+      pressDone: true,
+      casesInFreezer: 175,
+      nowMs: T0,
+    });
+    expect(phases.stage1.state).toBe("empty");
+    expect(phases.stage2.state).toBe("draining");
+    expect(phases.stage2.remainMs).toBeCloseTo(15 * 60000, -2);
+    expect(phases.stage3.state).toBe("empty");
+  });
+
+  it("switches from Stage 2 to Stage 3 at the exact boundary", () => {
+    // 25 cases = 2.5 min of remaining flow, exactly the wrapper phase.
+    const phases = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 30 * 60,
+      runStatus: "running",
+      pressDone: true,
+      casesInFreezer: 25,
+      nowMs: T0,
+    });
+    expect(phases.stage1.state).toBe("empty");
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("draining");
+    expect(phases.stage3.remainMs).toBeCloseTo(2.5 * 60000, -2);
+  });
+
+  it("keeps a single visible stage when drain speed is unavailable", () => {
+    const phases = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 30 * 60,
+      runStatus: "running",
+      pressDone: true,
+      casesInFreezer: 200,
+      ppm: 0,
+      nowMs: T0,
+    });
+    expect(phases.stage1.state).toBe("draining");
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
   });
 
   it("all stages empty when casesInFreezer reaches 0", () => {
@@ -667,7 +715,7 @@ describe("computeLinePhases — ended run wall-clock drain", () => {
   // 20-min full fill) so the occupancy gates don't hide any stage.
   const FULL_ELAPSED = 25 * 60;
 
-  it("Stage 1 draining immediately after end, Stage 3 also draining", () => {
+  it("shows only Stage 1 immediately after an ended run begins draining", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: FULL_ELAPSED,
@@ -676,11 +724,12 @@ describe("computeLinePhases — ended run wall-clock drain", () => {
       endedAt: T0,
     });
     expect(phases.stage1.state).toBe("draining");
-    expect(phases.stage3.state).toBe("draining");
     expect(phases.stage1.remainMs).toBeCloseTo(1.5 * 60000, -2);
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
   });
 
-  it("Stage 1 empty after preTunnelMin has elapsed since end", () => {
+  it("starts Stage 2 after Stage 1 empties", () => {
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: FULL_ELAPSED,
@@ -690,7 +739,7 @@ describe("computeLinePhases — ended run wall-clock drain", () => {
     });
     expect(phases.stage1.state).toBe("empty");
     expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage3.state).toBe("draining");
+    expect(phases.stage3.state).toBe("empty");
   });
 
   it("Stage 3 is last to become empty at freezerTime after end", () => {

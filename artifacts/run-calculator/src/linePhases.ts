@@ -121,6 +121,47 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     state,
     remainMs,
   });
+  const emptyPhases = (): LinePhases => ({
+    stage1: mk(S1, "empty"),
+    stage2: mk(S2, "empty"),
+    stage3: mk(S3, "empty"),
+  });
+
+  // The line physically contains product in more than one stage during a drain,
+  // but the operator-facing countdown is intentionally sequential: frontline,
+  // then tunnel, then packaging. Showing the cumulative remaining time for each
+  // stage made all three rows count down at once. Keep the same total drain
+  // duration and only expose the stage whose own window is currently active.
+  const sequentialDrain = (totalRemainingMin: number): LinePhases => {
+    const remaining = Math.max(0, totalRemainingMin);
+    const stage1Remaining = Math.max(0, remaining - tunnelMin - postTunnelMin);
+    if (preTunnelMin > 0 && stage1Remaining > 0) {
+      return {
+        stage1: mk(S1, "draining", stage1Remaining * 60000),
+        stage2: mk(S2, "empty"),
+        stage3: mk(S3, "empty"),
+      };
+    }
+
+    const stage2Remaining = Math.max(0, remaining - postTunnelMin);
+    if (tunnelMin > 0 && stage2Remaining > 0) {
+      return {
+        stage1: mk(S1, "empty"),
+        stage2: mk(S2, "draining", stage2Remaining * 60000),
+        stage3: mk(S3, "empty"),
+      };
+    }
+
+    if (postTunnelMin > 0 && remaining > 0) {
+      return {
+        stage1: mk(S1, "empty"),
+        stage2: mk(S2, "empty"),
+        stage3: mk(S3, "draining", remaining * 60000),
+      };
+    }
+
+    return emptyPhases();
+  };
 
   // ── Ended run: wall-clock drain from endedAt ─────────────────────────────
   if (runStatus === "ended" && endedAt && freezerTime > 0) {
@@ -130,21 +171,10 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     // the press stopping, regardless of how early the run ended.
     // Only exception: no product was ever pressed (elapsedMin == 0).
     if (elapsedMin <= 0) {
-      return {
-        stage1: mk(S1, "empty"),
-        stage2: mk(S2, "empty"),
-        stage3: mk(S3, "empty"),
-      };
+      return emptyPhases();
     }
     const elapsed = nowMs - endedAt;
-    const s1Rem = Math.max(0, preTunnelMin * 60000 - elapsed);
-    const s2Rem = Math.max(0, (preTunnelMin + tunnelMin) * 60000 - elapsed);
-    const s3Rem = Math.max(0, freezerTime * 60000 - elapsed);
-    return {
-      stage1: s1Rem > 0 ? mk(S1, "draining", s1Rem) : mk(S1, "empty"),
-      stage2: s2Rem > 0 ? mk(S2, "draining", s2Rem) : mk(S2, "empty"),
-      stage3: s3Rem > 0 ? mk(S3, "draining", s3Rem) : mk(S3, "empty"),
-    };
+    return sequentialDrain(freezerTime - elapsed / 60000);
   }
 
   // ── Paused run: propagation delay model ──────────────────────────────────
@@ -183,25 +213,17 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
   // ── Running, press done: casesInFreezer-based drain ──────────────────────
   if (runStatus === "running" && pressDone) {
     if (ppm <= 0 || pizzasPerCase <= 0 || freezerTime <= 0) {
-      // Can't compute drain speed; show everything as draining.
+      // Can't compute the next stage boundary without a production speed. Keep
+      // the display unambiguous rather than reviving the old parallel timers.
       return {
         stage1: mk(S1, "draining"),
-        stage2: mk(S2, "draining"),
-        stage3: mk(S3, "draining"),
+        stage2: mk(S2, "empty"),
+        stage3: mk(S3, "empty"),
       };
     }
     // Drain time remaining for the entire line (minutes).
     const drainTotalMin = (casesInFreezer * pizzasPerCase) / ppm;
-    // Stage 1 holds roughly the "innermost" product: its drain window is over
-    // once only the tunnel + wrapper product remain.
-    const s1RemMin = Math.max(0, drainTotalMin - tunnelMin - postTunnelMin);
-    const s2RemMin = Math.max(0, drainTotalMin - postTunnelMin);
-    const s3RemMin = Math.max(0, drainTotalMin);
-    return {
-      stage1: s1RemMin > 0 ? mk(S1, "draining", s1RemMin * 60000) : mk(S1, "empty"),
-      stage2: s2RemMin > 0 ? mk(S2, "draining", s2RemMin * 60000) : mk(S2, "empty"),
-      stage3: s3RemMin > 0 ? mk(S3, "draining", s3RemMin * 60000) : mk(S3, "empty"),
-    };
+    return sequentialDrain(drainTotalMin);
   }
 
   // ── Running, filling / steady state ──────────────────────────────────────
