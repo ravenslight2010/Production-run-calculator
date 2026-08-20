@@ -62,6 +62,7 @@ interface AutoTrackValues {
 
 interface AutoTrackParams {
   runId: string;
+
   runStatus: RunStatus;
   /**
    * Wall-clock ms when the run was ended (null while pending/running/paused).
@@ -69,11 +70,17 @@ interface AutoTrackParams {
    * case/skid counters keep ticking (packaging is still casing what's in the
    * tunnel) while dough tray/batch tracking stays stopped.
    */
+
   endedAt?: number | null;
+
   nowTime: Date;
+
   elapsedBatchSec: number;
+
   calc: AutoTrackCalc;
+
   v: AutoTrackValues;
+
   form: UseFormReturn<FormValues>;
   /**
    * Measured machine times in seconds (0 = not measured → fall back to
@@ -84,6 +91,7 @@ interface AutoTrackParams {
    *    "batches ready" can never drain faster than the hopper converts, so the
    *    effective drain period is the SLOWER of hopper time and line demand.
    */
+
   machine?: { spinSec: number; hopperSec: number };
   /**
    * Hard-disable all auto-track WRITES (cast/wall display screens). A passive
@@ -91,6 +99,7 @@ interface AutoTrackParams {
    * get pushed through live sync with fresh stamps and clobber the operator's
    * manual edits on every other device.
    */
+
   disabled?: boolean;
   /**
    * When provided, the hook uses this ref for its own suppression check
@@ -99,7 +108,17 @@ interface AutoTrackParams {
    * that manual-edit suppression latches written by UI consumers are honoured
    * by the auto-track write loop.
    */
+
   externalAutoSuppressRef?: React.MutableRefObject<number>;
+  /**
+   * Persists the independently synced packaging register before a case/skid
+   * auto-write lands in the form. Returning false fences a tick that raced a
+   * newly adopted manual-override deadline.
+   */
+  onPackagingProgressAutoAdvance?: (
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+  ) => boolean;
   /**
    * A foreground sync pull is checking the newest shared run values. Hold all
    * counter ticks until that pull completes.
@@ -110,11 +129,13 @@ interface AutoTrackParams {
    * raised before the wake clock can render, so the write effect is fenced even
    * if React has not committed the blocked state yet.
    */
+
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
   /**
    * Only lifecycle adoption requests a bookkeeping rebase on release. An
    * unchanged foreground pull must retain ordinary screen-off catch-up.
    */
+
   autoTrackRebaseAfterBlock?: boolean;
 }
 
@@ -201,6 +222,7 @@ export function useAutoTrack({
   machine,
   disabled = false,
   externalAutoSuppressRef,
+  onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
   // Preserve the established behavior for callers that only provide the
@@ -594,8 +616,12 @@ export function useAutoTrack({
             const target = curTotal + exited;
             const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
             if (newTotal !== curTotal) {
-              form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
-              form.setValue("casesOnCurrentSkid", Math.round(newTotal % cps), { shouldDirty: true });
+              const nextSkids = Math.floor(newTotal / cps);
+              const nextCases = Math.round(newTotal % cps);
+              if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
+                form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+              }
             }
           }
         } else if (prevExpected < 0) {
@@ -605,8 +631,12 @@ export function useAutoTrack({
           // we don't double-count.
           if (curTotal === 0 && expectedCases > 0) {
             const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
-            form.setValue("skidsCompleted", Math.floor(seedTotal / cps), { shouldDirty: true });
-            form.setValue("casesOnCurrentSkid", Math.round(seedTotal % cps), { shouldDirty: true });
+            const nextSkids = Math.floor(seedTotal / cps);
+            const nextCases = Math.round(seedTotal % cps);
+            if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
+              form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+              form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+            }
           }
         } else {
           // Add the production since the last tick on top of the current value, so a
@@ -635,8 +665,12 @@ export function useAutoTrack({
               // Never pull a value down below what the operator already has on the floor.
               const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
               if (newTotal !== curTotal) {
-                form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
-                form.setValue("casesOnCurrentSkid", Math.round(newTotal % cps), { shouldDirty: true });
+                const nextSkids = Math.floor(newTotal / cps);
+                const nextCases = Math.round(newTotal % cps);
+                if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
+                  form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                  form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                }
               }
             }
           } else {

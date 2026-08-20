@@ -545,4 +545,26 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
   });
+
+  it("7. fences the form write when the packaging register rejects a raced automatic tick", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+    });
+    const onPackagingProgressAutoAdvance = vi.fn(() => false);
+
+    renderHook(() => useAutoTrack({
+      runId: "manual-deadline-race-6",
+      runStatus: "running",
+      nowTime: ms(T0),
+      elapsedBatchSec: 780,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      onPackagingProgressAutoAdvance,
+    }));
+
+    expect(onPackagingProgressAutoAdvance).toHaveBeenCalled();
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(0);
+  });
 });

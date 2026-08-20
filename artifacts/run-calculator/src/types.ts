@@ -405,6 +405,10 @@ export type SyncPayload = {
   // change vanished" lost-update). Only used to BLOCK overwriting strictly-newer
   // local values; absent/equal entries fall back to the prior accept behavior.
   runValuesUpdatedAt?: Record<string, number>;
+  // Cases on skid + completed skids form one independently merged progress
+  // register. Manual corrections advance correctionGeneration; automatic
+  // tracking may only advance the generation it has already adopted.
+  packagingProgress?: Record<string, PackagingProgress>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
   ingredientTypes?: string[];
@@ -447,6 +451,14 @@ export type SyncPayload = {
   // later re-delete wins again). Merged per-name by MAX on both push and receive.
   deletedStamps?: Record<string, Record<string, number>>;
   undeletedStamps?: Record<string, Record<string, number>>;
+};
+
+export type PackagingProgress = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+  correctionGeneration: number;
+  updatedAt: number;
+  manualOverrideUntil: number;
 };
 
 export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };

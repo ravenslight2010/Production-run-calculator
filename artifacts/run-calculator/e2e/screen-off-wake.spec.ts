@@ -132,7 +132,7 @@ async function promoteCurrentPageUserToManager(page: Page): Promise<void> {
  * After setting values, DOM assertions confirm all six inputs hold the
  * expected numbers before returning.
  */
-async function fillFormValues(page: Page): Promise<void> {
+async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
   // Step 1 — confirm the run is pending before touching any inputs
   await page
     .locator('[data-testid="button-start-run"]')
@@ -155,7 +155,7 @@ async function fillFormValues(page: Page): Promise<void> {
 
   // Step 3 — set values via native setter + bubbling events
   // (React Testing Library's proven pattern for controlled inputs)
-  const results: Record<string, boolean> = await page.evaluate(() => {
+  const results: Record<string, boolean> = await page.evaluate((requestedCasesPerSkid) => {
     const nativeSetter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value",
@@ -191,7 +191,7 @@ async function fillFormValues(page: Page): Promise<void> {
       ["input-cycleSpeed", "30"],
       ["input-crustsPerCycle", "2"],
       ["input-pizzasPerCase", "6"],
-      ["input-casesPerSkid", "10"],
+      ["input-casesPerSkid", requestedCasesPerSkid],
       ["input-freezerTime", "5"],
     ];
     for (const [testId, value] of fields) {
@@ -202,7 +202,7 @@ async function fillFormValues(page: Page): Promise<void> {
     }
 
     return hit;
-  });
+  }, casesPerSkid);
 
   // Step 4 — fail immediately if any element was not found in the DOM
   const missing = Object.entries(results)
@@ -247,7 +247,7 @@ async function fillFormValues(page: Page): Promise<void> {
   expect(domValues.cycleSpeed, "cycleSpeed not set in DOM").toBe("30");
   expect(domValues.crustsPerCycle, "crustsPerCycle not set in DOM").toBe("2");
   expect(domValues.pizzasPerCase, "pizzasPerCase not set in DOM").toBe("6");
-  expect(domValues.casesPerSkid, "casesPerSkid not set in DOM").toBe("10");
+  expect(domValues.casesPerSkid, "casesPerSkid not set in DOM").toBe(casesPerSkid);
   expect(domValues.freezerTime, "freezerTime not set in DOM").toBe("5");
 }
 
@@ -416,11 +416,11 @@ async function waitForCaseCounterChange(
  *   6. Wait for tile-cases-completed (confirms casesNeeded > 0 and run live).
  * Returns safeBaseMs, which is the exact startedAt the app stored.
  */
-async function setupAndStartRun(page: Page): Promise<number> {
+async function setupAndStartRun(page: Page, casesPerSkid = "10"): Promise<number> {
   await signUpAndDismissDialog(page, uid(), "TestPass123!");
 
   await page.locator('[data-testid="tab-run"]').click();
-  await fillFormValues(page);
+  await fillFormValues(page, casesPerSkid);
 
   // Compute a safe anchor time: 21:00 UTC today.
   // mock offsets of +15 min → 21:15 and +20 min → 21:20 — well clear of midnight.
@@ -782,6 +782,202 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           .waitFor({ state: "visible", timeout: 15_000 });
       } finally {
         await peer.setOffline(false);
+        await peer.close();
+      }
+    },
+  );
+
+  test(
+    "D. active peers and server keep a downward skid correction over a stale automatic write",
+    async ({ page, browser }: { page: Page; browser: Browser }) => {
+      const safeBaseMs = await setupAndStartRun(page, "48");
+      // Stay comfortably inside the 36-case bucket rather than exactly on its
+      // opening millisecond; browser/start timestamp ordering can otherwise
+      // leave floating-point elapsed time a fraction below 3.6 minutes.
+      const baselineAt = safeBaseMs + 8 * 60_000 + 36_500;
+
+      // At +8.6 min, 3.6 min of product has exited the five-minute tunnel:
+      // floor(3.6 * 60 pizzas/min / 6 pizzas/case) = 36 cases.
+      await simulateScreenOff(page);
+      await mockDateNow(page, baselineAt);
+      await simulateWake(page);
+      await waitForCaseCounterChange(page, 0, 8_000);
+      expect(await readCaseTotal(page)).toBe(36);
+
+      // Wait until the automatic baseline and its generation-0 packaging
+      // register are durably stored before the second active browser joins.
+      await page.waitForFunction(async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`);
+        const body = await response.json() as {
+          packagingProgress?: Record<string, { casesOnCurrentSkid?: number }>;
+        } | null;
+        return Object.values(body?.packagingProgress ?? {})
+          .some((entry) => entry.casesOnCurrentSkid === 36);
+      }, undefined, { timeout: 15_000 });
+
+      const peer = await browser.newContext({
+        storageState: await page.context().storageState(),
+      });
+      try {
+        // Install the same Date proxy before any app script runs. Both tabs are
+        // active and automatic tracking is enabled, but neither can race ahead
+        // merely because this test's real clock differs from startedAt.
+        await peer.addInitScript(({ fakeMs }) => {
+          const w = window as unknown as Record<string, unknown>;
+          w.__testFakeMs = fakeMs;
+          w.__testDateProxyInstalled = true;
+          const Orig = window.Date;
+          w.__origDate = Orig;
+          window.Date = new Proxy(Orig, {
+            construct(target, args) {
+              return args.length === 0
+                ? new target(w.__testFakeMs as number)
+                : Reflect.construct(target, args);
+            },
+            apply(target, _self, args) {
+              return args.length === 0
+                ? new target(w.__testFakeMs as number).toString()
+                : Reflect.apply(target, target, args);
+            },
+            get(target, prop, receiver) {
+              if (prop === "now") return () => w.__testFakeMs as number;
+              const value = Reflect.get(target, prop, receiver);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as unknown as typeof Date;
+        }, { fakeMs: baselineAt });
+
+        const peerPage = await peer.newPage();
+        await peerPage.goto("/", { waitUntil: "domcontentloaded" });
+        await peerPage.locator('[data-testid="tile-cases-completed"]')
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await expect.poll(() => readCaseTotal(peerPage), { timeout: 15_000 }).toBe(36);
+
+        // Capture what the second active browser knew before the correction.
+        // We later replay this as its unaware automatic tick with a newer
+        // whole-run timestamp; the older correction generation must still lose.
+        const staleSnapshot = await peerPage.evaluate(async () => {
+          const today = new Date().toISOString().slice(0, 10);
+          const response = await fetch(`/api/sync/today?today=${today}`);
+          return await response.json() as {
+            dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+            runValues?: Record<string, Record<string, unknown>>;
+            runValuesUpdatedAt?: Record<string, number>;
+            packagingProgress?: Record<string, {
+              skidsCompleted: number;
+              casesOnCurrentSkid: number;
+              correctionGeneration: number;
+              updatedAt: number;
+              manualOverrideUntil: number;
+            }>;
+          };
+        });
+        const runId =
+          staleSnapshot.dayState?.currentRunId ??
+          staleSnapshot.dayState?.runs?.[0]?.id;
+        expect(runId, "active run id in stale peer snapshot").toBeTruthy();
+        expect(staleSnapshot.packagingProgress?.[runId!]?.casesOnCurrentSkid).toBe(36);
+
+        await page.locator('[data-testid="tab-packaging"]').click();
+        await peerPage.locator('[data-testid="tab-packaging"]').click();
+        const primaryCases = page.locator('[data-testid="text-casesOnCurrentSkid"]');
+        const peerCases = peerPage.locator('[data-testid="text-casesOnCurrentSkid"]');
+        await expect(primaryCases).toHaveText("36");
+        await expect(peerCases).toHaveText("36");
+
+        // Explicit operator correction: 36/48 → 24/48.
+        const decrement = page.locator('[data-testid="btn-dec-casesOnCurrentSkid"]');
+        for (let i = 0; i < 12; i++) await decrement.click();
+        await expect(primaryCases).toHaveText("24");
+        await expect(peerCases).toHaveText("24", { timeout: 15_000 });
+
+        const staleWriteResult = await peerPage.evaluate(async ({ snapshot, id }) => {
+          const payload = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+          const staleProgress = payload.packagingProgress?.[id];
+          const staleValues = payload.runValues?.[id];
+          if (!staleProgress || !staleValues) throw new Error("stale packaging snapshot missing");
+          staleProgress.skidsCompleted = 0;
+          staleProgress.casesOnCurrentSkid = 36;
+          staleProgress.updatedAt += 30_000;
+          staleValues.skidsCompleted = 0;
+          staleValues.casesOnCurrentSkid = 36;
+          payload.runValuesUpdatedAt ??= {};
+          payload.runValuesUpdatedAt[id] = staleProgress.updatedAt;
+
+          const epochResponse = await fetch("/api/sync/reset-epoch");
+          const { epoch } = await epochResponse.json() as { epoch: number };
+          const today = new Date().toISOString().slice(0, 10);
+          const response = await fetch(
+            `/api/sync/today?today=${today}&epoch=${epoch}`,
+            {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                senderId: `stale-auto-${id}`,
+                payload,
+              }),
+            },
+          );
+          return {
+            status: response.status,
+            body: await response.json() as {
+              data?: {
+                runValues?: Record<string, {
+                  skidsCompleted?: number;
+                  casesOnCurrentSkid?: number;
+                }>;
+              };
+            },
+          };
+        }, { snapshot: staleSnapshot, id: runId! });
+
+        expect(staleWriteResult.status).toBe(200);
+        expect(staleWriteResult.body.data?.runValues?.[runId!]).toMatchObject({
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 24,
+        });
+        await expect(primaryCases).toHaveText("24");
+        await expect(peerCases).toHaveText("24");
+
+        const serverPair = await page.evaluate(async ({ id }) => {
+          const today = new Date().toISOString().slice(0, 10);
+          const response = await fetch(`/api/sync/today?today=${today}`);
+          const body = await response.json() as {
+            runValues?: Record<string, {
+              skidsCompleted?: number;
+              casesOnCurrentSkid?: number;
+            }>;
+          };
+          return body.runValues?.[id];
+        }, { id: runId! });
+        expect(serverPair).toMatchObject({
+          skidsCompleted: 0,
+          casesOnCurrentSkid: 24,
+        });
+
+        // Walk the production clock through the shared one-minute hold. Each
+        // due tick updates the baseline while suppressed, so expiry permits one
+        // normal +1 rather than replaying the whole hold interval.
+        for (let offset = 6_000; offset <= 54_000; offset += 6_000) {
+          await mockDateNow(page, baselineAt + offset);
+          await simulateWake(page);
+          await page.waitForTimeout(80);
+          await expect(primaryCases).toHaveText("24");
+        }
+        await expect(peerCases).toHaveText("24");
+
+        await mockDateNow(page, baselineAt + 60_001);
+        await simulateWake(page);
+        await expect(primaryCases).toHaveText("25", { timeout: 8_000 });
+        await expect(peerCases).toHaveText("25", { timeout: 15_000 });
+        // The aggregate tile lives on the Run tab; both pages are still on
+        // Packaging after checking the pair above.
+        await page.locator('[data-testid="tab-run"]').click();
+        await peerPage.locator('[data-testid="tab-run"]').click();
+        expect(await readCaseTotal(page)).toBe(25);
+        expect(await readCaseTotal(peerPage)).toBe(25);
+      } finally {
         await peer.close();
       }
     },

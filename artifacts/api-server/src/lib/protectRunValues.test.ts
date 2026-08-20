@@ -957,3 +957,291 @@ describe("capMergedResult", () => {
     expect(byteSize(result)).toBeLessThanOrEqual(MAX_BYTES);
   });
 });
+
+// ── packagingProgress merge ───────────────────────────────────────────────────
+
+type ProgressEntry = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+  correctionGeneration: number;
+  updatedAt: number;
+  manualOverrideUntil: number;
+};
+
+function mkProgress(
+  skidsCompleted: number,
+  casesOnCurrentSkid: number,
+  correctionGeneration: number,
+  updatedAt: number,
+  manualOverrideUntil = 0,
+): ProgressEntry {
+  return { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt, manualOverrideUntil };
+}
+
+function basePayload(
+  runIds: string[],
+  progress?: Record<string, ProgressEntry>,
+  runValues?: Record<string, Record<string, unknown>>,
+) {
+  const rvs: Record<string, Record<string, unknown>> = runValues ?? {};
+  for (const id of runIds) {
+    if (!rvs[id]) rvs[id] = { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 0 };
+  }
+  const result: Record<string, unknown> = {
+    dayState: { runs: runIds.map((id) => ({ id, brand: "Acme", flavor: id })), resetAt: 1000 },
+    runValues: rvs,
+    runValuesUpdatedAt: Object.fromEntries(runIds.map((id) => [id, 1])),
+  };
+  if (progress) result.packagingProgress = progress;
+  return result;
+}
+
+describe("packagingProgress merge (Task 974)", () => {
+  it("higher correctionGeneration always wins regardless of updatedAt", () => {
+    // Stored has gen=2/updatedAt=9999 (very recent auto); incoming has gen=3/updatedAt=1 (older manual correction).
+    // Higher generation (3) must always win.
+    const stored = basePayload(["r1"], { r1: mkProgress(5, 3, 2, 9999) });
+    const incoming = basePayload(["r1"], { r1: mkProgress(10, 7, 3, 1) });
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    expect(prog.r1.skidsCompleted).toBe(10);
+    expect(prog.r1.casesOnCurrentSkid).toBe(7);
+    expect(prog.r1.correctionGeneration).toBe(3);
+  });
+
+  it("same generation: higher updatedAt wins", () => {
+    const stored = basePayload(["r1"], { r1: mkProgress(5, 3, 2, 1000) });
+    const incoming = basePayload(["r1"], { r1: mkProgress(8, 4, 2, 2000) });
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    expect(prog.r1.skidsCompleted).toBe(8);
+    expect(prog.r1.updatedAt).toBe(2000);
+  });
+
+  it("same generation AND same updatedAt: stored entry kept", () => {
+    const stored = basePayload(["r1"], { r1: mkProgress(5, 3, 2, 1000) });
+    const incoming = basePayload(["r1"], { r1: mkProgress(9, 9, 2, 1000) });
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    // Exact tie → stored wins
+    expect(prog.r1.skidsCompleted).toBe(5);
+    expect(prog.r1.casesOnCurrentSkid).toBe(3);
+  });
+
+  it("missing incoming metadata cannot clobber established stored metadata", () => {
+    // Stored has packagingProgress; incoming omits it entirely (legacy client).
+    const stored = basePayload(["r1"], { r1: mkProgress(4, 2, 1, 500) });
+    const incoming = basePayload(["r1"]); // no packagingProgress key
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    expect(prog.r1.skidsCompleted).toBe(4); // preserved from stored
+  });
+
+  it("tombstoned runs drop metadata", () => {
+    const stored = basePayload(["r1", "r2"], {
+      r1: mkProgress(4, 2, 1, 500),
+      r2: mkProgress(6, 1, 1, 600),
+    });
+    const incoming = {
+      ...basePayload(["r1"]),
+      deletedItems: { runs: ["r2"] },
+      packagingProgress: { r1: mkProgress(4, 2, 1, 500) },
+    };
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    expect(prog.r1).toBeDefined();
+    expect(prog.r2).toBeUndefined(); // tombstoned
+  });
+
+  it("packagingProgress is merged independently from runValues (different stamp clocks)", () => {
+    // runValues has a stale stamp (rejected); packagingProgress has a newer gen.
+    const stored = basePayload(["r1"], { r1: mkProgress(2, 5, 1, 100) });
+    // incoming runValues has older stamp → runValues kept from stored by LWW
+    const incoming: Record<string, unknown> = {
+      ...basePayload(["r1"]),
+      runValuesUpdatedAt: { r1: 0 }, // older stamp
+      packagingProgress: { r1: mkProgress(7, 3, 2, 50) }, // higher gen wins
+    };
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    // Higher gen wins regardless of runValues LWW
+    expect(prog.r1.correctionGeneration).toBe(2);
+    expect(prog.r1.skidsCompleted).toBe(7);
+  });
+
+  it("overlay: winning packagingProgress values applied into canonical runValues", () => {
+    const stored = basePayload(["r1"], { r1: mkProgress(2, 5, 1, 100) });
+    const incoming = basePayload(["r1"], { r1: mkProgress(7, 3, 2, 50) });
+    const out = protectRunValues(incoming, stored) as Record<string, unknown>;
+    const rv = (out.runValues as Record<string, Record<string, unknown>>).r1;
+    // Winning entry has higher gen (2), so skidsCompleted=7, casesOnCurrentSkid=3
+    expect(rv.skidsCompleted).toBe(7);
+    expect(rv.casesOnCurrentSkid).toBe(3);
+  });
+
+  it("reset path: retains only incoming run IDs but still applies precedence for shared runs", () => {
+    // Stored has runs a, b; incoming reset has only run a with lower gen.
+    // Run b should be dropped; run a should keep stored entry (higher gen).
+    const stored = {
+      dayState: { runs: [{ id: "a", brand: "X", flavor: "a" }, { id: "b", brand: "X", flavor: "b" }], resetAt: 100 },
+      runValues: { a: { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 0 }, b: { casesNeeded: 50, skidsCompleted: 0, casesOnCurrentSkid: 0 } },
+      runValuesUpdatedAt: { a: 1, b: 1 },
+      packagingProgress: {
+        a: mkProgress(5, 2, 3, 9999), // gen=3
+        b: mkProgress(1, 1, 1, 100),
+      },
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "a", brand: "X", flavor: "a" }], resetAt: 200 }, // reset
+      runValues: { a: { casesNeeded: 100, skidsCompleted: 0, casesOnCurrentSkid: 0 } },
+      runValuesUpdatedAt: { a: 5 },
+      packagingProgress: {
+        a: mkProgress(3, 1, 1, 5000), // lower gen than stored
+      },
+    };
+    const out = protectRunValues(incoming, stored, { allowRunListReplacement: true }) as Record<string, unknown>;
+    const prog = out.packagingProgress as Record<string, ProgressEntry>;
+    // Run b: dropped (not in incoming reset's run list)
+    expect(prog.b).toBeUndefined();
+    // Run a: stored has gen=3, incoming has gen=1 → stored wins
+    expect(prog.a.correctionGeneration).toBe(3);
+    expect(prog.a.skidsCompleted).toBe(5);
+  });
+
+  it("reset path keys progress retention to the incoming run list, not runValues keys", () => {
+    const stored = {
+      dayState: {
+        runs: [
+          { id: "listed", brand: "X", flavor: "A" },
+          { id: "ghost", brand: "X", flavor: "B" },
+        ],
+        resetAt: 100,
+      },
+      runValues: {
+        listed: { casesNeeded: 100 },
+        ghost: { casesNeeded: 50 },
+      },
+      runValuesUpdatedAt: { listed: 1, ghost: 1 },
+      packagingProgress: {
+        listed: mkProgress(2, 4, 2, 200),
+        ghost: mkProgress(1, 8, 1, 100),
+      },
+    };
+    const incoming = {
+      // "listed" intentionally has no runValues entry; "ghost" intentionally
+      // has a stray value entry despite not being in the authoritative list.
+      dayState: {
+        runs: [{ id: "listed", brand: "X", flavor: "A" }],
+        resetAt: 200,
+      },
+      runValues: {
+        ghost: { casesNeeded: 999 },
+      },
+      runValuesUpdatedAt: { ghost: 999 },
+      packagingProgress: {
+        ghost: mkProgress(9, 9, 9, 999),
+      },
+    };
+
+    const out = protectRunValues(
+      incoming,
+      stored,
+      { allowRunListReplacement: true },
+    ) as Record<string, unknown>;
+    const progress = out.packagingProgress as Record<string, ProgressEntry>;
+
+    expect(progress.listed).toEqual(stored.packagingProgress.listed);
+    expect(progress.ghost).toBeUndefined();
+  });
+
+  it("reset path drops an incoming-only packaging entry absent from the run list", () => {
+    const stored = {
+      dayState: {
+        runs: [{ id: "listed", brand: "X", flavor: "A" }],
+        resetAt: 100,
+      },
+      runValues: { listed: { casesNeeded: 100 } },
+      runValuesUpdatedAt: { listed: 1 },
+      packagingProgress: {
+        listed: mkProgress(2, 4, 2, 200),
+      },
+    };
+    const incoming = {
+      dayState: {
+        runs: [{ id: "listed", brand: "X", flavor: "A" }],
+        resetAt: 200,
+      },
+      runValues: { listed: { casesNeeded: 100 } },
+      runValuesUpdatedAt: { listed: 2 },
+      packagingProgress: {
+        listed: mkProgress(2, 4, 2, 200),
+        incomingOnlyGhost: mkProgress(9, 9, 9, 999),
+      },
+    };
+
+    const out = protectRunValues(
+      incoming,
+      stored,
+      { allowRunListReplacement: true },
+    ) as Record<string, unknown>;
+    const progress = out.packagingProgress as Record<string, ProgressEntry>;
+
+    expect(progress.listed).toBeDefined();
+    expect(progress.incomingOnlyGhost).toBeUndefined();
+  });
+
+  it("sanitizer: accepts valid packagingProgress entries and caps at MAX_RUNS", () => {
+    const progress: Record<string, unknown> = {};
+    for (let i = 0; i < 60; i++) {
+      progress[`r${i}`] = { skidsCompleted: i, casesOnCurrentSkid: i, correctionGeneration: 1, updatedAt: 1000, manualOverrideUntil: 0 };
+    }
+    const out = sanitizeSyncPayload({ packagingProgress: progress }) as Record<string, unknown>;
+    expect(Object.keys(out.packagingProgress as object).length).toBe(50);
+  });
+
+  it("sanitizer: rejects packagingProgress entries with non-finite or negative numeric fields", () => {
+    const out = sanitizeSyncPayload({
+      packagingProgress: {
+        r1: { skidsCompleted: -1, casesOnCurrentSkid: Infinity, correctionGeneration: NaN, updatedAt: 500, manualOverrideUntil: -5 },
+      },
+    }) as Record<string, unknown>;
+    expect(out.packagingProgress).toEqual({});
+  });
+
+  it("sanitizer: strips unknown keys from packagingProgress entries (only 5 known fields survive)", () => {
+    const out = sanitizeSyncPayload({
+      packagingProgress: {
+        r1: { skidsCompleted: 3, casesOnCurrentSkid: 2, correctionGeneration: 1, updatedAt: 100, manualOverrideUntil: 0, evil: "bad" },
+      },
+    }) as Record<string, unknown>;
+    const e = out.packagingProgress as Record<string, Record<string, unknown>>;
+    expect(Object.keys(e.r1)).toEqual(
+      expect.arrayContaining(["skidsCompleted", "casesOnCurrentSkid", "correctionGeneration", "updatedAt", "manualOverrideUntil"]),
+    );
+    expect(e.r1).not.toHaveProperty("evil");
+  });
+
+  it("capMergedResult: caps packagingProgress at MAX_RUNS entries", () => {
+    const progress: Record<string, ProgressEntry> = {};
+    for (let i = 0; i < 60; i++) {
+      progress[`r${i}`] = mkProgress(i, 0, 1, 1000);
+    }
+    const result = capMergedResult({
+      packagingProgress: progress,
+      dayState: { runs: [], resetAt: 0 },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    }) as Record<string, unknown>;
+    expect(Object.keys(result.packagingProgress as object).length).toBe(50);
+  });
+
+  it("first write (no existing): packagingProgress overlays canonical run values", () => {
+    const incoming = basePayload(["r1"], { r1: mkProgress(3, 2, 1, 100) });
+    const out = protectRunValues(incoming, null) as Record<string, unknown>;
+    expect(out.packagingProgress).toEqual(incoming.packagingProgress);
+    expect((out.runValues as Record<string, Record<string, number>>).r1).toMatchObject({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 2,
+    });
+  });
+});

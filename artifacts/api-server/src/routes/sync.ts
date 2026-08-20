@@ -258,6 +258,27 @@ function detectConflicts(
     }
   }
 
+  // Packaging progress is an independent causal register. Report when its
+  // generation/timestamp merge rejects or patches an incoming entry even if
+  // the visible skid/case pair happened to be identical.
+  const inProgress =
+    inObj.packagingProgress &&
+    typeof inObj.packagingProgress === "object" &&
+    !Array.isArray(inObj.packagingProgress)
+      ? inObj.packagingProgress as Record<string, unknown>
+      : {};
+  const mergedProgress =
+    merObj.packagingProgress &&
+    typeof merObj.packagingProgress === "object" &&
+    !Array.isArray(merObj.packagingProgress)
+      ? merObj.packagingProgress as Record<string, unknown>
+      : {};
+  for (const id of Object.keys(inProgress)) {
+    if (JSON.stringify(inProgress[id]) !== JSON.stringify(mergedProgress[id])) {
+      fields.push(`packagingProgress:${id}`);
+    }
+  }
+
   // Index incoming run objects by id so we can compare against the merged list.
   const inRunMap = new Map<string, unknown>();
   for (const r of (Array.isArray((inObj.dayState as any)?.runs)
@@ -439,7 +460,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   broadcast(merged, senderId, scope, today);
-  res.json({ ok: true });
+  res.json({ ok: true, data: merged });
 });
 
 router.get("/sync/events", async (req: Request, res: Response): Promise<void> => {
@@ -543,7 +564,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (date === clientToday(req)) {
     broadcast(merged, senderId, scope, date);
   }
-  res.json({ ok: true });
+  res.json({ ok: true, data: merged });
 });
 
 router.delete("/sync/:date", requireCapability("manage-factory-settings"), async (req: Request<{ date: string }>, res: Response): Promise<void> => {

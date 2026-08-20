@@ -142,6 +142,10 @@ export interface LiveRunProviderProps {
   screenMode: string | null;
   machine: { spinSec: number; hopperSec: number };
   externalAutoSuppressRef?: React.MutableRefObject<number>;
+  onPackagingProgressAutoAdvance?: (
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+  ) => boolean;
   autoTrackBlocked?: boolean;
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
   autoTrackRebaseAfterBlock?: boolean;
@@ -172,6 +176,7 @@ export function LiveRunProvider({
   screenMode,
   machine,
   externalAutoSuppressRef,
+  onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
   autoTrackRebaseAfterBlock = false,
@@ -497,6 +502,7 @@ export function LiveRunProvider({
       // Pass Home's ref so the hook's own suppression check reads from it —
       // manual-edit latches written by UI consumers are honoured by the write loop.
       externalAutoSuppressRef,
+      onPackagingProgressAutoAdvance,
       autoTrackBlocked,
       autoTrackBlockedRef,
       autoTrackRebaseAfterBlock,

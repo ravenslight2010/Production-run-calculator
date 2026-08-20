@@ -222,6 +222,15 @@ import {
   type SpecImportDisplayKind,
 } from "../storage";
 import {
+  loadPackagingProgress,
+  overlayPackagingProgress,
+  reconcilePackagingProgress,
+  recordAutomaticPackagingProgress,
+  recordManualPackagingProgress,
+  savePackagingProgress,
+} from "../packagingProgress";
+import { consumeSyncWriteResponse } from "../syncWriteResponse";
+import {
   canonicalProfileKey,
   reconcileProfilesFromServer,
   reconcileProfilesFromServerDetailed,
@@ -2222,7 +2231,7 @@ function StepperField({
   disabled?: boolean;
   suggestion?: number | null;
   onSuggest?: () => void;
-  onManualChange?: () => void;
+  onManualChange?: (nextValue: number) => void;
 }) {
   const repeatRef = useRef<{ t?: ReturnType<typeof setTimeout>; i?: ReturnType<typeof setInterval> }>({});
   const fieldRef = useRef<any>(null);
@@ -2243,15 +2252,17 @@ function StepperField({
         const decrement = () => {
           const cur = Number(fieldRef.current?.value) || 0;
           navigator.vibrate?.(8);
-          onManualChange?.();
-          fieldRef.current?.onChange(Math.max(min, cur - step));
+          const next = Math.max(min, cur - step);
+          onManualChange?.(next);
+          fieldRef.current?.onChange(next);
         };
         const increment = () => {
           const cur = Number(fieldRef.current?.value) || 0;
           if (max !== undefined && cur >= max) return;
           navigator.vibrate?.(8);
-          onManualChange?.();
-          fieldRef.current?.onChange(max !== undefined ? Math.min(max, cur + step) : cur + step);
+          const next = max !== undefined ? Math.min(max, cur + step) : cur + step;
+          onManualChange?.(next);
+          fieldRef.current?.onChange(next);
         };
         return (
           <FormItem>
@@ -2287,9 +2298,10 @@ function StepperField({
                   inputMode="numeric"
                   {...field}
                   onChange={(e) => {
-                    onManualChange?.();
                     const val = e.target.value === "" ? "" : Number(e.target.value);
-                    field.onChange(max !== undefined && typeof val === "number" ? Math.min(max, val) : val);
+                    const next = max !== undefined && typeof val === "number" ? Math.min(max, val) : val;
+                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
+                    field.onChange(next);
                   }}
                   onFocus={e => e.target.select()}
                   className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
@@ -2828,6 +2840,46 @@ export default function Home() {
   // stale when the user switches runs after the effect first ran.
   const currentRunIdRef = useRef(currentRunId);
   currentRunIdRef.current = currentRunId;
+  const persistManualPackagingProgress = useCallback((
+    runId: string,
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+    manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
+  ) => {
+    const now = Date.now();
+    recordManualPackagingProgress({
+      runId,
+      skidsCompleted,
+      casesOnCurrentSkid,
+      manualOverrideUntil,
+      now,
+    });
+    markRunValuesUpdated(runId, now);
+    lastLocalEditRef.current = now;
+    if (runId === currentRunIdRef.current) {
+      autoSuppressUntilRef.current = Math.max(
+        autoSuppressUntilRef.current,
+        manualOverrideUntil,
+      );
+    }
+  }, []);
+  const persistAutomaticPackagingProgress = useCallback((
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+  ): boolean => (
+    recordAutomaticPackagingProgress({
+      runId: currentRunIdRef.current,
+      skidsCompleted,
+      casesOnCurrentSkid,
+    }) !== null
+  ), []);
+  useEffect(() => {
+    // A correction may arrive while this device is viewing another run. Adopt
+    // that run's shared deadline when the operator later switches to it, rather
+    // than letting auto-track fire from a stale per-screen suppression ref.
+    autoSuppressUntilRef.current =
+      loadPackagingProgress()[currentRunId]?.manualOverrideUntil ?? 0;
+  }, [currentRunId]);
   const currentMixPresets = useMemo<MixPreset[]>(
     () => findMixPresets(currentRun?.brand ?? "", currentRun?.flavor ?? ""),
     [currentRun?.brand, currentRun?.flavor]
@@ -4626,14 +4678,7 @@ export default function Home() {
         await saveSpecImportAliases(aliasesToSave);
       } catch {}
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {}
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
@@ -4731,14 +4776,7 @@ export default function Home() {
       }
       refreshAfterMerge();
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {}
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
@@ -5261,14 +5299,7 @@ export default function Home() {
       // Push immediately so an incoming sync-pull's additive union can't
       // resurrect the wiped names on this device. Best-effort.
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {}
       noteChange(
         "merge",
@@ -5939,14 +5970,7 @@ export default function Home() {
       // from the still-stale server copy. Best-effort: the local tombstone filter
       // is the backstop if this push fails.
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {
         // Non-fatal: tombstones are persisted locally.
       }
@@ -6151,14 +6175,7 @@ export default function Home() {
         // Non-fatal: the next re-import just shows the old name for review.
       }
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {
         // Non-fatal: tombstones are persisted locally.
       }
@@ -6273,14 +6290,7 @@ export default function Home() {
       // Push the merged payload (with its deletion tombstones) immediately so an
       // incoming sync-pull's additive union can't re-add the merged-away names.
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {
         // Non-fatal: tombstones are persisted locally.
       }
@@ -6508,14 +6518,7 @@ export default function Home() {
       // Push immediately (with the deletion tombstone) so an incoming sync
       // pull's additive union can't re-add the removed name.
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {
         // Non-fatal: the tombstone is persisted locally and rides the next push.
       }
@@ -6576,14 +6579,7 @@ export default function Home() {
       refreshAfterMerge();
       setChangeHistory(loadChangeHistory());
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            senderId: clientId.current,
-            payload: buildSyncPayload(loadDayState()),
-          }),
-        });
+        await pushTodayCanonical(buildSyncPayload(loadDayState()));
       } catch {
         // Non-fatal: the local restore already happened; tombstones back it up.
       }
@@ -6863,7 +6859,11 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload }),
       });
-      if (res.ok && !handleStaleSyncWrite(await res.json().catch(() => null))) {
+      const { stale } = await consumeCanonicalSyncWriteResponse(
+        res,
+        scheduleEditorDate === todayStr(),
+      );
+      if (res.ok && !stale) {
         fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
         setScheduleView("list");
       } else if (!res.ok) {
@@ -6928,7 +6928,8 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payload: targetPayload }),
     });
-    if (!tRes.ok || handleStaleSyncWrite(await tRes.json().catch(() => null))) return;
+    const targetResult = await consumeCanonicalSyncWriteResponse(tRes, false);
+    if (!tRes.ok || targetResult.stale) return;
     if (source.length === 0) {
       await fetch(`/api/sync/${fromDate}?today=${todayStr()}`, { method: "DELETE" });
     } else {
@@ -6942,7 +6943,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: sourcePayload }),
       });
-      handleStaleSyncWrite(await sRes.json().catch(() => null));
+      await consumeCanonicalSyncWriteResponse(sRes, false);
     }
     await refreshScheduledDays();
   }
@@ -7177,6 +7178,30 @@ export default function Home() {
       const remoteUpd = payload.runValuesUpdatedAt ?? {};
       const localUpd = loadRunValuesUpdated();
       let rejectedStale = false;
+      const localPackaging = loadPackagingProgress();
+      // Date/reset acceptance fences packaging exactly like day/run values. A
+      // stale payload from another day must never advance this independent map.
+      const packagingMerge = acceptRemoteDay
+        ? reconcilePackagingProgress(
+            atomicSeedSnapshot || remoteResetAt > localResetAt ? {} : localPackaging,
+            payload.packagingProgress,
+          )
+        : reconcilePackagingProgress(localPackaging, undefined);
+      if (acceptRemoteDay) savePackagingProgress(packagingMerge.merged);
+      if (packagingMerge.rejectedRemoteIds.size > 0) rejectedStale = true;
+      const packagingRunAtApplyStart =
+        dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      const packagingFenceRaised =
+        !!packagingRunAtApplyStart &&
+        packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart);
+      if (packagingFenceRaised) {
+        const accepted = packagingMerge.merged[packagingRunAtApplyStart];
+        autoSuppressUntilRef.current = Math.max(
+          autoSuppressUntilRef.current,
+          accepted?.manualOverrideUntil ?? 0,
+        );
+        setAutoTrackBlocked(true);
+      }
 
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
@@ -7195,32 +7220,47 @@ export default function Home() {
           // carries the run's real stamp, so a re-push at the same stamp couldn't
           // overwrite it.
           const localVals = loadRunValues(id);
-          if (!acceptRemoteRunValueOnSync(vals as FormValues, localVals, rTs, lTs)) {
+          const acceptWholeRun = acceptRemoteRunValueOnSync(
+            vals as FormValues,
+            localVals,
+            rTs,
+            lTs,
+          );
+          let acceptedVals = localVals;
+          if (!acceptWholeRun) {
             // Rejected: keep ours and re-push later. When the reject is the
             // empty-over-populated corruption, advance our stamp so the heal
             // re-push strictly wins; a genuinely-fresher local edit keeps its
             // stamp as-is (the merge already bumped re-pointed runs' stamps).
             if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now();
             rejectedStale = true;
-            continue;
+          } else {
+            // Field-level preservation: casesNeeded is the planned target, set
+            // once from the schedule. A peer without the schedule carries
+            // casesNeeded=0; if they make any real edit their newer stamp wins
+            // the LWW check above, but we must NOT let their 0 wipe our target.
+            const remoteVals = vals as FormValues;
+            acceptedVals = {
+              ...remoteVals,
+              ...(remoteVals.casesNeeded === 0 && localVals.casesNeeded > 0
+                ? { casesNeeded: localVals.casesNeeded }
+                : {}),
+              // Guard against float values written before the modulo paths were
+              // wrapped in Math.round(). A pre-fix float in stored day-state that
+              // arrives via SSE would otherwise display with decimals on screen.
+              casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
+            };
+            if (rTs > lTs) mergedUpd[id] = rTs;
           }
-          // Field-level preservation: casesNeeded is the planned target, set
-          // once from the schedule. A peer without the schedule carries
-          // casesNeeded=0; if they make any real edit their newer stamp wins
-          // the LWW check above, but we must NOT let their 0 wipe our target.
-          const remoteVals = vals as FormValues;
-          const acceptedVals: FormValues = {
-            ...remoteVals,
-            ...(remoteVals.casesNeeded === 0 && localVals.casesNeeded > 0
-              ? { casesNeeded: localVals.casesNeeded }
-              : {}),
-            // Guard against float values written before the modulo paths were
-            // wrapped in Math.round(). A pre-fix float in stored day-state that
-            // arrives via SSE would otherwise display with decimals on screen.
-            casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
-          };
+          // Packaging progress is a separate causal register. Its winning pair
+          // overlays whichever whole-run copy won above, so a stale automatic
+          // writer cannot restore pre-correction skid/case values while genuine
+          // unrelated local edits remain intact.
+          acceptedVals = overlayPackagingProgress(
+            acceptedVals,
+            packagingMerge.merged[id],
+          );
           saveRunValues(id, acceptedVals);
-          if (rTs > lTs) mergedUpd[id] = rTs;
         }
         saveRunValuesUpdated(mergedUpd);
       }
@@ -7502,12 +7542,28 @@ export default function Home() {
         // fall through to the prior time-quiet + push-ack behavior.
         const curLocalTs = currentId ? (localUpd[currentId] ?? 0) : 0;
         const curRemoteTs = currentId ? (remoteUpd[currentId] ?? 0) : 0;
-        if (currentId && payload.runValues[currentId] && curLocalTs <= curRemoteTs && Date.now() - lastLocalEditRef.current > 2000 && pushAcknowledgedRef.current
+        const adoptedPackaging =
+          !!currentId && packagingMerge.acceptedRemoteIds.has(currentId);
+        if (adoptedPackaging) {
+          const progress = packagingMerge.merged[currentId!];
+          autoSuppressUntilRef.current = Math.max(
+            autoSuppressUntilRef.current,
+            progress?.manualOverrideUntil ?? 0,
+          );
+        }
+        if (currentId && payload.runValues[currentId] && (adoptedPackaging || (
+          curLocalTs <= curRemoteTs &&
+          Date.now() - lastLocalEditRef.current > 2000 &&
+          pushAcknowledgedRef.current
+        ))
           // Never blank the live form by resetting it to an all-default remote
           // value while our stored copy is still populated (the same
           // empty-over-populated corruption guarded on the run-values loop above).
           && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
-          const merged = mergeRunDefaults(payload.runValues[currentId] as FormValues);
+          // Read the already-reconciled durable copy rather than the raw payload:
+          // the whole-run LWW and packaging register may have selected different
+          // sides, and the form must adopt that combined result atomically.
+          const merged = mergeRunDefaults(loadRunValues(currentId));
           // Field-level preservation (mirrors the run-values loop above):
           // never reset the form's casesNeeded to 0 when the stored copy still
           // carries a positive planned target (a peer without the schedule
@@ -7723,6 +7779,9 @@ export default function Home() {
 
       requestAnimationFrame(() => {
         isSyncApplyingRef.current = false;
+        if (packagingFenceRaised && !foregroundSyncBarrierRef.current) {
+          setAutoTrackBlocked(false);
+        }
         // We kept a strictly-newer local run value over a stale remote — re-push so
         // peers adopt ours and converge. Clear the signature gate so the push isn't
         // skipped as a no-op, and defer until isSyncApplyingRef is cleared above.
@@ -8332,6 +8391,35 @@ export default function Home() {
     return true;
   }
 
+  async function consumeCanonicalSyncWriteResponse(
+    res: Response,
+    applyToLiveDay: boolean,
+    shouldConsume?: () => boolean,
+  ): Promise<{ body: unknown; stale: boolean }> {
+    return consumeSyncWriteResponse<SyncPayload>(res, {
+      shouldConsume,
+      onStale: (body) => {
+        handleStaleSyncWrite(body);
+      },
+      applyCanonical: applyToLiveDay
+        ? (canonical) => applySyncCallbackRef.current(canonical)
+        : undefined,
+    });
+  }
+
+  async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
+    const res = await fetch(
+      `/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderId: clientId.current, payload }),
+      },
+    );
+    await consumeCanonicalSyncWriteResponse(res, true);
+    return res;
+  }
+
   function doFetch(
     payload: SyncPayload,
     retriesLeft: number,
@@ -8358,10 +8446,14 @@ export default function Home() {
       signal: controller.signal,
     }).then(async (res) => {
       if (generation !== syncPushGenerationRef.current) return;
-      const body = await res.json().catch(() => null);
+      const { stale } = await consumeCanonicalSyncWriteResponse(
+        res,
+        true,
+        () => generation === syncPushGenerationRef.current,
+      );
       if (generation !== syncPushGenerationRef.current) return;
       pushAcknowledgedRef.current = true;
-      if (handleStaleSyncWrite(body)) {
+      if (stale) {
         // The server dropped this write (data reset not yet honoured). The
         // handler wipes + reloads when adoption applies; either way this push
         // did NOT persist, so flag it instead of recording it as synced.
@@ -8393,6 +8485,8 @@ export default function Home() {
   function buildSyncPayload(ds: DayState): SyncPayload {
     const curId = ds.runs[ds.currentIndex]?.id;
     const runValues: Record<string, FormValues> = {};
+    const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = {};
+    const storedPackagingProgress = loadPackagingProgress();
     const pushRuns: RunMeta[] = [];
     for (const run of ds.runs) {
       // The current run is normally pushed from the LIVE form so an in-progress
@@ -8427,6 +8521,9 @@ export default function Home() {
       const { seeded: _seeded, ...meta } = run;
       pushRuns.push(meta);
       runValues[run.id] = value;
+      if (storedPackagingProgress[run.id]) {
+        packagingProgress[run.id] = storedPackagingProgress[run.id];
+      }
     }
     // Drop edit stamps for runs excluded above so a stray stamp can't pair with
     // an absent value server-side (benign, but keeps the row clean).
@@ -8444,6 +8541,7 @@ export default function Home() {
       dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,
+      ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
       history: loadHistory(),
     };
   }
@@ -8788,7 +8886,7 @@ export default function Home() {
         });
         if (res.status === 401) { reportUnauthorized(); return; }
         if (!res.ok) { allOk = false; continue; }
-        const stale = handleStaleSyncWrite(await res.json().catch(() => null));
+        const { stale } = await consumeCanonicalSyncWriteResponse(res, false);
         if (stale) { allOk = false; continue; }
         updatedAny = true;
       }
@@ -10749,6 +10847,11 @@ export default function Home() {
           casesOnCurrentSkid?: number;
           casesPerSkid?: number;
         }) => {
+          const nextSkids = p.skidsCompleted ?? before.skidsCompleted;
+          const nextCases = p.casesOnCurrentSkid ?? before.casesOnCurrentSkid;
+          if (p.skidsCompleted != null || p.casesOnCurrentSkid != null) {
+            persistManualPackagingProgress(runId, nextSkids, nextCases);
+          }
           if (isCurrent) {
             if (p.skidsCompleted != null)
               form.setValue("skidsCompleted", p.skidsCompleted, { shouldDirty: true });
@@ -10756,8 +10859,6 @@ export default function Home() {
               form.setValue("casesOnCurrentSkid", p.casesOnCurrentSkid, { shouldDirty: true });
             if (p.casesPerSkid != null)
               form.setValue("casesPerSkid", p.casesPerSkid, { shouldDirty: true });
-            if (p.skidsCompleted != null || p.casesOnCurrentSkid != null)
-              autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
             saveRunValues(currentRunId, form.getValues());
           } else {
             const cur = loadRunValues(runId);
@@ -10946,8 +11047,28 @@ export default function Home() {
   // saveRunValues path (no new write surface), pushed to sync, and a bump forces
   // an immediate re-render of the draining panel. Manual logging only — we never
   // auto-track a non-active ended run. Mirrored on mobile (replit.md parity).
-  function updateDrainingRunValues(id: string, partial: Partial<FormValues>) {
+  function updateDrainingRunValues(
+    id: string,
+    partial: Partial<FormValues>,
+    source: "manual" | "auto" = "manual",
+  ) {
     const vals = { ...DEFAULT_VALUES, ...loadRunValues(id), ...partial } as FormValues;
+    if (partial.skidsCompleted != null || partial.casesOnCurrentSkid != null) {
+      if (source === "auto") {
+        const accepted = recordAutomaticPackagingProgress({
+          runId: id,
+          skidsCompleted: vals.skidsCompleted,
+          casesOnCurrentSkid: vals.casesOnCurrentSkid,
+        });
+        if (!accepted) return;
+      } else {
+        persistManualPackagingProgress(
+          id,
+          vals.skidsCompleted,
+          vals.casesOnCurrentSkid,
+        );
+      }
+    }
     saveRunValues(id, vals);
     // Stamp: this run isn't the active form, so the autosave never stamps it;
     // an unstamped value loses the per-run LWW merge to a peer's stale copy.
@@ -12086,12 +12207,12 @@ export default function Home() {
         reportUnauthorized();
         return;
       }
-      ok = res.ok && !handleStaleSyncWrite(await res.clone().json().catch(() => null));
+      const { stale } = await consumeCanonicalSyncWriteResponse(
+        res,
+        date === todayStr(),
+      );
+      ok = res.ok && !stale;
       if (ok) {
-        // If this import targets today, apply it onto THIS device right away
-        // (same union-merge the SSE path uses) instead of waiting for the SSE
-        // echo — otherwise today's imported runs may never show live here.
-        if (date === todayStr()) applySyncCallbackRef.current(outPayload);
         fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
       }
     } catch {}
@@ -12146,13 +12267,6 @@ export default function Home() {
     let failed = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
-    // TODAY is the LIVE view: unlike future days (which re-render from the
-    // refetched schedule list below), this device only picks up today's write
-    // via the SSE echo of our own PUT — an unreliable round-trip (a reconnecting
-    // stream, or a reset-epoch skew, can swallow it), which is why today's runs
-    // often never appeared even though the server stored them. Capture today's
-    // built payload and apply it straight into live state after the loop.
-    let todayApplyPayload: SyncPayload | null = null;
     // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
@@ -12242,7 +12356,11 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ payload: outPayload }),
         });
-        dayOk = res.ok && !handleStaleSyncWrite(await res.clone().json().catch(() => null));
+        const { stale } = await consumeCanonicalSyncWriteResponse(
+          res,
+          date === todayStr(),
+        );
+        dayOk = res.ok && !stale;
         if (!res.ok) {
           // A 401 means the sign-in session expired (e.g. the daily midnight
           // boundary): every remaining day would fail identically, so stop,
@@ -12282,14 +12400,9 @@ export default function Home() {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
       if (!dayOk) failed += 1;
-      if (dayOk && date === todayStr()) todayApplyPayload = outPayload;
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
-    // Show today's imported runs on THIS device immediately, through the same
-    // union-merge the SSE path uses (preserves in-progress runs, respects LWW),
-    // instead of waiting for — and depending on — the SSE echo to arrive.
-    if (todayApplyPayload) applySyncCallbackRef.current(todayApplyPayload);
     fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
     setImportProgress(null);
     setShowImportDialog(false);
@@ -12736,6 +12849,7 @@ export default function Home() {
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
     premixImportProgress, printSummary, proactiveAlert, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
+    persistManualPackagingProgress,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
     removeCheese3, removeCheese4, removeCheeseIngredient, removeCheeseRecipeName, removeDieType, removeDough,
@@ -17032,6 +17146,7 @@ export default function Home() {
         prefs={me?.notificationPrefs}
         screenMode={screenMode}
         externalAutoSuppressRef={autoSuppressUntilRef}
+        onPackagingProgressAutoAdvance={persistAutomaticPackagingProgress}
         machine={{
           spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
           hopperSec: Number(v.hopperSec) || 0,
@@ -17768,8 +17883,9 @@ function PauseTunnelDecision({
 
 function FloorModeView() {
   const {
-    activeStopId, allergenWarnings, autoSuppressUntilRef, currentRun, doughSubTab,
+    activeStopId, allergenWarnings, currentRun, doughSubTab,
     endStop, floorDimmed, form, pauseDecisionRunId, pauseRun, resumeRun, runStatus,
+    persistManualPackagingProgress,
     setPauseDecisionRunId, setPauseTunnelPolicy,
     setShowFloorMode, setShowStopDialog, setStopNotes, setStopReason,
     v, ve,
@@ -17780,8 +17896,7 @@ function FloorModeView() {
     casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     showBatchDue, setShowBatchDue,
-    autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
+    autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
   } = useLiveRun();
 
@@ -18012,10 +18127,13 @@ function FloorModeView() {
                     type="button"
                     onClick={() => {
                       navigator.vibrate?.(15);
-                      markRunValuesUpdated(currentRun?.id ?? "", Date.now());
-                      autoSuppressUntilRef.current = 0;
-                      fireAutoTrackNow();
-                      form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
+                      const nextSkids = v.skidsCompleted + 1;
+                      persistManualPackagingProgress(
+                        currentRun?.id ?? "",
+                        nextSkids,
+                        0,
+                      );
+                      form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                       form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
                     className="flex-[1.3] h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
@@ -19606,7 +19724,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
-    lastEndedRun, runStatus, updateDrainingRunValues, v,
+    lastEndedRun, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
     ve,
   } = hx;
 
@@ -19750,7 +19868,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
       updateDrainingRunValues(drainingRun.id, {
         skidsCompleted: Math.floor(newTotal / cps),
         casesOnCurrentSkid: Math.round(newTotal % cps),
-      });
+      }, "auto");
     }
   }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, updateDrainingRunValues]);
 
@@ -20034,9 +20152,17 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                           const s = autoTrackSuggestion;
                           const suppressed = Date.now() < autoSuppressUntilRef.current;
                           const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                          const onManual = () => {
-                            autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
-                            markRunValuesUpdated(currentRunId, Date.now());
+                          const onManual = (
+                            nextSkids: number,
+                            nextCases: number,
+                            manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
+                          ) => {
+                            persistManualPackagingProgress(
+                              currentRunId,
+                              nextSkids,
+                              nextCases,
+                              manualOverrideUntil,
+                            );
                           };
                           const skidNearlyFull =
                             casesPerSkid > 0 && casesOnSkid > 0 &&
@@ -20048,7 +20174,12 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 show={manualOverrideBannerShow(autoTrackProgress, s, autoSuppressUntilRef.current)}
                                 station="Packaging"
                                 minsLeft={suppressedMinsLeft}
-                                onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
+                                onResume={() => {
+                                  const now = Date.now();
+                                  onManual(skids, casesOnSkid, now);
+                                  autoSuppressUntilRef.current = 0;
+                                  fireAutoTrackNow();
+                                }}
                               />
 
                               {(() => {
@@ -20073,7 +20204,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); onManual(); const ns = Math.max(0, skids - 1); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -20087,7 +20218,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); onManual(); const ns = skids + 1; const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -20108,7 +20239,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); onManual(); const nc = Math.max(0, casesOnSkid - 1); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -20127,7 +20258,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); onManual(); const nc = casesOnSkid + 1; const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -20171,7 +20302,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   type="button"
                                   onClick={() => {
                                     navigator.vibrate?.(10);
-                                    markRunValuesUpdated(currentRunId, Date.now());
+                                    onManual(s.skids, s.casesOnSkid);
                                     form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
                                     form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
                                   }}
@@ -20187,10 +20318,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   type="button"
                                   onClick={() => {
                                     navigator.vibrate?.(15);
-                                    markRunValuesUpdated(currentRunId, Date.now());
-                                    autoSuppressUntilRef.current = 0;
-                                    fireAutoTrackNow();
                                     const ns = skids + 1;
+                                    onManual(ns, 0);
                                     form.setValue("skidsCompleted", ns, { shouldDirty: true });
                                     form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                                     const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids;
@@ -20439,7 +20568,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
-    form, autoSuppressUntilRef, lastLocalEditRef,
+    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
@@ -20740,23 +20869,23 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
         const packOnPace = packGapCases <= 2;
         const packBehindSec = packGapCases * casePeriodSec;
-        const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; markRunValuesUpdated(currentRunId, Date.now()); };
         const setPackedTotal = (t: number) => {
           const total = Math.max(0, t);
-          markRunValuesUpdated(currentRunId, Date.now());
-          form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
-          form.setValue("casesOnCurrentSkid", Math.round(total % cps), { shouldDirty: true });
-          onManual();
+          const nextSkids = Math.floor(total / cps);
+          const nextCases = Math.round(total % cps);
+          persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+          form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
         };
         const bumpSkids = (d: number) => {
-          markRunValuesUpdated(currentRunId, Date.now());
-          form.setValue("skidsCompleted", Math.max(0, packedSkids + d), { shouldDirty: true });
-          onManual();
+          const nextSkids = Math.max(0, packedSkids + d);
+          persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
+          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
         };
         const bumpCases = (d: number) => {
-          markRunValuesUpdated(currentRunId, Date.now());
-          form.setValue("casesOnCurrentSkid", Math.max(0, packedCasesOnSkid + d), { shouldDirty: true });
-          onManual();
+          const nextCases = Math.max(0, packedCasesOnSkid + d);
+          persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
+          form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
         };
         const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
         return (
@@ -21099,7 +21228,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRunId, dayState, dayStateRef, doughSubTab,
-    form, isSupervisor, runStatus, runToTime,
+    form, isSupervisor, persistManualPackagingProgress, runStatus, runToTime,
     schedulePush, setDayState, setRunToTime, v,
   } = hx;
 
@@ -21554,26 +21683,24 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             // need (run may over-produce). Auto-track still stops
                             // at casesNeeded on its own.
                             const total = Math.max(0, t);
-                            // Stamp the run BEFORE writing so any in-flight SSE
-                            // echo (which carries the previous stamp) is treated
-                            // as stale and can't overwrite the manual edit.
-                            markRunValuesUpdated(currentRunId, Date.now());
-                            form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
-                            form.setValue("casesOnCurrentSkid", Math.round(total % cps), { shouldDirty: true });
-                            onManual();
+                            const nextSkids = Math.floor(total / cps);
+                            const nextCases = Math.round(total % cps);
+                            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+                            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                           };
                           // Without a cases-per-skid setting the two counters
                           // can't be combined into one total — bump each field
                           // directly instead (same as the old plain steppers).
                           const bumpSkids = (d: number) => {
-                            markRunValuesUpdated(currentRunId, Date.now());
-                            form.setValue("skidsCompleted", Math.max(0, packedSkids + d), { shouldDirty: true });
-                            onManual();
+                            const nextSkids = Math.max(0, packedSkids + d);
+                            persistManualPackagingProgress(currentRunId, nextSkids, packedCasesOnSkid);
+                            form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                           };
                           const bumpCases = (d: number) => {
-                            markRunValuesUpdated(currentRunId, Date.now());
-                            form.setValue("casesOnCurrentSkid", Math.max(0, packedCasesOnSkid + d), { shouldDirty: true });
-                            onManual();
+                            const nextCases = Math.max(0, packedCasesOnSkid + d);
+                            persistManualPackagingProgress(currentRunId, packedSkids, nextCases);
+                            form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                           };
                           const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
                           return (
@@ -21645,8 +21772,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             name="skidsCompleted"
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                            onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={() => { onManual(); }}
+                            onSuggest={() => { persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                            onManualChange={(nextSkids) => { persistManualPackagingProgress(currentRunId, nextSkids, Number(v.casesOnCurrentSkid) || 0); }}
                           />
                           <StepperField
                             control={form.control}
@@ -21654,8 +21781,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
                             max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                            onSuggest={() => { markRunValuesUpdated(currentRunId, Date.now()); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={() => { onManual(); }}
+                            onSuggest={() => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                            onManualChange={(nextCases) => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, nextCases); }}
                           />
                         </div>
                         )}

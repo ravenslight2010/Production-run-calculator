@@ -382,8 +382,27 @@ export function protectRunValues(
   options: { allowRunListReplacement?: boolean } = {},
 ): unknown {
   if (!isPlainObject(incoming)) return incoming;
-  // Nothing stored yet (first write for this scope+date) — accept as-is.
-  if (!isPlainObject(existing)) return incoming;
+  // Nothing stored yet (first write for this scope+date): the payload was
+  // already sanitized by the route, but still canonicalize the legacy
+  // runValues pair from packagingProgress before storing/returning it.
+  if (!isPlainObject(existing)) {
+    const progress = mergePackagingProgress(
+      incoming.packagingProgress,
+      undefined,
+      tombstonedRunIds(incoming),
+    );
+    // Preserve the established first-write identity behavior for legacy
+    // payloads that do not carry the new independent register.
+    if (!progress) return incoming;
+    const out: Record<string, unknown> = { ...incoming };
+    const outVals = isPlainObject(incoming.runValues)
+      ? { ...incoming.runValues }
+      : {};
+    overlayPackagingIntoRunValues(outVals, progress);
+    out.packagingProgress = progress;
+    out.runValues = outVals;
+    return withMergedStamps(out, incoming, undefined);
+  }
 
   const inDay = isPlainObject(incoming.dayState) ? incoming.dayState : undefined;
   const exDay = isPlainObject(existing.dayState) ? existing.dayState : undefined;
@@ -449,6 +468,49 @@ export function protectRunValues(
       runValues: outVals,
       runValuesUpdatedAt: outUpd,
     };
+    // packagingProgress: reset retains only incoming run IDs, but still applies
+    // precedence where the same run exists on both sides.
+    const resetTombstoned = tombstonedRunIds(incoming as Record<string, unknown>);
+    // Any run NOT in incoming's authoritative run LIST is implicitly dropped
+    // by the reset. Do not infer membership from runValues: an orphan value
+    // must not retain metadata, while a listed run may legitimately have no
+    // value entry yet.
+    const inRunIds = new Set(
+      (
+        inDay && Array.isArray(inDay.runs)
+          ? inDay.runs
+          : []
+      )
+        .map((run) =>
+          isPlainObject(run) && typeof run.id === "string" ? run.id : "",
+        )
+        .filter(Boolean),
+    );
+    const resetProgress = mergePackagingProgress(
+      (incoming as Record<string, unknown>).packagingProgress,
+      (existing as Record<string, unknown>).packagingProgress,
+      new Set([...resetTombstoned, ...(
+        // Filter BOTH incoming and stored progress entries whose ids are not in
+        // the reset's run list. An incoming-only orphan must not survive merely
+        // because it was absent from the stored map.
+        (() => {
+          const inProg = isPlainObject((incoming as Record<string, unknown>).packagingProgress)
+            ? (incoming as Record<string, unknown>).packagingProgress as Record<string, unknown>
+            : {};
+          const exProg = isPlainObject((existing as Record<string, unknown>).packagingProgress)
+            ? (existing as Record<string, unknown>).packagingProgress as Record<string, unknown>
+            : {};
+          return [...new Set([...Object.keys(inProg), ...Object.keys(exProg)])]
+            .filter((id) => !inRunIds.has(id));
+        })()
+      )]),
+    );
+    if (resetProgress) {
+      overlayPackagingIntoRunValues(outVals, resetProgress);
+      base.packagingProgress = resetProgress;
+    } else {
+      delete base.packagingProgress;
+    }
     return withMergedStamps(base, incoming, existing);
   }
 
@@ -652,7 +714,134 @@ export function protectRunValues(
     out.brandFlavors = mergedBf;
   }
 
+  // ── packagingProgress map merge ───────────────────────────────────────────
+  // Merge independently from runValues using correctionGeneration/updatedAt
+  // precedence rules (see mergePackagingProgress). Tombstoned runs drop metadata.
+  const mergedProgress = mergePackagingProgress(
+    (incoming as Record<string, unknown>).packagingProgress,
+    exData.packagingProgress,
+    tombstoned,
+  );
+  if (mergedProgress) {
+    // Overlay winning counters into canonical runValues after the whole-value merge.
+    overlayPackagingIntoRunValues(outVals, mergedProgress);
+    out.packagingProgress = mergedProgress;
+  } else {
+    delete out.packagingProgress;
+  }
+
   return withMergedStamps(out, incoming, existing);
+}
+
+// ── packagingProgress merge ───────────────────────────────────────────────────
+// Optional top-level map: Record<runId, PackagingProgressEntry>.
+// Each entry records live packaging counters for one run:
+//   { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt, manualOverrideUntil }
+// Precedence rules (independent of runValues LWW stamps):
+//   - Higher correctionGeneration always wins regardless of updatedAt.
+//   - Same generation: higher updatedAt wins.
+//   - Exact tie (same generation AND same updatedAt): keep stored entry.
+//   - Missing incoming metadata cannot clobber established stored metadata.
+//   - Tombstoned runs drop their metadata entry.
+// After the whole-value merge, the winning (skidsCompleted, casesOnCurrentSkid)
+// from packagingProgress are overlaid into the corresponding runValues entry so
+// both maps stay in sync.
+
+export interface PackagingProgressEntry {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+  correctionGeneration: number;
+  updatedAt: number;
+  manualOverrideUntil: number;
+}
+
+function sanitizePackagingProgressEntry(v: unknown): PackagingProgressEntry | null {
+  if (!isPlainObject(v)) return null;
+  const fin = (x: unknown): x is number =>
+    typeof x === "number" && Number.isFinite(x) && x >= 0;
+  if (
+    !fin(v.skidsCompleted) ||
+    !fin(v.casesOnCurrentSkid) ||
+    !fin(v.correctionGeneration) ||
+    !fin(v.updatedAt) ||
+    !fin(v.manualOverrideUntil)
+  ) {
+    return null;
+  }
+  return {
+    skidsCompleted: v.skidsCompleted,
+    casesOnCurrentSkid: v.casesOnCurrentSkid,
+    correctionGeneration: v.correctionGeneration,
+    updatedAt: v.updatedAt,
+    manualOverrideUntil: v.manualOverrideUntil,
+  };
+}
+
+// Merge a single incoming entry against a stored one using the precedence rules.
+// Returns the winning entry, or null if neither side has a valid entry.
+function mergePackagingEntry(
+  incoming: PackagingProgressEntry | null,
+  stored: PackagingProgressEntry | null,
+): PackagingProgressEntry | null {
+  if (!incoming && !stored) return null;
+  if (!incoming) return stored;
+  if (!stored) return incoming;
+  // Higher correctionGeneration always wins.
+  if (incoming.correctionGeneration > stored.correctionGeneration) return incoming;
+  if (stored.correctionGeneration > incoming.correctionGeneration) return stored;
+  // Same generation: higher updatedAt wins.
+  if (incoming.updatedAt > stored.updatedAt) return incoming;
+  if (stored.updatedAt > incoming.updatedAt) return stored;
+  // Exact tie: keep stored.
+  return stored;
+}
+
+// Merge packagingProgress maps from incoming and stored, respecting tombstones.
+// Returns the merged map or undefined when both sides have nothing.
+function mergePackagingProgress(
+  incoming: unknown,
+  stored: unknown,
+  tombstoned: Set<string>,
+): Record<string, PackagingProgressEntry> | undefined {
+  const inMap = isPlainObject(incoming) ? incoming : null;
+  const exMap = isPlainObject(stored) ? stored : null;
+  if (!inMap && !exMap) return undefined;
+
+  const out: Record<string, PackagingProgressEntry> = {};
+
+  // Collect all known run ids from both sides.
+  const allIds = new Set<string>([
+    ...Object.keys(inMap ?? {}),
+    ...Object.keys(exMap ?? {}),
+  ]);
+
+  for (const id of allIds) {
+    if (tombstoned.has(id)) continue;
+    const inEntry = inMap ? sanitizePackagingProgressEntry(inMap[id]) : null;
+    const exEntry = exMap ? sanitizePackagingProgressEntry(exMap[id]) : null;
+    // Missing incoming metadata cannot clobber established stored metadata:
+    // if incoming has no entry for this id but stored does, keep stored.
+    const winner = mergePackagingEntry(inEntry, exEntry);
+    if (winner) out[id] = winner;
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+// After the whole-value merge, overlay the winning packaging counters into
+// the runValues map so both remain consistent.
+function overlayPackagingIntoRunValues(
+  outVals: Record<string, unknown>,
+  progress: Record<string, PackagingProgressEntry>,
+): void {
+  for (const [id, entry] of Object.entries(progress)) {
+    if (!isPlainObject(outVals[id])) continue;
+    outVals[id] = {
+      ...(outVals[id] as Record<string, unknown>),
+      skidsCompleted: entry.skidsCompleted,
+      casesOnCurrentSkid: entry.casesOnCurrentSkid,
+    };
+  }
 }
 
 // ── Sync payload sanitizer ────────────────────────────────────────────────────
@@ -714,6 +903,7 @@ const KNOWN_TOP_LEVEL_KEYS = new Set<string>([
   "deletedItems",
   "deletedStamps",
   "undeletedStamps",
+  "packagingProgress",
 ]);
 
 // Name-list fields that are additive string arrays — each entry is a single
@@ -827,6 +1017,22 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
           if (count >= MAX_RUNS) break;
           capped[k] = v;
           count++;
+        }
+        out[key] = capped;
+      }
+    } else if (key === "packagingProgress") {
+      // Cap at MAX_RUNS entries; each entry must have only finite nonnegative
+      // numeric fields — sanitize each entry strictly.
+      if (isPlainObject(val)) {
+        const capped: Record<string, PackagingProgressEntry> = {};
+        let count = 0;
+        for (const [k, v] of Object.entries(val)) {
+          if (count >= MAX_RUNS) break;
+          const entry = sanitizePackagingProgressEntry(v);
+          if (entry) {
+            capped[k] = entry;
+            count++;
+          }
         }
         out[key] = capped;
       }
@@ -949,6 +1155,27 @@ export function capMergedResult(merged: unknown): unknown {
         for (const [k, v] of entries.slice(0, MAX_RUNS)) capped[k] = v;
         out[key] = capped;
       }
+    }
+  }
+
+  // Cap packagingProgress at MAX_RUNS entries; re-sanitize each entry to
+  // ensure only finite nonneg numeric fields survive incremental merges.
+  if (isPlainObject(out.packagingProgress)) {
+    const entries = Object.entries(out.packagingProgress as object);
+    const capped: Record<string, PackagingProgressEntry> = {};
+    let count = 0;
+    for (const [k, v] of entries) {
+      if (count >= MAX_RUNS) break;
+      const entry = sanitizePackagingProgressEntry(v);
+      if (entry) {
+        capped[k] = entry;
+        count++;
+      }
+    }
+    if (count > 0) {
+      out.packagingProgress = capped;
+    } else {
+      delete out.packagingProgress;
     }
   }
 

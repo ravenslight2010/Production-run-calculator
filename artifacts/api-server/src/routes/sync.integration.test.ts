@@ -298,6 +298,123 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     expect(row?.runValues?.r1?.casesNeeded).toBe(777);
     expect(row?.runValuesUpdatedAt?.r1).toBe(3000);
   });
+
+  it("PUT /sync/today returns {ok:true,data:merged} with the canonical merged object", async () => {
+    const res = await put({ ...meta, runValues: { r1: { casesNeeded: 42 } }, runValuesUpdatedAt: { r1: 9000 } });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; data?: { runValues?: Record<string, { casesNeeded?: number }> } };
+    expect(body.ok).toBe(true);
+    expect(body.data).toBeDefined();
+    expect(body.data?.runValues?.r1?.casesNeeded).toBe(42);
+  });
+
+  it("PUT /sync/:date returns {ok:true,data:merged} with the canonical merged object", async () => {
+    const futureDate = "2030-07-15";
+    const res = await fetch(`${baseUrl}/api/sync/${futureDate}?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "c1",
+        payload: { ...meta, runValues: { r1: { casesNeeded: 77 } }, runValuesUpdatedAt: { r1: 1 } },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; data?: { runValues?: Record<string, { casesNeeded?: number }> } };
+    expect(body.ok).toBe(true);
+    expect(body.data).toBeDefined();
+    expect(body.data?.runValues?.r1?.casesNeeded).toBe(77);
+  });
+
+  it("keeps a downward manual skid correction when an unaware writer publishes a later auto stamp", async () => {
+    const progress = (
+      skidsCompleted: number,
+      casesOnCurrentSkid: number,
+      correctionGeneration: number,
+      updatedAt: number,
+      manualOverrideUntil: number,
+    ) => ({
+      skidsCompleted,
+      casesOnCurrentSkid,
+      correctionGeneration,
+      updatedAt,
+      manualOverrideUntil,
+    });
+
+    // Both devices begin from the same automatic generation and 36/48.
+    await put({
+      ...meta,
+      runValues: {
+        r1: { casesNeeded: 500, casesPerSkid: 48, skidsCompleted: 0, casesOnCurrentSkid: 36 },
+      },
+      runValuesUpdatedAt: { r1: 1_000 },
+      packagingProgress: { r1: progress(0, 36, 0, 1_000, 0) },
+    });
+
+    // Device A explicitly corrects downward. Its new generation is the causal
+    // boundary, independent of the whole-run timestamp.
+    await put({
+      ...meta,
+      runValues: {
+        r1: { casesNeeded: 500, casesPerSkid: 48, skidsCompleted: 0, casesOnCurrentSkid: 24 },
+      },
+      runValuesUpdatedAt: { r1: 2_000 },
+      packagingProgress: { r1: progress(0, 24, 1, 2_000, 62_000) },
+    });
+
+    // Device B has not seen that correction. Its later automatic tick and
+    // later whole-run stamp must be patched back to Device A's generation.
+    const staleResponse = await put({
+      ...meta,
+      runValues: {
+        r1: { casesNeeded: 500, casesPerSkid: 48, skidsCompleted: 0, casesOnCurrentSkid: 36 },
+      },
+      runValuesUpdatedAt: { r1: 9_000 },
+      packagingProgress: { r1: progress(0, 36, 0, 9_000, 0) },
+    });
+    const staleBody = await staleResponse.json() as {
+      data?: {
+        runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        packagingProgress?: Record<string, {
+          correctionGeneration?: number;
+          manualOverrideUntil?: number;
+        }>;
+      };
+    };
+
+    expect(staleBody.data?.runValues?.r1).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 24,
+    });
+    expect(staleBody.data?.packagingProgress?.r1).toMatchObject({
+      correctionGeneration: 1,
+      manualOverrideUntil: 62_000,
+    });
+
+    const stored = await fetch(`${baseUrl}/api/sync/${DATE}`, {
+      headers: authHeaders(),
+    }).then((response) => response.json()) as {
+      runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+      packagingProgress?: Record<string, { correctionGeneration?: number }>;
+    };
+    expect(stored.runValues?.r1).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 24,
+    });
+    expect(stored.packagingProgress?.r1?.correctionGeneration).toBe(1);
+
+    const conflictDeadline = Date.now() + 2_000;
+    let conflictRows = await db.select().from(syncConflictLogsTable);
+    while (
+      !conflictRows.some((row) => row.fieldsWithConflicts.includes("packagingProgress:r1")) &&
+      Date.now() < conflictDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      conflictRows = await db.select().from(syncConflictLogsTable);
+    }
+    expect(
+      conflictRows.some((row) => row.fieldsWithConflicts.includes("packagingProgress:r1")),
+    ).toBe(true);
+  });
 });
 
 describe("fresh-device unnamed-run remediation", () => {
