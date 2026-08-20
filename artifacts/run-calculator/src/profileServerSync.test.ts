@@ -5,6 +5,7 @@ import {
   markProfileForceEdited,
   markProfileDeleted,
   flushProfileQueue,
+  flushProfileQueueStrict,
   migrateLocalProfilesToServerIfNeeded,
   reconcileProfilesFromServer,
   getProfileStamp,
@@ -111,10 +112,16 @@ beforeEach(() => {
           json: async () => ({ error: "Forbidden" }),
         };
       }
+      const postedItems =
+        method === "POST" && init?.body
+          ? ((JSON.parse(String(init.body)) as { items?: ServerItem[] }).items ?? [])
+          : [];
       return {
         ok: true,
         status: 200,
-        json: async () => ({ items: listItems }),
+        // Saves acknowledge each submitted profile by default. Tests that need
+        // a server-advanced stamp provide listItems explicitly.
+        json: async () => ({ items: listItems.length > 0 ? listItems : postedItems }),
       };
     }),
   );
@@ -219,7 +226,16 @@ describe("persisted push queue", () => {
         const method = init?.method ?? "GET";
         calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
         await new Promise<void>((r) => releases.push(r));
-        return { ok: true, status: 200, json: async () => ({ items: listItems }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items:
+              method === "POST" && init?.body
+                ? (JSON.parse(String(init.body)) as { items: ServerItem[] }).items
+                : listItems,
+          }),
+        };
       },
     );
 
@@ -474,7 +490,16 @@ describe("reconcileProfilesFromServer", () => {
         const method = init?.method ?? "GET";
         calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
         if (method === "GET" && getFails) throw new Error("offline");
-        return { ok: true, status: 200, json: async () => ({ items: [] }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items:
+              method === "POST" && init?.body
+                ? (JSON.parse(String(init.body)) as { items: ServerItem[] }).items
+                : [],
+          }),
+        };
       },
     );
 
@@ -611,38 +636,33 @@ describe("one-time migration key filter", () => {
   });
 });
 
-describe("manage-profiles 403 handling (non-manager device)", () => {
-  // The server gates POST/DELETE /brand-profiles on the manage-profiles
-  // capability. A queued write that 403s must be DROPPED, not retried forever
-  // (real incident risk: a non-manager device with legacy local data would
-  // hammer the server on every kick, and its queue would grow unboundedly).
-
-  it("drops a queued upsert on 403 without marking it synced", async () => {
+describe("profile write acknowledgement failures", () => {
+  it("keeps an upsert queued after a 403 so an authoritative import can retry", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "V1" });
     writesForbidden = true;
     markProfileEdited(KEY);
     await flushProfileQueue();
     await settle();
 
-    expect(postCalls()).toHaveLength(1); // one attempt, no retries
-    expect(readQueue()).toEqual([]); // dropped, not left to retry
+    expect(postCalls().length).toBeGreaterThanOrEqual(1);
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY })]);
     expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined(); // never marked synced
 
-    // A later kick does not re-send anything.
+    // A later kick retains the repair attempt instead of silently abandoning it.
     calls = [];
     await flushProfileQueue();
     await settle();
-    expect(postCalls()).toHaveLength(0);
+    expect(postCalls().length).toBeGreaterThanOrEqual(1);
   });
 
-  it("drops a queued delete on 403 the same way", async () => {
+  it("keeps a queued delete after a 403 too", async () => {
     writesForbidden = true;
     markProfileDeleted(KEY);
     await flushProfileQueue();
     await settle();
 
-    expect(deleteCalls()).toHaveLength(1);
-    expect(readQueue()).toEqual([]);
+    expect(deleteCalls().length).toBeGreaterThanOrEqual(1);
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "del", key: KEY })]);
   });
 
   it("a non-403 failure still keeps the queue for retry (guard intact)", async () => {
@@ -652,5 +672,18 @@ describe("manage-profiles 403 handling (non-manager device)", () => {
     await flushProfileQueue();
     await settle();
     expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY })]);
+  });
+
+  it("strict import flush rejects a malformed acknowledgement and leaves its force op queued", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "Corrected" });
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (_url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    });
+
+    markProfileForceEdited(KEY);
+    await expect(flushProfileQueueStrict()).rejects.toThrow("not acknowledged");
+    expect(readQueue()).toEqual([expect.objectContaining({ t: "up", key: KEY, force: true })]);
   });
 });

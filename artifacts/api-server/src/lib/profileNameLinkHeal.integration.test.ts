@@ -33,6 +33,7 @@ let cheeseRecipesTable: DbModule["cheeseRecipesTable"];
 let mixesTable: DbModule["mixesTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let runProfileNameLinkStubPurge: () => Promise<void>;
+let runAug19SavedSpecProfileRepair: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -40,6 +41,7 @@ let originalDatabaseUrl: string | undefined;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const HEAL_ID = "profile-name-link-stub-purge-v1";
+const AUG19_REPAIR_ID = "aug19-saved-spec-profile-repair-v1";
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -80,6 +82,7 @@ beforeAll(async () => {
 
   const heals = await import("./dataHeals");
   runProfileNameLinkStubPurge = heals.runProfileNameLinkStubPurge;
+  runAug19SavedSpecProfileRepair = heals.runAug19SavedSpecProfileRepair;
 
   // ── Seed fixture data ──────────────────────────────────────────────────────
 
@@ -96,6 +99,38 @@ beforeAll(async () => {
       recipes: [],
     },
   });
+  // Two same-day snapshots ensure the historical repair takes the latest
+  // verified parse. Its raw applicator type must never replace the already
+  // resolved generic type/name link on the profile.
+  await db.insert(savedSpecSheetsTable).values([
+    {
+      scope: "live",
+      label: "older Aug 19 profile parse",
+      createdAt: new Date("2026-08-19T09:00:00.000Z"),
+      data: {
+        profiles: [{ brand: "Guard", flavor: "deluxe", dieType: "old die", sauceOzPerPizza: 1 }],
+      },
+    },
+    {
+      scope: "live",
+      label: "latest Aug 19 profile parse",
+      createdAt: new Date("2026-08-19T12:00:00.000Z"),
+      data: {
+        profiles: [{
+          brand: "Guard",
+          flavor: "deluxe",
+          dieType: "new die",
+          allergen: "gluten",
+          sauceName: "Raw Sauce Name",
+          doughName: "Raw Dough Name",
+          sauceOzPerPizza: 4.5,
+          pizzasPerCase: 12,
+          sauceBarrelLbs: 200,
+          applicators: [{ slot: 1, type: "Raw Mix Name", ozPerPizza: 2 }],
+        }],
+      },
+    },
+  ]);
 
   // Merge alias: "Old BBQ" was merged into "New BBQ" — corrections must land
   // on the merge target, not the raw spec name.
@@ -134,7 +169,6 @@ beforeAll(async () => {
     scope: "live",
     data: { runs: [{ id: "r1", brand: "Bobo", flavor: "pep", startedAt: 1755600000000 }] },
   });
-
   // (c) no snapshot — must be left untouched.
   await db.insert(brandProfilesTable).values({
     key: "carl__deluxe",
@@ -266,5 +300,94 @@ describe("runProfileNameLinkStubPurge", () => {
       .from(brandProfilesTable)
       .where(and(eq(brandProfilesTable.key, "aldo__cheese"), eq(brandProfilesTable.scope, "live")));
     expect((aldo.values as Record<string, unknown>).frontlineRecipeName).toBe("Manually Reverted");
+  });
+});
+
+describe("runAug19SavedSpecProfileRepair", () => {
+  it("repairs safe explicit fields, preserves resolved recipe links, and updates only future runs", async () => {
+    await db.insert(brandProfilesTable).values({
+      key: "guard__deluxe",
+      scope: "live",
+      brand: "Guard",
+      flavor: "deluxe",
+      values: {
+        dieType: "stale die",
+        sauceOzPerPizza: 2,
+        pizzasPerCase: 8,
+        sauceBarrelLbs: 100,
+        frontlineRecipeName: "Keep Mixed Sauce",
+        frontlineRecipe: [{ ingredient: "tomato", lbs: 20 }],
+        doughRecipeName: "Keep Mixed Dough",
+        doughRecipe: [{ ingredient: "flour", lbs: 10 }],
+        app1Type: "Mix",
+        app1CheeseRecipeName: "Resolved Mix Link",
+        app1OzPerPizza: 3,
+      },
+      updatedAtMs: 1000,
+    });
+    await db.insert(dailySyncTable).values({
+      date: "2026-08-20",
+      scope: "live",
+      data: {
+        dayState: {
+          runs: [
+            { id: "future-guard", brand: "Guard", flavor: "deluxe" },
+            { id: "started-guard", brand: "Guard", flavor: "deluxe", startedAt: 1755640000000 },
+          ],
+        },
+        runValues: {
+          "future-guard": { dieType: "stale die", sauceOzPerPizza: 2, app1Type: "Mix", app1CheeseRecipeName: "Resolved Mix Link" },
+          "started-guard": { dieType: "stale die", sauceOzPerPizza: 2, app1Type: "Mix", app1CheeseRecipeName: "Resolved Mix Link" },
+        },
+        runValuesUpdatedAt: { "future-guard": 100, "started-guard": 100 },
+      },
+    });
+    await runAug19SavedSpecProfileRepair();
+
+    const [profile] = await db
+      .select()
+      .from(brandProfilesTable)
+      .where(and(eq(brandProfilesTable.key, "guard__deluxe"), eq(brandProfilesTable.scope, "live")));
+    const values = profile.values as Record<string, unknown>;
+    expect(values).toMatchObject({
+      dieType: "new die",
+      allergen: "gluten",
+      sauceOzPerPizza: 4.5,
+      pizzasPerCase: 12,
+      sauceBarrelLbs: 200,
+      frontlineRecipeName: "Keep Mixed Sauce",
+      doughRecipeName: "Keep Mixed Dough",
+      app1Type: "Mix",
+      app1CheeseRecipeName: "Resolved Mix Link",
+      app1OzPerPizza: 3,
+    });
+    expect(profile.updatedAtMs).toBeGreaterThan(1000);
+
+    const [day] = await db
+      .select()
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, "2026-08-20"), eq(dailySyncTable.scope, "live")));
+    const data = day.data as Record<string, any>;
+    expect(data.runValues["future-guard"]).toMatchObject({
+      dieType: "new die",
+      sauceOzPerPizza: 4.5,
+      pizzasPerCase: 12,
+      sauceBarrelLbs: 200,
+      app1Type: "Mix",
+      app1CheeseRecipeName: "Resolved Mix Link",
+    });
+    expect(data.runValues["started-guard"]).toMatchObject({ dieType: "stale die", sauceOzPerPizza: 2 });
+    expect(data.runValuesUpdatedAt["future-guard"]).toBeGreaterThan(100);
+    expect(data.runValuesUpdatedAt["started-guard"]).toBe(100);
+
+    const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, AUG19_REPAIR_ID));
+    expect(marker).toBeTruthy();
+
+    await runAug19SavedSpecProfileRepair();
+    const [afterSecondRun] = await db
+      .select()
+      .from(brandProfilesTable)
+      .where(and(eq(brandProfilesTable.key, "guard__deluxe"), eq(brandProfilesTable.scope, "live")));
+    expect(afterSecondRun.updatedAtMs).toBe(profile.updatedAtMs);
   });
 });

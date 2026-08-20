@@ -97,7 +97,11 @@ import {
   type SpecImportNameCorrection,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases, deleteSpecImportAliases } from "./specImportAliases";
-import { canonicalProfileKey, markProfileForceEdited } from "./profileServerSync";
+import {
+  canonicalProfileKey,
+  flushProfileQueueStrict,
+  markProfileForceEdited,
+} from "./profileServerSync";
 import {
   saveSpecSheet,
   fetchSavedSpecSheets,
@@ -2274,6 +2278,11 @@ export async function commitSpecImport(
   for (const { brand, flavor } of touchedProfiles) {
     markProfileForceEdited(canonicalProfileKey(brand, flavor));
   }
+  // A spec import is an explicit manager repair, not an eventually-consistent
+  // autosave. Do not continue into the "Import applied" success path until the
+  // server has acknowledged every force-write. Failed ops remain in the queue
+  // for retry rather than silently leaving the fix only in this browser.
+  await flushProfileQueueStrict();
 
   // ── Bad-alias cleanup after a CORRECTING import ──
   // applySpecImport reported every name this import overwrote with a DIFFERENT

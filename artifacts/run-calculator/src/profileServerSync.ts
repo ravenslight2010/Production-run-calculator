@@ -269,10 +269,10 @@ function chunk<T>(list: T[], size: number): T[][] {
  * and silently rejected by LWW.
  */
 /**
- * Thrown when the server rejects a profile write with 403: this device's user
- * lacks the manage-profiles capability. Retrying is pointless — the queue op
- * is dropped instead of retried forever (the profile pool is server-truth for
- * non-managers; a manager device performs the write).
+ * Thrown when the server rejects a profile write with 403. The operation stays
+ * queued: an explicit import must visibly fail instead of claiming a profile
+ * repair persisted when it did not, and a later role/session refresh may make
+ * the write valid.
  */
 class ProfileWriteForbiddenError extends Error {
   constructor(kind: string) {
@@ -293,15 +293,23 @@ async function apiSave(items: ApiProfile[]): Promise<Map<string, number>> {
     });
     if (res.status === 403) throw new ProfileWriteForbiddenError("Save");
     if (!res.ok) throw new Error(`Save brand profiles failed (${res.status})`);
+    let data: { items?: ApiProfile[] };
     try {
-      const data = (await res.json()) as { items?: ApiProfile[] };
-      for (const item of data.items ?? []) {
-        if (item && typeof item.key === "string" && typeof item.updatedAt === "number") {
-          serverStamps.set(item.key, item.updatedAt);
-        }
-      }
+      data = (await res.json()) as { items?: ApiProfile[] };
     } catch {
-      // Malformed echo body — the save still landed; stamps self-heal on reconcile.
+      throw new Error("Save brand profiles was not acknowledged by the server");
+    }
+    for (const item of data.items ?? []) {
+      if (item && typeof item.key === "string" && typeof item.updatedAt === "number") {
+        serverStamps.set(item.key, item.updatedAt);
+      }
+    }
+    // The endpoint's response is the acknowledgement boundary. Do not remove a
+    // queued profile merely because HTTP succeeded: a truncated/malformed body
+    // would otherwise leave a re-import appearing successful only on this device.
+    const unacknowledged = part.find((item) => !serverStamps.has(item.key));
+    if (unacknowledged) {
+      throw new Error(`Save brand profile "${unacknowledged.key}" was not acknowledged by the server`);
     }
   }
   return serverStamps;
@@ -324,6 +332,7 @@ async function apiDelete(keys: string[]): Promise<void> {
 
 let flushInFlight: Promise<void> | null = null;
 let flushAgain = false;
+let lastFlushError: unknown = null;
 
 /**
  * Push the persisted op queue to the server (serialized — concurrent kicks
@@ -338,7 +347,9 @@ export function flushProfileQueue(): Promise<void> {
   flushInFlight = (async () => {
     try {
       await flushOnce();
-    } catch {
+      lastFlushError = null;
+    } catch (err) {
+      lastFlushError = err;
       // best-effort: queue stays persisted for the next kick
     } finally {
       flushInFlight = null;
@@ -349,6 +360,21 @@ export function flushProfileQueue(): Promise<void> {
     }
   })();
   return flushInFlight;
+}
+
+/**
+ * Import-specific acknowledgement boundary. Unlike ordinary background saves,
+ * this rejects unless every pending profile write completed with a valid server
+ * echo. The queue is intentionally retained on failure so retrying the import
+ * (or a later background flush) can finish the exact same forced write.
+ */
+export async function flushProfileQueueStrict(): Promise<void> {
+  await flushProfileQueue();
+  if (lastFlushError) throw lastFlushError;
+  const pending = readQueue();
+  if (pending.length > 0) {
+    throw new Error("Profile changes are still waiting to be saved. Check your connection and retry.");
+  }
 }
 
 async function flushOnce(): Promise<void> {
@@ -394,11 +420,10 @@ async function flushOnce(): Promise<void> {
     try {
       serverStamps = await apiSave(upserts);
     } catch (err) {
-      if (!(err instanceof ProfileWriteForbiddenError)) throw err;
-      // Not authorized to write profiles (manage-profiles capability) — drop
-      // the ops instead of retrying forever; the server pool stays truth and
-      // a manager device performs the write. Do NOT mark the keys synced.
-      doneKeys = doneKeys.concat(upsertKeys);
+      // Includes 403: keeping the operation is the only safe outcome. A
+      // background retry is harmless, while dropping it makes an authoritative
+      // import correction silently local-only forever.
+      throw err;
     }
     if (serverStamps) {
     const synced = readMap(SYNCED_KEY);
@@ -447,16 +472,14 @@ async function flushOnce(): Promise<void> {
     try {
       await apiDelete(deleteKeys);
     } catch (err) {
-      if (!(err instanceof ProfileWriteForbiddenError)) throw err;
-      // Same terminal 403 handling as upserts: drop, never retry.
-      deleted = false;
+      throw err;
     }
     if (deleted) {
       const synced = readMap(SYNCED_KEY);
       for (const key of deleteKeys) delete synced[key];
       writeMap(SYNCED_KEY, synced);
     }
-    doneKeys = doneKeys.concat(deleteKeys);
+    if (deleted) doneKeys = doneKeys.concat(deleteKeys);
   }
 
   // Remove completed ops — but ONLY the exact ops that were sent (matched by
