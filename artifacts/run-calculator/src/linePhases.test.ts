@@ -3,7 +3,7 @@
 //   • Persisted-policy pause sequence (safe stop-tunnel or normal line drain)
 //   • Resume propagation — short pause (Stage 2 never stopped, no resuming shown)
 //   • Resume propagation — long pause (Stage 2 + Stage 3 both show resuming)
-//   • Drain sequence (Stage 1 drains first, Stage 3 drains last — pressDone)
+//   • Lifecycle-gated drains (only persisted pause / stop records can drain)
 //   • Ended run wall-clock drain (Stage 1 empties first, Stage 3 last)
 //   • Normalization (oversized stage times clamped to fit freezerTime)
 
@@ -14,10 +14,6 @@ const BASE = {
   preTunnelMin: 2.5,
   postTunnelMin: 2.5,
   freezerTime: 20,        // tunnel = 20 - 2.5 - 2.5 = 15 min
-  ppm: 100,
-  pizzasPerCase: 10,
-  pressDone: false,
-  casesInFreezer: 0,
   pausedAt: null as number | null,
   lastResumeWallMs: 0,
   lastPauseStartWallMs: 0,
@@ -589,116 +585,38 @@ describe("pickMostActivePhase — compact strip selection priority", () => {
   });
 });
 
-// ── Drain sequence (pressDone) ───────────────────────────────────────────────
-describe("computeLinePhases — drain sequence (pressDone, running)", () => {
-  it("shows only Stage 1 while a full line begins draining", () => {
-    // casesInFreezer=200, ppm=100, ppc=10 → drainTotal=20min > tunnelMin+postTun=17.5
+// ── Lifecycle drain gate ─────────────────────────────────────────────────────
+describe("computeLinePhases — drains require a lifecycle record", () => {
+  it("keeps a target-reached running line in its normal steady state", () => {
+    // The production target and remaining tunnel inventory are deliberately not
+    // phase inputs. A device can reach its target while still running; only
+    // Pause Run or Stop Run may start an amber drain countdown.
     const phases = computeLinePhases({
       ...BASE,
       elapsedBatchSec: 30 * 60,
       runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 200,
       nowMs: T0,
     });
-    expect(phases.stage1.state).toBe("draining");
-    expect(phases.stage1.remainMs).toBeCloseTo(2.5 * 60000, -2);
-    expect(phases.stage2.state).toBe("empty");
-    expect(phases.stage3.state).toBe("empty");
-    expect(pickMostActivePhase(phases)?.label).toContain("Frontline");
+    expect(phases.stage1.state).toBe("active");
+    expect(phases.stage2.state).toBe("active");
+    expect(phases.stage3.state).toBe("active");
+    expect(pickMostActivePhase(phases)).toBeUndefined();
   });
 
-  it("starts Stage 2 only after Stage 1's drain window reaches zero", () => {
-    // casesInFreezer=100 → drainTotal=10min; s1Rem=max(0,10-15-2.5)=0
-    const phases = computeLinePhases({
+  it("derives the same staged pause drain from a persisted pause record after reload", () => {
+    const persistedPause = {
       ...BASE,
       elapsedBatchSec: 30 * 60,
-      runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 100,
-      nowMs: T0,
-    });
-    expect(phases.stage1.state).toBe("empty");
-    expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage3.state).toBe("empty");
-    expect(phases.stage2.remainMs).toBeCloseTo(7.5 * 60000, -2);
-  });
+      runStatus: "paused",
+      pausedAt: T0,
+      nowMs: T0 + 60 * 1000,
+    } as const;
+    const live = computeLinePhases(persistedPause);
+    const reloaded = computeLinePhases({ ...persistedPause });
 
-  it("starts Stage 3 only after Stage 2's drain window reaches zero", () => {
-    // casesInFreezer=20 → drainTotal=2min; s3Rem=2min
-    const phases = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 30 * 60,
-      runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 20,
-      nowMs: T0,
-    });
-    expect(phases.stage1.state).toBe("empty");
-    expect(phases.stage2.state).toBe("empty");
-    expect(phases.stage3.state).toBe("draining");
-    expect(phases.stage3.remainMs).toBeCloseTo(2 * 60000, -2);
-  });
-
-  it("switches from Stage 1 to Stage 2 at the exact boundary", () => {
-    // 175 cases = 17.5 min of remaining flow, exactly Stage 1 + Tunnel boundaries.
-    const phases = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 30 * 60,
-      runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 175,
-      nowMs: T0,
-    });
-    expect(phases.stage1.state).toBe("empty");
-    expect(phases.stage2.state).toBe("draining");
-    expect(phases.stage2.remainMs).toBeCloseTo(15 * 60000, -2);
-    expect(phases.stage3.state).toBe("empty");
-  });
-
-  it("switches from Stage 2 to Stage 3 at the exact boundary", () => {
-    // 25 cases = 2.5 min of remaining flow, exactly the wrapper phase.
-    const phases = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 30 * 60,
-      runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 25,
-      nowMs: T0,
-    });
-    expect(phases.stage1.state).toBe("empty");
-    expect(phases.stage2.state).toBe("empty");
-    expect(phases.stage3.state).toBe("draining");
-    expect(phases.stage3.remainMs).toBeCloseTo(2.5 * 60000, -2);
-  });
-
-  it("keeps a single visible stage when drain speed is unavailable", () => {
-    const phases = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 30 * 60,
-      runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 200,
-      ppm: 0,
-      nowMs: T0,
-    });
-    expect(phases.stage1.state).toBe("draining");
-    expect(phases.stage2.state).toBe("empty");
-    expect(phases.stage3.state).toBe("empty");
-  });
-
-  it("all stages empty when casesInFreezer reaches 0", () => {
-    const phases = computeLinePhases({
-      ...BASE,
-      elapsedBatchSec: 30 * 60,
-      runStatus: "running",
-      pressDone: true,
-      casesInFreezer: 0,
-      nowMs: T0,
-    });
-    expect(phases.stage1.state).toBe("empty");
-    expect(phases.stage2.state).toBe("empty");
-    expect(phases.stage3.state).toBe("empty");
+    expect(reloaded).toEqual(live);
+    expect(reloaded.stage1.state).toBe("draining");
+    expect(reloaded.stage1.remainMs).toBeCloseTo(1.5 * 60000, -2);
   });
 });
 
@@ -794,5 +712,21 @@ describe("computeLinePhases — ended run wall-clock drain", () => {
     expect(phases.stage1.state).toBe("empty");
     expect(phases.stage2.state).toBe("empty");
     expect(phases.stage3.state).toBe("empty");
+  });
+
+  it("derives the same drain stage from a saved stop timestamp on another device", () => {
+    const persistedStop = {
+      ...BASE,
+      elapsedBatchSec: FULL_ELAPSED,
+      runStatus: "ended",
+      endedAt: T0,
+      nowMs: T0 + 3 * 60000,
+    } as const;
+    const local = computeLinePhases(persistedStop);
+    const remote = computeLinePhases({ ...persistedStop });
+
+    expect(remote).toEqual(local);
+    expect(remote.stage2.state).toBe("draining");
+    expect(remote.stage2.remainMs).toBeCloseTo(14.5 * 60000, -2);
   });
 });

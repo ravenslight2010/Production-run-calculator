@@ -63,14 +63,6 @@ export interface ComputeLinePhasesArgs {
   freezerTime: number;
   /** Current wall-clock, in ms. */
   nowMs: number;
-  /** True when the press has finished all cases (product still in flight). */
-  pressDone: boolean;
-  /** Cases currently in the line (used for drain speed). */
-  casesInFreezer: number;
-  /** Pizzas per minute. */
-  ppm: number;
-  /** Pizzas per case. */
-  pizzasPerCase: number;
   /** Run end wall-clock ms; used for ended-run wall-clock drain model. */
   endedAt?: number | null;
 }
@@ -86,10 +78,6 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     runStatus,
     freezerTime,
     nowMs,
-    pressDone,
-    casesInFreezer,
-    ppm,
-    pizzasPerCase,
     endedAt,
   } = args;
 
@@ -211,25 +199,9 @@ export function computeLinePhases(args: ComputeLinePhasesArgs): LinePhases {
     };
   }
 
-  // ── Running, press done: casesInFreezer-based drain ──────────────────────
-  if (runStatus === "running" && pressDone) {
-    if (ppm <= 0 || pizzasPerCase <= 0 || freezerTime <= 0) {
-      // Can't compute the next stage boundary without a production speed. Keep
-      // the display unambiguous rather than reviving the old parallel timers.
-      return {
-        stage1: mk(S1, "draining"),
-        stage2: mk(S2, "empty"),
-        stage3: mk(S3, "empty"),
-      };
-    }
-    // Drain time remaining for the entire line (minutes).
-    const drainTotalMin = (casesInFreezer * pizzasPerCase) / ppm;
-    return sequentialDrain(drainTotalMin);
-  }
-
   // ── Running, filling / steady state ──────────────────────────────────────
   if (runStatus === "running") {
-    if (ppm <= 0 || elapsedMin === 0) {
+    if (elapsedMin === 0) {
       return {
         stage1: mk(S1, "empty"),
         stage2: mk(S2, "empty"),

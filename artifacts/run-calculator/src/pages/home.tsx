@@ -18484,10 +18484,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   postTunnelMin: postTun2,
                   freezerTime: freezerMin2,
                   nowMs: nowMs2,
-                  pressDone: true,
-                  casesInFreezer: 0,
-                  ppm: 0,
-                  pizzasPerCase: 0,
                   endedAt: refEndedAt,
                 });
                 const activePhase = pickMostActivePhase(phases2);
@@ -18543,7 +18539,8 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 </button>
               </div>
             )}
-                  {/* 3-phase line status — filling at run start, draining when press done.
+                  {/* 3-phase line status — filling at run start, draining only after
+                      a persisted pause or stop.
                       Auto-hidden when all stages are in steady-state active. */}
                   {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
                     const freezerMin = Number(ve.freezerTime) || 0;
@@ -18572,10 +18569,6 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       postTunnelMin: postTun,
                       freezerTime: freezerMin,
                       nowMs: nowTime.getTime(),
-                      pressDone: !!calc.pressDone,
-                      casesInFreezer: calc.casesInFreezer,
-                      ppm: calc.ppm,
-                      pizzasPerCase: Number(v.pizzasPerCase) || 0,
                     });
                     const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
                     // Hide the strip entirely when everything is in steady-state or empty.
@@ -19742,7 +19735,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     </div>
                   );
                 })()}
-                {/* ─── Line stage (3-phase: filling while running, draining when done/ended) ─── */}
+                {/* ─── Line stage (3-phase: filling while running, draining after pause/stop) ─── */}
                 {(() => {
                   const freezerMin = Number(ve.freezerTime) || 0;
                   const showFilling = (runStatus === "running" || runStatus === "paused") && freezerMin > 0;
@@ -19773,10 +19766,6 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                       postTunnelMin: postTun,
                       freezerTime: freezerMin,
                       nowMs,
-                      pressDone: !!calc.pressDone,
-                      casesInFreezer: calc.casesInFreezer,
-                      ppm: calc.ppm,
-                      pizzasPerCase: Number(v.pizzasPerCase) || 0,
                     });
                   } else {
                     // Compute actual virtual (pause-excluded) elapsed for the ended run.
@@ -19799,37 +19788,45 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                       postTunnelMin: postTun,
                       freezerTime: freezerMin,
                       nowMs,
-                      pressDone: true,
-                      casesInFreezer: 0,
-                      ppm: 0,
-                      pizzasPerCase: 0,
                       endedAt: lastEndedRun!.endedAt!,
                     });
                   }
                   const rows = [phases.stage1, phases.stage2, phases.stage3];
                   const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
                   if (!anyVisible && !showEmptying) return null;
-                  // Overall progress: use liveFreezerMin for filling, elapsed-since-end for draining.
+                  // A phase can drain only from its persisted pause / end record.
+                  // Completion math remains independent so dough and case tracking
+                  // can finish while the still-running line stays visually stable.
+                  const lifecycleDrainStartedAt = showEmptying
+                    ? lastEndedRun?.endedAt
+                    : runStatus === "paused"
+                    ? currentRun?.pausedAt
+                    : undefined;
+                  const lifecycleDraining = lifecycleDrainStartedAt != null;
+                  // Overall progress: use liveFreezerMin while loading, then the
+                  // persisted lifecycle timestamp while draining.
                   const totalSecs = freezerMin * 60;
-                  const elapsedSecs = showFilling ? liveFreezerMin * 60 : Math.min(totalSecs, (nowMs - (lastEndedRun?.endedAt ?? nowMs)) / 1000);
+                  const elapsedSecs = lifecycleDraining
+                    ? Math.min(totalSecs, Math.max(0, (nowMs - lifecycleDrainStartedAt) / 1000))
+                    : liveFreezerMin * 60;
                   const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
-                  const drainDone = !showFilling && rows.every(r => r.state === "empty");
+                  const drainDone = lifecycleDraining && rows.every(r => r.state === "empty");
                   return (
                     <div className="flex mb-4">
                       <TimelineNode icon={Snowflake} active />
                       <div className="flex-1 mt-2 space-y-2">
-                        <div className={`border rounded-lg p-3 ${showFilling && !calc.pressDone ? "bg-primary/5 border-primary/20" : "bg-amber-950/20 border-amber-600/30"}`}>
+                        <div className={`border rounded-lg p-3 ${drainDone ? "bg-emerald-950/20 border-emerald-700/30" : lifecycleDraining ? "bg-amber-950/20 border-amber-600/30" : "bg-primary/5 border-primary/20"}`}>
                           <div className="flex justify-between items-end mb-2">
-                            <span className={`text-sm font-semibold uppercase tracking-wider ${showFilling && !calc.pressDone ? "text-primary" : "text-amber-400"}`}>
-                              {showFilling && !calc.pressDone ? "Line Loading" : drainDone ? "Line Clear" : "Line Draining"}
+                            <span className={`text-sm font-semibold uppercase tracking-wider ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary"}`}>
+                              {drainDone ? "Line Clear" : lifecycleDraining ? "Line Draining" : "Line Loading"}
                             </span>
-                            <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : showFilling && !calc.pressDone ? "text-primary/80" : "text-amber-400"}`}>
+                            <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary/80"}`}>
                               {drainDone ? "✓ Line clear" : `${fmtNum(pct * 100, 0)}%`}
                             </span>
                           </div>
                           <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden mb-2">
                             <div
-                              className={`h-full rounded-full transition-all duration-1000 ${drainDone ? "bg-emerald-500" : showFilling && !calc.pressDone ? "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]" : "bg-amber-500"}`}
+                              className={`h-full rounded-full transition-all duration-1000 ${drainDone ? "bg-emerald-500" : lifecycleDraining ? "bg-amber-500" : "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"}`}
                               style={{ width: `${pct * 100}%` }}
                             />
                           </div>

@@ -3,7 +3,7 @@ import { Pause, Play, ChevronRight, Timer } from "lucide-react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
 import { fmtElapsed, fmtComma, fmtClock, fmtCountdownParts } from "../utils";
-import { computeLinePhases, pickMostActivePhase, type PhaseInfo } from "../linePhases";
+import { computeEndedRunElapsedSec, computeLinePhases, pickMostActivePhase } from "../linePhases";
 import { PRE_POST_TUNNEL_DEFAULT_MIN } from "../types";
 import { pauseStopsTunnel } from "../pausePolicy";
 
@@ -170,7 +170,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
           </div>
         )}
         {/* Compact 3-phase line strip — shows the most active transition */}
-        {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
+        {(runStatus === "running" || runStatus === "paused" || runStatus === "ended") && (() => {
           const freezerMin = Number(ve.freezerTime) || 0;
           if (freezerMin <= 0) return null;
           if (calc.ppm <= 0 && runStatus === "running") return null;
@@ -185,8 +185,15 @@ const CompactRunStrip = memo(function CompactRunStrip() {
           const openPause = (currentRun?.stoppages ?? [])
             .filter((s: any) => s.type === "pause" && !s.endedAt)
             .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
+          const elapsedForPhases = runStatus === "ended" && currentRun?.endedAt
+            ? computeEndedRunElapsedSec({
+              startedAt: currentRun.startedAt,
+              endedAt: currentRun.endedAt,
+              stoppages: currentRun.stoppages,
+            })
+            : elapsedBatchSec;
           const phases = computeLinePhases({
-            elapsedBatchSec,
+            elapsedBatchSec: elapsedForPhases,
             pausedAt: currentRun?.pausedAt ?? null,
             lastResumeWallMs,
             lastPauseStartWallMs,
@@ -197,10 +204,7 @@ const CompactRunStrip = memo(function CompactRunStrip() {
             postTunnelMin: postTun,
             freezerTime: freezerMin,
             nowMs,
-            pressDone: !!calc.pressDone,
-            casesInFreezer: calc.casesInFreezer,
-            ppm: calc.ppm,
-            pizzasPerCase: Number(v.pizzasPerCase) || 0,
+            endedAt: currentRun?.endedAt,
           });
           // Show the most active transition: filling/draining/resuming (nearest deadline)
           // beats paused — during a pause, Stage 2/3 "still draining" is more informative
