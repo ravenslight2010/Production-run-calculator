@@ -485,6 +485,44 @@ describe("/sync/events — date-scoped broadcasts", () => {
     })();
   }
 
+  it("sends the current-day snapshot as the first frame for a newly connected device", async () => {
+    const date = "2030-03-12";
+    await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "schedule-writer",
+        payload: {
+          dayState: { runs: [{ id: "scheduled-run", brand: "Acme", flavor: "Pep" }], resetAt: 1000 },
+          runValues: { "scheduled-run": { casesNeeded: 240 } },
+          runValuesUpdatedAt: { "scheduled-run": 1 },
+        },
+      }),
+    });
+
+    const ctrl = new AbortController();
+    const res = await fetch(
+      `${baseUrl}/api/sync/events?clientId=new-tablet&today=${date}`,
+      { headers: authHeaders(), signal: ctrl.signal },
+    );
+    const reader = res.body!.getReader();
+    const { value } = await reader.read();
+    await reader.cancel();
+    ctrl.abort();
+
+    const frame = new TextDecoder().decode(value);
+    const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
+    expect(line).toBeDefined();
+    const initial = JSON.parse(line!.slice("data: ".length)) as {
+      initial?: boolean;
+      senderId?: string | null;
+      data?: { dayState?: { runs?: Array<{ id: string }> } };
+    };
+    expect(initial.initial).toBe(true);
+    expect(initial.senderId).toBeNull();
+    expect(initial.data?.dayState?.runs?.map((run) => run.id)).toContain("scheduled-run");
+  });
+
   it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {
     // Watcher A is on 2030-03-10, watcher B is on 2030-03-11. A push from a
     // sender on 2030-03-10 must reach A and NOT B.
