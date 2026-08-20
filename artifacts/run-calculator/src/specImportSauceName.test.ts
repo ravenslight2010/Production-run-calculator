@@ -216,4 +216,48 @@ describe("applySpecImport library-row hydration for named dough/sauce", () => {
     const prof = loadProfile("Corner Booth", "BBQ CHICKEN");
     expect(prof?.frontlineRecipe).toEqual([{ ingredient: "Custom Base", lbs: 12 }]);
   });
+
+  it("uses live pool rows over stale mixed snapshots for an explicit forced correction", () => {
+    saveProfile("Corner Booth", "BBQ CHICKEN", {
+      ...DEFAULT_VALUES,
+      dieType: "12 inch",
+      frontlineRecipeName: "Mystic Pizza Sauce",
+      frontlineRecipe: [{ ingredient: "Wrong Sauce", lbs: 10 }],
+      doughRecipeName: "Wrong Dough",
+      doughRecipe: [{ ingredient: "Wrong Flour", lbs: 10 }],
+    });
+    applySpecImport(
+      {
+        profiles: [{
+          brand: "Corner Booth",
+          flavor: "BBQ CHICKEN",
+          sauceName: "Red Hot Pizza Sauce",
+          doughName: "Corner Booth Dough",
+          applicators: [],
+          pepperonis: [],
+        }],
+        recipes: [],
+      },
+      undefined,
+      {
+        sauce: [{
+          name: "Red Hot Pizza Sauce",
+          components: [{ ingredient: "Garlic Sauce", lbs: 200 }],
+        }],
+        dough: [{
+          name: "Corner Booth Dough",
+          components: [{ ingredient: "Flour", lbs: 100 }],
+          doughballWeightOz: 10,
+        }],
+      },
+      undefined,
+      new Set(["corner booth\u0000bbq chicken"]),
+    );
+    const profile = loadProfile("Corner Booth", "BBQ CHICKEN");
+    expect(profile?.frontlineRecipeName).toBe("Red Hot Pizza Sauce");
+    expect(profile?.frontlineRecipe).toEqual([{ ingredient: "Garlic Sauce", lbs: 200 }]);
+    expect(profile?.doughRecipeName).toBe("Corner Booth Dough");
+    expect(profile?.doughRecipe).toEqual([{ ingredient: "Flour", lbs: 100 }]);
+    expect(profile?.targetDoughballWeight).toBe(10);
+  });
 });

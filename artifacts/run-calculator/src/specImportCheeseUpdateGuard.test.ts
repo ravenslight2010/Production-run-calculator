@@ -118,8 +118,9 @@ vi.mock("./cheeseRecipes", () => ({
   },
 }));
 
-const { savedNamed } = vi.hoisted(() => ({
+const { savedNamed, writeFailure } = vi.hoisted(() => ({
   savedNamed: { byKind: {} as Record<string, NamedRecipe[]> },
+  writeFailure: { kind: "" as "" | "dough" | "sauce" },
 }));
 vi.mock("./namedRecipes", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./namedRecipes")>();
@@ -136,6 +137,7 @@ vi.mock("./namedRecipes", async (importOriginal) => {
           ]
         : [],
     saveNamedRecipes: async (kind: "dough" | "sauce", items: NamedRecipe[]) => {
+      if (writeFailure.kind === kind) throw new Error(`simulated ${kind} pool write failure`);
       savedNamed.byKind[kind] = items;
       return items;
     },
@@ -167,6 +169,7 @@ beforeEach(() => {
   savedCheese.last = null;
   savedCheese.calls = 0;
   savedNamed.byKind = {};
+  writeFailure.kind = "";
   appliedLocally.last = null;
   for (const k of Object.keys(mergeAliasesByCategory)) delete mergeAliasesByCategory[k];
 });
@@ -272,6 +275,21 @@ describe("commitSpecImport — regular spec cheese updates preserve batch pounds
 
     expect(recipesUpdated).toBe(0);
     expect(savedNamed.byKind["dough"]).toBeUndefined();
+  });
+
+  it("rejects an explicit import when a required dough/sauce pool write is not acknowledged", async () => {
+    writeFailure.kind = "dough";
+    const prepared = makePrepared({
+      profiles: [],
+      recipes: [{
+        kind: "dough",
+        name: "House Dough",
+        rows: [{ ingredient: "New Flour", lbs: 42 }],
+      }],
+    });
+    await expect(
+      commitSpecImport(prepared, new Set(["corner booth\u0000pepperoni"])),
+    ).rejects.toThrow("simulated dough pool write failure");
   });
 
   it("writes Fresh Spinach under its canonical Spinach survivor (resolveImportName)", async () => {

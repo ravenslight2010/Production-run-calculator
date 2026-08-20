@@ -2382,6 +2382,14 @@ export async function commitSpecImport(
   // above intentionally uses the untouched parse (its own slot-matching pass
   // already ties recipes to profiles).
   const scopedParsed = fillSpecCheeseTargetsFromProfiles(applyParsed);
+  // Ordinary imports remain usable while a device is offline: their pool sync
+  // has historically been best-effort. A reviewed forced correction is
+  // different—its purpose is to repair canonical shared data—so every required
+  // pool write must acknowledge before the caller can show success.
+  const requirePoolAcknowledgement = (forceUpdateProfileKeys?.size ?? 0) > 0;
+  const handlePoolWriteFailure = (error: unknown) => {
+    if (requirePoolAcknowledgement) throw error;
+  };
 
   // Spec-named dough/sauce with no backing recipe anywhere: create an
   // empty-components placeholder in the server pool so the name is visible
@@ -2390,7 +2398,8 @@ export async function commitSpecImport(
   // profiles when they all share one brand. Loose near-dup guard against the
   // existing pool: if a pool entry already loose-matches the name, the
   // profile relink pass should have (or will) snap onto it — never mint a
-  // near-duplicate placeholder. Best-effort, manager-gated server-side.
+  // near-duplicate placeholder. This is part of an explicit manager Apply:
+  // a pool failure rejects the import rather than claiming it fully landed.
   let placeholderRecipesAdded = 0;
   for (const kind of ["dough", "sauce"] as const) {
     const cands = (applyOut.recipePlaceholders ?? []).filter((c) => c.kind === kind);
@@ -2424,16 +2433,14 @@ export async function commitSpecImport(
         const { added } = await addNamedRecipesToServerIfAbsent(kind, drafts);
         placeholderRecipesAdded += added;
       }
-    } catch {
-      // Best-effort (non-manager 403, offline) — import applied.
+    } catch (error) {
+      handlePoolWriteFailure(error);
     }
   }
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
-  // appear on the Mixes screen alongside premix-imported ones. Manager-gated on
-  // the server (saveMixes → 403 for non-managers) and fully best-effort: the
-  // recipes already applied locally, so a failed mix sync must never surface as
-  // an import error. New mixes are matched by name against existing ones so an
+  // appear on the Mixes screen alongside premix-imported ones. New mixes are
+  // matched by name against existing ones so an
   // import never duplicates (or blanks) a mix the manager already keeps; a spec
   // sheet can't express per-pizza/batch amounts, so they arrive with those at 0
   // for the manager to fill in the editor.
@@ -2505,8 +2512,8 @@ export async function commitSpecImport(
       await saveMixes(workingMixes);
       mixesAdded = added;
     }
-  } catch {
-    // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  } catch (error) {
+    handlePoolWriteFailure(error);
   }
 
   // Add any named cheese blends detected in this import to the factory-wide
@@ -2515,9 +2522,7 @@ export async function commitSpecImport(
   // existing pool so an import never duplicates a manager's curated recipe.
   // A regular spec refreshes compatible blend shares and recipe assignment
   // details, but never turns its per-pizza ounces into the pool's per-batch
-  // pounds. Manager-gated on the server and fully best-effort: the recipes
-  // already applied locally, so a failed sync must never surface as an import
-  // error.
+  // pounds. A failed shared-pool write rejects the explicit manager Apply.
   // SPEC-WINS: every dough/sauce recipe this sheet carries rows for also
   // replaces the matching SERVER pool recipe's ingredient rows — the
   // dough/sauce pickers hydrate rows from the pools, so without this the
@@ -2557,12 +2562,12 @@ export async function commitSpecImport(
         cheeseRecipesAdded = added;
       }
     }
-  } catch {
-    // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  } catch (error) {
+    handlePoolWriteFailure(error);
   }
 
-  // Same update step for the Dough / Sauce named-recipe pools. Best-effort for
-  // the same reasons — the sheet's rows already applied locally either way.
+  // Same update step for the Dough / Sauce named-recipe pools. A successful
+  // import means these corrected shared rows were acknowledged as well.
   for (const kind of ["dough", "sauce"] as const) {
     // Ingredient names inside the rows were already resolved through the
     // factory's merge history above (resolveImportName on applyParsed), so
@@ -2578,8 +2583,8 @@ export async function commitSpecImport(
         await saveNamedRecipes(kind, upd.next);
         recipesUpdated += upd.updated;
       }
-    } catch {
-      // Best-effort (non-manager 403, offline) — import applied.
+    } catch (error) {
+      handlePoolWriteFailure(error);
     }
   }
 
@@ -2589,12 +2594,12 @@ export async function commitSpecImport(
   // (see the prune above). Profile-only sheets snapshot too so their re-imports
   // can also skip unchanged profiles. Best-effort: the import already applied
   // locally, so a failed snapshot must never surface as an import error.
-  if ((prepared.parsed.recipes?.length ?? 0) > 0 || (prepared.parsed.profiles?.length ?? 0) > 0) {
+  if ((fullRelinked.recipes?.length ?? 0) > 0 || (fullRelinked.profiles?.length ?? 0) > 0) {
     try {
       const names = prepared.sourceNames ?? [];
       await saveSpecSheet(
-        buildSpecSheetLabel(prepared.parsed, names),
-        prepared.parsed,
+        buildSpecSheetLabel(fullRelinked, names),
+        fullRelinked,
         deriveSourceKey(names),
         prepared.sourceHash,
       );

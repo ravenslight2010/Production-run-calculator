@@ -17,6 +17,9 @@ import {
 import { logger } from "./logger";
 import {
   sanitizeSpecAliases,
+  assignApplicatorSlots,
+  resolveCheeseApplicatorSlots,
+  resolveMixApplicatorSlots,
   isGenericSlotTypeName,
   cleanSpecNamedRecipeName,
   specImportNamedRecipeNamesEqual,
@@ -3358,6 +3361,7 @@ export async function runDataHeals(): Promise<void> {
   await runHannafordTikkaMasalaFix();
   await runProfileNameLinkStubPurge();
   await runAug19SavedSpecProfileRepair();
+  await runAug19SavedSpecProfileRepairV2();
 }
 
 // ── Strip all ozPerPizza from cheese recipe components ───────────────────────
@@ -4698,5 +4702,360 @@ export async function runAug19SavedSpecProfileRepair(): Promise<void> {
       .set({ result })
       .where(eq(dataHealsTable.id, AUG19_SAVED_SPEC_PROFILE_REPAIR_ID));
     logger.info({ heal: AUG19_SAVED_SPEC_PROFILE_REPAIR_ID, ...result }, "Data heal applied");
+  });
+}
+
+// ── August 19 saved-spec profile repair (authoritative v2) ───────────────────
+// The first repair intentionally preserved recipe snapshots already present on
+// a profile. That was safe for unknown data, but wrong for the audited batch:
+// a profile could keep Mystic's rows after the sheet explicitly selected Red
+// Hot. V2 rebuilds every *explicitly supplied* setup field against the current
+// master-data pools. It is a new marker so databases that ran v1 receive the
+// complete correction exactly once.
+const AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID = "aug19-saved-spec-profile-repair-v2";
+
+type SavedParsedRecipe = {
+  kind?: unknown;
+  name?: unknown;
+  rows?: unknown;
+};
+type SavedProfileSource = {
+  profile: SavedParsedProfile;
+  recipes: SavedParsedRecipe[];
+  scope: string;
+};
+type RepairRecipePool = {
+  name: string;
+  components: unknown;
+  doughballWeightOz?: unknown;
+  doughballsPerTray?: unknown;
+};
+
+function clonedRecipeRows(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && !Array.isArray(row))
+    .map((row) => ({ ...row }));
+}
+
+function recordValueEquals(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function savedRecipeRows(
+  recipes: SavedParsedRecipe[],
+  kind: "dough" | "sauce",
+  name: string,
+): Array<Record<string, unknown>> {
+  const match = recipes.find(
+    (recipe) =>
+      recipe.kind === kind &&
+      typeof recipe.name === "string" &&
+      specImportNamedRecipeNamesEqual(recipe.name, name),
+  );
+  return clonedRecipeRows(match?.rows);
+}
+
+function repairName(
+  raw: unknown,
+  kind: "dough" | "sauce",
+  aliases: ImportMergeAliasMap,
+  pool: RepairRecipePool[],
+): { name: string; rows: Array<Record<string, unknown>> } | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const resolved = resolveImportName(raw.trim(), kind, aliases).trim();
+  if (!resolved) return null;
+  const poolMatch = pool.find((item) => specImportNamedRecipeNamesEqual(item.name, resolved));
+  return {
+    name: poolMatch?.name ?? resolved,
+    rows: poolMatch ? clonedRecipeRows(poolMatch.components) : [],
+  };
+}
+
+/**
+ * Reproduce the profile-facing portion of a confirmed import from an audited
+ * saved parse. Only defined parse values are touched. Recipe rows come from the
+ * current named-recipe pools first (their formulas are master data); a same-sheet
+ * parsed formula is the fallback while a missing formula leaves old rows intact.
+ */
+export function applySavedSpecProfileFieldsV2(
+  current: Record<string, unknown>,
+  source: SavedProfileSource,
+  pools: {
+    dough: RepairRecipePool[];
+    sauce: RepairRecipePool[];
+    cheeseNames: string[];
+    mixNames: string[];
+  },
+  aliases: ImportMergeAliasMap,
+): { values: Record<string, unknown>; changedFields: string[] } {
+  const parsed = source.profile;
+  const values = { ...current };
+  const changed = new Set<string>();
+  const set = (field: string, value: unknown) => {
+    if (recordValueEquals(values[field], value)) return;
+    values[field] = value;
+    changed.add(field);
+  };
+  const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+
+  for (const field of ["dieType", "allergen"] as const) {
+    const value = text(parsed[field]);
+    if (value) set(field, value);
+  }
+  for (const [parsedField, storedField] of [
+    ["sauceOzPerPizza", "sauceOzPerPizza"],
+    ["pizzasPerCase", "pizzasPerCase"],
+    ["sauceBarrelLbs", "sauceBarrelLbs"],
+  ] as const) {
+    const value = finiteNumber(parsed[parsedField]);
+    if (value !== undefined && (parsedField === "sauceOzPerPizza" || value > 0)) {
+      set(storedField, value);
+    }
+  }
+
+  const sauce = repairName(parsed.sauceName, "sauce", aliases, pools.sauce);
+  if (sauce) {
+    set("frontlineRecipeName", sauce.name);
+    const rows = sauce.rows.length
+      ? sauce.rows
+      : savedRecipeRows(source.recipes, "sauce", sauce.name);
+    // No formula in either master data or this saved parse means the sheet only
+    // named a bought/ready-made sauce. Keep unrelated manager recipe rows rather
+    // than silently destroying them on a name-only parse.
+    if (rows.length) set("frontlineRecipe", rows);
+  }
+
+  const dough = repairName(parsed.doughName, "dough", aliases, pools.dough);
+  if (dough) {
+    set("doughRecipeName", dough.name);
+    const rows = dough.rows.length
+      ? dough.rows
+      : savedRecipeRows(source.recipes, "dough", dough.name);
+    if (rows.length) set("doughRecipe", rows);
+    const poolMatch = pools.dough.find((item) => specImportNamedRecipeNamesEqual(item.name, dough.name));
+    const weight = finiteNumber(poolMatch?.doughballWeightOz);
+    if (weight !== undefined && weight > 0) set("targetDoughballWeight", weight);
+    const perTray = finiteNumber(poolMatch?.doughballsPerTray);
+    if (perTray !== undefined && perTray > 0) set("doughballsPerTray", perTray);
+  }
+
+  const applicators = Array.isArray(parsed.applicators) ? parsed.applicators : [];
+  if (applicators.length > 0) {
+    const cheese = resolveCheeseApplicatorSlots(
+      assignApplicatorSlots(
+        applicators
+          .filter((item): item is { type?: unknown; ozPerPizza?: unknown; batchLbs?: unknown; slot?: unknown } => !!item && typeof item === "object")
+          .map((item) => ({
+            type: text(item.type),
+            ozPerPizza: finiteNumber(item.ozPerPizza) ?? 0,
+            ...(finiteNumber(item.batchLbs) !== undefined ? { batchLbs: finiteNumber(item.batchLbs) } : {}),
+            ...(finiteNumber(item.slot) !== undefined ? { slot: finiteNumber(item.slot) } : {}),
+          })),
+      ),
+      pools.cheeseNames,
+      text(parsed.brand),
+    );
+    const mixed = resolveMixApplicatorSlots(cheese.applicators, pools.mixNames, text(parsed.brand));
+    for (const [index, applicator] of mixed.applicators.entries()) {
+      const slot = index + 1;
+      if (!applicator.type.trim()) continue;
+      set(`app${slot}Type`, applicator.type.trim());
+      set(`app${slot}OzPerPizza`, applicator.ozPerPizza);
+      if (applicator.batchLbs != null && applicator.batchLbs > 0) {
+        set(`app${slot}BatchLbs`, applicator.batchLbs);
+      }
+    }
+    for (const link of cheese.links) {
+      const name = resolveImportName(link.recipeName, "cheese", aliases).trim();
+      if (name) set(`app${link.slot}CheeseRecipeName`, name);
+    }
+    for (const link of mixed.links) {
+      const name = resolveImportName(link.recipeName, "mixes", aliases).trim();
+      if (name) set(`app${link.slot}CheeseRecipeName`, name);
+    }
+  }
+
+  const pepperonis = Array.isArray(parsed.pepperonis) ? parsed.pepperonis : [];
+  const namedPepperonis = pepperonis
+    .filter((item): item is { type?: unknown; sticks?: unknown; ozPerPizza?: unknown; batchLbs?: unknown } => !!item && typeof item === "object")
+    .filter((item) => text(item.type))
+    .slice(0, 2);
+  for (const [index, pepperoni] of namedPepperonis.entries()) {
+    const slot = index + 1;
+    set(`pep${slot}Type`, text(pepperoni.type));
+    const sticks = finiteNumber(pepperoni.sticks);
+    if (sticks !== undefined) set(`pep${slot}Sticks`, sticks);
+    const ounces = finiteNumber(pepperoni.ozPerPizza);
+    if (ounces !== undefined) set(`pep${slot}OzPerPizza`, ounces);
+    const batchLbs = finiteNumber(pepperoni.batchLbs);
+    if (batchLbs !== undefined && batchLbs > 0) set(`pep${slot}BatchLbs`, batchLbs);
+  }
+  if (namedPepperonis.length > 0) set("pep1Combined", namedPepperonis.length < 2);
+
+  return { values, changedFields: [...changed] };
+}
+
+export async function runAug19SavedSpecProfileRepairV2(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const sheets = await tx
+      .select()
+      .from(savedSpecSheetsTable)
+      .where(
+        and(
+          gte(savedSpecSheetsTable.createdAt, AUG19_SAVED_SPEC_START),
+          sql`${savedSpecSheetsTable.createdAt} < ${AUG20_SAVED_SPEC_START}`,
+        ),
+      )
+      .orderBy(sql`${savedSpecSheetsTable.createdAt} DESC, ${savedSpecSheetsTable.id} DESC`);
+    const sources = new Map<string, SavedProfileSource>();
+    for (const sheet of sheets) {
+      const data = sheet.data as { profiles?: unknown; recipes?: unknown } | null;
+      if (!Array.isArray(data?.profiles)) continue;
+      const recipes = Array.isArray(data?.recipes)
+        ? data.recipes.filter((recipe): recipe is SavedParsedRecipe => !!recipe && typeof recipe === "object")
+        : [];
+      for (const candidate of data.profiles) {
+        if (!candidate || typeof candidate !== "object") continue;
+        const profile = candidate as SavedParsedProfile;
+        const brand = ciName(profile.brand);
+        const flavor = ciName(profile.flavor);
+        if (!brand || !flavor) continue;
+        const key = `${sheet.scope}\u0000${brand}\u0000${flavor}`;
+        if (!sources.has(key)) sources.set(key, { profile, recipes, scope: sheet.scope });
+      }
+    }
+
+    const [profiles, doughRows, sauceRows, cheeseRows, mixRows, aliases] = await Promise.all([
+      tx.select().from(brandProfilesTable).for("update"),
+      tx.select().from(doughRecipesTable),
+      tx.select().from(sauceRecipesTable),
+      tx.select().from(cheeseRecipesTable),
+      tx.select().from(mixesTable),
+      tx.select().from(mergeAliasesTable),
+    ]);
+    const aliasesByScope = new Map<string, ImportMergeAliasMap>();
+    for (const scope of new Set([...sources.values()].map((source) => source.scope))) {
+      aliasesByScope.set(scope, {
+        dough: aliases.filter((alias) => alias.scope === scope && alias.category === "dough"),
+        sauce: aliases.filter((alias) => alias.scope === scope && alias.category === "sauce"),
+        cheese: aliases.filter((alias) => alias.scope === scope && alias.category === "cheese"),
+        mixes: aliases.filter((alias) => alias.scope === scope && alias.category === "mixes"),
+        ingredient: aliases.filter((alias) => alias.scope === scope && alias.category === "ingredient"),
+      });
+    }
+    const poolsFor = (scope: string) => ({
+      dough: doughRows
+        .filter((row) => row.scope === scope)
+        .map((row) => ({
+          name: row.name,
+          components: row.components,
+          doughballWeightOz: row.doughballWeightOz,
+          doughballsPerTray: row.doughballsPerTray,
+        })),
+      sauce: sauceRows
+        .filter((row) => row.scope === scope)
+        .map((row) => ({ name: row.name, components: row.components })),
+      cheeseNames: cheeseRows.filter((row) => row.scope === scope).map((row) => row.name),
+      mixNames: mixRows.filter((row) => row.scope === scope).map((row) => row.name),
+    });
+
+    const profilesBySource = new Map(
+      profiles.map((profile) => [
+        `${profile.scope}\u0000${ciName(profile.brand)}\u0000${ciName(profile.flavor)}`,
+        profile,
+      ]),
+    );
+    const repaired = new Map<string, { values: Record<string, unknown>; fields: string[] }>();
+    let repairedProfiles = 0;
+    const now = Date.now();
+    for (const [sourceKey, source] of sources) {
+      const existing = profilesBySource.get(sourceKey);
+      const repair = applySavedSpecProfileFieldsV2(
+        { ...((existing?.values ?? {}) as Record<string, unknown>) },
+        source,
+        poolsFor(source.scope),
+        aliasesByScope.get(source.scope) ?? {},
+      );
+      if (repair.changedFields.length === 0 && existing) continue;
+      const brand = typeof source.profile.brand === "string" ? source.profile.brand.trim() : "";
+      const flavor = typeof source.profile.flavor === "string" ? source.profile.flavor.trim() : "";
+      const stamp = Math.max(existing?.updatedAtMs ?? 0, now) + 1;
+      if (existing) {
+        await tx
+          .update(brandProfilesTable)
+          .set({ values: repair.values, updatedAtMs: stamp })
+          .where(and(eq(brandProfilesTable.key, existing.key), eq(brandProfilesTable.scope, existing.scope)));
+      } else {
+        await tx.insert(brandProfilesTable).values({
+          key: `${brand.toLowerCase()}__${flavor.toLowerCase()}`,
+          scope: source.scope,
+          brand,
+          flavor,
+          values: repair.values,
+          crustValues: {},
+          updatedAtMs: stamp,
+        });
+      }
+      repaired.set(sourceKey, { values: repair.values, fields: repair.changedFields });
+      repairedProfiles++;
+    }
+
+    let repairedRuns = 0;
+    const days = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(gte(dailySyncTable.date, AUG19_PROFILE_REPAIR_FROM_DATE))
+      .for("update");
+    for (const day of days) {
+      const data = day.data as Record<string, unknown> | null;
+      const dayState = data?.dayState as Record<string, unknown> | undefined;
+      const runs = Array.isArray(dayState?.runs) ? dayState.runs : [];
+      const runValues = data?.runValues;
+      if (!runValues || typeof runValues !== "object" || Array.isArray(runValues)) continue;
+      const nextValues = { ...(runValues as Record<string, unknown>) };
+      const priorStamps =
+        data?.runValuesUpdatedAt && typeof data.runValuesUpdatedAt === "object"
+          ? (data.runValuesUpdatedAt as Record<string, unknown>)
+          : {};
+      const nextStamps = { ...priorStamps };
+      let changed = false;
+      for (const run of runs) {
+        if (!run || typeof run !== "object") continue;
+        const meta = run as Record<string, unknown>;
+        if (meta.startedAt != null || typeof meta.id !== "string") continue;
+        const repair = repaired.get(`${day.scope}\u0000${ciName(meta.brand)}\u0000${ciName(meta.flavor)}`);
+        const current = nextValues[meta.id];
+        if (!repair || !current || typeof current !== "object" || Array.isArray(current)) continue;
+        nextValues[meta.id] = { ...(current as Record<string, unknown>), ...Object.fromEntries(repair.fields.map((field) => [field, repair.values[field]])) };
+        nextStamps[meta.id] = Math.max(finiteNumber(nextStamps[meta.id]) ?? 0, now) + 1;
+        changed = true;
+        repairedRuns++;
+      }
+      if (!changed) continue;
+      await tx
+        .update(dailySyncTable)
+        .set({ data: { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps }, updatedAt: new Date() })
+        .where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+    }
+
+    const result = {
+      sheetsScanned: sheets.length,
+      parsedProfiles: sources.size,
+      repairedProfiles,
+      repairedRuns,
+    };
+    await tx
+      .update(dataHealsTable)
+      .set({ result })
+      .where(eq(dataHealsTable.id, AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID));
+    logger.info({ heal: AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID, ...result }, "Data heal applied");
   });
 }

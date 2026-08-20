@@ -3956,7 +3956,7 @@ export function applySpecImport(
     // stored name matching the sheet is simply a no-op write). Mixed-sauce
     // recipes always win over a bare name; the recipe-tie loop below further
     // overwrites with actual row data when available.
-    if (specSauceName && !hasMixedSauce) {
+    if (specSauceName && (!hasMixedSauce || isForced)) {
       // The sheet is overwriting a DIFFERENT stored sauce name — a correction.
       // Report it so the commit glue can clean up the alias that minted the
       // old wrong name and learn the reverse mapping.
@@ -3979,12 +3979,14 @@ export function applySpecImport(
     // an empty recipe until the user reselects it. Never clobbers mixed rows.
     {
       const flName = (values.frontlineRecipeName ?? "").trim();
-      if (flName && !(values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0)) {
-        // Local presets first, then the server pool — this device may never
-        // have saved the pool recipe locally (pool is factory master-data).
+      if (flName && (!(values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0) || isForced)) {
+        // An explicit manager correction must adopt the current server pool
+        // recipe over any stale browser preset/snapshot. Ordinary imports keep
+        // the historical local-first rule so a manager's unsynced edit remains
+        // available while offline.
         const rows = existingRecipeRowsForImport("sauce", flName);
-        const poolRows = rows.length ? [] : (poolEntryFor("sauce", flName)?.components ?? []);
-        const src = rows.length ? rows : poolRows;
+        const poolRows = poolEntryFor("sauce", flName)?.components ?? [];
+        const src = isForced && poolRows.length ? poolRows : rows.length ? rows : poolRows;
         if (src.length) values.frontlineRecipe = src.map(r => ({ ...r }));
       }
     }
@@ -4010,7 +4012,7 @@ export function applySpecImport(
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     // Same principle as sauce above: spec sheet is authoritative for the dough
     // name link — always write it, no equality guard.
-    if (specDoughName && !hasMixedDough) {
+    if (specDoughName && (!hasMixedDough || isForced)) {
       // Same correction reporting as sauce above.
       const priorDoughName = String(values.doughRecipeName ?? "").trim();
       if (priorDoughName && priorDoughName.toLowerCase() !== specDoughName.toLowerCase()) {
@@ -4029,12 +4031,17 @@ export function applySpecImport(
     // has none) attached now instead of waiting for a reselect.
     {
       const dName = (values.doughRecipeName ?? "").trim();
-      if (dName && !(values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0)) {
-        // Local presets first, then the server pool — this device may never
-        // have saved the pool recipe locally (pool is factory master-data).
+      if (dName && (!(values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0) || isForced)) {
+        // See sauce above: explicit correction adopts the live server recipe,
+        // while normal imports stay local-first for offline manager edits.
         const rows = existingRecipeRowsForImport("dough", dName);
-        const poolEntry = rows.length ? undefined : poolEntryFor("dough", dName);
-        const src = rows.length ? rows : (poolEntry?.components ?? []);
+        const poolEntry = poolEntryFor("dough", dName);
+        const poolComponents = poolEntry?.components ?? [];
+        const src = isForced && poolComponents.length > 0
+          ? poolComponents
+          : rows.length
+            ? rows
+            : poolComponents;
         if (src.length) values.doughRecipe = src.map(r => ({ ...r }));
         const presets = loadDoughRecipePresets();
         const pKey = Object.keys(presets).find(k => k.trim().toLowerCase() === dName.toLowerCase());

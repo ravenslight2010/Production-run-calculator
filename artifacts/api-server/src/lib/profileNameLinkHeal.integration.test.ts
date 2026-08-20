@@ -34,6 +34,7 @@ let mixesTable: DbModule["mixesTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let runProfileNameLinkStubPurge: () => Promise<void>;
 let runAug19SavedSpecProfileRepair: () => Promise<void>;
+let runAug19SavedSpecProfileRepairV2: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -42,6 +43,7 @@ let originalDatabaseUrl: string | undefined;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const HEAL_ID = "profile-name-link-stub-purge-v1";
 const AUG19_REPAIR_ID = "aug19-saved-spec-profile-repair-v1";
+const AUG19_REPAIR_V2_ID = "aug19-saved-spec-profile-repair-v2";
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -83,6 +85,7 @@ beforeAll(async () => {
   const heals = await import("./dataHeals");
   runProfileNameLinkStubPurge = heals.runProfileNameLinkStubPurge;
   runAug19SavedSpecProfileRepair = heals.runAug19SavedSpecProfileRepair;
+  runAug19SavedSpecProfileRepairV2 = heals.runAug19SavedSpecProfileRepairV2;
 
   // ── Seed fixture data ──────────────────────────────────────────────────────
 
@@ -389,5 +392,148 @@ describe("runAug19SavedSpecProfileRepair", () => {
       .from(brandProfilesTable)
       .where(and(eq(brandProfilesTable.key, "guard__deluxe"), eq(brandProfilesTable.scope, "live")));
     expect(afterSecondRun.updatedAtMs).toBe(profile.updatedAtMs);
+  });
+});
+
+describe("runAug19SavedSpecProfileRepairV2", () => {
+  it("rebuilds verified recipe rows, applicator links, pepperoni, and only unstarted run snapshots", async () => {
+    await db.insert(savedSpecSheetsTable).values({
+      scope: "live",
+      label: "authoritative Aug 19 full setup",
+      createdAt: new Date("2026-08-19T16:00:00.000Z"),
+      data: {
+        profiles: [{
+          brand: "Full",
+          flavor: "everything",
+          sauceName: "Red Hot Pizza Sauce",
+          doughName: "Full Dough",
+          sauceOzPerPizza: 4,
+          applicators: [
+            { slot: 1, type: "Full Cheese Blend", ozPerPizza: 2 },
+            { slot: 3, type: "Full Veggie Mix", ozPerPizza: 1.5 },
+          ],
+          pepperonis: [{ type: "Natural Pepperoni", sticks: 12, ozPerPizza: 1.25, batchLbs: 20 }],
+        }],
+        recipes: [],
+      },
+    });
+    await db.insert(sauceRecipesTable).values({
+      id: "red-hot",
+      scope: "live",
+      name: "Red Hot Pizza Sauce",
+      components: [{ ingredient: "Garlic Sauce", lbs: 200 }],
+    });
+    await db.insert(doughRecipesTable).values({
+      id: "full-dough",
+      scope: "live",
+      name: "Full Dough",
+      components: [{ ingredient: "Flour", lbs: 100 }],
+      doughballWeightOz: 10,
+      doughballsPerTray: 18,
+    });
+    await db.insert(cheeseRecipesTable).values({
+      id: "full-cheese",
+      scope: "live",
+      name: "Full Cheese Blend",
+      components: [{ ingredient: "Mozz", lbs: 20 }],
+    });
+    await db.insert(mixesTable).values({
+      id: "full-mix",
+      scope: "live",
+      name: "Full Veggie Mix",
+      components: [{ ingredient: "Peppers", perPizza: 1 }],
+    });
+    await db.insert(brandProfilesTable).values({
+      key: "full__everything",
+      scope: "live",
+      brand: "Full",
+      flavor: "everything",
+      values: {
+        frontlineRecipeName: "Mystic Pizza Sauce",
+        frontlineRecipe: [{ ingredient: "Wrong Sauce", lbs: 10 }],
+        doughRecipeName: "Wrong Dough",
+        doughRecipe: [{ ingredient: "Wrong Flour", lbs: 10 }],
+        app1Type: "Wrong Blend",
+        app1CheeseRecipeName: "Wrong Blend",
+        app3Type: "cheese",
+        app3CheeseRecipeName: "Wrong Cheese",
+        pep1Type: "Wrong Pepperoni",
+      },
+      updatedAtMs: 1,
+    });
+    await db.insert(dailySyncTable).values({
+      date: "2026-08-21",
+      scope: "live",
+      data: {
+        dayState: {
+          runs: [
+            { id: "full-unstarted", brand: "Full", flavor: "everything" },
+            { id: "full-started", brand: "Full", flavor: "everything", startedAt: 1755800000000 },
+          ],
+        },
+        runValues: {
+          "full-unstarted": { frontlineRecipeName: "Mystic Pizza Sauce", app1Type: "Wrong Blend" },
+          "full-started": { frontlineRecipeName: "Mystic Pizza Sauce", app1Type: "Wrong Blend" },
+        },
+        runValuesUpdatedAt: { "full-unstarted": 1, "full-started": 1 },
+      },
+    });
+
+    await runAug19SavedSpecProfileRepairV2();
+
+    const [profile] = await db
+      .select()
+      .from(brandProfilesTable)
+      .where(and(eq(brandProfilesTable.key, "full__everything"), eq(brandProfilesTable.scope, "live")));
+    const values = profile.values as Record<string, unknown>;
+    expect(values).toMatchObject({
+      frontlineRecipeName: "Red Hot Pizza Sauce",
+      frontlineRecipe: [{ ingredient: "Garlic Sauce", lbs: 200 }],
+      doughRecipeName: "Full Dough",
+      doughRecipe: [{ ingredient: "Flour", lbs: 100 }],
+      targetDoughballWeight: 10,
+      doughballsPerTray: 18,
+      app1Type: "cheese",
+      app1CheeseRecipeName: "Full Cheese Blend",
+      app1OzPerPizza: 2,
+      app3Type: "Mix",
+      app3CheeseRecipeName: "Full Veggie Mix",
+      app3OzPerPizza: 1.5,
+      pep1Type: "Natural Pepperoni",
+      pep1Sticks: 12,
+      pep1OzPerPizza: 1.25,
+      pep1BatchLbs: 20,
+      pep1Combined: true,
+    });
+
+    const [day] = await db
+      .select()
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, "2026-08-21"), eq(dailySyncTable.scope, "live")));
+    const data = day.data as Record<string, any>;
+    expect(data.runValues["full-unstarted"]).toMatchObject({
+      frontlineRecipeName: "Red Hot Pizza Sauce",
+      frontlineRecipe: [{ ingredient: "Garlic Sauce", lbs: 200 }],
+      app1Type: "cheese",
+      app3Type: "Mix",
+      pep1Type: "Natural Pepperoni",
+    });
+    expect(data.runValues["full-started"]).toEqual({
+      frontlineRecipeName: "Mystic Pizza Sauce",
+      app1Type: "Wrong Blend",
+    });
+
+    const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, AUG19_REPAIR_V2_ID));
+    expect(marker).toBeTruthy();
+    await db
+      .update(brandProfilesTable)
+      .set({ values: { frontlineRecipeName: "Manual override" }, updatedAtMs: 99999999999999 })
+      .where(and(eq(brandProfilesTable.key, "full__everything"), eq(brandProfilesTable.scope, "live")));
+    await runAug19SavedSpecProfileRepairV2();
+    const [afterSecondRun] = await db
+      .select()
+      .from(brandProfilesTable)
+      .where(and(eq(brandProfilesTable.key, "full__everything"), eq(brandProfilesTable.scope, "live")));
+    expect((afterSecondRun.values as Record<string, unknown>).frontlineRecipeName).toBe("Manual override");
   });
 });
