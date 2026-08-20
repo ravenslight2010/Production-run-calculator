@@ -6,8 +6,8 @@
  *  2. the same origin starts serving a changed worker;
  *  3. foregrounding activates the new worker without claiming or reloading the
  *     active tab;
- *  4. a staff-chosen reload (including an older error screen's generic reload)
- *     is the only thing that enters the new document.
+ *  4. the single persistent update prompt runs the worker update path and
+ *     reloads only after staff choose Reload now.
  *
  * The fixture intentionally serves real `vite build` output. It does not use
  * the main Playwright configuration because that suite prepares database-backed
@@ -172,7 +172,7 @@ async function startVersionedServer(versionDirs: Record<Version, string>) {
 }
 
 test.describe("PWA update handoff", () => {
-  test("keeps the active document intact until staff choose Reload now", async ({
+  test("shows one prompt and reloads only after staff choose Reload now", async ({
     page,
   }) => {
     const fixture = await buildTwoVersionFixture();
@@ -205,10 +205,14 @@ test.describe("PWA update handoff", () => {
       server.publish("new");
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 
-      await expect(page.getByText("Update available", { exact: true })).toBeVisible({
+      const updateMessage = page.getByText("Update available", { exact: true });
+      const reloadAction = page.getByRole("button", { name: "Reload now" });
+      await expect(updateMessage).toHaveCount(1);
+      await expect(reloadAction).toHaveCount(1);
+      await expect(updateMessage).toBeVisible({
         timeout: 20_000,
       });
-      await expect(page.getByRole("button", { name: "Reload now" })).toBeVisible();
+      await expect(reloadAction).toBeVisible();
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await expect
         .poll(() =>
@@ -232,13 +236,35 @@ test.describe("PWA update handoff", () => {
         )
         .toBe(true);
 
-      // Model the legacy boundary's only available recovery action. The worker
-      // was already activated above, so this user-chosen reload now enters the
-      // fixed build instead of repeating the stale cached document.
-      await page.reload({ waitUntil: "networkidle" });
+      // Count only the user-action update check. The button must go through the
+      // service-worker handoff path before it reloads, even when skipWaiting
+      // has already activated the discovered worker.
+      await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (!registration) throw new Error("Expected an active service worker");
+
+        const update = registration.update.bind(registration);
+        Object.defineProperty(registration, "update", {
+          configurable: true,
+          value: async () => {
+            const key = "__pwaSmokeUpdateCalls";
+            const calls = Number(sessionStorage.getItem(key) ?? "0") + 1;
+            sessionStorage.setItem(key, String(calls));
+            return update();
+          },
+        });
+      });
+
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "networkidle" }),
+        reloadAction.click(),
+      ]);
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
         timeout: 20_000,
       });
+      await expect
+        .poll(() => page.evaluate(() => sessionStorage.getItem("__pwaSmokeUpdateCalls")))
+        .toBe("1");
       await expect
         .poll(() =>
           page.evaluate(

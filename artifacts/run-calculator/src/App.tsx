@@ -144,19 +144,18 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
       action: (
         <ToastAction
           altText="Reload now"
-          onClick={() => {
-            if (needRefresh) {
-              void updateServiceWorker(true);
-            } else {
-              window.location.reload();
-            }
-          }}
+          onClick={() => void handleUpdateAndReload()}
         >
           Reload now
         </ToastAction>
       ),
     });
-  }, [activatedUpdateReady, needRefresh, toast, updateServiceWorker]);
+  }, [
+    activatedUpdateReady,
+    handleUpdateAndReload,
+    needRefresh,
+    toast,
+  ]);
 
   return (
     <AppUpdateContext.Provider value={{ updateAndReload: handleUpdateAndReload }}>
