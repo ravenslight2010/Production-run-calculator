@@ -143,6 +143,8 @@ export interface LiveRunProviderProps {
   machine: { spinSec: number; hopperSec: number };
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   autoTrackBlocked?: boolean;
+  autoTrackBlockedRef?: React.MutableRefObject<boolean>;
+  autoTrackRebaseAfterBlock?: boolean;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -171,6 +173,8 @@ export function LiveRunProvider({
   machine,
   externalAutoSuppressRef,
   autoTrackBlocked = false,
+  autoTrackBlockedRef,
+  autoTrackRebaseAfterBlock = false,
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus);
 
@@ -494,6 +498,8 @@ export function LiveRunProvider({
       // manual-edit latches written by UI consumers are honoured by the write loop.
       externalAutoSuppressRef,
       autoTrackBlocked,
+      autoTrackBlockedRef,
+      autoTrackRebaseAfterBlock,
     });
 
   // ── Pre-seed next run's dough counters when this run's press is done ─────

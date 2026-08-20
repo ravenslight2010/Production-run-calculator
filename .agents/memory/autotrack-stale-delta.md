@@ -57,10 +57,10 @@ valid remote correction such as 31 → 4 would otherwise look like an ordinary
 non-zero total, so the waking device could add its hidden-time backlog and
 publish a freshly stamped overwrite.
 
-**How to apply:** Release the barrier only after the pull path has either
-adopted the normal merge result or failed without changing local state. On
-release, re-base auto-track timing and expected-case bookkeeping from the
-currently held form/timeline so the next write is one normal increment, never
-the hidden interval. Failed pulls must remain visibly unsynchronized (normal
-retry/push handling continues); they must not be recorded as a successful
-remote reconciliation.
+**How to apply:** Raise a synchronous ref fence before the foreground pull; a
+React state flag alone can commit after the wake clock snap and let one stale
+write through. Release only after the pull has either applied or failed without
+changing local state. Re-base auto-track bookkeeping only when a newer remote
+lifecycle was adopted; an unchanged pull must retain ordinary screen-off
+catch-up. Failed pulls remain visibly unsynchronized and keep normal retry/push
+handling.

@@ -1396,6 +1396,57 @@ export function overlayRunMetaStamps(runs: RunMeta[]): RunMeta[] {
   }
 }
 
+/**
+ * Atomically adopt strictly-newer remote lifecycle copies for runs already in
+ * the local day. Foreground recovery uses this before releasing auto-track or
+ * any queued push, so a sleeping client's durable running copy cannot survive
+ * long enough to publish over a Stop it missed.
+ *
+ * This intentionally follows the established lifecycle LWW contract:
+ * strictly-newer metaUpdatedAt wins; equal/absent stamps do not get a special
+ * stop-wins rule. The ordinary inbound merge still handles remote-only runs,
+ * ordering, tombstones, overlays, and run values.
+ */
+export function adoptStrictlyNewerRemoteLifecycles(
+  localDay: DayState,
+  remoteRuns: RunMeta[],
+): { dayState: DayState; adoptedRunIds: string[] } {
+  const remoteById = new Map(remoteRuns.map((run) => [run.id, run]));
+  const adoptedRunIds: string[] = [];
+  const runs = localDay.runs.map((localRun) => {
+    const remoteRun = remoteById.get(localRun.id);
+    if (
+      !remoteRun
+      || (remoteRun.metaUpdatedAt ?? 0) <= (localRun.metaUpdatedAt ?? 0)
+      || (
+        remoteRun.startedAt === localRun.startedAt
+        && remoteRun.pausedAt === localRun.pausedAt
+        && remoteRun.endedAt === localRun.endedAt
+      )
+    ) {
+      return localRun;
+    }
+    adoptedRunIds.push(localRun.id);
+    return remoteRun;
+  });
+  if (adoptedRunIds.length === 0) return { dayState: localDay, adoptedRunIds };
+
+  const selectedRunId = localDay.runs[localDay.currentIndex]?.id;
+  const selectedIndex = selectedRunId
+    ? runs.findIndex((run) => run.id === selectedRunId)
+    : -1;
+  return {
+    dayState: {
+      ...localDay,
+      runs,
+      currentIndex: selectedIndex >= 0
+        ? selectedIndex
+        : Math.max(0, Math.min(localDay.currentIndex, runs.length - 1)),
+    },
+    adoptedRunIds,
+  };
+}
+
 export function loadHistory(): HistoryDay[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);

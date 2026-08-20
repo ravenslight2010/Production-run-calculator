@@ -49,6 +49,9 @@ describe("foreground wake sync barrier", () => {
   it("holds queued pushes, retries normally after a failed pull, and does not mark failure as reconciled", () => {
     expect(homeSource).toContain("if (foregroundSyncBarrierRef.current)");
     expect(homeSource).toContain("foregroundPushPendingRef.current = true");
+    expect(homeSource).toContain("syncPushGenerationRef.current += 1");
+    expect(homeSource).toContain("controller.abort()");
+    expect(homeSource).toContain("generation !== syncPushGenerationRef.current");
     expect(homeSource).toContain("if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`)");
     expect(homeSource).toContain("reconciled = true");
     expect(homeSource).toContain("if (shouldPush || !reconciled)");
@@ -62,8 +65,33 @@ describe("foreground wake sync barrier", () => {
 
   it("prevents the first released clock tick from writing the hidden-time delta", () => {
     expect(hookSource).toContain("autoTrackBlocked");
+    expect(hookSource).toContain("autoTrackBlockedRef?.current");
+    expect(homeSource).toContain("setAutoTrackBlocked(true)");
+    expect(homeSource).toContain("autoTrackBlockedRef={foregroundSyncBarrierRef}");
+    expect(homeSource).toContain("setAutoTrackRebaseAfterBlock(true)");
     expect(hookSource).toContain("rebaseAfterForegroundSync");
     expect(hookSource).toContain("lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1");
-    expect(hookSource).toContain("if (autoTrackBlocked || disabled");
+    expect(hookSource).toContain("autoTrackBlockedRef?.current");
+  });
+
+  it("durably adopts a newer lifecycle before releasing recovery work", () => {
+    const resetGate = homeSource.indexOf("const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot({");
+    const adopt = homeSource.indexOf("adoptStrictlyNewerRemoteLifecycles(");
+    const persist = homeSource.indexOf(
+      "saveDayState(lifecycleAdoption.dayState, { stampMeta: false })",
+      adopt,
+    );
+    const updateRef = homeSource.indexOf(
+      "dayStateRef.current = lifecycleAdoption.dayState",
+      persist,
+    );
+    const generalMerge = homeSource.indexOf("applySyncCallbackRef.current(payload)", updateRef);
+    const release = homeSource.indexOf("foregroundSyncBarrierRef.current = false", generalMerge);
+    expect(resetGate).toBeGreaterThan(-1);
+    expect(adopt).toBeGreaterThan(resetGate);
+    expect(persist).toBeGreaterThan(adopt);
+    expect(updateRef).toBeGreaterThan(persist);
+    expect(generalMerge).toBeGreaterThan(updateRef);
+    expect(release).toBeGreaterThan(generalMerge);
   });
 });

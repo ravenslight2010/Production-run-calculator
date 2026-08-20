@@ -101,11 +101,21 @@ interface AutoTrackParams {
    */
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   /**
-   * A foreground sync pull is applying the newest shared run values. Hold all
-   * counter ticks until that pull completes, then re-base from the adopted
-   * values instead of applying the time elapsed while the screen was hidden.
+   * A foreground sync pull is checking the newest shared run values. Hold all
+   * counter ticks until that pull completes.
    */
   autoTrackBlocked?: boolean;
+  /**
+   * Synchronous companion to autoTrackBlocked. The foreground barrier ref is
+   * raised before the wake clock can render, so the write effect is fenced even
+   * if React has not committed the blocked state yet.
+   */
+  autoTrackBlockedRef?: React.MutableRefObject<boolean>;
+  /**
+   * Only lifecycle adoption requests a bookkeeping rebase on release. An
+   * unchanged foreground pull must retain ordinary screen-off catch-up.
+   */
+  autoTrackRebaseAfterBlock?: boolean;
 }
 
 interface AutoTrackResult {
@@ -192,6 +202,10 @@ export function useAutoTrack({
   disabled = false,
   externalAutoSuppressRef,
   autoTrackBlocked = false,
+  autoTrackBlockedRef,
+  // Preserve the established behavior for callers that only provide the
+  // original boolean barrier. Home opts out explicitly for unchanged pulls.
+  autoTrackRebaseAfterBlock = true,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   // Independent dough-timer pause: non-zero = wall-clock ms when paused.
@@ -460,6 +474,7 @@ export function useAutoTrack({
   // always establishes fresh baselines before the first visible clock tick can
   // turn hidden time into a new counter write.
   const previouslyBlockedRef = useRef(autoTrackBlocked);
+  const foregroundRebaseRequestedRef = useRef(false);
   const rebaseAfterForegroundSync = useCallback(() => {
     const nowMs = nowTime.getTime();
     const casePeriodMs =
@@ -506,16 +521,32 @@ export function useAutoTrack({
 
   useEffect(() => {
     if (autoTrackBlocked) {
-      resetBookkeeping();
-    } else if (previouslyBlockedRef.current) {
+      if (autoTrackRebaseAfterBlock) {
+        foregroundRebaseRequestedRef.current = true;
+        resetBookkeeping();
+      }
+    } else if (previouslyBlockedRef.current && foregroundRebaseRequestedRef.current) {
       rebaseAfterForegroundSync();
+      foregroundRebaseRequestedRef.current = false;
     }
     previouslyBlockedRef.current = autoTrackBlocked;
-  }, [autoTrackBlocked, rebaseAfterForegroundSync, resetBookkeeping]);
+  }, [
+    autoTrackBlocked,
+    autoTrackRebaseAfterBlock,
+    rebaseAfterForegroundSync,
+    resetBookkeeping,
+  ]);
 
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
-    if (autoTrackBlocked || disabled || !autoTrackProgress || !(runStatus === "running" || drainActive) || !autoTrackSuggestion) return;
+    if (
+      autoTrackBlockedRef?.current
+      || autoTrackBlocked
+      || disabled
+      || !autoTrackProgress
+      || !(runStatus === "running" || drainActive)
+      || !autoTrackSuggestion
+    ) return;
 
     const nowMs = nowTime.getTime();
     // While the manual-edit suppression window is open, keep baselines current
@@ -807,7 +838,7 @@ export function useAutoTrack({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoTrackBlocked, nowTime]);
+  }, [autoTrackBlocked, autoTrackBlockedRef, nowTime]);
 
   return {
     autoTrackProgress,

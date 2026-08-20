@@ -118,6 +118,7 @@ import {
   loadDayState,
   saveDayState,
   overlayRunMetaStamps,
+  adoptStrictlyNewerRemoteLifecycles,
   loadHistory,
   filterMeaningfulHistory,
   archiveDayToHistory,
@@ -6987,7 +6988,15 @@ export default function Home() {
   const foregroundSyncBarrierRef = useRef(false);
   const foregroundSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const foregroundPushPendingRef = useRef(false);
+  // Every foreground reconciliation starts a new push generation and aborts
+  // requests built before wake. The server's metaUpdatedAt merge is still the
+  // durable last line of defense if an already-received request completes, but
+  // stale responses/retries may no longer update this client's sync signature
+  // or re-publish a captured running snapshot after a remote Stop is adopted.
+  const syncPushGenerationRef = useRef(0);
+  const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
+  const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
   const applySyncCallbackRef = useRef<
     (p: SyncPayload, options?: { initialSnapshot?: boolean }) => void
   >(() => {});
@@ -7881,6 +7890,14 @@ export default function Home() {
       if (foregroundSyncInFlightRef.current) return foregroundSyncInFlightRef.current;
 
       foregroundSyncBarrierRef.current = true;
+      // Raise both the synchronous ref fence and its rendered companion before
+      // the wake clock can publish hidden-time progress. A normal unchanged
+      // pull releases without rebasing, preserving ordinary screen-off catch-up.
+      setAutoTrackRebaseAfterBlock(false);
+      setAutoTrackBlocked(true);
+      syncPushGenerationRef.current += 1;
+      for (const controller of syncPushAbortControllersRef.current) controller.abort();
+      syncPushAbortControllersRef.current.clear();
       if (pushTimerRef.current) {
         clearTimeout(pushTimerRef.current);
         pushTimerRef.current = null;
@@ -7913,18 +7930,33 @@ export default function Home() {
             // unchanged. Re-baselining every successful wake would erase the
             // legitimate production delta accumulated while the display slept.
             // Only a newer lifecycle frame needs the auto-track fence.
-            const localRuns = new Map(dayStateRef.current.runs.map((run) => [run.id, run]));
-            const adoptsLifecycle = payload.dayState.runs.some((remoteRun) => {
-              const localRun = localRuns.get(remoteRun.id);
-              return !!localRun
-                && (remoteRun.metaUpdatedAt ?? 0) > (localRun.metaUpdatedAt ?? 0)
-                && (
-                  remoteRun.startedAt !== localRun.startedAt
-                  || remoteRun.pausedAt !== localRun.pausedAt
-                  || remoteRun.endedAt !== localRun.endedAt
-                );
+            const durableLocalDay = {
+              ...dayStateRef.current,
+              runs: overlayRunMetaStamps(dayStateRef.current.runs),
+            };
+            const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot({
+              remoteDate: payload.dayState.date,
+              localDate: todayStr(),
+              remoteResetAt: payload.dayState.resetAt ?? 0,
+              localResetAt: durableLocalDay.resetAt ?? 0,
             });
-            if (adoptsLifecycle) setAutoTrackBlocked(true);
+            const lifecycleAdoption = acceptsRemoteLifecycle
+              ? adoptStrictlyNewerRemoteLifecycles(
+                  durableLocalDay,
+                  payload.dayState.runs,
+                )
+              : { dayState: durableLocalDay, adoptedRunIds: [] };
+            if (lifecycleAdoption.adoptedRunIds.length > 0) {
+              setAutoTrackRebaseAfterBlock(true);
+              // Persist and publish the winning lifecycle synchronously before
+              // the general inbound merge and before recovery pushes are
+              // released. Lifecycle handlers read dayStateRef, so this also
+              // fences a late tap against the old running copy.
+              saveDayState(lifecycleAdoption.dayState, { stampMeta: false });
+              dayStateRef.current = lifecycleAdoption.dayState;
+              setDayState(lifecycleAdoption.dayState);
+              lastSyncSigRef.current = "";
+            }
             applySyncCallbackRef.current(payload);
           }
           // The live row is the authority that must land first. Profile and
@@ -8300,7 +8332,13 @@ export default function Home() {
     return true;
   }
 
-  function doFetch(payload: SyncPayload, retriesLeft: number, sig?: string) {
+  function doFetch(
+    payload: SyncPayload,
+    retriesLeft: number,
+    sig?: string,
+    generation = syncPushGenerationRef.current,
+  ) {
+    if (generation !== syncPushGenerationRef.current) return;
     // Guard the retry path too: buildSyncPayload stamps the payload with the
     // date it was built on. A push queued just before midnight could otherwise
     // retry after midnight and write yesterday's runs into the new day's
@@ -8311,12 +8349,17 @@ export default function Home() {
     // Key the live row by the CLIENT's local date (?today=). The server is UTC, so
     // without this a client behind UTC writes the live day into its local
     // "tomorrow" row — clobbering a scheduled day (and its case counts).
+    const controller = new AbortController();
+    syncPushAbortControllersRef.current.add(controller);
     fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ senderId: clientId.current, payload }),
+      signal: controller.signal,
     }).then(async (res) => {
+      if (generation !== syncPushGenerationRef.current) return;
       const body = await res.json().catch(() => null);
+      if (generation !== syncPushGenerationRef.current) return;
       pushAcknowledgedRef.current = true;
       if (handleStaleSyncWrite(body)) {
         // The server dropped this write (data reset not yet honoured). The
@@ -8330,14 +8373,17 @@ export default function Home() {
       // push is never treated as synced (which would block its retry).
       if (sig !== undefined) lastSyncSigRef.current = sig;
     }).catch(() => {
+      if (generation !== syncPushGenerationRef.current) return;
       if (retriesLeft > 0) {
-        setTimeout(() => doFetch(payload, retriesLeft - 1, sig), 5_000);
+        setTimeout(() => doFetch(payload, retriesLeft - 1, sig, generation), 5_000);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
         pushAcknowledgedRef.current = true;
         // ...but tell the user their changes aren't backed up / shared yet.
         setSyncPushFailed(true);
       }
+    }).finally(() => {
+      syncPushAbortControllersRef.current.delete(controller);
     });
   }
 
@@ -16991,6 +17037,8 @@ export default function Home() {
           hopperSec: Number(v.hopperSec) || 0,
         }}
         autoTrackBlocked={autoTrackBlocked}
+        autoTrackBlockedRef={foregroundSyncBarrierRef}
+        autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />

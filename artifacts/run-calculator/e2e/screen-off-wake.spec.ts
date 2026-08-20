@@ -265,6 +265,13 @@ async function installHiddenMock(page: Page): Promise<void> {
         (window as unknown as Record<string, unknown>).__testHidden ?? false,
       configurable: true,
     });
+    Object.defineProperty(document, "visibilityState", {
+      get: () =>
+        (window as unknown as Record<string, unknown>).__testHidden
+          ? "hidden"
+          : "visible",
+      configurable: true,
+    });
   });
 }
 
@@ -623,7 +630,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
-    "C. sleeping peer adopts lifecycle, profile changes, deletions, and factory settings on wake",
+    "C. disconnected sleeping peer adopts remote Stop before stale recovery writes and after reload",
     async ({ page, browser }: { page: Page; browser: Browser }) => {
       const profileBrand = `Wake ${uid()}`;
       const profileFlavor = "Peer Flavor";
@@ -655,7 +662,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         expect(result).toEqual({ ok: true, status: 200 });
       };
 
-      await setupAndStartRun(page);
+      const safeBaseMs = await setupAndStartRun(page);
       // This scenario exercises manager-only profile/factory APIs. Other
       // screen-wake cases intentionally run as floor staff.
       await promoteCurrentPageUserToManager(page);
@@ -672,6 +679,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         const sleepingPage = await peer.newPage();
         await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
         await sleepingPage.locator('[data-testid="tab-run"]').waitFor({ state: "visible", timeout: 20_000 });
+        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
+          .waitFor({ state: "visible", timeout: 15_000 });
         await sleepingPage.evaluate((key) => {
           localStorage.setItem(
             `run-calc-profile-${key}`,
@@ -680,11 +689,40 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         }, profileKey);
         await installHiddenMock(sleepingPage);
         await simulateScreenOff(sleepingPage);
+        await peer.setOffline(true);
+        await sleepingPage.waitForTimeout(300);
 
-        // Changes happen while the peer is hidden: the live-row transition is
-        // delivered by the normal sync path, while profiles/factory settings
-        // have no server event stream and must be refreshed on foreground.
-        await page.getByRole("button", { name: /pause.?run/i }).first().click();
+        const staleDayRaw = await sleepingPage.evaluate(() =>
+          localStorage.getItem("run-calc-day"),
+        );
+        expect(staleDayRaw, "sleeping peer should persist its running copy").toBeTruthy();
+
+        // Force a stale queued write while the sleeping browser is offline.
+        // It carries the old running lifecycle and must be invalidated/rebuilt
+        // after foreground reconciliation rather than retried after the Stop.
+        await sleepingPage.locator('[data-testid="input-cycleSpeed"]').evaluate((el) => {
+          const input = el as HTMLInputElement;
+          const setter = Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            "value",
+          )?.set;
+          setter?.call(input, "31");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await sleepingPage.waitForTimeout(900);
+
+        // Device A stops while B is genuinely disconnected and therefore cannot
+        // receive the normal SSE lifecycle event.
+        await mockDateNow(page, safeBaseMs + 60_000);
+        await page.getByRole("button", { name: /stop.?run/i }).first().click();
+        await page.waitForFunction(async () => {
+          const response = await fetch(`/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`, {
+            cache: "no-store",
+          });
+          const body = await response.json() as { dayState?: { runs?: Array<{ endedAt?: number }> } };
+          return body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ?? false;
+        }, undefined, { timeout: 15_000 });
         await postProfile("Wake Sauce V2", profileStamp + 10_000);
         const factoryWrite = await page.evaluate(async () => {
           const res = await fetch("/api/factory-data", {
@@ -696,9 +734,16 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         });
         expect(factoryWrite).toBe(true);
 
+        // Keep the recovered EventSource disconnected so the only path that can
+        // adopt Stop is the explicit foreground GET.
+        await sleepingPage.route("**/api/sync/events**", (route) => route.abort());
+        await peer.setOffline(false);
         await simulateWake(sleepingPage);
-        await sleepingPage.getByRole("button", { name: /resume.?run/i }).first()
+        await sleepingPage.getByText("Ended", { exact: true }).first()
           .waitFor({ state: "visible", timeout: 15_000 });
+        const casesAfterStop = await readCaseTotal(sleepingPage);
+        await sleepingPage.waitForTimeout(2_000);
+        expect(await readCaseTotal(sleepingPage)).toBe(casesAfterStop);
         await sleepingPage.waitForFunction(async ({ key }) => {
           const response = await fetch("/api/brand-profiles");
           const body = await response.json() as { items?: Array<{ key: string; values?: { frontlineRecipeName?: string } }> };
@@ -711,25 +756,32 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         });
         expect(factoryRead).toBe("05:45");
 
-        // A second wake observes deletion rather than re-uploading the older
-        // blob that was cached before screen-off.
-        await simulateScreenOff(sleepingPage);
-        const deleted = await page.evaluate(async (key) => {
-          const res = await fetch("/api/brand-profiles", {
-            method: "DELETE",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ keys: [key] }),
+        // Let the captured retry window pass, then verify it did not replace the
+        // authoritative Stop on the shared row.
+        await sleepingPage.waitForTimeout(5_500);
+        const sharedStillStopped = await page.evaluate(async () => {
+          const res = await fetch(`/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`, {
+            cache: "no-store",
           });
-          return res.ok;
-        }, profileKey);
-        expect(deleted).toBe(true);
-        await simulateWake(sleepingPage);
-        await sleepingPage.waitForFunction(async ({ key }) => {
-          const response = await fetch("/api/brand-profiles");
-          const body = await response.json() as { items?: Array<{ key: string }> };
-          return !body.items?.some((item) => item.key === key);
-        }, { key: profileKey }, { timeout: 15_000 });
+          const body = await res.json() as { dayState?: { runs?: Array<{ endedAt?: number }> } };
+          return body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ?? false;
+        });
+        expect(sharedStillStopped).toBe(true);
+        await sleepingPage.getByText("Ended", { exact: true }).first()
+          .waitFor({ state: "visible", timeout: 5_000 });
+
+        // Recreate the old running disk copy and perform a full reload. The
+        // authoritative strictly-newer Stop must win again without an operator
+        // tapping Stop on this device.
+        await sleepingPage.unroute("**/api/sync/events**");
+        await sleepingPage.evaluate((raw) => {
+          if (raw) localStorage.setItem("run-calc-day", raw);
+        }, staleDayRaw);
+        await sleepingPage.reload({ waitUntil: "domcontentloaded" });
+        await sleepingPage.getByText("Ended", { exact: true }).first()
+          .waitFor({ state: "visible", timeout: 15_000 });
       } finally {
+        await peer.setOffline(false);
         await peer.close();
       }
     },

@@ -470,4 +470,79 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(5);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 6. A remote Stop can be discovered only after the wake clock has snapped.
+  // The synchronous foreground ref must block that snap before React commits
+  // autoTrackBlocked; lifecycle adoption then requests a rebase and ended runs
+  // remain frozen after release.
+  // ───────────────────────────────────────────────────────────────────────────
+  it("6. foreground ref fences the wake tick until a remote Stop is adopted", () => {
+    const elapsed0 = 780;
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+    });
+    const foregroundBarrierRef = { current: false };
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      nowMs: number,
+      elapsedSec: number,
+      overrides: Partial<Props> = {},
+    ): Props => ({
+      runId: "wake-remote-stop-6",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+      autoTrackBlockedRef: foregroundBarrierRef,
+      ...overrides,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, elapsed0) },
+    );
+    act(() => rerender(props(T0 + 500, elapsed0)));
+    const beforeWake = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
+
+    // The visibility clock snap renders before autoTrackBlocked state commits,
+    // but the synchronous foreground ref is already raised.
+    const wakeMs = T0 + 20 * CASE_PERIOD_MS;
+    foregroundBarrierRef.current = true;
+    act(() => {
+      rerender(props(wakeMs, elapsed0 + 20 * CASE_PERIOD_MS / 1000));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
+
+    // Foreground GET adopts the newer remote Stop while the barrier remains up.
+    act(() => {
+      rerender(props(wakeMs, elapsed0, {
+        runStatus: "ended",
+        endedAt: wakeMs - 1_000,
+        autoTrackBlocked: true,
+        autoTrackRebaseAfterBlock: true,
+      }));
+    });
+
+    // Release, then advance beyond a normal case period. With no freezer drain
+    // inventory, the ended run must remain frozen.
+    foregroundBarrierRef.current = false;
+    act(() => {
+      rerender(props(wakeMs + CASE_PERIOD_MS + 1, elapsed0, {
+        runStatus: "ended",
+        endedAt: wakeMs - 1_000,
+        autoTrackBlocked: false,
+        autoTrackRebaseAfterBlock: true,
+      }));
+    });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
+  });
 });

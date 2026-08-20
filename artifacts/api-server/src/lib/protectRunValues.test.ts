@@ -413,6 +413,27 @@ describe("protectRunValues run-list lifecycle LWW (metaUpdatedAt)", () => {
     expect(out).toEqual([{ id: "r1", startedAt: 222, metaUpdatedAt: 2000 }]);
   });
 
+  it("keeps an authoritative stored Stop when a waking peer republishes an older running copy", () => {
+    const existing = mk([{
+      id: "r1",
+      startedAt: 111,
+      endedAt: 333,
+      metaUpdatedAt: 3000,
+    }]);
+    const staleWakePush = mk([{
+      id: "r1",
+      startedAt: 111,
+      metaUpdatedAt: 2000,
+    }]);
+    const out = outRuns(protectRunValues(staleWakePush, existing));
+    expect(out).toEqual([{
+      id: "r1",
+      startedAt: 111,
+      endedAt: 333,
+      metaUpdatedAt: 3000,
+    }]);
+  });
+
   it("keeps incoming on EQUAL stamps (tie -> incoming, the pre-stamp status quo)", () => {
     const existing = mk([{ id: "r1", startedAt: 111, metaUpdatedAt: 1000 }]);
     const incoming = mk([{ id: "r1", endedAt: 333, metaUpdatedAt: 1000 }]);
