@@ -135,3 +135,4 @@
 - [Name-only recipe attachment](recipe-name-only-attachment.md) + [historical fan narrowing](brand-fan-linked-name-narrowing.md) — brand/flavor apply-target fan RETIRED; recipes attach by name link/slot match; same-sheet tie is the only brand/flavor path.
 - [Correcting-import alias cleanup](correcting-import-alias-cleanup.md) — overwrite of a different stored name = correction: delete bad alias (unless old name live/unknown — cheese ingredients check cheese AND mix pools), learn reverse alias.
 - [Profile write gating](profile-write-gating.md) — profile saves/deletes gate on hasCapability("manage-profiles") not isManager; boot heals deferred to a capability-gated effect; push queue drops 403s as terminal.
+- [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa `autoUpdate` reloads clients; interactive “Reload now” UI requires `prompt` so `needRefresh` fires.

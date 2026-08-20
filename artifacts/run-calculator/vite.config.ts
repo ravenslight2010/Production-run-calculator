@@ -76,7 +76,9 @@ export default defineConfig({
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
     VitePWA({
-      registerType: "autoUpdate",
+      // Keep the new worker waiting so AppUpdatePrompt can offer staff a
+      // deliberate, one-tap reload instead of interrupting active work.
+      registerType: "prompt",
       base: basePath,
       includeAssets: [
         "favicon.svg",

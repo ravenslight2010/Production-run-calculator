@@ -13,6 +13,7 @@ type ToasterToast = ToastProps & {
   title?: React.ReactNode
   description?: React.ReactNode
   action?: ToastActionElement
+  persistent?: boolean
 }
 
 const actionTypes = {
@@ -73,11 +74,25 @@ const addToRemoveQueue = (toastId: string) => {
 
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
-    case "ADD_TOAST":
+    case "ADD_TOAST": {
+      const persistentToasts = state.toasts.filter((toast) => toast.persistent)
+      const nextToasts = action.toast.persistent
+        ? [action.toast, ...state.toasts.filter((toast) => !toast.persistent)]
+        : persistentToasts.length
+          ? [action.toast, ...persistentToasts]
+          : [action.toast, ...state.toasts]
+
       return {
         ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
+        // A reload prompt must remain available while a worker waits. Keep it
+        // alongside the latest ordinary toast instead of letting the global
+        // one-toast limit replace it.
+        toasts: nextToasts.slice(
+          0,
+          TOAST_LIMIT + (action.toast.persistent || persistentToasts.length ? 1 : 0)
+        ),
       }
+    }
 
     case "UPDATE_TOAST":
       return {
@@ -89,21 +104,22 @@ export const reducer = (state: State, action: Action): State => {
 
     case "DISMISS_TOAST": {
       const { toastId } = action
+      const shouldDismiss = (toast: ToasterToast) =>
+        !toast.persistent &&
+        (toastId === undefined || toast.id === toastId)
 
       // ! Side effects ! - This could be extracted into a dismissToast() action,
       // but I'll keep it here for simplicity
-      if (toastId) {
-        addToRemoveQueue(toastId)
-      } else {
-        state.toasts.forEach((toast) => {
+      state.toasts.forEach((toast) => {
+        if (shouldDismiss(toast)) {
           addToRemoveQueue(toast.id)
-        })
-      }
+        }
+      })
 
       return {
         ...state,
         toasts: state.toasts.map((t) =>
-          t.id === toastId || toastId === undefined
+          shouldDismiss(t)
             ? {
                 ...t,
                 open: false,
@@ -116,12 +132,14 @@ export const reducer = (state: State, action: Action): State => {
       if (action.toastId === undefined) {
         return {
           ...state,
-          toasts: [],
+          toasts: state.toasts.filter((toast) => toast.persistent),
         }
       }
       return {
         ...state,
-        toasts: state.toasts.filter((t) => t.id !== action.toastId),
+        toasts: state.toasts.filter(
+          (toast) => toast.persistent || toast.id !== action.toastId
+        ),
       }
   }
 }
@@ -156,7 +174,7 @@ function toast({ ...props }: Toast) {
       id,
       open: true,
       onOpenChange: (open) => {
-        if (!open) dismiss()
+        if (!open && !props.persistent) dismiss()
       },
     },
   })
