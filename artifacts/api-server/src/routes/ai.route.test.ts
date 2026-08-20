@@ -76,6 +76,32 @@ vi.mock("../middlewares/requireCapability", () => ({
   },
 }));
 
+// This suite exercises the route-local, per-user request limiter. Its loops
+// intentionally make more than the facility-wide 300-cost budget from the
+// same loopback IP, so use an effectively unlimited test-only cost budget here.
+// aiCostLimit.route.test.ts separately proves the actual weighted budget blocks
+// a route before it can call the provider.
+vi.mock("../middlewares/costLimitMiddleware", async () => {
+  const [costMiddleware, rateLimit] = await Promise.all([
+    vi.importActual<typeof import("../middlewares/costLimitMiddleware")>(
+      "../middlewares/costLimitMiddleware",
+    ),
+    vi.importActual<typeof import("../middlewares/rateLimit")>(
+      "../middlewares/rateLimit",
+    ),
+  ]);
+
+  return {
+    ...costMiddleware,
+    aiCostLimit: costMiddleware.createAiCostLimit({
+      maxCost: 1_000_000,
+      store: new rateLimit.MemoryRateLimitStore(
+        costMiddleware.AI_COST_LIMIT_WINDOW_MS,
+      ),
+    }),
+  };
+});
+
 let server: Server;
 let baseUrl: string;
 

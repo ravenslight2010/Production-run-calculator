@@ -33,6 +33,3 @@ terminate a connection still closing just after `pool.end()` resolved, surfacing
 as an unhandled pool `error` event (intermittent, only under the full parallel
 suite). Attach a no-op `pool.on("error", ...)` listener after binding the pool.
 
-**Same weakness elsewhere:** the photo-intake limiter (inventory route) still uses
-the default in-memory store — apply the shared store there too if its cap must hold
-under scale.

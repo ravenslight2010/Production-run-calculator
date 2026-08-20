@@ -32,6 +32,7 @@ import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
+import { aiCostLimit } from "../middlewares/costLimitMiddleware";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
   buildOptimizePrompt,
@@ -168,6 +169,10 @@ import {
 } from "./aiMemoryContext";
 
 const router: IRouter = Router();
+
+// Every /api/ai route passes through the facility's weighted cost budget before
+// its route-specific request limiter or handler can call an AI provider.
+router.use("/ai", aiCostLimit);
 
 // Cost/abuse guard for the paid AI endpoint: per-user fixed window. Matches the
 // photo-intake endpoint's posture (10 requests / minute).
