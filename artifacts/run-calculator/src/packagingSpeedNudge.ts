@@ -9,6 +9,38 @@ export type PackagingSpeedNudge = {
   direction: "faster" | "slower";
 };
 
+export type PackagingSpeedNudgeIneligibility =
+  | {
+      kind: "output-time";
+      elapsedOutputSec: number;
+      requiredOutputSec: number;
+    }
+  | {
+      kind: "correction-count";
+      direction: "faster" | "slower";
+      correctionCount: number;
+      correctionsNeeded: number;
+    }
+  | {
+      kind: "correction-size";
+      direction: "faster" | "slower";
+      correctionCases: number;
+      correctionCasesNeeded: number;
+    }
+  | {
+      kind: "missing-skid-size";
+      direction: "faster" | "slower";
+      correctionCount: number;
+    }
+  | {
+      kind: "invalid-data";
+    };
+
+export type PackagingSpeedNudgeEvaluation = {
+  nudge: PackagingSpeedNudge | null;
+  reason: PackagingSpeedNudgeIneligibility | null;
+};
+
 export type PackagingSpeedNudgeTracking = {
   runId: string;
   corrections: PackagingSpeedCorrection[];
@@ -16,8 +48,8 @@ export type PackagingSpeedNudgeTracking = {
   lastAcceptedAt: number;
 };
 
-const MIN_OUTPUT_MINUTES = 1;
-const MIN_DRIFT_RATIO = 0.1;
+const MIN_OUTPUT_SECONDS = 30;
+const MIN_SKID_CORRECTION_RATIO = 0.05;
 const ACCEPT_COOLDOWN_MS = 30_000;
 const MAX_CORRECTIONS = 10;
 
@@ -47,7 +79,10 @@ export function recordPackagingSpeedCorrection(
   const direction = directionOf(deltaCases);
   if (direction === 0) return tracking;
 
-  const priorDirection = directionOf(tracking.corrections.at(-1)?.deltaCases ?? 0);
+  // Do not use Array.prototype.at here: this handler runs in older iOS Safari
+  // versions where an unsupported array method can abort the click silently.
+  const lastCorrection = tracking.corrections[tracking.corrections.length - 1];
+  const priorDirection = directionOf(lastCorrection?.deltaCases ?? 0);
   const corrections = (
     priorDirection !== 0 && priorDirection !== direction
       ? []
@@ -87,6 +122,8 @@ type EvaluatePackagingSpeedNudgeInput = {
   elapsedOutputMin: number;
   configuredPpm: number;
   pizzasPerCase: number;
+  /** Needed only for the one-correction shortcut. */
+  casesPerSkid?: number;
   speedAdjustment: number;
   isCrust: boolean;
   corrections: PackagingSpeedCorrection[];
@@ -94,8 +131,9 @@ type EvaluatePackagingSpeedNudgeInput = {
 
 /**
  * Returns a speed nudge when a manual correction episode either repeats in the
- * same direction or demonstrates at least 10% drift from the configured line
- * rate.
+ * same direction or a single correction reaches the rounded 5%-of-skid
+ * threshold. The reason is returned separately when the episode is not ready
+ * so the Packaging controls can explain what the operator should do next.
  *
  * Auto-track starts from the configured rate, so manual case corrections are
  * best understood as signed movement away from that expected output. Anchoring
@@ -107,7 +145,7 @@ type EvaluatePackagingSpeedNudgeInput = {
  */
 export function evaluatePackagingSpeedNudge(
   input: EvaluatePackagingSpeedNudgeInput,
-): PackagingSpeedNudge | null {
+): PackagingSpeedNudgeEvaluation {
   const {
     displayedCases,
     elapsedOutputMin,
@@ -116,10 +154,10 @@ export function evaluatePackagingSpeedNudge(
     speedAdjustment,
     isCrust,
     corrections,
+    casesPerSkid,
   } = input;
 
   if (
-    elapsedOutputMin < MIN_OUTPUT_MINUTES ||
     !Number.isFinite(elapsedOutputMin) ||
     !Number.isFinite(configuredPpm) ||
     !Number.isFinite(pizzasPerCase) ||
@@ -127,7 +165,19 @@ export function evaluatePackagingSpeedNudge(
     pizzasPerCase <= 0 ||
     corrections.length === 0
   ) {
-    return null;
+    return { nudge: null, reason: { kind: "invalid-data" } };
+  }
+
+  const elapsedOutputSec = Math.max(0, elapsedOutputMin * 60);
+  if (elapsedOutputSec < MIN_OUTPUT_SECONDS) {
+    return {
+      nudge: null,
+      reason: {
+        kind: "output-time",
+        elapsedOutputSec,
+        requiredOutputSec: MIN_OUTPUT_SECONDS,
+      },
+    };
   }
 
   const direction = directionOf(corrections[0]?.deltaCases ?? 0);
@@ -135,23 +185,51 @@ export function evaluatePackagingSpeedNudge(
     direction === 0 ||
     corrections.some((correction) => directionOf(correction.deltaCases) !== direction)
   ) {
-    return null;
+    return { nudge: null, reason: { kind: "invalid-data" } };
+  }
+
+  const nudgeDirection = direction > 0 ? "faster" : "slower";
+  const hasRepeatedCorrection = corrections.length >= 2;
+  const latestCorrectionCases = Math.abs(corrections[corrections.length - 1]?.deltaCases ?? 0);
+  const skidSize = Number(casesPerSkid);
+  const correctionCasesNeeded =
+    Number.isFinite(skidSize) && skidSize > 0
+      ? Math.max(1, Math.ceil(skidSize * MIN_SKID_CORRECTION_RATIO))
+      : null;
+
+  if (!hasRepeatedCorrection) {
+    if (correctionCasesNeeded === null) {
+      return {
+        nudge: null,
+        reason: {
+          kind: "missing-skid-size",
+          direction: nudgeDirection,
+          correctionCount: corrections.length,
+        },
+      };
+    }
+    if (latestCorrectionCases < correctionCasesNeeded) {
+      return {
+        nudge: null,
+        reason: {
+          kind: "correction-size",
+          direction: nudgeDirection,
+          correctionCases: latestCorrectionCases,
+          correctionCasesNeeded,
+        },
+      };
+    }
   }
 
   const expectedCases = (elapsedOutputMin * configuredPpm) / pizzasPerCase;
-  if (!Number.isFinite(expectedCases) || expectedCases <= 0) return null;
+  if (!Number.isFinite(expectedCases) || expectedCases <= 0) {
+    return { nudge: null, reason: { kind: "invalid-data" } };
+  }
 
   const cumulativeCorrectionCases = corrections.reduce(
     (total, correction) => total + correction.deltaCases,
     0,
   );
-  const correctionDriftRatio = Math.abs(cumulativeCorrectionCases) / expectedCases;
-  const hasRepeatedCorrection = corrections.length >= 2;
-
-  // A single full-skid correction can itself be enough evidence of a 10% rate
-  // error. Smaller edits need a repeated same-direction episode before they can
-  // become a nudge.
-  if (!hasRepeatedCorrection && correctionDriftRatio < MIN_DRIFT_RATIO) return null;
 
   const correctionAdjustedCases = Math.max(
     0,
@@ -165,12 +243,18 @@ export function evaluatePackagingSpeedNudge(
 
   if (
     !Number.isFinite(driftRatio) ||
-    (!hasRepeatedCorrection &&
-      Math.abs(driftRatio - 1) + Number.EPSILON < MIN_DRIFT_RATIO) ||
     (direction > 0 && driftRatio <= 1) ||
     (direction < 0 && driftRatio >= 1)
   ) {
-    return null;
+    return {
+      nudge: null,
+      reason: {
+        kind: "correction-count",
+        direction: nudgeDirection,
+        correctionCount: corrections.length,
+        correctionsNeeded: 2,
+      },
+    };
   }
 
   const observedPpm = (observedCases * pizzasPerCase) / elapsedOutputMin;
@@ -185,8 +269,11 @@ export function evaluatePackagingSpeedNudge(
     );
 
   return {
-    value,
-    isCrust,
-    direction: direction > 0 ? "faster" : "slower",
+    nudge: {
+      value,
+      isCrust,
+      direction: nudgeDirection,
+    },
+    reason: null,
   };
 }

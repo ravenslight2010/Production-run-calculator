@@ -110,6 +110,10 @@ import {
   type PackagingSpeedNudge,
 } from "../packagingSpeedNudge";
 import {
+  PackagingSpeedNudgeFeedback,
+  type PackagingSpeedNudgeFeedbackStatus,
+} from "../components/PackagingSpeedNudgeFeedback";
+import {
   freshDayState,
   loadDayState,
   saveDayState,
@@ -19570,19 +19574,33 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   // faster or slower than the configured prediction.
   const speedNudgeTrackingRef = useRef(createPackagingSpeedNudgeTracking(""));
   const [speedNudge, setSpeedNudge] = useState<PackagingSpeedNudge | null>(null);
+  const [speedNudgeStatus, setSpeedNudgeStatus] =
+    useState<PackagingSpeedNudgeFeedbackStatus>(null);
 
   // Reset detection bookkeeping synchronously (ref mutations are fine in render)
   // and clear the nudge card state via effect (must not call setState during render).
   if (speedNudgeTrackingRef.current.runId !== currentRunId) {
     speedNudgeTrackingRef.current = createPackagingSpeedNudgeTracking(currentRunId);
   }
-  useEffect(() => { setSpeedNudge(null); }, [currentRunId]);
+  useEffect(() => {
+    setSpeedNudge(null);
+    setSpeedNudgeStatus(null);
+  }, [currentRunId]);
 
   function detectSpeedDrift(newTotal: number, correctionDeltaCases: number) {
     const now = Date.now();
     const tracking = speedNudgeTrackingRef.current;
     if (!canDetectPackagingSpeedNudge(tracking, now)) return;
-    if (!autoTrackProgress || runStatus !== "running") return;
+    if (!autoTrackProgress) {
+      setSpeedNudge(null);
+      setSpeedNudgeStatus("auto-disabled");
+      return;
+    }
+    if (runStatus !== "running") {
+      setSpeedNudge(null);
+      setSpeedNudgeStatus("run-not-running");
+      return;
+    }
     const elapsedNetMin = elapsedBatchSec / 60;
     // Cases don't exit the tunnel until freezerTime minutes into the run, so
     // measure observed PPM over the output window only — the same subtraction
@@ -19590,20 +19608,20 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     // low because the full elapsed time is in the denominator but only a
     // fraction of it has produced packaged output.
     const elapsedOutputMin = Math.max(0, elapsedNetMin - Number(v.freezerTime));
-    if (elapsedOutputMin < 1) return; // Need at least a minute of output
-    const ppc = v.pizzasPerCase;
-    if (ppc <= 0 || calc.ppm <= 0) return;
     const nextTracking = recordPackagingSpeedCorrection(tracking, correctionDeltaCases);
     speedNudgeTrackingRef.current = nextTracking;
-    setSpeedNudge(evaluatePackagingSpeedNudge({
+    const evaluation = evaluatePackagingSpeedNudge({
       displayedCases: newTotal,
       elapsedOutputMin,
       configuredPpm: calc.ppm,
-      pizzasPerCase: ppc,
+      pizzasPerCase: v.pizzasPerCase,
+      casesPerSkid: v.casesPerSkid,
       speedAdjustment: v.speedAdjustment,
       isCrust: doughSubTab === "crusts",
       corrections: nextTracking.corrections,
-    }));
+    });
+    setSpeedNudge(evaluation.nudge);
+    setSpeedNudgeStatus(evaluation.reason);
   }
 
   // ── Auto-tick skid/case counter for the prior run draining through the
@@ -20070,6 +20088,36 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 </div>
                               </div>
 
+                              {/* Kept with the manual case/skid controls so phone-sized
+                                  screens explain the next speed-suggestion requirement
+                                  without making staff scroll past the Packaging card. */}
+                              <PackagingSpeedNudgeFeedback
+                                nudge={speedNudge}
+                                status={speedNudgeStatus}
+                                onAccept={() => {
+                                  if (!speedNudge) return;
+                                  const now = Date.now();
+                                  const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
+                                  form.setValue(field, speedNudge.value, { shouldDirty: true });
+                                  markRunValuesUpdated(currentRunId, now);
+                                  hx.lastLocalEditRef.current = now;
+                                  hx.schedulePush(hx.dayStateRef.current, 0);
+                                  speedNudgeTrackingRef.current = acceptPackagingSpeedNudge(
+                                    speedNudgeTrackingRef.current,
+                                    now,
+                                  );
+                                  setSpeedNudge(null);
+                                  setSpeedNudgeStatus(null);
+                                }}
+                                onDismiss={() => {
+                                  speedNudgeTrackingRef.current = dismissPackagingSpeedNudge(
+                                    speedNudgeTrackingRef.current,
+                                  );
+                                  setSpeedNudge(null);
+                                  setSpeedNudgeStatus(null);
+                                }}
+                              />
+
                               {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
                                 <button
                                   type="button"
@@ -20158,58 +20206,6 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                 </div>
                 </div>
 
-                {/* Speed adjustment nudge — appears when packaging corrections
-                    indicate the configured line speed is off by ≥10%. */}
-                {speedNudge && (
-                  <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-950/15 px-4 py-3" data-testid="speed-nudge-card">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-1.5">
-                      Line Speed Suggestion
-                    </p>
-                    <p className="text-xs text-foreground mb-2.5">
-                      Line running <span className="font-semibold text-amber-300">{speedNudge.direction}</span> than
-                      predicted — adjust{" "}
-                      <span className="font-medium">
-                        {speedNudge.isCrust ? "Approximate Line Speed" : "Speed Adjustment"}
-                      </span>{" "}
-                      to <span className="font-mono font-bold">{speedNudge.value.toFixed(2)}</span>?
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        data-testid="speed-nudge-accept"
-                        onClick={() => {
-                          const now = Date.now();
-                          const field = speedNudge.isCrust ? "approxLineSpeed" : "speedAdjustment";
-                          form.setValue(field, speedNudge.value, { shouldDirty: true });
-                          markRunValuesUpdated(currentRunId, now);
-                          hx.lastLocalEditRef.current = now;
-                          hx.schedulePush(hx.dayStateRef.current, 0);
-                          speedNudgeTrackingRef.current = acceptPackagingSpeedNudge(
-                            speedNudgeTrackingRef.current,
-                            now,
-                          );
-                          setSpeedNudge(null);
-                        }}
-                        className="flex-1 rounded-md bg-amber-600 hover:bg-amber-500 text-black text-xs font-bold py-1.5 transition-colors"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="speed-nudge-dismiss"
-                        onClick={() => {
-                          speedNudgeTrackingRef.current = dismissPackagingSpeedNudge(
-                            speedNudgeTrackingRef.current,
-                          );
-                          setSpeedNudge(null);
-                        }}
-                        className="flex-1 rounded-md border border-border/50 bg-muted/40 hover:bg-muted text-muted-foreground text-xs py-1.5 transition-colors"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {/* ─── Packaging Config (collapsible) ─── */}
                 <details className="group mt-6 rounded-xl border border-border/40 bg-card/40 overflow-hidden">
