@@ -3425,9 +3425,10 @@ export function recomputeCheeseSharesFromLbs(recipe: CheeseRecipe): CheeseRecipe
     if (!hasOzProp) return null;
     const stripped = comps.map((c): typeof comps[number] => {
       if (!("ozPerPizza" in c)) return c;
-      const copy: Record<string, unknown> = { ...c };
-      delete copy.ozPerPizza;
-      return copy as typeof comps[number];
+      const { ozPerPizza: _ignored, ...component } = c as typeof c & {
+        ozPerPizza?: unknown;
+      };
+      return component;
     });
     return { ...recipe, components: stripped };
   }
@@ -3438,10 +3439,10 @@ export function recomputeCheeseSharesFromLbs(recipe: CheeseRecipe): CheeseRecipe
   // Avoid naming the local component type to prevent conflicts with any module-
   // level CheeseComponent declarations; use `typeof comps[number]` inference.
   const stripped = comps.map((c): typeof comps[number] => {
-    const copy: Record<string, unknown> = { ...c };
-    delete copy.ozPerPizza;
-    delete copy.sharePct;
-    return copy as typeof comps[number];
+    const { ozPerPizza: _ignored, sharePct: _sharePct, ...component } = c as typeof c & {
+      ozPerPizza?: unknown;
+    };
+    return component;
   });
 
   // Recompute sharePct from lbs (backfill fills where sharePct is 0/absent —

@@ -11,8 +11,9 @@ import { describe, it, expect } from "vitest";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "./protectRunValues";
 
 type Payload = {
-  runValues: Record<string, { casesNeeded?: number } | Record<string, never>>;
+  runValues: Record<string, Record<string, unknown>>;
   runValuesUpdatedAt: Record<string, number>;
+  dayState?: { runs: Array<{ id: string }>; resetAt?: number };
   other?: unknown;
 };
 

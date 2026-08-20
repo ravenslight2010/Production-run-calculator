@@ -33,7 +33,6 @@ import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
-import { currentScope } from "../lib/requestScope";
 import {
   buildOptimizePrompt,
   formatClock12,

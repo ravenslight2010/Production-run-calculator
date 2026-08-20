@@ -10,7 +10,7 @@ function makeRecipe(
     name: "Test Cheese Mix",
     brand: "TestBrand",
     flavors: [],
-    components: components.map((c) => ({ lbs: 0, ...c })),
+    components: components.map((c) => ({ ...c, lbs: c.lbs })),
     cellulose: "",
     shredderSetting: "",
     notes: "",

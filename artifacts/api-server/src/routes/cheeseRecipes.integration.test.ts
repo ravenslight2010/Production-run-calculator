@@ -273,7 +273,7 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
       notes: "",
       // Non-zero components so the later orphan-stub purge heal doesn't remove
       // the surviving sandbox copy.
-      components: [{ ingredient: "Mozz", lbs: 2, ozPerPizza: 0 }],
+      components: [{ ingredient: "Mozz", lbs: 2, ozPerPizza: 0 }] as never,
       enabled: true,
       createdAt: t,
       updatedAt: t,

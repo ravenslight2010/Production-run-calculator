@@ -132,6 +132,7 @@ describe("parseHistoryFilter", () => {
 describe("rowToRecord", () => {
   const baseRow: QualityCheckRow = {
     id: 7,
+    scope: "live",
     productType: "crust",
     status: "warn",
     confidence: 0.42,

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { db, auditLogsTable, insertAuditLogSchema } from "@workspace/db";
 import { requireCapability } from "../middlewares/requireCapability";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 
 /**
  * Audit log endpoints for compliance and forensics.
@@ -21,28 +21,20 @@ router.get(
       const endDate = (req.query.endDate as string) || "";
       const limit = Math.min(Number(req.query.limit) || 100, 1000);
 
-      let query = db
-        .select()
-        .from(auditLogsTable)
-        .where(eq(auditLogsTable.scope, scope));
+      const conditions: SQL[] = [eq(auditLogsTable.scope, scope)];
 
       if (startDate) {
-        query = query.where(
-          and(
-            sql`${auditLogsTable.createdAt} >= ${startDate}::timestamp`,
-          ),
-        ) as any;
+        conditions.push(sql`${auditLogsTable.createdAt} >= ${startDate}::timestamp`);
       }
 
       if (endDate) {
-        query = query.where(
-          and(
-            sql`${auditLogsTable.createdAt} <= ${endDate}::timestamp`,
-          ),
-        ) as any;
+        conditions.push(sql`${auditLogsTable.createdAt} <= ${endDate}::timestamp`);
       }
 
-      const logs = await query
+      const logs = await db
+        .select()
+        .from(auditLogsTable)
+        .where(and(...conditions))
         .orderBy(desc(auditLogsTable.createdAt))
         .limit(limit);
 

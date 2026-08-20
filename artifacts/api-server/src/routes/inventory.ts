@@ -74,7 +74,6 @@ import {
   sortLotsForConsumption,
   type ConsumeLine,
 } from "./inventoryLogic";
-import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
