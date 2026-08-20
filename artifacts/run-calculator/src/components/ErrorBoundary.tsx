@@ -2,9 +2,20 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reportIncident } from "../inventoryShared";
+import { WEB_BUILD_ID } from "../buildIdentity";
 
-type Props = { children: ReactNode };
+type Props = {
+  children: ReactNode;
+  onUpdateAndReload?: () => Promise<void> | void;
+};
 type State = { error: Error | null };
+
+export function isMissingNotificationError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.trim().replace(/\s+/g, " ") === "Can't find variable: Notification"
+  );
+}
 
 // Top-level safety net: if any screen throws while rendering, we catch it,
 // auto-submit a crash incident (so a manager sees it even if the user never
@@ -23,7 +34,7 @@ export default class ErrorBoundary extends Component<Props, State> {
       source: "auto_crash",
       screen: typeof window !== "undefined" ? window.location.pathname : "unknown",
       appPlatform: "web",
-      appVersion: import.meta.env.VITE_APP_VERSION,
+      appVersion: WEB_BUILD_ID,
       errorMessage: error.message,
       errorStack: [error.stack, info.componentStack].filter(Boolean).join("\n\n"),
       userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
@@ -32,6 +43,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (!this.state.error) return this.props.children;
+    const needsUpdate = isMissingNotificationError(this.state.error);
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
         <div className="max-w-md w-full text-center space-y-4">
@@ -40,12 +52,22 @@ export default class ErrorBoundary extends Component<Props, State> {
           </div>
           <h1 className="text-lg font-semibold text-foreground">Something went wrong</h1>
           <p className="text-sm text-muted-foreground">
-            The app hit an unexpected error and couldn't continue. We've sent the
-            details to your manager. Reloading usually clears it — your saved work
-            isn't affected.
+            {needsUpdate
+              ? "This older app version needs an update before it can continue. We've sent the details to your manager."
+              : "The app hit an unexpected error and couldn't continue. We've sent the details to your manager. Reloading usually clears it — your saved work isn't affected."}
           </p>
-          <Button onClick={() => window.location.reload()} className="mx-auto">
-            <RefreshCw className="w-4 h-4 mr-2" /> Reload the app
+          <Button
+            onClick={() => {
+              if (needsUpdate && this.props.onUpdateAndReload) {
+                void this.props.onUpdateAndReload();
+              } else {
+                window.location.reload();
+              }
+            }}
+            className="mx-auto"
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />{" "}
+            {needsUpdate ? "Update and reload" : "Reload the app"}
           </Button>
         </div>
       </div>

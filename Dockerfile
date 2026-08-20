@@ -13,7 +13,14 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 
 # Build the web app (served at the domain root) and the API server bundle.
-RUN BASE_PATH=/ pnpm --filter @workspace/run-calculator run build \
+# Deployment systems can provide VITE_APP_VERSION (or a Replit deployment id).
+# Keep a timestamped container fallback so incident reports never carry an
+# empty/local identifier from a production Docker build.
+ARG VITE_APP_VERSION
+ARG REPLIT_DEPLOYMENT_ID
+RUN BASE_PATH=/ \
+    VITE_APP_VERSION="${VITE_APP_VERSION:-${REPLIT_DEPLOYMENT_ID:-docker-$(date -u +%Y%m%d%H%M%S)}}" \
+    pnpm --filter @workspace/run-calculator run build \
   && pnpm --filter @workspace/api-server run build
 
 ########## api: runs the bundled server ##########

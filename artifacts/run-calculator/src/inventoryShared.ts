@@ -1,6 +1,7 @@
 import type { FormValues } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
+import { WEB_BUILD_ID } from "./buildIdentity";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -1097,7 +1098,10 @@ export type Incident = {
 export const reportIncident = (body: ReportIncidentBody) =>
   api<IncidentDiagnosis>("/incidents", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      ...body,
+      appVersion: body.appVersion?.trim() || WEB_BUILD_ID,
+    }),
   });
 
 // Manager-only review endpoints.

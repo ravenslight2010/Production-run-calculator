@@ -4,8 +4,10 @@
  * This exercises the deployed-browser behavior that unit tests cannot:
  *  1. a first (old) production build owns an open tab;
  *  2. the same origin starts serving a changed worker;
- *  3. foregrounding discovers that worker, but does not reload the tab;
- *  4. the persistent "Reload now" action is the only thing that activates it.
+ *  3. foregrounding activates the new worker without claiming or reloading the
+ *     active tab;
+ *  4. a staff-chosen reload (including an older error screen's generic reload)
+ *     is the only thing that enters the new document.
  *
  * The fixture intentionally serves real `vite build` output. It does not use
  * the main Playwright configuration because that suite prepares database-backed
@@ -217,15 +219,23 @@ test.describe("PWA update handoff", () => {
           ),
         )
         .toBe("running");
+      // The updated worker has activated so an older, generic Reload button
+      // can recover into the new bundle. Browser controller bookkeeping varies,
+      // but the user-visible invariant is strict: no navigation has happened
+      // and the in-progress run value is still in this open document.
       await expect
         .poll(() =>
-          page.evaluate(async () =>
-            Boolean((await navigator.serviceWorker.getRegistration())?.waiting),
-          ),
+          page.evaluate(async () => {
+            const registration = await navigator.serviceWorker.getRegistration();
+            return Boolean(registration?.active && !registration.waiting);
+          }),
         )
         .toBe(true);
 
-      await page.getByRole("button", { name: "Reload now" }).click();
+      // Model the legacy boundary's only available recovery action. The worker
+      // was already activated above, so this user-chosen reload now enters the
+      // fixed build instead of repeating the stale cached document.
+      await page.reload({ waitUntil: "networkidle" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
         timeout: 20_000,
       });

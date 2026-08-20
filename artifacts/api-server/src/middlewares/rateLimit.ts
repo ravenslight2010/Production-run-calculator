@@ -26,13 +26,18 @@ export type RateLimitResult = {
   resetAt: number;
 };
 
-// A counting backend for the limiter. `hit` atomically records one request for
+// A counting backend for the limiter. `hit` atomically records `cost` units for
 // `key` and returns the updated count plus the window's reset time. The window
 // is anchored to the application clock via `now` (passed in by the middleware)
 // rather than the store's own clock, so behavior is deterministic and identical
 // across store implementations.
 export interface RateLimitStore {
-  hit(key: string, windowMs: number, now: number): Promise<RateLimitResult>;
+  hit(
+    key: string,
+    windowMs: number,
+    now: number,
+    cost?: number,
+  ): Promise<RateLimitResult>;
 }
 
 type Bucket = { count: number; resetAt: number };
@@ -54,13 +59,18 @@ export class MemoryRateLimitStore implements RateLimitStore {
     sweep.unref?.();
   }
 
-  hit(key: string, windowMs: number, now: number): Promise<RateLimitResult> {
+  hit(
+    key: string,
+    windowMs: number,
+    now: number,
+    cost = 1,
+  ): Promise<RateLimitResult> {
     let bucket = this.buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + windowMs };
       this.buckets.set(key, bucket);
     }
-    bucket.count += 1;
+    bucket.count += cost;
     return Promise.resolve({ count: bucket.count, resetAt: bucket.resetAt });
   }
 }

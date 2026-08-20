@@ -16,6 +16,7 @@ import {
   reportIncident,
   type IncidentDiagnosis,
 } from "../inventoryShared";
+import { WEB_BUILD_ID } from "../buildIdentity";
 
 function serverMessage(error: unknown, fallback: string): string {
   return error instanceof InventoryApiError && error.serverMessage
@@ -44,7 +45,7 @@ export default function ReportIssueDialog({
         source: "user_report",
         screen,
         appPlatform: "web",
-        appVersion: import.meta.env.VITE_APP_VERSION,
+        appVersion: WEB_BUILD_ID,
         description: description.trim(),
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
       }),

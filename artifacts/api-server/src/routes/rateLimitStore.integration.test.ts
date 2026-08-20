@@ -172,6 +172,26 @@ describe("PostgresRateLimitStore — shared cross-instance counting", () => {
     expect(sorted).toEqual(Array.from({ length: total }, (_, i) => i + 1));
   }, 30_000);
 
+  it("atomically accumulates weighted hits across instances", async () => {
+    const a = newInstance();
+    const b = newInstance();
+    const key = "user-weighted";
+    const now = 10_000_000;
+    const costs = [5, 7, 11, 3];
+
+    const results = await Promise.all(
+      costs.map((cost, index) =>
+        (index % 2 === 0 ? a : b).hit(key, WINDOW_MS, now, cost),
+      ),
+    );
+
+    expect(Math.max(...results.map((result) => result.count))).toBe(
+      costs.reduce((total, cost) => total + cost, 0),
+    );
+    const afterReset = await a.hit(key, WINDOW_MS, now + WINDOW_MS + 1, 9);
+    expect(afterReset.count).toBe(9);
+  }, 30_000);
+
   it("keeps distinct keys on independent counters", async () => {
     const store = newInstance();
     const now = 12_000_000;

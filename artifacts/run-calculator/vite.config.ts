@@ -19,6 +19,11 @@ if (Number.isNaN(port) || port <= 0) {
 // BASE_PATH affects the `base` option which IS relevant during builds.
 // Default to "/" (the production root) when not explicitly provided.
 const basePath = process.env.BASE_PATH ?? "/";
+const webBuildId =
+  process.env.VITE_APP_VERSION?.trim() ||
+  process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
+  process.env.REPLIT_DEPLOYMENT?.trim() ||
+  "local";
 
 // Dev-only (Replit). The preview runs inside an HTTPS-proxied iframe where
 // Vite's HMR websocket can't stay connected — it drops every so often, and
@@ -70,14 +75,19 @@ function suppressViteClientReload(): Plugin {
 
 export default defineConfig({
   base: basePath,
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(webBuildId),
+  },
   plugins: [
     ...(process.env.REPL_ID ? [suppressViteClientReload()] : []),
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
     VitePWA({
-      // Keep the new worker waiting so AppUpdatePrompt can offer staff a
-      // deliberate, one-tap reload instead of interrupting active work.
+      // New workers activate without claiming an existing page. That makes a
+      // plain, user-chosen reload from an older error screen load the fixed
+      // bundle, while `clientsClaim: false` ensures an active run is never
+      // interrupted. AppUpdatePrompt still offers the explicit reload action.
       registerType: "prompt",
       base: basePath,
       includeAssets: [
@@ -124,6 +134,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: false,
         // The main bundle crossed workbox's default 2 MiB precache cap
         // (build hard-fails, not just a warning). Allow up to 4 MiB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

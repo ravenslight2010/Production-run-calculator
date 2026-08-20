@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -13,6 +21,7 @@ import Home from "@/pages/home";
 import Landing from "@/pages/landing";
 import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
+import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
 
 const queryClient = new QueryClient();
@@ -42,17 +51,59 @@ function AppRoutes() {
   );
 }
 
-function AppUpdatePrompt() {
+type AppUpdateContextValue = {
+  updateAndReload: () => Promise<void>;
+};
+
+const AppUpdateContext = createContext<AppUpdateContextValue | null>(null);
+
+function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const stopUpdateChecksRef = useRef<(() => void) | undefined>(undefined);
+  const stopUpdateWatchRef = useRef<(() => void) | undefined>(undefined);
+  const registrationRef = useRef<ServiceWorkerRegistration | undefined>(undefined);
+  const [activatedUpdateReady, setActivatedUpdateReady] = useState(false);
   const onRegisteredSW = useCallback(
     (
       _serviceWorkerUrl: string,
       registration: ServiceWorkerRegistration | undefined,
     ) => {
       stopUpdateChecksRef.current?.();
+      stopUpdateWatchRef.current?.();
+      registrationRef.current = registration;
       stopUpdateChecksRef.current = registration
         ? startServiceWorkerUpdateChecks(registration)
         : undefined;
+      if (!registration) return;
+
+      let installingWorker: ServiceWorker | null = null;
+      let onStateChange: (() => void) | undefined;
+      const watchInstallingWorker = () => {
+        const worker = registration.installing;
+        if (!worker || worker === installingWorker) return;
+        if (onStateChange && installingWorker) {
+          installingWorker.removeEventListener("statechange", onStateChange);
+        }
+        installingWorker = worker;
+        // An initial install should not prompt. For an update, the worker
+        // activates without claiming this open page; staff still choose when
+        // to reload into it.
+        const isUpdate = Boolean(registration.active);
+        onStateChange = () => {
+          if (worker.state === "installed" && isUpdate) {
+            setActivatedUpdateReady(true);
+          }
+        };
+        worker.addEventListener("statechange", onStateChange);
+        onStateChange();
+      };
+      registration.addEventListener("updatefound", watchInstallingWorker);
+      watchInstallingWorker();
+      stopUpdateWatchRef.current = () => {
+        registration.removeEventListener("updatefound", watchInstallingWorker);
+        if (onStateChange && installingWorker) {
+          installingWorker.removeEventListener("statechange", onStateChange);
+        }
+      };
     },
     [],
   );
@@ -62,16 +113,27 @@ function AppUpdatePrompt() {
   } = useRegisterSW({ onRegisteredSW });
   const { toast } = useToast();
   const toastedRef = useRef(false);
+  const handleUpdateAndReload = useCallback(
+    () =>
+      updateAndReload(
+        registrationRef.current,
+        updateServiceWorker,
+        () => window.location.reload(),
+      ),
+    [updateServiceWorker],
+  );
 
   useEffect(() => {
     return () => {
       stopUpdateChecksRef.current?.();
       stopUpdateChecksRef.current = undefined;
+      stopUpdateWatchRef.current?.();
+      stopUpdateWatchRef.current = undefined;
     };
   }, []);
 
   useEffect(() => {
-    if (!needRefresh || toastedRef.current) return;
+    if ((!needRefresh && !activatedUpdateReady) || toastedRef.current) return;
 
     toastedRef.current = true;
     toast({
@@ -82,27 +144,47 @@ function AppUpdatePrompt() {
       action: (
         <ToastAction
           altText="Reload now"
-          onClick={() => void updateServiceWorker(true)}
+          onClick={() => {
+            if (needRefresh) {
+              void updateServiceWorker(true);
+            } else {
+              window.location.reload();
+            }
+          }}
         >
           Reload now
         </ToastAction>
       ),
     });
-  }, [needRefresh, toast, updateServiceWorker]);
+  }, [activatedUpdateReady, needRefresh, toast, updateServiceWorker]);
 
-  return null;
+  return (
+    <AppUpdateContext.Provider value={{ updateAndReload: handleUpdateAndReload }}>
+      {children}
+    </AppUpdateContext.Provider>
+  );
+}
+
+function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
+  const updateContext = useContext(AppUpdateContext);
+  return (
+    <ErrorBoundary onUpdateAndReload={updateContext?.updateAndReload}>
+      {children}
+    </ErrorBoundary>
+  );
 }
 
 function App() {
   return (
     <WouterRouter base={basePath}>
       <QueryClientProvider client={queryClient}>
-        <ErrorBoundary>
+        <AppUpdatePrompt>
+          <ErrorBoundaryWithRecovery>
           <AuthProvider>
-            <AppUpdatePrompt />
             <AppRoutes />
           </AuthProvider>
-        </ErrorBoundary>
+          </ErrorBoundaryWithRecovery>
+        </AppUpdatePrompt>
       </QueryClientProvider>
     </WouterRouter>
   );

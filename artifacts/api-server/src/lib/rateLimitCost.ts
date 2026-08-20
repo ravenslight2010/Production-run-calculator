@@ -37,30 +37,34 @@ export function costLimitMiddleware(options: CostLimitOptions) {
 
     (async () => {
       try {
-        const result = await options.store.hit(key, options.windowMs, Date.now());
-        const currentCost = result.count;
-        const newCost = currentCost + cost;
+        const result = await options.store.hit(
+          key,
+          options.windowMs,
+          Date.now(),
+          cost,
+        );
+        const totalCost = result.count;
 
-        if (newCost > options.maxCost) {
+        if (totalCost > options.maxCost) {
           const retryAfterSec = Math.ceil(
             (result.resetAt - Date.now()) / 1000,
           );
           res.setHeader("Retry-After", String(retryAfterSec));
           res.setHeader("X-Cost-Limit", String(options.maxCost));
-          res.setHeader("X-Cost-Used", String(currentCost));
+          res.setHeader("X-Cost-Used", String(totalCost));
           res.setHeader("X-Cost-Requested", String(cost));
           req.log?.warn(
-            { key, newCost, maxCost: options.maxCost, cost },
+            { key, totalCost, maxCost: options.maxCost, cost },
             "Cost limit exceeded",
           );
           res.status(429).json({
-            error: `Cost limit exceeded. Budget: ${options.maxCost}, used: ${currentCost}, requested: ${cost}. Retry after ${retryAfterSec}s.`,
+            error: `Cost limit exceeded. Budget: ${options.maxCost}, used: ${totalCost}, requested: ${cost}. Retry after ${retryAfterSec}s.`,
           });
           return;
         }
 
         req.log?.debug(
-          { key, cost, totalCost: newCost, maxCost: options.maxCost },
+          { key, cost, totalCost, maxCost: options.maxCost },
           "Cost limit check passed",
         );
         next();

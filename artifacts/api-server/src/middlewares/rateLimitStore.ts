@@ -35,7 +35,12 @@ export class PostgresRateLimitStore implements RateLimitStore {
     }
   }
 
-  async hit(key: string, windowMs: number, now: number): Promise<RateLimitResult> {
+  async hit(
+    key: string,
+    windowMs: number,
+    now: number,
+    cost = 1,
+  ): Promise<RateLimitResult> {
     const nowDate = new Date(now);
     const resetAt = new Date(now + windowMs);
 
@@ -45,11 +50,11 @@ export class PostgresRateLimitStore implements RateLimitStore {
     // instances serialize and the count stays exact.
     const rows = await db
       .insert(rateLimitCountersTable)
-      .values({ key, count: 1, resetAt })
+      .values({ key, count: cost, resetAt })
       .onConflictDoUpdate({
         target: rateLimitCountersTable.key,
         set: {
-          count: sql`case when ${rateLimitCountersTable.resetAt} <= ${nowDate} then 1 else ${rateLimitCountersTable.count} + 1 end`,
+          count: sql`case when ${rateLimitCountersTable.resetAt} <= ${nowDate} then ${cost} else ${rateLimitCountersTable.count} + ${cost} end`,
           resetAt: sql`case when ${rateLimitCountersTable.resetAt} <= ${nowDate} then ${resetAt} else ${rateLimitCountersTable.resetAt} end`,
         },
       })
