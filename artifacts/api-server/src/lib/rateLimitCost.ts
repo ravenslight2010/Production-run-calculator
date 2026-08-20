@@ -34,31 +34,36 @@ export function costLimitMiddleware(options: CostLimitOptions) {
     const req = _req as any;
     const key = `cost-limit:${req.ip}`;
     const cost = costFn(req);
+    const now = Date.now();
 
     (async () => {
       try {
         const result = await options.store.hit(
           key,
           options.windowMs,
-          Date.now(),
+          now,
           cost,
         );
         const totalCost = result.count;
+        const remaining = Math.max(0, options.maxCost - totalCost);
+        const resetInSec = Math.ceil((result.resetAt - now) / 1000);
+
+        // Return the current quota on every response so callers can show users
+        // how much AI budget remains before they hit the cap.
+        res.setHeader("X-Cost-Limit", String(options.maxCost));
+        res.setHeader("X-Cost-Used", String(totalCost));
+        res.setHeader("X-Cost-Remaining", String(remaining));
+        res.setHeader("X-Cost-Requested", String(cost));
+        res.setHeader("X-Cost-Reset", String(resetInSec));
 
         if (totalCost > options.maxCost) {
-          const retryAfterSec = Math.ceil(
-            (result.resetAt - Date.now()) / 1000,
-          );
-          res.setHeader("Retry-After", String(retryAfterSec));
-          res.setHeader("X-Cost-Limit", String(options.maxCost));
-          res.setHeader("X-Cost-Used", String(totalCost));
-          res.setHeader("X-Cost-Requested", String(cost));
+          res.setHeader("Retry-After", String(resetInSec));
           req.log?.warn(
             { key, totalCost, maxCost: options.maxCost, cost },
             "Cost limit exceeded",
           );
           res.status(429).json({
-            error: `Cost limit exceeded. Budget: ${options.maxCost}, used: ${totalCost}, requested: ${cost}. Retry after ${retryAfterSec}s.`,
+            error: `Cost limit exceeded. Budget: ${options.maxCost}, used: ${totalCost}, requested: ${cost}. Retry after ${resetInSec}s.`,
           });
           return;
         }
