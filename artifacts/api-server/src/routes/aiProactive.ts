@@ -93,6 +93,14 @@ export type ProactiveAlert = {
   suggestedAction?: ProactiveAlertSuggestedAction;
 };
 
+export type LowCaseCorrection = {
+  runId: string;
+  impliedCases: number;
+  combinedProgressCases: number;
+  casedTargetCases: number;
+  suggestedAction: ProactiveAlertSuggestedAction;
+};
+
 export type { OptimizeInput };
 export { validateOptimizeBody };
 
@@ -157,10 +165,87 @@ export function slugifyKey(raw: string | undefined, fallback: string): string {
     : result;
 }
 
+const LOW_CASE_SHORTFALL_RATIO = 0.1;
+
+/**
+ * Deterministically checks whether a running line's recorded case count is
+ * genuinely stale. Freezer/on-line WIP counts for eligibility, but is subtracted
+ * back out of the correction so the suggested skid target remains cased-only.
+ */
+export function findLowCaseCorrection(input: OptimizeInput): LowCaseCorrection | null {
+  for (const run of input.runs) {
+    const pizzasPerCase = Number(run.pizzasPerCase);
+    const casesPerSkid = Math.floor(Number(run.casesPerSkid));
+    const netRunMin = Math.round(run.netElapsedSec / 60);
+    if (
+      run.status !== "running" ||
+      run.stoppages.some((stoppage) => stoppage.open) ||
+      !Number.isFinite(pizzasPerCase) ||
+      pizzasPerCase <= 0 ||
+      !Number.isFinite(casesPerSkid) ||
+      casesPerSkid <= 0 ||
+      !Number.isFinite(run.plannedPpm) ||
+      run.plannedPpm <= 0 ||
+      netRunMin <= 0
+    ) {
+      continue;
+    }
+
+    const casesMade = Math.max(0, Number(run.casesMade) || 0);
+    // Older clients omit casesOnLine. Treat omission as zero so their payloads
+    // continue to validate and retain the pre-WIP behavior safely.
+    const casesOnLine = Math.max(0, Math.floor(Number(run.casesOnLine) || 0));
+    const impliedCases = Math.floor((run.plannedPpm * netRunMin) / pizzasPerCase);
+    const combinedProgressCases = casesMade + casesOnLine;
+    const shortfallRatio =
+      (impliedCases - combinedProgressCases) / Math.max(combinedProgressCases, 1);
+    if (shortfallRatio <= LOW_CASE_SHORTFALL_RATIO) continue;
+
+    const casedTargetCases = Math.max(casesMade, impliedCases - casesOnLine);
+    const skidsCompleted = Math.floor(casedTargetCases / casesPerSkid);
+    const casesOnCurrentSkid = Math.floor(casedTargetCases % casesPerSkid);
+    if (
+      skidsCompleted > SUGGESTED_ACTION_MAX ||
+      casesOnCurrentSkid > SUGGESTED_ACTION_MAX
+    ) {
+      continue;
+    }
+
+    return {
+      runId: run.id,
+      impliedCases,
+      combinedProgressCases,
+      casedTargetCases,
+      suggestedAction: { skidsCompleted, casesOnCurrentSkid },
+    };
+  }
+  return null;
+}
+
+function isLowCaseAlertSignal(key: string, title: string, detail: string): boolean {
+  if (
+    key === "low-case-count" ||
+    key === "case-count-low" ||
+    key === "recorded-case-count-low"
+  ) {
+    return true;
+  }
+  const text = `${title} ${detail}`.toLowerCase();
+  const namesRecordedProgress =
+    /\b(?:case|skid)\s+count\b/.test(text) ||
+    /\brecorded\s+(?:case|cases|skid|skids|output|production)\b/.test(text) ||
+    /\b(?:case|skid)\s+(?:counter|recording)\b/.test(text);
+  const claimsItIsLow =
+    /\b(?:low|missing|stale|short|undercount|under-count|behind|not updated|not recorded)\b/.test(
+      text,
+    );
+  return namesRecordedProgress && claimsItIsLow;
+}
+
 // The model returns structured JSON but is untrusted: validate leniently, drop a
 // malformed alert (fall back to no alert), and length-clamp all free text. A
 // missing/null alert is a valid "nothing to surface right now" outcome.
-export function sanitizeProactiveAlert(raw: unknown): {
+export function sanitizeProactiveAlert(raw: unknown, input?: OptimizeInput): {
   alert: ProactiveAlert | null;
   note?: string;
 } {
@@ -180,6 +265,20 @@ export function sanitizeProactiveAlert(raw: unknown): {
   if (!title || !detail) return withNote(null);
 
   const category = mapCategory(a.category);
+  const key = slugifyKey(a.key, category);
+  const lowCaseCorrection = input ? findLowCaseCorrection(input) : null;
+
+  // Suppress a low-recorded-count nudge outright when combined cased + on-line
+  // progress is not actually low. The prompt requires the stable key, while the
+  // narrow text check also catches a model that miskeys or omits the action.
+  if (
+    input &&
+    category === "run" &&
+    isLowCaseAlertSignal(key, title, detail) &&
+    !lowCaseCorrection
+  ) {
+    return withNote(null);
+  }
 
   // Parse the optional suggested_action. Drop the action (but keep the alert)
   // when: category is not "run" (actions only valid for behind-plan run nudges),
@@ -198,16 +297,25 @@ export function sanitizeProactiveAlert(raw: unknown): {
         skids <= SUGGESTED_ACTION_MAX &&
         cases <= SUGGESTED_ACTION_MAX
       ) {
-        suggestedAction = {
-          skidsCompleted: Math.round(skids),
-          casesOnCurrentSkid: Math.round(cases),
-        };
+        // At the live route boundary, never trust model arithmetic. An action is
+        // valid only when the deterministic combined-progress check says the
+        // recorded count is genuinely low, and the returned target is always the
+        // server-computed cased-only target (implied cases minus current WIP).
+        if (input) {
+          if (!lowCaseCorrection) return withNote(null);
+          suggestedAction = lowCaseCorrection.suggestedAction;
+        } else {
+          suggestedAction = {
+            skidsCompleted: Math.round(skids),
+            casesOnCurrentSkid: Math.round(cases),
+          };
+        }
       }
     }
   }
 
   return withNote({
-    key: slugifyKey(a.key, category),
+    key,
     category,
     impact: mapImpact(a.impact),
     title,
@@ -300,6 +408,7 @@ export function buildProactivePrompt(
       `die=${r.dieType || "?"}`,
       `casesNeeded=${r.casesNeeded}`,
       `casesMade=${r.casesMade}`,
+      `casesOnLine=${r.casesOnLine ?? 0}`,
       `casesLeft=${r.casesLeft}`,
       `plannedPPM=${r.plannedPpm}`,
       `actualPPM=${r.actualPpm ?? "n/a"}`,
@@ -405,14 +514,18 @@ export function buildProactivePrompt(
       "meaningfully more cases than recorded — use plannedPPM (the machine's CONFIGURED speed, " +
       "which is INDEPENDENT of the recorded case count) as the throughput signal: " +
       "impliedCases = floor(plannedPPM × netRunMin / pizzasPerCase), " +
-      "then check whether (impliedCases - casesMade) / max(casesMade, 1) > 0.10 " +
-      "(implied total is more than 10% above what was recorded). " +
+       "combinedProgress = casesMade + casesOnLine, then check whether " +
+       "(impliedCases - combinedProgress) / max(combinedProgress, 1) > 0.10 " +
+       "(implied total is more than 10% above all cased plus in-flight work). " +
       "Do NOT use actualPPM for this calculation — it is derived from casesMade and would be circular. " +
       "Only suggest a correction when the line appears to be running normally at its configured speed " +
       "but the recorded case count looks low, suggesting the counter may not have been updated. " +
-      "(5) You can express the correction as non-negative whole numbers: " +
-      "skidsCompleted = floor(impliedCases / casesPerSkid), " +
-      "casesOnCurrentSkid = impliedCases mod casesPerSkid. " +
+       'Use the key "low-case-count" for this specific nudge. casesMade is the recorded/cased count; ' +
+       "casesOnLine is work in progress and MUST NEVER be converted into completed skid output. " +
+       "(5) You can express the cased-only correction as non-negative whole numbers: " +
+       "correctedCasedCases = max(casesMade, impliedCases - casesOnLine), " +
+       "skidsCompleted = floor(correctedCasedCases / casesPerSkid), " +
+       "casesOnCurrentSkid = correctedCasedCases mod casesPerSkid. " +
       "Omit suggested_action entirely for stock, break, or efficiency nudges, when there are open " +
       "stoppages, when pizzasPerCase or casesPerSkid is n/a, or when you are not confident. " +
       TIME_FORMAT_INSTRUCTION,

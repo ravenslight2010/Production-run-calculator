@@ -790,7 +790,10 @@ export interface OptimizeRun {
   dieType: string;
   status: OptimizeRunStatus;
   casesNeeded: number;
+  /** Recorded/cased output only; excludes work still in the freezer or on the line */
   casesMade: number;
+  /** Lifecycle-aware cases pressed but not yet cased (freezer/on-line work in progress); optional for older clients */
+  casesOnLine?: number;
   casesLeft: number;
   /** Planned pizzas-per-minute from line config */
   plannedPpm: number;

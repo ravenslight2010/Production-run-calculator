@@ -3,6 +3,7 @@ import {
   buildProactivePrompt,
   buildIncidentPatternsSection,
   clampProactiveSettings,
+  findLowCaseCorrection,
   isDayActive,
   sanitizeProactiveAlert,
   slugifyKey,
@@ -312,6 +313,110 @@ describe("sanitizeProactiveAlert — suggestedAction", () => {
     expect(effAlert.alert?.category).toBe("efficiency");
     expect(effAlert.alert?.suggestedAction).toBeUndefined();
   });
+
+  it("suppresses a model low-count correction when cased plus on-line progress is not low", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 197,
+          casesOnLine: 44,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    const out = sanitizeProactiveAlert(
+      validAlert({
+        key: "low-case-count",
+        suggested_action: { skidsCompleted: 11, casesOnCurrentSkid: 2 },
+      }),
+      input,
+    );
+    expect(out.alert).toBeNull();
+  });
+
+  it("suppresses a miskeyed low-count alert even when the model omits the action", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 197,
+          casesOnLine: 44,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    const out = sanitizeProactiveAlert(
+      validAlert({
+        key: "behind-plan",
+        title: "Case count appears low",
+        detail: "The recorded case counter may not have been updated.",
+      }),
+      input,
+    );
+    expect(out.alert).toBeNull();
+  });
+
+  it("preserves a general behind-target alert when combined production is healthy", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 197,
+          casesOnLine: 44,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    const out = sanitizeProactiveAlert(
+      validAlert({
+        key: "behind-plan",
+        title: "Finish time at risk",
+        detail: "At the current pace the shift will miss the target finish time.",
+      }),
+      input,
+    );
+    expect(out.alert?.key).toBe("behind-plan");
+    expect(out.alert?.suggestedAction).toBeUndefined();
+  });
+
+  it("replaces model arithmetic with the deterministic cased-only target", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 150,
+          casesOnLine: 44,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    const out = sanitizeProactiveAlert(
+      validAlert({
+        key: "low-case-count",
+        suggested_action: { skidsCompleted: 11, casesOnCurrentSkid: 2 },
+      }),
+      input,
+    );
+    // 222 implied - 44 still on line = 178 cased target = 8 skids + 18 cases.
+    expect(out.alert?.suggestedAction).toEqual({ skidsCompleted: 8, casesOnCurrentSkid: 18 });
+  });
 });
 
 describe("buildProactivePrompt — suggestedAction guidance", () => {
@@ -343,6 +448,18 @@ describe("buildProactivePrompt — suggestedAction guidance", () => {
     expect(user).toContain("pizzasPerCase=");
     expect(user).toContain("casesPerSkid=");
   });
+
+  it("counts on-line work for eligibility but excludes it from the cased correction", () => {
+    const input = baseInput({
+      runs: [{ ...baseInput().runs[0], casesMade: 197, casesOnLine: 44 }],
+    });
+    const { user } = buildProactivePrompt(input);
+    expect(user).toContain("casesMade=197");
+    expect(user).toContain("casesOnLine=44");
+    expect(user).toContain("combinedProgress = casesMade + casesOnLine");
+    expect(user).toContain("impliedCases - casesOnLine");
+    expect(user).toMatch(/MUST NEVER be converted into completed skid output/i);
+  });
 });
 
 describe("validateOptimizeBody (reused by /ai/proactive-alert)", () => {
@@ -354,6 +471,81 @@ describe("validateOptimizeBody (reused by /ai/proactive-alert)", () => {
   it("rejects a body with no runs array", () => {
     const result = validateOptimizeBody({ date: "2026-06-21", nowMs: 1 });
     expect(result.ok).toBe(false);
+  });
+
+  it("accepts both new casesOnLine data and older payloads that omit it", () => {
+    const withWip = baseInput({
+      runs: [{ ...baseInput().runs[0], casesOnLine: 44 }],
+    });
+    const withoutWip = baseInput({
+      runs: [{ ...baseInput().runs[0], casesOnLine: undefined }],
+    });
+    expect(validateOptimizeBody(withWip).ok).toBe(true);
+    expect(validateOptimizeBody(withoutWip).ok).toBe(true);
+  });
+});
+
+describe("findLowCaseCorrection", () => {
+  it("does not flag 197 cased plus 44 on-line against 222 implied cases", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 197,
+          casesOnLine: 44,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    expect(findLowCaseCorrection(input)).toBeNull();
+  });
+
+  it("returns a cased-only correction for a genuine low recorded count", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 150,
+          casesOnLine: 44,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    expect(findLowCaseCorrection(input)).toMatchObject({
+      impliedCases: 222,
+      combinedProgressCases: 194,
+      casedTargetCases: 178,
+      suggestedAction: { skidsCompleted: 8, casesOnCurrentSkid: 18 },
+    });
+  });
+
+  it("defaults missing WIP to zero for backward-compatible older payloads", () => {
+    const input = baseInput({
+      runs: [
+        {
+          ...baseInput().runs[0],
+          casesMade: 197,
+          casesOnLine: undefined,
+          plannedPpm: 30,
+          netElapsedSec: 74 * 60,
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          stoppages: [],
+        },
+      ],
+    });
+    expect(findLowCaseCorrection(input)?.suggestedAction).toEqual({
+      skidsCompleted: 11,
+      casesOnCurrentSkid: 2,
+    });
   });
 });
 

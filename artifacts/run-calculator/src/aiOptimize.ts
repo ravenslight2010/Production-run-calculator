@@ -1,5 +1,6 @@
 import type { ReviewVerdict } from "@workspace/ai-review";
-import type { FormValues, RunMeta, HistoryDay } from "./types";
+import { computeCasesInFreezer } from "@workspace/inventory-math";
+import { withTempOverrides, type FormValues, type RunMeta, type HistoryDay } from "./types";
 import { computeSummaryStats, runLabel } from "./utils";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
 
@@ -18,7 +19,10 @@ export type OptimizeRun = {
   dieType: string;
   status: RunStatus;
   casesNeeded: number;
+  /** Recorded/cased output only. Work still in the freezer/on the line stays separate. */
   casesMade: number;
+  /** Lifecycle-aware cases pressed but not yet cased. Optional for older clients. */
+  casesOnLine?: number;
   casesLeft: number;
   plannedPpm: number;
   actualPpm: number | null;
@@ -99,11 +103,14 @@ export type OptimizeResult = {
 
 // ── Per-run shaping ──────────────────────────────────────────────────────────
 // Mirrors buildRunCsvRow (downtime = stoppages with an end time that aren't
-// pauses) and the live calc's planned PPM (crustsPerCycle * cycleSpeed *
-// speedAdjustment). Kept in lockstep with the mobile builder so both platforms
-// send the model identically-shaped data.
-function plannedPpmOf(vals: FormValues): number {
-  return Math.max(0, vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment);
+// pauses) and the live calc's planned PPM (configured cycle speed for dough,
+// approximate line speed for crusts). Kept in lockstep with the live calculator.
+function plannedPpmOf(run: RunMeta, vals: FormValues): number {
+  const ppm =
+    run.subTab === "crusts"
+      ? vals.approxLineSpeed
+      : vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
+  return Math.max(0, Math.round(ppm * 100) / 100);
 }
 
 function statusOf(run: RunMeta): RunStatus {
@@ -115,15 +122,31 @@ function statusOf(run: RunMeta): RunStatus {
 export function buildOptimizeRun(run: RunMeta, vals: FormValues, nowMs: number): OptimizeRun {
   const s = computeSummaryStats(vals);
   const status = statusOf(run);
-  const ppc = vals.pizzasPerCase;
+  const effectiveVals = withTempOverrides(vals);
+  const ppc = effectiveVals.pizzasPerCase;
 
   const downtimeSec = (run.stoppages ?? [])
     .filter((st) => st.endedAt && st.type !== "pause")
     .reduce((acc, st) => acc + (st.endedAt! - st.startedAt) / 1000, 0);
 
-  const endRef = run.endedAt ?? (run.startedAt ? nowMs : undefined);
+  // An active pause freezes productive elapsed time at pausedAt. Closed pauses
+  // are already excluded because resumeRun shifts startedAt forward.
+  const endRef = run.endedAt ?? run.pausedAt ?? (run.startedAt ? nowMs : undefined);
   const grossDurSec = run.startedAt && endRef ? (endRef - run.startedAt) / 1000 : 0;
-  const netElapsedSec = Math.max(0, grossDurSec - downtimeSec);
+  // If a run is ended while still paused, endRun cannot shift startedAt; remove
+  // only that pause still open at end (closed pauses were already shifted out).
+  const openPauseAtEndSec =
+    run.endedAt == null
+      ? 0
+      : (run.stoppages ?? [])
+          .filter(
+            (st) =>
+              st.type === "pause" &&
+              st.startedAt < run.endedAt! &&
+              (st.endedAt == null || st.endedAt >= run.endedAt!),
+          )
+          .reduce((acc, st) => acc + (run.endedAt! - st.startedAt) / 1000, 0);
+  const netElapsedSec = Math.max(0, grossDurSec - downtimeSec - openPauseAtEndSec);
 
   const casesNeeded = vals.casesNeeded;
   const liveCasesMade = vals.skidsCompleted * vals.casesPerSkid + vals.casesOnCurrentSkid;
@@ -133,9 +156,20 @@ export function buildOptimizeRun(run: RunMeta, vals: FormValues, nowMs: number):
       : status === "running"
         ? Math.max(0, liveCasesMade)
         : 0;
+  const linePpm = plannedPpmOf(run, effectiveVals);
+  const casesOnLine = computeCasesInFreezer({
+    startedAt: run.startedAt,
+    endedAt: run.endedAt,
+    pausedAt: run.pausedAt,
+    stoppages: run.stoppages,
+    now: nowMs,
+    ppm: linePpm,
+    pizzasPerCase: ppc,
+    freezerTimeMin: effectiveVals.freezerTime,
+  });
   const casesLeft = Math.max(0, casesNeeded - casesMade);
 
-  const plannedPpm = Math.round(plannedPpmOf(vals));
+  const plannedPpm = Math.round(linePpm);
   const actualPpm =
     netElapsedSec > 0 && casesMade > 0 && ppc > 0
       ? Math.round((casesMade * ppc) / (netElapsedSec / 60))
@@ -162,6 +196,7 @@ export function buildOptimizeRun(run: RunMeta, vals: FormValues, nowMs: number):
     status,
     casesNeeded,
     casesMade,
+    casesOnLine,
     casesLeft,
     plannedPpm,
     actualPpm,

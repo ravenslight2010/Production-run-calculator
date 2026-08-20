@@ -1195,7 +1195,7 @@ router.post(
       return;
     }
 
-    const { alert, note } = sanitizeProactiveAlert(raw);
+    const { alert, note } = sanitizeProactiveAlert(raw, validation.data);
 
     // Record notable triggers back through the shared facility-memory write path
     // (best-effort) so the watcher's timing improves over time. A write failure

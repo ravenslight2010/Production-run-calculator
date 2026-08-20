@@ -5011,6 +5011,10 @@ components:
           type: number
         casesMade:
           type: number
+          description: Recorded/cased output only; excludes work still in the freezer or on the line
+        casesOnLine:
+          type: number
+          description: Lifecycle-aware cases pressed but not yet cased (freezer/on-line work in progress); optional for older clients
         casesLeft:
           type: number
         plannedPpm:

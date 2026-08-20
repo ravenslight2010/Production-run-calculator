@@ -330,6 +330,87 @@ describe("POST /ai/proactive-alert — decision branches", () => {
     expect(body.note).toBe("All runs on pace.");
   });
 
+  it("suppresses a low-count alert when recorded plus on-line progress is not low", async () => {
+    const mgr = await freshManager();
+    mock.nextContent = alertContent({
+      key: "low-case-count",
+      category: "run",
+      impact: "high",
+      title: "Case count appears low",
+      detail: "The configured speed implies 222 cases.",
+      suggested_action: { skidsCompleted: 11, casesOnCurrentSkid: 2 },
+    });
+    const run = (liveDayBody().runs as Array<Record<string, unknown>>)[0];
+    const res = await req(
+      mgr,
+      "POST",
+      "/api/ai/proactive-alert",
+      liveDayBody({
+        runs: [
+          {
+            ...run,
+            casesMade: 197,
+            casesOnLine: 44,
+            plannedPpm: 30,
+            netElapsedSec: 74 * 60,
+            downtimeSec: 0,
+            stoppages: [],
+            pizzasPerCase: 10,
+            casesPerSkid: 20,
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { alert: unknown };
+    expect(body.alert).toBeNull();
+    expect(mock.lastUserPrompt).toContain("casesMade=197");
+    expect(mock.lastUserPrompt).toContain("casesOnLine=44");
+  });
+
+  it("keeps a genuine low-count alert and returns a cased-only correction", async () => {
+    const mgr = await freshManager();
+    mock.nextContent = alertContent({
+      key: "low-case-count",
+      category: "run",
+      impact: "high",
+      title: "Case count appears low",
+      detail: "The configured speed implies 222 cases.",
+      // Deliberately inflated model math; the server replaces it.
+      suggested_action: { skidsCompleted: 11, casesOnCurrentSkid: 2 },
+    });
+    const run = (liveDayBody().runs as Array<Record<string, unknown>>)[0];
+    const res = await req(
+      mgr,
+      "POST",
+      "/api/ai/proactive-alert",
+      liveDayBody({
+        runs: [
+          {
+            ...run,
+            casesMade: 150,
+            casesOnLine: 44,
+            plannedPpm: 30,
+            netElapsedSec: 74 * 60,
+            downtimeSec: 0,
+            stoppages: [],
+            pizzasPerCase: 10,
+            casesPerSkid: 20,
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      alert: { key: string; suggestedAction?: { skidsCompleted: number; casesOnCurrentSkid: number } };
+    };
+    expect(body.alert.key).toBe("low-case-count");
+    expect(body.alert.suggestedAction).toEqual({
+      skidsCompleted: 8,
+      casesOnCurrentSkid: 18,
+    });
+  });
+
   it("skips the AI call on an idle day when no stock is at risk", async () => {
     const mgr = await freshManager();
     const before = mock.calls;
