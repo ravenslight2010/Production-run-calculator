@@ -1213,6 +1213,28 @@ export function shouldAcceptSyncDaySnapshot(args: {
   );
 }
 
+/**
+ * A brand-new browser has exactly one automatic seeded placeholder. Its first
+ * server snapshot is safe to adopt wholesale, but later reconnects must keep
+ * using the normal additive/LWW merge so an intentional offline New Run or edit
+ * is not discarded before it can be pushed.
+ */
+export function shouldAtomicallyAdoptFirstSnapshot(args: {
+  initialSnapshot?: boolean;
+  localRuns: RunMeta[];
+  // The form can receive a user keystroke before its autosave effect has
+  // persisted the intent by clearing `seeded`. Do not discard that in-flight
+  // edit just because the placeholder's meta still looks automatic.
+  hasLocalUserEdit?: boolean;
+}): boolean {
+  return (
+    args.initialSnapshot === true &&
+    args.localRuns.length === 1 &&
+    args.hasLocalUserEdit !== true &&
+    isPristineSeedRun(args.localRuns[0])
+  );
+}
+
 // True when a run is still the untouched auto-created placeholder: flagged
 // `seeded` (freshDayState / daily rollover — never New Run, imports, or
 // schedule pull-ups), with blank identity/lifecycle meta AND an all-default

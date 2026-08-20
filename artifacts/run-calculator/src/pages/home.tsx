@@ -207,6 +207,7 @@ import {
   loadProfileSubTab,
   createSyncBaselineGate,
   shouldAcceptSyncDaySnapshot,
+  shouldAtomicallyAdoptFirstSnapshot,
   type SpecImportDisplayKind,
 } from "../storage";
 import { reconcileProfilesFromServer, seedProfilesFromServer } from "../profileServerSync";
@@ -6945,6 +6946,10 @@ export default function Home() {
   // applicator/recipe data onto B's localStorage slot — cross-run contamination.
   // Guard: skip the autosave whenever the form ID and the current run ID disagree.
   const lastFormRunIdRef = useRef<string>("");
+  // The first server snapshot must switch the run list and bind the live form as
+  // one handoff. The fence rises immediately before that identity change; local
+  // offline edits remain available before a connection establishes a baseline.
+  const formHandoffRef = useRef(false);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncBaselineGateRef = useRef(createSyncBaselineGate());
   const isSyncApplyingRef = useRef(false);
@@ -7101,6 +7106,15 @@ export default function Home() {
       const localResetAt = dayStateRef.current.resetAt ?? 0;
       const remoteDate = payload.dayState.date;
       const initialSnapshot = options?.initialSnapshot === true;
+      // Only a genuinely fresh automatic placeholder may adopt an initial
+      // snapshot wholesale. A reconnect can also carry `initial: true`, but it
+      // must preserve an intentional offline New Run or local edit until the
+      // ordinary additive/LWW merge can publish it.
+      const atomicSeedSnapshot = shouldAtomicallyAdoptFirstSnapshot({
+        initialSnapshot,
+        localRuns: dayStateRef.current.runs,
+        hasLocalUserEdit: form.formState.isDirty,
+      });
       const acceptRemoteDay = shouldAcceptSyncDaySnapshot({
         remoteDate,
         localDate: todayStr(),
@@ -7164,6 +7178,32 @@ export default function Home() {
         saveRunValuesUpdated(mergedUpd);
       }
 
+      // Bind the form BEFORE publishing the incoming current run. React effects
+      // run after setDayState, so doing this only in the currentRunId effect
+      // leaves a frame where the old form values can be autosaved under the
+      // placeholder's ID. The handoff fence covers form.watch, recovery pushes,
+      // and any incidental sync work until this exact run/value pair is settled.
+      if (atomicSeedSnapshot) {
+        formHandoffRef.current = true;
+        const adopted = payload.dayState.runs[0];
+        if (adopted) {
+          const adoptedValues = mergeRunDefaults(loadRunValues(adopted.id));
+          lastFormRunIdRef.current = "";
+          form.reset(adoptedValues);
+          resetFieldArrays(adoptedValues);
+          lastFormRunIdRef.current = adopted.id;
+        } else {
+          // An explicit empty server baseline keeps the local automatic
+          // placeholder local-only, but still clears any stale form contents
+          // before the operator deliberately creates the first run.
+          const seedId = dayStateRef.current.runs[0]?.id ?? "";
+          lastFormRunIdRef.current = "";
+          form.reset(DEFAULT_VALUES);
+          resetFieldArrays(DEFAULT_VALUES);
+          lastFormRunIdRef.current = seedId;
+        }
+      }
+
       // ── Merge tombstones (union remote+local) ──
       // A merge removes source names locally, but the additive list-union below
       // would resurrect them from a stale peer/server. Union the synced tombstone
@@ -7220,11 +7260,11 @@ export default function Home() {
           })) rejectedStale = true;
         }
         setDayState(prev => {
-          // The first server frame is the baseline for this connection. It is
-          // authoritative even when a stale local device has a newer marker;
-          // otherwise the client would keep its short local run list forever
-          // while the server safely preserved the missing runs.
-          const isReset = initialSnapshot || remoteResetAt > localResetAt;
+          // The first snapshot is authoritative only for a fresh seeded
+          // placeholder. Reconnect initial frames use the regular additive/LWW
+          // path, preserving intentional offline changes while still converging
+          // with the server row.
+          const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;
           // Runs are day-state and converge like the substitution/staging overlays
           // below: on a true daily reset adopt the remote runs wholesale (the reset's
           // empty set replaces ours); during same-day concurrent editing union by id
@@ -7370,6 +7410,30 @@ export default function Home() {
           saveDayState(newDs, { stampMeta: false });
           return newDs;
         });
+        if (atomicSeedSnapshot) {
+          // Keep refs in lockstep with the atomic handoff. The normal React
+          // state effect catches up on render, but outgoing/recovery paths read
+          // this ref synchronously.
+          const remoteRuns = payload.dayState.runs.filter(
+            (run) => !deletedRunSet.has(run.id.trim().toLowerCase()),
+          );
+          const adoptedRuns = remoteRuns.length > 0
+            ? remoteRuns
+            : [{ id: dayStateRef.current.runs[0]?.id ?? genId(), brand: "", flavor: "", seeded: true }];
+          dayStateRef.current = {
+            ...dayStateRef.current,
+            runs: adoptedRuns,
+            currentIndex: 0,
+            shiftNotes: payload.dayState.shiftNotes ?? dayStateRef.current.shiftNotes,
+            runToTime: payload.dayState.runToTime ?? dayStateRef.current.runToTime,
+            resetAt: remoteResetAt > 0 ? remoteResetAt : dayStateRef.current.resetAt,
+            substitutions: payload.dayState.substitutions ?? [],
+            substitutionLog: payload.dayState.substitutionLog ?? [],
+            stagedItems: payload.dayState.stagedItems ?? {},
+            prepPhase: ((payload.dayState as Record<string, unknown>).prepPhase as PrepPhase | undefined) ?? FRESH_PREP_PHASE,
+          };
+          formHandoffRef.current = false;
+        }
         if (payload.dayState.runToTime) setRunToTime(payload.dayState.runToTime);
       }
 
@@ -7730,6 +7794,17 @@ export default function Home() {
           applySyncCallbackRef.current(msg.data, {
             initialSnapshot: msg.initial === true,
           });
+        } else if (msg.initial) {
+          // The server explicitly has no row. Settle the local automatic seed
+          // to default values before opening the baseline gate, so stale form
+          // contents cannot become a shared first run.
+          const seedId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id ?? "";
+          formHandoffRef.current = true;
+          lastFormRunIdRef.current = "";
+          form.reset(DEFAULT_VALUES);
+          resetFieldArrays(DEFAULT_VALUES);
+          lastFormRunIdRef.current = seedId;
+          formHandoffRef.current = false;
         }
         if (msg.initial) {
           // applySyncCallbackRef clears its sync-apply suppression in a
@@ -8123,7 +8198,9 @@ export default function Home() {
       // so it covers EVERY push path, not just direct edits.
       const value =
         run.id === curId
-          ? pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id))
+          ? (formHandoffRef.current
+              ? loadRunValues(run.id)
+              : pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id)))
           : loadRunValues(run.id);
       // NEVER push the untouched auto-created placeholder run. Every fresh
       // device/browser starts with one (freshDayState), and pushing it lets the
@@ -8158,7 +8235,7 @@ export default function Home() {
   }
 
   function schedulePush(ds: DayState, delay = 600) {
-    if (isSyncApplyingRef.current) return;
+    if (isSyncApplyingRef.current || formHandoffRef.current) return;
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
@@ -8255,7 +8332,7 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const ds = dayStateRef.current;
+    let ds = dayStateRef.current;
     const run = ds?.runs[ds?.currentIndex];
     const runId = run?.id;
     if (!runId) return;
@@ -8266,6 +8343,7 @@ export default function Home() {
     // profile — the cross-run contamination bug. Only proceed once the form is
     // confirmed settled for the current run.
     if (lastFormRunIdRef.current !== runId) return;
+    if (formHandoffRef.current) return;
     // Only treat this as a real user edit when the live form actually DIFFERS from
     // the values already stored for this run. A programmatic form.reset() — run
     // switch, sync-apply (the merge resets the live form to the accepted remote),
@@ -8290,6 +8368,23 @@ export default function Home() {
     // populated→empty transition, never a legitimately blank run.)
     if (isEmptyOverPopulated(v, loadRunValues(runId))) return;
     const now = Date.now();
+    // Claim an automatic placeholder as soon as an actual operator edit lands.
+    // A clean programmatic form reset never reaches this point (the stored-value
+    // equality guard above returns), so stale form contamination stays local-only.
+    // Persisting the provenance before the delayed sync push means reconnects and
+    // offline recovery retain this intentional run instead of treating it as a
+    // disposable startup seed.
+    if (run.seeded) {
+      ds = {
+        ...ds,
+        runs: ds.runs.map((candidate) =>
+          candidate.id === runId ? { ...candidate, seeded: false } : candidate,
+        ),
+      };
+      dayStateRef.current = ds;
+      saveDayState(ds);
+      setDayState(ds);
+    }
     saveRunValues(runId, v);
     // Stamp this run's edit time so an in-flight stale remote can't clobber it
     // (the "click away and my change disappeared" lost-update).

@@ -19,11 +19,13 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let dataHealsTable: DbModule["dataHealsTable"];
 let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
+let runDataHeals: () => Promise<void>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -63,11 +65,13 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
+  dataHealsTable = dbMod.dataHealsTable;
   syncConflictLogsTable = dbMod.syncConflictLogsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
+  runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -110,7 +114,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -293,6 +297,95 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
     const row = await readRow();
     expect(row?.runValues?.r1?.casesNeeded).toBe(777);
     expect(row?.runValuesUpdatedAt?.r1).toBe(3000);
+  });
+});
+
+describe("fresh-device unnamed-run remediation", () => {
+  const DATE = "2030-05-14";
+  const namedRun = { id: "named", brand: "Acme", flavor: "Pepperoni" };
+  const namedAmbiguousRun = { id: "named-ambiguous", brand: "Acme", flavor: "Sausage" };
+  const copiedRun = { id: "copied", brand: "", flavor: "" };
+  const ambiguousOne = { id: "ambiguous-one", brand: "", flavor: "" };
+  const ambiguousTwo = { id: "ambiguous-two", brand: "", flavor: "" };
+  const copiedValues = {
+    casesNeeded: 240,
+    pizzasPerCase: 12,
+    doughRecipeName: "House Dough",
+    doughRecipe: [{ ingredient: "Flour", lbs: 50 }],
+    skidsCompleted: 2,
+  };
+  const ambiguousValues = {
+    casesNeeded: 180,
+    pizzasPerCase: 12,
+    doughRecipeName: "Sausage Dough",
+    doughRecipe: [{ ingredient: "Flour", lbs: 40 }],
+  };
+
+  it("removes exactly one verified copied blank, tombstones it, and leaves ambiguous blanks for review", async () => {
+    await db.insert(dailySyncTable).values({
+      date: DATE,
+      scope: "live",
+      data: {
+        dayState: {
+          runs: [namedRun, namedAmbiguousRun, copiedRun, ambiguousOne, ambiguousTwo],
+        },
+        runValues: {
+          named: copiedValues,
+          copied: copiedValues,
+          "named-ambiguous": ambiguousValues,
+          "ambiguous-one": ambiguousValues,
+          "ambiguous-two": ambiguousValues,
+        },
+        runValuesUpdatedAt: {
+          named: 100,
+          copied: 101,
+          "ambiguous-one": 102,
+          "ambiguous-two": 103,
+        },
+      },
+    });
+
+    await runDataHeals();
+
+    const [row] = await db
+      .select()
+      .from(dailySyncTable)
+      .where(sql`${dailySyncTable.date} = ${DATE} and ${dailySyncTable.scope} = 'live'`);
+    const data = row.data as {
+      dayState: { runs: Array<{ id: string }> };
+      runValues: Record<string, unknown>;
+      runValuesUpdatedAt: Record<string, number>;
+      deletedItems: Record<string, string[]>;
+      deletedStamps: Record<string, Record<string, number>>;
+    };
+    expect(data.dayState.runs.map((run) => run.id)).toEqual([
+      "named",
+      "named-ambiguous",
+      "ambiguous-one",
+      "ambiguous-two",
+    ]);
+    expect(data.runValues.copied).toBeUndefined();
+    expect(data.runValuesUpdatedAt.copied).toBeUndefined();
+    expect(data.deletedItems.runs).toContain("copied");
+    expect(data.deletedStamps.runs.copied).toBeGreaterThan(0);
+
+    const [marker] = await db
+      .select()
+      .from(dataHealsTable)
+      .where(sql`${dataHealsTable.id} = 'fresh-device-run-contamination-v1'`);
+    expect(marker.result).toMatchObject({
+      healedDays: 1,
+      removedRuns: 1,
+      ambiguousCandidates: 2,
+    });
+
+    // Marker-guarded: repeating boot heals does not revisit the same row.
+    await runDataHeals();
+    const [again] = await db
+      .select()
+      .from(dailySyncTable)
+      .where(sql`${dailySyncTable.date} = ${DATE} and ${dailySyncTable.scope} = 'live'`);
+    expect((again.data as { dayState: { runs: unknown[] } }).dayState.runs).toHaveLength(4);
   });
 });
 

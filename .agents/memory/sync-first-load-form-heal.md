@@ -13,4 +13,4 @@ On a fresh device right after sign-in, the app auto-selects run 0 before synced 
 
 **Why:** healing must be one-directional (defaults → stored real data). Anything looser re-introduces the empty-over-populated clobber class of bugs guarded elsewhere (autosave attribution, server protectRunValues).
 
-**How to apply:** any new path that swaps `currentRunId` or adopts remote day-state on a fresh device should rely on this heal effect rather than duplicating form resets; keep the two guards intact.
+**How to apply:** ordinary remote swaps should rely on this heal effect rather than duplicating form resets; keep the two guards intact. The exception is a clean, untouched automatic seeded placeholder on its very first server snapshot: bind the incoming run ID and stored values synchronously, behind a handoff fence, *before* publishing the new run list. A dirty form must reject that wholesale path; its first real autosave claims the seed so reconnects use additive/LWW. Clean programmatic stale values must not claim it. Reconnects must remain additive/LWW so an intentional offline New Run survives.

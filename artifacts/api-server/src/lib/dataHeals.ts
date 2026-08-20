@@ -3362,6 +3362,7 @@ export async function runDataHeals(): Promise<void> {
   await runProfileNameLinkStubPurge();
   await runAug19SavedSpecProfileRepair();
   await runAug19SavedSpecProfileRepairV2();
+  await runFreshDeviceRunContaminationCleanup();
 }
 
 // ── Strip all ozPerPizza from cheese recipe components ───────────────────────
@@ -3459,6 +3460,178 @@ export function recomputeCheeseSharesFromLbs(recipe: CheeseRecipe): CheeseRecipe
 
   if (!anythingChanged) return null;
   return { ...recipe, components: newComps };
+}
+
+// ── Fresh-device copied unnamed runs ─────────────────────────────────────────
+// A timing window during first-snapshot adoption could briefly pair an automatic
+// blank placeholder ID with the prior live form. Only remove the narrow,
+// high-confidence shape: one unstarted unnamed run whose materially populated
+// complete values are an exact copy of exactly one named run on the same day.
+// Blank or otherwise ambiguous future rows intentionally remain for a manager.
+const FRESH_DEVICE_RUN_CONTAMINATION_HEAL_ID = "fresh-device-run-contamination-v1";
+const FRESH_DEVICE_RUN_CONTAMINATION_FROM_DATE = "2026-08-20";
+
+type JsonRecord = Record<string, unknown>;
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (isJsonRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function hasMaterialRunSetup(values: JsonRecord): boolean {
+  if (!(finiteNumber(values.casesNeeded) ?? 0)) return false;
+  return (
+    (finiteNumber(values.pizzasPerCase) ?? 0) > 0 ||
+    ["doughRecipe", "frontlineRecipe", "app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"]
+      .some((field) => Array.isArray(values[field]) && values[field].length > 0) ||
+    ["doughRecipeName", "frontlineRecipeName", "app1CheeseRecipeName", "app2CheeseRecipeName", "app3CheeseRecipeName", "app4CheeseRecipeName"]
+      .some((field) => typeof values[field] === "string" && (values[field] as string).trim().length > 0)
+  );
+}
+
+function isUnstartedUnnamedRun(run: JsonRecord): boolean {
+  return (
+    typeof run.id === "string" &&
+    !String(run.brand ?? "").trim() &&
+    !String(run.flavor ?? "").trim() &&
+    !String(run.notes ?? "").trim() &&
+    run.startedAt == null &&
+    run.endedAt == null &&
+    run.pausedAt == null &&
+    run.actualCases == null &&
+    run.wasteLbs == null &&
+    (!Array.isArray(run.stoppages) || run.stoppages.length === 0)
+  );
+}
+
+/**
+ * Pure, deliberately conservative duplicate detector. A signature with more
+ * than one unnamed candidate or more than one named source is ambiguous and is
+ * left untouched for manager review.
+ */
+export function findVerifiedFreshDeviceCopiedRunIds(data: unknown): {
+  duplicateRunIds: string[];
+  ambiguousCandidates: number;
+} {
+  if (!isJsonRecord(data) || !isJsonRecord(data.dayState) || !Array.isArray(data.dayState.runs) || !isJsonRecord(data.runValues)) {
+    return { duplicateRunIds: [], ambiguousCandidates: 0 };
+  }
+  const namedBySignature = new Map<string, string[]>();
+  const unnamedBySignature = new Map<string, string[]>();
+  for (const candidate of data.dayState.runs) {
+    if (!isJsonRecord(candidate) || typeof candidate.id !== "string") continue;
+    const values = data.runValues[candidate.id];
+    if (!isJsonRecord(values) || !hasMaterialRunSetup(values)) continue;
+    const signature = stableJson(values);
+    if (isUnstartedUnnamedRun(candidate)) {
+      unnamedBySignature.set(signature, [...(unnamedBySignature.get(signature) ?? []), candidate.id]);
+    } else if (String(candidate.brand ?? "").trim() || String(candidate.flavor ?? "").trim()) {
+      namedBySignature.set(signature, [...(namedBySignature.get(signature) ?? []), candidate.id]);
+    }
+  }
+
+  const duplicateRunIds: string[] = [];
+  let ambiguousCandidates = 0;
+  for (const [signature, unnamedIds] of unnamedBySignature) {
+    const namedIds = namedBySignature.get(signature) ?? [];
+    if (unnamedIds.length === 1 && namedIds.length === 1) duplicateRunIds.push(unnamedIds[0]);
+    else ambiguousCandidates += unnamedIds.length;
+  }
+  return { duplicateRunIds, ambiguousCandidates };
+}
+
+async function runFreshDeviceRunContaminationCleanup(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: FRESH_DEVICE_RUN_CONTAMINATION_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const days = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(gte(dailySyncTable.date, FRESH_DEVICE_RUN_CONTAMINATION_FROM_DATE))
+      .for("update");
+    let removedRuns = 0;
+    let ambiguousCandidates = 0;
+    let healedDays = 0;
+    const now = Date.now();
+
+    for (const day of days) {
+      const data = day.data as JsonRecord;
+      const result = findVerifiedFreshDeviceCopiedRunIds(data);
+      ambiguousCandidates += result.ambiguousCandidates;
+      if (result.duplicateRunIds.length === 0 || !isJsonRecord(data.dayState) || !Array.isArray(data.dayState.runs)) continue;
+
+      const removed = new Set(result.duplicateRunIds);
+      const runValues = isJsonRecord(data.runValues) ? { ...data.runValues } : {};
+      const runValuesUpdatedAt = isJsonRecord(data.runValuesUpdatedAt) ? { ...data.runValuesUpdatedAt } : {};
+      for (const id of removed) {
+        delete runValues[id];
+        delete runValuesUpdatedAt[id];
+      }
+      const deletedItems = isJsonRecord(data.deletedItems) ? { ...data.deletedItems } : {};
+      const existingRunTombstones = Array.isArray(deletedItems.runs)
+        ? deletedItems.runs.filter((id): id is string => typeof id === "string")
+        : [];
+      deletedItems.runs = [...new Set([...existingRunTombstones, ...result.duplicateRunIds.map((id) => id.toLowerCase())])];
+      // Tombstone stamps are monotonic too. They make this cleanup durable
+      // against a stale client's re-push of the removed ID.
+      const deletedStamps = isJsonRecord(data.deletedStamps) ? { ...data.deletedStamps } : {};
+      const runDeleteStamps = isJsonRecord(deletedStamps.runs) ? { ...deletedStamps.runs } : {};
+      for (const id of result.duplicateRunIds) {
+        const prior = finiteNumber(runDeleteStamps[id.toLowerCase()]) ?? 0;
+        runDeleteStamps[id.toLowerCase()] = Math.max(prior, now) + 1;
+      }
+      deletedStamps.runs = runDeleteStamps;
+
+      await tx
+        .update(dailySyncTable)
+        .set({
+          data: {
+            ...data,
+            dayState: {
+              ...data.dayState,
+              runs: data.dayState.runs.filter(
+                (run) => !isJsonRecord(run) || typeof run.id !== "string" || !removed.has(run.id),
+              ),
+            },
+            runValues,
+            runValuesUpdatedAt,
+            deletedItems,
+            deletedStamps,
+          },
+          updatedAt: new Date(),
+        })
+        .where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+      removedRuns += result.duplicateRunIds.length;
+      healedDays++;
+    }
+
+    const summary = {
+      scannedDays: days.length,
+      healedDays,
+      removedRuns,
+      ambiguousCandidates,
+    };
+    await tx
+      .update(dataHealsTable)
+      .set({ result: summary })
+      .where(eq(dataHealsTable.id, FRESH_DEVICE_RUN_CONTAMINATION_HEAL_ID));
+    logger.info({ heal: FRESH_DEVICE_RUN_CONTAMINATION_HEAL_ID, ...summary }, "Data heal applied");
+  });
 }
 
 // v1 marker already claimed in prod; this no-op guard prevents the old (broken)

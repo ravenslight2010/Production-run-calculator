@@ -3,7 +3,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createSyncBaselineGate, shouldAcceptSyncDaySnapshot } from "./storage";
+import {
+  createSyncBaselineGate,
+  shouldAcceptSyncDaySnapshot,
+  shouldAtomicallyAdoptFirstSnapshot,
+} from "./storage";
 
 describe("SSE sync baseline gate", () => {
   it("queues reconnect pushes until a populated initial snapshot is applied", () => {
@@ -61,11 +65,76 @@ describe("SSE sync baseline gate", () => {
     })).toBe(false);
   });
 
+  it("uses the atomic path only for the first untouched automatic placeholder", () => {
+    const seeded = { id: "seed", brand: "", flavor: "", seeded: true };
+    expect(
+      shouldAtomicallyAdoptFirstSnapshot({
+        initialSnapshot: true,
+        localRuns: [seeded],
+        hasLocalUserEdit: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAtomicallyAdoptFirstSnapshot({
+        initialSnapshot: false,
+        localRuns: [seeded],
+      }),
+    ).toBe(false);
+    expect(
+      shouldAtomicallyAdoptFirstSnapshot({
+        initialSnapshot: true,
+        localRuns: [{ id: "new-run", brand: "", flavor: "" }],
+      }),
+    ).toBe(false);
+    expect(
+      shouldAtomicallyAdoptFirstSnapshot({
+        initialSnapshot: true,
+        localRuns: [{ ...seeded, brand: "Acme" }],
+      }),
+    ).toBe(false);
+    expect(
+      shouldAtomicallyAdoptFirstSnapshot({
+        initialSnapshot: true,
+        localRuns: [seeded],
+        hasLocalUserEdit: true,
+      }),
+    ).toBe(false);
+  });
+
   it("wires the first SSE frame as authoritative and re-arms the gate on reconnect errors", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
     expect(source).toContain("initialSnapshot: msg.initial === true");
-    expect(source).toContain("const isReset = initialSnapshot || remoteResetAt > localResetAt;");
+    expect(source).toContain("shouldAtomicallyAdoptFirstSnapshot");
+    expect(source).toContain("hasLocalUserEdit: form.formState.isDirty");
+    expect(source).toContain("const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;");
+    expect(source).toContain("const formHandoffRef = useRef(false);");
     const errorHandler = source.match(/es\.onerror = \(\) => \{([\s\S]*?)\n    \};/);
     expect(errorHandler?.[1]).toContain("syncBaselineGateRef.current.beginConnection()");
+  });
+
+  it("binds the adopted form before it publishes the incoming run selection", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+    const handoff = source.slice(
+      source.indexOf("if (atomicSeedSnapshot) {"),
+      source.indexOf("// ── Merge tombstones"),
+    );
+    expect(handoff).toContain("formHandoffRef.current = true;");
+    expect(handoff.indexOf("form.reset(adoptedValues)")).toBeGreaterThan(-1);
+    expect(handoff).toContain("lastFormRunIdRef.current = adopted.id;");
+    // The state merge is intentionally after the complete form binding block.
+    expect(source.indexOf("setDayState(prev =>")).toBeGreaterThan(
+      source.indexOf("form.reset(adoptedValues)"),
+    );
+  });
+
+  it("claims a seed after a genuine form edit, while programmatic resets stay local-only", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+    const autosave = source.slice(
+      source.indexOf("if (deepEqual(loadRunValues(runId), v)) return;"),
+      source.indexOf("schedulePush(ds);"),
+    );
+    expect(autosave).toContain("if (run.seeded)");
+    expect(autosave).toContain("seeded: false");
+    expect(autosave).toContain("saveDayState(ds);");
   });
 });
