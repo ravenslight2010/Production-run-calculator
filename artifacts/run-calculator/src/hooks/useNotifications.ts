@@ -75,6 +75,77 @@ const PACE_SHORTFALL_MIN_CASES = 10;
 /** Only alert when this many minutes or fewer remain in the run. */
 const PACE_TIME_REMAINING_MAX_MIN = 30;
 
+export type BrowserNotificationState = "unavailable" | NotificationPermission;
+
+/**
+ * The usable subset of the browser Notification constructor. Do not reference
+ * the ambient `Notification` identifier outside this boundary: some embedded
+ * browsers expose a partial `window.Notification` value that is not safe to
+ * read, call, or construct.
+ */
+interface BrowserNotificationApi {
+  new(title: string, options?: NotificationOptions): Notification;
+  permission: NotificationPermission;
+  requestPermission?: () => Promise<NotificationPermission>;
+}
+
+export interface BrowserNotificationCapability {
+  state: BrowserNotificationState;
+  api?: BrowserNotificationApi;
+}
+
+/**
+ * Resolve the Notification API only from the browser object, validating both
+ * its constructor and permission value. This distinguishes every meaningful
+ * browser state without ever evaluating an unavailable free global.
+ */
+export function getBrowserNotificationCapability(): BrowserNotificationCapability {
+  if (typeof window === "undefined") return { state: "unavailable" };
+
+  try {
+    const candidate = (window as Window & { Notification?: unknown }).Notification;
+    if (typeof candidate !== "function") return { state: "unavailable" };
+
+    const permission = (candidate as { permission?: unknown }).permission;
+    if (permission !== "granted" && permission !== "denied" && permission !== "default") {
+      return { state: "unavailable" };
+    }
+
+    return { state: permission, api: candidate as BrowserNotificationApi };
+  } catch {
+    // WebViews can expose throwing property getters for unsupported APIs.
+    return { state: "unavailable" };
+  }
+}
+
+/**
+ * Request browser permission only when the API is complete enough to do so.
+ * A granted callback is intentionally optional: batch alerts retain their
+ * existing "ask now, alert on the next cycle" behavior.
+ */
+export function requestBrowserNotificationPermission(onGranted?: () => void): void {
+  const { state, api } = getBrowserNotificationCapability();
+  if (state === "granted") {
+    onGranted?.();
+    return;
+  }
+  if (state !== "default" || !api || typeof api.requestPermission !== "function") return;
+
+  try {
+    const permissionRequest = api.requestPermission();
+    if (!permissionRequest || typeof permissionRequest.then !== "function") return;
+    void permissionRequest
+      .then((permission) => {
+        if (permission === "granted") onGranted?.();
+      })
+      .catch(() => {
+        // A dismissed or unsupported permission prompt must not affect alerts.
+      });
+  } catch {
+    // Older embedded browsers may throw while opening the permission prompt.
+  }
+}
+
 /**
  * Fire a notification safely. Android Chrome (and other mobile browsers)
  * forbid the `new Notification()` constructor — it throws "Illegal
@@ -86,11 +157,11 @@ const PACE_TIME_REMAINING_MAX_MIN = 30;
  * push notifications outside of the centralised useNotifications hook.
  */
 export function showAppNotification(title: string, options: NotificationOptions): void {
-  if (typeof window === "undefined" || !("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
+  const { state, api } = getBrowserNotificationCapability();
+  if (state !== "granted" || !api) return;
   void (async () => {
     try {
-      const reg = await navigator.serviceWorker?.getRegistration();
+      const reg = await window.navigator.serviceWorker?.getRegistration();
       if (reg?.showNotification) {
         await reg.showNotification(title, options);
         return;
@@ -99,7 +170,7 @@ export function showAppNotification(title: string, options: NotificationOptions)
       /* fall through to the constructor */
     }
     try {
-      new Notification(title, options);
+      new api(title, options);
     } catch {
       /* notifications unsupported in this context — ignore */
     }
@@ -215,28 +286,24 @@ export function useNotifications({
         notifiedRunRef.current = runId;
         return;
       }
-      if ("Notification" in window) {
-        const fire = () => {
-          notifiedRunRef.current = runId;
-          // The press finishes in ~15 min, but product keeps exiting the
-          // freezer tunnel for the full freezer time after that — tell the
-          // crew when the line is actually clear, not just when the press stops.
-          const freezerMin = Number(v.freezerTime) || 0;
-          const freezerNote = freezerMin > 0
-            ? ` Freezer keeps emptying until ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}.`
-            : "";
-          showAppNotification("⏰ 15 minutes left", {
-            body: `${runLabel(currentRun)} — wrap up and prepare for end of run.${freezerNote}`,
-            icon: "/icons/icon-192.png",
-            tag: `run-end-${runId}`,
-          });
-        };
-        if (Notification.permission === "granted") {
-          fire();
-        } else if (Notification.permission === "default") {
-          Notification.requestPermission().then((p) => { if (p === "granted") fire(); });
-        }
-      }
+      // Latch before touching the browser API. An unavailable, denied, or
+      // incomplete implementation must not repeatedly evaluate this milestone.
+      notifiedRunRef.current = runId;
+      const fire = () => {
+        // The press finishes in ~15 min, but product keeps exiting the
+        // freezer tunnel for the full freezer time after that — tell the
+        // crew when the line is actually clear, not just when the press stops.
+        const freezerMin = Number(v.freezerTime) || 0;
+        const freezerNote = freezerMin > 0
+          ? ` Freezer keeps emptying until ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}.`
+          : "";
+        showAppNotification("⏰ 15 minutes left", {
+          body: `${runLabel(currentRun)} — wrap up and prepare for end of run.${freezerNote}`,
+          icon: "/icons/icon-192.png",
+          tag: `run-end-${runId}`,
+        });
+      };
+      requestBrowserNotificationPermission(fire);
     }
   }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec, v.freezerTime]);
 
@@ -291,22 +358,20 @@ export function useNotifications({
     // the warehouse view is visible, its staging checklist is the one source
     // of direction. In every silent path we still latch the milestone so a
     // later tab/background change cannot retroactively alert.
-    if (
-      !isNotifEnabled(prefsRef.current, "warehouseStaging") ||
-      !shouldEscalateToBrowser() ||
-      !("Notification" in window)
-    ) {
+    if (!isNotifEnabled(prefsRef.current, "warehouseStaging") || !shouldEscalateToBrowser()) {
       dueStages.forEach((stage) => {
         (stage === "frontline" ? frontlineNotifRef : packagingNotifRef).current.add(runId);
       });
       return;
     }
     const fireAll = () => dueStages.forEach(fireStage);
-    if (Notification.permission === "granted") {
-      fireAll();
-    } else if (Notification.permission === "default") {
-      Notification.requestPermission().then((p) => { if (p === "granted") fireAll(); });
-    }
+    // Preserve the per-stage one-time latches even when this browser cannot
+    // display OS notifications. A granted permission invokes fireAll now;
+    // a default permission invokes it only after the user grants access.
+    dueStages.forEach((stage) => {
+      (stage === "frontline" ? frontlineNotifRef : packagingNotifRef).current.add(runId);
+    });
+    requestBrowserNotificationPermission(fireAll);
   }, [
     runStatus,
     currentRun?.id,
@@ -346,16 +411,15 @@ export function useNotifications({
     // re-fire this completed boundary.
     if (!isNotifEnabled(prefsRef.current, "batchDue") || !shouldEscalateToBrowser()) return;
     navigator.vibrate?.([100, 50, 100]);
-    if ("Notification" in window) {
-      if (Notification.permission === "granted") {
-        showAppNotification("🍕 Start next dough batch", {
-          body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
-          icon: "/icons/icon-192.png",
-          tag: `batch-${currentRun.id}-${batchNum}`,
-        });
-      } else if (Notification.permission === "default") {
-        Notification.requestPermission();
-      }
+    const notification = getBrowserNotificationCapability();
+    if (notification.state === "granted") {
+      showAppNotification("🍕 Start next dough batch", {
+        body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
+        icon: "/icons/icon-192.png",
+        tag: `batch-${currentRun.id}-${batchNum}`,
+      });
+    } else if (notification.state === "default") {
+      requestBrowserNotificationPermission();
     }
   }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust, calc.pressDone]);
 
@@ -383,7 +447,7 @@ export function useNotifications({
     if (!isNotifEnabled(prefsRef.current, "runComplete")) return;
     navigator.vibrate?.([300, 100, 300, 100, 300]);
     if (!shouldEscalateToBrowser()) return;
-    if ("Notification" in window && Notification.permission === "granted") {
+    if (getBrowserNotificationCapability().state === "granted") {
       showAppNotification("✅ Run time complete", {
         body: `${runLabel(currentRun)} — time's up, end the run.`,
         icon: "/icons/icon-192.png",
@@ -412,7 +476,7 @@ export function useNotifications({
     if (!isNotifEnabled(prefsRef.current, "freezerEmpty")) return;
     navigator.vibrate?.([200, 100, 200]);
     if (!shouldEscalateToBrowser()) return;
-    if ("Notification" in window && Notification.permission === "granted") {
+    if (getBrowserNotificationCapability().state === "granted") {
       showAppNotification("❄️ Freezer empty", {
         body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
         icon: "/icons/icon-192.png",

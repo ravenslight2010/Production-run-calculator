@@ -177,6 +177,25 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
     expect(vibrateMock).not.toHaveBeenCalled();
   });
 
+  it("keeps the in-app banner when Notification exists but is incomplete", () => {
+    // Some embedded browsers expose a function-shaped global without its
+    // permission state. It must be treated as unavailable, without interrupting
+    // the Dough card or reading a free `Notification` identifier.
+    Object.defineProperty(window, "Notification", {
+      value: vi.fn(),
+      writable: true,
+      configurable: true,
+    });
+    const run = makeRun();
+
+    const { result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, { currentRun: run }),
+    });
+
+    expect(result.current.showBatchDue).toBe(true);
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
   it("shows the in-app banner when a batch boundary is first crossed", () => {
     const run = makeRun();
     const { result } = renderHook((p: Params) => useNotifications(p), {
