@@ -19,17 +19,31 @@ const BASE = {
 describe("packaging speed nudge", () => {
   it("uses repeated downward current-skid corrections even when auto-track is still ahead", () => {
     // Configured output is 100 cases. Auto-track is still showing 110 cases,
-    // but two 5-case corrections prove the physical line is at 90 cases.
+    // but two small corrections prove the physical line is at 96 cases.
     const nudge = evaluatePackagingSpeedNudge({
       ...BASE,
       displayedCases: 110,
-      corrections: [{ deltaCases: -5 }, { deltaCases: -5 }],
+      corrections: [{ deltaCases: -2 }, { deltaCases: -2 }],
     });
 
     expect(nudge).toEqual({
       direction: "slower",
       isCrust: false,
-      value: 1.13,
+      value: 1.2,
+    });
+  });
+
+  it("uses repeated upward corrections below the 10% drift threshold", () => {
+    const nudge = evaluatePackagingSpeedNudge({
+      ...BASE,
+      displayedCases: 100,
+      corrections: [{ deltaCases: 2 }, { deltaCases: 2 }],
+    });
+
+    expect(nudge).toEqual({
+      direction: "faster",
+      isCrust: false,
+      value: 1.3,
     });
   });
 
@@ -49,11 +63,11 @@ describe("packaging speed nudge", () => {
     });
   });
 
-  it("does not nudge for repeated corrections below the 10% drift threshold", () => {
+  it("does not nudge for a lone correction below the 10% drift threshold", () => {
     const nudge = evaluatePackagingSpeedNudge({
       ...BASE,
       displayedCases: 100,
-      corrections: [{ deltaCases: -2 }, { deltaCases: -2 }],
+      corrections: [{ deltaCases: -2 }],
     });
 
     expect(nudge).toBeNull();

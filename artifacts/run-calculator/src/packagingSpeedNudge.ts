@@ -93,8 +93,9 @@ type EvaluatePackagingSpeedNudgeInput = {
 };
 
 /**
- * Returns a speed nudge only when a manual correction episode demonstrates at
- * least 10% drift from the configured line rate.
+ * Returns a speed nudge when a manual correction episode either repeats in the
+ * same direction or demonstrates at least 10% drift from the configured line
+ * rate.
  *
  * Auto-track starts from the configured rate, so manual case corrections are
  * best understood as signed movement away from that expected output. Anchoring
@@ -149,7 +150,7 @@ export function evaluatePackagingSpeedNudge(
 
   // A single full-skid correction can itself be enough evidence of a 10% rate
   // error. Smaller edits need a repeated same-direction episode before they can
-  // become a nudge, and every nudge still has to clear the 10% drift threshold.
+  // become a nudge.
   if (!hasRepeatedCorrection && correctionDriftRatio < MIN_DRIFT_RATIO) return null;
 
   const correctionAdjustedCases = Math.max(
@@ -164,7 +165,8 @@ export function evaluatePackagingSpeedNudge(
 
   if (
     !Number.isFinite(driftRatio) ||
-    Math.abs(driftRatio - 1) + Number.EPSILON < MIN_DRIFT_RATIO ||
+    (!hasRepeatedCorrection &&
+      Math.abs(driftRatio - 1) + Number.EPSILON < MIN_DRIFT_RATIO) ||
     (direction > 0 && driftRatio <= 1) ||
     (direction < 0 && driftRatio >= 1)
   ) {
