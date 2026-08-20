@@ -100,6 +100,7 @@ const FACTORY_KV_SERVER_ONLY_KEYS: ReadonlySet<string> = new Set([
 // server stamp > local → overwrite local.
 
 const STAMP_KEY_PREFIX = "run-calc-fkv-stamp-";
+const QUEUE_KEY = "run-calc-fkv-queue-v1";
 
 function getLocalStamp(key: string): number {
   try {
@@ -118,11 +119,85 @@ function setLocalStamp(key: string, ts: number): void {
   } catch {}
 }
 
-/** Call after a local write-through PUT succeeds to record our edit time. */
-export function stampLocalWrite(key: string): void {
+/** Stamp a local edit and return the timestamp carried by its durable op. */
+export function stampLocalWrite(key: string): number {
   const now = Date.now();
   const cur = getLocalStamp(key);
-  setLocalStamp(key, Math.max(now, cur + 1));
+  const stamp = Math.max(now, cur + 1);
+  setLocalStamp(key, stamp);
+  return stamp;
+}
+
+type FactoryQueueOp = { key: string; value: unknown; updatedAt: number; g: number };
+let memoryQueue: FactoryQueueOp[] | null = null;
+let generation = 0;
+let flushInFlight: Promise<void> | null = null;
+
+function readQueue(): FactoryQueueOp[] {
+  if (memoryQueue !== null) return [...memoryQueue];
+  try {
+    const raw = localStorage.getItem(QUEUE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) {
+      return parsed.filter(
+        (op): op is FactoryQueueOp =>
+          !!op && typeof op.key === "string" && op.key.length > 0 && typeof op.g === "number",
+      );
+    }
+  } catch {}
+  return [];
+}
+
+function writeQueue(queue: FactoryQueueOp[]): void {
+  try {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    memoryQueue = null;
+  } catch {
+    memoryQueue = [...queue];
+  }
+}
+
+function pendingValue(key: string): { found: boolean; value?: unknown; updatedAt?: number; g?: number } {
+  const op = readQueue().find((candidate) => candidate.key === key);
+  return op
+    ? { found: true, value: op.value, updatedAt: Number(op.updatedAt ?? 0), g: op.g }
+    : { found: false };
+}
+
+function applyFactoryValueToModuleState(key: string, value: unknown): void {
+  if (key === STOP_REASONS_KEY) {
+    _stopReasons = Array.isArray(value) ? value as string[] : null;
+    return;
+  }
+  if (key === SHIFT_START_TIME_KEY) {
+    _shiftStartTime = typeof value === "string" ? value : null;
+    return;
+  }
+  if (key === PRODUCTION_START_TIME_KEY) {
+    _productionStartTime = typeof value === "string" ? value : null;
+    return;
+  }
+  const field =
+    key === CIRCLES_KEY ? "circles" :
+    key === SHIPPER_KEY ? "shipper" :
+    key === SKID_STACKING_KEY ? "skidStacking" :
+    key === GRIP_SHEETS_KEY ? "gripSheets" :
+    null;
+  if (field && Array.isArray(value)) {
+    _packagingSettings = { ...getPackagingSettings(), [field]: value as string[] };
+  }
+}
+
+function enqueueFactoryWrite(key: string, value: unknown, updatedAt: number): void {
+  generation = Math.max(generation + 1, Date.now());
+  const queue = readQueue().filter((op) => op.key !== key);
+  queue.push({ key, value, updatedAt, g: generation });
+  writeQueue(queue);
+}
+
+function discardQueuedWrite(key: string, g: number | undefined): void {
+  if (g === undefined) return;
+  writeQueue(readQueue().filter((op) => !(op.key === key && op.g === g)));
 }
 
 // ── Module-level state for server-only keys ──────────────────────────────────
@@ -200,28 +275,65 @@ export async function fetchFactoryData(): Promise<FactoryDataMap> {
   return body.data ?? {};
 }
 
-/** PUT /api/factory-data — fire-and-forget, retry once on failure. */
+/**
+ * Persist the latest value per factory key. The queue survives short outages
+ * and is serialized so an older in-flight save cannot remove a newer edit.
+ */
 export function putFactoryKey(key: string, value: unknown): void {
-  void (async () => {
-    const body = JSON.stringify({ key, value });
-    let ok = false;
-    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
-      try {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, 500));
+  const updatedAt = stampLocalWrite(key);
+  applyFactoryValueToModuleState(key, value);
+  enqueueFactoryWrite(key, value, updatedAt);
+  void flushFactoryQueue();
+}
+
+/** Flush durable writes in order. A failed head remains queued for recovery. */
+export function flushFactoryQueue(): Promise<void> {
+  if (flushInFlight) return flushInFlight;
+  flushInFlight = (async () => {
+    try {
+      while (true) {
+        const op = readQueue()[0];
+        if (!op) return;
         const res = await fetch("/api/factory-data", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
             "x-client-id": inventoryClientId(),
           },
-          body,
+          body: JSON.stringify({ key: op.key, value: op.value, updatedAt: op.updatedAt }),
         });
-        ok = res.ok;
-      } catch {
-        // network error — retry
+        if (!res.ok) return;
+        try {
+          const body = await res.json() as { updatedAt?: string; value?: unknown };
+          const serverStamp = typeof body.updatedAt === "string" ? new Date(body.updatedAt).getTime() : 0;
+          const current = readQueue();
+          if (current[0]?.g === op.g) {
+            if (Number.isFinite(serverStamp) && serverStamp > 0) {
+              setLocalStamp(op.key, serverStamp);
+              // A newer server write rejected this queued operation. Adopt its
+              // authoritative value rather than leaving a stale setting visible
+              // until the next foreground fetch.
+              if (serverStamp > op.updatedAt && body.value !== undefined) {
+                applyFactoryValueToModuleState(op.key, body.value);
+                if (FACTORY_KV_CACHED_KEYS.has(op.key)) {
+                  try { localStorage.setItem(op.key, JSON.stringify(body.value)); } catch {}
+                }
+              }
+            }
+            writeQueue(current.slice(1));
+          }
+        } catch {
+          // HTTP acknowledgement is sufficient; a later foreground fetch
+          // reconciles a malformed acknowledgement without duplicating writes.
+        }
       }
+    } catch {
+      // Leave the durable head intact for foreground/next-write recovery.
+    } finally {
+      flushInFlight = null;
     }
   })();
+  return flushInFlight;
 }
 
 // ── hydrateFromServer ────────────────────────────────────────────────────────
@@ -243,6 +355,7 @@ export function hydrateFromServer(data: FactoryDataMap): void {
   for (const key of FACTORY_KV_CACHED_KEYS) {
     const entry = data[key];
     const localTs = getLocalStamp(key);
+    const pending = pendingValue(key);
 
     if (!entry) {
       // Server has no value for this key.  If we have a local value, push it up.
@@ -255,14 +368,16 @@ export function hydrateFromServer(data: FactoryDataMap): void {
 
     const serverTs = new Date(entry.updatedAt).getTime();
 
-    if (localTs > serverTs) {
+    const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
+    if (localIntentTs > serverTs) {
       // Local is newer — push our value up.
       try {
         const local = localStorage.getItem(key);
-        if (local !== null) putFactoryKey(key, JSON.parse(local));
+        if (!pending.found && local !== null) putFactoryKey(key, JSON.parse(local));
       } catch {}
-    } else if (serverTs > localTs) {
+    } else if (serverTs > localIntentTs) {
       // Server is newer — overwrite local.
+      if (pending.found) discardQueuedWrite(key, pending.g);
       try {
         localStorage.setItem(key, JSON.stringify(entry.value));
         setLocalStamp(key, serverTs);
@@ -279,16 +394,19 @@ export function hydrateFromServer(data: FactoryDataMap): void {
       try { return localStorage.getItem(STOP_REASONS_KEY); } catch { return null; }
     })();
     const localTs = getLocalStamp(STOP_REASONS_KEY);
+    const pending = pendingValue(STOP_REASONS_KEY);
 
     if (entry) {
       const serverTs = new Date(entry.updatedAt).getTime();
-      if (localTs > serverTs && localRaw !== null) {
+      const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
+      if (localIntentTs > serverTs && (pending.found || localRaw !== null)) {
         // Local copy is newer — push it up.
-        try { putFactoryKey(STOP_REASONS_KEY, JSON.parse(localRaw)); } catch {}
-        _stopReasons = (() => {
-          try { const v = JSON.parse(localRaw); return Array.isArray(v) ? v : null; } catch { return null; }
+        if (!pending.found) try { putFactoryKey(STOP_REASONS_KEY, JSON.parse(localRaw!)); } catch {}
+        _stopReasons = pending.found && Array.isArray(pending.value) ? pending.value as string[] : (() => {
+          try { const v = JSON.parse(localRaw!); return Array.isArray(v) ? v : null; } catch { return null; }
         })();
       } else {
+        if (pending.found && serverTs > localIntentTs) discardQueuedWrite(STOP_REASONS_KEY, pending.g);
         _stopReasons = Array.isArray(entry.value) ? (entry.value as string[]) : null;
       }
     } else if (localRaw !== null) {
@@ -324,16 +442,19 @@ export function hydrateFromServer(data: FactoryDataMap): void {
       try { return localStorage.getItem(key); } catch { return null; }
     })();
     const localTs = getLocalStamp(key);
+    const pending = pendingValue(key);
 
     if (entry) {
       const serverTs = new Date(entry.updatedAt).getTime();
-      if (localTs > serverTs && localRaw !== null) {
-        try { putFactoryKey(key, JSON.parse(localRaw)); } catch {}
+      const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
+      if (localIntentTs > serverTs && (pending.found || localRaw !== null)) {
+        if (!pending.found) try { putFactoryKey(key, JSON.parse(localRaw!)); } catch {}
         try {
-          const v = JSON.parse(localRaw);
+          const v = pending.found ? pending.value : JSON.parse(localRaw!);
           if (Array.isArray(v)) pkg[field] = v as string[];
         } catch {}
       } else {
+        if (pending.found && serverTs > localIntentTs) discardQueuedWrite(key, pending.g);
         if (Array.isArray(entry.value)) pkg[field] = entry.value as string[];
       }
     } else if (localRaw !== null) {
@@ -358,16 +479,19 @@ export function hydrateFromServer(data: FactoryDataMap): void {
       try { return localStorage.getItem(key); } catch { return null; }
     })();
     const localTs = getLocalStamp(key);
+    const pending = pendingValue(key);
 
     if (entry) {
       const serverTs = new Date(entry.updatedAt).getTime();
-      if (localTs > serverTs && localRaw !== null) {
-        try { putFactoryKey(key, JSON.parse(localRaw)); } catch {}
+      const localIntentTs = pending.found ? (pending.updatedAt ?? 0) : localTs;
+      if (localIntentTs > serverTs && (pending.found || localRaw !== null)) {
+        if (!pending.found) try { putFactoryKey(key, JSON.parse(localRaw!)); } catch {}
         try {
-          const v = JSON.parse(localRaw);
+          const v = pending.found ? pending.value : JSON.parse(localRaw!);
           if (typeof v === "string") setter(v);
         } catch {}
       } else {
+        if (pending.found && serverTs > localIntentTs) discardQueuedWrite(key, pending.g);
         if (typeof entry.value === "string") setter(entry.value);
       }
     } else if (localRaw !== null) {
@@ -388,6 +512,9 @@ export function resetFactoryDataSyncForTests(): void {
   _packagingSettings = null;
   _shiftStartTime = null;
   _productionStartTime = null;
+  memoryQueue = null;
+  generation = 0;
+  flushInFlight = null;
 }
 
 // ── One-time migration heals ──────────────────────────────────────────────────

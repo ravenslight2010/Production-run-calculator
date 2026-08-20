@@ -8,6 +8,7 @@ import {
   flushProfileQueueStrict,
   migrateLocalProfilesToServerIfNeeded,
   reconcileProfilesFromServer,
+  reconcileProfilesFromServerDetailed,
   getProfileStamp,
   resetProfileSyncMemoryFallbackForTests,
 } from "./profileServerSync";
@@ -420,6 +421,20 @@ describe("reconcileProfilesFromServer", () => {
     expect(readMap(SYNCED_KEY)[KEY]).toBeUndefined();
     // A remote deletion must not be re-uploaded.
     expect(postCalls()).toHaveLength(0);
+  });
+
+  it("reports adopted and deleted keys so wake consumers can safely update open forms", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "old" });
+    writeMap(STAMPS_KEY, { [KEY]: 100 });
+    writeMap(SYNCED_KEY, { [KEY]: 100 });
+    listItems = [serverItem(KEY, 200, { doughRecipeName: "new" })];
+
+    const adopted = await reconcileProfilesFromServerDetailed();
+    expect(adopted).toMatchObject({ changed: true, adoptedKeys: [KEY], deletedKeys: [] });
+
+    listItems = [];
+    const deleted = await reconcileProfilesFromServerDetailed();
+    expect(deleted).toMatchObject({ changed: true, adoptedKeys: [], deletedKeys: [KEY] });
   });
 
   it("keeps a never-synced local profile absent from the server and pushes it up", async () => {

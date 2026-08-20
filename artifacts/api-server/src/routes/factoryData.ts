@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db, factoryKvTable } from "@workspace/db";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
@@ -10,7 +10,8 @@ import { currentScope } from "../lib/requestScope";
 // Rows are scope-isolated: live and sandbox data never intermingle.
 //
 // GET /factory-data  — returns { data: { [key]: { value, updatedAt } } }
-// PUT /factory-data  — accepts { key, value }, upserts the row, returns { updatedAt }
+// PUT /factory-data  — accepts { key, value, updatedAt? }, guarded per-key
+// client timestamps so a waking offline browser cannot overwrite a newer save.
 
 const router: IRouter = Router();
 
@@ -40,7 +41,7 @@ router.put(
   "/factory-data",
   requireCapability("manage-factory-settings"),
   async (req: Request, res: Response) => {
-    const { key, value } = req.body ?? {};
+    const { key, value, updatedAt: rawUpdatedAt } = req.body ?? {};
     if (typeof key !== "string" || key.trim().length === 0) {
       res.status(400).json({ error: "key must be a non-empty string" });
       return;
@@ -50,7 +51,13 @@ router.put(
       return;
     }
     const scope = currentScope();
-    const updatedAt = new Date();
+    // Accept the client stamp for cross-device LWW but keep a small forward
+    // skew bound so one accidentally future-dated device cannot freeze a key.
+    const clientUpdatedAt =
+      typeof rawUpdatedAt === "number" && Number.isFinite(rawUpdatedAt)
+        ? Math.min(Math.floor(rawUpdatedAt), Date.now() + 5 * 60_000)
+        : Date.now();
+    const updatedAt = new Date(clientUpdatedAt);
     try {
       await db
         .insert(factoryKvTable)
@@ -58,8 +65,16 @@ router.put(
         .onConflictDoUpdate({
           target: [factoryKvTable.scope, factoryKvTable.key],
           set: { value, updatedAt },
+          where: sql`${factoryKvTable.updatedAt} < ${updatedAt}`,
         });
-      res.json({ updatedAt: updatedAt.toISOString() });
+      const [current] = await db
+        .select()
+        .from(factoryKvTable)
+        .where(and(eq(factoryKvTable.scope, scope), eq(factoryKvTable.key, key.trim())));
+      res.json({
+        updatedAt: current?.updatedAt.toISOString() ?? updatedAt.toISOString(),
+        value: current?.value ?? value,
+      });
     } catch (err) {
       req.log.error({ err }, "failed to upsert factory-data key");
       res.status(500).json({ error: "Failed to save factory data" });

@@ -50,7 +50,7 @@
  *   pnpm --filter @workspace/run-calculator exec playwright test screen-off-wake
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Browser, type Page } from "@playwright/test";
 import { Client as PgClient } from "pg";
 
 // ── config ────────────────────────────────────────────────────────────────────
@@ -95,6 +95,19 @@ async function signUpAndDismissDialog(
   } catch {
     // Dialog did not appear — page is already clear.
   }
+}
+
+async function promoteCurrentPageUserToManager(page: Page): Promise<void> {
+  const identity = await page.evaluate(async () => {
+    const response = await fetch("/api/me");
+    return response.ok ? await response.json() as { userId?: string } : null;
+  });
+  const userId = identity?.userId;
+  expect(userId, "signed-in test user id").toBeTruthy();
+  const client = new PgClient({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  await client.query("UPDATE user_roles SET role = 'manager' WHERE user_id = $1", [userId]);
+  await client.end();
 }
 
 // ── form helpers ──────────────────────────────────────────────────────────────
@@ -606,6 +619,119 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         casesAfterPausedWake,
         `paused wake: expected ${casesBeforePause}, got ${casesAfterPausedWake}`,
       ).toBe(casesBeforePause);
+    },
+  );
+
+  test(
+    "C. sleeping peer adopts lifecycle, profile changes, deletions, and factory settings on wake",
+    async ({ page, browser }: { page: Page; browser: Browser }) => {
+      const profileBrand = `Wake ${uid()}`;
+      const profileFlavor = "Peer Flavor";
+      const profileKey = `${profileBrand.toLowerCase()}__${profileFlavor.toLowerCase()}`;
+      const postProfile = async (frontlineRecipeName: string, updatedAt: number) => {
+        const result = await page.evaluate(async ({ key, name, stamp, brand, flavor }) => {
+          const res = await fetch("/api/brand-profiles", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              items: [{
+                key,
+                brand,
+                flavor,
+                values: { frontlineRecipeName: name, app1Type: "Cheese" },
+                crustValues: {},
+                updatedAt: stamp,
+              }],
+            }),
+          });
+          return { ok: res.ok, status: res.status };
+        }, {
+          key: profileKey,
+          name: frontlineRecipeName,
+          stamp: updatedAt,
+          brand: profileBrand,
+          flavor: profileFlavor,
+        });
+        expect(result).toEqual({ ok: true, status: 200 });
+      };
+
+      await setupAndStartRun(page);
+      // This scenario exercises manager-only profile/factory APIs. Other
+      // screen-wake cases intentionally run as floor staff.
+      await promoteCurrentPageUserToManager(page);
+      // Browser time is deliberately fixed at 21:00 for this clock suite.
+      // Keep profile LWW stamps ahead of real Node time so the peer's mocked
+      // clock cannot make an older remote profile look stale.
+      const profileStamp = Date.now() + 4 * 60 * 60_000;
+      await postProfile("Wake Sauce V1", profileStamp);
+
+      // A second independent context has its own in-memory caches, but shares
+      // this manager's authenticated cookie. It is the sleeping tablet.
+      const peer = await browser.newContext({ storageState: await page.context().storageState() });
+      try {
+        const sleepingPage = await peer.newPage();
+        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+        await sleepingPage.locator('[data-testid="tab-run"]').waitFor({ state: "visible", timeout: 20_000 });
+        await sleepingPage.evaluate((key) => {
+          localStorage.setItem(
+            `run-calc-profile-${key}`,
+            JSON.stringify({ frontlineRecipeName: "Wake Sauce V1", app1Type: "Cheese" }),
+          );
+        }, profileKey);
+        await installHiddenMock(sleepingPage);
+        await simulateScreenOff(sleepingPage);
+
+        // Changes happen while the peer is hidden: the live-row transition is
+        // delivered by the normal sync path, while profiles/factory settings
+        // have no server event stream and must be refreshed on foreground.
+        await page.getByRole("button", { name: /pause.?run/i }).first().click();
+        await postProfile("Wake Sauce V2", profileStamp + 10_000);
+        const factoryWrite = await page.evaluate(async () => {
+          const res = await fetch("/api/factory-data", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ key: "run-calc-shift-start-time", value: "05:45" }),
+          });
+          return res.ok;
+        });
+        expect(factoryWrite).toBe(true);
+
+        await simulateWake(sleepingPage);
+        await sleepingPage.getByRole("button", { name: /resume.?run/i }).first()
+          .waitFor({ state: "visible", timeout: 15_000 });
+        await sleepingPage.waitForFunction(async ({ key }) => {
+          const response = await fetch("/api/brand-profiles");
+          const body = await response.json() as { items?: Array<{ key: string; values?: { frontlineRecipeName?: string } }> };
+          return body.items?.some((item) => item.key === key && item.values?.frontlineRecipeName === "Wake Sauce V2") ?? false;
+        }, { key: profileKey }, { timeout: 15_000 });
+        const factoryRead = await sleepingPage.evaluate(async () => {
+          const res = await fetch("/api/factory-data");
+          const body = await res.json() as { data?: Record<string, { value?: unknown }> };
+          return body.data?.["run-calc-shift-start-time"]?.value;
+        });
+        expect(factoryRead).toBe("05:45");
+
+        // A second wake observes deletion rather than re-uploading the older
+        // blob that was cached before screen-off.
+        await simulateScreenOff(sleepingPage);
+        const deleted = await page.evaluate(async (key) => {
+          const res = await fetch("/api/brand-profiles", {
+            method: "DELETE",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ keys: [key] }),
+          });
+          return res.ok;
+        }, profileKey);
+        expect(deleted).toBe(true);
+        await simulateWake(sleepingPage);
+        await sleepingPage.waitForFunction(async ({ key }) => {
+          const response = await fetch("/api/brand-profiles");
+          const body = await response.json() as { items?: Array<{ key: string }> };
+          return !body.items?.some((item) => item.key === key);
+        }, { key: profileKey }, { timeout: 15_000 });
+      } finally {
+        await peer.close();
+      }
     },
   );
 });

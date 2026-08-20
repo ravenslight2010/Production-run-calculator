@@ -547,7 +547,18 @@ export function migrateLocalProfilesToServerIfNeeded(): void {
  *   previously-synced local profile absent from server → deleted remotely;
  *     drop the local copy (skipped while an op for that key is still queued)
  */
-export async function reconcileProfilesFromServer(): Promise<boolean> {
+export type ProfileReconcileResult = {
+  changed: boolean;
+  adoptedKeys: string[];
+  deletedKeys: string[];
+  deletedSnapshots: Record<string, { dough: string; crust: string }>;
+};
+
+/**
+ * Detailed reconciliation result for foreground recovery consumers. The legacy
+ * boolean wrapper below is intentionally kept for existing boot/poll callers.
+ */
+export async function reconcileProfilesFromServerDetailed(): Promise<ProfileReconcileResult> {
   migrateLocalProfilesToServerIfNeeded();
 
   let serverItems: ApiProfile[];
@@ -556,10 +567,13 @@ export async function reconcileProfilesFromServer(): Promise<boolean> {
   } catch {
     // Offline / signed-out — retry queued pushes anyway and bail quietly.
     void flushProfileQueue();
-    return false;
+    return { changed: false, adoptedKeys: [], deletedKeys: [], deletedSnapshots: {} };
   }
 
   let changed = false;
+  const adoptedKeys: string[] = [];
+  const deletedKeys: string[] = [];
+  const deletedSnapshots: Record<string, { dough: string; crust: string }> = {};
   const stamps = readMap(STAMPS_KEY);
   const synced = readMap(SYNCED_KEY);
   const serverByKey = new Map(serverItems.map((it) => [it.key, it]));
@@ -578,6 +592,7 @@ export async function reconcileProfilesFromServer(): Promise<boolean> {
         stamps[item.key] = item.updatedAt;
         synced[item.key] = item.updatedAt;
         changed = true;
+        adoptedKeys.push(item.key);
         // Seed the fast-access :subtab key from the embedded _subTab field so
         // loadProfileSubTab() can return the correct mode without parsing the
         // full profile blob on every call. This is the mechanism that propagates
@@ -600,11 +615,18 @@ export async function reconcileProfilesFromServer(): Promise<boolean> {
     if (synced[key] !== undefined) {
       // Was on the server before and is gone now — deleted remotely.
       try {
+        const dough = localStorage.getItem(doughStorageKey(key));
+        const crust = localStorage.getItem(crustStorageKey(key));
+        if (dough !== null || crust !== null) {
+          deletedSnapshots[key] = { dough: dough ?? "{}", crust: crust ?? "{}" };
+        }
         localStorage.removeItem(doughStorageKey(key));
         localStorage.removeItem(crustStorageKey(key));
+        localStorage.removeItem(key + ":subtab");
         delete stamps[key];
         delete synced[key];
         changed = true;
+        deletedKeys.push(key);
       } catch {}
     } else {
       // Local-only profile the server has never seen (offline creation, or a
@@ -623,7 +645,11 @@ export async function reconcileProfilesFromServer(): Promise<boolean> {
   injectSubTabIntoProfileBlobsIfNeeded(stamps);
 
   void flushProfileQueue();
-  return changed;
+  return { changed, adoptedKeys, deletedKeys, deletedSnapshots };
+}
+
+export async function reconcileProfilesFromServer(): Promise<boolean> {
+  return (await reconcileProfilesFromServerDetailed()).changed;
 }
 
 /**

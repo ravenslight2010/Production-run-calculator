@@ -673,6 +673,45 @@ function extractProfileBlobs(values: FormValues): { dough: string; crust: string
 // overwrite the snapshot and let the stale open form republish old values.
 const SNAPSHOT_HISTORY_CAP = 12;
 const loadedProfileSnapshots = new Map<string, { dough: string; crust: string }[]>();
+// A profile that disappears during a foreground server reconciliation must not
+// be recreated by an old open form or a delayed nav save. Keep this small
+// local tombstone until a genuinely edited form differs from the snapshot that
+// was originally loaded; that explicit edit is allowed to create a new profile.
+const REMOTELY_DELETED_PROFILES_KEY = "run-calc-remotely-deleted-profiles-v1";
+type RemoteDeleteFence = { dough: string; crust: string };
+function loadRemotelyDeletedProfiles(): Map<string, RemoteDeleteFence> {
+  try {
+    const raw = localStorage.getItem(REMOTELY_DELETED_PROFILES_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    return new Map(Object.entries(parsed).flatMap(([key, value]) => {
+      const fence = value as Partial<RemoteDeleteFence>;
+      return typeof fence?.dough === "string" && typeof fence?.crust === "string"
+        ? [[key, { dough: fence.dough, crust: fence.crust }] as const]
+        : [];
+    }));
+  } catch {
+    return new Map();
+  }
+}
+function saveRemotelyDeletedProfiles(fences: Map<string, RemoteDeleteFence>): void {
+  try { localStorage.setItem(REMOTELY_DELETED_PROFILES_KEY, JSON.stringify(Object.fromEntries(fences))); } catch {}
+}
+function normalizedDeletedProfileBlob(raw: string): string {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    delete value._subTab;
+    return JSON.stringify(value);
+  } catch {
+    return raw;
+  }
+}
+export function markProfileRemotelyDeleted(key: string, fence?: RemoteDeleteFence): void {
+  if (!key || key === "__") return;
+  const fences = loadRemotelyDeletedProfiles();
+  fences.set(key, fence ?? { dough: "{}", crust: "{}" });
+  saveRemotelyDeletedProfiles(fences);
+}
 
 function rememberProfileSnapshot(key: string, snap: { dough: string; crust: string }): void {
   const list = loadedProfileSnapshots.get(key) ?? [];
@@ -745,6 +784,19 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
     const storedDough = localStorage.getItem(PROFILE_KEY(brand, flavor));
     const storedCrust = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
     if (storedDough === dough && storedCrust === crust) return false;
+    // A wake pull deleted this profile remotely. An old open form still holds
+    // the exact blob loadProfile previously handed it, so treating that as a
+    // new save would silently resurrect the deletion. A changed form is an
+    // intentional new setup and clears this fence below.
+    const remotelyDeleted = loadRemotelyDeletedProfiles();
+    const deleteFence = remotelyDeleted.get(key);
+    if (
+      deleteFence &&
+      normalizedDeletedProfileBlob(deleteFence.dough) === normalizedDeletedProfileBlob(dough) &&
+      deleteFence.crust === crust
+    ) {
+      return false;
+    }
     // The stale-form guard only applies while a stored profile EXISTS to
     // protect: if the local copy is gone (deleted, factory reset, fresh
     // device), an incoming save must persist even when it matches an old
@@ -762,6 +814,8 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   } catch {}
   try { localStorage.setItem(PROFILE_KEY(brand, flavor), dough); } catch {}
   try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), crust); } catch {}
+  const remotelyDeleted = loadRemotelyDeletedProfiles();
+  if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
   markProfileEdited(key);
   return true;

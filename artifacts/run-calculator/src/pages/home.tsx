@@ -139,6 +139,7 @@ import {
   backfillFromProfile,
   saveProfile,
   mergeProfileIntoOpenForm,
+  markProfileRemotelyDeleted,
   recipeRowsEqual,
   normalizeRecipeRowsForCompare,
   refreshProfilesFromNamedRecipes,
@@ -215,7 +216,13 @@ import {
   shouldAtomicallyAdoptFirstSnapshot,
   type SpecImportDisplayKind,
 } from "../storage";
-import { reconcileProfilesFromServer, seedProfilesFromServer } from "../profileServerSync";
+import {
+  canonicalProfileKey,
+  reconcileProfilesFromServer,
+  reconcileProfilesFromServerDetailed,
+  seedProfilesFromServer,
+  type ProfileReconcileResult,
+} from "../profileServerSync";
 import {
   fetchFactoryData,
   hydrateFromServer,
@@ -225,6 +232,7 @@ import {
   getShiftStartTime,
   getProductionStartTime,
   stampLocalWrite,
+  flushFactoryQueue,
   FACTORY_KV_CACHED_KEYS,
   runFactoryKvMigration,
   runTemplatesMigration,
@@ -3392,6 +3400,18 @@ export default function Home() {
     setCheeseRecipeNames([...loadList(CHEESE_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
     setMixIngredients([...loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setMixRecipeNames([...loadList(MIX_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
+  }
+
+  function refreshFactoryDataConsumers() {
+    setStopReasonsList(getStopReasons());
+    const packaging = getPackagingSettings();
+    setCircles(packaging.circles);
+    setShipper(packaging.shipper);
+    setSkidStacking(packaging.skidStacking);
+    setGripSheets(packaging.gripSheets);
+    setShiftStartTime(getShiftStartTime());
+    setProductionStartTime(getProductionStartTime());
+    reloadMasterData();
   }
 
   // Re-sync every React surface a merge rewrites in localStorage, in place, so the
@@ -6967,6 +6987,9 @@ export default function Home() {
   const applySyncCallbackRef = useRef<
     (p: SyncPayload, options?: { initialSnapshot?: boolean }) => void
   >(() => {});
+  const applyProfileReconcileRef = useRef<
+    (result: ProfileReconcileResult) => void
+  >(() => {});
   const initialFinishTimestampRef = useRef<number>(0);
   const pushAcknowledgedRef = useRef(true);
   // Signature of the last payload we successfully pushed. Idle clients must not
@@ -7726,17 +7749,11 @@ export default function Home() {
       try {
         const data = await fetchFactoryData();
         hydrateFromServer(data);
-        // Refresh server-only keys in React state
-        setStopReasonsList(getStopReasons());
-        const pkg = getPackagingSettings();
-        setCircles(pkg.circles);
-        setShipper(pkg.shipper);
-        setSkidStacking(pkg.skidStacking);
-        setGripSheets(pkg.gripSheets);
-        setShiftStartTime(getShiftStartTime());
-        setProductionStartTime(getProductionStartTime());
-        // Reload cached keys from localStorage (hydrateFromServer just wrote them)
-        reloadMasterData();
+        refreshFactoryDataConsumers();
+        // Only flush after comparing each durable operation with the server
+        // timestamp. A pre-read flush could let a sleeping device overwrite a
+        // setting that another device saved while it was offline.
+        void flushFactoryQueue();
         // One-time migration heals: push localStorage data to the server for
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
@@ -7750,7 +7767,6 @@ export default function Home() {
     // bumps the local stamp and fires a server PUT.
     setKvMutationHook(({ key, value }) => {
       if (FACTORY_KV_CACHED_KEYS.has(key)) {
-        stampLocalWrite(key);
         putFactoryKey(key, value);
       }
     });
@@ -7771,12 +7787,13 @@ export default function Home() {
     let cancelled = false;
     const pass = async () => {
       try {
-        const changed = await reconcileProfilesFromServer();
-        if (cancelled || !changed) return;
+        const result = await reconcileProfilesFromServerDetailed();
+        if (cancelled || !result.changed) return;
         // Profile-derived pickers/cards read localStorage lazily, but the die
         // types list self-heals from profiles — re-run so an adopted profile's
         // die size shows up without a reload.
         setDieTypes(healDieTypesFromProfiles());
+        applyProfileReconcileRef.current(result);
       } catch {}
     };
     void pass();
@@ -7860,7 +7877,6 @@ export default function Home() {
       if (foregroundSyncInFlightRef.current) return foregroundSyncInFlightRef.current;
 
       foregroundSyncBarrierRef.current = true;
-      setAutoTrackBlocked(true);
       if (pushTimerRef.current) {
         clearTimeout(pushTimerRef.current);
         pushTimerRef.current = null;
@@ -7889,7 +7905,41 @@ export default function Home() {
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
           if (payload) {
+            // Preserve ordinary screen-off catch-up when the live row is
+            // unchanged. Re-baselining every successful wake would erase the
+            // legitimate production delta accumulated while the display slept.
+            // Only a newer lifecycle frame needs the auto-track fence.
+            const localRuns = new Map(dayStateRef.current.runs.map((run) => [run.id, run]));
+            const adoptsLifecycle = payload.dayState.runs.some((remoteRun) => {
+              const localRun = localRuns.get(remoteRun.id);
+              return !!localRun
+                && (remoteRun.metaUpdatedAt ?? 0) > (localRun.metaUpdatedAt ?? 0)
+                && (
+                  remoteRun.startedAt !== localRun.startedAt
+                  || remoteRun.pausedAt !== localRun.pausedAt
+                  || remoteRun.endedAt !== localRun.endedAt
+                );
+            });
+            if (adoptsLifecycle) setAutoTrackBlocked(true);
             applySyncCallbackRef.current(payload);
+          }
+          // The live row is the authority that must land first. Profile and
+          // factory pools are intentionally outside that payload, so hydrate
+          // them only after the day-state LWW merge is safely applied.
+          const profileResult = await reconcileProfilesFromServerDetailed();
+          if (profileResult.changed) {
+            setDieTypes(healDieTypesFromProfiles());
+            applyProfileReconcileRef.current(profileResult);
+          }
+          try {
+            const factoryData = await fetchFactoryData();
+            hydrateFromServer(factoryData);
+            refreshFactoryDataConsumers();
+            await flushFactoryQueue();
+          } catch {
+            // Factory data is independent of the live row. A failed factory
+            // pull leaves the local cache and durable queue intact; the next
+            // foreground/reconnect attempt will retry it.
           }
           reconciled = true;
           return true;
@@ -7901,6 +7951,8 @@ export default function Home() {
         } finally {
           if (!cancelled) {
             foregroundSyncBarrierRef.current = false;
+            // No-op if this wake did not adopt lifecycle state. If it did, the
+            // hook sees the true→false transition and re-baselines safely.
             setAutoTrackBlocked(false);
             const shouldPush = foregroundPushPendingRef.current;
             foregroundPushPendingRef.current = false;
@@ -7929,12 +7981,17 @@ export default function Home() {
     function onFocus() {
       void reconcileForeground();
     }
+    function onOnline() {
+      void reconcileForeground();
+    }
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 
@@ -8561,6 +8618,39 @@ export default function Home() {
       description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
     });
   }
+
+  // Profile reconciliation is invoked by boot/poll/foreground effects that
+  // intentionally have stable subscriptions. Keep their behavior fresh without
+  // rebuilding those listeners on every form or run change.
+  applyProfileReconcileRef.current = (result) => {
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay.runs[liveDay.currentIndex];
+    const liveKey = liveRun
+      ? canonicalProfileKey(liveRun.brand ?? "", liveRun.flavor ?? "")
+      : "";
+
+    for (const key of result.deletedKeys) {
+      markProfileRemotelyDeleted(key, result.deletedSnapshots[key]);
+    }
+
+    if (liveKey && result.adoptedKeys.includes(liveKey) && liveRun) {
+      // Reuse the profile-owned merge: progress, planned cases, and temporary
+      // run overrides stay intact while the visible setup updates immediately.
+      handleSetupProfileSaved(liveRun.brand ?? "", liveRun.flavor ?? "");
+    }
+
+    if (liveKey && result.deletedKeys.includes(liveKey)) {
+      // Keep the active run's values (a profile deletion must never erase
+      // production progress), but close a matching editor so it cannot submit
+      // an old snapshot back into the now-deleted server row.
+      const editorKey = canonicalProfileKey(setupEditorBrand ?? "", setupEditorFlavor ?? "");
+      if (setupEditorOpen && editorKey === liveKey) setSetupEditorOpen(false);
+      toast({
+        title: "Saved setup was deleted",
+        description: "The active run keeps its values. Save an intentionally updated setup to create it again.",
+      });
+    }
+  };
 
   // (1b) Profile → every NOT-YET-STARTED run of the same brand+flavor. The
   // saved profile is the source of truth for pending work: overlay its
@@ -9897,38 +9987,48 @@ export default function Home() {
   }
 
   function startRun() {
+    // A visible tab can be tapped before its foreground GET returns. Do not
+    // turn that stale UI into a lifecycle write; the reconciled state will
+    // render before the controls become actionable again.
+    if (foregroundSyncBarrierRef.current) return;
     initialFinishTimestampRef.current = Date.now() + (calcRef.current?.totalTimeSec ?? 0) * 1000;
+    const base = dayStateRef.current;
+    const index = base.currentIndex;
+    const activeRun = base.runs[index];
+    if (!activeRun) return;
+    const activeRunId = activeRun.id;
     const now = Date.now();
     // Starting a run stops any other run that is currently running. Finalize each
     // like an explicit endRun: deduct its own inventory (idempotent per runId,
     // from its stored values) before marking it ended.
-    for (const r of dayState.runs) {
-      if (r.id !== currentRunId && r.startedAt && !r.endedAt) {
+    for (const r of base.runs) {
+      if (r.id !== activeRunId && r.startedAt && !r.endedAt) {
         void consumeRun(r.id, computeRunConsumptionLines(loadRunValues(r.id))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
       }
     }
     // Carry over prep batches into the starting run (once, guarded by prepCarriedOver).
     // Adds dough prep batches to the run form's batchesReady field so the live
     // calculation begins with the correct head start.
-    const prep = dayState.prepPhase;
+    const prep = base.prepPhase;
     let nextPrepPhase = prep;
     if (prep && !prep.prepCarriedOver && prep.prepBatchesDough > 0) {
       const curBatches = Number(form.getValues("batchesReady")) || 0;
       form.setValue("batchesReady", curBatches + prep.prepBatchesDough, { shouldDirty: true });
-      markRunValuesUpdated(currentRunId, now);
+      markRunValuesUpdated(activeRunId, now);
       nextPrepPhase = { ...prep, prepCarriedOver: true };
     } else if (prep && !prep.prepCarriedOver) {
       // Mark carried even if no dough batches — prevents re-check on next startRun.
       nextPrepPhase = { ...prep, prepCarriedOver: true };
     }
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
+    const newRuns = base.runs.map((r, i) =>
+      i === index
         ? { ...r, startedAt: now, endedAt: undefined }
         : r.startedAt && !r.endedAt
           ? { ...r, endedAt: now, pausedAt: undefined }
           : r
     );
-    const newDs = { ...dayState, runs: newRuns, prepPhase: nextPrepPhase };
+    const newDs = { ...base, runs: newRuns, prepPhase: nextPrepPhase };
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs, 0);
@@ -9936,12 +10036,13 @@ export default function Home() {
     // post-run evaluation as an explicit Stop Run (best-effort).
     const autoEnded = newRuns.filter(
       (r, i) =>
-        i !== dayState.currentIndex && r.endedAt === now && dayState.runs[i]?.startedAt && !dayState.runs[i]?.endedAt,
+        i !== index && r.endedAt === now && base.runs[i]?.startedAt && !base.runs[i]?.endedAt,
     );
     if (autoEnded.length > 0) void reportRunInsightsAfterFinalize(autoEnded, newRuns);
   }
 
   function pauseRun() {
+    if (foregroundSyncBarrierRef.current) return;
     const base = dayStateRef.current;
     const index = base.currentIndex;
     const run = base.runs[index];
@@ -10015,6 +10116,7 @@ export default function Home() {
   }
 
   function resumeRun() {
+    if (foregroundSyncBarrierRef.current) return;
     const base = dayStateRef.current;
     const index = base.currentIndex;
     const run = base.runs[index];
@@ -10202,36 +10304,43 @@ export default function Home() {
     // Guard: a run that was never started cannot be ended. Every UI call-site
     // is already gated (STOP RUN only shows when runStatus==="running"), but
     // this makes the function itself safe against future or unexpected paths.
-    if (!currentRun?.startedAt) return;
+    if (foregroundSyncBarrierRef.current) return;
+    const base = dayStateRef.current;
+    const index = base.currentIndex;
+    const activeRun = base.runs[index];
+    if (!activeRun?.startedAt || activeRun.endedAt) return;
+    const activeRunId = activeRun.id;
     const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    saveRunValues(activeRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
+    if (canManageProfiles && (activeRun.brand || activeRun.flavor)) {
+      if (saveProfile(activeRun.brand, activeRun.flavor, cur)) {
+        void propagateProfileToPendingRuns(activeRun.brand, activeRun.flavor);
       }
     }
     // Auto-deduct this run's materials from inventory (idempotent by runId;
     // no-op for any material that has no inventory item).
-    void consumeRun(currentRunId, computeRunConsumptionLines(cur)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, pausedAt: undefined, endedAt: Date.now() } : r
+    void consumeRun(activeRunId, computeRunConsumptionLines(cur)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+    const endedAt = Date.now();
+    const newRuns = base.runs.map((r, i) =>
+      i === index ? { ...r, pausedAt: undefined, endedAt } : r
     );
-    const nextIndex = dayState.currentIndex + 1 < dayState.runs.length
-      ? dayState.currentIndex + 1
-      : dayState.currentIndex;
-    const newDs = { ...dayState, runs: newRuns, currentIndex: nextIndex };
+    const nextIndex = index + 1 < base.runs.length ? index + 1 : index;
+    const newDs = { ...base, runs: newRuns, currentIndex: nextIndex };
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     // Run Insights: evaluate the just-finished run against its configured
     // settings (best-effort, fire-and-forget — never disturbs the run flow).
     void reportRunInsightsAfterFinalize(
-      newRuns.filter((r) => r.id === currentRunId),
+      newRuns.filter((r) => r.id === activeRunId),
       newRuns,
     );
-    if (nextIndex !== dayState.currentIndex) {
-      const nextVals = loadRunValues(dayState.runs[nextIndex].id);
+    if (nextIndex !== index) {
+      const nextId = base.runs[nextIndex].id;
+      const nextVals = loadRunValues(nextId);
+      lastFormRunIdRef.current = nextId;
       form.reset(nextVals);
       resetFieldArrays(nextVals);
       const openStop = newRuns[nextIndex].stoppages?.find(s => !s.endedAt);

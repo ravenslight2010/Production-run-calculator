@@ -26,6 +26,24 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain("setAutoTrackBlocked(false)");
     expect(homeSource).toContain('document.addEventListener("visibilitychange", onVisibility)');
     expect(homeSource).toContain('window.addEventListener("focus", onFocus)');
+    expect(homeSource).toContain('window.addEventListener("online", onOnline)');
+  });
+
+  it("reconciles profile and factory domains only after the live row lands", () => {
+    const liveApply = homeSource.indexOf("applySyncCallbackRef.current(payload)");
+    const profiles = homeSource.indexOf("reconcileProfilesFromServerDetailed()", liveApply);
+    const factory = homeSource.indexOf("fetchFactoryData()", profiles);
+    expect(liveApply).toBeGreaterThan(-1);
+    expect(profiles).toBeGreaterThan(liveApply);
+    expect(factory).toBeGreaterThan(profiles);
+    expect(homeSource).toContain("applyProfileReconcileRef.current(profileResult)");
+    expect(homeSource).toContain("refreshFactoryDataConsumers()");
+    expect(homeSource).toContain("await flushFactoryQueue()");
+  });
+
+  it("fences stale lifecycle taps until foreground adoption completes", () => {
+    const starts = homeSource.match(/function (?:startRun|pauseRun|resumeRun|endRun)\(\) \{[\s\S]{0,260}?foregroundSyncBarrierRef\.current/g) ?? [];
+    expect(starts).toHaveLength(4);
   });
 
   it("holds queued pushes, retries normally after a failed pull, and does not mark failure as reconciled", () => {
