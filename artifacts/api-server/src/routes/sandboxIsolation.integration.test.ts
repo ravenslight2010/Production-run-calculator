@@ -51,6 +51,8 @@ let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
+let brandProfilesTable: DbModule["brandProfilesTable"];
+let mergedAwayTable: DbModule["mergedAwayTable"];
 
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
@@ -117,6 +119,8 @@ beforeAll(async () => {
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
+  brandProfilesTable = dbMod.brandProfilesTable;
+  mergedAwayTable = dbMod.mergedAwayTable;
   seedRoles = rolesMod.seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
   SANDBOX_USERNAME = sandboxMod.SANDBOX_USERNAME;
@@ -177,7 +181,7 @@ beforeEach(async () => {
   // Wipe only the scoped DATA tables; the users / roles / role-catalog rows are
   // seeded once in beforeAll and must survive so the identity caches stay valid.
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${dailySyncTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${brandProfilesTable}, ${mergedAwayTable}, ${dailySyncTable} RESTART IDENTITY CASCADE`,
   );
 });
 
@@ -247,6 +251,38 @@ async function listRuleIds(userId: string): Promise<string[]> {
   return body.rules.map((r) => r.id).sort();
 }
 
+async function saveProfile(userId: string, flavor: string, dieType: string): Promise<void> {
+  const res = await req(userId, "POST", "/api/brand-profiles", {
+    items: [{
+      key: `acme__${flavor}`,
+      brand: "acme",
+      flavor,
+      values: { dieType },
+      crustValues: {},
+      updatedAt: 1_000,
+    }],
+  });
+  expect(res.status).toBe(200);
+}
+
+async function listProfileKeys(userId: string): Promise<string[]> {
+  const res = await req(userId, "GET", "/api/brand-profiles");
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { items: Array<{ key: string }> };
+  return body.items.map((item) => item.key).sort();
+}
+
+async function addMergedAway(userId: string, name: string): Promise<void> {
+  const res = await req(userId, "POST", "/api/merged-away", { names: [name] });
+  expect(res.status).toBe(200);
+}
+
+async function listMergedAway(userId: string): Promise<string[]> {
+  const res = await req(userId, "GET", "/api/merged-away");
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { names: string[] }).names;
+}
+
 describe("live ↔ sandbox scope isolation", () => {
   it("day-state, inventory, and production rules never cross between scopes", async () => {
     // Live writes its rows.
@@ -281,6 +317,23 @@ describe("live ↔ sandbox scope isolation", () => {
     const ruleRows = await db.select().from(productionRulesTable);
     expect(ruleRows.map((r) => r.scope).sort()).toEqual(["live", "sandbox"]);
   }, 20_000);
+
+  it("setup profiles and durable merge tombstones never cross between scopes", async () => {
+    await saveProfile(LIVE_MANAGER, "live-profile", "live-die");
+    await saveProfile(sandboxUserId, "sandbox-profile", "sandbox-die");
+    await addMergedAway(LIVE_MANAGER, "Live Ingredient");
+    await addMergedAway(sandboxUserId, "Sandbox Ingredient");
+
+    expect(await listProfileKeys(LIVE_MANAGER)).toEqual(["acme__live-profile"]);
+    expect(await listProfileKeys(sandboxUserId)).toEqual(["acme__sandbox-profile"]);
+    expect(await listMergedAway(LIVE_MANAGER)).toEqual(["live ingredient"]);
+    expect(await listMergedAway(sandboxUserId)).toEqual(["sandbox ingredient"]);
+
+    const profileScopes = (await db.select().from(brandProfilesTable)).map((row) => row.scope).sort();
+    const tombstoneScopes = (await db.select().from(mergedAwayTable)).map((row) => row.scope).sort();
+    expect(profileScopes).toEqual(["live", "sandbox"]);
+    expect(tombstoneScopes).toEqual(["live", "sandbox"]);
+  });
 });
 
 describe("POST /sandbox/reset re-copies live → sandbox", () => {

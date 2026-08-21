@@ -183,6 +183,26 @@ describe("GET /sync/scheduled — client-local-date filtering", () => {
   });
 });
 
+describe("DELETE /sync/:date — server-date deletion boundary", () => {
+  it("does not trust a client-supplied date to delete the server's current day", async () => {
+    // Client-local dates correctly scope live reads and writes, but deletion is
+    // destructive: a client must not claim an older local date to delete the
+    // server's current row. The server-date guard is intentional and must hold
+    // at the local-midnight boundary.
+    const now = new Date();
+    const serverToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    await db.insert(dailySyncTable).values(dayRow(serverToday));
+
+    const res = await fetch(`${baseUrl}/api/sync/${serverToday}?today=2000-01-01`, {
+      method: "DELETE",
+      headers: managerAuthHeaders(),
+    });
+    expect(res.status).toBe(400);
+    expect(await fetch(`${baseUrl}/api/sync/${serverToday}`, { headers: authHeaders() }).then((r) => r.json()))
+      .not.toBeNull();
+  });
+});
+
 describe("/sync/today — client-local-date keying", () => {
   // The live "today" row must be keyed by the CLIENT's local date too, matching
   // /sync/scheduled. Otherwise a client behind UTC writes the live day into its
@@ -729,6 +749,48 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     };
     expect(replayed.dayState?.runs?.map((r) => r.id)).toEqual(["survivor"]);
     expect(replayed.runValues?.removed).toBeUndefined();
+  });
+
+  it("preserves a later un-delete decision when a stale scheduled replacement omits its stamps", async () => {
+    // Delete/un-delete is a factory-data decision, not a disposable schedule
+    // field. A stale device can legitimately replace a FUTURE day's run list,
+    // but it must not erase a newer re-add stamp and make the item disappear
+    // again after the next client-side tombstone merge.
+    const future = "2030-06-20";
+    const putFuture = (payload: unknown) =>
+      fetch(`${baseUrl}/api/sync/${future}?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId: "schedule-device", payload }),
+      });
+
+    await putFuture({
+      dayState: { runs: [run("first")], resetAt: 1_000 },
+      runValues: { first: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { first: 1 },
+      deletedItems: { brands: ["returning brand"] },
+      deletedStamps: { brands: { "returning brand": 1_000 } },
+    });
+    await putFuture({
+      dayState: { runs: [run("re-added")], resetAt: 2_000 },
+      runValues: { "re-added": { casesNeeded: 20 } },
+      runValuesUpdatedAt: { "re-added": 2 },
+      undeletedStamps: { brands: { "returning brand": 2_000 } },
+    });
+    // An older client replaces this scheduled day again without either stamp
+    // map. The new schedule may win, but the re-add history must survive.
+    await putFuture({
+      dayState: { runs: [run("stale-replacement")], resetAt: 3_000 },
+      runValues: { "stale-replacement": { casesNeeded: 30 } },
+      runValuesUpdatedAt: { "stale-replacement": 3 },
+    });
+
+    const row = await fetch(`${baseUrl}/api/sync/${future}`, { headers: authHeaders() }).then((r) => r.json()) as {
+      deletedStamps?: Record<string, Record<string, number>>;
+      undeletedStamps?: Record<string, Record<string, number>>;
+    };
+    expect(row.deletedStamps?.brands?.["returning brand"]).toBe(1_000);
+    expect(row.undeletedStamps?.brands?.["returning brand"]).toBe(2_000);
   });
 
   it("preserves both run lists under concurrent FIRST writes to a new date (no first-write clobber)", async () => {
