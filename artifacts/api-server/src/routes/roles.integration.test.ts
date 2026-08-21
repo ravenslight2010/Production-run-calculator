@@ -88,6 +88,8 @@ let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
 let rolesTable: DbModule["rolesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
+let passwordResetRequestsTable: DbModule["passwordResetRequestsTable"];
 
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
@@ -151,6 +153,8 @@ beforeAll(async () => {
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
   rolesTable = dbMod.rolesTable;
+  auditLogsTable = dbMod.auditLogsTable;
+  passwordResetRequestsTable = dbMod.passwordResetRequestsTable;
   const rolesMod = await import("../lib/roles");
   seedRoles = rolesMod.seedRoles;
 
@@ -193,7 +197,7 @@ beforeEach(async () => {
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog (manager/operator builtins + editable starters) so the
   // capability middleware can resolve each user's role to a capability set. Plus
@@ -240,6 +244,28 @@ async function req(
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+}
+
+async function auditLogs(): Promise<{
+  logs: Array<{
+    actor: string;
+    action: string;
+    resource: string | null;
+    changes: Record<string, any>;
+  }>;
+  count: number;
+}> {
+  const res = await req(MANAGER, "GET", "/api/audit-logs");
+  expect(res.status).toBe(200);
+  return (await res.json()) as {
+    logs: Array<{
+      actor: string;
+      action: string;
+      resource: string | null;
+      changes: Record<string, any>;
+    }>;
+    count: number;
+  };
 }
 
 // Insert a tracked item directly; returns its id. Used to give PATCH/DELETE a
@@ -627,6 +653,85 @@ describe("identity and role assignment", () => {
       expect(row.role).toBe(role);
     });
   }
+});
+
+describe("staff security actions are visible in the Audit Log", () => {
+  it("records successful role grant/revoke and reset approval, but not rejected mutations", async () => {
+    const grant = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/role`, {
+      role: "warehouse",
+    });
+    expect(grant.status).toBe(200);
+
+    const revoke = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/role`, {
+      role: "operator",
+    });
+    expect(revoke.status).toBe(200);
+
+    const resetRequestId = "audit-log-reset-request";
+    await db.insert(passwordResetRequestsTable).values({
+      id: resetRequestId,
+      userId: OPERATOR,
+      status: "pending",
+    });
+    const approval = await req(
+      MANAGER,
+      "POST",
+      `/api/password-reset-requests/${resetRequestId}/approve`,
+    );
+    expect(approval.status).toBe(200);
+
+    // An unauthorized role mutation must not produce an audit event.
+    const rejected = await req(OPERATOR, "PUT", `/api/users/${WAREHOUSE}/role`, {
+      role: "supervisor",
+    });
+    expect(rejected.status).toBe(403);
+
+    // The routes intentionally use fire-and-forget audit writes. Poll the
+    // manager-visible endpoint rather than relying on a timing-sensitive sleep.
+    let result = await auditLogs();
+    for (let attempt = 0; attempt < 20 && result.count < 3; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      result = await auditLogs();
+    }
+
+    expect(result.count).toBe(3);
+    expect(result.logs).toHaveLength(3);
+
+    const grantLog = result.logs.find((log) => log.action === "role_granted");
+    expect(grantLog).toMatchObject({
+      actor: "manager",
+      action: "role_granted",
+      resource: "user:operator",
+      changes: {
+        targetUsername: "operator",
+        role: { from: "operator", to: "warehouse" },
+      },
+    });
+
+    const revokeLog = result.logs.find((log) => log.action === "role_revoked");
+    expect(revokeLog).toMatchObject({
+      actor: "manager",
+      action: "role_revoked",
+      resource: "user:operator",
+      changes: {
+        targetUsername: "operator",
+        role: { from: "warehouse", to: "operator" },
+      },
+    });
+
+    const approvalLog = result.logs.find(
+      (log) => log.action === "password_reset_approved",
+    );
+    expect(approvalLog).toMatchObject({
+      actor: "manager",
+      action: "password_reset_approved",
+      resource: "user:operator",
+      changes: {
+        targetUsername: "operator",
+        requestId: resetRequestId,
+      },
+    });
+  });
 });
 
 describe("role administration", () => {
