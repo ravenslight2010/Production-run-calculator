@@ -349,6 +349,8 @@ import { describeSubstitution } from "../components/SubstitutionsManager";
 import AssistantTab from "../components/AssistantTab";
 import SpecReconcilePanel from "../components/SpecReconcilePanel";
 import MixReconcilePanel from "../components/MixReconcilePanel";
+import ImportHistoryPanel from "../components/ImportHistoryPanel";
+import { recordImportHistory } from "../importHistory";
 import MixAssistChat from "../components/MixAssistChat";
 import {
   dispatchVoiceCommand,
@@ -566,7 +568,8 @@ import {
 } from "@/recipeGuideImport";
 import type { ShippingPatch } from "@workspace/shipping-import";
 import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
-import { deriveSourceKey } from "@/savedSpecSheets";
+import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
+import { fetchSavedPremixSheets } from "@/savedPremixSheets";
 import type { PremixFreezerPull } from "@workspace/premix-import";
 import CheeseRecipesManager from "@/components/CheeseRecipesManager";
 import DieLineDefaultsManager from "@/components/DieLineDefaultsManager";
@@ -11349,6 +11352,35 @@ export default function Home() {
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+      let specSnapshotId: number | null = null;
+      try {
+        const saved = await fetchSavedSpecSheets();
+        const key = deriveSourceKey(toCommit.sourceNames ?? []);
+        specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
+      } catch { /* history still records without the optional snapshot reference */ }
+      void recordImportHistory({
+        importType: "spec",
+        sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
+        sourceLabel: (toCommit.sourceNames ?? []).join(", ") || "Spec sheet",
+        customerScope: [...new Set(appliedParsed.profiles.map((p) => p.brand).filter(Boolean))].join(", "),
+        status: aliasSaveFailed ? "partial" : "complete",
+        summary: {
+          phases: { parse: toCommit.note?.includes("reused") ? "reused saved parse" : "fresh AI parse", linking: "deterministic linking", commit: "committed changes" },
+          counts: {
+            created: mixesAdded + cheeseRecipesAdded,
+            updated: recipesUpdated,
+            renamed: toCommit.newAliases.length,
+            removed: profilesToRemove.length,
+            unresolved: toCommit.skipped?.profiles?.length ?? 0,
+            skipped: (toCommit.skipped?.recipes?.length ?? 0) + (toCommit.skipped?.profiles?.length ?? 0),
+          },
+          warnings: [aliasSaveFailed ? "Learned mappings were not saved and may need review again." : "", toCommit.note ?? ""].filter(Boolean),
+          unresolved: toCommit.skipped?.profiles?.map((p) => `${p.brand} ${p.flavor}`) ?? [],
+          skipped: toCommit.skipped?.recipes?.map((r) => r.name) ?? [],
+          followUp: aliasSaveFailed ? ["Reopen the saved import review and confirm the name mappings again."] : [],
+          snapshotId: specSnapshotId,
+        },
+      }).catch(() => {});
       // The import itself succeeded, but the learned rename / "use existing"
       // aliases failed to save — warn instead of failing silently, since the
       // next re-import of this sheet would otherwise forget these picks.
@@ -11685,6 +11717,17 @@ export default function Home() {
           autoLinkedNote,
       });
     } catch (err) {
+      void recordImportHistory({
+        importType: "spec",
+        sourceKey: deriveSourceKey(specImportPrepared?.sourceNames ?? []),
+        sourceLabel: (specImportPrepared?.sourceNames ?? []).join(", ") || "Spec sheet",
+        status: "failed",
+        summary: {
+          phases: { parse: "completed", linking: "not completed", commit: "not completed" },
+          warnings: [err instanceof Error ? err.message : "Import failed while saving."],
+          followUp: ["Retry the import; no rollback is implied by this record."],
+        },
+      }).catch(() => {});
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
       );
@@ -11759,6 +11802,27 @@ export default function Home() {
         newAliases,
         mixesToRemove,
       );
+      let premixSnapshotId: number | null = null;
+      try {
+        const saved = await fetchSavedPremixSheets();
+        const key = deriveSourceKey(premixImportPrepared.sourceNames ?? []);
+        premixSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
+      } catch { /* history still records without the optional snapshot reference */ }
+      void recordImportHistory({
+        importType: "premix",
+        sourceKey: deriveSourceKey(premixImportPrepared.sourceNames ?? []),
+        sourceLabel: (premixImportPrepared.sourceNames ?? []).join(", ") || "Premix sheet",
+        customerScope: [...new Set(mixesToApply.map((m) => m.brand).filter(Boolean))].join(", "),
+        status: result.warning || premixImportPrepared.note ? "partial" : "complete",
+        summary: {
+          phases: { parse: premixImportPrepared.note?.includes("reused") ? "reused saved parse" : "deterministic parse", linking: "deterministic linking", commit: "committed changes" },
+          counts: { created: mixesToApply.filter((m) => !m.id || m.id.startsWith("import-")).length, updated: mixesToApply.length, removed: mixesToRemove.length, skipped: (premixImportPrepared.candidates?.length ?? 0) - mixesToApply.length },
+          warnings: [premixImportPrepared.note ?? "", result.warning ?? ""].filter(Boolean),
+          skipped: premixImportPrepared.candidates.filter((c) => !mixesToApply.some((m) => m.id === c.mix.id)).map((c) => c.mix.name),
+          followUp: result.warning ? ["Open Freezer Pull settings and save the missing reminders."] : [],
+          snapshotId: premixSnapshotId,
+        },
+      }).catch(() => {});
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
@@ -11787,6 +11851,17 @@ export default function Home() {
         });
       }
     } catch (err) {
+      void recordImportHistory({
+        importType: "premix",
+        sourceKey: deriveSourceKey(premixImportPrepared?.sourceNames ?? []),
+        sourceLabel: (premixImportPrepared?.sourceNames ?? []).join(", ") || "Premix sheet",
+        status: "failed",
+        summary: {
+          phases: { parse: "completed", linking: "completed", commit: "not completed" },
+          warnings: [err instanceof Error ? err.message : "Import failed while saving."],
+          followUp: ["Retry the import; no rollback is implied by this record."],
+        },
+      }).catch(() => {});
       setPremixImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
       );
@@ -15679,6 +15754,11 @@ export default function Home() {
                     canManageProfiles={hasCapability("manage-profiles")}
                   />
                 </div>
+                {hasCapability("manage-profiles") && (
+                  <div className="mt-3">
+                    <ImportHistoryPanel refreshSignal={sheetListSignal} />
+                  </div>
+                )}
               </TabsContent>
 
               <TabsContent value="incidents">

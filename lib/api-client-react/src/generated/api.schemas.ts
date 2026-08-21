@@ -1592,6 +1592,99 @@ export interface SummaryResult {
 }
 
 export type OperationalReportInputScope = typeof OperationalReportInputScope[keyof typeof OperationalReportInputScope];
+
+
+export const OperationalReportInputScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export interface OperationalReportInput {
+  scope: OperationalReportInputScope;
+  /** ISO date, or week-ending date for a weekly report */
+  date: string;
+  /** @maxItems 600 */
+  runs: SummaryRunInput[];
+}
+
+export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
+
+
+export const OperationalReportScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export type OperationalReportQualityAvailability = typeof OperationalReportQualityAvailability[keyof typeof OperationalReportQualityAvailability];
+
+
+export const OperationalReportQualityAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportQualityValue = {
+  checks?: number;
+  issues?: number;
+  failed?: number;
+  warnings?: number;
+} | null;
+
+export type OperationalReportQuality = {
+  availability: OperationalReportQualityAvailability;
+  value: OperationalReportQualityValue;
+  note?: string;
+};
+
+export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
+
+
+export const OperationalReportIncidentsAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportIncidentsValue = {
+  total?: number;
+  unresolved?: number;
+} | null;
+
+export type OperationalReportIncidents = {
+  availability: OperationalReportIncidentsAvailability;
+  value: OperationalReportIncidentsValue;
+  note?: string;
+};
+
+export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
+
+
+export const OperationalReportInventoryAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportInventoryValue = {
+  flaggedItems?: number;
+} | null;
+
+export type OperationalReportInventory = {
+  availability: OperationalReportInventoryAvailability;
+  value: OperationalReportInventoryValue;
+  note?: string;
+};
+
+export interface OperationalReport {
+  scope: OperationalReportScope;
+  date: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  production: SummaryStats;
+  quality: OperationalReportQuality;
+  incidents: OperationalReportIncidents;
+  inventory: OperationalReportInventory;
+}
+
 /**
  * No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.
  */
@@ -2058,6 +2151,85 @@ export interface ImportAlias {
 
 export interface ImportAliasList {
   aliases: ImportAlias[];
+}
+
+export type ImportHistorySummaryPhases = {[key: string]: string};
+
+export type ImportHistorySummaryCounts = {[key: string]: number};
+
+export interface ImportHistorySummary {
+  phases?: ImportHistorySummaryPhases;
+  counts?: ImportHistorySummaryCounts;
+  warnings?: string[];
+  unresolved?: string[];
+  skipped?: string[];
+  followUp?: string[];
+  snapshotId?: number | null;
+  [key: string]: unknown;
+ }
+
+export type ImportHistoryImportType = typeof ImportHistoryImportType[keyof typeof ImportHistoryImportType];
+
+
+export const ImportHistoryImportType = {
+  spec: 'spec',
+  premix: 'premix',
+} as const;
+
+export type ImportHistoryStatus = typeof ImportHistoryStatus[keyof typeof ImportHistoryStatus];
+
+
+export const ImportHistoryStatus = {
+  complete: 'complete',
+  partial: 'partial',
+  failed: 'failed',
+} as const;
+
+export interface ImportHistory {
+  id: number;
+  importType: ImportHistoryImportType;
+  sourceKey?: string | null;
+  sourceLabel: string;
+  customerScope?: string | null;
+  status: ImportHistoryStatus;
+  summary: ImportHistorySummary;
+  snapshotId?: number | null;
+  /** Epoch milliseconds */
+  createdAt: number;
+}
+
+export interface ImportHistoryList {
+  imports: ImportHistory[];
+}
+
+export type ImportHistoryInputImportType = typeof ImportHistoryInputImportType[keyof typeof ImportHistoryInputImportType];
+
+
+export const ImportHistoryInputImportType = {
+  spec: 'spec',
+  premix: 'premix',
+} as const;
+
+export type ImportHistoryInputStatus = typeof ImportHistoryInputStatus[keyof typeof ImportHistoryInputStatus];
+
+
+export const ImportHistoryInputStatus = {
+  complete: 'complete',
+  partial: 'partial',
+  failed: 'failed',
+} as const;
+
+export interface ImportHistoryInput {
+  importType: ImportHistoryInputImportType;
+  sourceKey?: string;
+  sourceLabel: string;
+  customerScope?: string;
+  status: ImportHistoryInputStatus;
+  summary: ImportHistorySummary;
+}
+
+export interface ImportHistoryResponse {
+  import: ImportHistory;
 }
 
 export interface SaveImportAliasesInput {
@@ -3551,96 +3723,32 @@ export type GetProfileNameLinkCleanupAudit200 = {
   heal: ProfileNameLinkCleanupAudit | null;
 };
 
+export type ListImportHistoryParams = {
+type?: ListImportHistoryType;
+status?: ListImportHistoryStatus;
+customer?: string;
+};
+
+export type ListImportHistoryType = typeof ListImportHistoryType[keyof typeof ListImportHistoryType];
+
+
+export const ListImportHistoryType = {
+  spec: 'spec',
+  premix: 'premix',
+} as const;
+
+export type ListImportHistoryStatus = typeof ListImportHistoryStatus[keyof typeof ListImportHistoryStatus];
+
+
+export const ListImportHistoryStatus = {
+  complete: 'complete',
+  partial: 'partial',
+  failed: 'failed',
+} as const;
+
 export type ListIncidentAssignees200Item = {
   userId: string;
   name: string;
   role: string;
 };
 
-
-export type OperationalReportIncidentsValue = {
-  total?: number;
-  unresolved?: number;
-} | null;
-
-export const OperationalReportInventoryAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export const OperationalReportQualityAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export const OperationalReportScope = {
-  day: 'day',
-  week: 'week',
-} as const;
-
-export type OperationalReportQualityValue = {
-  checks?: number;
-  issues?: number;
-  failed?: number;
-  warnings?: number;
-} | null;
-
-export type OperationalReportQualityAvailability = typeof OperationalReportQualityAvailability[keyof typeof OperationalReportQualityAvailability];
-
-export const OperationalReportInputScope = {
-  day: 'day',
-  week: 'week',
-} as const;
-
-export type OperationalReportIncidents = {
-  availability: OperationalReportIncidentsAvailability;
-  value: OperationalReportIncidentsValue;
-  note?: string;
-};
-
-export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
-
-export interface OperationalReportInput {
-  scope: OperationalReportInputScope;
-  /** ISO date, or week-ending date for a weekly report */
-  date: string;
-  /** @maxItems 600 */
-  runs: SummaryRunInput[];
-}
-
-export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
-
-export type OperationalReportInventoryValue = {
-  flaggedItems?: number;
-} | null;
-
-export const OperationalReportIncidentsAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export type OperationalReportInventory = {
-  availability: OperationalReportInventoryAvailability;
-  value: OperationalReportInventoryValue;
-  note?: string;
-};
-
-export interface OperationalReport {
-  scope: OperationalReportScope;
-  date: string;
-  periodStart: string;
-  periodEnd: string;
-  generatedAt: string;
-  production: SummaryStats;
-  quality: OperationalReportQuality;
-  incidents: OperationalReportIncidents;
-  inventory: OperationalReportInventory;
-}
-
-export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
-
-export type OperationalReportQuality = {
-  availability: OperationalReportQualityAvailability;
-  value: OperationalReportQualityValue;
-  note?: string;
-};

@@ -3251,6 +3251,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/SavedPremixSheetList"
 
+  /import-history:
+    get:
+      operationId: listImportHistory
+      tags: [specImport]
+      summary: List recent workbook import review records
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [spec, premix] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [complete, partial, failed] }
+        - name: customer
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Recent manager-visible import records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportHistoryList"
+    post:
+      operationId: recordImportHistory
+      tags: [specImport]
+      summary: Record a sanitized workbook import outcome
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportHistoryInput"
+      responses:
+        "201":
+          description: Import history record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportHistoryResponse"
+        "400": { description: Invalid input }
+
   /import-aliases:
     get:
       operationId: listImportAliases
@@ -7224,6 +7265,75 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ImportAlias"
+
+    ImportHistorySummary:
+      type: object
+      additionalProperties: true
+      properties:
+        phases:
+          type: object
+          additionalProperties: { type: string }
+        counts:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        warnings:
+          type: array
+          items: { type: string }
+        unresolved:
+          type: array
+          items: { type: string }
+        skipped:
+          type: array
+          items: { type: string }
+        followUp:
+          type: array
+          items: { type: string }
+        snapshotId:
+          type: integer
+          nullable: true
+
+    ImportHistory:
+      type: object
+      required: [id, importType, sourceLabel, status, summary, createdAt]
+      properties:
+        id: { type: integer }
+        importType: { type: string, enum: [spec, premix] }
+        sourceKey: { type: string, nullable: true }
+        sourceLabel: { type: string }
+        customerScope: { type: string, nullable: true }
+        status: { type: string, enum: [complete, partial, failed] }
+        summary:
+          $ref: "#/components/schemas/ImportHistorySummary"
+        snapshotId: { type: integer, nullable: true }
+        createdAt: { type: integer, description: Epoch milliseconds }
+
+    ImportHistoryList:
+      type: object
+      required: [imports]
+      properties:
+        imports:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportHistory"
+
+    ImportHistoryInput:
+      type: object
+      required: [importType, sourceLabel, status, summary]
+      properties:
+        importType: { type: string, enum: [spec, premix] }
+        sourceKey: { type: string }
+        sourceLabel: { type: string }
+        customerScope: { type: string }
+        status: { type: string, enum: [complete, partial, failed] }
+        summary:
+          $ref: "#/components/schemas/ImportHistorySummary"
+
+    ImportHistoryResponse:
+      type: object
+      required: [import]
+      properties:
+        import:
+          $ref: "#/components/schemas/ImportHistory"
 
     SaveImportAliasesInput:
       type: object

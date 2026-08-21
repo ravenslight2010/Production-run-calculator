@@ -30,6 +30,7 @@ export const signUpBodyOnePasswordMax = 200;
 export const signUpBodyTwoAccessCodeMax = 200;
 
 
+
 export const SignUpBody = zod.object({
   "username": zod.string().min(signUpBodyOneUsernameMin).max(signUpBodyOneUsernameMax),
   "password": zod.string().min(signUpBodyOnePasswordMin).max(signUpBodyOnePasswordMax)
@@ -43,6 +44,7 @@ export const SignUpBody = zod.object({
  * @summary Check whether a username is available for sign-up
  */
 export const checkUsernameAvailableQueryUsernameMax = 64;
+
 
 
 export const CheckUsernameAvailableQueryParams = zod.object({
@@ -62,6 +64,7 @@ export const signInBodyUsernameMax = 64;
 
 export const signInBodyPasswordMin = 6;
 export const signInBodyPasswordMax = 200;
+
 
 
 export const SignInBody = zod.object({
@@ -98,6 +101,7 @@ export const changePasswordBodyNewPasswordMin = 6;
 export const changePasswordBodyNewPasswordMax = 200;
 
 
+
 export const ChangePasswordBody = zod.object({
   "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
   "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
@@ -129,6 +133,7 @@ export const ChangePasswordResponse = zod.object({
 export const forgotPasswordBodyUsernameMax = 64;
 
 
+
 export const ForgotPasswordBody = zod.object({
   "username": zod.string().min(1).max(forgotPasswordBodyUsernameMax)
 })
@@ -148,6 +153,7 @@ export const resetPasswordBodyCodeMax = 64;
 
 export const resetPasswordBodyNewPasswordMin = 6;
 export const resetPasswordBodyNewPasswordMax = 200;
+
 
 
 export const ResetPasswordBody = zod.object({
@@ -599,6 +605,7 @@ export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 
 
+
 export const IdentifyInventoryPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
   "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
@@ -781,6 +788,7 @@ export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 
 export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
+
 
 
 export const WasteInsightBody = zod.object({
@@ -1316,6 +1324,7 @@ export const UpdateProactiveAlertSettingsResponse = zod.object({
 export const aiForecastBodyHorizonDaysMax = 7;
 
 
+
 export const AiForecastBody = zod.object({
   "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the first upcoming day to forecast'),
   "horizonDays": zod.number().min(1).max(aiForecastBodyHorizonDaysMax).optional().describe('How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday\'s history.'),
@@ -1415,11 +1424,82 @@ export const AiSummaryResponse = zod.object({
   "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used')
 })
 
+
 /**
  * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReportBodyRunsMax = 600;
+
+
+
+export const ExportOperationalReportBody = zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string().describe('ISO date, or week-ending date for a weekly report'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
+  "finished": zod.boolean().describe('Whether the run was completed'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
+  "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
+}).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax)
+})
+
+export const ExportOperationalReportResponse = zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "periodStart": zod.string(),
+  "periodEnd": zod.string(),
+  "generatedAt": zod.coerce.date(),
+  "production": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "runsPlanned": zod.number(),
+  "runsFinished": zod.number(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "attainmentPct": zod.number(),
+  "totalDowntimeMinutes": zod.number(),
+  "totalStoppages": zod.number(),
+  "topDowntime": zod.union([zod.object({
+  "label": zod.string(),
+  "minutes": zod.number()
+}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
+  "unfinishedRuns": zod.array(zod.string()),
+  "incidentCount": zod.number(),
+  "wasteFlaggedCount": zod.number(),
+  "hasData": zod.boolean()
+}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
+  "quality": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "checks": zod.number().optional(),
+  "issues": zod.number().optional(),
+  "failed": zod.number().optional(),
+  "warnings": zod.number().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "incidents": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "total": zod.number().optional(),
+  "unresolved": zod.number().optional()
+}).nullable(),
+  "note": zod.string().optional()
+}),
+  "inventory": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "value": zod.object({
+  "flaggedItems": zod.number().optional()
+}).nullable(),
+  "note": zod.string().optional()
+})
+})
+
+
 /**
  * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
  * @summary Review how accurate past forecasts were vs. what actually ran; read-only
@@ -3781,6 +3861,67 @@ export const DeletePremixSheetResponse = zod.object({
 
 
 /**
+ * @summary List recent workbook import review records
+ */
+export const ListImportHistoryQueryParams = zod.object({
+  "type": zod.enum(['spec', 'premix']).optional(),
+  "status": zod.enum(['complete', 'partial', 'failed']).optional(),
+  "customer": zod.coerce.string().optional()
+})
+
+export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
+
+
+
+export const ListImportHistoryResponse = zod.object({
+  "imports": zod.array(zod.object({
+  "id": zod.number(),
+  "importType": zod.enum(['spec', 'premix']),
+  "sourceKey": zod.string().nullish(),
+  "sourceLabel": zod.string(),
+  "customerScope": zod.string().nullish(),
+  "status": zod.enum(['complete', 'partial', 'failed']),
+  "summary": zod.object({
+  "phases": zod.record(zod.string(), zod.string()).optional(),
+  "counts": zod.record(zod.string(), zod.number().min(listImportHistoryResponseImportsItemSummaryCountsMinOne)).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "unresolved": zod.array(zod.string()).optional(),
+  "skipped": zod.array(zod.string()).optional(),
+  "followUp": zod.array(zod.string()).optional(),
+  "snapshotId": zod.number().nullish()
+}),
+  "snapshotId": zod.number().nullish(),
+  "createdAt": zod.number().describe('Epoch milliseconds')
+}))
+})
+
+
+/**
+ * @summary Record a sanitized workbook import outcome
+ */
+export const recordImportHistoryBodySummaryCountsMinOne = 0;
+
+
+
+export const RecordImportHistoryBody = zod.object({
+  "importType": zod.enum(['spec', 'premix']),
+  "sourceKey": zod.string().optional(),
+  "sourceLabel": zod.string(),
+  "customerScope": zod.string().optional(),
+  "status": zod.enum(['complete', 'partial', 'failed']),
+  "summary": zod.object({
+  "phases": zod.record(zod.string(), zod.string()).optional(),
+  "counts": zod.record(zod.string(), zod.number().min(recordImportHistoryBodySummaryCountsMinOne)).optional(),
+  "warnings": zod.array(zod.string()).optional(),
+  "unresolved": zod.array(zod.string()).optional(),
+  "skipped": zod.array(zod.string()).optional(),
+  "followUp": zod.array(zod.string()).optional(),
+  "snapshotId": zod.number().nullish()
+})
+})
+
+
+/**
  * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
  * @summary List learned import aliases (brand/flavor name mappings)
  */
@@ -3931,6 +4072,7 @@ export const reportIncidentBodyErrorMessageMax = 4000;
 export const reportIncidentBodyErrorStackMax = 8000;
 
 export const reportIncidentBodyUserAgentMax = 500;
+
 
 
 export const ReportIncidentBody = zod.object({
@@ -4200,6 +4342,7 @@ export const UpdateIncidentWorkflowParams = zod.object({
 export const updateIncidentWorkflowBodyNoteMax = 2000;
 
 
+
 export const UpdateIncidentWorkflowBody = zod.object({
   "priority": zod.enum(['low', 'normal', 'high', 'urgent']).optional(),
   "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']).optional(),
@@ -4376,6 +4519,7 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 export const createRoleBodyNameMax = 60;
 
 
+
 export const CreateRoleBody = zod.object({
   "name": zod.string().min(1).max(createRoleBodyNameMax),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
@@ -4390,6 +4534,7 @@ export const UpdateRoleParams = zod.object({
 })
 
 export const updateRoleBodyNameMax = 60;
+
 
 
 export const UpdateRoleBody = zod.object({
@@ -4470,6 +4615,7 @@ export const resetStaffPasswordBodyNewPasswordMin = 6;
 export const resetStaffPasswordBodyNewPasswordMax = 200;
 
 
+
 export const ResetStaffPasswordBody = zod.object({
   "newPassword": zod.string().min(resetStaffPasswordBodyNewPasswordMin).max(resetStaffPasswordBodyNewPasswordMax)
 })
@@ -4483,68 +4629,3 @@ export const DeleteStaffMemberParams = zod.object({
 })
 
 
-export const ExportOperationalReportBody = zod.object({
-  "scope": zod.enum(['day', 'week']),
-  "date": zod.string().describe('ISO date, or week-ending date for a weekly report'),
-  "runs": zod.array(zod.object({
-  "brand": zod.string(),
-  "flavor": zod.string(),
-  "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
-  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
-  "finished": zod.boolean().describe('Whether the run was completed'),
-  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
-  "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
-}).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax)
-})
-
-export const ExportOperationalReportResponse = zod.object({
-  "scope": zod.enum(['day', 'week']),
-  "date": zod.string(),
-  "periodStart": zod.string(),
-  "periodEnd": zod.string(),
-  "generatedAt": zod.coerce.date(),
-  "production": zod.object({
-  "scope": zod.enum(['day', 'week']),
-  "date": zod.string(),
-  "runsPlanned": zod.number(),
-  "runsFinished": zod.number(),
-  "casesPlanned": zod.number(),
-  "casesProduced": zod.number(),
-  "attainmentPct": zod.number(),
-  "totalDowntimeMinutes": zod.number(),
-  "totalStoppages": zod.number(),
-  "topDowntime": zod.union([zod.object({
-  "label": zod.string(),
-  "minutes": zod.number()
-}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
-  "unfinishedRuns": zod.array(zod.string()),
-  "incidentCount": zod.number(),
-  "wasteFlaggedCount": zod.number(),
-  "hasData": zod.boolean()
-}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
-  "quality": zod.object({
-  "availability": zod.enum(['available', 'unavailable']),
-  "value": zod.object({
-  "checks": zod.number().optional(),
-  "issues": zod.number().optional(),
-  "failed": zod.number().optional(),
-  "warnings": zod.number().optional()
-}).nullable(),
-  "note": zod.string().optional()
-}),
-  "incidents": zod.object({
-  "availability": zod.enum(['available', 'unavailable']),
-  "value": zod.object({
-  "total": zod.number().optional(),
-  "unresolved": zod.number().optional()
-}).nullable(),
-  "note": zod.string().optional()
-}),
-  "inventory": zod.object({
-  "availability": zod.enum(['available', 'unavailable']),
-  "value": zod.object({
-  "flaggedItems": zod.number().optional()
-}).nullable(),
-  "note": zod.string().optional()
-})
-})

@@ -42,6 +42,7 @@ import factoryDataRouter from "./factoryData";
 import operationalReportsRouter from "./operationalReports";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
+import importHistoryRouter from "./importHistory";
 
 const router: IRouter = Router();
 
@@ -78,6 +79,7 @@ router.use(specImportAliasesRouter);
 router.use(savedSpecSheetsRouter);
 router.use(savedShippingGuidesRouter);
 router.use(savedPremixSheetsRouter);
+router.use(importHistoryRouter);
 router.use(mergeAliasesRouter);
 router.use(deniedMergesRouter);
 router.use(mergedAwayRouter);
