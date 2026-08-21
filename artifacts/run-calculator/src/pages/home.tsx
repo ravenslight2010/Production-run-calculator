@@ -283,6 +283,10 @@ import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import DataHealthWorkspace from "../components/DataHealthWorkspace";
+import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
+import { loadSyncDiagnostics, recordSyncDiagnostic, type SyncDiagnostic, type SyncDiagnosticKind } from "../syncDiagnostics";
+import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
+import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
 import ProductionRulesManager from "../components/ProductionRulesManager";
@@ -530,6 +534,7 @@ import {
   ClipboardCheck,
   Users,
   Truck,
+  RefreshCw,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
 import * as XLSX from "xlsx";
@@ -4895,6 +4900,21 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+  const syncDate = todayStr();
+  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate));
+  const [lastAcknowledgedAt, setLastAcknowledgedAt] = useState<number | null>(() => {
+    const events = loadSyncDiagnostics(syncDate);
+    return events.filter((event) => event.kind === "ack").at(-1)?.at ?? null;
+  });
+  const [syncPendingCount, setSyncPendingCount] = useState(0);
+  const [syncFailedCount, setSyncFailedCount] = useState(() =>
+    loadSyncDiagnostics(syncDate).filter((event) => event.kind === "failure" || event.kind === "stale").length,
+  );
+  const recordSyncEvent = (kind: SyncDiagnosticKind, message: string, response?: string, runId?: string) => {
+    const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId });
+    setSyncDiagnostics((current) => [...current, event].slice(-20));
+    if (kind === "ack") setLastAcknowledgedAt(event.at);
+  };
 
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
@@ -6898,6 +6918,7 @@ export default function Home() {
   // or re-publish a captured running snapshot after a remote Stop is adopted.
   const syncPushGenerationRef = useRef(0);
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
+  const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
   const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
   const applySyncCallbackRef = useRef<
@@ -6914,6 +6935,15 @@ export default function Home() {
   // Mirrors the mobile app's lastSyncSigRef gate (web/mobile parity).
   const lastSyncSigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
+  const syncStatus: SyncStatus = syncPushFailed
+    ? "failed"
+    : syncPendingCount > 0
+      ? "syncing"
+      : !isOnline || !syncConnected
+        ? "delayed"
+        : lastAcknowledgedAt
+          ? "synchronized"
+          : "connected";
 
   // Mirror today's substitution overlay into the shared-calc module so every
   // call site (calc useMemo, warehouse roll-up, consumeRun, schedule/history
@@ -7782,6 +7812,7 @@ export default function Home() {
     const es = new EventSource(`/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`);
     es.onopen = () => {
       setSyncConnected(true);
+      recordSyncEvent("connected", "Live sync connection opened");
       // Queue the reconnect recovery push. It is released only after the stream's
       // first frame has established a baseline, so a new/stale device cannot
       // upload its local day before applying today's shared row.
@@ -7798,13 +7829,16 @@ export default function Home() {
         // A manager ran a data reset: wipe local state and reload onto the clean
         // slate. applyResetWipe records the new epoch so this fires exactly once.
         if (msg.reset && typeof msg.resetEpoch === "number") {
+          recordSyncEvent("reset", "Server reset received; local data will reload");
           if (applyResetWipe(msg.resetEpoch)) window.location.reload();
           return;
         }
         if (msg.data) {
+          recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
             initialSnapshot: msg.initial === true,
           });
+          if (!msg.initial) recordSyncEvent("merge", "Remote state merged into this device");
         } else if (msg.initial) {
           // The server explicitly has no row. Settle the local automatic seed
           // to default values before opening the baseline gate, so stale form
@@ -7830,6 +7864,7 @@ export default function Home() {
       } catch {}
     };
     es.onerror = () => {
+      recordSyncEvent("failure", isOnline ? "Live sync connection delayed; local changes are retained" : "Offline; local changes are retained");
       // EventSource reconnects itself after an error without recreating this
       // effect. Fence automatic pushes until that reconnect delivers its own
       // initial snapshot.
@@ -8321,6 +8356,8 @@ export default function Home() {
     generation = syncPushGenerationRef.current,
   ) {
     if (generation !== syncPushGenerationRef.current) return;
+    latestSyncPayloadRef.current = payload;
+    recordSyncEvent("push", retriesLeft < 3 ? "Retrying retained change" : "Sending local change to server", undefined, currentRunId);
     // Guard the retry path too: buildSyncPayload stamps the payload with the
     // date it was built on. A push queued just before midnight could otherwise
     // retry after midnight and write yesterday's runs into the new day's
@@ -8352,9 +8389,15 @@ export default function Home() {
         // handler wipes + reloads when adoption applies; either way this push
         // did NOT persist, so flag it instead of recording it as synced.
         setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent("stale", "Server rejected the write after a reset; local change is retained", "reset-stale");
         return;
       }
       setSyncPushFailed(false);
+      setSyncPendingCount(0);
+      setSyncFailedCount(0);
+      recordSyncEvent("ack", "Server acknowledged the local change", "200", currentRunId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
       if (sig !== undefined) lastSyncSigRef.current = sig;
@@ -8367,6 +8410,9 @@ export default function Home() {
         pushAcknowledgedRef.current = true;
         // ...but tell the user their changes aren't backed up / shared yet.
         setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network");
       }
     }).finally(() => {
       syncPushAbortControllersRef.current.delete(controller);
@@ -8452,6 +8498,8 @@ export default function Home() {
     if (!syncBaselineGateRef.current.requestPush()) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     pushAcknowledgedRef.current = false;
+    setSyncPendingCount(1);
+    recordSyncEvent("local", "Local change is queued for server sync");
     pushTimerRef.current = setTimeout(() => {
       // Never push a stale-dated day into today's sync row. A tab left open
       // across midnight still holds yesterday's runs until the rollover fires;
@@ -8466,9 +8514,23 @@ export default function Home() {
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
       const sig = JSON.stringify(payload);
-      if (sig === lastSyncSigRef.current) { pushAcknowledgedRef.current = true; return; }
+      if (sig === lastSyncSigRef.current) {
+        pushAcknowledgedRef.current = true;
+        setSyncPendingCount(0);
+        return;
+      }
       doFetch(payload, 3, sig);
     }, delay);
+  }
+  function retryLatestSync(): void {
+    const payload = latestSyncPayloadRef.current;
+    if (!payload) {
+      recordSyncEvent("local", "No retained change is available to retry");
+      return;
+    }
+    setSyncPushFailed(false);
+    setSyncPendingCount(1);
+    doFetch(payload, 0, JSON.stringify(payload));
   }
   function resetFieldArrays(vals: FormValues) {
     replaceCheese1(vals.app1CheeseRecipe ?? []);
@@ -14367,10 +14429,17 @@ export default function Home() {
             </div>
           </div>
           <div className="print:hidden flex items-center gap-1.5 shrink-0">
-            {/* Sync status dot */}
-            <span
-              title={syncPushFailed ? "Not synced — last save to the server failed" : syncConnected ? "Sync connected" : isOnline ? "Reconnecting to sync…" : "Offline — changes saved locally"}
-              className={`h-2 w-2 rounded-full shrink-0 transition-colors ${syncPushFailed ? "bg-red-500 animate-pulse" : syncConnected ? "bg-emerald-500" : isOnline ? "bg-amber-400 animate-pulse" : "bg-zinc-500 animate-pulse"}`}
+            <SyncStatusPopover
+              status={syncStatus}
+              connected={syncConnected}
+              date={syncDate}
+              lastAcknowledgedAt={lastAcknowledgedAt}
+              pendingCount={syncPendingCount}
+              failedCount={syncFailedCount}
+              diagnostics={syncDiagnostics}
+              canViewConflicts={canManageStaff}
+              onRetry={retryLatestSync}
+              onOpenConflicts={() => { setManageCategory("audit"); setShowManageDialog(true); }}
             />
             {/* Auto-save badge — hidden on xs to save space */}
             <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="hidden sm:flex text-[10px] font-semibold items-center gap-1 text-emerald-400 pointer-events-none">
@@ -14561,13 +14630,18 @@ export default function Home() {
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
                 <div className="flex-1 min-w-0">
                   {syncPushFailed && (
-                    <p>Your latest changes haven't synced to the server. They're saved on this device, but other devices won't see them and they aren't backed up until the connection is restored.</p>
+                    <p>Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.</p>
                   )}
                   {writeError && <p className={syncPushFailed ? "mt-1" : ""}>{writeError}</p>}
+                  {syncPushFailed && (
+                    <button type="button" onClick={retryLatestSync} className="mt-2 inline-flex items-center gap-1.5 rounded border border-red-300/40 px-2 py-1 text-xs font-semibold hover:bg-red-500/20">
+                      <RefreshCw className="h-3 w-3" /> Retry sync
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setSyncPushFailed(false); setWriteError(null); }}
+                  onClick={() => setWriteError(null)}
                   className="shrink-0 text-red-300 hover:text-red-100 text-xs font-semibold"
                 >
                   Dismiss

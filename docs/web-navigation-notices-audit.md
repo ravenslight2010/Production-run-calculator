@@ -60,7 +60,7 @@ Assistant, Setup, Incidents, Quality History, Downtime Trends, and Staff.
 
 | Surface | Who sees it | Trigger / state | Expected action | Current location |
 | --- | --- | --- | --- | --- |
-| Sync-status dot | All signed-in users | Always; color/status reflects sync state | Confirm whether the browser is connected | Header, left of action controls |
+| Sync status | All signed-in users | Always; shows connected, syncing, synchronized, delayed, or failed, with pending/failed counts | Open details to see the last server acknowledgment, retained local changes, recent activity, and retry when needed | Header, left of action controls |
 | **Saved** indicator | All signed-in users | Briefly after successful persistence | Reassurance only; no action | Header |
 | **Cast to Screens** | All signed-in users | Always | Open display URLs/QR codes and optionally cast a station screen | Header |
 | **Floor Mode** shortcut | Users with Floor Mode enabled | Preference is enabled | Open the simplified floor view | Header |
@@ -129,11 +129,31 @@ section pills are assembled from the current user’s available tabs.
 | Notice | Audience | Trigger | Expected action | Location / behavior |
 | --- | --- | --- | --- | --- |
 | Sandbox mode banner | Sandbox users | Current session is in a sandbox scope | Understand that data is isolated; reset only when intended | Persistent above tab content; advisory |
-| Sync/write failure banner | All signed-in users | A day-state sync or inventory write failed | Reconnect/retry; do not assume other devices received changes | Persistent top-level banner; dismissible, but warns local changes are not backed up/shared |
+| Sync/write failure banner | All signed-in users | A day-state sync or inventory write failed | Retry sync; do not assume other devices received changes. The local change remains on this device until acknowledged. | Persistent top-level banner with a retry action; the sync failure cannot be dismissed as resolved without acknowledgment |
 | Proactive alert banner | Relevant shift users; often manager-facing correction | A proactive shift alert is available | Read the nudge; optionally **Apply** its proposed correction or **Dismiss** | Persistent top-level banner above tabs; advisory, one alert shown at a time |
 | Alert preferences | All signed-in users | User opens Alert & Floor Mode | Toggle account-level browser/in-app alert preferences and Floor Mode | Header menu → dialog; not an operational warning |
 | Browser permission state | All signed-in users | Notification permission is not granted/available | Grant permission if browser alerts are desired | Alert & Floor Mode dialog; preference/setup notice |
-| Saved / sync status | All signed-in users | Ongoing connection and save state | Reassurance or connection awareness | Header; informational |
+| Saved / sync status | All signed-in users | Ongoing connection and save state | Reassurance or connection awareness; open Sync status for recovery | Header; informational and actionable |
+
+### Sync status guidance
+
+The header Sync status is scoped to the signed-in facility and the browser's current
+client-local production date. It is separate from the manager conflict monitor: a
+conflict is a completed protective merge recorded for review, while a pending or
+failed write means the server has not acknowledged the local change yet.
+
+| State | Meaning | Safe operator action |
+| --- | --- | --- |
+| **Connected** | The live sync stream is open, but this browser has not recorded a server acknowledgment for the current day yet. | Continue working; check the details if a change is waiting. |
+| **Syncing** | A local change is queued or being sent. | Continue working. Do not duplicate the edit; wait for acknowledgment or use Retry if it becomes delayed. |
+| **Synchronized** | The most recent local change was acknowledged by the server. | Continue normally. Peer receipt and merge activity remain visible in details. |
+| **Delayed** | The browser is offline or the live stream is reconnecting. | Local changes remain on this device. Restore connectivity and use Retry; do not assume another device has the change. |
+| **Sync failed** | Retries ended without acknowledgment, or the server rejected the write because this device must honor a reset. | Keep working only if appropriate for the station, then use Retry after connectivity/reset recovery. The failure remains visible until an actual acknowledgment. |
+
+The detail view shows the last acknowledgment, pending and failed write counts,
+recent date/run-related sync activity, and (for managers) a link to the conflict
+monitor. Opening the conflict monitor is for reviewing completed merge history; it
+does not mark an unsent write as delivered.
 
 ### 2.2 Run surface: safety, start-readiness, and pacing
 
