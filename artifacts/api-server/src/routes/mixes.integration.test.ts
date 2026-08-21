@@ -546,11 +546,12 @@ describe("mix-duplicate-name-purge data heal", () => {
       { ...shared, id: "empty-duplicate-mix-newer", createdAt: newer },
     ]);
 
-    // Keep this ranking test focused on duplicate-name cleanup. The later
-    // profile-name stub heal intentionally removes empty mix rows altogether.
-    await db.insert(dataHealsTable).values({
-      id: "profile-name-link-stub-purge-v1",
-    });
+    // Keep this ranking test focused on duplicate-name cleanup. Later stub
+    // heals intentionally remove empty mix rows altogether.
+    await db.insert(dataHealsTable).values([
+      { id: "profile-name-link-stub-purge-v1" },
+      { id: "workbook-import-stub-purge-v1" },
+    ]);
 
     await runDataHeals();
 

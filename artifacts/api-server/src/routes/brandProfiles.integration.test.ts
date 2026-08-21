@@ -484,7 +484,7 @@ describe("brand-profiles applicator-audit route", () => {
     expect(clear.status).toBe(403);
 
     const saved = (await listAs(OPERATOR)).find((item) => item.key === "craft__supreme");
-    expect(saved).toBeDefined();
+    if (!saved) throw new Error("Expected the protected profile to remain saved");
     expect(saved.values).toMatchObject({
       app3CheeseRecipeName: "Mozz Blend",
       app3Type: "cheese",

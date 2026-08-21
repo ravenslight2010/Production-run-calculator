@@ -1247,7 +1247,7 @@ export function pickMixDuplicateLosers<R extends MixDupRow>(rows: R[]): R[] {
     else groups.set(key, [row]);
   }
 
-  const rank = (r: R): [number, number, number, number] => {
+  const rank = (r: R): [number, number, number] => {
     const components = r.components ?? [];
     const hasAmounts = components.some(
       (c) =>
@@ -3481,6 +3481,7 @@ export async function runDataHeals(): Promise<void> {
   await runCheeseComponentOzStrip();
   await runHannafordTikkaMasalaFix();
   await runProfileNameLinkStubPurge();
+  await runWorkbookImportStubPurge();
   await runAug19SavedSpecProfileRepair();
   await runAug19SavedSpecProfileRepairV2();
   await runFreshDeviceRunContaminationCleanup();
@@ -4807,11 +4808,30 @@ export async function runProfileNameLinkStubPurge(): Promise<void> {
   });
 }
 
-// ── August 19 saved-spec profile repair ──────────────────────────────────────
-// A re-import could visibly apply a verified parse locally while its forced
-// profile queue write was rejected or only partially acknowledged. The saved
-// parses from August 19 are the audited source of truth. Repair only fields
-// which that parse explicitly supplied; omitted fields remain manager-owned.
+const WORKBOOK_IMPORT_STUB_PURGE_ID = "workbook-import-stub-purge-v1";
+
+// Workbook importers persist stable IDs derived from the displayed identity:
+// premix-${brand}-${flavor}-${name} for premix sheets and
+// cheese:${brand}:${name} for cheese sheets. Require a full recomputation
+// match instead of a prefix so a manager-created empty draft is never treated
+// as an importer leftover.
+const workbookImportSlug = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const isCheeseWorkbookImportRow = (row: { id: string; brand: string; name: string }): boolean => {
+  const brand = workbookImportSlug(row.brand);
+  const name = workbookImportSlug(row.name);
+  return row.id === (brand ? `cheese:${brand}:${name}` : `cheese:${name}`);
+};
+
+const isPremixWorkbookImportRow = (
+  row: { id: string; brand: string; flavor: string; name: string },
+): boolean =>
+  row.id ===
+  `premix-${workbookImportSlug(row.brand)}-${workbookImportSlug(row.flavor)}-${workbookImportSlug(row.name)}`;
 const AUG19_SAVED_SPEC_PROFILE_REPAIR_ID = "aug19-saved-spec-profile-repair-v1";
 const AUG19_SAVED_SPEC_START = new Date("2026-08-19T00:00:00.000Z");
 const AUG20_SAVED_SPEC_START = new Date("2026-08-20T00:00:00.000Z");
@@ -5352,5 +5372,85 @@ export async function runAug19SavedSpecProfileRepairV2(): Promise<void> {
       .set({ result })
       .where(eq(dataHealsTable.id, AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID));
     logger.info({ heal: AUG19_SAVED_SPEC_PROFILE_REPAIR_V2_ID, ...result }, "Data heal applied");
+  });
+}
+
+export async function runWorkbookImportStubPurge(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: WORKBOOK_IMPORT_STUB_PURGE_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    // Profile writes name their app-slot recipes but cannot have a foreign key
+    // to those text names. Block concurrent writes through the reference scan
+    // and deletes so a newly live recipe cannot be mistaken for an orphan.
+    await tx.execute(sql`LOCK TABLE ${brandProfilesTable} IN SHARE ROW EXCLUSIVE MODE`);
+    const profiles = await tx.select().from(brandProfilesTable);
+    const slotRefs = new Set<string>();
+    for (const profile of profiles) {
+      for (const values of [profile.values, profile.crustValues]) {
+        if (!values || typeof values !== "object") continue;
+        for (const field of [
+          "app1CheeseRecipeName",
+          "app2CheeseRecipeName",
+          "app3CheeseRecipeName",
+          "app4CheeseRecipeName",
+        ]) {
+          const name = ciName((values as Record<string, unknown>)[field]);
+          if (name) slotRefs.add(`${profile.scope}\u0000${name}`);
+        }
+      }
+    }
+
+    const num = (value: unknown): number => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    };
+    const isZeroNamedComponents = (components: unknown): boolean =>
+      !Array.isArray(components) ||
+      components.every((component) => {
+        if (!component || typeof component !== "object") return true;
+        const row = component as Record<string, unknown>;
+        return num(row.lbs) <= 0 && num(row.ozPerPizza) <= 0 && num(row.perPizza) <= 0;
+      });
+
+    let removedCheese = 0;
+    const cheeseRows = await tx.select().from(cheeseRecipesTable).for("update");
+    for (const row of cheeseRows) {
+      if (!isCheeseWorkbookImportRow(row)) continue;
+      if (!isZeroNamedComponents(row.components)) continue;
+      if (slotRefs.has(`${row.scope}\u0000${ciName(row.name)}`)) continue;
+      await tx
+        .delete(cheeseRecipesTable)
+        .where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, row.scope)));
+      removedCheese++;
+    }
+
+    let removedMix = 0;
+    const mixRows = await tx.select().from(mixesTable).for("update");
+    for (const row of mixRows) {
+      if (!isPremixWorkbookImportRow(row)) continue;
+      if (!isZeroNamedComponents(row.components)) continue;
+      // A workbook row with batch/progress data is not an empty stub.
+      if (num(row.batchSize) > 0 || num(row.amountAlreadyMade) > 0) continue;
+      if (slotRefs.has(`${row.scope}\u0000${ciName(row.name)}`)) continue;
+      await tx
+        .delete(mixesTable)
+        .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, row.scope)));
+      removedMix++;
+    }
+
+    const result = {
+      scannedProfiles: profiles.length,
+      removedStubs: { cheese: removedCheese, mix: removedMix },
+    };
+    await tx
+      .update(dataHealsTable)
+      .set({ result })
+      .where(eq(dataHealsTable.id, WORKBOOK_IMPORT_STUB_PURGE_ID));
+    logger.info({ heal: WORKBOOK_IMPORT_STUB_PURGE_ID, ...result }, "Data heal applied");
   });
 }

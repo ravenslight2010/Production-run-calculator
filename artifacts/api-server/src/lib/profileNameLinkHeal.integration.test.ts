@@ -33,6 +33,7 @@ let cheeseRecipesTable: DbModule["cheeseRecipesTable"];
 let mixesTable: DbModule["mixesTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let runProfileNameLinkStubPurge: () => Promise<void>;
+let runWorkbookImportStubPurge: () => Promise<void>;
 let runAug19SavedSpecProfileRepair: () => Promise<void>;
 let runAug19SavedSpecProfileRepairV2: () => Promise<void>;
 
@@ -42,6 +43,7 @@ let originalDatabaseUrl: string | undefined;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const HEAL_ID = "profile-name-link-stub-purge-v1";
+const WORKBOOK_HEAL_ID = "workbook-import-stub-purge-v1";
 const AUG19_REPAIR_ID = "aug19-saved-spec-profile-repair-v1";
 const AUG19_REPAIR_V2_ID = "aug19-saved-spec-profile-repair-v2";
 
@@ -84,6 +86,7 @@ beforeAll(async () => {
 
   const heals = await import("./dataHeals");
   runProfileNameLinkStubPurge = heals.runProfileNameLinkStubPurge;
+  runWorkbookImportStubPurge = heals.runWorkbookImportStubPurge;
   runAug19SavedSpecProfileRepair = heals.runAug19SavedSpecProfileRepair;
   runAug19SavedSpecProfileRepairV2 = heals.runAug19SavedSpecProfileRepairV2;
 
@@ -316,6 +319,130 @@ describe("runProfileNameLinkStubPurge", () => {
       .from(dataHealsTable)
       .where(eq(dataHealsTable.id, HEAL_ID));
     expect(markerAfterSecondRun.result).toEqual(claimedResult);
+  });
+});
+
+describe("runWorkbookImportStubPurge", () => {
+  it("removes only orphaned empty workbook-pool rows and is marker-guarded", async () => {
+    await db.insert(brandProfilesTable).values({
+      key: "workbook__referenced",
+      scope: "live",
+      brand: "Workbook",
+      flavor: "referenced",
+      values: { app1CheeseRecipeName: "Referenced Cheese", app2CheeseRecipeName: "Referenced Mix" },
+      crustValues: {},
+      updatedAtMs: 1,
+    });
+    await db.insert(cheeseRecipesTable).values([
+      { id: "cheese:workbook:workbook-cheese-orphan", scope: "live", brand: "Workbook", name: "Workbook Cheese Orphan", components: [] },
+      { id: "cheese:workbook:referenced-cheese", scope: "live", brand: "Workbook", name: "Referenced Cheese", components: [] },
+      { id: "cheese:workbook:workbook-cheese-nonzero", scope: "live", brand: "Workbook", name: "Workbook Cheese Nonzero", components: [{ ingredient: "cheese", lbs: 1 }] },
+      { id: "manager-cheese-draft", scope: "live", brand: "Workbook", name: "Manager Cheese Draft", components: [] },
+    ]);
+    await db.insert(mixesTable).values([
+      { id: "premix-workbook-orphan-workbook-mix-orphan", scope: "live", brand: "Workbook", flavor: "Orphan", name: "Workbook Mix Orphan", components: [] },
+      { id: "premix-workbook-referenced-referenced-mix", scope: "live", brand: "Workbook", flavor: "Referenced", name: "Referenced Mix", components: [] },
+      { id: "premix-workbook-nonzero-workbook-mix-nonzero", scope: "live", brand: "Workbook", flavor: "Nonzero", name: "Workbook Mix Nonzero", components: [{ ingredient: "spice", perPizza: 1 }] },
+      { id: "premix-workbook-batched-workbook-mix-batched", scope: "live", brand: "Workbook", flavor: "Batched", name: "Workbook Mix Batched", components: [], batchSize: 1 },
+      { id: "manager-mix-draft", scope: "live", brand: "Workbook", flavor: "Manager", name: "Manager Mix Draft", components: [] },
+    ]);
+
+    await runWorkbookImportStubPurge();
+
+    expect(await db.select().from(cheeseRecipesTable)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "cheese:workbook:referenced-cheese" }),
+        expect.objectContaining({ id: "cheese:workbook:workbook-cheese-nonzero" }),
+        expect.objectContaining({ id: "manager-cheese-draft" }),
+      ]),
+    );
+    expect(await db.select().from(cheeseRecipesTable).then((rows) => rows.map((row) => row.id))).not.toContain(
+      "cheese:workbook:workbook-cheese-orphan",
+    );
+    const mixIds = await db.select().from(mixesTable).then((rows) => rows.map((row) => row.id));
+    expect(mixIds).toEqual(expect.arrayContaining([
+      "premix-workbook-referenced-referenced-mix",
+      "premix-workbook-nonzero-workbook-mix-nonzero",
+      "premix-workbook-batched-workbook-mix-batched",
+      "manager-mix-draft",
+    ]));
+    expect(mixIds).not.toContain("premix-workbook-orphan-workbook-mix-orphan");
+
+    const [marker] = await db.select().from(dataHealsTable).where(eq(dataHealsTable.id, WORKBOOK_HEAL_ID));
+    expect(marker.result).toEqual({
+      scannedProfiles: expect.any(Number),
+      removedStubs: {
+        cheese: expect.any(Number),
+        mix: expect.any(Number),
+      },
+    });
+    expect((marker.result as { removedStubs: { cheese: number; mix: number } }).removedStubs).toEqual({
+      cheese: 1,
+      mix: 1,
+    });
+
+    await db.insert(mixesTable).values({
+      id: "workbook-mix-after-heal",
+      scope: "live",
+      name: "Workbook Mix After Heal",
+      components: [],
+    });
+    await runWorkbookImportStubPurge();
+    expect(await db.select().from(mixesTable).then((rows) => rows.map((row) => row.id))).toContain(
+      "workbook-mix-after-heal",
+    );
+  });
+
+  it("keeps a stub referenced by a profile save that commits before its locked scan", async () => {
+    await db.delete(dataHealsTable).where(eq(dataHealsTable.id, WORKBOOK_HEAL_ID));
+    await db.insert(cheeseRecipesTable).values({
+      id: "cheese:workbook:workbook-cheese-race",
+      scope: "live",
+      brand: "Workbook",
+      name: "Workbook Cheese Race",
+      components: [],
+    });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO brand_profiles
+          (key, scope, brand, flavor, values, crust_values, updated_at_ms)
+         VALUES ($1, 'live', $2, $3, $4::jsonb, '{}'::jsonb, 1)`,
+        [
+          "workbook__race",
+          "Workbook",
+          "Race",
+          JSON.stringify({ app1CheeseRecipeName: "Workbook Cheese Race" }),
+        ],
+      );
+
+      const heal = runWorkbookImportStubPurge();
+      let completed = false;
+      void heal.then(() => {
+        completed = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(completed).toBe(false);
+      await client.query("COMMIT");
+      await heal;
+    } finally {
+      await client.query("ROLLBACK").catch(() => {});
+      client.release();
+    }
+
+    expect(
+      await db
+        .select({ id: cheeseRecipesTable.id })
+        .from(cheeseRecipesTable)
+        .where(eq(cheeseRecipesTable.id, "cheese:workbook:workbook-cheese-race")),
+    ).toHaveLength(1);
+    const [marker] = await db
+      .select()
+      .from(dataHealsTable)
+      .where(eq(dataHealsTable.id, WORKBOOK_HEAL_ID));
+    expect(marker.result).toMatchObject({ removedStubs: { cheese: 0 } });
   });
 });
 
