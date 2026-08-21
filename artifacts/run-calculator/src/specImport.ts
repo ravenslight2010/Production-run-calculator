@@ -2382,15 +2382,13 @@ export async function commitSpecImport(
   // above intentionally uses the untouched parse (its own slot-matching pass
   // already ties recipes to profiles).
   const scopedParsed = fillSpecCheeseTargetsFromProfiles(applyParsed);
-  // Ordinary imports remain usable while a device is offline: their pool sync
-  // has historically been best-effort. A reviewed forced correction is
-  // different—its purpose is to repair canonical shared data—so every required
-  // pool write must acknowledge before the caller can show success.
-  const requirePoolAcknowledgement = (forceUpdateProfileKeys?.size ?? 0) > 0;
-  const handlePoolWriteFailure = (error: unknown) => {
-    if (requirePoolAcknowledgement) throw error;
-  };
-
+  // A spec import is only successful when every required shared-data write has
+  // been acknowledged. The local profile apply happens before these pool
+  // writes, so swallowing a POST failure here would leave a profile pointing
+  // at a recipe whose components never landed while still showing the success
+  // toast. Keep fetches/snapshots/learned aliases best-effort, but never
+  // downgrade a required recipe write into a partial success. This applies to
+  // ordinary imports as well as explicit forced corrections.
   // Spec-named dough/sauce with no backing recipe anywhere: create an
   // empty-components placeholder in the server pool so the name is visible
   // (and editable) under Manage Lists → Dough/Sauce Recipes instead of living
@@ -2404,8 +2402,13 @@ export async function commitSpecImport(
   for (const kind of ["dough", "sauce"] as const) {
     const cands = (applyOut.recipePlaceholders ?? []).filter((c) => c.kind === kind);
     if (!cands.length) continue;
+    let pool: PoolNamedRecipe[];
     try {
-      const pool = await fetchNamedRecipes(kind);
+      pool = await fetchNamedRecipes(kind);
+    } catch {
+      continue;
+    }
+    try {
       // Group per recipe name. Recipes attach by NAME only — placeholders
       // carry no brand/flavor targeting.
       const byName = new Map<string, { name: string }>();
@@ -2434,7 +2437,7 @@ export async function commitSpecImport(
         placeholderRecipesAdded += added;
       }
     } catch (error) {
-      handlePoolWriteFailure(error);
+      throw error;
     }
   }
 
@@ -2445,8 +2448,13 @@ export async function commitSpecImport(
   // sheet can't express per-pizza/batch amounts, so they arrive with those at 0
   // for the manager to fill in the editor.
   let mixesAdded = 0;
+  let existingMixes: Mix[];
   try {
-    const existingMixes = await fetchMixes();
+    existingMixes = await fetchMixes();
+  } catch {
+    existingMixes = [];
+  }
+  try {
     const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
     const candidates = collectSpecImportMixes(scopedParsed, userMixNamesLower)
       .map((d) => specMixDraftToMix(d))
@@ -2513,7 +2521,7 @@ export async function commitSpecImport(
       mixesAdded = added;
     }
   } catch (error) {
-    handlePoolWriteFailure(error);
+    throw error;
   }
 
   // Add any named cheese blends detected in this import to the factory-wide
@@ -2543,9 +2551,14 @@ export async function commitSpecImport(
   let recipesUpdated = 0;
 
   let cheeseRecipesAdded = 0;
+  let existingMixesForCheese: Mix[];
   try {
-    const existingMixes = await fetchMixes();
-    const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
+    existingMixesForCheese = await fetchMixes();
+  } catch {
+    existingMixesForCheese = [];
+  }
+  try {
+    const userMixNamesLower = new Set(existingMixesForCheese.map((m) => m.name.trim().toLowerCase()));
     const drafts = collectSpecImportCheeseRecipes(scopedParsed, userMixNamesLower);
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
@@ -2563,7 +2576,7 @@ export async function commitSpecImport(
       }
     }
   } catch (error) {
-    handlePoolWriteFailure(error);
+    throw error;
   }
 
   // Same update step for the Dough / Sauce named-recipe pools. A successful
@@ -2576,15 +2589,20 @@ export async function commitSpecImport(
       .filter((r) => r.kind === kind)
       .map((r) => ({ name: r.name.trim(), rows: r.rows ?? [] }));
     if (!updates.length) continue;
+    let pool: PoolNamedRecipe[];
     try {
-      const pool = await fetchNamedRecipes(kind);
+      pool = await fetchNamedRecipes(kind);
+    } catch {
+      continue;
+    }
+    try {
       const upd = updateRecipePoolComponents(pool, updates);
       if (upd.updated > 0) {
         await saveNamedRecipes(kind, upd.next);
         recipesUpdated += upd.updated;
       }
     } catch (error) {
-      handlePoolWriteFailure(error);
+      throw error;
     }
   }
 
