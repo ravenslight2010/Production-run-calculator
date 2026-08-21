@@ -315,8 +315,11 @@ describe("addCheeseRecipesIfAbsentByName", () => {
         name: "Aldo's Cheese Mix",
         brand: "",
         components: [
-          { ingredient: "Pizella", lbs: 207 },
-          { ingredient: "Part Skim Mozzarella", lbs: 119 },
+          // Keep a manager-entered per-pizza value in the stored component too:
+          // a regular spec re-import must refresh its share without clobbering
+          // that saved value.
+          { ingredient: "Pizella", lbs: 207, ozPerPizza: 2.25 },
+          { ingredient: "Part Skim Mozzarella", lbs: 119, ozPerPizza: 1.75 },
         ],
       }),
     ];
@@ -335,8 +338,13 @@ describe("addCheeseRecipesIfAbsentByName", () => {
     expect(added).toBe(0);
     expect(updated).toBe(1);
     expect(merged[0].components).toEqual([
-      { ingredient: "Pizella", lbs: 207, sharePct: 63.49 },
-      { ingredient: "Part Skim Mozzarella", lbs: 119, sharePct: 36.51 },
+      { ingredient: "Pizella", lbs: 207, ozPerPizza: 2.25, sharePct: 63.49 },
+      {
+        ingredient: "Part Skim Mozzarella",
+        lbs: 119,
+        ozPerPizza: 1.75,
+        sharePct: 36.51,
+      },
     ]);
   });
 
