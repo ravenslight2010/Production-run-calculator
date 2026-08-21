@@ -100,6 +100,52 @@ async function goToMixes(page: Page): Promise<void> {
     .waitFor({ state: "visible", timeout: 8_000 });
 }
 
+/**
+ * Seed a live run before the authenticated app bootstraps. Seeding after the
+ * app is mounted and then reloading races the first SSE baseline: the server
+ * can replace the just-written local day before Mix Plan renders it.
+ */
+async function seedLiveRunBeforeAppLoad(
+  page: Page,
+  opts: {
+    runId: string;
+    brand: string;
+    ingredient: string;
+    runOz: number;
+    casesNeeded: number;
+    pizzasPerCase: number;
+    casesPerLayer: number;
+  },
+): Promise<void> {
+  await page.addInitScript((seed) => {
+    localStorage.setItem("run-calc-day", JSON.stringify({
+      runs: [{ id: seed.runId, brand: seed.brand, flavor: "", seeded: false }],
+      currentIndex: 0,
+      date: new Date().toISOString().slice(0, 10),
+      // Keep a test-local seed ahead of any blank baseline left by a prior
+      // authenticated startup. The run is intentionally not a pristine seed,
+      // so same-day sync still merges it additively.
+      resetAt: Date.now() + 60_000,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+      prepPhase: {
+        prepStartedAt: null,
+        prepBatchesDough: 0,
+        prepBatchesSauce: 0,
+        prepCarriedOver: false,
+      },
+    }));
+    localStorage.setItem(`run-calc-run-${seed.runId}`, JSON.stringify({
+      pep1Type: seed.ingredient,
+      pep1OzPerPizza: seed.runOz,
+      casesNeeded: seed.casesNeeded,
+      pizzasPerCase: seed.pizzasPerCase,
+      casesPerLayer: seed.casesPerLayer,
+    }));
+  }, opts);
+}
+
 async function dbCreateMix(
   db: Client,
   opts: {
@@ -449,35 +495,20 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         perPizza: MIX_CARD_OZ,
       });
 
+      await seedLiveRunBeforeAppLoad(page, {
+        runId: `prep-pull-run-${suffix}`,
+        brand,
+        ingredient,
+        runOz: RUN_OZ,
+        casesNeeded: CASES_NEEDED,
+        pizzasPerCase: PIZZAS_PER_CASE,
+        casesPerLayer: CASES_PER_LAYER,
+      });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-
-      await page.evaluate(
-        ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase, casesPerLayer }) => {
-          const DAY_KEY = "run-calc-day";
-          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
-          const rawDay = localStorage.getItem(DAY_KEY);
-          if (!rawDay) return;
-          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
-          if (!day.runs || day.runs.length === 0) return;
-          day.runs[0].brand = brand;
-          localStorage.setItem(DAY_KEY, JSON.stringify(day));
-          const runId = day.runs[0].id;
-          const existing = (() => {
-            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
-          })();
-          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
-            ...existing, pep1Type: ingredient, pep1OzPerPizza: runOz,
-            casesNeeded, pizzasPerCase, casesPerLayer,
-          }));
-        },
-        { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE, casesPerLayer: CASES_PER_LAYER },
-      );
-
-      await page.reload({ waitUntil: "domcontentloaded" });
+      // The auth form transitions to "/" without a document reload. Re-enter
+      // the app route so the init-script seed is read before React hydration.
+      await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
-      await page.waitForTimeout(1_000);
 
       await goToMixes(page);
       await page.waitForTimeout(500);
@@ -539,34 +570,18 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         perPizza: 0.5,
       });
 
+      await seedLiveRunBeforeAppLoad(page, {
+        runId: `prep-live-add-run-${suffix}`,
+        brand: brand1,
+        ingredient,
+        runOz: 2,
+        casesNeeded: 100,
+        pizzasPerCase: 8,
+        casesPerLayer: 0,
+      });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-
-      await page.evaluate(
-        ({ brand, ingredient }) => {
-          const DAY_KEY = "run-calc-day";
-          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
-          const rawDay = localStorage.getItem(DAY_KEY);
-          if (!rawDay) return;
-          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
-          if (!day.runs || day.runs.length === 0) return;
-          day.runs[0].brand = brand;
-          localStorage.setItem(DAY_KEY, JSON.stringify(day));
-          const runId = day.runs[0].id;
-          const existing = (() => {
-            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
-          })();
-          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
-            ...existing, pep1Type: ingredient, pep1OzPerPizza: 2,
-            casesNeeded: 100, pizzasPerCase: 8, casesPerLayer: 0,
-          }));
-        },
-        { brand: brand1, ingredient },
-      );
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((button) => button.click()).catch(() => {});
-      await page.waitForTimeout(1_000);
       await page.waitForTimeout(1_000);
 
       await goToMixes(page);
@@ -593,9 +608,15 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await brandInput.fill(brand2);
       await brandInput.press("Enter");
 
+      // Leave the new run first: switching away saves the live form, so doing
+      // this in the opposite order would overwrite the direct fixture values
+      // with the compact form's defaults.
+      await page.getByRole("button", { name: /prev/i }).click();
+      await page.waitForTimeout(300);
+
       // The Run tab's compact view does not render the applicator editor.
-      // Persist the new run's ingredient fields, then switch away and back so
-      // the normal run-switch path hydrates them into the open form.
+      // Persist the new run's ingredient fields, then switch back so the
+      // normal run-switch path hydrates them into the open form.
       await page.evaluate(({ ingredient }) => {
         const dayKey = "run-calc-day";
         const rawDay = localStorage.getItem(dayKey);
@@ -611,8 +632,6 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
           casesPerLayer: 0,
         }));
       }, { ingredient });
-      await page.getByRole("button", { name: /prev/i }).click();
-      await page.waitForTimeout(300);
       await page.getByRole("button", { name: /next/i }).click();
       await page.waitForTimeout(1_000);
 
