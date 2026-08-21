@@ -1,13 +1,14 @@
 ---
 name: Spec-import stub pollution
-description: Spec imports mint all-zero placeholder recipes across cheese/mix/dough/sauce pools; full-corpus audit findings and method.
+description: Recipe references need positive component data before they create cheese, mix, dough, or sauce pool rows; includes historical-stub audit context.
 ---
 
-Spec-sheet imports create placeholder rows (all-zero lbs, no components) in EVERY server pool for any recipe name they reference (cheese blends, mixes, dough, sauce). If the matching cheese/premix/dough workbook is never imported (or the name drifts), the stub stays empty in production forever and clutters pickers next to the real row.
+Recipe names in a spec sheet are profile links, not evidence of a master-data formula. A cheese, mix, dough, or sauce pool row may be created or replaced only when the parsed recipe has a named component with a positive amount. Profile-only references remain intact; managers can import the corresponding workbook or create the recipe explicitly.
 
-**Why:** The July 2026 full-corpus audit found 16 cheese blends + 22 mixes + 4 dough + several sauces live in prod as empty stubs, plus one empty profile (brand quote-typo) — all from spec imports that referenced names the later workbook imports didn't link to.
+**Why:** The July 2026 full-corpus audit found 16 cheese blends, 22 mixes, four dough recipes, and several sauces live in production as empty stubs, created when a spec referenced a name whose later workbook never linked.
 
 **How to apply:**
-- After any spec import, check the pools for new zero-lbs rows and either link them to real recipes or delete them.
+- Apply the positive-data guard to every spec-import pool-writing path, including post-import client promotion, rather than relying on a later cleanup.
+- Bump the saved-parse version whenever this deterministic import behavior changes.
 - Audits: compare workbooks in `attached_assets/source-library/` vs prod pools read-only (`executeSql environment:"production"`, `select json_agg(row_to_json(t)) ...` to survive CSV quoting). Treat "same name, all-zero lbs" as "stub never filled", not "recipe is zero".
 - Name drift between spec and workbook ("4hands Red Hot Chicken Mix" vs "Red Hot Chicken Mix") is the main stub cause — the near-dup matcher only runs at import link passes.

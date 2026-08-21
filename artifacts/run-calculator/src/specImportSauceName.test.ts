@@ -4,8 +4,8 @@
 // (e.g. "BBQ Sauce") on a profile with no mixing recipe. applySpecImport must
 // (a) set it as the profile's frontlineRecipeName when nothing is there yet,
 // (b) never clobber an existing mixed sauce recipe or a name the user set, and
-// (c) register the name as a selectable Sauce Recipe option — otherwise the
-// import looks like it silently dropped the sauce.
+// (c) keep a name-only reference out of the recipe picker until real amounts
+//     are imported or a manager creates the recipe.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -49,12 +49,12 @@ describe("applySpecImport ready-made sauce name", () => {
     expect(prof?.frontlineRecipeName).toBe("BBQ Sauce");
   });
 
-  it("registers the sauce name as a Sauce Recipe dropdown option", () => {
+  it("keeps a name-only sauce reference out of the Sauce Recipe dropdown", () => {
     applySpecImport(importWithSauce("BBQ Sauce"));
-    expect(loadList(FRONTLINE_RECIPE_NAMES_KEY, [])).toContain("BBQ Sauce");
+    expect(loadList(FRONTLINE_RECIPE_NAMES_KEY, [])).not.toContain("BBQ Sauce");
   });
 
-  it("does NOT clobber an existing mixed sauce recipe, but still registers the option", () => {
+  it("does NOT clobber an existing mixed sauce recipe or create an option", () => {
     saveProfile("Corner Booth", "BBQ CHICKEN", {
       ...DEFAULT_VALUES,
       frontlineRecipeName: "House Red Sauce",
@@ -64,16 +64,16 @@ describe("applySpecImport ready-made sauce name", () => {
     const prof = loadProfile("Corner Booth", "BBQ CHICKEN");
     expect(prof?.frontlineRecipeName).toBe("House Red Sauce");
     expect(prof?.frontlineRecipe).toEqual([{ ingredient: "Tomato", lbs: 10 }]);
-    expect(loadList(FRONTLINE_RECIPE_NAMES_KEY, [])).toContain("BBQ Sauce");
+    expect(loadList(FRONTLINE_RECIPE_NAMES_KEY, [])).not.toContain("BBQ Sauce");
   });
 
-  it("clears delete + merge tombstones so the sync receive-side filters can't strip the name back out", () => {
+  it("leaves delete + merge tombstones intact because a name-only reference creates no picker option", () => {
     tombstoneDeleted("frontlineRecipeNames", "BBQ Sauce");
     saveMergedAway(["BBQ Sauce"]);
     applySpecImport(importWithSauce("BBQ Sauce"));
-    expect(loadDeletedItems()["frontlineRecipeNames"] ?? []).not.toContain("bbq sauce");
-    expect(loadMergedAway()).not.toContain("BBQ Sauce");
-    expect(loadList(FRONTLINE_RECIPE_NAMES_KEY, [])).toContain("BBQ Sauce");
+    expect(loadDeletedItems()["frontlineRecipeNames"] ?? []).toContain("bbq sauce");
+    expect(loadMergedAway()).toContain("BBQ Sauce");
+    expect(loadList(FRONTLINE_RECIPE_NAMES_KEY, [])).not.toContain("BBQ Sauce");
   });
 });
 

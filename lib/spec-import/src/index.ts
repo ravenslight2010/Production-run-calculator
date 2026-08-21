@@ -666,6 +666,24 @@ export function specImportRecipeIsMix(
 }
 
 /**
+ * Whether a parsed recipe has enough positive component data to create or
+ * replace a factory-wide pool recipe. Recipe names alone are profile links, not
+ * master-data records: persisting a name with only blank/zero amounts creates a
+ * permanent, unusable picker entry that has no workbook-backed formula.
+ *
+ * Spec sheets carry per-pizza ounces in `rows[].lbs` for cheese-kind recipes,
+ * while dough and sauce sheets use pounds. In both cases a positive amount is
+ * the minimum evidence that the import contains real recipe data.
+ */
+export function specImportRecipeHasUsablePoolData(recipe: ParsedRecipe): boolean {
+  return (recipe.rows ?? []).some((row) => {
+    const ingredient = (row.ingredient ?? "").trim();
+    const amount = Number(row.lbs);
+    return Boolean(ingredient) && Number.isFinite(amount) && amount > 0;
+  });
+}
+
+/**
  * Backfill "who it goes to" targets onto cheese-kind recipes that arrived with
  * NO brand/flavor targets at all, by scanning the import's own profiles for
  * applicator slots that reference the recipe by name (either the applicator
@@ -752,6 +770,7 @@ export function collectSpecImportMixes(
   for (const r of parsed.recipes ?? []) {
     const name = (r.name ?? "").trim();
     if (!name || !(r.rows?.length)) continue;
+    if (!specImportRecipeHasUsablePoolData(r)) continue;
     if (!specImportRecipeIsMix(r, userMixNamesLower)) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
@@ -796,6 +815,7 @@ export function collectSpecImportMixesByBrandScope(
   for (const r of parsed.recipes ?? []) {
     const name = (r.name ?? "").trim();
     if (!name || !(r.rows?.length)) continue;
+    if (!specImportRecipeHasUsablePoolData(r)) continue;
     if (!specImportRecipeIsMix(r, userMixNamesLower)) continue;
 
     // Build components once — they are the same regardless of which brand
@@ -878,6 +898,7 @@ export function collectSpecImportCheeseRecipes(
     if (r.kind !== "cheese") continue;
     const name = (r.name ?? "").trim();
     if (!name || !(r.rows?.length)) continue;
+    if (!specImportRecipeHasUsablePoolData(r)) continue;
     if (specImportRecipeIsMix(r, userMixNamesLower)) continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;

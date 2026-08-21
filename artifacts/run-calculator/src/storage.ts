@@ -92,7 +92,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, type ImportMergeAliasMap, type SpecAliasKind } from "@workspace/spec-import";
+import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, specImportRecipeHasUsablePoolData, type ImportMergeAliasMap, type SpecAliasKind } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import type {
   ParsedSpecImport,
@@ -3711,22 +3711,9 @@ export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayK
  * brand/flavor/type/ingredient/recipe name becomes selectable. Best-effort and
  * fail-safe: a malformed entry is skipped rather than aborting the whole import.
  */
-// A dough/sauce recipe NAME a spec sheet put onto a profile with no actual
-// mixing recipe anywhere to back it (no recipe in the import, no local preset).
-// Without a pool entry the name is invisible under Manage Lists → Dough/Sauce
-// Recipes, so the caller creates an empty-components placeholder in the server
-// pool (see commitSpecImport) that the manager fills in later.
-export type SpecImportRecipePlaceholder = {
-  kind: "dough" | "sauce";
-  name: string;
-  brand: string;
-  flavor: string;
-};
-
 /**
  * A dough/sauce recipe from the SERVER pool, passed into applySpecImport by
- * the commit glue (which fetched the live pools for its relink/placeholder
- * passes anyway). Shape mirrors @workspace/named-recipes' NamedRecipe fields
+ * the commit glue. Shape mirrors @workspace/named-recipes' NamedRecipe fields
  * used here, kept structural so storage.ts stays free of that dependency.
  */
 export type SpecImportServerPoolRecipe = {
@@ -3760,7 +3747,7 @@ export type SpecImportNameCorrection = {
 
 export function applySpecImport(
   parsed: ParsedSpecImport,
-  out?: { recipePlaceholders?: SpecImportRecipePlaceholder[]; nameCorrections?: SpecImportNameCorrection[] },
+  out?: { nameCorrections?: SpecImportNameCorrection[] },
   serverPools?: {
     dough?: SpecImportServerPoolRecipe[];
     sauce?: SpecImportServerPoolRecipe[];
@@ -3913,7 +3900,7 @@ export function applySpecImport(
     // it neither registers a name nor needs a tombstone cleared.
     if (r.referenceOnly) continue;
     const name = r.name.trim();
-    if (!name || r.rows.length === 0) continue;
+    if (!name || !specImportRecipeHasUsablePoolData(r)) continue;
     clearDeleted(routesToMix(r) ? "mixRecipeNames" : RECIPE_KIND_DELETE_NAMESPACE[r.kind], name);
     clearMergedAway(name);
   }
@@ -4024,8 +4011,6 @@ export function applySpecImport(
   const newBrands: string[] = [];
   const newAppTypes: string[] = [];
   const newPepTypes: string[] = [];
-  const profileSauceNames: string[] = [];
-  const profileDoughNames: string[] = [];
   // Every profile this import writes to (applicator types and/or recipe ties) —
   // the post-loop cheese-mirror pass revisits each to fill any cheese applicator
   // left blank by a single-blend spec.
@@ -4033,10 +4018,6 @@ export function applySpecImport(
   // Profiles identified as purchased-crust runs (no dieType + crust-named
   // doughName): the caller uses this to auto-switch the run's subTab to "crusts".
   const crustProfilesList: Array<{ brand: string; flavor: string }> = [];
-  // Spec-named dough/sauce with no backing recipe anywhere — candidates for the
-  // caller's empty-placeholder pool push (filtered against this import's
-  // recipes and the local presets at the end of this function).
-  const placeholderCandidates: SpecImportRecipePlaceholder[] = [];
   const markTouched = (brand: string, flavor: string): void => {
     if (!brand || !flavor) return;
     touchedProfiles.set(`${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`, { brand, flavor });
@@ -4142,14 +4123,9 @@ export function applySpecImport(
       // Register the bought/ready-made sauce name as a selectable Sauce Recipe
       // option regardless of whether this profile keeps it — otherwise the name
       // only ever appears on the one profile and looks like it never imported.
-      // (Collected separately: the newSauceNames list was already flushed to
-      // storage before this loop runs.) Clear any delete/merge tombstone for
-      // the name too, or the sync receive-side dropDeleted/dropMergedAway
-      // filters would strip it right back out of the options list.
-      profileSauceNames.push(specSauceName);
-      clearDeleted("frontlineRecipeNames", specSauceName);
-      clearMergedAway(specSauceName);
-      placeholderCandidates.push({ kind: "sauce", name: specSauceName, brand, flavor });
+      // A profile-only name remains visible on the profile, but is deliberately
+      // not registered as a recipe option or server-pool row. Only an imported
+      // formula with positive component amounts may create master data.
     }
     const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     // The spec sheet is authoritative for the sauce name link: always write it
@@ -4203,13 +4179,9 @@ export function applySpecImport(
       resolveImportName((p.doughName ?? "").trim(), "dough", importMergeAliases),
     );
     if (specDoughName) {
-      // Register the name as a selectable Dough Recipe option regardless of
-      // whether this profile keeps it, and clear any delete/merge tombstone so
-      // the sync receive-side filters don't strip it right back out.
-      profileDoughNames.push(specDoughName);
-      clearDeleted("doughRecipeNames", specDoughName);
-      clearMergedAway(specDoughName);
-      placeholderCandidates.push({ kind: "dough", name: specDoughName, brand, flavor });
+      // A profile-only name remains visible on the profile, but is deliberately
+      // not registered as a recipe option or server-pool row. Only an imported
+      // formula with positive component amounts may create master data.
     }
     const hasMixedDough = (values.doughRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     // Same principle as sauce above: spec sheet is authoritative for the dough
@@ -4439,13 +4411,6 @@ export function applySpecImport(
     );
     Object.assign(values as Record<string, unknown>, lineFills);
     saveProfile(brand, flavor, values);
-  }
-
-  if (profileSauceNames.length) {
-    saveList(FRONTLINE_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES), profileSauceNames).sort((a, b) => a.localeCompare(b)));
-  }
-  if (profileDoughNames.length) {
-    saveList(DOUGH_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES), profileDoughNames).sort((a, b) => a.localeCompare(b)));
   }
 
   // ── Tie recipes onto their profiles ──
@@ -4752,26 +4717,6 @@ export function applySpecImport(
     saveList(PEP_TYPES_KEY, mergeListInsensitive(loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES), newPepTypes));
   }
 
-  // Spec-named dough/sauce with NO backing recipe: not in this import (any
-  // non-reference recipe of the kind that loose-matches counts, even one this
-  // apply skipped for having no rows) and not among the local presets. These
-  // are reported to the caller, which creates empty-components placeholder
-  // entries in the server pool so the names show up under Manage Lists →
-  // Dough/Sauce Recipes instead of existing only on the profile.
-  if (out && placeholderCandidates.length) {
-    const doughPresetKeys = Object.keys(loadDoughRecipePresets());
-    const saucePresetKeys = Object.keys(loadFrontlineRecipePresets());
-    const backed = (c: SpecImportRecipePlaceholder): boolean => {
-      for (const r of parsed.recipes) {
-        if (r.referenceOnly) continue;
-        if (r.kind !== c.kind) continue;
-        if (specImportNamedRecipeNamesEqual(r.name, c.name)) return true;
-      }
-      const presets = c.kind === "dough" ? doughPresetKeys : saucePresetKeys;
-      return presets.some((k) => specImportNamedRecipeNamesEqual(k, c.name));
-    };
-    out.recipePlaceholders = placeholderCandidates.filter((c) => !backed(c));
-  }
   if (out && nameCorrections.length) {
     // Dedupe (same correction can fire once per profile that carried the old
     // name) — keyed on the full tuple, case-insensitive.

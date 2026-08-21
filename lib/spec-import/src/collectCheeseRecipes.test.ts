@@ -100,6 +100,23 @@ describe("collectSpecImportCheeseRecipes", () => {
     expect(drafts).toHaveLength(0);
   });
 
+  it("skips an all-zero blend so a name-only spec cannot create a pool stub", () => {
+    const drafts = collectSpecImportCheeseRecipes(
+      parsed([
+        cheeseRecipe({
+          name: "Awaiting Cheese Workbook",
+          rows: [
+            { ingredient: "Mozzarella", lbs: 0 },
+            { ingredient: "Provolone", lbs: 0 },
+          ],
+        }),
+      ]),
+      none,
+    );
+
+    expect(drafts).toEqual([]);
+  });
+
   it("de-dupes by name (case-insensitive), keeping the first", () => {
     const drafts = collectSpecImportCheeseRecipes(
       parsed([

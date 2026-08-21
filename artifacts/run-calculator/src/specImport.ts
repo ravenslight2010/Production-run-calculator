@@ -52,7 +52,6 @@ import {
   shouldRetryParsePass,
   specImportNameMatchKey,
   specImportNamedRecipeNamesEqual,
-  findSpecImportDoughFamilyMatch,
   splitGridsForPrompt,
   summarizeSpecImport,
   updateRecipePoolComponents,
@@ -92,7 +91,6 @@ import {
   applySpecImport,
   isNameDeleted,
   flavorNamespace,
-  type SpecImportRecipePlaceholder,
   type SpecImportServerPoolRecipe,
   type SpecImportNameCorrection,
 } from "./storage";
@@ -123,10 +121,10 @@ import { fetchMergeAliases } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
-import { fetchNamedRecipes, saveNamedRecipes, addNamedRecipesToServerIfAbsent } from "./namedRecipes";
+import { fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
-import { namedRecipeFromDraft, parseDoughCustomerSection, parseDoughVariantTable, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
+import { parseDoughCustomerSection, parseDoughVariantTable, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, applyMixPerPizza, applyNewMixComponents, detectNewMixComponents, fillSpecMixTags, type Mix, type MixComponent } from "@workspace/mixes";
 import {
@@ -1262,7 +1260,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "28";
+export const SPEC_PARSE_VERSION = "29";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -2026,12 +2024,6 @@ export async function commitSpecImport(
    */
   recipesUpdated: number;
   /**
-   * Empty-components dough/sauce placeholder recipes added to the server pool
-   * for profile-named recipes with no backing recipe anywhere (so the name is
-   * visible under Manage Lists → Dough/Sauce Recipes).
-   */
-  placeholderRecipesAdded: number;
-  /**
    * Dough or sauce recipes whose imported name was a near-exact match
    * (word reorder or single typo) of an existing pool entry, and were
    * automatically linked to that entry at commit time rather than creating
@@ -2264,7 +2256,7 @@ export async function commitSpecImport(
     };
   }
 
-  const applyOut: { recipePlaceholders?: SpecImportRecipePlaceholder[]; nameCorrections?: SpecImportNameCorrection[] } = {};
+  const applyOut: { nameCorrections?: SpecImportNameCorrection[] } = {};
   const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases);
 
   // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
@@ -2389,58 +2381,6 @@ export async function commitSpecImport(
   // toast. Keep fetches/snapshots/learned aliases best-effort, but never
   // downgrade a required recipe write into a partial success. This applies to
   // ordinary imports as well as explicit forced corrections.
-  // Spec-named dough/sauce with no backing recipe anywhere: create an
-  // empty-components placeholder in the server pool so the name is visible
-  // (and editable) under Manage Lists → Dough/Sauce Recipes instead of living
-  // only on the profile. Tagged "who it goes to" from the referencing
-  // profiles when they all share one brand. Loose near-dup guard against the
-  // existing pool: if a pool entry already loose-matches the name, the
-  // profile relink pass should have (or will) snap onto it — never mint a
-  // near-duplicate placeholder. This is part of an explicit manager Apply:
-  // a pool failure rejects the import rather than claiming it fully landed.
-  let placeholderRecipesAdded = 0;
-  for (const kind of ["dough", "sauce"] as const) {
-    const cands = (applyOut.recipePlaceholders ?? []).filter((c) => c.kind === kind);
-    if (!cands.length) continue;
-    let pool: PoolNamedRecipe[];
-    try {
-      pool = await fetchNamedRecipes(kind);
-    } catch {
-      continue;
-    }
-    try {
-      // Group per recipe name. Recipes attach by NAME only — placeholders
-      // carry no brand/flavor targeting.
-      const byName = new Map<string, { name: string }>();
-      const poolNames = pool.map((r) => r.name);
-      for (const c of cands) {
-        if (pool.some((r) => specImportNamedRecipeNamesEqual(r.name, c.name))) continue;
-        // Dough variant of an existing base recipe ("CRB Heavy Plus" when the
-        // pool already has "CRB Dough"): never mint a placeholder — the link
-        // pass snapped the profile onto the base recipe (one recipe per dough
-        // family; qualifiers only locate the doughball weight row).
-        if (kind === "dough" && findSpecImportDoughFamilyMatch(c.name, poolNames)) continue;
-        const key = c.name.trim().toLowerCase();
-        if (!byName.has(key)) byName.set(key, { name: c.name.trim() });
-      }
-      const drafts = [...byName.values()]
-        .map((g) =>
-          namedRecipeFromDraft({
-            name: g.name,
-            components: [],
-            idPrefix: kind,
-          }),
-        )
-        .filter((r): r is PoolNamedRecipe => r != null);
-      if (drafts.length) {
-        const { added } = await addNamedRecipesToServerIfAbsent(kind, drafts);
-        placeholderRecipesAdded += added;
-      }
-    } catch (error) {
-      throw error;
-    }
-  }
-
   // Add any mixes detected in this import to the factory-wide Mixes list so they
   // appear on the Mixes screen alongside premix-imported ones. New mixes are
   // matched by name against existing ones so an
@@ -2656,5 +2596,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, aliasSaveFailed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, aliasSaveFailed };
 }

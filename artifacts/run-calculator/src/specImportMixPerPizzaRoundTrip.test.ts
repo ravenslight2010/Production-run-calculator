@@ -93,18 +93,16 @@ describe("collectSpecImportMixes: perPizza comes from row.lbs", () => {
     ]);
   });
 
-  it("carries zero oz correctly (no phantom non-zero)", () => {
-    // A spec sheet that lists ingredient names but no amounts → perPizza 0.
-    // Needs >= 2 ingredients to pass the mix-routing filter (single-ingredient
-    // recipes are never routed to Mixes regardless of the label).
+  it("skips an all-zero mix instead of creating a permanent pool stub", () => {
+    // A spec sheet that lists ingredient names but no amounts is only a
+    // reference to a mix. The matching premix workbook (or an explicit manager
+    // entry) supplies the master-data formula later.
     const parsed = specImportWithMix("Ranch Mix", "Aldo's", "Ranch", [
       { ingredient: "Ranch Sauce", ozPerPizza: 0 },
       { ingredient: "Spices", ozPerPizza: 0 },
     ]);
     const drafts = collectSpecImportMixes(parsed, new Set());
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0].components[0].perPizza).toBe(0);
-    expect(drafts[0].components[1].perPizza).toBe(0);
+    expect(drafts).toEqual([]);
   });
 
   it("skips single-ingredient cheese-kind recipes (not a mix)", () => {
@@ -327,32 +325,17 @@ describe("Full pipeline: spec import perPizza → buildMixPlan non-zero lbs", ()
     ]);
   });
 
-  it("produces zero lbs when the spec sheet carried no oz amounts (manager must enter manually)", () => {
-    // A spec sheet that lists only ingredient names without amounts. This is
-    // expected behavior — the manager fills in perPizza later in the editor.
+  it("does not create a mix when the spec sheet carried no oz amounts", () => {
+    // A spec sheet that lists only ingredient names without amounts is a
+    // profile/name reference, not enough data for a factory-wide Mix record.
+    // The manager can import the premix workbook or add the mix explicitly.
     const parsed = specImportWithMix("Ranch Mix", "Acme", "Ranch", [
       { ingredient: "Ranch Sauce", ozPerPizza: 0 },
       { ingredient: "Spices", ozPerPizza: 0 },
     ]);
     const drafts = collectSpecImportMixes(parsed, new Set());
-    const candidates = drafts.map((d) => specMixDraftToMix(d)).filter((m): m is Mix => m != null);
-    const { merged } = addSpecMixesIfAbsent([], candidates);
-    const { next: finalMixes } = applyMixPerPizza(merged, candidates);
 
-    const plan = buildMixPlan({
-      runs: [{ date: TODAY, brand: "Acme", flavor: "Ranch", pizzas: 500, cases: 50 }],
-      mixes: finalMixes,
-      today: TODAY,
-    });
-    // With perPizza=0, component lbs are 0. buildMixPlan still adds the 20 lb
-    // startup buffer, so totalLbs = 20. The key signal is missingAmounts=true.
-    if (plan.length > 0) {
-      const entry = plan[0].runs[0].mixes[0];
-      expect(entry.missingAmounts).toBe(true);
-      expect(entry.components.every((c) => c.lbs === 0)).toBe(true);
-    }
-    // No plan entries at all is also acceptable when everything is 0.
-    // The important thing: no crash and no phantom non-zero lbs.
+    expect(drafts).toEqual([]);
   });
 
   it("saveMixes round-trip: applyMixPerPizza on re-fetch preserves the values from the first import", () => {

@@ -5,7 +5,8 @@
 // when no dough mixing recipe exists yet. applySpecImport must
 // (a) set it as the profile's doughRecipeName when nothing is there yet,
 // (b) never clobber an existing mixed dough recipe or a name the user set,
-// (c) register the name as a selectable Dough Recipe option, and
+// (c) keep a name-only reference out of the recipe picker until real amounts
+//     are imported or a manager creates the recipe, and
 // (d) when the actual dough recipe imports LATER, re-link its rows/weight onto
 //     every already-saved profile pointing at that name (loose-key match) —
 //     that re-link is the whole point of capturing the type up front.
@@ -53,12 +54,12 @@ describe("applySpecImport named dough (no recipe yet)", () => {
     expect(prof?.doughRecipeName).toBe("Ultra Thin Dough");
   });
 
-  it("registers the dough name as a Dough Recipe dropdown option", () => {
+  it("keeps a name-only dough reference out of the Dough Recipe dropdown", () => {
     applySpecImport(importWithDough("Ultra Thin Dough"));
-    expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).toContain("Ultra Thin Dough");
+    expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).not.toContain("Ultra Thin Dough");
   });
 
-  it("does NOT clobber an existing mixed dough recipe, but still registers the option", () => {
+  it("does NOT clobber an existing mixed dough recipe or create an option", () => {
     saveProfile("Corner Booth", "BBQ CHICKEN", {
       ...DEFAULT_VALUES,
       // dieType makes the profile "real" — a dough-only profile is
@@ -71,16 +72,16 @@ describe("applySpecImport named dough (no recipe yet)", () => {
     const prof = loadProfile("Corner Booth", "BBQ CHICKEN");
     expect(prof?.doughRecipeName).toBe("House Dough");
     expect(prof?.doughRecipe).toEqual([{ ingredient: "Flour", lbs: 50 }]);
-    expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).toContain("Ultra Thin Dough");
+    expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).not.toContain("Ultra Thin Dough");
   });
 
-  it("clears delete + merge tombstones so the sync receive-side filters can't strip the name back out", () => {
+  it("leaves delete + merge tombstones intact because a name-only reference creates no picker option", () => {
     tombstoneDeleted("doughRecipeNames", "Ultra Thin Dough");
     saveMergedAway(["Ultra Thin Dough"]);
     applySpecImport(importWithDough("Ultra Thin Dough"));
-    expect(loadDeletedItems()["doughRecipeNames"] ?? []).not.toContain("ultra thin dough");
-    expect(loadMergedAway()).not.toContain("Ultra Thin Dough");
-    expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).toContain("Ultra Thin Dough");
+    expect(loadDeletedItems()["doughRecipeNames"] ?? []).toContain("ultra thin dough");
+    expect(loadMergedAway()).toContain("Ultra Thin Dough");
+    expect(loadList(DOUGH_RECIPE_NAMES_KEY, [])).not.toContain("Ultra Thin Dough");
   });
 });
 

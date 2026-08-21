@@ -1010,6 +1010,20 @@ describe("collectSpecImportMixes", () => {
     expect(mixes).toHaveLength(1);
     expect(mixes[0].components.map((c) => c.ingredient)).toEqual(["Sauce"]);
   });
+
+  it("skips all-zero amounts so a name-only spec cannot create a mix stub", () => {
+    const parsed = specParse([
+      specRecipe({
+        name: "Awaiting Premix Workbook",
+        rows: [
+          { ingredient: "Sauce", lbs: 0 },
+          { ingredient: "Seasoning", lbs: 0 },
+        ],
+      }),
+    ]);
+
+    expect(collectSpecImportMixes(parsed, new Set())).toEqual([]);
+  });
 });
 
 describe("specMixDraftToMix", () => {

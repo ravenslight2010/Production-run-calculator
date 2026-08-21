@@ -541,7 +541,7 @@ import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
+import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { SauceGuideImportDialog, DoughGuideImportDialog } from "@/components/RecipeGuideImportDialog";
@@ -11414,7 +11414,7 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, placeholderRecipesAdded, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
       // The import itself succeeded, but the learned rename / "use existing"
       // aliases failed to save — warn instead of failing silently, since the
@@ -11511,6 +11511,7 @@ export default function Home() {
         for (const r of appliedParsed.recipes) {
           if (r.referenceOnly) continue;
           if (r.kind !== "dough" && r.kind !== "sauce") continue;
+          if (!specImportRecipeHasUsablePoolData(r)) continue;
           const name = r.name.trim();
           if (!name) continue;
           if (r.kind === "dough" && (r.doughballsPerTray ?? 0) > 0) {
@@ -11705,14 +11706,14 @@ export default function Home() {
       // (dough/sauce ONLY), those pickers must refetch too.
       if (cheeseRecipesAdded > 0)
         void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
-      // Invalidate dough recipes when server recipe rows were replaced,
-      // placeholder recipes were added, OR doughball variants were pushed
-      // to the server — so autofill and recipe pickers always see the
-      // fresh variant/customer lists without waiting for the next app load.
-      if (recipesUpdated > 0 || placeholderRecipesAdded > 0 || (importedRecipes && canManageInventory)) {
+      // Invalidate dough recipes when server recipe rows were replaced or
+      // doughball variants were pushed to the server — so autofill and recipe
+      // pickers always see the fresh variant/customer lists without waiting for
+      // the next app load.
+      if (recipesUpdated > 0 || (importedRecipes && canManageInventory)) {
         void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
       }
-      if (recipesUpdated > 0 || placeholderRecipesAdded > 0) {
+      if (recipesUpdated > 0) {
         void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
       }
       setShowSpecImport(false);
