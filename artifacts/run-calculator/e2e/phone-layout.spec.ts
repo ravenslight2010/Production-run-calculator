@@ -1,4 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { Client } from "pg";
+import { cleanupTestUsers, uniqueTestId } from "./isolation";
 
 const PHONE_VIEWPORTS = [
   { width: 375, height: 812 },
@@ -29,8 +31,22 @@ function getSignupCode(): string {
 }
 
 function uniqueUsername(): string {
-  return `phonee2e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  return uniqueTestId("phonee2e");
 }
+
+const testUsernames = new Set<string>();
+let cleanupDb: Client | undefined;
+
+test.afterAll(async () => {
+  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
+  cleanupDb = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await cleanupDb.connect();
+    await cleanupTestUsers(cleanupDb, testUsernames);
+  } finally {
+    await cleanupDb.end().catch(() => {});
+  }
+});
 
 function viewportLabel(page: Page): string {
   const viewport = page.viewportSize();
@@ -387,7 +403,9 @@ async function signInToSandbox(page: Page): Promise<void> {
     .locator("#username")
     .waitFor({ state: "visible", timeout: 20_000 });
   const password = "PhoneLayoutTest123!";
-  await page.locator("#username").fill(uniqueUsername());
+  const username = uniqueUsername();
+  testUsernames.add(username);
+  await page.locator("#username").fill(username);
   await page.locator("#password").fill(password);
   await page.locator("#confirm").fill(password);
   await page.locator("#accessCode").fill(getSignupCode());

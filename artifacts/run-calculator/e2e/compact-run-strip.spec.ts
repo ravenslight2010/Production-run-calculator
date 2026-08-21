@@ -20,6 +20,8 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { Client } from "pg";
+import { cleanupTestUsers } from "./isolation";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,18 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "Welcome2Lucias!";
+const testUsernames = new Set<string>();
+
+test.afterAll(async () => {
+  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await cleanupTestUsers(db, testUsernames);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
 
 /**
  * Sign up a fresh throwaway account and wait for the main app to be ready.
@@ -81,6 +95,7 @@ test.describe("CompactRunStrip — ended-run round-trip", () => {
     "strip stays visible with Ended status after Run-tab round-trip, no pause/resume buttons",
     async ({ page }) => {
       const username = uid();
+      testUsernames.add(username);
 
       // 1. Sign up, land on the main app, dismiss onboarding dialog
       await signUpAndDismissOnboarding(page, username, "TestPass123!");

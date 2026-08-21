@@ -15,8 +15,9 @@ function uid(): string {
   return `e2e_subtab_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-const BRAND = "TabletCrustBrand";
-const FLAVOR = "TabletCrustFlavor";
+const FIXTURE_SUFFIX = uid();
+const BRAND = `TabletCrustBrand_${FIXTURE_SUFFIX}`;
+const FLAVOR = `TabletCrustFlavor_${FIXTURE_SUFFIX}`;
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const API_BASE =

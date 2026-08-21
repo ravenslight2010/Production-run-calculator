@@ -52,6 +52,7 @@
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { Client as PgClient } from "pg";
+import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 
 // ── config ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,18 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
+const testUsernames = new Set<string>();
+
+test.afterAll(async () => {
+  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
+  const db = new PgClient({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await cleanupTestUsers(db, testUsernames);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
 
 // ── auth helpers ──────────────────────────────────────────────────────────────
 
@@ -417,7 +430,9 @@ async function waitForCaseCounterChange(
  * Returns safeBaseMs, which is the exact startedAt the app stored.
  */
 async function setupAndStartRun(page: Page, casesPerSkid = "10"): Promise<number> {
-  await signUpAndDismissDialog(page, uid(), "TestPass123!");
+  const username = uid();
+  testUsernames.add(username);
+  await signUpAndDismissDialog(page, username, "TestPass123!");
 
   await page.locator('[data-testid="tab-run"]').click();
   await fillFormValues(page, casesPerSkid);
@@ -476,35 +491,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
    * This beforeEach mirrors that logic on a per-test basis to prevent
    * cross-test state leakage within the file.
    *
-   * Safety guard: only proceeds when DATABASE_URL is a local address OR when
-   * E2E_TEST_DB=1 is explicitly set.  This prevents accidental wipes of a
-   * shared operational factory database.  These tests must be run against a
-   * dedicated test database (the same requirement that global-setup.ts has).
+   * Safety guard: this is a destructive fixture and must use the same
+   * local/disposable database boundary as global-setup.ts.
    */
   test.beforeEach(async () => {
-    const url = process.env.DATABASE_URL ?? "";
-    // A "safe" test database is one of:
-    //   • localhost / 127.0.0.1 — local dev Postgres
-    //   • REPLIT_DEV_DOMAIN set — we are inside a Replit workspace (dev env)
-    //   • E2E_TEST_DB=1 — explicit opt-in from CI
-    // Production deployments have REPLIT_DEPLOYMENT set but not REPLIT_DEV_DOMAIN.
-    const isTestDb =
-      url.includes("localhost") ||
-      url.includes("127.0.0.1") ||
-      !!process.env.REPLIT_DEV_DOMAIN ||
-      process.env.E2E_TEST_DB === "1";
-    if (!isTestDb) {
-      throw new Error(
-        "screen-off-wake tests require a local DATABASE_URL, REPLIT_DEV_DOMAIN " +
-          "set, or E2E_TEST_DB=1 to safely delete today's factory-wide " +
-          "daily_sync row between tests.",
-      );
-    }
+    const url = requireIsolatedTestDatabase("screen-off-wake beforeEach");
     const client = new PgClient({ connectionString: url });
-    await client.connect();
-    const today = new Date().toISOString().slice(0, 10);
-    await client.query("DELETE FROM daily_sync WHERE date = $1", [today]);
-    await client.end();
+    try {
+      await client.connect();
+      const today = new Date().toISOString().slice(0, 10);
+      await client.query("DELETE FROM daily_sync WHERE date = $1", [today]);
+    } finally {
+      await client.end().catch(() => {});
+    }
   });
 
   // ──────────────────────────────────────────────────────────────────────────

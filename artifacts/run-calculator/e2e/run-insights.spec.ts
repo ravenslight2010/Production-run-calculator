@@ -191,9 +191,10 @@ test.afterAll(async () => {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 test.describe("Run Insights — accept, dismiss, follow-up", () => {
-  const BRAND = "InsightBrand";
-  const FLAVOR_A = "FlavorAccept";
-  const FLAVOR_B = "FlavorDismiss";
+  const FIXTURE_SUFFIX = uid();
+  const BRAND = `InsightBrand_${FIXTURE_SUFFIX}`;
+  const FLAVOR_A = `FlavorAccept_${FIXTURE_SUFFIX}`;
+  const FLAVOR_B = `FlavorDismiss_${FIXTURE_SUFFIX}`;
   const CONFIGURED_SPEED = 10;
   const RECOMMENDED_SPEED = 12.5;
 

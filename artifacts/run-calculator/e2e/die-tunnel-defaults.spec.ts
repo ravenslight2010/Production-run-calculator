@@ -7,12 +7,26 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { Client } from "pg";
+import { cleanupTestUsers } from "./isolation";
 
 function uid(): string {
   return `e2edie${Math.random().toString(36).slice(2, 9)}`;
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "Welcome2Lucias!";
+const testUsernames = new Set<string>();
+
+test.afterAll(async () => {
+  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await cleanupTestUsers(db, testUsernames);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
 
 async function signUpAndDismissOnboarding(
   page: Page,
@@ -65,7 +79,9 @@ test.describe("run-form die tunnel defaults", () => {
       );
     });
 
-    await signUpAndDismissOnboarding(page, uid(), "TestPass123!");
+    const username = uid();
+    testUsernames.add(username);
+    await signUpAndDismissOnboarding(page, username, "TestPass123!");
     // Make the two options available in the factory pool as well as the
     // browser cache. This keeps the test independent of whatever die names
     // another local test run may have left on the development database.

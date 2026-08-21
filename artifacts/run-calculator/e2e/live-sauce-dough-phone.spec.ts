@@ -7,9 +7,23 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
+import { Client } from "pg";
+import { cleanupTestUsers } from "./isolation";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
+const testUsernames = new Set<string>();
+
+test.afterAll(async () => {
+  if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await cleanupTestUsers(db, testUsernames);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
 
 function uid(): string {
   return `e2e_live_tabs_${Math.random().toString(36).slice(2, 9)}`;
@@ -73,7 +87,9 @@ async function seedRunningValues(page: Page): Promise<void> {
 
 test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signUpAndDismissOnboarding(page, uid());
+  const username = uid();
+  testUsernames.add(username);
+  await signUpAndDismissOnboarding(page, username);
   await seedRunningValues(page);
 
   await page.getByTestId("tab-sauce").click();

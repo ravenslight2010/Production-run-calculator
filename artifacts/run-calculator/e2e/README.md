@@ -1,0 +1,58 @@
+# Browser test isolation
+
+## Suite boundaries
+
+| Suite/config | Classification | Database behavior |
+| --- | --- | --- |
+| `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
+| `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
+| `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
+
+The phone and PWA configs intentionally do not extend the main config. This
+prevents destructive live-day setup from being inherited by independent layout
+and service-worker checks.
+
+## Database safety
+
+Any fixture that deletes or resets live-day data must call the shared safety
+guard. It only permits:
+
+- a local PostgreSQL host;
+- a database whose name contains an explicit `e2e`, `test`, or `tmp` marker; or
+- the two explicit approved-mode variables:
+  `E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1`.
+
+`REPLIT_DEV_DOMAIN` is not a database safety signal. Never point these tests at
+production or a shared operational database. A rejected run fails before a
+connection or delete is attempted.
+
+## Test data lifecycle
+
+Browser-created users are unique per test and are tracked for cleanup. Tests
+that verify reload or a fresh browser session keep their account until the
+suite finishes; cleanup happens afterward. Server-created profiles, mixes, and
+suggestions are removed by the owning suite using their unique IDs/names.
+PWA fixture directories and HTTP servers are always closed in `finally`.
+
+## Supported commands and order
+
+Run the independent suites in either order; they do not share Playwright
+global setup:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:pwa-handoff
+pnpm --filter @workspace/run-calculator run test:e2e:phone
+```
+
+Run destructive browser coverage only with an approved disposable database:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e
+```
+
+The main suite uses one worker to keep its factory-wide live-day reset
+deterministic. A failed test may leave its own temporary server data behind;
+rerun the suite only after confirming the disposable database boundary. The
+global reset removes today’s live-day row before the next run, while per-suite
+cleanup removes tracked accounts and entity fixtures.
