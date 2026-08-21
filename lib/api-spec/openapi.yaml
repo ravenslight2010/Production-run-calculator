@@ -8275,13 +8275,16 @@ components:
         lbs:
           type: number
           description: Pounds of this ingredient per batch
+        ozPerPizza:
+          type: number
+          description: Manager-entered ounces of this ingredient per pizza
         sharePct:
           type: number
           description: >-
             This ingredient's share of the blend as a percent (0-100). A
             flavor's per-ingredient oz/pizza is its cheese applicator target
-            oz times this share. Absent/0 = not recorded (derived from lbs
-            proportions instead).
+            oz times this share. Absent/0 = not recorded (derived from complete
+            oz/pizza values or lbs proportions).
 
     CheeseRecipe:
       type: object

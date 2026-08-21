@@ -507,7 +507,7 @@ export function CheeseRecipeEditor({
   function addComponent() {
     setDraft((d) => ({
       ...d,
-      components: [...d.components, { ingredient: "", lbs: 0 }],
+      components: [...d.components, { ingredient: "", lbs: 0, ozPerPizza: 0 }],
     }));
   }
 
@@ -696,9 +696,9 @@ export function CheeseRecipeEditor({
                   value={c.lbs}
                   aria-label="lbs per batch"
                   onValue={(n) =>
-                    // Editing a row's batch lbs makes any imported per-pizza
-                    // oz on that row stale — drop it so the manager's lbs
-                    // (not old spec data) drive the blend shares.
+                    // Keep manager-entered oz/pizza when batch lbs changes.
+                    // Shares decide which complete basis is authoritative;
+                    // editing lbs must not silently discard the other value.
                     patchComponent(idx, { lbs: n })
                   }
                   onBlur={() => commit()}
@@ -706,11 +706,20 @@ export function CheeseRecipeEditor({
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
                 <span className="text-[11px] text-muted-foreground">lbs</span>
-                {/* oz/pizza is not shown here — it is a property of the applicator
-                    slot, not the recipe. The same recipe can be used by two
-                    applicators at different target weights, making per-ingredient
-                    oz/pizza different for each. Share % drives the per-ingredient
-                    split; applicator oz/pizza lives on the run form. */}
+                <DecimalInput
+                  value={c.ozPerPizza ?? 0}
+                  aria-label="oz per pizza"
+                  onValue={(n) =>
+                    patchComponent(idx, {
+                      ozPerPizza: n > 0 ? n : undefined,
+                    })
+                  }
+                  onBlur={() => commit()}
+                  disabled={disabled}
+                  title="Per-pizza ounces used for blend shares when every component has a value"
+                  className="w-16 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground">oz/pizza</span>
                 <input
                   type="number"
                   min={0}

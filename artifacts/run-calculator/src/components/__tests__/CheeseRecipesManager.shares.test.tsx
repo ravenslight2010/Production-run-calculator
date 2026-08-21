@@ -103,6 +103,35 @@ describe("CheeseRecipesManager blend shares with partial oz data", () => {
     expect(shares[0]).toBeCloseTo(58.1, 1);
   });
 
+  it("keeps an existing oz/pizza value when its row's lbs are edited", () => {
+    const onChange = vi.fn();
+    const recipe: CheeseRecipe = {
+      ...aldos(),
+      components: [
+        { ingredient: "Mozzarella", lbs: 60, ozPerPizza: 3 },
+        { ingredient: "Parmesan", lbs: 30, ozPerPizza: 1 },
+      ],
+    };
+    const { container } = render(
+      <CheeseRecipeEditor
+        recipe={recipe}
+        disabled={false}
+        brands={[]}
+        ingredientSuggestions={[]}
+        onChange={onChange}
+        onDelete={() => {}}
+      />,
+    );
+    const lbs = container.querySelectorAll<HTMLInputElement>(
+      'input[aria-label="lbs per batch"]',
+    );
+    fireEvent.change(lbs[0], { target: { value: "90" } });
+    fireEvent.blur(lbs[0]);
+    const saved = onChange.mock.calls.at(-1)?.[0] as CheeseRecipe;
+    expect(saved.components[0].lbs).toBe(90);
+    expect(saved.components[0].ozPerPizza).toBe(3);
+  });
+
   it("adding a new lbs-only ingredient after import shifts shares to the lbs basis", () => {
     // Start from the pre-bug state: fully-covered oz rows (consistent), then
     // the manager adds a row — shares must recompute over lbs, not zero it.

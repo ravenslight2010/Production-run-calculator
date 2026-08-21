@@ -2624,7 +2624,8 @@ export const ListCheeseRecipesResponse = zod.object({
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from lbs proportions instead).')
+  "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
@@ -2647,7 +2648,8 @@ export const SaveCheeseRecipesBody = zod.object({
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from lbs proportions instead).')
+  "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of cheese recipes to create or update (by id)')
@@ -2665,7 +2667,8 @@ export const SaveCheeseRecipesResponse = zod.object({
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from lbs proportions instead).')
+  "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
@@ -2692,7 +2695,8 @@ export const DeleteCheeseRecipesResponse = zod.object({
   "components": zod.array(zod.object({
   "ingredient": zod.string().describe('Ingredient name'),
   "lbs": zod.number().describe('Pounds of this ingredient per batch'),
-  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from lbs proportions instead).')
+  "ozPerPizza": zod.number().optional().describe('Manager-entered ounces of this ingredient per pizza'),
+  "sharePct": zod.number().optional().describe('This ingredient\'s share of the blend as a percent (0-100). A flavor\'s per-ingredient oz\/pizza is its cheese applicator target oz times this share. Absent\/0 = not recorded (derived from complete oz\/pizza values or lbs proportions).')
 }).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
   "enabled": zod.boolean()
 }).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))

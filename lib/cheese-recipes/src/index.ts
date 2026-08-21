@@ -33,11 +33,18 @@ export interface CheeseComponent {
   /** Pounds of this ingredient in one BATCH of the blend (manager-entered). */
   lbs: number;
   /**
+   * Ounces of this ingredient on ONE PIZZA. This is manager-editable ratio
+   * data; it is kept separate from per-batch pounds so editing one does not
+   * silently discard the other.
+   */
+  ozPerPizza?: number;
+  /**
    * This ingredient's share of the blend as a PERCENT (0–100). The blend is a
    * ratio: each flavor's actual per-ingredient oz/pizza is the flavor's cheese
    * applicator target oz × this share, so one blend serves flavors with
    * different cheese targets. Managers may enter it directly; absent/0 = not
-   * recorded (derive from lbs proportions instead — see cheeseComponentShares).
+   * recorded (derive from ozPerPizza when complete, otherwise lbs proportions
+   * instead — see cheeseComponentShares).
    */
   sharePct?: number;
 }
@@ -96,8 +103,10 @@ export function normalizeCheeseComponent(input: unknown): CheeseComponent | null
   const ingredient = coerceStr(raw.ingredient);
   if (!ingredient) return null;
   const lbs = Math.max(0, coerceNum(raw.lbs, 0));
+  const ozPerPizza = Math.max(0, coerceNum(raw.ozPerPizza, 0));
   const sharePct = Math.max(0, coerceNum(raw.sharePct, 0));
   const out: CheeseComponent = { ingredient, lbs };
+  if (ozPerPizza > 0) out.ozPerPizza = ozPerPizza;
   if (sharePct > 0) out.sharePct = sharePct;
   return out;
 }
@@ -203,13 +212,15 @@ export function cheeseRecipeTotalLbs(recipe: CheeseRecipe): number {
 // mix, and a flavor's actual per-ingredient oz/pizza is that flavor's cheese
 // applicator target oz × the share. Shares come from (in priority order):
 //   1. explicit manager-entered `sharePct` values,
-//   2. the per-batch pound proportions (`lbs`).
+//   2. the recorded per-pizza ounce proportions (`ozPerPizza`) when they cover
+//      every component with positive lbs,
+//   3. the per-batch pound proportions (`lbs`).
 // Whichever source is used, the returned fractions are normalized to sum to 1
 // (or all zeros when no source has usable numbers).
 
 /**
  * Index-aligned blend-share FRACTIONS (0–1, summing to 1) for a component
- * list, using the sharePct → lbs priority above. Pure.
+ * list, using the sharePct → complete ozPerPizza → lbs priority above. Pure.
  */
 export function cheeseComponentShares(
   components: ReadonlyArray<CheeseComponent>,
@@ -219,9 +230,15 @@ export function cheeseComponentShares(
     if (!(total > 0)) return null;
     return vals.map((v) => (v > 0 ? v / total : 0));
   };
+  const ozValues = components.map((c) => Number(c.ozPerPizza ?? 0));
+  const ozCoversBlend = components.every(
+    (c, i) => !(Number(c.lbs ?? 0) > 0) || ozValues[i] > 0,
+  );
   return (
     pick(components.map((c) => Number(c.sharePct ?? 0))) ??
+    (ozCoversBlend ? pick(ozValues) : null) ??
     pick(components.map((c) => Number(c.lbs ?? 0))) ??
+    pick(ozValues) ??
     components.map(() => 0)
   );
 }

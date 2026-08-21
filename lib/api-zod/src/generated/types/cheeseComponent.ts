@@ -14,6 +14,8 @@ export interface CheeseComponent {
   ingredient: string;
   /** Pounds of this ingredient per batch */
   lbs: number;
-  /** This ingredient's share of the blend as a percent (0-100). A flavor's per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from lbs proportions instead). */
+  /** Manager-entered ounces of this ingredient per pizza */
+  ozPerPizza?: number;
+  /** This ingredient's share of the blend as a percent (0-100). A flavor's per-ingredient oz/pizza is its cheese applicator target oz times this share. Absent/0 = not recorded (derived from complete oz/pizza values or lbs proportions). */
   sharePct?: number;
 }
