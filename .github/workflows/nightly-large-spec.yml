@@ -56,6 +56,8 @@ jobs:
       AI_INTEGRATIONS_GEMINI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_GEMINI_BASE_URL }}
       VERIFY_USERNAME:                ${{ secrets.VERIFY_USERNAME }}
       VERIFY_PASSWORD:                ${{ secrets.VERIFY_PASSWORD }}
+      # Optional Slack incoming webhook for overnight failure alerts.
+      SLACK_WEBHOOK_URL:              ${{ secrets.SLACK_WEBHOOK_URL }}
       # Dataset size — prefer workflow_dispatch input, fall back to repo var, then default.
       BRANDS:  ${{ inputs.brands  || vars.VERIFY_BRANDS  || '30' }}
       FLAVORS: ${{ inputs.flavors || vars.VERIFY_FLAVORS || '8'  }}
@@ -117,6 +119,19 @@ jobs:
           name: api-server-log
           path: /tmp/api-server.log
           retention-days: 7
+
+      - name: Notify Slack on failure
+        if: ${{ failure() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          jq -n \
+            --arg text ":rotating_light: Nightly large-spec harness failed. Check the harness output and uploaded API server log for data-loss diffs or API startup errors: ${RUN_URL}" \
+            '{text: $text}' |
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              --data @- \
+              "$SLACK_WEBHOOK_URL"
 
       - name: Stop API server
         if: always()
