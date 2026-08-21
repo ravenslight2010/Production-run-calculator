@@ -68,6 +68,28 @@ describe("foreground wake sync barrier", () => {
     expect(totalPulls).toBe(2);
   });
 
+  it("retries a failed client-date pull after a later online wake", async () => {
+    const pullClientDateRow = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const reconcile = createForegroundSyncWakeGuard(pullClientDateRow);
+    const events = new EventTarget();
+    let retryPromise: Promise<boolean> | undefined;
+    events.addEventListener("online", () => {
+      retryPromise = reconcile();
+    });
+
+    await expect(reconcile()).resolves.toBe(false);
+    expect(pullClientDateRow).toHaveBeenCalledTimes(1);
+
+    events.dispatchEvent(new Event("online"));
+
+    expect(retryPromise).toBeDefined();
+    await expect(retryPromise!).resolves.toBe(true);
+    expect(pullClientDateRow).toHaveBeenCalledTimes(2);
+  });
+
   it("reconciles profile and factory domains only after the live row lands", () => {
     const liveApply = homeSource.indexOf("applySyncCallbackRef.current(payload)");
     const profiles = homeSource.indexOf("reconcileProfilesFromServerDetailed()", liveApply);
