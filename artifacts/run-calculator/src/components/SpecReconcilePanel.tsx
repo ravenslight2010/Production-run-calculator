@@ -43,6 +43,7 @@ import {
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import type { ImportHistoryReopenRequest } from "@/importHistory";
 
 function fmtDate(ms: number): string {
   try {
@@ -166,11 +167,16 @@ function buildProfileView(sheets: SavedSpecSheet[]): ProfileEntry[] {
 const KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
 const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
 
-type Props = { autoCheckSignal?: number; canManageProfiles?: boolean };
+type Props = {
+  autoCheckSignal?: number;
+  canManageProfiles?: boolean;
+  reopenRequest?: ImportHistoryReopenRequest | null;
+};
 
 export default function SpecReconcilePanel({
   autoCheckSignal = 0,
   canManageProfiles = false,
+  reopenRequest = null,
 }: Props) {
   const [sheets, setSheets] = useState<SavedSpecSheet[]>([]);
   const latestSpecIds = latestSourceKeyIds(sheets);
@@ -194,6 +200,7 @@ export default function SpecReconcilePanel({
   const [clearingAuditKey, setClearingAuditKey] = useState<string | null>(null);
 
   const prevSignalRef = useRef(-1);
+  const handledReopenRef = useRef<number | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -277,6 +284,23 @@ export default function SpecReconcilePanel({
       setBusyId(null);
     }
   }
+
+  useEffect(() => {
+    if (
+      !reopenRequest ||
+      reopenRequest.importType !== "spec" ||
+      handledReopenRef.current === reopenRequest.requestId ||
+      loading
+    ) return;
+    const sheet = sheets.find((candidate) => candidate.id === reopenRequest.snapshotId);
+    if (!sheet) {
+      setResultError("That saved spec snapshot is no longer available.");
+      handledReopenRef.current = reopenRequest.requestId;
+      return;
+    }
+    handledReopenRef.current = reopenRequest.requestId;
+    void handleAiCheck(sheet);
+  }, [reopenRequest, loading, sheets]);
 
   async function handleDelete(id: number) {
     setBusyId(id);

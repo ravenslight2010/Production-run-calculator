@@ -9,7 +9,7 @@
 // mobile section in artifacts/run-calculator-mobile/components/MixReconcilePanel.tsx
 // (replit.md parity).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import {
   type MixReconcileView,
 } from "@/mixReconcile";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import type { ImportHistoryReopenRequest } from "@/importHistory";
 
 function fmtDate(ms: number): string {
   try {
@@ -51,10 +52,12 @@ function fmtDate(ms: number): string {
 export default function MixReconcilePanel({
   isManager,
   refreshSignal = 0,
+  reopenRequest = null,
 }: {
   isManager: boolean;
   /** Bump to re-fetch the saved sheet lists (e.g. right after an import saves one). */
   refreshSignal?: number;
+  reopenRequest?: ImportHistoryReopenRequest | null;
 }) {
   const qc = useQueryClient();
   const [premixSheets, setPremixSheets] = useState<SavedPremixSheet[]>([]);
@@ -69,6 +72,7 @@ export default function MixReconcilePanel({
   const [result, setResult] = useState<MixReconcileView | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const handledReopenRef = useRef<number | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -121,6 +125,21 @@ export default function MixReconcilePanel({
       setBusyKey(null);
     }
   }
+
+  useEffect(() => {
+    if (
+      !reopenRequest ||
+      reopenRequest.importType !== "premix" ||
+      handledReopenRef.current === reopenRequest.requestId ||
+      loading
+    ) return;
+    const sheet = premixSheets.find(
+      (candidate) => candidate.id === reopenRequest.snapshotId,
+    );
+    if (!sheet) return;
+    handledReopenRef.current = reopenRequest.requestId;
+    void handleCheckPremix(sheet);
+  }, [reopenRequest, loading, premixSheets, specSheets]);
 
   async function handleDeletePremix(id: number) {
     setBusyKey(`premix-${id}`);

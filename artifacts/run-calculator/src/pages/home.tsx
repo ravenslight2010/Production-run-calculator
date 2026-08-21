@@ -350,7 +350,10 @@ import AssistantTab from "../components/AssistantTab";
 import SpecReconcilePanel from "../components/SpecReconcilePanel";
 import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
-import { recordImportHistory } from "../importHistory";
+import {
+  recordImportHistory,
+  type ImportHistoryReopenRequest,
+} from "../importHistory";
 import MixAssistChat from "../components/MixAssistChat";
 import {
   dispatchVoiceCommand,
@@ -4995,6 +4998,11 @@ export default function Home() {
   // Bumped after ANY sheet-saving import (spec or premix) so the Mix
   // Monitoring panel re-fetches its saved-sheet lists instead of going stale.
   const [sheetListSignal, setSheetListSignal] = useState(0);
+  // A manager can reopen the exact saved snapshot referenced by import history
+  // without uploading the workbook again. The request id lets the panels
+  // distinguish repeated clicks on the same snapshot.
+  const [importReopenRequest, setImportReopenRequest] =
+    useState<ImportHistoryReopenRequest | null>(null);
   // True when the merge review was opened automatically by an import, so we can
   // show a one-line explainer of why the user landed here.
   const [mergeFromImport, setMergeFromImport] = useState(false);
@@ -15780,11 +15788,21 @@ export default function Home() {
                   <SpecReconcilePanel
                     autoCheckSignal={specReconcileSignal}
                     canManageProfiles={hasCapability("manage-profiles")}
+                    reopenRequest={importReopenRequest}
                   />
                 </div>
                 {hasCapability("manage-profiles") && (
                   <div className="mt-3">
-                    <ImportHistoryPanel refreshSignal={sheetListSignal} />
+                    <ImportHistoryPanel
+                      refreshSignal={sheetListSignal}
+                      onReopen={(request) => {
+                        setImportReopenRequest((previous) => ({
+                          ...request,
+                          requestId: (previous?.requestId ?? 0) + 1,
+                        }));
+                        if (request.importType === "premix") setActiveTab("mixes");
+                      }}
+                    />
                   </div>
                 )}
               </TabsContent>
