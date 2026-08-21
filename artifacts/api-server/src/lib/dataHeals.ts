@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, sql } from "drizzle-orm";
 import {
   db,
   dataHealsTable,
@@ -3319,7 +3319,121 @@ async function runTunnelPrePostDefaultHeal(): Promise<void> {
   });
 }
 
+// ── Historical result annotation ────────────────────────────────────────────
+// Result tracking was added after some production heals had already run. Their
+// marker rows are still useful for auditing, but result is NULL because the
+// old code did not record counts. This one-time migration annotates every
+// existing NULL row (excluding its own marker) with current-state counts from a
+// small window around applied_at. These are explicitly approximate: later
+// edits, deletes, and heals can make exact historical counts unrecoverable.
+const HISTORICAL_HEAL_RESULT_BACKFILL_ID = "data-heal-result-backfill-v1";
+const HISTORICAL_RESULT_BUFFER_MS = 10 * 60 * 1000;
+
+async function runHistoricalHealResultBackfill(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: HISTORICAL_HEAL_RESULT_BACKFILL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const legacyRows = await tx
+      .select({
+        id: dataHealsTable.id,
+        appliedAt: dataHealsTable.appliedAt,
+      })
+      .from(dataHealsTable)
+      .where(
+        and(
+          isNull(dataHealsTable.result),
+          sql`${dataHealsTable.id} <> ${HISTORICAL_HEAL_RESULT_BACKFILL_ID}`,
+        ),
+      )
+      .for("update");
+
+    let annotated = 0;
+    for (const heal of legacyRows) {
+      const windowStart = new Date(
+        heal.appliedAt.getTime() - HISTORICAL_RESULT_BUFFER_MS,
+      );
+      const windowStartMs = windowStart.getTime();
+
+      // Keep these queries sequential: a Drizzle transaction owns one pg
+      // connection, and concurrent queries on it trigger pg's
+      // "client.query() while already executing" warning.
+      const profiles = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(brandProfilesTable)
+        .where(gte(brandProfilesTable.updatedAtMs, windowStartMs));
+      const cheese = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(cheeseRecipesTable)
+        .where(gte(cheeseRecipesTable.updatedAt, windowStart));
+      const mixes = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(mixesTable)
+        .where(gte(mixesTable.updatedAt, windowStart));
+      const dough = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(doughRecipesTable)
+        .where(gte(doughRecipesTable.updatedAt, windowStart));
+      const sauces = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(sauceRecipesTable)
+        .where(gte(sauceRecipesTable.updatedAt, windowStart));
+      const syncRows = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(dailySyncTable)
+        .where(gte(dailySyncTable.updatedAt, windowStart));
+
+      await tx
+        .update(dataHealsTable)
+        .set({
+          result: {
+            backfilled: true,
+            approximate: true,
+            method: "current rows updated within 10 minutes before applied_at",
+            note:
+              "Exact historical counts were not stored when this heal ran; counts may include unrelated edits.",
+            windowStart: windowStart.toISOString(),
+            currentStateCounts: {
+              brandProfiles: Number(profiles[0]?.count ?? 0),
+              cheeseRecipes: Number(cheese[0]?.count ?? 0),
+              mixes: Number(mixes[0]?.count ?? 0),
+              doughRecipes: Number(dough[0]?.count ?? 0),
+              sauceRecipes: Number(sauces[0]?.count ?? 0),
+              dailySyncRows: Number(syncRows[0]?.count ?? 0),
+            },
+          },
+        })
+        .where(eq(dataHealsTable.id, heal.id));
+      annotated++;
+    }
+
+    await tx
+      .update(dataHealsTable)
+      .set({
+        result: {
+          annotated,
+          bufferMinutes: HISTORICAL_RESULT_BUFFER_MS / 60_000,
+          note:
+            "Backfilled NULL legacy results with approximate current-state counts; NULL means no result was recorded before this migration.",
+        },
+      })
+      .where(eq(dataHealsTable.id, HISTORICAL_HEAL_RESULT_BACKFILL_ID));
+    logger.info(
+      {
+        heal: HISTORICAL_HEAL_RESULT_BACKFILL_ID,
+        annotated,
+      },
+      "Historical data-heal results backfilled",
+    );
+  });
+}
+
 export async function runDataHeals(): Promise<void> {
+  await runHistoricalHealResultBackfill();
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
   await runCheeseDuplicateNamePurge();

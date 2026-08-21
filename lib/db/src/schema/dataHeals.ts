@@ -10,6 +10,9 @@ import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 // created through the app (e.g. poisoned learned import matches) can only be
 // corrected by shipping code, and that code must not re-run on every boot.
 // Purely additive table — safe for `db push-force` on a populated database.
+// A NULL result means the heal ran before result tracking was added (or was a
+// deliberate no-op marker); historical rows may be annotated by the
+// result-backfill heal with approximate current-state counts.
 export const dataHealsTable = pgTable("data_heals", {
   id: text("id").primaryKey(),
   appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
