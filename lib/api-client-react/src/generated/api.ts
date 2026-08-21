@@ -3804,7 +3804,7 @@ export const getExportOperationalReportUrl = () => {
 }
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReport = async (operationalReportInput: OperationalReportInput, options?: RequestInit): Promise<OperationalReport> => {

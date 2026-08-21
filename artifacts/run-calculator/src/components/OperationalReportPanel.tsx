@@ -31,7 +31,12 @@ function reportText(report: OperationalReport): string {
       ? `Incidents: ${report.incidents.value?.total ?? 0} total, ${report.incidents.value?.unresolved ?? 0} unresolved`
       : `Incidents: Unavailable${report.incidents.note ? ` — ${report.incidents.note}` : ""}`,
     report.inventory.availability === "available"
-      ? `Inventory flags: ${report.inventory.value?.flaggedItems ?? 0} items at or below reorder level${report.inventory.note ? ` (${report.inventory.note})` : ""}`
+      ? [
+          `Inventory flags (current snapshot): ${report.inventory.value?.flaggedItems ?? 0} items at or below reorder level${report.inventory.note ? ` (${report.inventory.note})` : ""}`,
+          report.inventory.value?.historical.availability === "available"
+            ? `Inventory history (selected period): ${report.inventory.value.historical.value?.totalEvents ?? 0} events — ${report.inventory.value.historical.value?.consumptionEvents ?? 0} consumption, ${report.inventory.value.historical.value?.wasteEvents ?? 0} waste, ${report.inventory.value.historical.value?.adjustmentEvents ?? 0} adjustments`
+            : `Inventory history (selected period): Unavailable — ${report.inventory.value?.historical.note ?? "historical events could not be read"}`,
+        ].join("\n")
       : `Inventory: Unavailable${report.inventory.note ? ` — ${report.inventory.note}` : ""}`,
   ];
   return lines.join("\n");
@@ -124,9 +129,21 @@ export default function OperationalReportPanel({ buildInput }: Props) {
           <div className="grid sm:grid-cols-3 gap-2 text-xs">
             <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
             <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
-            <p>Inventory flags: {report.inventory.value?.flaggedItems ?? "Unavailable"}</p>
+            <p>Inventory flags (current snapshot): {report.inventory.value?.flaggedItems ?? "Unavailable"}</p>
           </div>
-          <p className="text-[11px] text-muted-foreground">{report.inventory.note}</p>
+          <div className="text-[11px] text-muted-foreground space-y-1">
+            <p>{report.inventory.note}</p>
+            {report.inventory.value?.historical?.availability === "available" ? (
+              <p>
+                Inventory history (selected period): {report.inventory.value.historical.value?.totalEvents ?? 0} event(s), including{" "}
+                {report.inventory.value.historical.value?.consumptionEvents ?? 0} consumption,{" "}
+                {report.inventory.value.historical.value?.wasteEvents ?? 0} waste, and{" "}
+                {report.inventory.value.historical.value?.adjustmentEvents ?? 0} adjustment event(s).
+              </p>
+            ) : (
+              <p>{report.inventory.value?.historical?.note ?? "Historical inventory events: Unavailable."}</p>
+            )}
+          </div>
         </div>
       )}
     </div>
