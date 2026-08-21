@@ -9,7 +9,8 @@
  */
 import fs from "fs";
 import path from "path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createForegroundSyncWakeGuard } from "./foregroundSyncWakeGuard";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
 const HOOK_FILE = path.join(__dirname, "hooks", "useAutoTrack.ts");
@@ -18,7 +19,7 @@ const hookSource = fs.readFileSync(HOOK_FILE, "utf8");
 
 describe("foreground wake sync barrier", () => {
   it("pulls the date-scoped row through the established inbound merge before releasing auto-track", () => {
-    expect(homeSource).toContain("foregroundSyncInFlightRef.current");
+    expect(homeSource).toContain("createForegroundSyncWakeGuard");
     expect(homeSource).toContain("setAutoTrackBlocked(true)");
     expect(homeSource).toContain("`/api/sync/today?today=${todayStr()}`");
     expect(homeSource).toContain('cache: "no-store"');
@@ -27,6 +28,44 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain('document.addEventListener("visibilitychange", onVisibility)');
     expect(homeSource).toContain('window.addEventListener("focus", onFocus)');
     expect(homeSource).toContain('window.addEventListener("online", onOnline)');
+  });
+
+  it("coalesces overlapping wake signals into one pull, then allows a later wake", async () => {
+    let activePulls = 0;
+    let totalPulls = 0;
+    let resolvePull!: (result: boolean) => void;
+    const pull = vi.fn(() => {
+      activePulls += 1;
+      totalPulls += 1;
+      return new Promise<boolean>((resolve) => {
+        resolvePull = (result) => {
+          activePulls -= 1;
+          resolve(result);
+        };
+      });
+    });
+    const reconcile = createForegroundSyncWakeGuard(pull);
+    const events = new EventTarget();
+    const wake = () => void reconcile();
+    events.addEventListener("focus", wake);
+    events.addEventListener("visibilitychange", wake);
+    events.addEventListener("online", wake);
+
+    events.dispatchEvent(new Event("focus"));
+    events.dispatchEvent(new Event("visibilitychange"));
+    events.dispatchEvent(new Event("online"));
+
+    expect(pull).toHaveBeenCalledTimes(1);
+    expect(activePulls).toBe(1);
+    resolvePull(true);
+    await vi.waitFor(() => expect(activePulls).toBe(0));
+
+    events.dispatchEvent(new Event("focus"));
+    expect(pull).toHaveBeenCalledTimes(2);
+    expect(activePulls).toBe(1);
+    resolvePull(true);
+    await vi.waitFor(() => expect(activePulls).toBe(0));
+    expect(totalPulls).toBe(2);
   });
 
   it("reconciles profile and factory domains only after the live row lands", () => {

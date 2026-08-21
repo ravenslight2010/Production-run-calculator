@@ -1,6 +1,7 @@
 import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
+import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import GlanceOverlay from "../components/GlanceOverlay";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
@@ -6936,7 +6937,6 @@ export default function Home() {
   // frame as a stale recovery push, so keep auto-track and outgoing pushes
   // blocked until the date-scoped shared row has been pulled and applied.
   const foregroundSyncBarrierRef = useRef(false);
-  const foregroundSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const foregroundPushPendingRef = useRef(false);
   // Every foreground reconciliation starts a new push generation and aborts
   // requests built before wake. The server's metaUpdatedAt merge is still the
@@ -7894,9 +7894,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const reconcileForeground = async (): Promise<boolean> => {
-      if (foregroundSyncInFlightRef.current) return foregroundSyncInFlightRef.current;
-
+    const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
       foregroundSyncBarrierRef.current = true;
       // Raise both the synchronous ref fence and its rendered companion before
       // the wake clock can publish hidden-time progress. A normal unchanged
@@ -7913,7 +7911,7 @@ export default function Home() {
       }
       if (!pushAcknowledgedRef.current) foregroundPushPendingRef.current = true;
 
-      const work = (async () => {
+      return (async () => {
         let reconciled = false;
         try {
           // Check the reset epoch first because a device can miss the SSE reset
@@ -8008,16 +8006,7 @@ export default function Home() {
           }
         }
       })();
-
-      foregroundSyncInFlightRef.current = work;
-      try {
-        return await work;
-      } finally {
-        if (foregroundSyncInFlightRef.current === work) {
-          foregroundSyncInFlightRef.current = null;
-        }
-      }
-    };
+    });
 
     function onVisibility() {
       if (document.visibilityState === "visible") void reconcileForeground();
