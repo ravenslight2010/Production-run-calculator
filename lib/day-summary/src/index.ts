@@ -13,6 +13,40 @@
 
 export type SummaryScope = "day" | "week";
 
+export type OperationalReportAvailability = "available" | "unavailable";
+
+export interface OperationalReportSection<T> {
+  availability: OperationalReportAvailability;
+  value: T | null;
+  note?: string;
+}
+
+export interface OperationalReport {
+  scope: SummaryScope;
+  date: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  production: DaySummaryStats;
+  quality: OperationalReportSection<{
+    checks: number;
+    issues: number;
+    failed: number;
+    warnings: number;
+  }>;
+  incidents: OperationalReportSection<{
+    total: number;
+    unresolved: number;
+  }>;
+  inventory: OperationalReportSection<{
+    flaggedItems: number;
+  }>;
+  narrative?: {
+    text: string;
+    source: "ai" | "deterministic";
+  };
+}
+
 /** One finished/attempted run as the client shapes it for the summary. */
 export interface DaySummaryRunInput {
   brand: string;

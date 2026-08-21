@@ -1591,6 +1591,7 @@ export interface SummaryResult {
   aiGenerated: boolean;
 }
 
+export type OperationalReportInputScope = typeof OperationalReportInputScope[keyof typeof OperationalReportInputScope];
 /**
  * No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.
  */
@@ -3556,3 +3557,90 @@ export type ListIncidentAssignees200Item = {
   role: string;
 };
 
+
+export type OperationalReportIncidentsValue = {
+  total?: number;
+  unresolved?: number;
+} | null;
+
+export const OperationalReportInventoryAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export const OperationalReportQualityAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export const OperationalReportScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export type OperationalReportQualityValue = {
+  checks?: number;
+  issues?: number;
+  failed?: number;
+  warnings?: number;
+} | null;
+
+export type OperationalReportQualityAvailability = typeof OperationalReportQualityAvailability[keyof typeof OperationalReportQualityAvailability];
+
+export const OperationalReportInputScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export type OperationalReportIncidents = {
+  availability: OperationalReportIncidentsAvailability;
+  value: OperationalReportIncidentsValue;
+  note?: string;
+};
+
+export type OperationalReportScope = typeof OperationalReportScope[keyof typeof OperationalReportScope];
+
+export interface OperationalReportInput {
+  scope: OperationalReportInputScope;
+  /** ISO date, or week-ending date for a weekly report */
+  date: string;
+  /** @maxItems 600 */
+  runs: SummaryRunInput[];
+}
+
+export type OperationalReportIncidentsAvailability = typeof OperationalReportIncidentsAvailability[keyof typeof OperationalReportIncidentsAvailability];
+
+export type OperationalReportInventoryValue = {
+  flaggedItems?: number;
+} | null;
+
+export const OperationalReportIncidentsAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportInventory = {
+  availability: OperationalReportInventoryAvailability;
+  value: OperationalReportInventoryValue;
+  note?: string;
+};
+
+export interface OperationalReport {
+  scope: OperationalReportScope;
+  date: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  production: SummaryStats;
+  quality: OperationalReportQuality;
+  incidents: OperationalReportIncidents;
+  inventory: OperationalReportInventory;
+}
+
+export type OperationalReportInventoryAvailability = typeof OperationalReportInventoryAvailability[keyof typeof OperationalReportInventoryAvailability];
+
+export type OperationalReportQuality = {
+  availability: OperationalReportQualityAvailability;
+  value: OperationalReportQualityValue;
+  note?: string;
+};

@@ -368,6 +368,7 @@ import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
+import OperationalReportPanel from "../components/OperationalReportPanel";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { useGetStartedOverview } from "@workspace/onboarding";
@@ -15673,6 +15674,42 @@ export default function Home() {
 
               {/* ─── SUMMARY ─── */}
               <TabsContent value="summary">
+                {isManager && (
+                  <div className="max-w-3xl mx-auto mb-4">
+                    <OperationalReportPanel
+                      buildInput={(scope, date) =>
+                        scope === "week"
+                          ? buildWeekSummaryInput({
+                              date,
+                              nowMs: Date.now(),
+                              history: [
+                                ...history,
+                                {
+                                  date: todayStr(),
+                                  runs: dayState.runs,
+                                  runValues: Object.fromEntries(
+                                    dayState.runs.map((run) => [
+                                      run.id,
+                                      run.id === currentRunId
+                                        ? form.getValues()
+                                        : loadRunValues(run.id),
+                                    ]),
+                                  ),
+                                },
+                              ],
+                              runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                            })
+                          : buildDaySummaryInput({
+                              date,
+                              nowMs: Date.now(),
+                              runs: dayState.runs,
+                              runValues: (run) =>
+                                run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                            })
+                      }
+                    />
+                  </div>
+                )}
                 <LiveSummaryTabContent />
               </TabsContent>
 

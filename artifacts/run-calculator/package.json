@@ -104,6 +104,7 @@
     "@workspace/cheese-import": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",
     "@workspace/cycle-count": "workspace:*",
+    "@workspace/day-summary": "workspace:*",
     "@workspace/downtime-trends": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",

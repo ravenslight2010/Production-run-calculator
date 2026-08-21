@@ -39,6 +39,7 @@ import runSuggestionsRouter from "./runSuggestions";
 import sandboxRouter from "./sandbox";
 import auditLogsRouter from "./auditLogs";
 import factoryDataRouter from "./factoryData";
+import operationalReportsRouter from "./operationalReports";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
 
@@ -101,5 +102,6 @@ router.use(runSuggestionsRouter);
 router.use(sandboxRouter);
 router.use(auditLogsRouter);
 router.use(factoryDataRouter);
+router.use(operationalReportsRouter);
 
 export default router;
