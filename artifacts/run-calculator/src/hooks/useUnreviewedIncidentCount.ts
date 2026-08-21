@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchUnreviewedIncidentCount } from "../inventoryShared";
+import { fetchActionableIncidentCount } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "./useIdle";
 
@@ -27,7 +27,7 @@ export function useUnreviewedIncidentCount(): number {
 
   const { data } = useQuery({
     queryKey: ["unreviewedIncidentCount"],
-    queryFn: fetchUnreviewedIncidentCount,
+    queryFn: fetchActionableIncidentCount,
     enabled: canReview,
     refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });

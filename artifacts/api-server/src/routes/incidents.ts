@@ -3,7 +3,7 @@ import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
-import { getStaffMember } from "../lib/roles";
+import { getStaffMember, listStaff } from "../lib/roles";
 import {
   countUnreviewedIncidents,
   createIncident,
@@ -11,6 +11,8 @@ import {
   listIncidents,
   markIncidentResolved,
   markIncidentReviewed,
+  countActionableIncidents,
+  updateIncidentWorkflow,
 } from "../lib/incidents";
 import {
   analyzeIncidentHistory,
@@ -286,6 +288,19 @@ router.get(
   },
 );
 
+router.get("/incidents/actionable-count", requireCapability("review-incidents"), async (_req, res): Promise<void> => {
+  res.json({ count: await countActionableIncidents() });
+});
+
+router.get("/incidents/assignees", requireCapability("review-incidents"), async (_req, res): Promise<void> => {
+  const staff = await listStaff();
+  res.json(staff.filter((s) => !s.sandbox).map((s) => ({
+    userId: s.userId,
+    name: s.name ?? s.userId,
+    role: s.role,
+  })));
+});
+
 // GET /incidents/:id — manager-only single incident.
 router.get("/incidents/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {
   const incident = await getIncident(pathId(req.params.id));
@@ -309,6 +324,45 @@ router.post(
     res.json(incident);
   },
 );
+
+router.patch("/incidents/:id/workflow", requireCapability("review-incidents"), async (req, res): Promise<void> => {
+  const body = req.body ?? {};
+  const priorities = new Set(["low", "normal", "high", "urgent"]);
+  const states = new Set(["new", "assigned", "waiting", "resolved"]);
+  if ((body.priority !== undefined && !priorities.has(body.priority)) ||
+      (body.workflowState !== undefined && !states.has(body.workflowState)) ||
+      (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 2000)) ||
+      (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string")) {
+    res.status(400).json({ error: "Invalid incident workflow update" });
+    return;
+  }
+  let assigneeName: string | null | undefined;
+  if (body.assigneeId) {
+    const staff = await getStaffMember(body.assigneeId);
+    if (staff.sandbox || !staff.name) {
+      res.status(400).json({ error: "Assignee is not eligible" });
+      return;
+    }
+    assigneeName = staff.name;
+  } else if (body.assigneeId === null) {
+    assigneeName = null;
+  }
+  const actor = await getStaffMember(req.userId!);
+  const incident = await updateIncidentWorkflow(pathId(req.params.id), {
+    priority: body.priority,
+    workflowState: body.workflowState,
+    assigneeId: body.assigneeId,
+    assigneeName,
+    note: body.note,
+    actorName: actor.name ?? req.userId!,
+    actorId: req.userId!,
+  });
+  if (!incident) {
+    res.status(404).json({ error: "No incident with that id" });
+    return;
+  }
+  res.json(incident);
+});
 
 // POST /incidents/:id/resolve — manager marks an incident resolved (fixed).
 router.post(

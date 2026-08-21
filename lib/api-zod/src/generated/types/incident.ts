@@ -5,10 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { IncidentActivity } from './incidentActivity';
 import type { IncidentContext } from './incidentContext';
+import type { IncidentNote } from './incidentNote';
+import type { IncidentPriority } from './incidentPriority';
 import type { IncidentRecurrence } from './incidentRecurrence';
 import type { IncidentSource } from './incidentSource';
 import type { IncidentStatus } from './incidentStatus';
+import type { IncidentWorkflowState } from './incidentWorkflowState';
 
 export interface Incident {
   id: string;
@@ -36,4 +40,12 @@ export interface Incident {
   reviewedAt: Date | null;
   /** @nullable */
   resolvedAt: Date | null;
+  priority: IncidentPriority;
+  workflowState: IncidentWorkflowState;
+  /** @nullable */
+  assigneeId: string | null;
+  /** @nullable */
+  assigneeName: string | null;
+  notes: IncidentNote[];
+  activity: IncidentActivity[];
 }

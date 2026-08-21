@@ -1102,6 +1102,12 @@ export type Incident = {
   createdAt: string;
   reviewedAt: string | null;
   resolvedAt: string | null;
+  priority: "low" | "normal" | "high" | "urgent";
+  workflowState: "new" | "assigned" | "waiting" | "resolved";
+  assigneeId: string | null;
+  assigneeName: string | null;
+  notes: Array<{ id: string; authorName: string; text: string; createdAt: string }>;
+  activity: Array<{ id: string; action: string; detail: string; actorName: string; createdAt: string }>;
 };
 
 // Report a problem (or auto-submit a crash) and get back a plain-language
@@ -1119,6 +1125,15 @@ export const reportIncident = (body: ReportIncidentBody) =>
 export const fetchIncidents = () => api<Incident[]>("/incidents");
 export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
+export const fetchActionableIncidentCount = () => api<{ count: number }>("/incidents/actionable-count");
+export const fetchIncidentAssignees = () =>
+  api<Array<{ userId: string; name: string; role: string }>>("/incidents/assignees");
+export const updateIncidentWorkflow = (id: string, body: {
+  priority?: Incident["priority"]; workflowState?: Incident["workflowState"];
+  assigneeId?: string | null; note?: string;
+}) => api<Incident>(`/incidents/${encodeURIComponent(id)}/workflow`, {
+  method: "PATCH", body: JSON.stringify(body),
+});
 export const markIncidentReviewed = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/review`, { method: "POST" });
 export const markIncidentResolved = (id: string) =>

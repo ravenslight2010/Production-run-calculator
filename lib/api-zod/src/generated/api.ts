@@ -3989,7 +3989,24 @@ export const ListIncidentsResponseItem = zod.object({
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
-  "resolvedAt": zod.coerce.date().nullable()
+  "resolvedAt": zod.coerce.date().nullable(),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']),
+  "assigneeId": zod.string().nullable(),
+  "assigneeName": zod.string().nullable(),
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "authorName": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "activity": zod.array(zod.object({
+  "id": zod.string(),
+  "action": zod.string(),
+  "detail": zod.string(),
+  "actorName": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
 })
 export const ListIncidentsResponse = zod.array(ListIncidentsResponseItem)
 
@@ -4001,6 +4018,25 @@ export const ListIncidentsResponse = zod.array(ListIncidentsResponseItem)
 export const GetUnreviewedIncidentCountResponse = zod.object({
   "count": zod.number()
 })
+
+
+/**
+ * @summary Count unresolved actionable incident work
+ */
+export const GetActionableIncidentCountResponse = zod.object({
+  "count": zod.number()
+})
+
+
+/**
+ * @summary List eligible incident owners
+ */
+export const ListIncidentAssigneesResponseItem = zod.object({
+  "userId": zod.string(),
+  "name": zod.string(),
+  "role": zod.string()
+})
+export const ListIncidentAssigneesResponse = zod.array(ListIncidentAssigneesResponseItem)
 
 
 /**
@@ -4034,7 +4070,24 @@ export const GetIncidentResponse = zod.object({
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
-  "resolvedAt": zod.coerce.date().nullable()
+  "resolvedAt": zod.coerce.date().nullable(),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']),
+  "assigneeId": zod.string().nullable(),
+  "assigneeName": zod.string().nullable(),
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "authorName": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "activity": zod.array(zod.object({
+  "id": zod.string(),
+  "action": zod.string(),
+  "detail": zod.string(),
+  "actorName": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
 })
 
 
@@ -4069,7 +4122,24 @@ export const ReviewIncidentResponse = zod.object({
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
-  "resolvedAt": zod.coerce.date().nullable()
+  "resolvedAt": zod.coerce.date().nullable(),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']),
+  "assigneeId": zod.string().nullable(),
+  "assigneeName": zod.string().nullable(),
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "authorName": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "activity": zod.array(zod.object({
+  "id": zod.string(),
+  "action": zod.string(),
+  "detail": zod.string(),
+  "actorName": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
 })
 
 
@@ -4105,7 +4175,87 @@ export const ResolveIncidentResponse = zod.object({
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
-  "resolvedAt": zod.coerce.date().nullable()
+  "resolvedAt": zod.coerce.date().nullable(),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']),
+  "assigneeId": zod.string().nullable(),
+  "assigneeName": zod.string().nullable(),
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "authorName": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "activity": zod.array(zod.object({
+  "id": zod.string(),
+  "action": zod.string(),
+  "detail": zod.string(),
+  "actorName": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Update incident ownership, priority, state, or add a note
+ */
+export const UpdateIncidentWorkflowParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const updateIncidentWorkflowBodyNoteMax = 2000;
+
+
+
+export const UpdateIncidentWorkflowBody = zod.object({
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']).optional(),
+  "assigneeId": zod.string().nullish(),
+  "note": zod.string().max(updateIncidentWorkflowBodyNoteMax).optional()
+})
+
+export const UpdateIncidentWorkflowResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['user_report', 'auto_crash']),
+  "reporterId": zod.string().nullable(),
+  "reporterName": zod.string().nullable(),
+  "reporterRole": zod.string().nullable(),
+  "screen": zod.string(),
+  "appPlatform": zod.string(),
+  "appVersion": zod.string().nullable(),
+  "context": zod.object({
+  "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
+  "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
+  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+}).describe('Captured details about a reported issue or a crash'),
+  "diagnosis": zod.string().nullable(),
+  "workaround": zod.string().nullable(),
+  "recurrence": zod.union([zod.object({
+  "count": zod.number().describe('How many prior similar incidents were found'),
+  "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
+  "status": zod.enum(['new', 'reviewed', 'resolved']),
+  "createdAt": zod.coerce.date(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "resolvedAt": zod.coerce.date().nullable(),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "workflowState": zod.enum(['new', 'assigned', 'waiting', 'resolved']),
+  "assigneeId": zod.string().nullable(),
+  "assigneeName": zod.string().nullable(),
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "authorName": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "activity": zod.array(zod.object({
+  "id": zod.string(),
+  "action": zod.string(),
+  "detail": zod.string(),
+  "actorName": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
 })
 
 

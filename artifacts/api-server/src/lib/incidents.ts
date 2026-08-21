@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { db, incidentsTable, type Incident } from "@workspace/db";
+import { db, incidentsTable, auditLogsTable, type Incident } from "@workspace/db";
 import { newUserId } from "./auth";
 import { currentScope } from "./requestScope";
 
@@ -44,6 +44,23 @@ export type IncidentDTO = {
   createdAt: string;
   reviewedAt: string | null;
   resolvedAt: string | null;
+  priority: IncidentPriority;
+  workflowState: IncidentWorkflowState;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  notes: IncidentNote[];
+  activity: IncidentActivity[];
+};
+
+export type IncidentPriority = "low" | "normal" | "high" | "urgent";
+export type IncidentWorkflowState = "new" | "assigned" | "waiting" | "resolved";
+export type IncidentNote = { id: string; authorName: string; text: string; createdAt: string };
+export type IncidentActivity = {
+  id: string;
+  action: string;
+  detail: string;
+  actorName: string;
+  createdAt: string;
 };
 
 function toDTO(row: Incident): IncidentDTO {
@@ -64,6 +81,12 @@ function toDTO(row: Incident): IncidentDTO {
     createdAt: row.createdAt.toISOString(),
     reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+    priority: (row.priority as IncidentPriority) ?? "normal",
+    workflowState: (row.workflowState as IncidentWorkflowState) ?? (row.status === "resolved" ? "resolved" : "new"),
+    assigneeId: row.assigneeId,
+    assigneeName: row.assigneeName,
+    notes: (row.notes ?? []) as IncidentNote[],
+    activity: (row.activity ?? []) as IncidentActivity[],
   };
 }
 
@@ -166,12 +189,66 @@ export async function markIncidentResolved(id: string): Promise<IncidentDTO | nu
     .update(incidentsTable)
     .set({
       status: "resolved",
+      workflowState: "resolved",
       resolvedAt: now,
       reviewedAt: existing.reviewedAt ?? now,
     })
     .where(and(eq(incidentsTable.id, id), eq(incidentsTable.scope, scope)))
     .returning();
   return row ? toDTO(row) : toDTO(existing);
+}
+
+export async function updateIncidentWorkflow(
+  id: string,
+  input: {
+    priority?: IncidentPriority;
+    workflowState?: IncidentWorkflowState;
+    assigneeId?: string | null;
+    assigneeName?: string | null;
+    note?: string;
+    actorName: string;
+    actorId: string;
+  },
+): Promise<IncidentDTO | null> {
+  const scope = currentScope();
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(incidentsTable)
+      .where(and(eq(incidentsTable.id, id), eq(incidentsTable.scope, scope))).for("update");
+    if (!existing) return null;
+    const now = new Date();
+    const activity = [...((existing.activity ?? []) as IncidentActivity[])];
+    const notes = [...((existing.notes ?? []) as IncidentNote[])];
+    const changes: Record<string, unknown> = {};
+    const set: Record<string, unknown> = {};
+    if (input.priority && input.priority !== existing.priority) {
+      set.priority = input.priority; changes.priority = input.priority;
+    }
+    if (input.workflowState && input.workflowState !== existing.workflowState) {
+      set.workflowState = input.workflowState;
+      if (input.workflowState === "resolved") { set.status = "resolved"; set.resolvedAt = existing.resolvedAt ?? now; }
+      else if (existing.status === "resolved") { set.status = "reviewed"; set.resolvedAt = null; }
+      changes.workflowState = input.workflowState;
+    }
+    if (input.assigneeId !== undefined && (input.assigneeId !== existing.assigneeId || input.assigneeName !== existing.assigneeName)) {
+      set.assigneeId = input.assigneeId; set.assigneeName = input.assigneeName ?? null;
+      if (!input.workflowState && input.assigneeId) set.workflowState = "assigned";
+      changes.assigneeId = input.assigneeId;
+    }
+    if (input.note?.trim()) {
+      const note: IncidentNote = { id: newUserId(), authorName: input.actorName, text: input.note.trim(), createdAt: now.toISOString() };
+      notes.push(note); set.notes = notes; changes.note = note.text;
+    }
+    if (Object.keys(changes).length === 0) return toDTO(existing);
+    const action = input.note?.trim() ? "note_added" : "incident_workflow_updated";
+    const event: IncidentActivity = { id: newUserId(), action, detail: JSON.stringify(changes), actorName: input.actorName, createdAt: now.toISOString() };
+    activity.push(event); set.activity = activity;
+    const [row] = await tx.update(incidentsTable).set(set).where(and(eq(incidentsTable.id, id), eq(incidentsTable.scope, scope))).returning();
+    await tx.insert(auditLogsTable).values({
+      scope, actor: input.actorId, action: `incident_${action}`, resource: id,
+      changes, userAgent: undefined, ipAddress: undefined,
+    });
+    return row ? toDTO(row) : toDTO(existing);
+  });
 }
 
 // Count incidents still awaiting review, for the manager nav badge. Scoped so
@@ -181,6 +258,12 @@ export async function countUnreviewedIncidents(): Promise<number> {
     .select({ count: sql<number>`cast(count(*) as int)` })
     .from(incidentsTable)
     .where(and(isNull(incidentsTable.reviewedAt), eq(incidentsTable.scope, currentScope())));
+  return row?.count ?? 0;
+}
+
+export async function countActionableIncidents(): Promise<number> {
+  const [row] = await db.select({ count: sql<number>`cast(count(*) as int)` }).from(incidentsTable)
+    .where(and(eq(incidentsTable.scope, currentScope()), sql`${incidentsTable.workflowState} <> 'resolved'`));
   return row?.count ?? 0;
 }
 

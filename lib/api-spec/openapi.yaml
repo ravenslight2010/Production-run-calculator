@@ -3457,6 +3457,43 @@ paths:
         "403":
           description: Manager role required
 
+  /incidents/actionable-count:
+    get:
+      operationId: getActionableIncidentCount
+      tags: [incidents]
+      summary: Count unresolved actionable incident work
+      responses:
+        "200":
+          description: Actionable incident count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreviewedIncidentCount"
+        "403":
+          description: Incident review capability required
+
+  /incidents/assignees:
+    get:
+      operationId: listIncidentAssignees
+      tags: [incidents]
+      summary: List eligible incident owners
+      responses:
+        "200":
+          description: Staff eligible to own incident work
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [userId, name, role]
+                  properties:
+                    userId: { type: string }
+                    name: { type: string }
+                    role: { type: string }
+        "403":
+          description: Incident review capability required
+
   /incidents/{id}:
     get:
       operationId: getIncident
@@ -3528,6 +3565,32 @@ paths:
           description: Manager role required
         "404":
           description: No incident with that id
+
+  /incidents/{id}/workflow:
+    patch:
+      operationId: updateIncidentWorkflow
+      tags: [incidents]
+      summary: Update incident ownership, priority, state, or add a note
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentWorkflowUpdate"
+      responses:
+        "200":
+          description: Updated incident with activity timeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Incident" }
+        "400": { description: Invalid workflow update }
+        "403": { description: Incident review capability required }
+        "404": { description: No incident with that id }
 
   /me:
     get:
@@ -9382,6 +9445,12 @@ components:
         - createdAt
         - reviewedAt
         - resolvedAt
+        - priority
+        - workflowState
+        - assigneeId
+        - assigneeName
+        - notes
+        - activity
       properties:
         id:
           type: string
@@ -9423,6 +9492,57 @@ components:
         resolvedAt:
           type: [string, "null"]
           format: date-time
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+        workflowState:
+          type: string
+          enum: [new, assigned, waiting, resolved]
+        assigneeId:
+          type: [string, "null"]
+        assigneeName:
+          type: [string, "null"]
+        notes:
+          type: array
+          items: { $ref: "#/components/schemas/IncidentNote" }
+        activity:
+          type: array
+          items: { $ref: "#/components/schemas/IncidentActivity" }
+
+    IncidentNote:
+      type: object
+      required: [id, authorName, text, createdAt]
+      properties:
+        id: { type: string }
+        authorName: { type: string }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    IncidentActivity:
+      type: object
+      required: [id, action, detail, actorName, createdAt]
+      properties:
+        id: { type: string }
+        action: { type: string }
+        detail: { type: string }
+        actorName: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    IncidentWorkflowUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+        workflowState:
+          type: string
+          enum: [new, assigned, waiting, resolved]
+        assigneeId:
+          type: [string, "null"]
+        note:
+          type: string
+          maxLength: 2000
 
     UnreviewedIncidentCount:
       type: object

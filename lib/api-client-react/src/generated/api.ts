@@ -80,6 +80,7 @@ import type {
   IncidentClustersInput,
   IncidentClustersResult,
   IncidentDiagnosis,
+  IncidentWorkflowUpdate,
   IngredientBatchWeightList,
   IngredientList,
   InventoryItem,
@@ -89,6 +90,7 @@ import type {
   LabelVerifyInput,
   LabelVerifyResult,
   ListDeniedMergesParams,
+  ListIncidentAssignees200Item,
   ListInventoryLedgerParams,
   ListMergeAliasesParams,
   ListQualityChecksParams,
@@ -10832,6 +10834,160 @@ export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof 
 
 
 
+export const getGetActionableIncidentCountUrl = () => {
+
+
+
+
+  return `/api/incidents/actionable-count`
+}
+
+/**
+ * @summary Count unresolved actionable incident work
+ */
+export const getActionableIncidentCount = async ( options?: RequestInit): Promise<UnreviewedIncidentCount> => {
+
+  return customFetch<UnreviewedIncidentCount>(getGetActionableIncidentCountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetActionableIncidentCountQueryKey = () => {
+    return [
+    `/api/incidents/actionable-count`
+    ] as const;
+    }
+
+
+export const getGetActionableIncidentCountQueryOptions = <TData = Awaited<ReturnType<typeof getActionableIncidentCount>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetActionableIncidentCountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getActionableIncidentCount>>> = ({ signal }) => getActionableIncidentCount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetActionableIncidentCountQueryResult = NonNullable<Awaited<ReturnType<typeof getActionableIncidentCount>>>
+export type GetActionableIncidentCountQueryError = ErrorType<void>
+
+
+/**
+ * @summary Count unresolved actionable incident work
+ */
+
+export function useGetActionableIncidentCount<TData = Awaited<ReturnType<typeof getActionableIncidentCount>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getActionableIncidentCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetActionableIncidentCountQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListIncidentAssigneesUrl = () => {
+
+
+
+
+  return `/api/incidents/assignees`
+}
+
+/**
+ * @summary List eligible incident owners
+ */
+export const listIncidentAssignees = async ( options?: RequestInit): Promise<ListIncidentAssignees200Item[]> => {
+
+  return customFetch<ListIncidentAssignees200Item[]>(getListIncidentAssigneesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListIncidentAssigneesQueryKey = () => {
+    return [
+    `/api/incidents/assignees`
+    ] as const;
+    }
+
+
+export const getListIncidentAssigneesQueryOptions = <TData = Awaited<ReturnType<typeof listIncidentAssignees>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListIncidentAssigneesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIncidentAssignees>>> = ({ signal }) => listIncidentAssignees({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListIncidentAssigneesQueryResult = NonNullable<Awaited<ReturnType<typeof listIncidentAssignees>>>
+export type ListIncidentAssigneesQueryError = ErrorType<void>
+
+
+/**
+ * @summary List eligible incident owners
+ */
+
+export function useListIncidentAssignees<TData = Awaited<ReturnType<typeof listIncidentAssignees>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIncidentAssignees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListIncidentAssigneesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getGetIncidentUrl = (id: string,) => {
 
 
@@ -11048,6 +11204,78 @@ export const useResolveIncident = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getResolveIncidentMutationOptions(options));
+    }
+
+export const getUpdateIncidentWorkflowUrl = (id: string,) => {
+
+
+
+
+  return `/api/incidents/${id}/workflow`
+}
+
+/**
+ * @summary Update incident ownership, priority, state, or add a note
+ */
+export const updateIncidentWorkflow = async (id: string,
+    incidentWorkflowUpdate: IncidentWorkflowUpdate, options?: RequestInit): Promise<Incident> => {
+
+  return customFetch<Incident>(getUpdateIncidentWorkflowUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      incidentWorkflowUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateIncidentWorkflowMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentWorkflow>>, TError,{id: string;data: BodyType<IncidentWorkflowUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateIncidentWorkflow>>, TError,{id: string;data: BodyType<IncidentWorkflowUpdate>}, TContext> => {
+
+const mutationKey = ['updateIncidentWorkflow'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIncidentWorkflow>>, {id: string;data: BodyType<IncidentWorkflowUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateIncidentWorkflow(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateIncidentWorkflowMutationResult = NonNullable<Awaited<ReturnType<typeof updateIncidentWorkflow>>>
+    export type UpdateIncidentWorkflowMutationBody = BodyType<IncidentWorkflowUpdate>
+    export type UpdateIncidentWorkflowMutationError = ErrorType<void>
+
+    /**
+ * @summary Update incident ownership, priority, state, or add a note
+ */
+export const useUpdateIncidentWorkflow = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIncidentWorkflow>>, TError,{id: string;data: BodyType<IncidentWorkflowUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateIncidentWorkflow>>,
+        TError,
+        {id: string;data: BodyType<IncidentWorkflowUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateIncidentWorkflowMutationOptions(options));
     }
 
 export const getGetMeUrl = () => {

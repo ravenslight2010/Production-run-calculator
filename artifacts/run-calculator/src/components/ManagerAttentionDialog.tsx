@@ -70,7 +70,7 @@ export function buildManagerAttentionItems(
       priority: 2,
       count: input.unreviewedIncidentCount,
       title: "Reported issues",
-      detail: `${pluralize(input.unreviewedIncidentCount, "incident")} waiting for review.`,
+      detail: `${pluralize(input.unreviewedIncidentCount, "incident")} needs manager attention (new, assigned, or waiting).`,
       actionLabel: "Review issues",
     });
   }

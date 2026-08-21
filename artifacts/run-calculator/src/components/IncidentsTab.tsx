@@ -21,6 +21,8 @@ import {
   markIncidentReviewed,
   markIncidentResolved,
   requestIncidentClusters,
+  fetchIncidentAssignees,
+  updateIncidentWorkflow,
   type Incident,
   type IncidentCluster,
   type IncidentClustersResult,
@@ -122,6 +124,7 @@ function ClustersPanel({ disabled }: { disabled: boolean }) {
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
 type PlatformFilter = "all" | "web" | "mobile";
 type SourceFilter = "all" | "user_report" | "auto_crash";
+type WorkflowFilter = "all" | Incident["workflowState"];
 
 function timeAgo(iso: string): string {
   const then = Date.parse(iso);
@@ -135,7 +138,7 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function IncidentRow({ incident }: { incident: Incident }) {
+function IncidentRow({ incident, assignees }: { incident: Incident; assignees: Array<{ userId: string; name: string; role: string }> }) {
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(incident.status === "new");
   const invalidate = () => {
@@ -150,7 +153,12 @@ function IncidentRow({ incident }: { incident: Incident }) {
     mutationFn: () => markIncidentResolved(incident.id),
     onSuccess: invalidate,
   });
-  const busy = review.isPending || resolve.isPending;
+  const workflow = useMutation({
+    mutationFn: (body: Parameters<typeof updateIncidentWorkflow>[1]) => updateIncidentWorkflow(incident.id, body),
+    onSuccess: invalidate,
+  });
+  const [note, setNote] = useState("");
+  const busy = review.isPending || resolve.isPending || workflow.isPending;
 
   const isCrash = incident.source === "auto_crash";
   const ctx = incident.context ?? {};
@@ -233,6 +241,40 @@ function IncidentRow({ incident }: { incident: Incident }) {
                 : "Seen before"}
             </div>
           )}
+          <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">
+            <label className="text-xs text-muted-foreground">Priority
+              <select className="ml-1 rounded border border-border bg-background px-1.5 py-1 text-xs" value={incident.priority}
+                onChange={(e) => workflow.mutate({ priority: e.target.value as Incident["priority"] })} disabled={busy}>
+                <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option>
+              </select>
+            </label>
+            <label className="text-xs text-muted-foreground">Work
+              <select className="ml-1 rounded border border-border bg-background px-1.5 py-1 text-xs" value={incident.workflowState}
+                onChange={(e) => workflow.mutate({ workflowState: e.target.value as Incident["workflowState"] })} disabled={busy}>
+                <option value="new">New</option><option value="assigned">Assigned</option><option value="waiting">Waiting</option><option value="resolved">Resolved</option>
+              </select>
+            </label>
+            <label className="text-xs text-muted-foreground">Owner
+              <select className="ml-1 max-w-40 rounded border border-border bg-background px-1.5 py-1 text-xs" value={incident.assigneeId ?? ""}
+                onChange={(e) => workflow.mutate({ assigneeId: e.target.value || null })} disabled={busy}>
+                <option value="">Unassigned</option>
+                {assignees.map((a) => <option key={a.userId} value={a.userId}>{a.name} ({a.role})</option>)}
+              </select>
+            </label>
+          </div>
+          {(incident.notes.length > 0 || incident.activity.length > 0) && (
+            <div className="rounded-md border border-border p-2 space-y-1.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Activity</p>
+              {[...incident.activity].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).map((event) => (
+                <p key={event.id} className="text-xs text-muted-foreground"><span className="font-medium text-foreground">{event.actorName}</span> · {event.action.replaceAll("_", " ")} · {timeAgo(event.createdAt)}</p>
+              ))}
+              {incident.notes.map((entry) => <p key={entry.id} className="text-sm text-foreground"><span className="font-medium">{entry.authorName}:</span> {entry.text}</p>)}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-sm" placeholder="Add an operational note…" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
+            <Button size="sm" variant="outline" disabled={!note.trim() || busy} onClick={() => { workflow.mutate({ note }); setNote(""); }}>Add note</Button>
+          </div>
           {incident.diagnosis && (
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -314,6 +356,8 @@ export default function IncidentsTab() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [platform, setPlatform] = useState<PlatformFilter>("all");
   const [source, setSource] = useState<SourceFilter>("all");
+  const [workflowState, setWorkflowState] = useState<WorkflowFilter>("all");
+  const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
 
   const incidents = data ?? [];
   const filtered = useMemo(
@@ -322,9 +366,13 @@ export default function IncidentsTab() {
         (i) =>
           (status === "all" || i.status === status) &&
           (platform === "all" || i.appPlatform === platform) &&
-          (source === "all" || i.source === source),
-      ),
-    [incidents, status, platform, source],
+          (source === "all" || i.source === source) &&
+          (workflowState === "all" || i.workflowState === workflowState),
+      ).sort((a, b) => {
+        const rank = { urgent: 0, high: 1, normal: 2, low: 3 } as Record<string, number>;
+        return (rank[a.priority] - rank[b.priority]) || Date.parse(b.createdAt) - Date.parse(a.createdAt);
+      }),
+    [incidents, status, platform, source, workflowState],
   );
 
   if (!roleLoading && !canReview) {
@@ -364,6 +412,8 @@ export default function IncidentsTab() {
                 ["resolved", "Resolved"],
               ] as [StatusFilter, string][]}
             />
+            <FilterRow label="Work" value={workflowState} onChange={(v: WorkflowFilter) => setWorkflowState(v)}
+              options={[["all", "All"], ["new", "New"], ["assigned", "Assigned"], ["waiting", "Waiting"], ["resolved", "Resolved"]] as [WorkflowFilter, string][]} />
             <FilterRow
               label="Platform"
               value={platform}
@@ -405,7 +455,7 @@ export default function IncidentsTab() {
           </p>
         ) : (
           filtered.map((incident) => (
-            <IncidentRow key={incident.id} incident={incident} />
+            <IncidentRow key={incident.id} incident={incident} assignees={assignees} />
           ))
         )}
       </CardContent>

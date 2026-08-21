@@ -3361,6 +3361,41 @@ export const IncidentStatus = {
   resolved: 'resolved',
 } as const;
 
+export type IncidentPriority = typeof IncidentPriority[keyof typeof IncidentPriority];
+
+
+export const IncidentPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
+} as const;
+
+export type IncidentWorkflowState = typeof IncidentWorkflowState[keyof typeof IncidentWorkflowState];
+
+
+export const IncidentWorkflowState = {
+  new: 'new',
+  assigned: 'assigned',
+  waiting: 'waiting',
+  resolved: 'resolved',
+} as const;
+
+export interface IncidentNote {
+  id: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface IncidentActivity {
+  id: string;
+  action: string;
+  detail: string;
+  actorName: string;
+  createdAt: string;
+}
+
 export interface Incident {
   id: string;
   source: IncidentSource;
@@ -3387,6 +3422,43 @@ export interface Incident {
   reviewedAt: string | null;
   /** @nullable */
   resolvedAt: string | null;
+  priority: IncidentPriority;
+  workflowState: IncidentWorkflowState;
+  /** @nullable */
+  assigneeId: string | null;
+  /** @nullable */
+  assigneeName: string | null;
+  notes: IncidentNote[];
+  activity: IncidentActivity[];
+}
+
+export type IncidentWorkflowUpdatePriority = typeof IncidentWorkflowUpdatePriority[keyof typeof IncidentWorkflowUpdatePriority];
+
+
+export const IncidentWorkflowUpdatePriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
+} as const;
+
+export type IncidentWorkflowUpdateWorkflowState = typeof IncidentWorkflowUpdateWorkflowState[keyof typeof IncidentWorkflowUpdateWorkflowState];
+
+
+export const IncidentWorkflowUpdateWorkflowState = {
+  new: 'new',
+  assigned: 'assigned',
+  waiting: 'waiting',
+  resolved: 'resolved',
+} as const;
+
+export interface IncidentWorkflowUpdate {
+  priority?: IncidentWorkflowUpdatePriority;
+  workflowState?: IncidentWorkflowUpdateWorkflowState;
+  /** @nullable */
+  assigneeId?: string | null;
+  /** @maxLength 2000 */
+  note?: string;
 }
 
 export interface UnreviewedIncidentCount {
@@ -3476,5 +3548,11 @@ export type AuditProfileDataHealth200 = {
 
 export type GetProfileNameLinkCleanupAudit200 = {
   heal: ProfileNameLinkCleanupAudit | null;
+};
+
+export type ListIncidentAssignees200Item = {
+  userId: string;
+  name: string;
+  role: string;
 };
 

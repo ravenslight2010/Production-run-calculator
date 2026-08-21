@@ -57,6 +57,14 @@ export const incidentsTable = pgTable("incidents", {
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   // When a manager marked the incident resolved; null until then.
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  // Manager work-queue fields. JSON arrays are append-only event/note history;
+  // keeping them on the incident makes detail reads atomic with the workflow row.
+  priority: text("priority").notNull().default("normal"),
+  workflowState: text("workflow_state").notNull().default("new"),
+  assigneeId: text("assignee_id").references(() => usersTable.id, { onDelete: "set null" }),
+  assigneeName: text("assignee_name"),
+  notes: jsonb("notes").notNull().default([]),
+  activity: jsonb("activity").notNull().default([]),
 });
 
 export type Incident = typeof incidentsTable.$inferSelect;
