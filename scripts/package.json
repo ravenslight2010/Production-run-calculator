@@ -8,6 +8,7 @@
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
     "test": "bash ./src/check-model-version-bump.test.sh",
     "check-model-bump": "pnpm run test && bash ./src/check-model-version-bump.sh",
+    "check-operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

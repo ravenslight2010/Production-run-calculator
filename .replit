@@ -52,6 +52,10 @@ args = "test:corpus"
 task = "workflow.run"
 args = "check-model-bump"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "operational-skill-evidence"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -159,6 +163,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scripts run check-model-bump"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "operational-skill-evidence"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run check-operational-skill-evidence"
 
 [workflows.workflow.metadata]
 isValidation = true
