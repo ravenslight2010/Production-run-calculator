@@ -109,14 +109,15 @@ async function dbCreateMix(
     isPrep?: boolean;
     component: string;
     perPizza?: number;
+    components?: Array<{ ingredient: string; perPizza: number }>;
     batchSize?: number;
     amountAlreadyMade?: number;
     daysEarly?: number;
   },
 ): Promise<void> {
-  const components = JSON.stringify([
-    { ingredient: opts.component, perPizza: opts.perPizza ?? 2.0 },
-  ]);
+  const components = JSON.stringify(
+    opts.components ?? [{ ingredient: opts.component, perPizza: opts.perPizza ?? 2.0 }],
+  );
   await db.query(
     `INSERT INTO mixes
        (id, scope, name, brand, flavor, batch_size, days_early, notes,
@@ -3584,19 +3585,20 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
    *   m.remainingLbs = max(0, totalLbs − amountAlreadyMade) — changes on edit
    *
    * Scenario numbers:
-   *   perPizza     = 2.0 oz
+   *   components   = 2.0 oz + 1.0 oz
    *   casesNeeded  = 100,  pizzasPerCase = 8  →  pizzas = 800
-   *   c.lbs        = (2.0/16) × 800 = 100.00
-   *   totalLbs     = 100.00 × 1.15 + 20 = 135.00
+   *   c1.lbs       = (2.0/16) × 800 = 100.00
+   *   c2.lbs       = (1.0/16) × 800 =  50.00
+   *   totalLbs     = (100.00 + 50.00) × 1.15 + 20 = 192.50
    *
    *   Step 1 (amountAlreadyMade = 0):
-   *     remainingLbs = 135.00 → pullLbs = 100.00 × 135.00 / 135.00 = 100.00 ✓
+   *     remainingLbs = 192.50 → c1=100.00, c2=50.00 ✓
    *
    *   Step 2 (amountAlreadyMade = 50):
-   *     remainingLbs = 85.00  → pullLbs = 100.00 × 85.00 / 135.00 ≈ 62.96 ✓
+   *     remainingLbs = 142.50  → c1≈74.03, c2≈37.01 ✓
    *
    *   Step 3 (amountAlreadyMade = 200 ≥ totalLbs):
-   *     remainingLbs = 0      → pullLbs = 100.00 × 0 / 135.00 = 0.00 ✓
+   *     remainingLbs = 0      → c1=0.00, c2=0.00 ✓
    *
    * The update must happen without a page reload — MixAlreadyMadeInput onBlur
    * → saveMixes → onSaved → cycleCountQc.setQueryData(["mixes"], saved) →
@@ -3609,40 +3611,50 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     const username = `user_${suffix}`;
     const mixId = `reg-pull-live-${suffix}`;
     const mixName = `RegPullLiveMix ${suffix}`;
-    const component = `RegComp_${suffix}`;
+    const component1 = `RegCompA_${suffix}`;
+    const component2 = `RegCompB_${suffix}`;
     const brand = `Brand_${suffix}`;
     const today = todayStr();
 
-    const MIX_PER_PIZZA_OZ = 2.0;
+    const COMPONENT_1_PER_PIZZA_OZ = 2.0;
+    const COMPONENT_2_PER_PIZZA_OZ = 1.0;
     const CASES_NEEDED = 100;
     const PIZZAS_PER_CASE = 8;
     const totalPizzas = CASES_NEEDED * PIZZAS_PER_CASE; // 800
 
-    const componentLbs = (MIX_PER_PIZZA_OZ / 16) * totalPizzas; // 100.00
+    const component1Lbs = (COMPONENT_1_PER_PIZZA_OZ / 16) * totalPizzas; // 100.00
+    const component2Lbs = (COMPONENT_2_PER_PIZZA_OZ / 16) * totalPizzas; // 50.00
+    const componentLbs = component1Lbs + component2Lbs; // 150.00
     const MIX_WASTE_FACTOR = 0.15;
     const STARTUP_LBS = 20;
-    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 135.00
+    const totalLbs = componentLbs * (1 + MIX_WASTE_FACTOR) + STARTUP_LBS; // 192.50
 
     // ── Step 1 expected: full pull (amountAlreadyMade = 0) ──────────────────
-    const fullPullStr = componentLbs.toFixed(2); // "100.00"
+    const fullPull1Str = component1Lbs.toFixed(2); // "100.00"
+    const fullPull2Str = component2Lbs.toFixed(2); // "50.00"
 
     // ── Step 2 expected: partial pull (amountAlreadyMade = 50) ──────────────
     const EDIT_PARTIAL = 50;
-    const remainingAfterPartial = totalLbs - EDIT_PARTIAL; // 85.00
-    const scaledPullStr = (componentLbs * remainingAfterPartial / totalLbs).toFixed(2); // "62.96"
+    const remainingAfterPartial = totalLbs - EDIT_PARTIAL; // 142.50
+    const scaledPull1Str = (component1Lbs * remainingAfterPartial / totalLbs).toFixed(2); // "74.03"
+    const scaledPull2Str = (component2Lbs * remainingAfterPartial / totalLbs).toFixed(2); // "37.01"
 
     // ── Step 3 expected: zero pull (amountAlreadyMade >= totalLbs) ──────────
     const EDIT_FULL = Math.ceil(totalLbs) + 1; // 136, safely >= 135.00
 
     try {
-      // Create a regular (non-prep) mix with a single component.
+      // Create a regular mix with two components whose pull amounts differ.
       await dbCreateMix(db, {
         id: mixId,
         name: mixName,
         brand,
         isPrep: false,
-        component,
-        perPizza: MIX_PER_PIZZA_OZ,
+        component: component1,
+        components: [
+          { ingredient: component1, perPizza: COMPONENT_1_PER_PIZZA_OZ },
+          { ingredient: component2, perPizza: COMPONENT_2_PER_PIZZA_OZ },
+        ],
+        perPizza: COMPONENT_1_PER_PIZZA_OZ,
         batchSize: 0,
         amountAlreadyMade: 0,
       });
@@ -3689,10 +3701,14 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       // ── Step 1: full pull shown when amountAlreadyMade = 0 ─────────────────
       // Locate the component row inside the Pull For Mix section.
-      const componentRow = todayCard
-        .locator("div", { has: page.getByText(component, { exact: true }) })
+      const component1Row = todayCard
+        .locator("div", { has: page.getByText(component1, { exact: true }) })
         .last();
-      await expect(componentRow).toContainText(fullPullStr, { timeout: 5_000 });
+      const component2Row = todayCard
+        .locator("div", { has: page.getByText(component2, { exact: true }) })
+        .last();
+      await expect(component1Row).toContainText(fullPull1Str, { timeout: 5_000 });
+      await expect(component2Row).toContainText(fullPull2Str, { timeout: 5_000 });
 
       // ── Step 2: type 50 and blur — pull must scale down immediately ─────────
       // The "Already made" input lives on the regular mix card (emerald section,
@@ -3703,18 +3719,22 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await alreadyMadeInput.fill(String(EDIT_PARTIAL));
       await alreadyMadeInput.press("Tab");
 
-      // Polling assertion: waits until the component row re-renders with scaled lbs.
-      await expect(componentRow).toContainText(scaledPullStr, { timeout: 5_000 });
-      // The full unscaled value must no longer appear (regression guard).
-      await expect(componentRow).not.toContainText(fullPullStr, { timeout: 3_000 });
+      // Polling assertion: waits until both component rows re-render with scaled lbs.
+      await expect(component1Row).toContainText(scaledPull1Str, { timeout: 5_000 });
+      await expect(component2Row).toContainText(scaledPull2Str, { timeout: 5_000 });
+      // Neither full unscaled value may remain (regression guard).
+      await expect(component1Row).not.toContainText(fullPull1Str, { timeout: 3_000 });
+      await expect(component2Row).not.toContainText(fullPull2Str, { timeout: 3_000 });
 
       // ── Step 3: type a value >= totalLbs — pull must reach 0.00 ────────────
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(EDIT_FULL));
       await alreadyMadeInput.press("Tab");
 
-      // Polling assertion: component row must show 0.00 once remainingLbs clamps to 0.
-      await expect(componentRow).toContainText("0.00", { timeout: 5_000 });
+      // Polling assertion: both component rows must show 0.00 once remainingLbs
+      // clamps to 0.
+      await expect(component1Row).toContainText("0.00", { timeout: 5_000 });
+      await expect(component2Row).toContainText("0.00", { timeout: 5_000 });
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
