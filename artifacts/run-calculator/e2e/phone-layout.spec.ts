@@ -18,7 +18,15 @@ const PRIMARY_TABS = [
   "tab-warehouse",
 ] as const;
 
-const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "Welcome2Lucias!";
+function getSignupCode(): string {
+  const code = process.env.STAFF_SIGNUP_CODE;
+  if (!code) {
+    throw new Error(
+      "STAFF_SIGNUP_CODE must be configured to run the phone layout suite.",
+    );
+  }
+  return code;
+}
 
 function uniqueUsername(): string {
   return `phonee2e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -248,7 +256,7 @@ async function signInToSandbox(page: Page): Promise<void> {
   await page.locator("#username").fill(uniqueUsername());
   await page.locator("#password").fill(password);
   await page.locator("#confirm").fill(password);
-  await page.locator("#accessCode").fill(SIGNUP_CODE);
+  await page.locator("#accessCode").fill(getSignupCode());
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page
     .locator('[data-testid="tab-run"]')

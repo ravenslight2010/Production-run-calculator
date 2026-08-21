@@ -18,3 +18,7 @@ schema push against its URL, start temporary API/web endpoints using that URL,
 run Playwright there, then terminate its connections and drop the database in a
 cleanup trap. Keep connection URLs out of logs. Verify no temporary database or
 listener remains afterward.
+
+For browser suites that only need to inspect layout or exercise a newly created
+test account, do not inherit a shared configuration with destructive global
+setup at all. Give them a dedicated, non-destructive configuration instead.
