@@ -311,6 +311,38 @@ describe("cheese-recipe-name-dedupe-v1 data heal", () => {
     expect(rows[0].id).toBe("older-row");
   });
 
+  it("keeps the row with more components when duplicate lbs are both zero", async () => {
+    const t = new Date("2026-07-01T08:00:00Z");
+    await seedRow("one-component", "Swiss Cheese Blend", [{ ingredient: "Swiss", lbs: 0, ozPerPizza: 0 }], t);
+    await seedRow(
+      "two-components",
+      "Swiss Cheese Blend",
+      [
+        { ingredient: "Swiss", lbs: 0, ozPerPizza: 0 },
+        { ingredient: "Mozz", lbs: 0, ozPerPizza: 0 },
+      ],
+      new Date("2026-06-01T08:00:00Z"),
+    );
+    // Keep the zero-value survivor from being removed as an orphan stub by the
+    // later orphan-stub purge heal.
+    await db
+      .insert(brandProfilesTable)
+      .values({
+        key: "acme__swiss",
+        scope: "live",
+        brand: "Acme",
+        flavor: "swiss",
+        values: { app1CheeseRecipeName: "Swiss Cheese Blend" },
+      })
+      .onConflictDoNothing();
+
+    await runDataHeals();
+
+    const rows = await db.select().from(cheeseRecipesTable);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe("two-components");
+  });
+
   it("is marker-guarded: a second run is a no-op even after new dupes appear", async () => {
     await runDataHeals();
     const t = new Date();
