@@ -6937,6 +6937,10 @@ export default function Home() {
   // otherwise a second open tab keeps overwriting another tab's live edits.
   // Mirrors the mobile app's lastSyncSigRef gate (web/mobile parity).
   const lastSyncSigRef = useRef<string>("");
+  // History is independently persisted and merged by date. Keep it on the
+  // first/change payload for recovery, but omit the unchanged cold section
+  // from ordinary live updates.
+  const lastSyncedHistorySigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
   const syncStatus: SyncStatus = syncPushFailed
     ? "failed"
@@ -8404,6 +8408,9 @@ export default function Home() {
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
       if (sig !== undefined) lastSyncSigRef.current = sig;
+      if (payload.history !== undefined) {
+        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+      }
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
       if (retriesLeft > 0) {
@@ -8480,16 +8487,20 @@ export default function Home() {
     // NOT in the sync payload anymore — they live in the factory KV store
     // (/api/factory-data) and are replicated via write-through PUTs + startup
     // fetch (see factoryDataSync.ts).
+    const history = loadHistory();
+    const historySig = JSON.stringify(history);
     return {
       dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
-      history: loadHistory(),
+      ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
     };
   }
 
-  function schedulePush(ds: DayState, delay = 600) {
+  const SYNC_EDIT_DEBOUNCE_MS = 300;
+
+  function schedulePush(ds: DayState, delay = SYNC_EDIT_DEBOUNCE_MS) {
     if (foregroundSyncBarrierRef.current) {
       foregroundPushPendingRef.current = true;
       return;

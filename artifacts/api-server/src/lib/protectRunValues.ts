@@ -359,6 +359,17 @@ function withMergedStamps(
   incoming: Record<string, unknown>,
   existing: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
+  // History is a cold, independently mergeable section. New live payloads may
+  // omit it to reduce request/broadcast cost; omission must not erase the
+  // server's retained history. An explicit value (including []) remains
+  // authoritative for reset/import flows.
+  if (
+    !Object.prototype.hasOwnProperty.call(incoming, "history") &&
+    existing &&
+    Object.prototype.hasOwnProperty.call(existing, "history")
+  ) {
+    out.history = existing.history;
+  }
   const del = mergeStampMap(incoming.deletedStamps, existing?.deletedStamps);
   const undel = mergeStampMap(incoming.undeletedStamps, existing?.undeletedStamps);
   if (Object.keys(del).length > 0) out.deletedStamps = del;

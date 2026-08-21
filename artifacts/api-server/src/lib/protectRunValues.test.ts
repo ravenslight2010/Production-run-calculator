@@ -184,6 +184,21 @@ const CURRENT_BLANK = {
 };
 
 describe("protectRunValues", () => {
+  it("retains cold history when a hot live payload omits it", () => {
+    const existing = {
+      runValues: { r1: POP },
+      runValuesUpdatedAt: { r1: 1000 },
+      history: [{ date: "2030-01-01", runs: [], runValues: {} }],
+    };
+    const incoming = {
+      runValues: { r1: { casesNeeded: 241 } },
+      runValuesUpdatedAt: { r1: 2000 },
+    };
+    const out = protectRunValues(incoming, existing) as typeof existing;
+    expect(out.history).toEqual(existing.history);
+    expect(out.runValues.r1).toEqual({ casesNeeded: 241 });
+  });
+
   it("keeps the populated stored value when an empty push arrives with an EQUAL stamp (the corruption)", () => {
     const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
     const incoming: Payload = { runValues: { r1: EMPTY }, runValuesUpdatedAt: { r1: 1000 } };
