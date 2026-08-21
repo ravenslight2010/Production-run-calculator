@@ -28,7 +28,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { PerRunMixSlotBadge } from "./pages/home";
+import { PerRunMixSlotBadge, SetupMathConflictBadge } from "./pages/home";
 import { saveProfile, loadProfile } from "./storage";
 import type { RecipeRow, FormValues } from "./types";
 import { DEFAULT_VALUES } from "./types";
@@ -491,5 +491,45 @@ describe("PerRunMixSlotBadge (home.tsx) — end-to-end per-run Setup tab flow", 
     fireEvent.click(screen.getByText(/▼ fix/));
     fireEvent.click(screen.getByText(/Use row sum/i));
     expect(onRowSum.mock.calls[0][0]).toBeCloseTo(ROW_SUM, 5);
+  });
+});
+
+// ── 7. Setup header aggregate badge ──────────────────────────────────────────
+
+describe("SetupMathConflictBadge (home.tsx) — aggregate header signal", () => {
+  it("counts conflicts from all four applicator slots and clears immediately after one is resolved", () => {
+    const conflictingSlots = [1, 2, 3, 4].map(() => ({
+      rows: ROWS,
+      ozPerPizza: OZ_TOTAL,
+    }));
+
+    const { rerender } = render(<SetupMathConflictBadge slots={conflictingSlots} />);
+
+    expect(screen.getByTestId("setup-math-conflict-count").textContent).toContain(
+      "4 math conflicts",
+    );
+    expect(
+      screen.getByTestId("setup-math-conflict-count").getAttribute("aria-label"),
+    ).toBe("4 math conflicts");
+
+    rerender(
+      <SetupMathConflictBadge
+        slots={conflictingSlots.map((slot, index) =>
+          index === 2 ? { ...slot, ozPerPizza: ROW_SUM } : slot,
+        )}
+      />,
+    );
+
+    expect(screen.getByTestId("setup-math-conflict-count").textContent).toContain(
+      "3 math conflicts",
+    );
+
+    rerender(
+      <SetupMathConflictBadge
+        slots={conflictingSlots.map((slot) => ({ ...slot, ozPerPizza: ROW_SUM }))}
+      />,
+    );
+
+    expect(screen.queryByTestId("setup-math-conflict-count")).toBeNull();
   });
 });
