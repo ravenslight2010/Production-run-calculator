@@ -30,6 +30,7 @@ import {
   fetchSavedSpecSheets,
   fetchStaleSauceProfiles,
   fetchApplicatorAuditProfiles,
+  clearApplicatorAuditSlot,
   reconcileSpecSheet,
   deleteSpecSheet,
   loadCurrentReconcileRecipes,
@@ -165,9 +166,12 @@ function buildProfileView(sheets: SavedSpecSheet[]): ProfileEntry[] {
 const KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
 const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
 
-type Props = { autoCheckSignal?: number };
+type Props = { autoCheckSignal?: number; canManageProfiles?: boolean };
 
-export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
+export default function SpecReconcilePanel({
+  autoCheckSignal = 0,
+  canManageProfiles = false,
+}: Props) {
   const [sheets, setSheets] = useState<SavedSpecSheet[]>([]);
   const latestSpecIds = latestSourceKeyIds(sheets);
   const [loading, setLoading] = useState(true);
@@ -187,6 +191,7 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
 
   const [auditProfiles, setAuditProfiles] = useState<ApplicatorAuditProfile[]>([]);
   const [auditExpanded, setAuditExpanded] = useState(false);
+  const [clearingAuditKey, setClearingAuditKey] = useState<string | null>(null);
 
   const prevSignalRef = useRef(-1);
 
@@ -285,6 +290,18 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
       setResultError("Couldn't delete that spec sheet.");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleClearAuditSlot(profile: ApplicatorAuditProfile) {
+    const actionKey = `${profile.key}-${profile.slot}`;
+    setClearingAuditKey(actionKey);
+    try {
+      setAuditProfiles(await clearApplicatorAuditSlot(profile.key, profile.slot));
+    } catch {
+      setResultError("Couldn't clear that applicator slot.");
+    } finally {
+      setClearingAuditKey(null);
     }
   }
 
@@ -424,28 +441,41 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                   {auditProfiles.map((p, i) => (
                     <li
                       key={`${p.key}-${p.slot}-${i}`}
-                      className="text-xs"
+                       className="flex items-start justify-between gap-2 text-xs"
                       data-testid={`applicator-audit-profile-${p.key}-${p.slot}`}
                     >
                       <span className="font-medium text-foreground">
                         {p.brand} — {p.flavor}
                       </span>
-                      <span className="text-red-700 ml-2">
-                        {p.slot === "app3" ? "App 3" : "App 4"}
-                        {p.recipeName
-                          ? <>: "{p.recipeName}"</>
-                          : p.appType
-                            ? <> type "{p.appType}" with no recipe</>
-                            : null}
-                        {" "}
-                        <span className="opacity-70">
-                          ({p.reason === "cross-profile"
-                            ? "belongs to a different product"
-                            : p.reason === "cross-brand"
-                              ? "contains another brand's name"
-                              : "applicator type set but no recipe"})
-                        </span>
-                      </span>
+                       <span className="text-red-700 ml-2">
+                         {p.slot === "app3" ? "App 3" : "App 4"}
+                         {p.recipeName
+                           ? <>: "{p.recipeName}"</>
+                           : p.appType
+                             ? <> type "{p.appType}" with no recipe</>
+                             : null}
+                         {" "}
+                         <span className="opacity-70">
+                           ({p.reason === "cross-profile"
+                             ? "belongs to a different product"
+                             : p.reason === "cross-brand"
+                               ? "contains another brand's name"
+                               : "applicator type set but no recipe"})
+                         </span>
+                       </span>
+                       {canManageProfiles && (
+                         <Button
+                           type="button"
+                           size="sm"
+                           variant="outline"
+                           className="h-7 shrink-0 px-2 text-xs"
+                           onClick={() => void handleClearAuditSlot(p)}
+                           disabled={clearingAuditKey !== null}
+                           data-testid={`button-clear-applicator-${p.key}-${p.slot}`}
+                         >
+                           {clearingAuditKey === `${p.key}-${p.slot}` ? "Clearing…" : "Clear"}
+                         </Button>
+                       )}
                     </li>
                   ))}
                 </ul>

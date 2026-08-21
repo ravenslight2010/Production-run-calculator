@@ -15696,7 +15696,10 @@ export default function Home() {
                   }
                 />
                 <div className="mt-3">
-                  <SpecReconcilePanel autoCheckSignal={specReconcileSignal} />
+                  <SpecReconcilePanel
+                    autoCheckSignal={specReconcileSignal}
+                    canManageProfiles={hasCapability("manage-profiles")}
+                  />
                 </div>
               </TabsContent>
 

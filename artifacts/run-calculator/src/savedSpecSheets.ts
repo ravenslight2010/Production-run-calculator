@@ -365,6 +365,33 @@ export async function fetchApplicatorAuditProfiles(): Promise<ApplicatorAuditPro
   }
 }
 
+/** Clear one flagged app3/app4 slot on a server-stored setup profile. */
+export async function clearApplicatorAuditSlot(
+  key: string,
+  slot: "app3" | "app4",
+): Promise<ApplicatorAuditProfile[]> {
+  const res = await fetch(
+    `/api/brand-profiles/${encodeURIComponent(key)}/clear-slot`,
+    {
+      method: "PATCH",
+      headers: authHeaders(true),
+      body: JSON.stringify({ slot }),
+    },
+  );
+  if (!res.ok) throw new Error(`Clear applicator slot failed (${res.status})`);
+  const data = (await res.json()) as { items?: unknown[] };
+  const items = Array.isArray(data.items) ? data.items : [];
+  return items.filter(
+    (x): x is ApplicatorAuditProfile =>
+      x !== null &&
+      typeof x === "object" &&
+      typeof (x as ApplicatorAuditProfile).brand === "string" &&
+      typeof (x as ApplicatorAuditProfile).flavor === "string" &&
+      typeof (x as ApplicatorAuditProfile).slot === "string" &&
+      typeof (x as ApplicatorAuditProfile).reason === "string",
+  );
+}
+
 /**
  * Build a short, human-friendly label for an auto-saved import snapshot. When the
  * uploaded filename(s) are known they lead the label so distinct files (each kept

@@ -328,6 +328,73 @@ router.get("/brand-profiles/applicator-audit", async (req: Request, res: Respons
   }
 });
 
+// Clear only the contaminated app3/app4 recipe and type fields identified by
+// the audit. This is intentionally narrower than a whole-profile save so a
+// manager's in-place cleanup cannot discard unrelated setup values.
+router.patch(
+  "/brand-profiles/:key/clear-slot",
+  requireCapability("manage-profiles"),
+  async (req: Request, res: Response) => {
+    const slot = req.body?.slot;
+    if (slot !== "app3" && slot !== "app4") {
+      res.status(400).json({ error: "Slot must be app3 or app4" });
+      return;
+    }
+
+    const recipeField = `${slot}CheeseRecipeName`;
+    const typeField = `${slot}Type`;
+    try {
+      const scope = currentScope();
+      const profileKey = String(req.params.key);
+      const [profile] = await db
+        .select()
+        .from(brandProfilesTable)
+        .where(
+          and(
+            eq(brandProfilesTable.key, profileKey),
+            eq(brandProfilesTable.scope, scope),
+          ),
+        )
+        .limit(1);
+      if (!profile) {
+        res.status(404).json({ error: "Brand profile not found" });
+        return;
+      }
+
+      const values = { ...((profile.values ?? {}) as Record<string, unknown>) };
+      values[recipeField] = "";
+      values[typeField] = "";
+      await db
+        .update(brandProfilesTable)
+        .set({
+          values,
+          updatedAtMs: Math.max((profile.updatedAtMs ?? 0) + 1, Date.now()),
+        })
+        .where(
+          and(
+            eq(brandProfilesTable.key, profile.key),
+            eq(brandProfilesTable.scope, scope),
+          ),
+        );
+
+      const remainingRows = await db
+        .select()
+        .from(brandProfilesTable)
+        .where(eq(brandProfilesTable.scope, scope));
+      const remainingProfiles = remainingRows.map((p) => ({
+        key: p.key,
+        brand: p.brand ?? "",
+        flavor: p.flavor ?? "",
+        values: (p.values ?? {}) as Record<string, unknown>,
+      }));
+      res.json({ items: computeApplicatorAudit(remainingProfiles) });
+    } catch (err) {
+      req.log.error({ err }, "failed to clear applicator slot");
+      res.status(500).json({ error: "Failed to clear applicator slot" });
+    }
+  },
+);
+
 // Returns profiles whose stored frontlineRecipeName is a plain generic sauce
 // category label (e.g. "BBQ Sauce", "Ranch") rather than a specific product
 // name — a sign the spec-sheet parenthetical was dropped during import.
