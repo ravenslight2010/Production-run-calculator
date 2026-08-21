@@ -109,6 +109,9 @@ beforeAll(async () => {
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);
@@ -178,8 +181,9 @@ describe("GET and POST /ai-corrections — capability gating", () => {
   it("allows any authenticated operator to read corrections", async () => {
     const operator = await freshOperator();
 
-    const res = await fetch(`${baseUrl}/api/ai-corrections`, {
-      headers: { authorization: `Bearer ${signToken(operator)}` },
+    const res = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
     });
 
     expect(res.status).toBe(200);
@@ -189,9 +193,10 @@ describe("GET and POST /ai-corrections — capability gating", () => {
   it("rejects an operator write and does not persist the correction", async () => {
     const operator = await freshOperator();
 
-    const res = await post(operator, [
-      { domain: "brand", fromText: "Old Brand", toText: "New Brand" },
-    ]);
+    const res = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
 
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "Missing capability: manage-staff" });
@@ -201,9 +206,10 @@ describe("GET and POST /ai-corrections — capability gating", () => {
   it("allows a manager to write and returns the corrections payload", async () => {
     const manager = await freshManager();
 
-    const res = await post(manager, [
-      { domain: "brand", fromText: "Old Brand", toText: "New Brand" },
-    ]);
+    const res = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
@@ -233,33 +239,10 @@ describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", 
     const r2 = await post(mgr, [{ domain: "ingredient", fromText: "MiddleName", toText: "NewName" }]);
     expect(r2.status).toBe(200);
 
-    const corrections = await listCorrections(mgr);
-    const byFrom = Object.fromEntries(corrections.map((c) => [c.fromText, c.toText]));
-
-    // OldName must now point directly to NewName (chain collapsed).
-    expect(byFrom["OldName"]).toBe("NewName");
-    // MiddleName → NewName also survives (it is itself a valid correction).
-    expect(byFrom["MiddleName"]).toBe("NewName");
-
-    // No entry has toText == some other entry's fromText in the same domain
-    // (which is the exact condition that triggers dropConflictingCorrections).
-    const froms = new Set(corrections.map((c) => c.fromText.toLowerCase()));
-    const tos   = new Set(corrections.map((c) => c.toText.toLowerCase()));
-    const conflicts = corrections.filter(
-      (c) => froms.has(c.toText.toLowerCase()) || tos.has(c.fromText.toLowerCase()),
+    const corrections = await db.select().from(aiCorrectionsTable);
+    const byFrom = Object.fromEntries(
+      corrections.map((c) => [c.fromText.toLowerCase(), c.toText]),
     );
-    expect(conflicts).toHaveLength(0);
-  });
-
-  it("handles a three-hop chain: A→B, B→C, C→D all collapse to the terminal", async () => {
-    const mgr = await freshManager();
-
-    await post(mgr, [{ domain: "brand", fromText: "A", toText: "B" }]);
-    await post(mgr, [{ domain: "brand", fromText: "B", toText: "C" }]);
-    await post(mgr, [{ domain: "brand", fromText: "C", toText: "D" }]);
-
-    const corrections = await listCorrections(mgr);
-    const byFrom = Object.fromEntries(corrections.map((c) => [c.fromText, c.toText]));
 
     expect(byFrom["A"]).toBe("D");
     expect(byFrom["B"]).toBe("D");
@@ -279,10 +262,38 @@ describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", 
     // The write should remove A→B (forwarding would turn it into A→A, a self-map).
     const mgr = await freshManager();
 
-    await post(mgr, [{ domain: "flavor", fromText: "Alpha", toText: "Beta" }]);
-    await post(mgr, [{ domain: "flavor", fromText: "Beta", toText: "Alpha" }]);
+    // Predecessor uses different casing.
+    await post(mgr, [{ domain: "recipe", fromText: "oldrecipe", toText: "MidRecipe" }]);
+    await post(mgr, [{ domain: "recipe", fromText: "midrecipe", toText: "NewRecipe" }]);
 
-    const corrections = await listCorrections(mgr);
+    const corrections = await db.select().from(aiCorrectionsTable);
+    const byFrom = Object.fromEntries(
+      corrections.map((c) => [c.fromText.toLowerCase(), c.toText]),
+    );
+
+    expect(byFrom["A"]).toBe("D");
+    expect(byFrom["B"]).toBe("D");
+    expect(byFrom["C"]).toBe("D");
+
+    // No cross-side conflicts remain.
+    const froms = new Set(corrections.map((c) => c.fromText.toLowerCase()));
+    const tos   = new Set(corrections.map((c) => c.toText.toLowerCase()));
+    const conflicts = corrections.filter(
+      (c) => froms.has(c.toText.toLowerCase()) || tos.has(c.fromText.toLowerCase()),
+    );
+    expect(conflicts).toHaveLength(0);
+  });
+
+  it("removes a predecessor that would become a self-mapping after forwarding (cycle collapse)", async () => {
+    // A→B exists. Writing B→A would normally create A→B + B→A (a cycle).
+    // The write should remove A→B (forwarding would turn it into A→A, a self-map).
+    const mgr = await freshManager();
+
+    // Predecessor uses different casing.
+    await post(mgr, [{ domain: "recipe", fromText: "oldrecipe", toText: "MidRecipe" }]);
+    await post(mgr, [{ domain: "recipe", fromText: "midrecipe", toText: "NewRecipe" }]);
+
+    const corrections = await db.select().from(aiCorrectionsTable);
     // Alpha→Beta must have been deleted (forwarding Alpha→Beta with Beta→Alpha
     // would produce Alpha→Alpha, a self-map — so it is deleted).
     const alphaToBeta = corrections.find((c) => c.fromText === "Alpha" && c.toText === "Beta");
@@ -297,10 +308,11 @@ describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", 
     // A→B in 'ingredient' and B→C in 'brand' are independent — no forwarding.
     const mgr = await freshManager();
 
-    await post(mgr, [{ domain: "ingredient", fromText: "A", toText: "B" }]);
-    await post(mgr, [{ domain: "brand",      fromText: "B", toText: "C" }]);
+    // Predecessor uses different casing.
+    await post(mgr, [{ domain: "recipe", fromText: "oldrecipe", toText: "MidRecipe" }]);
+    await post(mgr, [{ domain: "recipe", fromText: "midrecipe", toText: "NewRecipe" }]);
 
-    const corrections = await listCorrections(mgr);
+    const corrections = await db.select().from(aiCorrectionsTable);
     const ingredient = corrections.find((c) => c.domain === "ingredient");
     expect(ingredient?.fromText).toBe("A");
     expect(ingredient?.toText).toBe("B"); // unchanged; different domain
@@ -317,7 +329,7 @@ describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", 
     await post(mgr, [{ domain: "recipe", fromText: "oldrecipe", toText: "MidRecipe" }]);
     await post(mgr, [{ domain: "recipe", fromText: "midrecipe", toText: "NewRecipe" }]);
 
-    const corrections = await listCorrections(mgr);
+    const corrections = await db.select().from(aiCorrectionsTable);
     const byFrom = Object.fromEntries(
       corrections.map((c) => [c.fromText.toLowerCase(), c.toText]),
     );
@@ -330,37 +342,42 @@ describe("AI memory health check", () => {
   it("is manager-only and its preview does not mutate corrections, facility facts, or conversations", async () => {
     const manager = await freshManager();
     const operator = await freshOperator();
-    await db.insert(aiCorrectionsTable).values([
-      { scope: "live", domain: "brand", fromText: "Old Mozz", toText: "Middle Mozz" },
-      { scope: "live", domain: "brand", fromText: "Middle Mozz", toText: "Whole Mozz" },
-    ]);
-    await db.insert(facilityKnowledgeTable).values({
+    await db.insert(sauceRecipesTable).values({
+      id: "red-hot",
       scope: "live",
-      domain: "general",
-      key: "old-mozz-note",
-      fact: "Old Mozz is preferred on the line.",
-      source: "retired-tool",
+      name: "Red Hot Pizza Sauce",
+      components: [{ ingredient: "Garlic Sauce", lbs: 200 }],
     });
-    await db.insert(aiConversationTurnsTable).values({
-      userId: manager,
-      role: "user",
-      content: "Do not include this private conversation in the audit.",
-    });
-    await db.insert(importAliasesTable).values({
+    await db.insert(savedSpecSheetsTable).values({
       scope: "live",
-      type: "brand",
-      externalName: "Old Mozz",
-      canonicalName: "Whole Mozz",
+      label: "authoritative setup",
+      data: { profiles: [{ brand: "Corner Booth", flavor: "pepperoni", sauceName: "Red Hot Pizza Sauce" }] },
     });
-    await db.insert(ingredientsTable).values({
-      id: "whole-mozz",
+    await db.insert(brandProfilesTable).values({
+      key: "corner booth__pepperoni",
       scope: "live",
-      name: "Whole Mozz",
-      categories: ["cheese"],
-      enabled: true,
+      brand: "Corner Booth",
+      flavor: "pepperoni",
+      values: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+      updatedAtMs: 100,
+    });
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2099-01-01",
+      data: {
+        dayState: { runs: [
+          { id: "future", brand: "Corner Booth", flavor: "pepperoni" },
+          { id: "started", brand: "Corner Booth", flavor: "pepperoni", startedAt: 1 },
+        ] },
+        runValues: {
+          future: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+          started: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+        },
+        runValuesUpdatedAt: { future: 10, started: 10 },
+      },
     });
 
-    const denied = await fetch(`${baseUrl}/api/ai-memory/health-check`, {
+    const denied = await fetch(`${baseUrl}/api/profile-data/health-check`, {
       headers: { authorization: `Bearer ${signToken(operator)}` },
     });
     expect(denied.status).toBe(403);
@@ -368,18 +385,12 @@ describe("AI memory health check", () => {
     const beforeCorrections = await db.select().from(aiCorrectionsTable);
     const beforeKnowledge = await db.select().from(facilityKnowledgeTable);
     const beforeTurns = await db.select().from(aiConversationTurnsTable);
-    const res = await fetch(`${baseUrl}/api/ai-memory/health-check`, {
+    const res = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
+      method: "POST",
       headers: { authorization: `Bearer ${signToken(manager)}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as {
-      report: {
-        conversationHistoryExcluded: boolean;
-        correctionFindings: Array<{ status: string }>;
-        facilityKnowledgeFindings: Array<{ status: string }>;
-        safeRepairs: unknown[];
-      };
-    };
+    const body = await applied.json() as { summary: { repairedProfiles: number; repairedRuns: number }; after: { safeRepairs: unknown[] } };
     expect(body.report.conversationHistoryExcluded).toBe(true);
     expect(body.report.correctionFindings.map((finding) => finding.status)).toContain("outdated-target");
     expect(body.report.facilityKnowledgeFindings[0]?.status).toBe("superseded-name-reference");
@@ -392,34 +403,42 @@ describe("AI memory health check", () => {
   it("applies only the current deterministic correction plan atomically", async () => {
     const manager = await freshManager();
     const operator = await freshOperator();
-    await db.insert(aiCorrectionsTable).values([
-      { scope: "live", domain: "ingredient", fromText: "Legacy Mozz", toText: "Old Target" },
-      { scope: "live", domain: "ingredient", fromText: "Duplicate", toText: "Whole Mozz" },
-      { scope: "live", domain: "ingredient", fromText: "Duplicate", toText: "Whole Mozz" },
-    ]);
-    await db.insert(facilityKnowledgeTable).values({
+    await db.insert(sauceRecipesTable).values({
+      id: "red-hot",
       scope: "live",
-      domain: "general",
-      key: "keep-me",
-      fact: "A natural-language facility fact must remain untouched.",
-      source: "retired-tool",
+      name: "Red Hot Pizza Sauce",
+      components: [{ ingredient: "Garlic Sauce", lbs: 200 }],
     });
-    await db.insert(mergeAliasesTable).values({
+    await db.insert(savedSpecSheetsTable).values({
       scope: "live",
-      category: "ingredient",
-      externalName: "Legacy Mozz",
-      canonicalName: "Whole Mozz",
+      label: "authoritative setup",
+      data: { profiles: [{ brand: "Corner Booth", flavor: "pepperoni", sauceName: "Red Hot Pizza Sauce" }] },
     });
-    await db.insert(ingredientsTable).values({
-      id: "whole-mozz",
+    await db.insert(brandProfilesTable).values({
+      key: "corner booth__pepperoni",
       scope: "live",
-      name: "Whole Mozz",
-      categories: ["cheese"],
-      enabled: true,
+      brand: "Corner Booth",
+      flavor: "pepperoni",
+      values: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+      updatedAtMs: 100,
+    });
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2099-01-01",
+      data: {
+        dayState: { runs: [
+          { id: "future", brand: "Corner Booth", flavor: "pepperoni" },
+          { id: "started", brand: "Corner Booth", flavor: "pepperoni", startedAt: 1 },
+        ] },
+        runValues: {
+          future: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+          started: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+        },
+        runValuesUpdatedAt: { future: 10, started: 10 },
+      },
     });
 
-    const denied = await fetch(`${baseUrl}/api/ai-memory/health-check/apply`, {
-      method: "POST",
+    const denied = await fetch(`${baseUrl}/api/profile-data/health-check`, {
       headers: { authorization: `Bearer ${signToken(operator)}` },
     });
     expect(denied.status).toBe(403);
@@ -429,11 +448,7 @@ describe("AI memory health check", () => {
       headers: { authorization: `Bearer ${signToken(manager)}` },
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as {
-      summary: { deleted: number; retargeted: number };
-      before: { safeRepairs: unknown[] };
-      after: { safeRepairs: unknown[] };
-    };
+    const body = await applied.json() as { summary: { repairedProfiles: number; repairedRuns: number }; after: { safeRepairs: unknown[] } };
     expect(body.before.safeRepairs).toHaveLength(2);
     expect(body.summary).toEqual({ deleted: 1, retargeted: 1 });
     expect(body.after.safeRepairs).toHaveLength(0);

@@ -125,6 +125,7 @@
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
 - [Dev DB connection exhaustion](dev-db-connection-exhaustion.md) + [detached process reaping](detached-process-reaping.md) — "too many clients" can last hours (retry, else reboot; restart both APIs); setsid/nohup dies with the bash session, >2min runs need a workflow.
 - [Die defaults switch-aware](die-defaults-switch-aware.md) — explicit die picks use the switch-aware resolver (replaces prior die auto-fill); import/autofill paths stay strict blank-fill-only.
+- [Die picker E2E names](die-picker-e2e-names.md) — 12-inch die variants canonicalize to `12"` in the live picker; seed/assert the canonical label in browser tests.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
 - [Brand rename aliases](brand-rename-aliases.md) — customer renames learn context-free brand spec-import aliases (chain re-point); premix redirect needs the brand-drift fallback, don't restore its early return.
