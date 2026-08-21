@@ -456,7 +456,7 @@ describe("buildMixPlan — prep-mix missingAmounts and missingComponentIngredien
     expect(plan).toHaveLength(0);
   });
 
-  it("prep mix card appears with missingAmounts=true when a run lists the ingredient but has no oz/pizza amounts", () => {
+  it("flags every component when a matching run has no ingredientOzPerPizza map", () => {
     // A run that HAS "Bell Peppers" in its ingredient list but provides no
     // oz/pizza value for it should still show the prep mix card with a warning,
     // because the name match IS there — only the amounts are missing (name-alignment
@@ -485,6 +485,27 @@ describe("buildMixPlan — prep-mix missingAmounts and missingComponentIngredien
     expect(entry.components[0].lbs).toBe(0);
     expect(entry.components[1].lbs).toBe(0);
     expect(entry.totalLbs).toBeCloseTo(20, 8); // startup buffer only
+  });
+
+  it("positive mix-card fallback clears missingAmounts when the profile map is absent", () => {
+    const mixes = [
+      makePrepMix({
+        name: "Fallback Prep",
+        components: [
+          { ingredient: "Bell Peppers", perPizza: 2.5 },
+          { ingredient: "Onions", perPizza: 1.25 },
+        ],
+      }),
+    ];
+    const r = prepRun(TODAY, 200, ["Bell Peppers", "Onions"]);
+
+    const [group] = buildMixPlan({ mixes, runs: [r], today: TODAY });
+    const entry = group.prepMixes[0];
+
+    expect(entry.missingAmounts).toBe(false);
+    expect(entry.missingComponentIngredients).toBeUndefined();
+    expect(entry.components[0].lbs).toBeCloseTo((2.5 * 200) / OZ_PER_LB, 8);
+    expect(entry.components[1].lbs).toBeCloseTo((1.25 * 200) / OZ_PER_LB, 8);
   });
 
   it("missingAmounts=true and missingComponentIngredients lists only the unmatched component when match is partial", () => {
