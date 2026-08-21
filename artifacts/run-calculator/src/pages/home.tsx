@@ -20743,6 +20743,9 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const [showSauceQuickCheck, setShowSauceQuickCheckRaw] = useState(
     () => getSauceBarrelEntry(currentRunId).showQuickCheck,
   );
+  const [lastBarrelNetSec, setLastBarrelNetSec] = useState(
+    () => getSauceBarrelEntry(currentRunId).lastBarrelNetSec,
+  );
 
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
@@ -20786,6 +20789,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const writeLastBarrelAnchor = useCallback(
     (sec: number) => {
       lastBarrelNetSecRef.current = sec;
+      setLastBarrelNetSec(sec);
       getSauceBarrelEntry(currentRunId).lastBarrelNetSec = sec;
     },
     [currentRunId],
@@ -20796,28 +20800,26 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     prep, prepActive, elapsedSec: prepElapsedSec, startPrep, addPrepBatchSauce,
   } = usePrepPhase({ dayState, dayStateRef, setDayState, schedulePush, nowMs: nowTime.getTime(), doughBatchSec: 580, sauceBatchSec: 1800 });
 
-  // Track the PREVIOUS run ID so the reset effect can distinguish a genuine
+  // Track the PREVIOUS run ID so the lifecycle effect can distinguish a genuine
   // new-run transition from a remount with the same run ID (e.g. Radix
   // TabsContent unmounting and re-mounting when the operator switches tabs).
-  // On a remount the prev ref initialises to currentRunId — equal → skip reset.
+  // On a remount the prev ref initialises to currentRunId — equal → skip work.
   const prevRunIdRef = useRef<string>(currentRunId);
 
   useEffect(() => {
-    // Reset only when the run ID genuinely changes — not on tab-return remounts.
-    // A remount sets prevRunIdRef to currentRunId on creation, so this guard
-    // returns immediately, leaving the module-level store (and its persisted
-    // barrel count, anchor, and latches) untouched.
+    // Only hydrate when the run ID genuinely changes — not on tab-return
+    // remounts. Each run owns an independent entry; resetting the destination
+    // here would erase its saved anchor when switching back to it.
     if (prevRunIdRef.current === currentRunId) return;
     prevRunIdRef.current = currentRunId;
-    // Wipe the store entry for the new run so state starts from zero.
-    // Raw setters avoid a write-through echo back to the just-reset entry.
-    resetSauceBarrelEntry(currentRunId);
-    setSauceMadeRaw(0);
-    lastBarrelNetSecRef.current = 0;
-    setShowSauceBarrelDueRaw(false);
-    sauceBarrelDueKeyRef.current = "";
-    sauceQuickCheckKeyRef.current = "";
-    setShowSauceQuickCheckRaw(false);
+    const entry = getSauceBarrelEntry(currentRunId);
+    setSauceMadeRaw(entry.barrelsMade);
+    lastBarrelNetSecRef.current = entry.lastBarrelNetSec;
+    setLastBarrelNetSec(entry.lastBarrelNetSec);
+    setShowSauceBarrelDueRaw(entry.showBarrelDue);
+    sauceBarrelDueKeyRef.current = entry.barrelDueKey;
+    sauceQuickCheckKeyRef.current = entry.quickCheckKey;
+    setShowSauceQuickCheckRaw(entry.showQuickCheck);
   }, [currentRunId]);
   useEffect(() => {
     if (runStatus === "ended") {
@@ -20987,7 +20989,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
             {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && calc.sauceDepletionSec > 0 && (() => {
               // Use pause-aware elapsedBatchSec; lastBarrelNetSecRef is also stored
               // in net-elapsed coords so the delta is naturally pause-safe.
-              const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSecRef.current);
+              const barrelElapsed = Math.max(0, elapsedBatchSec - lastBarrelNetSec);
               const secLeft = Math.max(0, calc.sauceDepletionSec - barrelElapsed);
               if (secLeft <= 0) {
                 return (

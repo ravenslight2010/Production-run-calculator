@@ -6,8 +6,9 @@
  * panels by default; without this store the barrel anchor and notification
  * latches reset to zero every time the operator navigates away and back.
  *
- * Keyed by run ID. Entries are lazily created on first access and explicitly
- * wiped when the run changes (via the currentRunId useEffect in the component).
+ * Keyed by run ID. Entries are lazily created on first access. Switching runs
+ * hydrates the destination entry; entries are only explicitly wiped when a run
+ * ends.
  */
 
 export interface SauceBarrelEntry {
