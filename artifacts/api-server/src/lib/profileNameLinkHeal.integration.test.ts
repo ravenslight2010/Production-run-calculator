@@ -295,6 +295,14 @@ describe("runProfileNameLinkStubPurge", () => {
       .set({ values: { frontlineRecipeName: "Manually Reverted" }, updatedAtMs: 99999999999999 })
       .where(and(eq(brandProfilesTable.key, "aldo__cheese"), eq(brandProfilesTable.scope, "live")));
 
+    // A claimed marker must protect the original summary as well as the data:
+    // if a later boot reaches the early return, it must not overwrite result.
+    const claimedResult = { preserved: "first-run-summary" };
+    await db
+      .update(dataHealsTable)
+      .set({ result: claimedResult })
+      .where(eq(dataHealsTable.id, HEAL_ID));
+
     await runProfileNameLinkStubPurge();
 
     expect(await db.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.id, "post-heal-orphan"))).toHaveLength(1);
@@ -303,6 +311,11 @@ describe("runProfileNameLinkStubPurge", () => {
       .from(brandProfilesTable)
       .where(and(eq(brandProfilesTable.key, "aldo__cheese"), eq(brandProfilesTable.scope, "live")));
     expect((aldo.values as Record<string, unknown>).frontlineRecipeName).toBe("Manually Reverted");
+    const [markerAfterSecondRun] = await db
+      .select()
+      .from(dataHealsTable)
+      .where(eq(dataHealsTable.id, HEAL_ID));
+    expect(markerAfterSecondRun.result).toEqual(claimedResult);
   });
 });
 
