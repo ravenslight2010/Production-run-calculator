@@ -263,7 +263,15 @@ export async function countUnreviewedIncidents(): Promise<number> {
 
 export async function countActionableIncidents(): Promise<number> {
   const [row] = await db.select({ count: sql<number>`cast(count(*) as int)` }).from(incidentsTable)
-    .where(and(eq(incidentsTable.scope, currentScope()), sql`${incidentsTable.workflowState} <> 'resolved'`));
+    // During the transition to the manager work queue, some already-resolved
+    // incidents kept their older `status = resolved` while retaining a stale
+    // workflow label such as "waiting". Treat either resolution signal as final
+    // so the manager badge never asks for attention on a handled incident.
+    .where(and(
+      eq(incidentsTable.scope, currentScope()),
+      sql`${incidentsTable.status} <> 'resolved'`,
+      sql`${incidentsTable.workflowState} <> 'resolved'`,
+    ));
   return row?.count ?? 0;
 }
 

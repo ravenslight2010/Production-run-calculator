@@ -72,6 +72,8 @@ let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
 let incidentsTable: DbModule["incidentsTable"];
 let facilityKnowledgeTable: DbModule["facilityKnowledgeTable"];
+let dataHealsTable: DbModule["dataHealsTable"];
+let runDataHeals: () => Promise<void>;
 
 let clearUserValidityCache: () => void;
 
@@ -121,6 +123,8 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   incidentsTable = dbMod.incidentsTable;
   facilityKnowledgeTable = dbMod.facilityKnowledgeTable;
+  dataHealsTable = dbMod.dataHealsTable;
+  runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -163,7 +167,7 @@ beforeEach(async () => {
   mock.calls = 0;
   mock.lastUserPrompt = "";
   await db.execute(
-    sql`TRUNCATE ${incidentsTable}, ${facilityKnowledgeTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${incidentsTable}, ${facilityKnowledgeTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog so requireCapability can resolve each user's role to a
   // capability set (a manager with no seeded roles would resolve to zero caps).
@@ -417,6 +421,62 @@ describe("incident resolve — manager only", () => {
 
     const missing = await req(MANAGER, "POST", "/api/incidents/does-not-exist/resolve");
     expect(missing.status).toBe(404);
+  });
+});
+
+describe("resolved incident workflow reconciliation", () => {
+  it("excludes legacy resolved incidents from the manager badge and repairs their stale queue state once", async () => {
+    const resolvedAt = new Date("2026-08-21T12:00:00.000Z");
+    await db.insert(incidentsTable).values([
+      {
+        id: "legacy-resolved-waiting",
+        source: "user_report",
+        reporterId: OPERATOR,
+        reporterName: "operator",
+        reporterRole: "operator",
+        screen: "Run",
+        appPlatform: "web",
+        context: { description: "Already handled legacy issue." },
+        status: "resolved",
+        workflowState: "waiting",
+        reviewedAt: resolvedAt,
+        resolvedAt,
+        priority: "high",
+      },
+      {
+        id: "still-waiting",
+        source: "user_report",
+        reporterId: OPERATOR,
+        reporterName: "operator",
+        reporterRole: "operator",
+        screen: "Run",
+        appPlatform: "web",
+        context: { description: "This issue still needs follow-up." },
+        status: "reviewed",
+        workflowState: "waiting",
+      },
+    ]);
+
+    const before = await req(MANAGER, "GET", "/api/incidents/actionable-count");
+    expect(((await before.json()) as { count: number }).count).toBe(1);
+
+    await runDataHeals();
+    const rows = await db.select().from(incidentsTable);
+    const reconciled = rows.find((row) => row.id === "legacy-resolved-waiting");
+    const stillWaiting = rows.find((row) => row.id === "still-waiting");
+    expect(reconciled?.workflowState).toBe("resolved");
+    expect(reconciled?.priority).toBe("high");
+    expect(reconciled?.resolvedAt?.toISOString()).toBe(resolvedAt.toISOString());
+    expect(stillWaiting?.workflowState).toBe("waiting");
+
+    const healRows = await db.select().from(dataHealsTable);
+    const marker = healRows.find((row) => row.id === "incident-resolved-workflow-reconciliation-v1");
+    expect(marker?.result).toEqual({ reconciled: 1 });
+
+    // The marker makes a later boot a no-op; it must not alter live queue rows.
+    await runDataHeals();
+    const afterRetry = await db.select().from(incidentsTable);
+    expect(afterRetry.find((row) => row.id === "still-waiting")?.workflowState).toBe("waiting");
   });
 });
 

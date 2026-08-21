@@ -13,6 +13,7 @@ import {
   sauceRecipesTable,
   brandProfilesTable,
   savedSpecSheetsTable,
+  incidentsTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import {
@@ -3485,6 +3486,58 @@ export async function runDataHeals(): Promise<void> {
   await runAug19SavedSpecProfileRepair();
   await runAug19SavedSpecProfileRepairV2();
   await runFreshDeviceRunContaminationCleanup();
+  await runResolvedIncidentWorkflowReconciliation();
+}
+
+// ── Incident resolved-status/workflow-state reconciliation ───────────────────
+//
+// The manager work queue introduced `workflowState` after incidents already had
+// a lifecycle `status`. Older resolution writes set `status = resolved` but did
+// not necessarily update the new queue state, leaving a handled incident in the
+// manager-attention badge. `status = resolved` is the authoritative, explicit
+// proof that an incident was handled; only those contradictory rows are safe to
+// normalize. We do not touch ownership, notes, priority, or timestamps.
+const RESOLVED_INCIDENT_WORKFLOW_RECONCILIATION_HEAL_ID =
+  "incident-resolved-workflow-reconciliation-v1";
+
+async function runResolvedIncidentWorkflowReconciliation(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: RESOLVED_INCIDENT_WORKFLOW_RECONCILIATION_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const staleRows = await tx
+      .select({ id: incidentsTable.id })
+      .from(incidentsTable)
+      .where(and(
+        eq(incidentsTable.status, "resolved"),
+        sql`${incidentsTable.workflowState} <> 'resolved'`,
+      ))
+      .for("update");
+
+    let reconciled = 0;
+    for (const row of staleRows) {
+      const updated = await tx
+        .update(incidentsTable)
+        .set({ workflowState: "resolved" })
+        .where(eq(incidentsTable.id, row.id))
+        .returning({ id: incidentsTable.id });
+      reconciled += updated.length;
+    }
+
+    const result = { reconciled };
+    await tx
+      .update(dataHealsTable)
+      .set({ result })
+      .where(eq(dataHealsTable.id, RESOLVED_INCIDENT_WORKFLOW_RECONCILIATION_HEAL_ID));
+    logger.info(
+      { heal: RESOLVED_INCIDENT_WORKFLOW_RECONCILIATION_HEAL_ID, ...result },
+      "Data heal applied",
+    );
+  });
 }
 
 // ── Strip all ozPerPizza from cheese recipe components ───────────────────────
