@@ -358,8 +358,10 @@ import {
   buildBatchWeightMap,
   lookupBatchWeight,
   collectBatchWeightCandidates,
+  executeBatchWeightPropagation,
   type BatchWeightCandidate,
   type IngredientBatchWeightRow,
+  type BatchWeightPropagationProfile,
 } from "../ingredientBatchWeights";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
@@ -4268,44 +4270,6 @@ export default function Home() {
     async (entries: { name: string; lbs: number }[]) => {
       if (entries.length === 0) return;
 
-      // Build name-key → new lbs map for all positive entries.
-      const newWeights = new Map<string, number>();
-      for (const { name, lbs } of entries) {
-        const key = (name ?? "").trim().toLowerCase();
-        if (key && lbs > 0) newWeights.set(key, lbs);
-      }
-      if (newWeights.size === 0) return;
-
-      // Whether a recipe row array has any real lbs (recipe-backed slot).
-      function hasProfileRecipeRows(rows: unknown): boolean {
-        return Array.isArray(rows) && rows.some(
-          (r: unknown) => Number((r as { lbs?: unknown })?.lbs) > 0,
-        );
-      }
-      function isMixType(type: unknown): boolean {
-        return typeof type === "string" && type.trim().toLowerCase().includes("mix");
-      }
-
-      // Each (typeField → lbsField) slot, with the guard that tells us whether
-      // the manual batch-lbs field is hidden (recipe-backed / default pep type).
-      type ProfileLike = Record<string, unknown>;
-      const typeSlots: Array<{
-        typeField: string;
-        lbsField: string;
-        hidden: (p: ProfileLike) => boolean;
-      }> = [
-        { typeField: "app1Type", lbsField: "app1BatchLbs", hidden: (p) => hasProfileRecipeRows(p.app1CheeseRecipe) || isMixType(p.app1Type) },
-        { typeField: "app2Type", lbsField: "app2BatchLbs", hidden: (p) => hasProfileRecipeRows(p.app2CheeseRecipe) || isMixType(p.app2Type) },
-        { typeField: "app3Type", lbsField: "app3BatchLbs", hidden: (p) => hasProfileRecipeRows(p.app3CheeseRecipe) || isMixType(p.app3Type) },
-        { typeField: "app4Type", lbsField: "app4BatchLbs", hidden: (p) => hasProfileRecipeRows(p.app4CheeseRecipe) || isMixType(p.app4Type) },
-        { typeField: "pep1Type",  lbsField: "pep1BatchLbs",   hidden: (p) => DEFAULT_PEP_TYPES.includes(((p.pep1Type  as string) ?? "").trim()) },
-        { typeField: "pep1TypeB", lbsField: "pep1BatchLbsB",  hidden: (p) => DEFAULT_PEP_TYPES.includes(((p.pep1TypeB as string) ?? "").trim()) },
-        { typeField: "pep2Type",  lbsField: "pep2BatchLbs",   hidden: (p) => DEFAULT_PEP_TYPES.includes(((p.pep2Type  as string) ?? "").trim()) },
-        { typeField: "pep2TypeB", lbsField: "pep2BatchLbsB",  hidden: (p) => DEFAULT_PEP_TYPES.includes(((p.pep2TypeB as string) ?? "").trim()) },
-        // Sauce barrel: only plain (no recipe rows); uses frontlineRecipeName as the "type"
-        { typeField: "frontlineRecipeName", lbsField: "sauceBarrelLbs", hidden: (p) => hasProfileRecipeRows(p.frontlineRecipe) },
-      ];
-
       // Ensure all server profiles are present in localStorage before scanning
       // (gap-fill only — never clobbers local edits). This covers the race
       // where a manager saves a batch weight before the boot reconciliation
@@ -4344,8 +4308,7 @@ export default function Home() {
         }
       }
 
-      let updatedCount = 0;
-      const propagations: Promise<void>[] = [];
+      const profiles: BatchWeightPropagationProfile[] = [];
 
       for (const suffix of profileSuffixes) {
         const dunderIdx = suffix.indexOf("__");
@@ -4355,54 +4318,33 @@ export default function Home() {
 
         const profile = loadProfile(brand, flavor);
         if (!profile) continue;
-
-        const updates: Partial<Record<string, number>> = {};
-        const profileRec = profile as unknown as ProfileLike;
-
-        for (const { typeField, lbsField, hidden } of typeSlots) {
-          if (hidden(profileRec)) continue;
-          const typeName = ((profileRec[typeField] as string) ?? "").trim();
-          if (!typeName) continue;
-          const newLbs = newWeights.get(typeName.toLowerCase());
-          if (newLbs == null) continue;
-          const currentLbs = Number(profileRec[lbsField]);
-          // Fill if was 0; replace if factory standard changed.
-          if (currentLbs !== newLbs) updates[lbsField] = newLbs;
-        }
-
-        if (Object.keys(updates).length === 0) continue;
-
-        const updated = { ...profile, ...updates } as FormValues;
-        // Profile writes are manager-only; non-managers still get the
-        // in-memory heal (open-form update below) but never persist it.
-        const saved = canManageProfiles && saveProfile(brand, flavor, updated);
-        if (saved) {
-          updatedCount++;
-          propagations.push(propagateProfileToPendingRuns(brand, flavor));
-        }
+        profiles.push({ brand, flavor, profile: profile as Record<string, unknown> });
       }
 
-      await Promise.allSettled(propagations);
-
-      // Update the open form if it uses any of the updated ingredients.
-      const cv = form.getValues() as unknown as ProfileLike;
-      for (const { typeField, lbsField, hidden } of typeSlots) {
-        if (hidden(cv)) continue;
-        const typeName = ((cv[typeField] as string) ?? "").trim();
-        if (!typeName) continue;
-        const newLbs = newWeights.get(typeName.toLowerCase());
-        if (newLbs == null) continue;
-        if (Number(cv[lbsField]) !== newLbs) {
-          form.setValue(lbsField as Parameters<typeof form.setValue>[0], newLbs as never, { shouldDirty: true });
-        }
-      }
-
-      if (updatedCount > 0) {
-        toast({
-          title: "Batch weight saved",
-          description: `${updatedCount} profile${updatedCount === 1 ? "" : "s"} updated`,
-        });
-      }
+      await executeBatchWeightPropagation({
+        profiles,
+        openForm: form.getValues() as Record<string, unknown>,
+        entries,
+        defaultPepTypes: DEFAULT_PEP_TYPES,
+        saveProfile: (brand, flavor, updates) => {
+          const profile = loadProfile(brand, flavor);
+          if (!profile) return false;
+          // Profile writes are manager-only; non-managers still get the
+          // in-memory heal (open-form update below) but never persist it.
+          return canManageProfiles && saveProfile(
+            brand,
+            flavor,
+            { ...profile, ...updates } as FormValues,
+          );
+        },
+        propagateToPendingRuns: propagateProfileToPendingRuns,
+        setOpenFormValue: (field, lbs) => form.setValue(
+          field as Parameters<typeof form.setValue>[0],
+          lbs as never,
+          { shouldDirty: true },
+        ),
+        notify: toast,
+      });
     },
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)
     // eslint-disable-next-line react-hooks/exhaustive-deps

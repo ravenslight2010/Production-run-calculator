@@ -71,8 +71,9 @@ export type BatchWeightCandidate = { name: string; lbs: number };
 
 type RecipeRowLike = { lbs?: number | string | null };
 
-function hasRecipeRows(rows: RecipeRowLike[] | null | undefined): boolean {
-  return (rows ?? []).some((r) => Number(r?.lbs) > 0);
+function hasRecipeRows(rows: unknown): boolean {
+  return Array.isArray(rows) &&
+    rows.some((row) => Number((row as RecipeRowLike | null)?.lbs) > 0);
 }
 
 export type BatchWeightFormSlice = {
@@ -94,6 +95,220 @@ export type BatchWeightFormSlice = {
     recipe: RecipeRowLike[] | null | undefined;
   };
 };
+
+export type BatchWeightProfileLike = Record<string, unknown>;
+
+export type BatchWeightPropagationProfile = {
+  brand: string;
+  flavor: string;
+  profile: BatchWeightProfileLike;
+};
+
+export type BatchWeightProfileUpdate = {
+  brand: string;
+  flavor: string;
+  updates: Partial<Record<string, number>>;
+};
+
+export type BatchWeightPropagationPlan = {
+  profileUpdates: BatchWeightProfileUpdate[];
+  openFormUpdates: Partial<Record<string, number>>;
+};
+
+export type BatchWeightPropagationToast = {
+  title: string;
+  description: string;
+};
+
+export function batchWeightPropagationToast(
+  savedProfileCount: number,
+): BatchWeightPropagationToast | null {
+  if (savedProfileCount <= 0) return null;
+  return {
+    title: "Batch weight saved",
+    description: `${savedProfileCount} profile${savedProfileCount === 1 ? "" : "s"} updated`,
+  };
+}
+
+export type BatchWeightPropagationExecution = {
+  profiles: BatchWeightPropagationProfile[];
+  openForm: BatchWeightProfileLike;
+  entries: BatchWeightCandidate[];
+  defaultPepTypes: string[];
+  saveProfile: (
+    brand: string,
+    flavor: string,
+    updates: Partial<Record<string, number>>,
+  ) => boolean | Promise<boolean>;
+  propagateToPendingRuns: (brand: string, flavor: string) => Promise<void> | void;
+  setOpenFormValue: (field: string, lbs: number) => void;
+  notify: (toast: BatchWeightPropagationToast) => void;
+};
+
+export type BatchWeightPropagationExecutionResult = {
+  plan: BatchWeightPropagationPlan;
+  savedProfileCount: number;
+};
+
+type BatchWeightProfileSlot = {
+  typeField: string;
+  lbsField: string;
+  hidden: (profile: BatchWeightProfileLike, defaultPepTypes: string[]) => boolean;
+};
+
+const BATCH_WEIGHT_PROFILE_SLOTS: BatchWeightProfileSlot[] = [
+  {
+    typeField: "app1Type",
+    lbsField: "app1BatchLbs",
+    hidden: (profile) =>
+      hasRecipeRows(profile.app1CheeseRecipe) ||
+      isMixType(profile.app1Type),
+  },
+  {
+    typeField: "app2Type",
+    lbsField: "app2BatchLbs",
+    hidden: (profile) =>
+      hasRecipeRows(profile.app2CheeseRecipe) ||
+      isMixType(profile.app2Type),
+  },
+  {
+    typeField: "app3Type",
+    lbsField: "app3BatchLbs",
+    hidden: (profile) =>
+      hasRecipeRows(profile.app3CheeseRecipe) ||
+      isMixType(profile.app3Type),
+  },
+  {
+    typeField: "app4Type",
+    lbsField: "app4BatchLbs",
+    hidden: (profile) =>
+      hasRecipeRows(profile.app4CheeseRecipe) ||
+      isMixType(profile.app4Type),
+  },
+  {
+    typeField: "pep1Type",
+    lbsField: "pep1BatchLbs",
+    hidden: (profile, defaultPepTypes) =>
+      isDefaultPepType(profile.pep1Type, defaultPepTypes),
+  },
+  {
+    typeField: "pep1TypeB",
+    lbsField: "pep1BatchLbsB",
+    hidden: (profile, defaultPepTypes) =>
+      isDefaultPepType(profile.pep1TypeB, defaultPepTypes),
+  },
+  {
+    typeField: "pep2Type",
+    lbsField: "pep2BatchLbs",
+    hidden: (profile, defaultPepTypes) =>
+      profile.pep1Combined === true ||
+      isDefaultPepType(profile.pep2Type, defaultPepTypes),
+  },
+  {
+    typeField: "pep2TypeB",
+    lbsField: "pep2BatchLbsB",
+    hidden: (profile, defaultPepTypes) =>
+      profile.pep1Combined === true ||
+      isDefaultPepType(profile.pep2TypeB, defaultPepTypes),
+  },
+  {
+    typeField: "frontlineRecipeName",
+    lbsField: "sauceBarrelLbs",
+    hidden: (profile) =>
+      hasRecipeRows(profile.frontlineRecipe),
+  },
+];
+
+function isMixType(type: unknown): boolean {
+  return typeof type === "string" && type.trim().toLowerCase().includes("mix");
+}
+
+function isDefaultPepType(type: unknown, defaultPepTypes: unknown): boolean {
+  const trimmed = typeof type === "string" ? type.trim() : "";
+  return Array.isArray(defaultPepTypes) && defaultPepTypes.includes(trimmed);
+}
+
+function buildNewBatchWeightMap(
+  entries: BatchWeightCandidate[],
+): Map<string, number> {
+  const newWeights = new Map<string, number>();
+  for (const { name, lbs } of entries) {
+    const key = (name ?? "").trim().toLowerCase();
+    if (key && Number.isFinite(lbs) && lbs > 0) newWeights.set(key, lbs);
+  }
+  return newWeights;
+}
+
+export function collectBatchWeightProfileUpdates(
+  profile: BatchWeightProfileLike,
+  entries: BatchWeightCandidate[],
+  defaultPepTypes: string[],
+): Partial<Record<string, number>> {
+  const newWeights = buildNewBatchWeightMap(entries);
+  const updates: Partial<Record<string, number>> = {};
+
+  for (const { typeField, lbsField, hidden } of BATCH_WEIGHT_PROFILE_SLOTS) {
+    if (hidden(profile, defaultPepTypes)) continue;
+    const typeName = typeof profile[typeField] === "string"
+      ? profile[typeField].trim()
+      : "";
+    if (!typeName) continue;
+    const newLbs = newWeights.get(typeName.toLowerCase());
+    if (newLbs == null || Number(profile[lbsField]) === newLbs) continue;
+    updates[lbsField] = newLbs;
+  }
+
+  return updates;
+}
+
+export function buildBatchWeightPropagationPlan(
+  profiles: BatchWeightPropagationProfile[],
+  openForm: BatchWeightProfileLike,
+  entries: BatchWeightCandidate[],
+  defaultPepTypes: string[],
+): BatchWeightPropagationPlan {
+  const profileUpdates: BatchWeightProfileUpdate[] = [];
+  for (const { brand, flavor, profile } of profiles) {
+    const updates = collectBatchWeightProfileUpdates(profile, entries, defaultPepTypes);
+    if (Object.keys(updates).length > 0) {
+      profileUpdates.push({ brand, flavor, updates });
+    }
+  }
+
+  return {
+    profileUpdates,
+    openFormUpdates: collectBatchWeightProfileUpdates(openForm, entries, defaultPepTypes),
+  };
+}
+
+export async function executeBatchWeightPropagation(
+  input: BatchWeightPropagationExecution,
+): Promise<BatchWeightPropagationExecutionResult> {
+  const plan = buildBatchWeightPropagationPlan(
+    input.profiles,
+    input.openForm,
+    input.entries,
+    input.defaultPepTypes,
+  );
+  let savedProfileCount = 0;
+  const propagations: Promise<void>[] = [];
+
+  for (const { brand, flavor, updates } of plan.profileUpdates) {
+    if (!await input.saveProfile(brand, flavor, updates)) continue;
+    savedProfileCount++;
+    propagations.push(Promise.resolve(input.propagateToPendingRuns(brand, flavor)));
+  }
+  await Promise.allSettled(propagations);
+
+  for (const [field, lbs] of Object.entries(plan.openFormUpdates)) {
+    if (lbs !== undefined) input.setOpenFormValue(field, lbs);
+  }
+
+  const toast = batchWeightPropagationToast(savedProfileCount);
+  if (toast) input.notify(toast);
+
+  return { plan, savedProfileCount };
+}
 
 // Collect the pairs worth remembering right now: named ingredient + a positive
 // manually-visible batch weight that differs from what's already learned.
