@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { computeCheesePull } from "@workspace/inventory-math";
 import { DEFAULT_VALUES, type FormValues } from "./types";
-import { setActiveSubstitutions, withSubstitutions } from "./substitutionState";
+import {
+  setActiveSubstitutions,
+  withSubstitutions,
+  withTodaySubstitutions,
+} from "./substitutionState";
 
 afterEach(() => setActiveSubstitutions([]));
 
@@ -153,37 +157,39 @@ describe("runDetailModal — mix ingredient rows", () => {
 // ── Today's substitution overlay ──────────────────────────────────────────────
 
 describe("runDetailModal — today's substituted dough recipe", () => {
+  const storedRun = {
+    ...DEFAULT_VALUES,
+    casesNeeded: 25,
+    pizzasPerCase: 12,
+    targetDoughballWeight: 16,
+    doughRecipe: [
+      { ingredient: "Standard Flour", lbs: 40 },
+      { ingredient: "Water", lbs: 20 },
+    ],
+  };
+
+  const substitutions = [
+    {
+      id: "replace-flour",
+      ingredient: "Standard Flour",
+      action: "swap" as const,
+      substitute: "High Gluten Flour",
+      amount: 50,
+    },
+    {
+      id: "add-dough-conditioner",
+      ingredient: "Water",
+      action: "add" as const,
+      substitute: "Dough Conditioner",
+      amount: 5,
+    },
+  ];
+
   it("shows replaced and newly added dough ingredients at their substituted totals", () => {
     // This is the stored recipe for a run that has already started. Daily
     // substitutions deliberately do not mutate it; the Detail dialog must
     // overlay the rows just before it calculates the visible totals.
-    const storedRun = {
-      ...DEFAULT_VALUES,
-      casesNeeded: 25,
-      pizzasPerCase: 12,
-      targetDoughballWeight: 16,
-      doughRecipe: [
-        { ingredient: "Standard Flour", lbs: 40 },
-        { ingredient: "Water", lbs: 20 },
-      ],
-    };
-
-    setActiveSubstitutions([
-      {
-        id: "replace-flour",
-        ingredient: "Standard Flour",
-        action: "swap",
-        substitute: "High Gluten Flour",
-        amount: 50,
-      },
-      {
-        id: "add-dough-conditioner",
-        ingredient: "Water",
-        action: "add",
-        substitute: "Dough Conditioner",
-        amount: 5,
-      },
-    ]);
+    setActiveSubstitutions(substitutions);
 
     // Exactly as Ingredient Detail does for today's run: it keeps the stored
     // value for summary math and overlays only the displayed recipe rows.
@@ -198,13 +204,24 @@ describe("runDetailModal — today's substituted dough recipe", () => {
     expect(visibleRows.find((row) => row.ingredient === "Standard Flour")).toBeUndefined();
   });
 
-  it("keeps the real Ingredient Detail dialog wired to the today-only overlay", () => {
-    // The arithmetic test above protects the user-visible totals. This guard
-    // protects the production handoff: the modal must use the overlay for
-    // today's recipe rows, while historical recipe detail remains immutable.
+  it("leaves historical run recipes and their ingredient detail unchanged", () => {
+    const historicalBefore = structuredClone(storedRun);
+    const visibleValues = withTodaySubstitutions(storedRun, false, substitutions);
+
+    expect(visibleValues).toBe(storedRun);
+    expect(visibleValues).toEqual(historicalBefore);
+    expect(doughIngredientRows(visibleValues)).toEqual([
+      { ingredient: "Standard Flour", lbs: 200 },
+      { ingredient: "Water", lbs: 100 },
+    ]);
+  });
+
+  it("keeps the real Ingredient Detail dialog wired to the today-only helper", () => {
+    // This guard protects the production handoff: the modal must use the
+    // today-only helper, while historical recipe detail remains immutable.
     const homeSource = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
     expect(homeSource).toContain(
-      "? applySubstitutions(detailVals, dayState.substitutions ?? [])",
+      "withTodaySubstitutions(",
     );
   });
 });

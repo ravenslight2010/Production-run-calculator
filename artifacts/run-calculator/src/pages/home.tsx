@@ -91,7 +91,7 @@ import {
   writeDayResetAt,
   runLabel,
 } from "../utils";
-import { setActiveSubstitutions } from "../substitutionState";
+import { setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
@@ -23769,9 +23769,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
       // of relying on the module-level mirror effect: opening the dialog in
       // the same render as a substitution change must not show stale rows.
       // Historical runs are intentionally left untouched by today's overlay.
-      const dv = todayRun
-        ? applySubstitutions(detailVals, dayState.substitutions ?? [])
-        : detailVals;
+      const dv = withTodaySubstitutions(
+        detailVals,
+        Boolean(todayRun),
+        dayState.substitutions,
+      );
       const ds = computeSummaryStatsShared(dv, DEFAULT_PEP_TYPES);
       const ddrLbs = (dv.doughRecipe ?? []).reduce((acc: number, r: any) => acc + Number(r.lbs ?? 0), 0);
       const effYld = ddrLbs > 0 && dv.targetDoughballWeight > 0

@@ -27,3 +27,12 @@ export function getActiveSubstitutions(): IngredientSubstitution[] {
 export function withSubstitutions<T extends Record<string, unknown>>(vals: T): T {
   return active.length ? (applySubstitutions(vals, active) as T) : vals;
 }
+
+/** Apply the day-state overlay only to values belonging to today's runs. */
+export function withTodaySubstitutions<T extends Record<string, unknown>>(
+  vals: T,
+  isToday: boolean,
+  substitutions: IngredientSubstitution[] | undefined,
+): T {
+  return isToday ? (applySubstitutions(vals, substitutions ?? []) as T) : vals;
+}
