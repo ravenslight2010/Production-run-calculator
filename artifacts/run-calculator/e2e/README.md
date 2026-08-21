@@ -7,6 +7,7 @@
 | `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
 | `playwright.a11y.config.ts` | isolated sandbox, non-destructive | no global setup; axe scans public and sandbox-authenticated screens without deleting live-day data |
+| `playwright.visual.config.ts` | isolated account, non-destructive | no global setup; the visual suite creates unique accounts and removes them in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
 
@@ -76,6 +77,47 @@ global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
 
+## Visual regression baselines
+
+The visual suite is intentionally small: it covers a live production run, Mix
+Plan, the Excel import review, the ended-run compact strip, and a phone stop
+dialog. It uses a unique account, a generated workbook, and masks clocks,
+timestamps, and date controls so snapshots describe layout rather than test
+data or wall-clock time.
+
+Run the comparisons with a disposable or explicitly approved test database:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:visual
+```
+
+To intentionally update baselines, review the resulting images locally and
+rerun with Playwright's explicit update flag:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator exec playwright test \
+  --config playwright.visual.config.ts --update-snapshots
+```
+
+Never add `--update-snapshots` to CI. A failed comparison leaves the actual
+image, expected image, and diff in `test-results/`; inspect all three before
+accepting a baseline change. If the suite cannot reach the app, first start
+the API and web workflows and verify `PLAYWRIGHT_BASE_URL`.
+
+Run destructive browser coverage only with an approved disposable database:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e
+```
+
+The main suite uses one worker to keep its factory-wide live-day reset
+deterministic. A failed test may leave its own temporary server data behind;
+rerun the suite only after confirming the disposable database boundary. The
+global reset removes today’s live-day row before the next run, while per-suite
+cleanup removes tracked accounts and entity fixtures.
 ## Accessibility smoke gate
 
 Run `pnpm --filter @workspace/run-calculator run test:e2e:a11y` against the
