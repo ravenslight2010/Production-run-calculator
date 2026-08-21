@@ -23875,7 +23875,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     {sRows.map((r: any, i: number) => (
                       <div key={i} className="flex justify-between py-0.5 pl-3 text-muted-foreground">
                         <span>{r.ingredient}</span>
-                        <span className="tabular-nums">{fmtNum(Number(r.lbs) * ds.sauceBatches, 1)} lbs</span>
+                          <span className="tabular-nums">{fmtNum(Number(r.lbs) * ds.sauceBatches, 1)} lbs</span>
                       </div>
                     ))}
                   </div>
