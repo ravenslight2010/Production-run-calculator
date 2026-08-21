@@ -204,7 +204,73 @@ describe("useClock — screen timeout / visibility event handling", () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // 5. Repeated hide/show cycles don't drift the clock or accumulate phantom
+  // 5. Rapid focus events while hidden must not restart the interval.
+  //
+  // Some devices can emit several focus events during screen wake while the
+  // document is still hidden.  The hidden focus guard must ignore every one:
+  // no interval may be started and nowTime must remain frozen until the
+  // visibilitychange show branch snaps and restarts the clock.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("5. rapid focus events while hidden do not start an interval or advance nowTime", () => {
+    cleanup();
+
+    const { result, rerender } = renderHook(() => useClock("running"));
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Hide the running tab.  The existing interval is cleared.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    const timeBeforeSleep = result.current.getTime();
+
+    act(() => {
+      setDocumentHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Focus can fire repeatedly before the tab becomes visible.  Each event
+    // must leave the timer count at zero and the last visible time unchanged.
+    for (let focusNumber = 0; focusNumber < 3; focusNumber += 1) {
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+        rerender();
+      });
+      expect(vi.getTimerCount()).toBe(0);
+      expect(result.current.getTime()).toBe(timeBeforeSleep);
+
+      // Advance the fake clock between focus events to prove that no hidden
+      // interval callback advances nowTime.
+      act(() => {
+        vi.advanceTimersByTime(250);
+        rerender();
+      });
+      expect(result.current.getTime()).toBe(timeBeforeSleep);
+    }
+
+    // Becoming visible snaps to the current time and restarts exactly one
+    // interval.
+    act(() => {
+      setDocumentHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    expect(result.current.getTime()).toBe(T0 + 1_750);
+
+    // Confirm the restarted interval has one normal cadence.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 2_750);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 6. Repeated hide/show cycles don't drift the clock or accumulate phantom
   //    intervals — 3 cycles while status="running".
   //
   // Each screen-lock/unlock pair (hide then show) must:
