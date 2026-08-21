@@ -141,3 +141,4 @@
 - [AI memory health audits](ai-memory-health-audits.md) — historic aliases are evidence, not stale records; safe cleanup must rely on canonical merge/import maps and never touch facility facts or user conversations.
 - [Mounted AI cost paths](mounted-ai-cost-paths.md) — Express strips mount prefixes from req.path; cost lookups keyed by public API paths must recombine baseUrl + path.
 - [Isolated destructive browser tests](isolated-destructive-browser-tests.md) — Drizzle push ignores URL search_path isolation; use a temporary database for Playwright setup that deletes live-day rows.
+- [GitHub Actions connector limitation](github-actions-connector-quirk.md) — workflow-path writes can be blocked by Cloudflare and repository secrets cannot be provisioned through the connector; verify remote setup first.
