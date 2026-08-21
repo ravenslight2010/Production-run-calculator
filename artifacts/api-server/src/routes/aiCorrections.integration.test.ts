@@ -174,6 +174,50 @@ async function listCorrections(userId: string): Promise<Array<{ id: number; doma
   return body.corrections;
 }
 
+describe("GET and POST /ai-corrections — capability gating", () => {
+  it("allows any authenticated operator to read corrections", async () => {
+    const operator = await freshOperator();
+
+    const res = await fetch(`${baseUrl}/api/ai-corrections`, {
+      headers: { authorization: `Bearer ${signToken(operator)}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ corrections: [] });
+  });
+
+  it("rejects an operator write and does not persist the correction", async () => {
+    const operator = await freshOperator();
+
+    const res = await post(operator, [
+      { domain: "brand", fromText: "Old Brand", toText: "New Brand" },
+    ]);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Missing capability: manage-staff" });
+    expect(await listCorrections(operator)).toEqual([]);
+  });
+
+  it("allows a manager to write and returns the corrections payload", async () => {
+    const manager = await freshManager();
+
+    const res = await post(manager, [
+      { domain: "brand", fromText: "Old Brand", toText: "New Brand" },
+    ]);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      corrections: [
+        {
+          domain: "brand",
+          fromText: "Old Brand",
+          toText: "New Brand",
+        },
+      ],
+    });
+  });
+});
+
 describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", () => {
   it("collapses A→B + B→C into A→C when B is renamed to C", async () => {
     // Core scenario: OldName→MiddleName recorded, then MiddleName→NewName recorded.
