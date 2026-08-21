@@ -393,6 +393,7 @@ import {
   buildReorderDemandByKey,
   type MergeInventoryLine,
 } from "../inventoryShared";
+import { applySubstitutions, computeSummaryStats as computeSummaryStatsShared } from "@workspace/inventory-math";
 import {
   buildMergeMap,
   countMergeReferences,
@@ -23771,8 +23772,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
         }
       }
       if (!detailRun || !detailVals) return null;
-      const dv = detailVals;
-      const ds = computeSummaryStats(dv);
+      // Ingredient Detail must use the same effective recipe as today's
+      // consumption math. Apply the day-state overlay directly here instead
+      // of relying on the module-level mirror effect: opening the dialog in
+      // the same render as a substitution change must not show stale rows.
+      // Historical runs are intentionally left untouched by today's overlay.
+      const dv = todayRun
+        ? applySubstitutions(detailVals, dayState.substitutions ?? [])
+        : detailVals;
+      const ds = computeSummaryStatsShared(dv, DEFAULT_PEP_TYPES);
       const ddrLbs = (dv.doughRecipe ?? []).reduce((acc: number, r: any) => acc + Number(r.lbs ?? 0), 0);
       const effYld = ddrLbs > 0 && dv.targetDoughballWeight > 0
         ? (ddrLbs * 16) / dv.targetDoughballWeight : dv.doughBatchYield;
