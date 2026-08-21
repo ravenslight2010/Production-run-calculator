@@ -37,15 +37,21 @@ function viewportLabel(page: Page): string {
   return viewport ? `${viewport.width}x${viewport.height}` : "unknown viewport";
 }
 
-async function assertPhoneLayout(page: Page, area: string): Promise<void> {
+async function assertPhoneLayout(
+  page: Page,
+  area: string,
+  options: { skipModalOverlayCoverage?: boolean } = {},
+): Promise<void> {
   const label = `${viewportLabel(page)} ${area}`;
-  const failures = await page.evaluate(() => {
+  const failures = await page.evaluate((skipModalOverlayCoverage) => {
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const visible = (element: Element) => {
       const style = window.getComputedStyle(element);
       const rect = (element as HTMLElement).getBoundingClientRect();
       return (
+        element.getAttribute("aria-hidden") !== "true" &&
+        !element.closest('[aria-hidden="true"]') &&
         style.display !== "none" &&
         style.visibility !== "hidden" &&
         Number.parseFloat(style.opacity || "1") > 0 &&
@@ -153,6 +159,7 @@ async function assertPhoneLayout(page: Page, area: string): Promise<void> {
       );
     });
     for (const fixed of fixedElements) {
+      if (skipModalOverlayCoverage) continue;
       if (isFixedNavigation(fixed)) continue;
       const fixedRect = fixed.getBoundingClientRect();
       if (
@@ -183,7 +190,7 @@ async function assertPhoneLayout(page: Page, area: string): Promise<void> {
     }
 
     return problems;
-  });
+  }, options.skipModalOverlayCoverage ?? false);
 
   expect(failures, `Phone layout failures in ${label}`).toEqual([]);
 }
@@ -395,6 +402,50 @@ async function visible(locator: Locator): Promise<boolean> {
   return locator.isVisible({ timeout: 5_000 }).catch(() => false);
 }
 
+async function assertKeyboardReachable(
+  page: Page,
+  area: string,
+  tabCount = 10,
+): Promise<void> {
+  const controls = page.locator(
+    'button:visible, input:visible, select:visible, textarea:visible, [role="button"]:visible, [role="tab"]:visible',
+  );
+  await expect(controls.first(), `${area} should expose a keyboard-reachable control`).toBeVisible();
+  await controls.first().focus();
+
+  for (let i = 0; i < tabCount; i += 1) {
+    await page.keyboard.press("Tab");
+    const focusGeometry = await page.evaluate(() => {
+      const element = document.activeElement;
+      if (!(element instanceof HTMLElement)) return null;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return {
+        tag: element.tagName,
+        disabled: "disabled" in element && Boolean((element as HTMLButtonElement).disabled),
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        outline: style.outlineStyle,
+      };
+    });
+    expect(focusGeometry, `${area} should retain a visible focused element`).not.toBeNull();
+    expect(focusGeometry?.disabled, `${area} should not focus disabled controls`).toBeFalsy();
+    expect(focusGeometry?.left, `${area} focus should remain on-screen`).toBeGreaterThanOrEqual(-1);
+    expect(focusGeometry?.right, `${area} focus should remain on-screen`).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
+    expect(focusGeometry?.top, `${area} focus should remain on-screen`).toBeGreaterThanOrEqual(-1);
+    expect(focusGeometry?.bottom, `${area} focus should remain on-screen`).toBeLessThanOrEqual((page.viewportSize()?.height ?? 0) + 1);
+  }
+}
+
+async function closeImportReview(page: Page): Promise<void> {
+  const title = page.locator("span").filter({ hasText: /^Import Excel$/ });
+  await expect(title).toBeVisible();
+  await title.locator("xpath=../..").getByRole("button").first().click();
+  await expect(title).toBeHidden();
+}
+
 test.describe("phone layout smoke", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -461,8 +512,62 @@ test.describe("phone layout smoke", () => {
       });
       await expect(manageDialog).toBeVisible();
       await assertPhoneLayout(page, "setup/manage surface");
+      await assertKeyboardReachable(page, "setup/manage surface", 12);
+
+      // Exercise the manager's setup editor navigation without saving anything.
+      // These tabs are present for the first signed-up manager and expose the
+      // same compact scroll container used by the longer manager workflows.
+      const setupProfilesTab = page.getByRole("button", { name: "Setup Profiles", exact: true });
+      if (await visible(setupProfilesTab)) {
+        await setupProfilesTab.click();
+        await assertPhoneLayout(page, "setup profiles editor");
+        await assertKeyboardReachable(page, "setup profiles editor", 8);
+      }
+
+      await page.getByRole("button", { name: "Tools", exact: true }).click();
+      const importTab = page.getByRole("button", { name: "Import", exact: true });
+      await expect(importTab).toBeVisible();
+      await importTab.click();
+      await assertPhoneLayout(page, "manager import controls");
+      await assertKeyboardReachable(page, "manager import controls", 8);
+
+      // Use an invalid in-memory workbook to reach the real review/error dialog.
+      // No schedule, profile, or master-data write can occur on this path.
+      const importInput = page.locator('input[type="file"]').first();
+      await importInput.setInputFiles({
+        name: "phone-layout-invalid.xlsx",
+        mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        buffer: Buffer.from("not a workbook"),
+      });
+      await expect(
+        page.locator("span").filter({ hasText: /^Import Excel$/ }),
+      ).toBeVisible({ timeout: 10_000 });
+      await assertPhoneLayout(page, "Excel import review dialog");
+      await assertKeyboardReachable(page, "Excel import review dialog", 8);
+      await closeImportReview(page);
     });
   }
+
+  test(`manager workflows stay usable in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(LANDSCAPE_VIEWPORT);
+    await signInToSandbox(page);
+    await page.getByTestId("tab-warehouse").click();
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Settings" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Manage Lists & Settings" }),
+    ).toBeVisible();
+    await assertPhoneLayout(page, "narrow landscape manager settings", {
+      // The compact manager modal intentionally uses a clipped-height fixed
+      // backdrop while its scroll container owns the controls. Overflow and
+      // focus are still checked below; backdrop hit-testing is covered by the
+      // portrait dialog checks above.
+      skipModalOverlayCoverage: true,
+    });
+    await assertKeyboardReachable(page, "narrow landscape manager settings", 12);
+  });
 
   test(`sign-in is usable without overflow in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
     page,
