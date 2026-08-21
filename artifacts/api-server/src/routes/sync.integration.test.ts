@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
@@ -749,6 +749,68 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     const res = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
     const row = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
     expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("preserves every run and logs each merge under a burst of concurrent FIRST writes", async () => {
+    // Exercise more contention than the two-writer regression above. Every
+    // writer starts from an empty date with a distinct run and value. The
+    // first insert wins the unique-constraint race; each retry must then merge
+    // against the row created by the preceding writer instead of replacing it.
+    const D = "2030-06-04";
+    const writes = [
+      { id: "burst-a", casesNeeded: 11 },
+      { id: "burst-b", casesNeeded: 22 },
+      { id: "burst-c", casesNeeded: 33 },
+      { id: "burst-d", casesNeeded: 44 },
+    ];
+    const putBurst = ({ id, casesNeeded }: (typeof writes)[number]) =>
+      fetch(`${baseUrl}/api/sync/today?today=${D}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: id,
+          payload: {
+            dayState: { runs: [run(id)], resetAt: 1000 },
+            runValues: { [id]: { casesNeeded } },
+            runValuesUpdatedAt: { [id]: 1 },
+          },
+        }),
+      });
+
+    const responses = await Promise.all(writes.map(putBurst));
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+
+    const storedResponse = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
+    expect(storedResponse.status).toBe(200);
+    const stored = (await storedResponse.json()) as {
+      dayState?: { runs?: Array<{ id: string }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    } | null;
+    expect((stored?.dayState?.runs ?? []).map((entry) => entry.id).sort()).toEqual(
+      writes.map(({ id }) => id).sort(),
+    );
+    for (const { id, casesNeeded } of writes) {
+      expect(stored?.runValues?.[id]?.casesNeeded).toBe(casesNeeded);
+    }
+
+    // Conflict logging is intentionally fire-and-forget, so wait for the
+    // three non-first writers' protective merges to finish recording.
+    const deadline = Date.now() + 2_000;
+    let conflicts = await db
+      .select()
+      .from(syncConflictLogsTable)
+      .where(eq(syncConflictLogsTable.date, D));
+    while (conflicts.length < writes.length - 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      conflicts = await db
+        .select()
+        .from(syncConflictLogsTable)
+        .where(eq(syncConflictLogsTable.date, D));
+    }
+    expect(conflicts).toHaveLength(writes.length - 1);
+    expect(conflicts.every((conflict) => conflict.scope === "live")).toBe(true);
+    expect(conflicts.every((conflict) => conflict.resolution === "additive-union")).toBe(true);
+    expect(conflicts.every((conflict) => conflict.fieldsWithConflicts.some((field) => field.startsWith("dayState.runs:appended(")))).toBe(true);
   });
 
   it("does NOT treat a normal push as a reset when the STORED row has no resetAt baseline", async () => {
