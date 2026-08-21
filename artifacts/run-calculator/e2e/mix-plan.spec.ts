@@ -3294,6 +3294,131 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (l): Empty state is preserved after a cold page reload when all runs
+   * are ended and Mixes was never opened in the previous page session.
+   *
+   * Unlike the preceding reload test, this deliberately stops both runs while
+   * staying on the Run tab. The first Mixes navigation happens only after the
+   * reload, exercising hydration without any previously-populated Mixes state.
+   */
+  test("shows the empty state on first Mixes visit after a cold reload with all runs ended", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId1 = `cold-reload-ended-mix-a-${suffix}`;
+    const mixId2 = `cold-reload-ended-mix-b-${suffix}`;
+    const mixName1 = `ColdReloadEndedMixA ${suffix}`;
+    const mixName2 = `ColdReloadEndedMixB ${suffix}`;
+    const component1 = `ColdReloadEndedCompA_${suffix}`;
+    const component2 = `ColdReloadEndedCompB_${suffix}`;
+    const brand1 = `ColdReloadEndedBrandA_${suffix}`;
+    const brand2 = `ColdReloadEndedBrandB_${suffix}`;
+    const today = todayStr();
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId1,
+        name: mixName1,
+        brand: brand1,
+        isPrep: false,
+        component: component1,
+        perPizza: 2.0,
+        batchSize: 10,
+      });
+      await dbCreateMix(db, {
+        id: mixId2,
+        name: mixName2,
+        brand: brand2,
+        isPrep: false,
+        component: component2,
+        perPizza: 2.0,
+        batchSize: 10,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.waitForTimeout(1_000);
+
+      // Set brand on run 1 without ever opening the Mixes tab.
+      await page.locator('[data-testid="tab-run"]').click();
+      const brandInput = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput.click();
+      await brandInput.fill(brand1);
+      await brandInput.press("Enter");
+      await page.waitForTimeout(800);
+
+      // Add run 2 and set its brand, still without visiting Mixes.
+      const newRunBtn = page.getByRole("button", { name: /new run/i });
+      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await newRunBtn.click();
+      await page.waitForTimeout(800);
+
+      const brandInput2 = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput2.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput2.click();
+      await brandInput2.fill(brand2);
+      await brandInput2.press("Enter");
+      await page.waitForTimeout(800);
+
+      // Stop run 1.
+      const prevBtn = page.getByRole("button", { name: /prev/i });
+      await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await prevBtn.click();
+      await page.waitForTimeout(600);
+
+      const startBtn1 = page.locator('[data-testid="button-start-run"]');
+      await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
+      await startBtn1.click();
+      const stopBtn1 = page.getByRole("button", { name: /stop run/i });
+      await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
+      await stopBtn1.click();
+      await page.waitForTimeout(800);
+
+      // Stop run 2.
+      const nextBtn = page.getByRole("button", { name: /next/i });
+      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await nextBtn.click();
+      await page.waitForTimeout(600);
+
+      const startBtn2 = page.locator('[data-testid="button-start-run"]');
+      await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
+      await startBtn2.click();
+      const stopBtn2 = page.getByRole("button", { name: /stop run/i });
+      await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
+      await stopBtn2.click();
+      await page.waitForTimeout(1_000);
+
+      // Reload before the first Mixes visit in this browser session.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await page.waitForTimeout(500);
+
+      await expect(page.locator(`[data-testid="mix-plan-${today}"]`)).toHaveCount(0, {
+        timeout: 5_000,
+      });
+      await expect(page.locator('[data-testid="mix-plan-empty"]')).toBeVisible({
+        timeout: 5_000,
+      });
+      await expect(page.getByText(mixName1, { exact: false })).toHaveCount(0, {
+        timeout: 3_000,
+      });
+      await expect(page.getByText(mixName2, { exact: false })).toHaveCount(0, {
+        timeout: 3_000,
+      });
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (m): Batch count on a regular mix card updates live when 'already made'
    * is edited — Task #798.
    *
