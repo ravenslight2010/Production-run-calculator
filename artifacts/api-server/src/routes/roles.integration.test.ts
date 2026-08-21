@@ -437,6 +437,13 @@ const ROUTES: GatedRoute[] = [
   },
   // --- manage-staff ---
   {
+    name: "GET /audit-logs",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/audit-logs",
+    okStatus: 200,
+  },
+  {
     name: "GET /roles",
     capability: "manage-staff",
     method: "GET",
