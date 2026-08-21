@@ -46,10 +46,6 @@ args = "test:spec-export"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Web App"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "test:corpus"
 
 [[workflows.workflow.tasks]]
@@ -144,18 +140,6 @@ outputType = "console"
 task = "shell.exec"
 args = "PORT=5000 pnpm --filter @workspace/api-server run dev"
 waitForPort = 5000
-
-[[workflows.workflow]]
-name = "Web App"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd artifacts/run-calculator && PORT=5173 BASE_PATH=/ pnpm run dev"
-waitForPort = 5173
 
 [[workflows.workflow]]
 name = "test:corpus"
