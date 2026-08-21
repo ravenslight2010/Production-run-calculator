@@ -30,6 +30,7 @@ export const signUpBodyOnePasswordMax = 200;
 export const signUpBodyTwoAccessCodeMax = 200;
 
 
+
 export const SignUpBody = zod.object({
   "username": zod.string().min(signUpBodyOneUsernameMin).max(signUpBodyOneUsernameMax),
   "password": zod.string().min(signUpBodyOnePasswordMin).max(signUpBodyOnePasswordMax)
@@ -43,6 +44,7 @@ export const SignUpBody = zod.object({
  * @summary Check whether a username is available for sign-up
  */
 export const checkUsernameAvailableQueryUsernameMax = 64;
+
 
 
 export const CheckUsernameAvailableQueryParams = zod.object({
@@ -62,6 +64,7 @@ export const signInBodyUsernameMax = 64;
 
 export const signInBodyPasswordMin = 6;
 export const signInBodyPasswordMax = 200;
+
 
 
 export const SignInBody = zod.object({
@@ -98,6 +101,7 @@ export const changePasswordBodyNewPasswordMin = 6;
 export const changePasswordBodyNewPasswordMax = 200;
 
 
+
 export const ChangePasswordBody = zod.object({
   "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
   "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
@@ -129,6 +133,7 @@ export const ChangePasswordResponse = zod.object({
 export const forgotPasswordBodyUsernameMax = 64;
 
 
+
 export const ForgotPasswordBody = zod.object({
   "username": zod.string().min(1).max(forgotPasswordBodyUsernameMax)
 })
@@ -148,6 +153,7 @@ export const resetPasswordBodyCodeMax = 64;
 
 export const resetPasswordBodyNewPasswordMin = 6;
 export const resetPasswordBodyNewPasswordMax = 200;
+
 
 
 export const ResetPasswordBody = zod.object({
@@ -599,6 +605,7 @@ export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 
 
+
 export const IdentifyInventoryPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
   "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
@@ -781,6 +788,7 @@ export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 
 export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
+
 
 
 export const WasteInsightBody = zod.object({
@@ -1314,6 +1322,7 @@ export const UpdateProactiveAlertSettingsResponse = zod.object({
  * @summary Predict an upcoming day's run plan (AI); read-only
  */
 export const aiForecastBodyHorizonDaysMax = 7;
+
 
 
 export const AiForecastBody = zod.object({
@@ -3929,6 +3938,7 @@ export const reportIncidentBodyErrorStackMax = 8000;
 export const reportIncidentBodyUserAgentMax = 500;
 
 
+
 export const ReportIncidentBody = zod.object({
   "source": zod.enum(['user_report', 'auto_crash']),
   "screen": zod.string().max(reportIncidentBodyScreenMax).describe('Screen\/route the user was on'),
@@ -4223,6 +4233,7 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 export const createRoleBodyNameMax = 60;
 
 
+
 export const CreateRoleBody = zod.object({
   "name": zod.string().min(1).max(createRoleBodyNameMax),
   "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
@@ -4237,6 +4248,7 @@ export const UpdateRoleParams = zod.object({
 })
 
 export const updateRoleBodyNameMax = 60;
+
 
 
 export const UpdateRoleBody = zod.object({
@@ -4317,6 +4329,7 @@ export const resetStaffPasswordBodyNewPasswordMin = 6;
 export const resetStaffPasswordBodyNewPasswordMax = 200;
 
 
+
 export const ResetStaffPasswordBody = zod.object({
   "newPassword": zod.string().min(resetStaffPasswordBodyNewPasswordMin).max(resetStaffPasswordBodyNewPasswordMax)
 })
@@ -4328,3 +4341,5 @@ export const ResetStaffPasswordBody = zod.object({
 export const DeleteStaffMemberParams = zod.object({
   "userId": zod.coerce.string()
 })
+
+

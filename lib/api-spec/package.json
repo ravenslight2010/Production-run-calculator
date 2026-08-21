@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "codegen": "orval --config ./orval.config.ts && pnpm -w run typecheck:libs"
+    "generate": "orval --config ./orval.config.ts",
+    "codegen": "pnpm run generate && pnpm -w run typecheck:libs",
+    "check-generated": "bash ./check-generated.sh"
   },
   "devDependencies": {
     "orval": "^8.9.1"
