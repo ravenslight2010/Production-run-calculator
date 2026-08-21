@@ -22,6 +22,7 @@ import { useAutoTrack, suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
 import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
 import type { NotificationPrefs } from "../notificationPrefs";
+import { getSauceBarrelEntry } from "../sauceBarrelStore";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -423,6 +424,14 @@ export function LiveRunProvider({
     calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
       ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
       : 0;
+  // Both the Sauce tab and batch-alert suppression measure the active barrel
+  // on this net-production clock. The stored anchor is updated when the crew
+  // starts a replacement barrel, so paused time never depletes sauce and a new
+  // barrel immediately resumes the batch cycle.
+  const sauceBarrelElapsedSec = Math.max(
+    0,
+    elapsedBatchSec - getSauceBarrelEntry(currentRunId).lastBarrelNetSec,
+  );
 
   // ── Next-run prep handoff detection ─────────────────────────────────────
   // When the current run's press is done AND an unstarted dough run follows in
@@ -442,6 +451,7 @@ export function LiveRunProvider({
     nowTime,
     currentRun,
     calc,
+    sauceBarrelElapsedSec,
     v: ve,
     isCrust: doughSubTab === "crusts",
     nextRunLabels: upcomingRunLabels,

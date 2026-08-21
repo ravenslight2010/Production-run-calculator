@@ -65,6 +65,8 @@ type Params = Parameters<typeof useNotifications>[0];
  *   ppm = 0                  → disables warehouse-staging, pace, run-complete
  *   pressCasesLeft = 100     → irrelevant with ppm=0, but safe
  *   pressDone = false        → batch-cycle effect must not early-return
+ *   sauceDepletionSec = 0    → sauce timing is unset, so it does not suppress
+ *   sauceBarrelElapsedSec = 0 → active barrel just started
  *   isCrust = false          → batch-cycle effect must not early-return
  *   runStatus = "running"    → freezer-drain effect skips (requires "ended")
  */
@@ -81,7 +83,9 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
       casesInFreezer: 0,
       pressCasesLeft: 100,
       pressDone: false,
+      sauceDepletionSec: 0,
     },
+    sauceBarrelElapsedSec: 0,
     v: {
       freezerTime: 10,
       casesNeeded: 200,
@@ -357,6 +361,82 @@ describe("useNotifications — batch-cycle effect (no Notification API)", () => 
     });
 
     expect(result.current.showBatchDue).toBe(false);
+  });
+
+  it("does NOT raise a batch alert once the active sauce barrel depletes before dough or the press", () => {
+    const run = makeRun();
+
+    const { result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: {
+          ...makeParams(T0).calc,
+          // Thirty elapsed minutes have passed, so this low-sauce run's
+          // 20-minute barrel is empty. Dough is still available and the press
+          // is not done: only sauce depletion can suppress the batch alert.
+          sauceDepletionSec: 20 * 60,
+          pressDone: false,
+        },
+        sauceBarrelElapsedSec: 20 * 60,
+      }),
+    });
+
+    expect(result.current.showBatchDue).toBe(false);
+    expect(vibrateMock).not.toHaveBeenCalled();
+  });
+
+  it("does not count paused wall-clock time toward the active sauce barrel", () => {
+    const run = makeRun();
+    const { result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: {
+          ...makeParams(T0).calc,
+          // The wall clock is 30 minutes past start, but a ten-minute pause
+          // means only 19 minutes of this 20-minute barrel were consumed.
+          sauceDepletionSec: 20 * 60,
+          pressDone: false,
+        },
+        sauceBarrelElapsedSec: 19 * 60,
+      }),
+    });
+
+    expect(result.current.showBatchDue).toBe(true);
+  });
+
+  it("resumes batch alerts when a replacement sauce barrel resets the active clock", () => {
+    const run = makeRun();
+    const { rerender, result } = renderHook((p: Params) => useNotifications(p), {
+      initialProps: makeParams(T0, {
+        currentRun: run,
+        calc: {
+          ...makeParams(T0).calc,
+          sauceDepletionSec: 20 * 60,
+          pressDone: false,
+        },
+        sauceBarrelElapsedSec: 20 * 60,
+      }),
+    });
+
+    // The first barrel is depleted, but dough remains and the press is not
+    // done, so only sauce should suppress the batch prompt.
+    expect(result.current.showBatchDue).toBe(false);
+
+    act(() => {
+      rerender(makeParams(T0 + 1_000, {
+        currentRun: run,
+        calc: {
+          ...makeParams(T0).calc,
+          sauceDepletionSec: 20 * 60,
+          pressDone: false,
+        },
+        // Mirrors the Sauce tab's + action, which writes the current
+        // pause-aware elapsed time as the new barrel's anchor.
+        sauceBarrelElapsedSec: 0,
+      }));
+    });
+
+    expect(result.current.showBatchDue).toBe(true);
   });
 
   it("does NOT fire when runStatus is not 'running'", () => {

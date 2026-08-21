@@ -109,6 +109,9 @@ beforeAll(async () => {
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);
@@ -317,7 +320,7 @@ describe("POST /ai-corrections — chain-forwarding (stale-memory prevention)", 
     await post(mgr, [{ domain: "recipe", fromText: "oldrecipe", toText: "MidRecipe" }]);
     await post(mgr, [{ domain: "recipe", fromText: "midrecipe", toText: "NewRecipe" }]);
 
-    const corrections = await listCorrections(mgr);
+    const corrections = await db.select().from(aiCorrectionsTable);
     const byFrom = Object.fromEntries(
       corrections.map((c) => [c.fromText.toLowerCase(), c.toText]),
     );

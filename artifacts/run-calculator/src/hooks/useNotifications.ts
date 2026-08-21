@@ -29,6 +29,11 @@ interface NotifCalc {
    * so no further dough batch-due alerts should fire for the current run.
    */
   pressDone: boolean;
+  /**
+   * Seconds until the current sauce barrel is depleted at the active line
+   * speed. A value of 0 means sauce timing is not configured.
+   */
+  sauceDepletionSec: number;
 }
 
 interface NotifValues {
@@ -42,6 +47,12 @@ interface NotifParams {
   nowTime: Date;
   currentRun: RunMeta | undefined;
   calc: NotifCalc;
+  /**
+   * Pause-aware seconds since the currently active sauce barrel was started.
+   * The Sauce tab resets this clock whenever the crew records a replacement
+   * barrel.
+   */
+  sauceBarrelElapsedSec: number;
   v: NotifValues;
   /** Crust runs open pre-made cases — no dough is mixed, so suppress batch alerts. */
   isCrust: boolean;
@@ -199,6 +210,7 @@ export function useNotifications({
   nowTime,
   currentRun,
   calc,
+  sauceBarrelElapsedSec,
   v,
   isCrust,
   nextRunLabels,
@@ -391,6 +403,14 @@ export function useNotifications({
     // from this point the dough crew is on the NEXT run, not this one.
     if (calc.pressDone) { setShowBatchDue(false); return; }
     if (runStatus !== "running" || !currentRun?.startedAt || calc.timePerBatchSec <= 0) return;
+    // A low-sauce run can exhaust its active sauce barrel before its dough
+    // supply or press target. This is the Sauce tab's pause-aware, per-barrel
+    // clock — not wall time since the run began — so a replacement barrel
+    // immediately resumes the batch cycle.
+    if (calc.sauceDepletionSec > 0 && sauceBarrelElapsedSec >= calc.sauceDepletionSec) {
+      setShowBatchDue(false);
+      return;
+    }
     const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
     const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
     if (batchNum < 1) return;
@@ -421,7 +441,17 @@ export function useNotifications({
     } else if (notification.state === "default") {
       requestBrowserNotificationPermission();
     }
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust, calc.pressDone]);
+  }, [
+    runStatus,
+    currentRun?.id,
+    currentRun?.startedAt,
+    calc.timePerBatchSec,
+    calc.sauceDepletionSec,
+    sauceBarrelElapsedSec,
+    nowTime,
+    isCrust,
+    calc.pressDone,
+  ]);
 
   // ── Run time complete alert ────────────────────────────────────────────────
   useEffect(() => {
