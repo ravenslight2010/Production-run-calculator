@@ -120,8 +120,29 @@ async function unlockSupervisorLineSetup(page: Page): Promise<void> {
   await page.getByText("Line Type", { exact: true }).waitFor({ state: "visible" });
 }
 
+async function selectBrandAndFlavor(page: Page): Promise<void> {
+  const brandInput = page.locator('input[placeholder="Brand…"]');
+  await brandInput.click();
+  if (await brandInput.isEditable()) {
+    await brandInput.fill(BRAND);
+    await brandInput.press("Enter");
+  } else {
+    await expect(brandInput).toHaveValue(BRAND);
+  }
+
+  const flavorInput = page.locator('input[placeholder="Flavor…"]');
+  await flavorInput.click();
+  if (await flavorInput.isEditable()) {
+    await flavorInput.fill(FLAVOR);
+    await flavorInput.press("Enter");
+  } else {
+    await expect(flavorInput).toHaveValue(FLAVOR);
+  }
+}
+
 let db: Client;
 let username: string;
+const testUsernames = new Set<string>();
 
 test.beforeAll(async () => {
   db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -130,7 +151,9 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await db.query("DELETE FROM brand_profiles WHERE brand = $1", [BRAND]);
-  await db.query("DELETE FROM users WHERE username = $1", [username]);
+  for (const testUsername of testUsernames) {
+    await db.query("DELETE FROM users WHERE username = $1", [testUsername]);
+  }
   await db.end();
 });
 
@@ -139,6 +162,7 @@ test("adopts crust preference, reloads, and starts a new run in crust mode", asy
   request,
 }) => {
   username = uid();
+  testUsernames.add(username);
   const token = await apiSignUp(request, db, username);
   await createCrustProfile(request, token);
   await signIn(page, username);
@@ -164,15 +188,7 @@ test("adopts crust preference, reloads, and starts a new run in crust mode", asy
 
   await unlockSupervisorLineSetup(page);
 
-  const brandInput = page.locator('input[placeholder="Brand…"]');
-  await brandInput.click();
-  await brandInput.fill(BRAND);
-  await brandInput.press("Enter");
-
-  const flavorInput = page.locator('input[placeholder="Flavor…"]');
-  await flavorInput.click();
-  await flavorInput.fill(FLAVOR);
-  await flavorInput.press("Enter");
+  await selectBrandAndFlavor(page);
 
   // Selecting the identity creates/updates the pending run from the saved
   // profile preference. Assert the rendered line type before production starts.
@@ -182,4 +198,56 @@ test("adopts crust preference, reloads, and starts a new run in crust mode", asy
     page.getByText("Approximate Line Speed (ppm)", { exact: true }),
   ).toBeVisible();
   await expect(page.locator('[data-testid="button-start-run"]')).toBeVisible();
+});
+
+test("keeps the saved crust preference after sign-out and a fresh browser session", async ({
+  browser,
+  page,
+  request,
+}) => {
+  username = uid();
+  testUsernames.add(username);
+  const token = await apiSignUp(request, db, username);
+  await createCrustProfile(request, token);
+  await signIn(page, username);
+
+  await unlockSupervisorLineSetup(page);
+  await selectBrandAndFlavor(page);
+
+  await expect(page.getByRole("button", { name: "Crust", exact: true })).toHaveClass(
+    /bg-background/,
+  );
+
+  // Exercise the same boundary as a tablet operator signing out, rather than
+  // only clearing React state or reloading the existing browser context.
+  await page.locator('button[title="More"], button[title*="manager action"]').first().click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/auth/sign-out") &&
+        response.request().method() === "POST",
+    ),
+    page.getByText("Sign out", { exact: true }).click(),
+  ]);
+
+  const freshContext = await browser.newContext();
+  const freshPage = await freshContext.newPage();
+  try {
+    await signIn(freshPage, username);
+    await unlockSupervisorLineSetup(freshPage);
+    await selectBrandAndFlavor(freshPage);
+
+    // The pending run must adopt the server profile before production begins.
+    await expect(
+      freshPage.getByRole("button", { name: "Crust", exact: true }),
+    ).toHaveClass(/bg-background/);
+    await expect(
+      freshPage.getByText("Approximate Line Speed (ppm)", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      freshPage.locator('[data-testid="button-start-run"]'),
+    ).toBeVisible();
+  } finally {
+    await freshContext.close();
+  }
 });
