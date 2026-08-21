@@ -965,6 +965,61 @@ router.post(
       facilityDomains: ["ingredient", "general"],
     });
 
+    const finalize = (content: string) => {
+      const { answer, note } = sanitizeMixAnswer(content);
+      const replyText = answer || note || "I couldn't answer that from the mix data.";
+      return {
+        answer: replyText,
+        generatedAt: Date.now(),
+        ...(note ? { note } : {}),
+      };
+    };
+
+    // ── Streaming path (opt-in via Accept: text/event-stream) ────────────────
+    // Stream the answer text, then send the same final payload the non-stream
+    // path returns. The client keeps a regular JSON fallback.
+    if (wantsEventStream(req.headers.accept)) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      let content = "";
+      let emitted = "";
+      try {
+        const stream = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 2048,
+          response_format: { type: "json_object" },
+          stream: true,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: grounded },
+          ],
+        });
+        for await (const chunk of stream) {
+          const piece = chunk.choices[0]?.delta?.content ?? "";
+          if (!piece) continue;
+          content += piece;
+          const partial = extractJsonStringField(content, "answer");
+          if (partial.length > emitted.length) {
+            res.write(sseFrame("delta", { text: partial.slice(emitted.length) }));
+            emitted = partial;
+          }
+        }
+      } catch (err) {
+        req.log.error({ err }, "ai-mix-assistant stream failed");
+        res.write(sseFrame("error", { error: "AI provider error" }));
+        res.end();
+        return;
+      }
+      res.write(sseFrame("done", finalize(content)));
+      res.end();
+      return;
+    }
+
     // A cut-off reply surfaces as a garbled half-JSON "answer" (raw fallback),
     // so retry once; final give-up keeps that fallback via result.content.
     const result = await fetchModelJsonWithRetry({
@@ -990,14 +1045,7 @@ router.post(
     }
     const content = result.ok ? JSON.stringify(result.raw) : result.content;
 
-    const { answer, note } = sanitizeMixAnswer(content);
-    const replyText = answer || note || "I couldn't answer that from the mix data.";
-
-    res.json({
-      answer: replyText,
-      generatedAt: Date.now(),
-      ...(note ? { note } : {}),
-    });
+    res.json(finalize(content));
   },
 );
 
