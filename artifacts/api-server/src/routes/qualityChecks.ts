@@ -130,17 +130,25 @@ export function validateRecordQualityCheckBody(
 export type QualityHistoryFilter = {
   productType?: QualityProductType;
   status?: QualityStatus;
+  from?: Date;
+  to?: Date;
 };
 
 export function parseHistoryFilter(query: {
   productType?: unknown;
   status?: unknown;
+  from?: unknown;
+  to?: unknown;
 }): QualityHistoryFilter {
   const filter: QualityHistoryFilter = {};
   const pt = typeof query.productType === "string" ? query.productType : "";
   if (pt === "pizza" || pt === "crust" || pt === "other") filter.productType = pt;
   const st = typeof query.status === "string" ? query.status : "";
   if (st === "pass" || st === "warn" || st === "fail") filter.status = st;
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) filter.from = new Date(`${from}T00:00:00.000Z`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) filter.to = new Date(`${to}T23:59:59.999Z`);
   return filter;
 }
 

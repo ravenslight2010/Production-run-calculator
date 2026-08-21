@@ -5,6 +5,11 @@ import type { SummaryInput } from "../aiSummary";
 import { useMe } from "../useRole";
 
 type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput };
+export type OperationalReportDetailRange = {
+  start: string;
+  end: string;
+  scope: "day" | "week";
+};
 
 function fmtDate(value: string): string {
   const d = new Date(`${value}T12:00:00`);
@@ -31,18 +36,20 @@ function reportText(report: OperationalReport): string {
       ? `Incidents: ${report.incidents.value?.total ?? 0} total, ${report.incidents.value?.unresolved ?? 0} unresolved`
       : `Incidents: Unavailable${report.incidents.note ? ` — ${report.incidents.note}` : ""}`,
     report.inventory.availability === "available"
-      ? [
-          `Inventory flags (current snapshot): ${report.inventory.value?.flaggedItems ?? 0} items at or below reorder level${report.inventory.note ? ` (${report.inventory.note})` : ""}`,
-          report.inventory.value?.historical.availability === "available"
-            ? `Inventory history (selected period): ${report.inventory.value.historical.value?.totalEvents ?? 0} events — ${report.inventory.value.historical.value?.consumptionEvents ?? 0} consumption, ${report.inventory.value.historical.value?.wasteEvents ?? 0} waste, ${report.inventory.value.historical.value?.adjustmentEvents ?? 0} adjustments`
-            : `Inventory history (selected period): Unavailable — ${report.inventory.value?.historical.note ?? "historical events could not be read"}`,
-        ].join("\n")
+      ? `Inventory flags: ${report.inventory.value?.flaggedItems ?? 0} items at or below reorder level${report.inventory.note ? ` (${report.inventory.note})` : ""}`
       : `Inventory: Unavailable${report.inventory.note ? ` — ${report.inventory.note}` : ""}`,
   ];
   return lines.join("\n");
 }
 
-export default function OperationalReportPanel({ buildInput }: Props) {
+export default function OperationalReportPanel({
+  buildInput,
+  onOpenQuality,
+  onOpenIncidents,
+}: Props & {
+  onOpenQuality?: (range: OperationalReportDetailRange) => void;
+  onOpenIncidents?: (range: OperationalReportDetailRange) => void;
+}) {
   const { hasCapability } = useMe();
   const allowed = hasCapability("review-incidents");
   const [scope, setScope] = useState<"day" | "week">("day");
@@ -127,23 +134,33 @@ export default function OperationalReportPanel({ buildInput }: Props) {
           </div>
           {report.production.unfinishedRuns.length > 0 && <p className="text-sm text-amber-400">Unfinished: {report.production.unfinishedRuns.join(", ")}</p>}
           <div className="grid sm:grid-cols-3 gap-2 text-xs">
-            <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
-            <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
-            <p>Inventory flags (current snapshot): {report.inventory.value?.flaggedItems ?? "Unavailable"}</p>
+            <div>
+              <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
+              {report.quality.availability === "available" && onOpenQuality && (
+                <button
+                  type="button"
+                  className="mt-1 font-semibold text-primary hover:underline"
+                  onClick={() => onOpenQuality({ start: report.periodStart, end: report.periodEnd, scope: report.scope })}
+                >
+                  Open quality details
+                </button>
+              )}
+            </div>
+            <div>
+              <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
+              {report.incidents.availability === "available" && onOpenIncidents && (
+                <button
+                  type="button"
+                  className="mt-1 font-semibold text-primary hover:underline"
+                  onClick={() => onOpenIncidents({ start: report.periodStart, end: report.periodEnd, scope: report.scope })}
+                >
+                  Open incident details
+                </button>
+              )}
+            </div>
+            <p>Inventory flags: {report.inventory.value?.flaggedItems ?? "Unavailable"}</p>
           </div>
-          <div className="text-[11px] text-muted-foreground space-y-1">
-            <p>{report.inventory.note}</p>
-            {report.inventory.value?.historical?.availability === "available" ? (
-              <p>
-                Inventory history (selected period): {report.inventory.value.historical.value?.totalEvents ?? 0} event(s), including{" "}
-                {report.inventory.value.historical.value?.consumptionEvents ?? 0} consumption,{" "}
-                {report.inventory.value.historical.value?.wasteEvents ?? 0} waste, and{" "}
-                {report.inventory.value.historical.value?.adjustmentEvents ?? 0} adjustment event(s).
-              </p>
-            ) : (
-              <p>{report.inventory.value?.historical?.note ?? "Historical inventory events: Unavailable."}</p>
-            )}
-          </div>
+          <p className="text-[11px] text-muted-foreground">{report.inventory.note}</p>
         </div>
       )}
     </div>

@@ -19,6 +19,11 @@ import { useMe } from "../useRole";
 
 type ProductFilter = "all" | QualityProductType;
 type StatusFilter = "all" | QualityStatus;
+export type HistoryDateRange = {
+  start: string;
+  end: string;
+  scope: "day" | "week";
+};
 
 const STATUS_META: Record<
   QualityStatus,
@@ -143,19 +148,21 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
   );
 }
 
-export default function QualityHistoryTab() {
+export default function QualityHistoryTab({ dateRange }: { dateRange?: HistoryDateRange }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const [product, setProduct] = useState<ProductFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
 
   const query = useQuery({
-    queryKey: ["qualityChecks", product, status],
+    queryKey: ["qualityChecks", product, status, dateRange?.start, dateRange?.end],
     enabled: canManageInventory,
     queryFn: () =>
       fetchQualityChecks({
         productType: product === "all" ? undefined : product,
         status: status === "all" ? undefined : status,
+        from: dateRange?.start,
+        to: dateRange?.end,
       }),
   });
 
@@ -185,6 +192,11 @@ export default function QualityHistoryTab() {
             Every quality check a manager reviews and confirms is logged here so you can spot
             trends (e.g. recurring undersized crusts) and audit outcomes over time.
           </p>
+          {dateRange && (
+            <p className="rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs text-primary">
+              Showing the {dateRange.scope} report period: {dateRange.start} – {dateRange.end}
+            </p>
+          )}
           <div className="space-y-2">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] font-semibold text-muted-foreground mr-1">Product:</span>

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
 import {
   db,
   inventoryItemsTable,
@@ -859,6 +859,8 @@ router.get(
     if (filter.productType)
       conditions.push(eq(qualityChecksTable.productType, filter.productType));
     if (filter.status) conditions.push(eq(qualityChecksTable.status, filter.status));
+    if (filter.from) conditions.push(gte(qualityChecksTable.createdAt, filter.from));
+    if (filter.to) conditions.push(lte(qualityChecksTable.createdAt, filter.to));
 
     const rows = await db
       .select()

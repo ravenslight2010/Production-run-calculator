@@ -377,7 +377,7 @@ import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
-import OperationalReportPanel from "../components/OperationalReportPanel";
+import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { useGetStartedOverview } from "@workspace/onboarding";
@@ -3730,6 +3730,7 @@ export default function Home() {
   // Navigation owns only tab persistence/history. Run selection and lifecycle
   // transitions remain in Home's day-state coordinator.
   const { activeTab, setActiveTab, goBack } = useHomeNavigation();
+  const [reportDetailRange, setReportDetailRange] = useState<OperationalReportDetailRange | undefined>();
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -15808,7 +15809,7 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="incidents">
-                <IncidentsTab />
+                <IncidentsTab dateRange={reportDetailRange} />
               </TabsContent>
 
               <TabsContent value="downtime">
@@ -15816,7 +15817,7 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="quality">
-                <QualityHistoryTab />
+                <QualityHistoryTab dateRange={reportDetailRange} />
               </TabsContent>
 
               <TabsContent value="staff">
@@ -15877,6 +15878,14 @@ export default function Home() {
                 {isManager && (
                   <div className="max-w-3xl mx-auto mb-4">
                     <OperationalReportPanel
+                      onOpenQuality={(range) => {
+                        setReportDetailRange(range);
+                        setActiveTab("quality");
+                      }}
+                      onOpenIncidents={(range) => {
+                        setReportDetailRange(range);
+                        setActiveTab("incidents");
+                      }}
                       buildInput={(scope, date) =>
                         scope === "week"
                           ? buildWeekSummaryInput({
