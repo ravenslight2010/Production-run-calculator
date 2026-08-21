@@ -369,6 +369,21 @@ describe("reconcileProfilesFromServer", () => {
     expect(postCalls()).toHaveLength(0);
   });
 
+  it("seeds the receiving tablet's fast sub-tab key from a server-newer crust profile", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "old" });
+    writeMap(STAMPS_KEY, { [KEY]: 100 });
+    writeMap(SYNCED_KEY, { [KEY]: 100 });
+    listItems = [serverItem(KEY, 200, { doughRecipeName: "newer", _subTab: "crusts" })];
+
+    await reconcileProfilesFromServer();
+
+    expect(localStorage.getItem(`${KEY}:subtab`)).toBe("crusts");
+    expect(JSON.parse(localStorage.getItem(`${DOUGH_PREFIX}${KEY}`)!)).toMatchObject({
+      doughRecipeName: "newer",
+      _subTab: "crusts",
+    });
+  });
+
   it("re-enqueues a local-newer profile so a lost queue self-heals", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "local-newer" });
     writeMap(STAMPS_KEY, { [KEY]: 300 });
