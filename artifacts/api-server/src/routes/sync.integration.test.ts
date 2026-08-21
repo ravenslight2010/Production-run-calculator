@@ -813,6 +813,89 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect(conflicts.every((conflict) => conflict.fieldsWithConflicts.some((field) => field.startsWith("dayState.runs:appended(")))).toBe(true);
   });
 
+  it("preserves every repeated first-write burst under pool pressure without cross-date conflict logs", async () => {
+    // Five independent empty days submit four writers each at once. This creates
+    // more simultaneous route transactions (and later background conflict-log
+    // inserts) than the default pg pool can immediately serve, exercising retry
+    // exhaustion and ensuring conflict records remain attached to their own day.
+    const groups = Array.from({ length: 5 }, (_, groupIndex) => {
+      const date = `2030-06-${String(20 + groupIndex).padStart(2, "0")}`;
+      const writes = Array.from({ length: 4 }, (_, writerIndex) => ({
+        id: `pressure-${groupIndex}-${writerIndex}`,
+        casesNeeded: (groupIndex + 1) * 100 + writerIndex,
+      }));
+      return { date, writes };
+    });
+    const putBurst = (
+      date: string,
+      { id, casesNeeded }: (typeof groups)[number]["writes"][number],
+    ) =>
+      fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: id,
+          payload: {
+            dayState: { runs: [run(id)], resetAt: 1000 },
+            runValues: { [id]: { casesNeeded } },
+            runValuesUpdatedAt: { [id]: 1 },
+          },
+        }),
+      });
+
+    const responses = await Promise.all(
+      groups.flatMap(({ date, writes }) => writes.map((write) => putBurst(date, write))),
+    );
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+
+    for (const { date, writes } of groups) {
+      const storedResponse = await fetch(`${baseUrl}/api/sync/${date}`, { headers: authHeaders() });
+      expect(storedResponse.status).toBe(200);
+      const stored = (await storedResponse.json()) as {
+        dayState?: { runs?: Array<{ id: string }> };
+        runValues?: Record<string, { casesNeeded?: number }>;
+      } | null;
+      expect((stored?.dayState?.runs ?? []).map((entry) => entry.id).sort()).toEqual(
+        writes.map(({ id }) => id).sort(),
+      );
+      for (const { id, casesNeeded } of writes) {
+        expect(stored?.runValues?.[id]?.casesNeeded).toBe(casesNeeded);
+      }
+    }
+
+    // Every group has one clean initial insert and three protective retry
+    // merges. Logging is asynchronous, so poll the isolated test database until
+    // every date has exactly those three records, then assert no record leaked
+    // into a different date.
+    const expectedPerDate = 3;
+    const expectedTotal = groups.length * expectedPerDate;
+    const dates = new Set(groups.map(({ date }) => date));
+    const deadline = Date.now() + 3_000;
+    let conflicts = await db.select().from(syncConflictLogsTable);
+    while (
+      (
+        conflicts.length < expectedTotal
+        || groups.some(({ date }) => conflicts.filter((conflict) => conflict.date === date).length < expectedPerDate)
+      )
+      && Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      conflicts = await db.select().from(syncConflictLogsTable);
+    }
+    expect(conflicts).toHaveLength(expectedTotal);
+    expect(conflicts.every((conflict) => dates.has(conflict.date))).toBe(true);
+    for (const { date } of groups) {
+      const dateConflicts = conflicts.filter((conflict) => conflict.date === date);
+      expect(dateConflicts).toHaveLength(expectedPerDate);
+      expect(dateConflicts.every((conflict) => conflict.scope === "live")).toBe(true);
+      expect(dateConflicts.every((conflict) => conflict.resolution === "additive-union")).toBe(true);
+      expect(
+        dateConflicts.every((conflict) =>
+          conflict.fieldsWithConflicts.some((field) => field.startsWith("dayState.runs:appended("))),
+      ).toBe(true);
+    }
+  });
+
   it("does NOT treat a normal push as a reset when the STORED row has no resetAt baseline", async () => {
     // Production saw an active day's row carrying a NULL resetAt. The reset escape
     // hatch defaulted a missing stored resetAt to 0, so a normal same-day push
