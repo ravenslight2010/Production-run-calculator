@@ -537,11 +537,15 @@ export function maybeLearnTypeRename(
  * canonicalName match, case-insensitive). Used after a correcting re-import:
  * when the sheet overwrote a wrong stored name, the alias that produced the
  * wrong name must be removed or the next import re-applies the mistake.
- * Entries with a null context match rows under ANY context; a provided
- * context must match. Callers treat failure as best-effort (the import
- * already applied), mirroring saveSpecImportAliases.
+ * Entries with a null context match rows under ANY context by default; callers
+ * that know the original key can request exact-null matching. A provided
+ * context always matches exactly. Callers treat failure as best-effort (the
+ * import already applied), mirroring saveSpecImportAliases.
  */
-export async function deleteSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {
+export async function deleteSpecImportAliases(
+  aliases: SpecImportAlias[],
+  options: { exactContext?: boolean } = {},
+): Promise<void> {
   if (aliases.length === 0) return;
   const res = await fetch("/api/spec-import-aliases/delete", {
     method: "POST",
@@ -549,7 +553,7 @@ export async function deleteSpecImportAliases(aliases: SpecImportAlias[]): Promi
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ aliases }),
+    body: JSON.stringify({ aliases, ...(options.exactContext ? { exactContext: true } : {}) }),
   });
   if (!res.ok) throw new Error(`Delete spec-import aliases failed (${res.status})`);
 }

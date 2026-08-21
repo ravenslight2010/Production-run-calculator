@@ -3066,6 +3066,8 @@ export interface SaveSpecImportAliasesInput {
 export interface DeleteSpecImportAliasesInput {
   /** The exact alias mappings to delete */
   aliases: SpecImportAlias[];
+  /** When true, a null/omitted alias context matches only stored rows whose context is also null. Defaults to false for the legacy any-context cleanup behavior. */
+  exactContext?: boolean;
 }
 
 export type ParseSpecSheetKnownFlavorsByBrand = {[key: string]: string[]};

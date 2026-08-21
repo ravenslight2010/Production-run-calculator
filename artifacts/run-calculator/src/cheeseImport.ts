@@ -40,7 +40,13 @@ import {
 } from "@workspace/spec-import";
 import { readWorkbookGrids } from "./specImport";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
-import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
+import { fetchMixes } from "./mixes";
+import {
+  deleteSpecImportAliases,
+  fetchSpecImportAliases,
+  saveSpecImportAliases,
+} from "./specImportAliases";
+import { saveAiCorrections } from "./aiCorrections";
 
 export type CheeseImportPrepared = {
   /** Ready-to-apply cheese recipes (deterministic ids). */
@@ -262,10 +268,83 @@ export async function commitCheeseImport(
   // aliases so the next import of the same sheet pre-suggests the same links.
   // Best-effort: the recipes already saved; learning is a bonus.
   if (newAliases.length) {
+    let priorAliases: SpecImportAlias[] = [];
     try {
-      await saveSpecImportAliases([...newAliases]);
+      priorAliases = await fetchSpecImportAliases();
+    } catch {
+      // Unknown alias state is safe: save the new mapping, but do not delete.
+    }
+    const [mixes, cheese] = await Promise.all([
+      fetchMixes().catch(() => null),
+      // saveCheeseRecipes returns the current full pool, so liveness reflects
+      // the committed state rather than the pre-commit snapshot.
+      Promise.resolve(saved),
+    ]);
+    const liveNames =
+      mixes === null
+        ? null
+        : new Set(
+            [...mixes, ...cheese]
+              .map((r) => r.name.trim().toLowerCase())
+              .filter(Boolean),
+          );
+    const keyOf = (a: SpecImportAlias) =>
+      `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`;
+    const incomingByKey = new Map(newAliases.map((a) => [keyOf(a), a]));
+    const corrections = priorAliases
+      .map((old) => {
+        const next = incomingByKey.get(keyOf(old));
+        if (
+          old.kind !== "appType" ||
+          next?.kind !== "appType" ||
+          old.canonicalName.trim().toLowerCase() === next.canonicalName.trim().toLowerCase()
+        ) {
+          return null;
+        }
+        return { old, next };
+      })
+      .filter((v): v is { old: SpecImportAlias; next: SpecImportAlias } => v !== null);
+    const toDelete =
+      liveNames === null
+        ? []
+        : corrections
+            .filter(({ old }) => !liveNames.has(old.canonicalName.trim().toLowerCase()))
+            .map(({ old }) => ({ ...old, context: old.context ?? null }));
+    if (toDelete.length) {
+      try {
+        await deleteSpecImportAliases(toDelete, { exactContext: true });
+      } catch {
+        // Best-effort: the import already applied.
+      }
+    }
+    const reverseAliases = corrections.map(({ old, next }) => ({
+      kind: old.kind,
+      externalName: old.canonicalName,
+      canonicalName: next.canonicalName,
+      context: old.context ?? null,
+    }));
+    const aliasesToSave = [...newAliases, ...reverseAliases];
+    try {
+      await saveSpecImportAliases(aliasesToSave);
     } catch {
       // ignore — learning is non-critical
+    }
+    const mirrorable = aliasesToSave.filter(
+      (a) => a.kind === "brand" || a.kind === "flavor" || a.kind === "appType",
+    );
+    if (mirrorable.length) {
+      void saveAiCorrections(
+        mirrorable.map((a) => ({
+          domain:
+            a.kind === "brand"
+              ? ("brand" as const)
+              : a.kind === "flavor"
+                ? ("flavor" as const)
+                : ("item" as const),
+          fromText: a.externalName,
+          toText: a.canonicalName,
+        })),
+      );
     }
   }
   return { count: recipesToApply.length, saved };

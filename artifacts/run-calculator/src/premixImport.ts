@@ -45,8 +45,13 @@ import { gridSanityIssue } from "@workspace/spec-import";
 import { fetchFreezerPullItems, saveFreezerPullItems } from "./freezerPull";
 import { loadSpecImportKnown } from "./storage";
 import { readWorkbookGrids } from "./specImport";
-import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
+import {
+  deleteSpecImportAliases,
+  fetchSpecImportAliases,
+  saveSpecImportAliases,
+} from "./specImportAliases";
 import { fetchMixes, saveMixes } from "./mixes";
+import { fetchCheeseRecipes } from "./cheeseRecipes";
 import { requestMatchPremix } from "./premixMatch";
 import { saveAiCorrections } from "./aiCorrections";
 import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./savedPremixSheets";
@@ -373,8 +378,70 @@ export async function commitPremixImport(
   // Persist learned name mappings: the grounding pass's brand/flavor aliases
   // plus any "use existing mix" picks the review dialog collected (blend-name
   // "appType" aliases). Best-effort: the import already applied.
-  const aliasesToSave = [...prepared.newAliases, ...extraAliases];
+  let aliasesToSave = [...prepared.newAliases, ...extraAliases];
   if (aliasesToSave.length) {
+    // A reviewed redirect can correct an older redirect for the same workbook
+    // label. Compare against the server aliases before upserting so the stale
+    // canonical target cannot win on the next import.
+    let priorAliases: SpecImportAlias[] = [];
+    try {
+      priorAliases = await fetchSpecImportAliases();
+    } catch {
+      // Unknown alias state is safe: save the new mapping, but do not delete.
+    }
+    const keyOf = (a: SpecImportAlias) =>
+      `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`;
+    const incomingByKey = new Map(aliasesToSave.map((a) => [keyOf(a), a]));
+    const corrections = priorAliases
+      .map((old) => {
+        const next = incomingByKey.get(keyOf(old));
+        // Workbook redirect corrections live only in the shared blend-name
+        // namespace. Brand/flavor aliases have different liveness universes
+        // and are intentionally left to their existing upsert behavior.
+        if (
+          old.kind !== "appType" ||
+          next?.kind !== "appType" ||
+          old.canonicalName.trim().toLowerCase() === next.canonicalName.trim().toLowerCase()
+        ) {
+          return null;
+        }
+        return { old, next };
+      })
+      .filter((v): v is { old: SpecImportAlias; next: SpecImportAlias } => v !== null);
+    let liveNames: Set<string> | null = null;
+    try {
+      // Blend-name aliases share the Mixes and Cheese Recipes namespace. Both
+      // pools must be known before deletion; an old target in either pool is
+      // still legitimate and must keep its alias.
+      const [liveMixes, liveCheese] = await Promise.all([
+        fetchMixes(),
+        fetchCheeseRecipes(),
+      ]);
+      liveNames = new Set(
+        [...liveMixes, ...liveCheese]
+          .map((r) => r.name.trim().toLowerCase())
+          .filter(Boolean),
+      );
+    } catch {
+      // Unknown pool state is fail-safe: skip deletion.
+    }
+    const toDelete = corrections
+      .filter(({ old }) => liveNames !== null && !liveNames.has(old.canonicalName.trim().toLowerCase()))
+      .map(({ old }) => ({ ...old, context: old.context ?? null }));
+    if (toDelete.length) {
+      try {
+        await deleteSpecImportAliases(toDelete, { exactContext: true });
+      } catch {
+        // Best-effort: the import already applied.
+      }
+    }
+    const reverseAliases = corrections.map(({ old, next }) => ({
+      kind: old.kind,
+      externalName: old.canonicalName,
+      canonicalName: next.canonicalName,
+      context: old.context ?? null,
+    }));
+    aliasesToSave.push(...reverseAliases);
     try {
       await saveSpecImportAliases(aliasesToSave);
     } catch {
@@ -385,12 +452,17 @@ export async function commitPremixImport(
     // (e.g. the "appType" blend-name picks) have no corrections domain — mixing
     // them in would mis-file a mix name as a flavor correction.
     const mirrorable = aliasesToSave.filter(
-      (a) => a.kind === "brand" || a.kind === "flavor",
+      (a) => a.kind === "brand" || a.kind === "flavor" || a.kind === "appType",
     );
     if (mirrorable.length) {
       void saveAiCorrections(
         mirrorable.map((a) => ({
-          domain: a.kind === "brand" ? ("brand" as const) : ("flavor" as const),
+          domain:
+            a.kind === "brand"
+              ? ("brand" as const)
+              : a.kind === "flavor"
+                ? ("flavor" as const)
+                : ("item" as const),
           fromText: a.externalName,
           toText: a.canonicalName,
         })),

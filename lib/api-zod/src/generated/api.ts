@@ -3455,7 +3455,7 @@ export const SaveSpecImportAliasesResponse = zod.object({
 
 
 /**
- * Deletes alias rows that exactly match the given kind + externalName + canonicalName (case-insensitive). Used after a correcting re-import to remove a bad alias that mapped a sheet label onto a wrong stored name, so the next import doesn't re-apply the mistake. When an entry's context is null/omitted, rows with ANY context are matched; when provided, only rows with that context (case-insensitive) match. Available to any signed-in user (operators included).
+ * Deletes alias rows that exactly match the given kind + externalName + canonicalName (case-insensitive). Used after a correcting re-import to remove a bad alias that mapped a sheet label onto a wrong stored name, so the next import doesn't re-apply the mistake. By default, an entry's null/omitted context matches rows with ANY context; set exactContext to true to match null contexts exactly. A provided context always matches only that context (case-insensitive). Available to any signed-in user (operators included).
  * @summary Delete specific learned spec-import aliases (bad-mapping cleanup)
  */
 export const DeleteSpecImportAliasesBody = zod.object({
@@ -3464,7 +3464,8 @@ export const DeleteSpecImportAliasesBody = zod.object({
   "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
   "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
-}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).describe('The exact alias mappings to delete')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).describe('The exact alias mappings to delete'),
+  "exactContext": zod.boolean().optional().describe('When true, a null\/omitted alias context matches only stored rows whose context is also null. Defaults to false for the legacy any-context cleanup behavior.')
 })
 
 export const DeleteSpecImportAliasesResponse = zod.object({
@@ -4327,4 +4328,3 @@ export const ResetStaffPasswordBody = zod.object({
 export const DeleteStaffMemberParams = zod.object({
   "userId": zod.coerce.string()
 })
-

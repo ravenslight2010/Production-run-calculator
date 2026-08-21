@@ -4,6 +4,10 @@ import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow 
 import { SaveSpecImportAliasesBody, DeleteSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, isCrossFamilyMixCheesePair, type SpecAliasKind } from "@workspace/spec-import";
+import {
+  matchesSpecImportAliasDeletion,
+  type SpecImportAliasDeletionEntry,
+} from "../lib/specImportAliasDeletion";
 
 const router: IRouter = Router();
 
@@ -148,12 +152,12 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
 // overwrites a wrong stored name, the alias that minted the mistake
 // (external label -> wrong canonical name) must be removed or the next import
 // re-applies it and undoes the correction. Matching is exact-by-names
-// (case-insensitive) on kind + externalName + canonicalName; when an entry's
-// context is null/omitted, rows with ANY context match (the client can't
-// always know which brand context a poisoned appType alias was learned
-// under), otherwise the context must match case-insensitively too. This is
-// deliberately NOT a broad sweep — only rows whose full mapping is named get
-// deleted.
+// (case-insensitive) on kind + externalName + canonicalName. By default, an
+// entry's null/omitted context matches rows with ANY context (legacy behavior
+// for callers that cannot know the poisoned alias's context); `exactContext`
+// changes that to an exact null match. A provided context always matches only
+// that context case-insensitively. This is deliberately NOT a broad sweep —
+// only rows whose full mapping is named get deleted.
 router.post("/spec-import-aliases/delete", async (req: Request, res: Response) => {
   const parsed = DeleteSpecImportAliasesBody.safeParse(req.body);
   if (!parsed.success) {
@@ -161,8 +165,7 @@ router.post("/spec-import-aliases/delete", async (req: Request, res: Response) =
     return;
   }
 
-  type DeleteEntry = { kind: SpecAliasKind; externalName: string; canonicalName: string; context: string | null };
-  const entries: DeleteEntry[] = [];
+  const entries: SpecImportAliasDeletionEntry[] = [];
   for (const a of parsed.data.aliases.slice(0, MAX_BATCH)) {
     if (!KIND_SET.has(a.kind)) continue;
     const externalName = (a.externalName ?? "").trim().slice(0, MAX_NAME_LEN);
@@ -180,13 +183,17 @@ router.post("/spec-import-aliases/delete", async (req: Request, res: Response) =
         .where(eq(specImportAliasesTable.scope, currentScope()));
       const idsToDelete = existing
         .filter((row) =>
-          entries.some(
-            (e) =>
-              row.kind === e.kind &&
-              row.externalName.trim().toLowerCase() === e.externalName.toLowerCase() &&
-              row.canonicalName.trim().toLowerCase() === e.canonicalName.toLowerCase() &&
-              (e.context === null ||
-                (row.context ?? "").trim().toLowerCase() === e.context.toLowerCase()),
+          entries.some((entry) =>
+            matchesSpecImportAliasDeletion(
+              {
+                kind: row.kind as SpecAliasKind,
+                externalName: row.externalName,
+                canonicalName: row.canonicalName,
+                context: row.context ?? null,
+              },
+              entry,
+              parsed.data.exactContext ?? false,
+            ),
           ),
         )
         .map((row) => row.id);

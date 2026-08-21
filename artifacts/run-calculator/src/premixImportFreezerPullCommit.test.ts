@@ -7,6 +7,11 @@ import type { PremixImportPrepared } from "./premixImport";
 
 const fetchMixes = vi.fn(async () => []);
 const saveMixes = vi.fn(async () => {});
+const fetchCheeseRecipes = vi.fn(async () => []);
+const fetchSpecImportAliases = vi.fn(async () => []);
+const saveSpecImportAliases = vi.fn(async () => {});
+const deleteSpecImportAliases = vi.fn(async () => {});
+const saveAiCorrections = vi.fn(async () => {});
 const fetchFreezerPullItems = vi.fn(async () => [] as unknown[]);
 const saveFreezerPullItems = vi.fn(async () => {});
 
@@ -14,20 +19,26 @@ vi.mock("./mixes", () => ({
   fetchMixes: (...a: unknown[]) => fetchMixes(...(a as [])),
   saveMixes: (...a: unknown[]) => saveMixes(...(a as [])),
 }));
+vi.mock("./cheeseRecipes", () => ({
+  fetchCheeseRecipes: (...a: unknown[]) => fetchCheeseRecipes(...(a as [])),
+}));
 vi.mock("./freezerPull", () => ({
   fetchFreezerPullItems: (...a: unknown[]) => fetchFreezerPullItems(...(a as [])),
   saveFreezerPullItems: (...a: unknown[]) => saveFreezerPullItems(...(a as [])),
 }));
 vi.mock("./specImportAliases", () => ({
-  fetchSpecImportAliases: async () => [],
-  saveSpecImportAliases: async () => {},
+  fetchSpecImportAliases: (...a: unknown[]) => fetchSpecImportAliases(...(a as [])),
+  saveSpecImportAliases: (...a: unknown[]) => saveSpecImportAliases(...(a as [])),
+  deleteSpecImportAliases: (...a: unknown[]) => deleteSpecImportAliases(...(a as [])),
 }));
 vi.mock("./savedPremixSheets", () => ({
   savePremixSheet: async () => {},
   buildPremixSheetLabel: () => "",
   deriveSourceKey: () => "",
 }));
-vi.mock("./aiCorrections", () => ({ saveAiCorrections: async () => {} }));
+vi.mock("./aiCorrections", () => ({
+  saveAiCorrections: (...a: unknown[]) => saveAiCorrections(...(a as [])),
+}));
 vi.mock("./premixMatch", () => ({ requestMatchPremix: async () => ({ matches: [] }) }));
 vi.mock("./storage", () => ({ loadSpecImportKnown: async () => null }));
 vi.mock("./specImport", () => ({ readWorkbookGrids: async () => [] }));
@@ -62,6 +73,8 @@ const mix = {
 beforeEach(() => {
   vi.clearAllMocks();
   fetchMixes.mockResolvedValue([]);
+  fetchCheeseRecipes.mockResolvedValue([]);
+  fetchSpecImportAliases.mockResolvedValue([]);
   fetchFreezerPullItems.mockResolvedValue([]);
 });
 
@@ -123,5 +136,108 @@ describe("commitPremixImport freezer-pull application", () => {
     expect(fetchFreezerPullItems).not.toHaveBeenCalled();
     expect(saveFreezerPullItems).not.toHaveBeenCalled();
     expect(result.freezerPullCount).toBe(0);
+  });
+
+  it("removes a non-live stale redirect and learns the reverse correction", async () => {
+    fetchSpecImportAliases.mockResolvedValue([
+      {
+        kind: "appType",
+        externalName: "Sheet Blend",
+        canonicalName: "Wrong Blend",
+        context: null,
+      },
+    ]);
+
+    await commitPremixImport(prepared, [mix], [], [
+      {
+        kind: "appType",
+        externalName: "Sheet Blend",
+        canonicalName: "Correct Blend",
+        context: null,
+      },
+    ]);
+
+    expect(deleteSpecImportAliases).toHaveBeenCalledWith(
+      [
+        {
+          kind: "appType",
+          externalName: "Sheet Blend",
+          canonicalName: "Wrong Blend",
+          context: null,
+        },
+      ],
+      { exactContext: true },
+    );
+    expect(saveSpecImportAliases).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          externalName: "Wrong Blend",
+          canonicalName: "Correct Blend",
+        }),
+      ]),
+    );
+    expect(saveAiCorrections).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          domain: "item",
+          fromText: "Wrong Blend",
+          toText: "Correct Blend",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps the old alias when its target is still a live mix", async () => {
+    fetchSpecImportAliases.mockResolvedValue([
+      {
+        kind: "appType",
+        externalName: "Sheet Blend",
+        canonicalName: "Still Live Blend",
+        context: null,
+      },
+    ]);
+    fetchMixes.mockResolvedValue([{ ...mix, name: "Still Live Blend" }]);
+
+    await commitPremixImport(prepared, [mix], [], [
+      {
+        kind: "appType",
+        externalName: "Sheet Blend",
+        canonicalName: "Correct Blend",
+        context: null,
+      },
+    ]);
+
+    expect(deleteSpecImportAliases).not.toHaveBeenCalled();
+    expect(saveSpecImportAliases).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          externalName: "Still Live Blend",
+          canonicalName: "Correct Blend",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps the old alias when its target is still a live cheese recipe", async () => {
+    fetchSpecImportAliases.mockResolvedValue([
+      {
+        kind: "appType",
+        externalName: "Sheet Blend",
+        canonicalName: "Still Live Cheese",
+        context: null,
+      },
+    ]);
+    fetchCheeseRecipes.mockResolvedValue([{ name: "Still Live Cheese" }]);
+
+    await commitPremixImport(prepared, [mix], [], [
+      {
+        kind: "appType",
+        externalName: "Sheet Blend",
+        canonicalName: "Correct Blend",
+        context: null,
+      },
+    ]);
+
+    expect(deleteSpecImportAliases).not.toHaveBeenCalled();
   });
 });

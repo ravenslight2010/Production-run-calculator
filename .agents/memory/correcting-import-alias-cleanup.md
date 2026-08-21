@@ -9,6 +9,5 @@ Rule: when a spec import overwrites a stored name with a DIFFERENT one, that's a
 
 **How to apply:**
 - Never delete when the old name is still live anywhere it could legitimately resolve, and treat "pool fetch failed" as live/unknown (fail safe: skip deletion, still learn the reverse alias).
-- Cheese-ingredient liveness must check BOTH the cheese pool and the Mixes pool — cheese-kind imported recipes can be routed to either (reviewer-caught cross-pool gap).
-- Reverse aliases must flow through the normal sanitize+save path so poison guards apply; the symmetric modifier-drop guard intentionally drops reverse pairs like "Salt"→"Sea Salt".
-- Alias deletion API: null/omitted context matches ANY context (client can't always know which context a poisoned alias was learned under).
+- Delete a correcting-import alias by its complete identity, including an explicitly empty context; never let a correction for one scope erase a sibling scoped alias.
+- Reverse aliases must flow through the normal sanitize+save path so poison guards apply.
