@@ -663,6 +663,74 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect(row?.runValues?.b).toBeUndefined();
   });
 
+  it("does not resurrect a deleted run when a stale peer syncs, preserving the survivor and selection", async () => {
+    const D = "2030-06-04";
+    const survivor = run("survivor");
+    const removed = run("removed");
+    const devicePut = (senderId: string, payload: unknown) =>
+      fetch(`${baseUrl}/api/sync/today?today=${D}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+
+    // Both devices initially share the same two-run day, with device B's
+    // current selection pointing at index 0 — the run that will survive
+    // deletion. Selection itself is local-only; preserving this run first in
+    // the returned list lets device B retain that selection.
+    const sharedPayload = {
+      dayState: {
+        runs: [survivor, removed],
+        resetAt: 1000,
+      },
+      runValues: {
+        survivor: { casesNeeded: 10 },
+        removed: { casesNeeded: 20 },
+      },
+      runValuesUpdatedAt: { survivor: 1, removed: 1 },
+    };
+    expect((await devicePut("device-a", sharedPayload)).status).toBe(200);
+    expect((await devicePut("device-b", sharedPayload)).status).toBe(200);
+
+    // Device A removes the not-started run and pushes the same tombstone that
+    // the Manage Runs UI records locally.
+    const deletedPayload = {
+      ...sharedPayload,
+      dayState: {
+        ...sharedPayload.dayState,
+        runs: [survivor],
+      },
+      runValues: { survivor: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { survivor: 1 },
+      deletedItems: { runs: ["removed"] },
+    };
+    expect((await devicePut("device-a", deletedPayload)).status).toBe(200);
+
+    // Device B syncs its stale copy. The server must drop only the tombstoned
+    // run, including its value, while keeping B's current selection intact.
+    const syncResponse = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
+    expect(syncResponse.status).toBe(200);
+    const synced = (await syncResponse.json()) as {
+      dayState?: { runs?: Array<{ id: string }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+      deletedItems?: { runs?: string[] };
+    };
+    expect(synced.dayState?.runs?.map((r) => r.id)).toEqual(["survivor"]);
+    expect(synced.runValues?.survivor?.casesNeeded).toBe(10);
+    expect(synced.runValues?.removed).toBeUndefined();
+    expect(synced.deletedItems?.runs).toContain("removed");
+
+    // A stale peer replay after the pull must remain unable to resurrect it.
+    expect((await devicePut("device-b", sharedPayload)).status).toBe(200);
+    const afterReplay = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
+    const replayed = (await afterReplay.json()) as {
+      dayState?: { runs?: Array<{ id: string }> };
+      runValues?: Record<string, unknown>;
+    };
+    expect(replayed.dayState?.runs?.map((r) => r.id)).toEqual(["survivor"]);
+    expect(replayed.runValues?.removed).toBeUndefined();
+  });
+
   it("preserves both run lists under concurrent FIRST writes to a new date (no first-write clobber)", async () => {
     // No row exists yet, so FOR UPDATE locks nothing: two concurrent first PUTs
     // with different single-run lists must still converge to the union, not let
