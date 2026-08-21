@@ -169,6 +169,13 @@ async function post(userId: string, corrections: unknown[]): Promise<Response> {
   });
 }
 
+async function del(userId: string, id: number): Promise<Response> {
+  return fetch(`${baseUrl}/api/ai-corrections/${id}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${signToken(userId)}` },
+  });
+}
+
 async function listCorrections(userId: string): Promise<Array<{ id: number; domain: string; fromText: string; toText: string }>> {
   const res = await fetch(`${baseUrl}/api/ai-corrections`, {
     headers: { authorization: `Bearer ${signToken(userId)}` },
@@ -177,7 +184,7 @@ async function listCorrections(userId: string): Promise<Array<{ id: number; doma
   return body.corrections;
 }
 
-describe("GET and POST /ai-corrections — capability gating", () => {
+describe("GET, POST, and DELETE /ai-corrections — capability gating", () => {
   it("allows any authenticated operator to read corrections", async () => {
     const operator = await freshOperator();
 
@@ -218,6 +225,63 @@ describe("GET and POST /ai-corrections — capability gating", () => {
         },
       ],
     });
+  });
+
+  it("rejects an operator delete and leaves the correction intact", async () => {
+    const manager = await freshManager();
+    const operator = await freshOperator();
+
+    const seeded = await post(manager, [
+      { domain: "brand", fromText: "Old Brand", toText: "New Brand" },
+    ]);
+    expect(seeded.status).toBe(200);
+    const [{ id }] = await listCorrections(manager);
+
+    const res = await del(operator, id);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Missing capability: manage-staff" });
+    expect(await listCorrections(manager)).toMatchObject([
+      {
+        id,
+        domain: "brand",
+        fromText: "Old Brand",
+        toText: "New Brand",
+      },
+    ]);
+  });
+
+  it("allows a manager to delete a correction and returns the remaining corrections", async () => {
+    const manager = await freshManager();
+
+    const seeded = await post(manager, [
+      { domain: "brand", fromText: "Old Brand", toText: "New Brand" },
+      { domain: "flavor", fromText: "Old Flavor", toText: "New Flavor" },
+    ]);
+    expect(seeded.status).toBe(200);
+    const corrections = await listCorrections(manager);
+    const deleted = corrections.find((correction) => correction.fromText === "Old Brand");
+    expect(deleted).toBeDefined();
+
+    const res = await del(manager, deleted!.id);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      corrections: [
+        {
+          domain: "flavor",
+          fromText: "Old Flavor",
+          toText: "New Flavor",
+        },
+      ],
+    });
+    expect(await listCorrections(manager)).toMatchObject([
+      {
+        domain: "flavor",
+        fromText: "Old Flavor",
+        toText: "New Flavor",
+      },
+    ]);
   });
 });
 
