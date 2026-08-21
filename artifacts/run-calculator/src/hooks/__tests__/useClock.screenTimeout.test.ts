@@ -691,6 +691,82 @@ describe("useClock — slow-tick path (runStatus=pending) screen timeout handlin
     // nowTime must not have advanced past the pre-hide tick.
     expect(result.current.getTime()).toBe(timeAfterFirstTick);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // E. Repeated window "focus" events do not accumulate phantom slow intervals.
+  //
+  // Devices that wake repeatedly between runs may emit several focus events
+  // without a visibilitychange event.  Each focus must replace the existing
+  // PENDING_CLOCK_MS interval rather than leaving an additional interval
+  // ticking in the background.
+  //
+  // Three focus events are separated by quarter-period gaps.  After each one:
+  //   • exactly one interval remains active;
+  //   • nowTime snaps to the current system clock;
+  //   • no slow tick has fired during the sub-period gap.
+  //
+  // cleanup() prevents listeners from earlier hooks in this file from handling
+  // the focus events and inflating the timer count.
+  // ──────────────────────────────────────────────────────────────────────────
+  it("E. repeated window focus events: exactly one slow interval, immediate snaps, no phantom ticks", () => {
+    cleanup();
+
+    const { result, rerender } = renderHook(() => useClock("pending"));
+    const subPeriod = PENDING_CLOCK_MS / 4;
+
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Focus #1 after a sub-period gap: no interval tick should have fired.
+    act(() => {
+      vi.advanceTimersByTime(subPeriod);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0);
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    expect(result.current.getTime()).toBe(T0 + subPeriod);
+
+    // Focus #2 before the replacement interval reaches its first period.
+    act(() => {
+      vi.advanceTimersByTime(subPeriod);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + subPeriod);
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    expect(result.current.getTime()).toBe(T0 + 2 * subPeriod);
+
+    // Focus #3 likewise must not allow the prior interval to tick.
+    act(() => {
+      vi.advanceTimersByTime(subPeriod);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 2 * subPeriod);
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+      rerender();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    expect(result.current.getTime()).toBe(T0 + 3 * subPeriod);
+
+    // Only the current interval is active: one full slow period produces one
+    // tick, not multiple callbacks from intervals left by earlier focuses.
+    act(() => {
+      vi.advanceTimersByTime(PENDING_CLOCK_MS);
+      rerender();
+    });
+    expect(result.current.getTime()).toBe(T0 + 3 * subPeriod + PENDING_CLOCK_MS);
+    expect(vi.getTimerCount()).toBe(1);
+  });
 });
 
 // ── Fast-tick path (runStatus="paused") hidden at mount ───────────────────────
