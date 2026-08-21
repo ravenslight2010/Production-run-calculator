@@ -20837,7 +20837,12 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
             {showSauceBarrelDue && (
               <div className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 mt-2 text-xs">
                 <span className="text-red-400 font-semibold">🍅 Start new barrel soon — current barrel nearly empty</span>
-                <button className="text-muted-foreground hover:text-foreground ml-2 shrink-0" onClick={() => setShowSauceBarrelDue(false)}>✕</button>
+                <button
+                  data-testid="button-dismiss-barrel-alert"
+                  aria-label="Dismiss barrel alert"
+                  className="text-muted-foreground hover:text-foreground ml-2 shrink-0"
+                  onClick={() => setShowSauceBarrelDue(false)}
+                >✕</button>
               </div>
             )}
           </CardContent>
@@ -21535,7 +21540,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                       {v.targetDoughballWeight > 0 && (
                         <p className="text-xs text-muted-foreground mt-3">
                           Target ball weight:{" "}
-                          <span className="font-mono font-semibold text-foreground">
+                          <span data-testid="text-target-ball-weight" className="font-mono font-semibold text-foreground">
                             {v.targetDoughballWeight % 1 === 0
                               ? v.targetDoughballWeight.toString()
                               : v.targetDoughballWeight.toFixed(2)}{" "}oz
