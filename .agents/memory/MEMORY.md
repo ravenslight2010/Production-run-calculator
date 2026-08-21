@@ -142,3 +142,4 @@
 - [Mounted AI cost paths](mounted-ai-cost-paths.md) — Express strips mount prefixes from req.path; cost lookups keyed by public API paths must recombine baseUrl + path.
 - [Isolated destructive browser tests](isolated-destructive-browser-tests.md) — Drizzle push ignores URL search_path isolation; use a temporary database for Playwright setup that deletes live-day rows.
 - [Mix-plan E2E setup](mix-plan-e2e-setup.md) — localStorage-seeded live runs can be replaced before Mix Plan renders; baseline pull tests may fail before exercising their assertions.
+- [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.

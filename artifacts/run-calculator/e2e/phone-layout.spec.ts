@@ -239,6 +239,133 @@ async function assertFocusedFieldIsKeyboardSafe(
   ).toBeGreaterThanOrEqual(geometry.viewportHeight);
 }
 
+async function assertMobileViewportAndSafeArea(
+  page: Page,
+  field: Locator,
+  name: string,
+): Promise<{
+  viewportHeight: number;
+  viewportWidth: number;
+  safeArea: Record<"top" | "right" | "bottom" | "left", number>;
+  safeAreaRaw: Record<"top" | "right" | "bottom" | "left", string>;
+  authScreenPadding: Record<"top" | "right" | "bottom" | "left", number>;
+}> {
+  await field.focus();
+  await expect(field, `${name} should retain focus`).toBeFocused();
+
+  const geometry = await page.evaluate(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return null;
+
+    const safeAreaProbe = document.createElement("div");
+    safeAreaProbe.style.cssText =
+      "position:fixed;visibility:hidden;pointer-events:none;" +
+      "padding-top:env(safe-area-inset-top);" +
+      "padding-right:env(safe-area-inset-right);" +
+      "padding-bottom:env(safe-area-inset-bottom);" +
+      "padding-left:env(safe-area-inset-left);";
+    document.body.append(safeAreaProbe);
+    const safeAreaStyle = window.getComputedStyle(safeAreaProbe);
+    const cssPixels = (value: string) => Number.parseFloat(value) || 0;
+    const authScreen = document.querySelector<HTMLElement>(
+      '[data-testid="auth-screen"]',
+    );
+    const authScreenStyle = authScreen
+      ? window.getComputedStyle(authScreen)
+      : null;
+    safeAreaProbe.remove();
+
+    return {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
+      viewportScale: viewport.scale,
+      field: document.activeElement?.getBoundingClientRect().toJSON(),
+      safeArea: {
+        top: cssPixels(safeAreaStyle.paddingTop),
+        right: cssPixels(safeAreaStyle.paddingRight),
+        bottom: cssPixels(safeAreaStyle.paddingBottom),
+        left: cssPixels(safeAreaStyle.paddingLeft),
+      },
+      safeAreaRaw: {
+        top: safeAreaStyle.paddingTop,
+        right: safeAreaStyle.paddingRight,
+        bottom: safeAreaStyle.paddingBottom,
+        left: safeAreaStyle.paddingLeft,
+      },
+      authScreenPadding: authScreenStyle
+        ? {
+            top: cssPixels(authScreenStyle.paddingTop),
+            right: cssPixels(authScreenStyle.paddingRight),
+            bottom: cssPixels(authScreenStyle.paddingBottom),
+            left: cssPixels(authScreenStyle.paddingLeft),
+          }
+        : null,
+      viewportMeta: document
+        .querySelector('meta[name="viewport"]')
+        ?.getAttribute("content"),
+    };
+  });
+
+  expect(geometry, "mobile browsers should expose visualViewport").not.toBeNull();
+  if (!geometry) {
+    throw new Error("Mobile browser did not expose visualViewport.");
+  }
+
+  expect(
+    geometry.viewportWidth,
+    "visualViewport width should stay within the mobile layout viewport",
+  ).toBeLessThanOrEqual(geometry.innerWidth + 1);
+  expect(
+    geometry.viewportHeight,
+    "visualViewport height should stay within the mobile layout viewport",
+  ).toBeLessThanOrEqual(geometry.innerHeight + 1);
+  expect(
+    geometry.viewportScale,
+    "the browser should begin at the page's configured scale",
+  ).toBeGreaterThan(0);
+  expect(
+    geometry.viewportMeta,
+    "the page must opt into display under a device safe area",
+  ).toContain("viewport-fit=cover");
+  expect(
+    geometry.authScreenPadding,
+    "the sign-in screen should reserve its safe-area padding",
+  ).not.toBeNull();
+  if (!geometry.authScreenPadding) {
+    throw new Error("Sign-in screen was not found for safe-area verification.");
+  }
+
+  for (const edge of ["top", "right", "bottom", "left"] as const) {
+    expect(
+      geometry.authScreenPadding[edge],
+      `sign-in ${edge} padding should include the ${edge} safe area`,
+    ).toBeGreaterThanOrEqual(Math.max(24, geometry.safeArea[edge]) - 1);
+  }
+
+  const rect = geometry.field;
+  expect(rect, `${name} should be the active element`).toBeTruthy();
+  if (!rect) {
+    throw new Error(`${name} was not the active element.`);
+  }
+  expect(rect.left, `${name} should fit the mobile visual viewport`).toBeGreaterThanOrEqual(-1);
+  expect(rect.right, `${name} should fit the mobile visual viewport`).toBeLessThanOrEqual(
+    geometry.viewportWidth + 1,
+  );
+  expect(rect.bottom, `${name} should remain above the visual viewport bottom`).toBeLessThanOrEqual(
+    geometry.viewportHeight + 1,
+  );
+
+  return {
+    viewportHeight: geometry.viewportHeight,
+    viewportWidth: geometry.viewportWidth,
+    safeArea: geometry.safeArea,
+    safeAreaRaw: geometry.safeAreaRaw,
+    authScreenPadding: geometry.authScreenPadding,
+  };
+}
+
 async function dismissOnboardingIfPresent(page: Page): Promise<void> {
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
   if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -387,5 +514,89 @@ test.describe("phone layout smoke", () => {
       "Password",
     );
     await assertPhoneLayout(page, "keyboard-safe password field");
+  });
+
+  test("@real-mobile-browser physical Android Chrome keeps sign-in fields above the real keyboard", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "real-mobile-chromium",
+      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
+    );
+
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+
+    const preKeyboardViewportHeight = await page.evaluate(
+      () => window.visualViewport?.height ?? null,
+    );
+    expect(
+      preKeyboardViewportHeight,
+      "the physical mobile browser should expose visualViewport",
+    ).not.toBeNull();
+    if (!preKeyboardViewportHeight) return;
+
+    const username = page.getByRole("textbox", { name: "Username" });
+    await username.focus();
+    await expect(username, "Username should retain focus").toBeFocused();
+    await page.waitForFunction(
+      (initialHeight) =>
+        Boolean(
+          window.visualViewport &&
+            window.visualViewport.height < initialHeight - 80,
+        ),
+      preKeyboardViewportHeight,
+      { timeout: 15_000 },
+    );
+    const postKeyboardViewportHeight = await page.evaluate(
+      () => window.visualViewport?.height ?? null,
+    );
+    expect(
+      postKeyboardViewportHeight,
+      "opening the real software keyboard should shrink visualViewport",
+    ).toBeLessThan(preKeyboardViewportHeight - 80);
+
+    const usernameGeometry = await assertMobileViewportAndSafeArea(
+      page,
+      username,
+      "Username",
+    );
+    await assertFocusedFieldIsKeyboardSafe(
+      page,
+      username,
+      "Username",
+    );
+    await testInfo.attach("real-mobile-keyboard-viewport", {
+      body: JSON.stringify({
+        preKeyboardViewportHeight,
+        postKeyboardViewportHeight,
+        usernameGeometry,
+      }),
+      contentType: "application/json",
+    });
+
+    const password = page.getByRole("textbox", { name: "Password" });
+    await password.focus();
+    await expect(password, "Password should retain focus").toBeFocused();
+    await page.waitForFunction(
+      (keyboardViewportHeight) =>
+        Boolean(
+          window.visualViewport &&
+            window.visualViewport.height <= keyboardViewportHeight + 1,
+        ),
+      postKeyboardViewportHeight,
+      { timeout: 5_000 },
+    );
+    await assertMobileViewportAndSafeArea(
+      page,
+      password,
+      "Password",
+    );
+    await assertFocusedFieldIsKeyboardSafe(
+      page,
+      password,
+      "Password",
+    );
+    await assertPhoneLayout(page, "real mobile browser sign-in");
   });
 });

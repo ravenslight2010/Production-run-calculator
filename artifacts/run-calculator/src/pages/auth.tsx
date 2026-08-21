@@ -265,7 +265,16 @@ function AuthForm({ mode }: { mode: Mode }) {
   }
 
   return (
-    <div className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground px-6 py-12">
+    <div
+      data-testid="auth-screen"
+      className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground"
+      style={{
+        paddingTop: "max(3rem, env(safe-area-inset-top))",
+        paddingRight: "max(1.5rem, env(safe-area-inset-right))",
+        paddingBottom: "max(3rem, env(safe-area-inset-bottom))",
+        paddingLeft: "max(1.5rem, env(safe-area-inset-left))",
+      }}
+    >
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <img
