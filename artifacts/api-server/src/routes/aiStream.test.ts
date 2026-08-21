@@ -29,6 +29,12 @@ describe("sseFrame", () => {
     const dataLines = frame.split("\n").filter((l) => l.startsWith("data:"));
     expect(dataLines).toHaveLength(1);
   });
+
+  it("encodes provider failures as a recoverable error event", () => {
+    const frame = sseFrame("error", { error: "AI provider error" });
+    expect(frame).toBe('event: error\ndata: {"error":"AI provider error"}\n\n');
+    expect(frame).not.toContain("event: done");
+  });
 });
 
 describe("extractJsonStringField", () => {

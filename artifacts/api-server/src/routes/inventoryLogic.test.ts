@@ -175,6 +175,25 @@ describe("applyRunConsumption", () => {
     expect(deps.drawDown).toHaveBeenCalledTimes(1);
   });
 
+  it("allows only one of concurrent retries to claim and deduct a run", async () => {
+    const { deps, ledger, remaining } = makeDeps({ mozz: 1 }, { 1: 10 });
+    const lines = [{ itemKey: "mozz", qty: 3 }];
+
+    const results = await Promise.all([
+      applyRunConsumption(deps, "run-race", lines),
+      applyRunConsumption(deps, "run-race", lines),
+    ]);
+
+    expect(results).toEqual([
+      { applied: true, consumed: 1 },
+      { applied: false, consumed: 0 },
+    ]);
+    expect(remaining[1]).toBe(7);
+    expect(ledger).toEqual([{ itemId: 1, consumed: 3 }]);
+    expect(deps.drawDown).toHaveBeenCalledOnce();
+    expect(deps.recordConsumption).toHaveBeenCalledOnce();
+  });
+
   it("claims the run marker even when nothing is consumed (zero-consume run)", async () => {
     // No matching inventory items, so every line is a no-op draw.
     const { deps, ledger, claimedRuns } = makeDeps({});

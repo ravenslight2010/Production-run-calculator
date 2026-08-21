@@ -51,11 +51,31 @@ describe("consumeSyncWriteResponse", () => {
 
   it("does not apply data from an unsuccessful response", async () => {
     const applyCanonical = vi.fn();
-    await consumeSyncWriteResponse(
+    const result = await consumeSyncWriteResponse(
       new Response(JSON.stringify({ data: { runValues: {} } }), { status: 500 }),
       { applyCanonical },
     );
+    expect(result.body).toEqual({ data: { runValues: {} } });
     expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
+  it("leaves a failed save unapplied and permits a later successful retry", async () => {
+    const applyCanonical = vi.fn();
+    const intended = { runValues: { run1: { casesOnCurrentSkid: 12 } } };
+
+    const failed = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({ data: intended }), { status: 503 }),
+      { applyCanonical },
+    );
+    expect(failed.stale).toBe(false);
+    expect(applyCanonical).not.toHaveBeenCalled();
+
+    await consumeSyncWriteResponse(
+      new Response(JSON.stringify({ ok: true, data: intended }), { status: 200 }),
+      { applyCanonical },
+    );
+    expect(applyCanonical).toHaveBeenCalledOnce();
+    expect(applyCanonical).toHaveBeenCalledWith(intended);
   });
 
   it("ignores a response invalidated while its body was being read", async () => {
