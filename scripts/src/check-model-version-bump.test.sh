@@ -93,5 +93,37 @@ test_accepts_prompt_change_with_version_bump() {
   echo "PASS: accepts a prompt change with a SPEC_PARSE_VERSION bump"
 }
 
+test_rejects_sanitizer_change_without_version_bump() {
+  local repo="${TEST_ROOT}/sanitizer-without-bump"
+  make_base_repo "${repo}"
+
+  cat > "${repo}/lib/spec-import/src/index.ts" <<'EOF'
+export type ParsedRecipe = { name: string; doughName?: string };
+EOF
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q -m "change sanitizer output shape without version bump"
+
+  run_guard "${repo}" 1
+  echo "PASS: rejects a sanitizer/type change without a SPEC_PARSE_VERSION bump"
+}
+
+test_accepts_sanitizer_change_with_version_bump() {
+  local repo="${TEST_ROOT}/sanitizer-with-bump"
+  make_base_repo "${repo}"
+
+  cat > "${repo}/lib/spec-import/src/index.ts" <<'EOF'
+export type ParsedRecipe = { name: string; doughName?: string };
+EOF
+  printf 'export const SPEC_PARSE_VERSION = "11";\n' \
+    > "${repo}/artifacts/run-calculator/src/specImport.ts"
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q -m "change sanitizer output shape with version bump"
+
+  run_guard "${repo}" 0
+  echo "PASS: accepts a sanitizer/type change with a SPEC_PARSE_VERSION bump"
+}
+
 test_rejects_prompt_change_without_version_bump
 test_accepts_prompt_change_with_version_bump
+test_rejects_sanitizer_change_without_version_bump
+test_accepts_sanitizer_change_with_version_bump
