@@ -19,7 +19,7 @@ export interface DieLineDefaultsEntry {
   /** "Extra Case Buffer" in the UI */
   casesPerLayer: number;
   /** Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12"). */
-  preTunnelMin?: number;
+  preTunnelMin?: number | null;
   /** Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12"). */
-  postTunnelMin?: number;
+  postTunnelMin?: number | null;
 }

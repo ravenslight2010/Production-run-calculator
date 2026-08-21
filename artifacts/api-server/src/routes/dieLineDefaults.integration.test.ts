@@ -241,6 +241,53 @@ describe("die-line-defaults upsert semantics", () => {
     expect(items[0]).not.toHaveProperty("postTunnelMin");
   });
 
+  it("ignores invalid tunnel overrides without changing the valid die defaults", async () => {
+    const save = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [
+        entry({ preTunnelMin: 0, postTunnelMin: -1 }),
+        {
+          ...entry({ name: "11-inch Dies", preTunnelMin: 100001 }),
+          postTunnelMin: null,
+        },
+      ],
+    });
+    expect(save.status).toBe(200);
+
+    const savedBody = (await save.json()) as { entries: ApiEntry[] };
+    expect(savedBody.entries).toHaveLength(2);
+    expect(savedBody.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: '7" Dies',
+          crustsPerCycle: 4,
+          cycleSpeed: 9,
+          speedAdjustment: 0.7,
+          freezerTime: 30,
+          casesPerLayer: 8,
+        }),
+        expect.objectContaining({
+          name: "11-inch Dies",
+          crustsPerCycle: 4,
+          cycleSpeed: 9,
+          speedAdjustment: 0.7,
+          freezerTime: 30,
+          casesPerLayer: 8,
+        }),
+      ]),
+    );
+    for (const saved of savedBody.entries) {
+      expect(saved).not.toHaveProperty("preTunnelMin");
+      expect(saved).not.toHaveProperty("postTunnelMin");
+    }
+
+    const items = await listAs(OPERATOR);
+    expect(items).toEqual(savedBody.entries);
+    for (const item of items) {
+      expect(item).not.toHaveProperty("preTunnelMin");
+      expect(item).not.toHaveProperty("postTunnelMin");
+    }
+  });
+
   it("drops malformed entries (blank name, negative / non-finite numbers)", async () => {
     const res = await req(MANAGER, "POST", "/api/die-line-defaults", {
       entries: [

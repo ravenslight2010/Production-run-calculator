@@ -7870,11 +7870,13 @@ components:
           description: '"Extra Case Buffer" in the UI'
         preTunnelMin:
           type: number
+          nullable: true
           description: >-
             Pre-tunnel dwell time override in minutes. Absent = use the app's
             built-in per-die-size default (3.5 min for 7", 2.0 min for 12").
         postTunnelMin:
           type: number
+          nullable: true
           description: >-
             Post-tunnel dwell time override in minutes. Absent = use the app's
             built-in per-die-size default (3.0 min for 7", 2.0 min for 12").
