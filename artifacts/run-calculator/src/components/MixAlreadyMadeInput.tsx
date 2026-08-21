@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Mix } from "@workspace/mixes";
+import { toast } from "@/hooks/use-toast";
 
 interface Props {
   mix: Mix;
@@ -31,8 +32,17 @@ export function MixAlreadyMadeInput({ mix, onSaved, saveMixes }: Props) {
         onChange={(e) => setVal(Math.max(0, Number(e.target.value) || 0))}
         onBlur={async () => {
           if (val === mix.amountAlreadyMade) return;
-          const saved = await saveMixes([{ ...mix, amountAlreadyMade: val }]);
-          onSaved(saved);
+          try {
+            const saved = await saveMixes([{ ...mix, amountAlreadyMade: val }]);
+            onSaved(saved);
+          } catch {
+            // Keep the local value so the manager can retry without retyping.
+            toast({
+              variant: "destructive",
+              title: "Couldn't save already made amount",
+              description: "Please check your connection and try again.",
+            });
+          }
         }}
         className="w-20 rounded border border-emerald-700/50 bg-emerald-950/60 px-1.5 py-0.5 text-xs text-emerald-100 tabular-nums focus:outline-none focus:ring-1 focus:ring-emerald-500"
       />
