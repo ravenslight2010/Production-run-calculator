@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSuggestMergesPrompt,
+  buildKnownPairsNote,
+  filterKnownMerges,
   sanitizeSuggestMerges,
   validateSuggestMergesBody,
   MAX_MERGE_NAMES,
   MAX_MERGE_ALIASES,
   MAX_MERGE_NAME_LEN,
 } from "./aiSuggestMerges";
+import type { AiCorrection } from "@workspace/ai-memory";
 
 describe("validateSuggestMergesBody — happy path", () => {
   it("accepts a well-formed body and returns the cleaned names/aliases", () => {
@@ -145,6 +148,80 @@ describe("sanitizeSuggestMerges — untrusted AI output", () => {
     for (const bad of [null, 42, "nope", {}, { suggestions: "x" }]) {
       expect(sanitizeSuggestMerges(bad, NAMES)).toEqual([]);
     }
+  });
+});
+
+describe("filterKnownMerges", () => {
+  const corrections: AiCorrection[] = [
+    { domain: "ingredient", fromText: "Mozz", toText: "Mozzarella" },
+  ];
+
+  it("drops a source whose target pair is already a known correction", () => {
+    const suggestions = [
+      { target: "Mozzarella", sources: ["Mozz"], reason: "abbreviation" },
+    ];
+
+    expect(filterKnownMerges(suggestions, corrections)).toEqual([]);
+  });
+
+  it("keeps unmatched sources and removes only the known source from a group", () => {
+    const suggestions = [
+      {
+        target: "Mozzarella",
+        sources: ["Mozz", "Mozzarella Cheese"],
+        reason: "same product",
+      },
+      { target: "Pepperoni", sources: ["Peperoni"], reason: "typo" },
+    ];
+
+    expect(filterKnownMerges(suggestions, corrections)).toEqual([
+      {
+        target: "Mozzarella",
+        sources: ["Mozzarella Cheese"],
+        reason: "same product",
+      },
+      { target: "Pepperoni", sources: ["Peperoni"], reason: "typo" },
+    ]);
+  });
+
+  it("matches known pairs case-insensitively and drops groups with no sources left", () => {
+    const suggestions = [
+      { target: "MOZZARELLA", sources: ["MOZZ"], reason: "case variant" },
+      { target: "Cheese", sources: ["Cheeze"], reason: "typo" },
+    ];
+
+    expect(filterKnownMerges(suggestions, corrections)).toEqual([
+      { target: "Cheese", sources: ["Cheeze"], reason: "typo" },
+    ]);
+  });
+
+  it("returns the original suggestions when there are no corrections", () => {
+    const suggestions = [
+      { target: "Mozzarella", sources: ["Mozz"], reason: "abbreviation" },
+    ];
+
+    expect(filterKnownMerges(suggestions, [])).toBe(suggestions);
+  });
+});
+
+describe("buildKnownPairsNote", () => {
+  const corrections: AiCorrection[] = [
+    { domain: "ingredient", fromText: "Mozz", toText: "Mozzarella" },
+    { domain: "ingredient", fromText: "Peperoni", toText: "Pepperoni" },
+  ];
+
+  it("lists only corrections whose source and target are both in the input names", () => {
+    const note = buildKnownPairsNote(corrections, ["Mozz", "Mozzarella", "Pepperoni"]);
+
+    expect(note).toContain('"Mozz" → "Mozzarella"');
+    expect(note).not.toContain("Peperoni");
+  });
+
+  it("matches input names case-insensitively and returns empty for no relevant pairs", () => {
+    expect(buildKnownPairsNote(corrections, ["MOZZ", "mozzarella"])).toContain(
+      '"Mozz" → "Mozzarella"',
+    );
+    expect(buildKnownPairsNote(corrections, ["Mozz", "Pepperoni"])).toBe("");
   });
 });
 
