@@ -5,6 +5,10 @@ const PHONE_VIEWPORTS = [
   { width: 390, height: 844 },
 ] as const;
 
+// 568x320 is a narrow phone in landscape (and is small enough to expose
+// layouts that accidentally depend on portrait height).
+const LANDSCAPE_VIEWPORT = { width: 568, height: 320 } as const;
+
 const PRIMARY_TABS = [
   "tab-run",
   "tab-dough",
@@ -176,6 +180,57 @@ async function assertPhoneLayout(page: Page, area: string): Promise<void> {
   expect(failures, `Phone layout failures in ${label}`).toEqual([]);
 }
 
+async function assertFocusedFieldIsKeyboardSafe(
+  page: Page,
+  field: Locator,
+  name: string,
+): Promise<void> {
+  await field.focus();
+  await expect(field, `${name} should retain focus`).toBeFocused();
+
+  const geometry = await field.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      viewportHeight,
+      viewportWidth,
+      scrollHeight: document.documentElement.scrollHeight,
+      scrollWidth: document.documentElement.scrollWidth,
+    };
+  });
+
+  expect(
+    geometry.left,
+    `${name} left edge should remain inside the visual viewport`,
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    geometry.right,
+    `${name} right edge should remain inside the visual viewport`,
+  ).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(
+    geometry.top,
+    `${name} should not be hidden above the visual viewport`,
+  ).toBeGreaterThanOrEqual(-1);
+  expect(
+    geometry.bottom,
+    `${name} bottom edge should remain above the virtual keyboard`,
+  ).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  expect(
+    geometry.scrollWidth,
+    `${name} must not introduce horizontal overflow`,
+  ).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(
+    geometry.scrollHeight,
+    `${name} should remain scrollable rather than widening the page`,
+  ).toBeGreaterThanOrEqual(geometry.viewportHeight);
+}
+
 async function dismissOnboardingIfPresent(page: Page): Promise<void> {
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
   if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -273,4 +328,56 @@ test.describe("phone layout smoke", () => {
       await assertPhoneLayout(page, "setup/manage surface");
     });
   }
+
+  test(`sign-in is usable without overflow in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(LANDSCAPE_VIEWPORT);
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page
+      .locator("#username")
+      .waitFor({ state: "visible", timeout: 20_000 });
+
+    await assertPhoneLayout(page, "narrow landscape sign-in");
+    await expect(
+      page.getByRole("heading", { name: /sign in to run calculator/i }),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Username" })).toBeEditable();
+    await expect(page.getByRole("textbox", { name: "Password" })).toBeEditable();
+    await expect(
+      page.getByRole("button", { name: /^sign in$/i }),
+    ).toBeVisible();
+  });
+
+  test("focused sign-in fields stay reachable when the virtual keyboard reduces the viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize(LANDSCAPE_VIEWPORT);
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page
+      .locator("#username")
+      .waitFor({ state: "visible", timeout: 20_000 });
+
+    await assertFocusedFieldIsKeyboardSafe(
+      page,
+      page.getByRole("textbox", { name: "Username" }),
+      "Username",
+    );
+
+    // Desktop Chromium has no on-screen keyboard. Reducing the viewport after
+    // the first focus models the visualViewport resize that mobile browsers
+    // perform when the keyboard opens.
+    await page.setViewportSize({
+      width: LANDSCAPE_VIEWPORT.width,
+      height: 220,
+    });
+    await assertPhoneLayout(page, "keyboard-safe username field");
+
+    await assertFocusedFieldIsKeyboardSafe(
+      page,
+      page.getByRole("textbox", { name: "Password" }),
+      "Password",
+    );
+    await assertPhoneLayout(page, "keyboard-safe password field");
+  });
 });
