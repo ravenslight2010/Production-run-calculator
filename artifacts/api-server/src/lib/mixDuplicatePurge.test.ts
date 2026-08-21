@@ -69,6 +69,15 @@ describe("pickMixDuplicateLosers", () => {
     expect(pickMixDuplicateLosers([newer, older])).toEqual([newer]);
   });
 
+  it("uses the lexicographically smaller ID when contents and timestamps tie", () => {
+    const sameCreatedAt = new Date("2026-07-01T00:00:00Z");
+    const lowerId = row({ id: "mix-a", createdAt: sameCreatedAt });
+    const higherId = row({ id: "mix-b", createdAt: sameCreatedAt });
+
+    expect(pickMixDuplicateLosers([lowerId, higherId])).toEqual([higherId]);
+    expect(pickMixDuplicateLosers([higherId, lowerId])).toEqual([higherId]);
+  });
+
   it("groups case-insensitively on trimmed name/brand/flavor", () => {
     const a = row({ id: "a", name: " bashas red fajita mix " });
     const b = row({ id: "b", batchSize: 5 });

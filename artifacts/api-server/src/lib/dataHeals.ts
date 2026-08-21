@@ -1209,8 +1209,8 @@ async function runSeaSaltAliasUndo(): Promise<void> {
 // which was later renamed to the full name a second import also created).
 // The Merge screen is name-keyed, so two same-named pool rows look like one
 // name and can never be merged away — the duplicate is stuck in Manage Lists.
-  // Keep the row with real data (per-batch/per-pizza amounts, more components,
-  // oldest), delete the hollow one. Mirrors runCheeseDuplicateNamePurge.
+// Keep the row with real data (per-batch/per-pizza amounts, more components,
+// oldest), delete the hollow one. Mirrors runCheeseDuplicateNamePurge.
 
 const MIX_DUP_HEAL_ID = "mix-duplicate-name-purge-v1";
 
@@ -1229,7 +1229,9 @@ type MixDupRow = {
  * Pure selection logic for the mix duplicate purge: group rows by
  * scope + case-insensitive (name, brand, flavor), keep the best row per
  * group (real amounts > has batch size > more components > oldest), and
- * return the losers to delete. Exported for unit tests.
+ * return the losers to delete. When creation timestamps tie, the
+ * lexicographically smaller ID wins so the result is independent of database
+ * row order. Exported for unit tests.
  */
 export function pickMixDuplicateLosers<R extends MixDupRow>(rows: R[]): R[] {
   const groups = new Map<string, R[]>();
@@ -1268,7 +1270,8 @@ export function pickMixDuplicateLosers<R extends MixDupRow>(rows: R[]): R[] {
         if (ra[i] !== rb[i]) return rb[i] - ra[i];
       }
       // When duplicate rows have no distinguishing data, retain the oldest
-      // row so the original record remains authoritative.
+      // row so the original record remains authoritative. If timestamps also
+      // tie, use the ID as a stable final tiebreaker.
       const createdAtDiff = a.createdAt.getTime() - b.createdAt.getTime();
       return createdAtDiff !== 0
         ? createdAtDiff
