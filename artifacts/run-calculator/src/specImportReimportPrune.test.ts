@@ -165,6 +165,95 @@ describe("commitSpecImport re-import prune wiring", () => {
     expect(savedParsed.recipes[0].referenceOnly).toBeUndefined();
   });
 
+  it("forwards a corrected re-import while omitting stale source-owned records", async () => {
+    const names = ["corrected-spec.xlsx"];
+    const initialBadImport: ParsedSpecImport = {
+      profiles: [
+        fixtureProfile({
+          sauceName: "Wrong Sauce",
+          doughName: "Wrong Dough",
+          sauceOzPerPizza: 4,
+          dieType: "12 inch",
+        }),
+      ],
+      recipes: [
+        fixtureRecipe({
+          name: "House Marinara",
+          rows: [
+            { ingredient: "Tomato Paste", lbs: 20 },
+            { ingredient: "Wrong Spice", lbs: 3 },
+          ],
+        }),
+        fixtureRecipe({
+          name: "Stale Imported Sauce",
+          rows: [{ ingredient: "Old Tomato", lbs: 8 }],
+        }),
+      ],
+    };
+    fetchSheetsSpy.mockResolvedValue([
+      sheetOf(initialBadImport, "corrected-spec", 100),
+    ]);
+
+    // The corrected workbook fixes both profile links and amounts, changes the
+    // recipe rows, and no longer contains the stale source-owned recipe. The
+    // die type is intentionally unchanged: it represents valid manager setup
+    // that the re-import must not overwrite.
+    const corrected: ParsedSpecImport = {
+      profiles: [
+        fixtureProfile({
+          sauceName: "Correct Marinara",
+          doughName: "Correct Dough",
+          sauceOzPerPizza: 6,
+          dieType: "12 inch",
+          applicators: [{ type: "Correct Blend", ozPerPizza: 7 }],
+        }),
+      ],
+      recipes: [
+        fixtureRecipe({
+          name: "House Marinara",
+          rows: [
+            { ingredient: "Tomato Paste", lbs: 25 },
+            { ingredient: "Correct Spice", lbs: 1 },
+          ],
+        }),
+      ],
+    };
+
+    await commitSpecImport(preparedOf(corrected, names));
+
+    expect(applySpy).toHaveBeenCalledTimes(1);
+    const applied = applySpy.mock.calls[0][0] as ParsedSpecImport;
+    expect(applied.profiles).toHaveLength(1);
+    expect(applied.profiles[0]).toMatchObject({
+      brand: BRAND,
+      flavor: "Cheese",
+      sauceName: "Correct Marinara",
+      doughName: "Correct Dough",
+      sauceOzPerPizza: 6,
+      applicators: [{ type: "Correct Blend", ozPerPizza: 7 }],
+    });
+    expect(applied.profiles[0].dieType).toBeUndefined();
+    expect(applied.recipes).toEqual([
+      expect.objectContaining({
+        kind: "sauce",
+        name: "House Marinara",
+        rows: [
+          { ingredient: "Tomato Paste", lbs: 25 },
+          { ingredient: "Correct Spice", lbs: 1 },
+        ],
+      }),
+    ]);
+    expect(
+      applied.recipes.some((r) => r.name === "Stale Imported Sauce"),
+    ).toBe(false);
+
+    // The saved snapshot remains the complete corrected source, including the
+    // unchanged manager-owned die type. That full snapshot prevents the next
+    // correction from mistaking it for an import-owned change.
+    const saved = saveSheetSpy.mock.calls[0][1] as ParsedSpecImport;
+    expect(saved).toEqual(corrected);
+  });
+
   it("uses the NEWEST snapshot when several match the sourceKey", async () => {
     const names = ["specs.xlsx"];
     const older = fixtureParse(); // matches incoming → would prune everything

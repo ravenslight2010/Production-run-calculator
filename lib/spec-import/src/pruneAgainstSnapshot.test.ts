@@ -146,6 +146,62 @@ describe("pruneSpecImportAgainstSnapshot", () => {
     expect(out.unchangedRecipes).toBe(0);
   });
 
+  it("carries corrected links, amounts, and rows while omitting a stale recipe", () => {
+    const previous: ParsedSpecImport = parsedOf(
+      [
+        profile({
+          sauceName: "Wrong Sauce",
+          doughName: "Wrong Dough",
+          sauceOzPerPizza: 4,
+          applicators: [{ type: "Wrong Blend", ozPerPizza: 5 }],
+        }),
+      ],
+      [
+        recipe({
+          name: "House Marinara",
+          rows: [
+            { ingredient: "Tomato Paste", lbs: 20 },
+            { ingredient: "Wrong Spice", lbs: 3 },
+          ],
+        }),
+        recipe({
+          name: "Stale Imported Sauce",
+          rows: [{ ingredient: "Old Tomato", lbs: 8 }],
+        }),
+      ],
+    );
+    const corrected: ParsedSpecImport = parsedOf(
+      [
+        profile({
+          sauceName: "Correct Marinara",
+          doughName: "Correct Dough",
+          sauceOzPerPizza: 6,
+          applicators: [{ type: "Correct Blend", ozPerPizza: 7 }],
+        }),
+      ],
+      [
+        recipe({
+          name: "House Marinara",
+          rows: [
+            { ingredient: "Tomato Paste", lbs: 25 },
+            { ingredient: "Correct Spice", lbs: 1 },
+          ],
+        }),
+      ],
+    );
+
+    const out = pruneSpecImportAgainstSnapshot(corrected, previous);
+
+    expect(out.parsed.profiles[0]).toMatchObject({
+      sauceName: "Correct Marinara",
+      doughName: "Correct Dough",
+      sauceOzPerPizza: 6,
+      applicators: [{ type: "Correct Blend", ozPerPizza: 7 }],
+    });
+    expect(out.parsed.recipes).toEqual(corrected.recipes);
+    expect(out.parsed.recipes.some((r) => r.name === "Stale Imported Sauce")).toBe(false);
+  });
+
   it("keeps a dough recipe whose doughball weight changed even with identical rows", () => {
     const out = pruneSpecImportAgainstSnapshot(
       parsedOf([], [recipe({ kind: "dough", name: "Master Dough", doughballOz: 19 })]),
