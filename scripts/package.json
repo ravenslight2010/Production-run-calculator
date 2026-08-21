@@ -6,7 +6,8 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
-    "check-model-bump": "bash ./src/check-model-version-bump.sh",
+    "test": "bash ./src/check-model-version-bump.test.sh",
+    "check-model-bump": "pnpm run test && bash ./src/check-model-version-bump.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
