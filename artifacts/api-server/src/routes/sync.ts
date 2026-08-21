@@ -49,6 +49,8 @@ import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMerged
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
+import { detectConflicts } from "../lib/syncConflict";
+export { detectConflicts } from "../lib/syncConflict";
 
 const router: IRouter = Router();
 
@@ -231,7 +233,7 @@ interface ConflictInfo {
   mergedStateHash: string;
 }
 
-function detectConflicts(
+function detectConflictsLegacy(
   incoming: unknown,
   existing: unknown,
   merged: unknown,
