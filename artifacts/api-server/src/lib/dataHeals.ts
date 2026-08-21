@@ -5248,14 +5248,15 @@ export async function runAug19SavedSpecProfileRepairV2(): Promise<void> {
       }
     }
 
-    const [profiles, doughRows, sauceRows, cheeseRows, mixRows, aliases] = await Promise.all([
-      tx.select().from(brandProfilesTable).for("update"),
-      tx.select().from(doughRecipesTable),
-      tx.select().from(sauceRecipesTable),
-      tx.select().from(cheeseRecipesTable),
-      tx.select().from(mixesTable),
-      tx.select().from(mergeAliasesTable),
-    ]);
+    // A Drizzle transaction owns one pg client. Keep these reads sequential:
+    // Promise.all would issue concurrent client.query() calls on that same
+    // client, which pg 9 will reject instead of merely warning about.
+    const profiles = await tx.select().from(brandProfilesTable).for("update");
+    const doughRows = await tx.select().from(doughRecipesTable);
+    const sauceRows = await tx.select().from(sauceRecipesTable);
+    const cheeseRows = await tx.select().from(cheeseRecipesTable);
+    const mixRows = await tx.select().from(mixesTable);
+    const aliases = await tx.select().from(mergeAliasesTable);
     const aliasesByScope = new Map<string, ImportMergeAliasMap>();
     for (const scope of new Set([...sources.values()].map((source) => source.scope))) {
       aliasesByScope.set(scope, {
