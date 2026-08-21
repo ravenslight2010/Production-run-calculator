@@ -423,6 +423,7 @@ import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveM
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
+import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
@@ -3606,6 +3607,24 @@ export default function Home() {
   });
 
   const v = form.watch();
+
+  // Keep the Setup tab's summary indicator in lockstep with the inline
+  // applicator warnings. This is intentionally computed on every render:
+  // react-hook-form can update recipe row objects in place while editing.
+  const setupMathConflictCount = [
+    { rows: v.app1CheeseRecipe, ozPerPizza: v.app1OzPerPizza },
+    { rows: v.app2CheeseRecipe, ozPerPizza: v.app2OzPerPizza },
+    { rows: v.app3CheeseRecipe, ozPerPizza: v.app3OzPerPizza },
+    { rows: v.app4CheeseRecipe, ozPerPizza: v.app4OzPerPizza },
+  ].reduce(
+    (count, slot) =>
+      count +
+      detectAppSlotConflicts(
+        (slot.rows ?? []) as { ingredient: string; lbs: number }[],
+        Number(slot.ozPerPizza) || 0,
+      ).length,
+    0,
+  );
 
   // Server ingredient catalog (Task #102): factory-wide, stable ids that
   // recipe rows reference. Migrating local option lists into it once, and
@@ -14719,6 +14738,20 @@ export default function Home() {
 
               {/* ─── SETUP ─── */}
               <TabsContent value="setup">
+                <div className="mb-4 flex items-center gap-2" data-testid="setup-header">
+                  <Settings className="w-5 h-5 text-primary" />
+                  <h2 className="text-lg font-bold">Setup</h2>
+                  {setupMathConflictCount > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400"
+                      data-testid="setup-math-conflict-count"
+                      aria-label={`${setupMathConflictCount} math conflict${setupMathConflictCount === 1 ? "" : "s"}`}
+                    >
+                      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                      {setupMathConflictCount} math conflict{setupMathConflictCount === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
                 {/* Run Insights: manager-only pattern-based setting suggestions
                     from completed runs. One at a time; Accept applies, Dismiss
                     suppresses. Renders nothing when there's nothing to show. */}
