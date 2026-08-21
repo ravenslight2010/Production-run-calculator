@@ -187,6 +187,27 @@ describe("specCheeseDraftToRecipe", () => {
       { ingredient: "Green Peppers", lbs: 5 },
     ]);
   });
+  it("does not write ozPerPizza for shared blends seeded from oz proportions", () => {
+    // Regular spec imports derive these shares from per-pizza ounces. The
+    // recipe pool must keep only the ratio seed; ozPerPizza belongs to the
+    // applicator slot, not to cheese recipe components.
+    const r = specCheeseDraftToRecipe({
+      name: "Shared Blend",
+      brand: "Corner Booth",
+      flavors: ["Pepperoni", "Cheese"],
+      components: [
+        { ingredient: "Mozzarella", lbs: 0, sharePct: 72.73 },
+        { ingredient: "Provolone", lbs: 0, sharePct: 27.27 },
+      ],
+    });
+
+    expect(r).not.toBeNull();
+    expect(r?.components).toEqual([
+      { ingredient: "Mozzarella", lbs: 0, sharePct: 72.73 },
+      { ingredient: "Provolone", lbs: 0, sharePct: 27.27 },
+    ]);
+    expect(r?.components.every((component) => !("ozPerPizza" in component))).toBe(true);
+  });
   it("returns null for a blank name", () => {
     expect(
       specCheeseDraftToRecipe({ name: "  ", brand: "", flavors: [], components: [] }),
