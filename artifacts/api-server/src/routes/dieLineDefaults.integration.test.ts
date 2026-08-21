@@ -154,6 +154,8 @@ type ApiEntry = {
   speedAdjustment: number;
   freezerTime: number;
   casesPerLayer: number;
+  preTunnelMin?: number;
+  postTunnelMin?: number;
 };
 
 function entry(overrides: Partial<ApiEntry> = {}): ApiEntry {
@@ -212,6 +214,33 @@ describe("die-line-defaults upsert semantics", () => {
     expect(items[0].name).toBe('7" DIES');
   });
 
+  it("saves and returns explicit tunnel time overrides", async () => {
+    const save = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry({ preTunnelMin: 2.5, postTunnelMin: 4 })],
+    });
+    expect(save.status).toBe(200);
+
+    const items = await listAs(MANAGER);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      name: '7" Dies',
+      preTunnelMin: 2.5,
+      postTunnelMin: 4,
+    });
+  });
+
+  it("omits tunnel time fields when they are not provided", async () => {
+    const save = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry()],
+    });
+    expect(save.status).toBe(200);
+
+    const items = await listAs(MANAGER);
+    expect(items).toHaveLength(1);
+    expect(items[0]).not.toHaveProperty("preTunnelMin");
+    expect(items[0]).not.toHaveProperty("postTunnelMin");
+  });
+
   it("drops malformed entries (blank name, negative / non-finite numbers)", async () => {
     const res = await req(MANAGER, "POST", "/api/die-line-defaults", {
       entries: [
@@ -235,7 +264,10 @@ describe("die-line-defaults upsert semantics", () => {
 describe("die-line-defaults delete", () => {
   it("deletes by name case-insensitively so the die falls back to built-ins", async () => {
     await req(MANAGER, "POST", "/api/die-line-defaults", {
-      entries: [entry(), entry({ name: "Argus Dies" })],
+      entries: [
+        entry({ preTunnelMin: 2.5, postTunnelMin: 4 }),
+        entry({ name: "Argus Dies" }),
+      ],
     });
     const del = await req(MANAGER, "DELETE", "/api/die-line-defaults", { names: ['7" DIES'] });
     expect(del.status).toBe(200);
