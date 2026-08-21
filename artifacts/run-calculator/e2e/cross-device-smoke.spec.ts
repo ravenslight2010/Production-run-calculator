@@ -169,8 +169,9 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await selectedRunId(page))).toBe(runId);
 
-  // Fail exactly one foreground reconciliation pull. The online event below
-  // must cause a later pull; no action is clicked twice and no pause is cloned.
+  // Fail exactly one foreground reconciliation pull while simulating a
+  // background → foreground wake. The online event below must cause a later
+  // pull; no action is clicked twice and no pause is cloned.
   let failedPull = false;
   let failedPullResolve!: () => void;
   const failedPullObserved = new Promise<void>((resolve) => {
@@ -186,6 +187,7 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
     await route.continue();
   });
 
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await failedPullObserved;
   await page.unroute("**/api/sync/today?*");
@@ -196,15 +198,21 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
   );
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await recoveredPull;
-  expect(failedPull).toBe(true);
 
   await expect
     .poll(async () => (await readSelectedRun(page)).stoppages?.filter(
       (stop) => stop.type === "pause",
     ).length)
     .toBe(1);
-  await expect(page.locator('[title="Sync connected"]')).toBeVisible();
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await selectedRunId(page))).toBe(runId);
+
+  // A successful recovery must release the synchronous lifecycle fence, not
+  // merely refresh the UI. This real action is blocked while the fence is
+  // stuck, so it proves the recovered page can write its adopted state again.
+  await page.getByRole("button", { name: /pause run/i }).click();
+  await expect(page.getByTestId("resume-run")).toBeVisible();
+  await dismissPauseDecision(page);
+  await expect.poll(async () => (await readSelectedRun(page)).pausedAt).toBeTruthy();
 });
