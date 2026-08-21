@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
+| `playwright.a11y.config.ts` | isolated sandbox, non-destructive | no global setup; axe scans public and sandbox-authenticated screens without deleting live-day data |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
 
@@ -43,6 +44,7 @@ global setup:
 ```sh
 pnpm --filter @workspace/run-calculator run test:pwa-handoff
 pnpm --filter @workspace/run-calculator run test:e2e:phone
+pnpm --filter @workspace/run-calculator run test:e2e:a11y
 ```
 
 Run the recurring cross-device smoke matrix before release checks. It is a
@@ -72,3 +74,13 @@ deterministic. A failed test may leave its own temporary server data behind;
 rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
+
+
+## Accessibility smoke gate
+
+Run `pnpm --filter @workspace/run-calculator run test:e2e:a11y` against the
+artifact-managed app. It runs the sign-in, live run, manager setup, and import
+review states at desktop and phone sizes without `global-setup.ts`, so it does
+not clear `daily_sync`. Failures include the screen name, axe rule, affected
+selector, and remediation summary. The suite is intentionally a separate gate;
+it is not part of the client unit-test command.
