@@ -92,7 +92,7 @@ async function goToMixes(page: Page): Promise<void> {
   const menuBtn = page.locator('button[title="More"]');
   await menuBtn.waitFor({ state: "visible", timeout: 10_000 });
   await menuBtn.click();
-  const mixesItem = page.getByRole("menuitem", { name: /^mixes$/i });
+  const mixesItem = page.getByRole("menuitem", { name: /^(mixes|mix plan)$/i });
   await mixesItem.waitFor({ state: "visible", timeout: 5_000 });
   await mixesItem.click();
   await page
@@ -500,6 +500,128 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       expect(rowText).toContain(expectedStr);
       expect(rowText).not.toContain(wrongFallbackStr);
+    } finally {
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
+   * Test (d2): Pull For Prep updates when a second run is added while Mixes is
+   * already open.
+   *
+   * The first run contributes 100 lbs. The second run is created through the
+   * Run tab after the Mixes plan is visible and contributes another 25 lbs.
+   * Returning to Mixes must use the new live day-state run without a reload.
+   */
+  test("Pull For Prep includes a second run added while Mixes is open", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `prep-live-add-${suffix}`;
+    const mixName = `LiveAddPrepMix ${suffix}`;
+    const ingredient = `LiveAddHerb_${suffix}`;
+    const brand1 = `LiveAddBrandA_${suffix}`;
+    const brand2 = `LiveAddBrandB_${suffix}`;
+    const today = todayStr();
+
+    const firstPullLbs = (2 / 16) * 100 * 8; // 100.00
+    const secondPullLbs = (1 / 16) * 25 * 8; // 12.50
+    const combinedPullLbs = firstPullLbs + secondPullLbs; // 112.50
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        isPrep: true,
+        component: ingredient,
+        perPizza: 0.5,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+
+      await page.evaluate(
+        ({ brand, ingredient }) => {
+          const DAY_KEY = "run-calc-day";
+          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+          const rawDay = localStorage.getItem(DAY_KEY);
+          if (!rawDay) return;
+          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
+          if (!day.runs || day.runs.length === 0) return;
+          day.runs[0].brand = brand;
+          localStorage.setItem(DAY_KEY, JSON.stringify(day));
+          const runId = day.runs[0].id;
+          const existing = (() => {
+            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
+          })();
+          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
+            ...existing, pep1Type: ingredient, pep1OzPerPizza: 2,
+            casesNeeded: 100, pizzasPerCase: 8, casesPerLayer: 0,
+          }));
+        },
+        { brand: brand1, ingredient },
+      );
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((button) => button.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible();
+      await expect(todayCard.getByText("Pull For Prep", { exact: false })).toBeVisible();
+      const ingredientRow = todayCard
+        .locator("div", { has: page.getByText(ingredient, { exact: true }) })
+        .last();
+      await expect(ingredientRow).toContainText(firstPullLbs.toFixed(2));
+
+      // Add and configure run 2 from the Run tab while preserving the mounted
+      // page (no reload between the two Mixes assertions).
+      await page.locator('[data-testid="tab-run"]').click();
+      const newRunBtn = page.getByRole("button", { name: /new run/i });
+      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await newRunBtn.click();
+      await page.waitForTimeout(600);
+
+      const brandInput = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput.click();
+      await brandInput.fill(brand2);
+      await brandInput.press("Enter");
+
+      // The Run tab's compact view does not render the applicator editor.
+      // Persist the new run's ingredient fields, then switch away and back so
+      // the normal run-switch path hydrates them into the open form.
+      await page.evaluate(({ ingredient }) => {
+        const dayKey = "run-calc-day";
+        const rawDay = localStorage.getItem(dayKey);
+        if (!rawDay) return;
+        const day = JSON.parse(rawDay) as { runs?: Array<{ id: string }> };
+        const run = day.runs?.[day.runs.length - 1];
+        if (!run) return;
+        localStorage.setItem(`run-calc-run-${run.id}`, JSON.stringify({
+          pep1Type: ingredient,
+          pep1OzPerPizza: 1,
+          casesNeeded: 25,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        }));
+      }, { ingredient });
+      await page.getByRole("button", { name: /prev/i }).click();
+      await page.waitForTimeout(300);
+      await page.getByRole("button", { name: /next/i }).click();
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(ingredientRow).toContainText(combinedPullLbs.toFixed(2), {
+        timeout: 5_000,
+      });
+      await expect(ingredientRow).not.toContainText(firstPullLbs.toFixed(2));
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
