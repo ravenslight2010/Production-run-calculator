@@ -7,6 +7,7 @@
 | `playwright.config.ts` | destructive/live-day | `global-setup.ts` deletes today’s `daily_sync` row once; `screen-off-wake.spec.ts` repeats that reset before each test |
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
+| `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
 
 The phone and PWA configs intentionally do not extend the main config. This
 prevents destructive live-day setup from being inherited by independent layout
@@ -43,6 +44,21 @@ global setup:
 pnpm --filter @workspace/run-calculator run test:pwa-handoff
 pnpm --filter @workspace/run-calculator run test:e2e:phone
 ```
+
+Run the recurring cross-device smoke matrix before release checks. It is a
+small lifecycle signal, not a replacement for the focused wake, timer, mobile
+layout, or failed-write suites:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:smoke
+```
+
+The smoke config uses the same disposable-database safety guard as the
+destructive browser suite. It runs one test in each project: Desktop Chrome
+and a 390×844 phone-sized Chromium layout. The test creates and removes its
+own account, and clears only today's disposable live-day row before each
+project run.
 
 Run destructive browser coverage only with an approved disposable database:
 
