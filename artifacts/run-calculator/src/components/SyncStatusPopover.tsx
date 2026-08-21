@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useState } from "react";
 import type { SyncDiagnostic } from "../syncDiagnostics";
 
@@ -15,6 +15,7 @@ type Props = {
   canViewConflicts: boolean;
   onRetry: () => void;
   onOpenConflicts: () => void;
+  onExportDiagnostics: () => void;
 };
 
 const labels: Record<SyncStatus, string> = {
@@ -71,9 +72,14 @@ export default function SyncStatusPopover(props: Props) {
             </button>
           )}
           {props.canViewConflicts && (
-            <button type="button" onClick={props.onOpenConflicts} className="mt-2 w-full rounded border border-border px-2 py-1.5 text-left hover:bg-muted/50">
-              Open manager conflict monitor <span className="text-muted-foreground">(history only)</span>
-            </button>
+            <div className="mt-2 space-y-2">
+              <button type="button" onClick={props.onExportDiagnostics} className="flex w-full items-center gap-2 rounded border border-border px-2 py-1.5 text-left font-semibold hover:bg-muted/50">
+                <Download className="h-3.5 w-3.5" /> Export diagnostic history
+              </button>
+              <button type="button" onClick={props.onOpenConflicts} className="w-full rounded border border-border px-2 py-1.5 text-left hover:bg-muted/50">
+                Open manager conflict monitor <span className="text-muted-foreground">(conflict history)</span>
+              </button>
+            </div>
           )}
           <div className="mt-3 border-t border-border pt-2">
             <p className="mb-1 font-semibold">Recent sync activity</p>

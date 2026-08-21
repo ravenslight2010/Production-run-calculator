@@ -284,7 +284,7 @@ import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import DataHealthWorkspace from "../components/DataHealthWorkspace";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
-import { loadSyncDiagnostics, recordSyncDiagnostic, type SyncDiagnostic, type SyncDiagnosticKind } from "../syncDiagnostics";
+import { buildSyncDiagnosticReport, loadSyncDiagnostics, recordSyncDiagnostic, type SyncDiagnostic, type SyncDiagnosticKind } from "../syncDiagnostics";
 import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
@@ -4917,6 +4917,23 @@ export default function Home() {
     const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId });
     setSyncDiagnostics((current) => [...current, event].slice(-20));
     if (kind === "ack") setLastAcknowledgedAt(event.at);
+  };
+  const exportSyncDiagnostics = () => {
+    const report = buildSyncDiagnosticReport({
+      date: syncDate,
+      status: syncStatus,
+      lastAcknowledgedAt,
+      pendingCount: syncPendingCount,
+      failedCount: syncFailedCount,
+      diagnostics: syncDiagnostics,
+    });
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `sync-diagnostic-history-${syncDate}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
 
@@ -14524,6 +14541,7 @@ export default function Home() {
               diagnostics={syncDiagnostics}
               canViewConflicts={canManageStaff}
               onRetry={retryLatestSync}
+              onExportDiagnostics={exportSyncDiagnostics}
               onOpenConflicts={() => { setManageCategory("audit"); setShowManageDialog(true); }}
             />
             {/* Auto-save badge — hidden on xs to save space */}
