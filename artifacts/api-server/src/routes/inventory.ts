@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { z } from "zod";
 import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
 import {
   db,
@@ -76,6 +77,13 @@ import {
 } from "./inventoryLogic";
 
 const router: IRouter = Router();
+
+const ConsumeSauceBarrelBody = z.object({
+  runId: z.string(),
+  barrelIndex: z.number().int().positive(),
+  itemKey: z.string().min(1),
+  qty: z.number().positive(),
+});
 
 // Cost/abuse guards for the paid AI vision endpoint. All routes require a
 // signed-in user, so cap per-user (falling back to IP) rather than per-IP only.
@@ -1170,6 +1178,65 @@ export async function consumeRun(
     );
   });
 }
+
+// Draw down one manually-confirmed sauce barrel. The barrel index is folded
+// into the existing per-run claim table so a retried tap cannot deduct stock
+// twice, while the ledger keeps the real run ID for end-of-day review.
+export async function consumeSauceBarrel(
+  runId: string,
+  barrelIndex: number,
+  itemKey: string,
+  qty: number,
+): Promise<{ applied: boolean; consumed: number }> {
+  const claimId = `${runId}:sauce-barrel:${barrelIndex}`;
+  return db.transaction(async (tx) => {
+    const [claim] = await tx
+      .insert(inventoryConsumedRunsTable)
+      .values({ runId: claimId, scope: currentScope() })
+      .onConflictDoNothing({
+        target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+      })
+      .returning();
+    if (!claim) return { applied: false, consumed: 0 };
+
+    const [item] = await tx
+      .select()
+      .from(inventoryItemsTable)
+      .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
+    if (!item) return { applied: true, consumed: 0 };
+
+    const onsiteId = await resolveOnsiteLocationId();
+    const consumed = await drawDown(tx, item.id, qty, onsiteLotCond(onsiteId));
+    if (consumed > 0) {
+      await tx.insert(inventoryLedgerTable).values({
+        itemId: item.id,
+        scope: currentScope(),
+        lotId: null,
+        type: "consume",
+        qtyDelta: -consumed,
+        runId,
+        note: `Sauce barrel ${barrelIndex} used during run`,
+      });
+      await tx
+        .update(inventoryItemsTable)
+        .set({ updatedAt: new Date() })
+        .where(and(eq(inventoryItemsTable.id, item.id), eq(inventoryItemsTable.scope, currentScope())));
+    }
+    return { applied: true, consumed };
+  });
+}
+
+router.post("/inventory/consume-sauce-barrel", async (req, res): Promise<void> => {
+  const parsed = ConsumeSauceBarrelBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { runId, barrelIndex, itemKey, qty } = parsed.data;
+  const result = await consumeSauceBarrel(runId, barrelIndex, itemKey, qty);
+  broadcast(headerSenderId(req), currentScope());
+  res.json(result);
+});
 
 router.post("/inventory/consume", async (req, res): Promise<void> => {
   const parsed = ConsumeInventoryBody.safeParse(req.body);

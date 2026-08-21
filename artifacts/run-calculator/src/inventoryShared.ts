@@ -978,6 +978,17 @@ export const consumeRun = (runId: string, lines: ConsumeLine[]) =>
     body: JSON.stringify({ runId, lines }),
   });
 
+export const consumeSauceBarrel = (
+  runId: string,
+  barrelIndex: number,
+  itemKey: string,
+  qty: number,
+) =>
+  api<{ applied: boolean; consumed: number }>("/inventory/consume-sauce-barrel", {
+    method: "POST",
+    body: JSON.stringify({ runId, barrelIndex, itemKey, qty }),
+  });
+
 // ── Locations (named storage) + transfers ────────────────────────────────────
 export type CreateLocationBody = { name: string; isOnsite?: boolean };
 export type UpdateLocationBody = { name?: string; isOnsite?: boolean };

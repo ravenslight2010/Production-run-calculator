@@ -385,6 +385,7 @@ import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
+  consumeSauceBarrel,
   deriveCandidateItems,
   consumeRun,
   fetchInventory,
@@ -20578,7 +20579,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
-    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress,
+    form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, setWriteError,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
@@ -20812,6 +20813,20 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               onIncrement={() => {
                 // writeLastBarrelAnchor syncs both the ref and the store so the
                 // anchor survives subsequent tab navigation (remounts).
+                const barrelIndex = getSauceBarrelEntry(currentRunId).barrelsMade + 1;
+                const sauceName = (v.frontlineRecipeName ?? "").trim();
+                const hasSauceRecipe = (v.frontlineRecipe ?? []).some((r: RecipeRow) => Number(r.lbs ?? 0) > 0);
+                const itemKey = hasSauceRecipe
+                  ? "ingredient:Sauce:batches"
+                  : sauceName
+                    ? `ingredient:${sauceName}:lbs`
+                    : "";
+                const barrelQty = hasSauceRecipe ? 1 : calc.sauceEffBarrel;
+                if (itemKey && barrelQty > 0) {
+                  void consumeSauceBarrel(currentRunId, barrelIndex, itemKey, barrelQty).catch(() => {
+                    setWriteError("Couldn't record sauce barrel usage — inventory may be out of sync. Check your connection.");
+                  });
+                }
                 writeLastBarrelAnchor(elapsedBatchSec);
                 setSauceMade(n => n + 1);
                 setShowSauceBarrelDue(false);
