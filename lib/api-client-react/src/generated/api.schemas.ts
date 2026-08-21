@@ -2308,6 +2308,26 @@ export interface ProfileDataHealthApplyResult {
   summary: ProfileDataHealthApplyResultSummary;
 }
 
+export type ProfileNameLinkCleanupSummaryRemovedStubs = {
+  dough: number;
+  sauce: number;
+  cheese: number;
+  mix: number;
+};
+
+export interface ProfileNameLinkCleanupSummary {
+  scannedProfiles: number;
+  correctedProfiles: number;
+  skippedStarted: number;
+  removedStubs: ProfileNameLinkCleanupSummaryRemovedStubs;
+}
+
+export interface ProfileNameLinkCleanupAudit {
+  id: string;
+  appliedAt: string;
+  summary: ProfileNameLinkCleanupSummary;
+}
+
 export interface FacilityKnowledgeList {
   knowledge: FacilityKnowledge[];
 }
@@ -3450,5 +3470,9 @@ export type AuditAiMemoryHealth200 = {
 
 export type AuditProfileDataHealth200 = {
   report: ProfileDataHealthReport;
+};
+
+export type GetProfileNameLinkCleanupAudit200 = {
+  heal: ProfileNameLinkCleanupAudit | null;
 };
 

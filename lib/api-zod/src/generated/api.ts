@@ -3339,6 +3339,29 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
 
 
 /**
+ * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
+ * @summary View the completed name-link cleanup result
+ */
+export const GetProfileNameLinkCleanupAuditResponse = zod.object({
+  "heal": zod.object({
+  "id": zod.string(),
+  "appliedAt": zod.coerce.date(),
+  "summary": zod.object({
+  "scannedProfiles": zod.number(),
+  "correctedProfiles": zod.number(),
+  "skippedStarted": zod.number(),
+  "removedStubs": zod.object({
+  "dough": zod.number(),
+  "sauce": zod.number(),
+  "cheese": zod.number(),
+  "mix": zod.number()
+})
+})
+}).nullable()
+})
+
+
+/**
  * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
  * @summary List the shared facility-wide AI knowledge pool
  */

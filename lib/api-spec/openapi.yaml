@@ -28,6 +28,8 @@ tags:
     description: Manager-defined factory-wide production rules
   - name: aiMemory
     description: Shared AI memory (facility knowledge + per-user conversation history)
+  - name: audit
+    description: Manager-visible read-only audit records
   - name: cheeseRecipes
   - name: runTemplates
     description: Facility-wide saved run-setup templates
@@ -2841,6 +2843,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProfileDataHealthApplyResult"
+        "403":
+          description: Missing manager capability
+
+  /audit-logs/profile-name-link-cleanup:
+    get:
+      operationId: getProfileNameLinkCleanupAudit
+      tags: [audit]
+      summary: View the completed name-link cleanup result
+      description: >-
+        Manager-only, read-only view of the one-time cleanup that aligned saved
+        profile dough and sauce names to verified spec-sheet links and deleted
+        unreferenced empty recipe stubs. Older historical markers return zero
+        for result fields that were not recorded at the time.
+      responses:
+        "200":
+          description: The cleanup marker and its recorded summary, or null when it has not run
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [heal]
+                properties:
+                  heal:
+                    nullable: true
+                    allOf:
+                      - $ref: "#/components/schemas/ProfileNameLinkCleanupAudit"
         "403":
           description: Missing manager capability
 
@@ -7396,6 +7424,41 @@ components:
             repairedProfiles:
               type: integer
             repairedRuns:
+              type: integer
+
+    ProfileNameLinkCleanupAudit:
+      type: object
+      required: [id, appliedAt, summary]
+      properties:
+        id:
+          type: string
+        appliedAt:
+          type: string
+          format: date-time
+        summary:
+          $ref: "#/components/schemas/ProfileNameLinkCleanupSummary"
+
+    ProfileNameLinkCleanupSummary:
+      type: object
+      required: [scannedProfiles, correctedProfiles, skippedStarted, removedStubs]
+      properties:
+        scannedProfiles:
+          type: integer
+        correctedProfiles:
+          type: integer
+        skippedStarted:
+          type: integer
+        removedStubs:
+          type: object
+          required: [dough, sauce, cheese, mix]
+          properties:
+            dough:
+              type: integer
+            sauce:
+              type: integer
+            cheese:
+              type: integer
+            mix:
               type: integer
 
     FacilityKnowledge:

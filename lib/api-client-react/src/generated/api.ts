@@ -71,6 +71,7 @@ import type {
   ForecastResult,
   ForgotPasswordRequest,
   FreezerPullItemList,
+  GetProfileNameLinkCleanupAudit200,
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
@@ -8742,6 +8743,84 @@ export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
       > => {
       return useMutation(getApplyProfileDataHealthRepairsMutationOptions(options));
     }
+
+export const getGetProfileNameLinkCleanupAuditUrl = () => {
+
+
+
+
+  return `/api/audit-logs/profile-name-link-cleanup`
+}
+
+/**
+ * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
+ * @summary View the completed name-link cleanup result
+ */
+export const getProfileNameLinkCleanupAudit = async ( options?: RequestInit): Promise<GetProfileNameLinkCleanupAudit200> => {
+
+  return customFetch<GetProfileNameLinkCleanupAudit200>(getGetProfileNameLinkCleanupAuditUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProfileNameLinkCleanupAuditQueryKey = () => {
+    return [
+    `/api/audit-logs/profile-name-link-cleanup`
+    ] as const;
+    }
+
+
+export const getGetProfileNameLinkCleanupAuditQueryOptions = <TData = Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProfileNameLinkCleanupAuditQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>> = ({ signal }) => getProfileNameLinkCleanupAudit({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProfileNameLinkCleanupAuditQueryResult = NonNullable<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>>
+export type GetProfileNameLinkCleanupAuditQueryError = ErrorType<void>
+
+
+/**
+ * @summary View the completed name-link cleanup result
+ */
+
+export function useGetProfileNameLinkCleanupAudit<TData = Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProfileNameLinkCleanupAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProfileNameLinkCleanupAuditQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListFacilityKnowledgeUrl = () => {
 

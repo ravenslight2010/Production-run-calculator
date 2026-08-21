@@ -282,6 +282,7 @@ import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
+import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
 import ProductionRulesManager from "../components/ProductionRulesManager";
@@ -14282,6 +14283,7 @@ export default function Home() {
                 {/* Audit log — manager-only read-only event history */}
                 {manageCategory === "audit" && canManageStaff && (
                   <div className="space-y-4">
+                    <ProfileNameLinkCleanupCard />
                     <ProfileDataHealthCard />
                     <SyncConflictStatsCard />
                     <AuditLogCard />
