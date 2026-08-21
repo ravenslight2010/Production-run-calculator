@@ -1131,3 +1131,57 @@ describe("POST /api/inventory/consume — server-side authorization of client-su
     expect(await onHand(itemId)).toBe(98);
   });
 });
+
+describe("POST /api/inventory/consume-sauce-barrel — retry-safe barrel taps", () => {
+  it("deducts each barrel once even when the same tap is retried", async () => {
+    const itemId = await makeItem("ingredient:BBQ Sauce:lbs");
+    await addLot(itemId, 100);
+    const request = (barrelIndex: number) =>
+      fetch(`${baseUrl}/api/inventory/consume-sauce-barrel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: "run-sauce-barrels",
+          barrelIndex,
+          itemKey: "ingredient:BBQ Sauce:lbs",
+          qty: 10,
+        }),
+      });
+
+    const firstBarrel = await request(1);
+    expect(firstBarrel.status).toBe(200);
+    expect(await firstBarrel.json()).toEqual({ applied: true, consumed: 10 });
+    expect(await onHand(itemId)).toBe(90);
+    expect(await consumeLedgerCount(itemId)).toBe(1);
+
+    const retriedFirstBarrel = await request(1);
+    expect(retriedFirstBarrel.status).toBe(200);
+    expect(await retriedFirstBarrel.json()).toEqual({ applied: false, consumed: 0 });
+    expect(await onHand(itemId)).toBe(90);
+    expect(await consumeLedgerCount(itemId)).toBe(1);
+
+    const secondBarrel = await request(2);
+    expect(secondBarrel.status).toBe(200);
+    expect(await secondBarrel.json()).toEqual({ applied: true, consumed: 10 });
+    expect(await onHand(itemId)).toBe(80);
+
+    const retriedSecondBarrel = await request(2);
+    expect(retriedSecondBarrel.status).toBe(200);
+    expect(await retriedSecondBarrel.json()).toEqual({ applied: false, consumed: 0 });
+    expect(await onHand(itemId)).toBe(80);
+
+    const ledger = await db.select().from(inventoryLedgerTable);
+    const sauceConsumes = ledger.filter(
+      (row) => row.itemId === itemId && row.type === "consume",
+    );
+    expect(sauceConsumes).toHaveLength(2);
+    expect(sauceConsumes.map((row) => row.qtyDelta)).toEqual([-10, -10]);
+    expect(sauceConsumes.every((row) => row.runId === "run-sauce-barrels")).toBe(true);
+
+    const claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.map((claim) => claim.runId).sort()).toEqual([
+      "run-sauce-barrels:sauce-barrel:1",
+      "run-sauce-barrels:sauce-barrel:2",
+    ]);
+  });
+});
