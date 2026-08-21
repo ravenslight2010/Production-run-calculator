@@ -92,7 +92,7 @@ import {
   writeDayResetAt,
   runLabel,
 } from "../utils";
-import { setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
+import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
@@ -7411,6 +7411,7 @@ export default function Home() {
           };
           const remoteSubs = payload.dayState.substitutions ?? [];
           const remoteSubLog = payload.dayState.substitutionLog ?? [];
+          if (isReset) clearActiveSubstitutions();
           const mergedSubs = isReset ? remoteSubs : unionById(prev.substitutions ?? [], remoteSubs);
           const mergedSubLog = isReset
             ? remoteSubLog
@@ -8222,6 +8223,7 @@ export default function Home() {
                 return pref ? { ...r, subTab: pref } : r;
               });
               const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
+              clearActiveSubstitutions();
               // Scheduled run values are a snapshot from scheduling time; blank
               // sauce fields backfill from the CURRENT profile (mobile parity —
               // its pull-up spreads the live profile).
@@ -8269,6 +8271,7 @@ export default function Home() {
         // confirmed there are no scheduled runs — otherwise we'd risk wiping
         // them via the wholesale-adopt escape hatch (see comment above).
         const fresh = { ...freshDayState(), resetAt: Date.now() };
+        clearActiveSubstitutions();
         { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         saveDayState(fresh);
         setDayState(fresh);
@@ -10877,6 +10880,7 @@ export default function Home() {
         };
         archiveDayToHistory(finalDs, cur.date ?? todayStr());
         const fresh = { ...freshDayState(), resetAt: now };
+        clearActiveSubstitutions();
         { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         setDayState(fresh);
         saveDayState(fresh);
@@ -12514,6 +12518,7 @@ export default function Home() {
                 return pref ? { ...r, subTab: pref } : r;
               });
               const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
+              clearActiveSubstitutions();
               // Scheduled run values are a snapshot from scheduling time; blank
               // sauce fields backfill from the CURRENT profile (mobile parity —
               // its pull-up spreads the live profile).
@@ -12559,6 +12564,7 @@ export default function Home() {
         // confirmed there are no scheduled runs — otherwise we'd risk wiping
         // them via the wholesale-adopt escape hatch (see comment above).
         const fresh = { ...freshDayState(), resetAt: Date.now() };
+        clearActiveSubstitutions();
         { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         setDayState(fresh);
         saveDayState(fresh);

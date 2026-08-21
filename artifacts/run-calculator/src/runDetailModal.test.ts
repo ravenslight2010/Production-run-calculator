@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { computeCheesePull } from "@workspace/inventory-math";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 import {
+  clearActiveSubstitutions,
+  getActiveSubstitutions,
   setActiveSubstitutions,
   withSubstitutions,
   withTodaySubstitutions,
@@ -210,6 +212,21 @@ describe("runDetailModal — today's substituted dough recipe", () => {
 
     expect(visibleValues).toBe(storedRun);
     expect(visibleValues).toEqual(historicalBefore);
+    expect(doughIngredientRows(visibleValues)).toEqual([
+      { ingredient: "Standard Flour", lbs: 200 },
+      { ingredient: "Water", lbs: 100 },
+    ]);
+  });
+
+  it("clears the active overlay at a workday reset so Ingredient Detail uses stored rows", () => {
+    setActiveSubstitutions(substitutions);
+    expect(getActiveSubstitutions()).toHaveLength(2);
+
+    clearActiveSubstitutions();
+
+    expect(getActiveSubstitutions()).toEqual([]);
+    const visibleValues = withTodaySubstitutions(storedRun, true, getActiveSubstitutions());
+    expect(visibleValues.doughRecipe).toEqual(storedRun.doughRecipe);
     expect(doughIngredientRows(visibleValues)).toEqual([
       { ingredient: "Standard Flour", lbs: 200 },
       { ingredient: "Water", lbs: 100 },

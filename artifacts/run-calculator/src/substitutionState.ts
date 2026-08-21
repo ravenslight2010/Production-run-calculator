@@ -20,6 +20,11 @@ export function setActiveSubstitutions(subs: IngredientSubstitution[] | undefine
   active = subs ?? [];
 }
 
+/** Clear the process-local overlay immediately when a new workday starts. */
+export function clearActiveSubstitutions(): void {
+  active = [];
+}
+
 export function getActiveSubstitutions(): IngredientSubstitution[] {
   return active;
 }
