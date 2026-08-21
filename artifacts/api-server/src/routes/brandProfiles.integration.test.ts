@@ -397,6 +397,105 @@ describe("brand-profiles applicator-audit route", () => {
       reason: "cross-profile",
     });
   });
+
+  it.each(["app3", "app4"] as const)(
+    "manager can clear only the selected %s audit slot",
+    async (slot) => {
+      await req(MANAGER, "POST", "/api/brand-profiles", {
+        items: [
+          profile({
+            key: "source__mozz",
+            brand: "source",
+            flavor: "mozz",
+            values: { app1CheeseRecipeName: "Mozz Blend" },
+          }),
+          profile({
+            key: "craft__supreme",
+            brand: "craft",
+            flavor: "supreme",
+            values: {
+              app1CheeseRecipeName: "Craft Blend",
+              app3CheeseRecipeName: "Mozz Blend",
+              app3Type: "cheese",
+              app4CheeseRecipeName: "",
+              app4Type: "Pepperoni",
+              dieType: "12in",
+            },
+            crustValues: { crustsPerCycle: 7 },
+          }),
+        ],
+      });
+
+      const clear = await req(MANAGER, "PATCH", "/api/brand-profiles/craft__supreme/clear-slot", {
+        slot,
+      });
+      expect(clear.status).toBe(200);
+      const clearBody = (await clear.json()) as { items: Array<Record<string, unknown>> };
+      expect(clearBody.items).toHaveLength(1);
+      expect(clearBody.items[0]).toMatchObject({
+        key: "craft__supreme",
+        slot: slot === "app3" ? "app4" : "app3",
+      });
+      expect(clearBody.items.some((item) => item.slot === slot)).toBe(false);
+
+      const saved = (await listAs(OPERATOR)).find((item) => item.key === "craft__supreme");
+      expect(saved).toBeDefined();
+      expect(saved).toMatchObject({
+        key: "craft__supreme",
+        values: {
+          app1CheeseRecipeName: "Craft Blend",
+          app3CheeseRecipeName: slot === "app3" ? "" : "Mozz Blend",
+          app3Type: slot === "app3" ? "" : "cheese",
+          app4CheeseRecipeName: "",
+          app4Type: slot === "app4" ? "" : "Pepperoni",
+          dieType: "12in",
+        },
+        crustValues: { crustsPerCycle: 7 },
+      });
+    },
+  );
+
+  it("rejects clearing an audit slot without manage-profiles", async () => {
+    await req(MANAGER, "POST", "/api/brand-profiles", {
+      items: [
+        profile({
+          key: "source__mozz",
+          brand: "source",
+          flavor: "mozz",
+          values: { app1CheeseRecipeName: "Mozz Blend" },
+        }),
+        profile({
+          key: "craft__supreme",
+          brand: "craft",
+          flavor: "supreme",
+          values: {
+            app3CheeseRecipeName: "Mozz Blend",
+            app3Type: "cheese",
+            app4CheeseRecipeName: "",
+            app4Type: "Pepperoni",
+          },
+        }),
+      ],
+    });
+
+    const clear = await req(OPERATOR, "PATCH", "/api/brand-profiles/craft__supreme/clear-slot", {
+      slot: "app3",
+    });
+    expect(clear.status).toBe(403);
+
+    const saved = (await listAs(OPERATOR)).find((item) => item.key === "craft__supreme");
+    expect(saved).toBeDefined();
+    expect(saved.values).toMatchObject({
+      app3CheeseRecipeName: "Mozz Blend",
+      app3Type: "cheese",
+      app4CheeseRecipeName: "",
+      app4Type: "Pepperoni",
+    });
+    const audit = await req(OPERATOR, "GET", "/api/brand-profiles/applicator-audit");
+    expect(audit.status).toBe(200);
+    const auditBody = (await audit.json()) as { items: Array<Record<string, unknown>> };
+    expect(auditBody.items.map((item) => item.slot)).toEqual(["app3", "app4"]);
+  });
 });
 
 describe("brand-profiles delete + input hygiene", () => {
