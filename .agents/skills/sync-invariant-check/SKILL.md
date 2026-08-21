@@ -4,7 +4,9 @@ description: >
   Pre-ship checklist for sync-related code changes. Trigger when an agent
   modifies routes/sync.ts, storage.ts, home.tsx sync handlers, day-state
   shape, SSE handlers, stamp logic, reset/epoch logic, or the protectRunValues
-  merge. Each invariant below traces back to a real production incident.
+  merge. Trigger it too for awake/sleeping-device handoffs, foreground wake
+  reconciliation, stale writes, reset epochs, or live counter synchronization.
+  Each invariant below traces back to a real production incident.
 ---
 
 # Sync Invariant Check
@@ -16,6 +18,8 @@ Read this skill before shipping any change to:
 - `artifacts/run-calculator/src/home.tsx` (SSE apply callback, push logic, `buildSyncPayload`, `applySyncCallbackRef`)
 - `_archived/mobile/context/sync/` (client.ts, mapping.ts)
 - Any file that adds a field to `SyncPayload`, `RunMeta`, or `FormValues`/`DEFAULT_VALUES`
+- Foreground/focus/visibility/online wake handling or any code that releases
+  auto-track after a sleeping-device reconciliation
 
 Out of scope: inventory SSE stream (separate invariants).
 
@@ -34,6 +38,7 @@ Out of scope: inventory SSE stream (separate invariants).
 | Adding a field to `DEFAULT_VALUES` / `FormValues` | §6 (BLANK_RUN_VALUE copies in protectRunValues.ts must be updated) |
 | Reset / rollover / `POST /sync/reset` | §5 (epoch guard fail-closed), §6 (reset-path blank guard) |
 | Any new sync write path (web or mobile) | §3 (`?today=` threading), §4 (body budget), §5 (epoch param + stale handling) |
+| Foreground wake / focus / visibility / online recovery | §7 (adopt-before-publish barrier), plus State Accuracy §5 |
 
 ---
 
@@ -182,6 +187,92 @@ The Express server (`artifacts/api-server`) must set `express.json` and `express
 
 ---
 
+## §7 — Sleeping-device wake handoff (adopt before publish)
+
+**Source:** `sync.integration.test.ts` and `foregroundSyncWakeGuard.test.ts`.
+
+When a device has been asleep, backgrounded, offline, or otherwise missed
+updates, its first foreground recovery is a reconciliation barrier:
+
+1. Pull the client-date live row with `cache: "no-store"` and the correct
+   `?today=` value. Do not publish the device's stale local snapshot first.
+2. Keep queued pushes and lifecycle actions behind the barrier. A waking device
+   must adopt the newer server/canonical response through the established
+   inbound merge, persist newer lifecycle state, update the local day-state
+   ref, and only then release auto-track and normal writes.
+3. A failed pull is not reconciliation. Keep the barrier/retry state correct;
+   do not mark the device reconciled or silently release stale writes.
+4. Coalesce focus, visibility, and online wake events so concurrent recovery
+   pulls do not create competing writes.
+5. After adoption, the next counter tick must rebase from the adopted values.
+   It must not apply hidden-time elapsed deltas, replay a stale lifecycle, or
+   overwrite a manual correction. A successful sync PUT must self-apply the
+   server's canonical `{ok:true,data}` response; a `{ok:true,stale:true}`
+   reset response must go through the epoch-stale handler and must not apply
+   its data.
+6. The server-side handoff contract is canonical convergence: if the sleeping
+   device submits its pre-sleep snapshot, return the newer merged state; its
+   repeat write after adoption is idempotent. A transient blank wake payload
+   must preserve populated values, advance protection stamps, and record the
+   conflict rather than erase live setup/progress.
+
+**Exact regression scenarios:**
+
+- API: awake device advances setup, skid progress/manual correction, and run
+  lifecycle while device B sleeps; B's stale wake push receives the canonical
+  newer lifecycle, run values, and packaging progress; B adopts and repeats
+  the write without a hidden-time counter delta; a blank wake payload remains
+  protected and produces a conflict record.
+- Foreground wiring: wake pulls the date-scoped row, routes it through the
+  existing inbound merge, reconciles profiles/factory data only after the live
+  row lands, fences Start/Pause/Resume/End until adoption completes, retries
+  failed pulls, and releases auto-track only after counter rebase.
+- Write response: successful writes immediately self-apply canonical data;
+  reset-stale responses invoke stale handling and never apply data; failed or
+  invalidated responses apply nothing.
+- Live counter receive: `casesOnCurrentSkid` is normalized to a rounded
+  integer, including missing/null/NaN input, before it reaches the display.
+- Blank shape: `CURRENT_BLANK_RUN_VALUE` stays aligned with `DEFAULT_VALUES`.
+
+**Safe merge vs. heal/investigation:**
+
+- Safe merge behavior: newer server state is adopted before the retry, the
+  repeat write is idempotent, LWW/blank guards preserve populated values, and
+  counters rebase once without a jump. Fix the sync path and add/keep the
+  focused regression test when any of these contracts is missing.
+- Data-heal or production investigation: stored production values are already
+  wrong, a stale wake was accepted and propagated to peers, reset-epoch data
+  was resurrected, canonical adoption still diverges after a retry, or
+  conflicts persist beyond the expected transient race. Do not hide these with
+  a client merge; inspect production history and use the data-heal playbook
+  when persisted data was poisoned.
+
+This section covers the sync barrier and convergence. Use
+`state-accuracy-check` for timer/counter math, auto-track bookkeeping,
+pause/resume, and the first post-wake tick; do not duplicate those formulas
+here.
+
+---
+
+## Focused validation
+
+Run the exact handoff regression set after sync or wake changes:
+
+```bash
+pnpm --filter @workspace/api-server exec vitest run \
+  src/routes/sync.integration.test.ts src/routes/syncReset.integration.test.ts
+pnpm --filter @workspace/run-calculator exec vitest run \
+  src/foregroundSyncWakeGuard.test.ts src/syncReceiveCasesOnSkid.test.ts \
+  src/syncWriteResponse.test.ts src/blankRunValueSync.test.ts
+```
+
+If a test needs a broader change, run the corresponding package's full
+`test` script as well. Do not call a wake path validated merely because the
+HTTP request returned 200: inspect whether its body was canonical or
+`stale:true`, and whether the client adopted it.
+
+---
+
 ## Checklist summary (copy-paste for PR review)
 
 ```
@@ -192,4 +283,5 @@ Sync invariant check:
 [ ] §4 Body limit: express.json limit is "10mb" (not 100kb default)
 [ ] §5 Epoch/reset: isStaleResetPush fails closed when serverEpoch>0; client sends ?epoch= and parses stale body; resetBoundaryAt clamped server-side with 5min skew; integration tests pass
 [ ] §6 Empty-over-populated: blank guard in additive path AND reset path; stamp advanced to Date.now() when guard fires; CURRENT_BLANK_RUN_VALUE updated if DEFAULT_VALUES changed
+[ ] §7 Wake handoff: pull/adopt canonical client-date state before publishing or releasing lifecycle/auto-track work; failed pulls stay unreconciled; canonical retry is idempotent; reset-stale data is not applied; post-wake counters rebase without hidden-time delta
 ```
