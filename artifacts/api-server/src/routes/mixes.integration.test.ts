@@ -520,3 +520,45 @@ describe("generic-mix-poison-purge-v2 data heal", () => {
     expect(remaining).toContain("safe-mix");
   });
 });
+
+// ── mix-duplicate-name-purge data heal ────────────────────────────────────────
+describe("mix-duplicate-name-purge data heal", () => {
+  it("keeps the oldest row when duplicate mixes have no usable data", async () => {
+    const older = new Date("2026-01-01T00:00:00Z");
+    const newer = new Date("2026-02-01T00:00:00Z");
+    const shared = {
+      scope: "live" as const,
+      name: "Empty Duplicate Mix",
+      brand: "TestBrand",
+      flavor: "TestFlavor",
+      batchSize: 0,
+      daysEarly: 0,
+      notes: "",
+      amountAlreadyMade: 0,
+      components: [],
+      isPrep: false,
+      enabled: true,
+      updatedAt: newer,
+    };
+
+    await db.insert(mixesTable).values([
+      { ...shared, id: "empty-duplicate-mix-older", createdAt: older },
+      { ...shared, id: "empty-duplicate-mix-newer", createdAt: newer },
+    ]);
+
+    // Keep this ranking test focused on duplicate-name cleanup. The later
+    // profile-name stub heal intentionally removes empty mix rows altogether.
+    await db.insert(dataHealsTable).values({
+      id: "profile-name-link-stub-purge-v1",
+    });
+
+    await runDataHeals();
+
+    const remaining = await db
+      .select({ id: mixesTable.id })
+      .from(mixesTable);
+    expect(remaining.map((row) => row.id)).toEqual([
+      "empty-duplicate-mix-older",
+    ]);
+  });
+});

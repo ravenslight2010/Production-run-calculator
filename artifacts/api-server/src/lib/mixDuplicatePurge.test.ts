@@ -62,11 +62,11 @@ describe("pickMixDuplicateLosers", () => {
     expect(pickMixDuplicateLosers([real, hollow])).toEqual([hollow]);
   });
 
-  it("prefers the NEWEST row when contents tie", () => {
+  it("prefers the OLDEST row when contents tie", () => {
     const older = row({ id: "a", createdAt: new Date("2026-07-01T00:00:00Z") });
     const newer = row({ id: "b", createdAt: new Date("2026-07-10T00:00:00Z") });
-    expect(pickMixDuplicateLosers([older, newer])).toEqual([older]);
-    expect(pickMixDuplicateLosers([newer, older])).toEqual([older]);
+    expect(pickMixDuplicateLosers([older, newer])).toEqual([newer]);
+    expect(pickMixDuplicateLosers([newer, older])).toEqual([newer]);
   });
 
   it("groups case-insensitively on trimmed name/brand/flavor", () => {
