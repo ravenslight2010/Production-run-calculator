@@ -901,8 +901,8 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
   // managers can detect whether offline-first merges are converging or
   // accumulating drift over time.
   const DATE = "2030-09-01";
-  function put(payload: unknown) {
-    return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+  function put(payload: unknown, date = DATE) {
+    return fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
       body: JSON.stringify({ senderId: "c1", payload }),
@@ -974,6 +974,48 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
     expect(rows.length).toBe(beforeCount + 1);
     const last = rows[rows.length - 1];
     expect(last.fieldsWithConflicts.some((f) => f.startsWith("dayState.runs:appended"))).toBe(true);
+  });
+
+  it("preserves both first-write runs and logs the protected merge after concurrent PUTs", async () => {
+    // Neither request sees a row initially. The losing first INSERT must retry
+    // against the row created by the winner, then add its distinct run instead
+    // of replacing the winner's state. The conflict log is asynchronous, so
+    // poll for the retry's appended-run record below.
+    const D = "2030-09-03";
+    const run = (id: string, casesNeeded: number) => ({
+      dayState: { runs: [{ id, brand: "Concurrent", flavor: id }], resetAt: 1000 },
+      runValues: { [id]: { casesNeeded } },
+      runValuesUpdatedAt: { [id]: 1 },
+    });
+
+    const requests = await Promise.all([
+      put(run("device-a", 10), D),
+      put(run("device-b", 20), D),
+    ]);
+    expect(requests.map((response) => response.status)).toEqual([200, 200]);
+
+    const stored = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() }).then(
+      (response) => response.json(),
+    ) as {
+      dayState?: { runs?: Array<{ id: string }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    };
+    expect(stored.dayState?.runs?.map((entry) => entry.id).sort()).toEqual(["device-a", "device-b"]);
+    expect(stored.runValues).toMatchObject({
+      "device-a": { casesNeeded: 10 },
+      "device-b": { casesNeeded: 20 },
+    });
+
+    const rows = await pollConflictRows(
+      (conflicts) => conflicts.some(
+        (row) => row.date === D
+          && row.fieldsWithConflicts.some((field) => field.startsWith("dayState.runs:appended")),
+      ),
+    );
+    expect(rows.some(
+      (row) => row.date === D
+        && row.fieldsWithConflicts.some((field) => field.startsWith("dayState.runs:appended")),
+    )).toBe(true);
   });
 
   it("inserts a conflict row when the stored run object wins the metaUpdatedAt LWW", async () => {
