@@ -1,5 +1,4 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash } from "crypto";
 import {
   db,
   dailySyncTable,
@@ -43,13 +42,13 @@ import {
   auditLogsTable,
   syncConflictLogsTable,
 } from "@workspace/db";
-import { and, eq, gt, asc, sql } from "drizzle-orm";
+import { and, eq, gt, gte, lte, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "../lib/protectRunValues";
 import { logAuditEvent } from "./auditLogs";
 import { healNaturalPepInValues, healNaturalPepList } from "../lib/dataHeals";
 import { requireCapability } from "../middlewares/requireCapability";
-import { detectConflicts } from "../lib/syncConflict";
+import { detectConflicts, type ConflictInfo } from "../lib/syncConflict";
 export { detectConflicts } from "../lib/syncConflict";
 
 const router: IRouter = Router();
@@ -212,121 +211,6 @@ function canonicalizePepNames(merged: unknown): void {
   }
 }
 
-// ── Sync conflict detection ──────────────────────────────────────────────────
-// Compares incoming vs merged payloads to find fields where the protective
-// merge kept the stored value instead of the incoming one. Conflicts include:
-//   - run values that were overridden (blank-over-populated or stale-stamp)
-//   - runs appended from the stored row that the push omitted (run-list union)
-// Returns null when no merge protection was actually applied.
-function shortHash(v: unknown): string {
-  return createHash("sha256")
-    .update(JSON.stringify(v) ?? "")
-    .digest("hex")
-    .slice(0, 16);
-}
-
-interface ConflictInfo {
-  fieldsWithConflicts: string[];
-  conflictCount: number;
-  clientStateHash: string;
-  serverStateHash: string;
-  mergedStateHash: string;
-}
-
-function detectConflictsLegacy(
-  incoming: unknown,
-  existing: unknown,
-  merged: unknown,
-): ConflictInfo | null {
-  if (
-    !incoming || typeof incoming !== "object" ||
-    !existing || typeof existing !== "object" ||
-    !merged || typeof merged !== "object"
-  ) {
-    return null;
-  }
-
-  const inObj  = incoming as Record<string, unknown>;
-  const merObj = merged   as Record<string, unknown>;
-
-  const fields: string[] = [];
-
-  // Run values that the merge overrode (blank-over-populated or stale stamp).
-  const inVals  = (inObj.runValues  && typeof inObj.runValues  === "object" && !Array.isArray(inObj.runValues))  ? inObj.runValues  as Record<string, unknown> : {};
-  const merVals = (merObj.runValues && typeof merObj.runValues === "object" && !Array.isArray(merObj.runValues)) ? merObj.runValues as Record<string, unknown> : {};
-  for (const id of Object.keys(inVals)) {
-    if (JSON.stringify(inVals[id]) !== JSON.stringify(merVals[id])) {
-      fields.push(`runValues:${id}`);
-    }
-  }
-
-  // Packaging progress is an independent causal register. Report when its
-  // generation/timestamp merge rejects or patches an incoming entry even if
-  // the visible skid/case pair happened to be identical.
-  const inProgress =
-    inObj.packagingProgress &&
-    typeof inObj.packagingProgress === "object" &&
-    !Array.isArray(inObj.packagingProgress)
-      ? inObj.packagingProgress as Record<string, unknown>
-      : {};
-  const mergedProgress =
-    merObj.packagingProgress &&
-    typeof merObj.packagingProgress === "object" &&
-    !Array.isArray(merObj.packagingProgress)
-      ? merObj.packagingProgress as Record<string, unknown>
-      : {};
-  for (const id of Object.keys(inProgress)) {
-    if (JSON.stringify(inProgress[id]) !== JSON.stringify(mergedProgress[id])) {
-      fields.push(`packagingProgress:${id}`);
-    }
-  }
-
-  // Index incoming run objects by id so we can compare against the merged list.
-  const inRunMap = new Map<string, unknown>();
-  for (const r of (Array.isArray((inObj.dayState as any)?.runs)
-    ? (inObj.dayState as any).runs as unknown[]
-    : [])
-  ) {
-    if (r && typeof r === "object") {
-      const id = (r as Record<string, unknown>).id;
-      if (typeof id === "string" && id) inRunMap.set(id, r);
-    }
-  }
-
-  // Walk merged run list to find two kinds of protective outcomes:
-  //   1. Appended runs: present in merged but absent from incoming (server rescued them).
-  //   2. Meta-LWW overrides: same id in both but objects differ, meaning the stored
-  //      copy had a strictly-newer metaUpdatedAt and replaced the incoming one.
-  const merRuns: unknown[] = Array.isArray((merObj.dayState as any)?.runs)
-    ? (merObj.dayState as any).runs as unknown[]
-    : [];
-  let appendedCount = 0;
-  for (const r of merRuns) {
-    if (!r || typeof r !== "object") continue;
-    const id = (r as Record<string, unknown>).id;
-    if (typeof id !== "string" || !id) continue;
-    if (!inRunMap.has(id)) {
-      appendedCount++;
-    } else if (JSON.stringify(r) !== JSON.stringify(inRunMap.get(id))) {
-      // Stored run object replaced the incoming one via the metaUpdatedAt LWW.
-      fields.push(`dayState.runs.meta:${id}`);
-    }
-  }
-  if (appendedCount > 0) {
-    fields.push(`dayState.runs:appended(${appendedCount})`);
-  }
-
-  if (fields.length === 0) return null;
-
-  return {
-    fieldsWithConflicts: fields,
-    conflictCount: fields.length,
-    clientStateHash: shortHash(incoming),
-    serverStateHash: shortHash(existing),
-    mergedStateHash: shortHash(merged),
-  };
-}
-
 // Best-effort: insert a sync_conflict_logs row when the protective merge
 // actually changed the incoming payload. Never throws — a logging failure
 // must never block the sync response.
@@ -352,6 +236,110 @@ async function recordSyncConflict(
     // best-effort: log failures must never break the sync write
   }
 }
+
+type ConflictTrendPoint = {
+  date: string;
+  conflicts: number;
+  events: number;
+};
+
+function previousDates(today: string, count: number): string[] {
+  const cursor = new Date(`${today}T00:00:00.000Z`);
+  const dates: string[] = [];
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const day = new Date(cursor);
+    day.setUTCDate(cursor.getUTCDate() - offset);
+    dates.push(day.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+function conflictFieldName(field: string): string {
+  if (field.startsWith("runValues:")) return "Run values";
+  if (field.startsWith("packagingProgress:")) return "Packaging progress";
+  if (field.startsWith("dayState.runs.meta:")) return "Run details";
+  if (field.startsWith("dayState.runs:appended")) return "Run list";
+  return field;
+}
+
+function conflictRunId(field: string): string | null {
+  for (const prefix of ["runValues:", "packagingProgress:", "dayState.runs.meta:"]) {
+    if (field.startsWith(prefix)) return field.slice(prefix.length) || null;
+  }
+  return null;
+}
+
+router.get(
+  "/sync/conflict-stats",
+  requireCapability("manage-staff"),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const today = clientToday(req);
+      const dates = previousDates(today, 7);
+      const [startDate] = dates;
+      const scope = currentScope();
+      const rows = await db
+        .select({
+          date: syncConflictLogsTable.date,
+          conflictCount: syncConflictLogsTable.conflictCount,
+          fieldsWithConflicts: syncConflictLogsTable.fieldsWithConflicts,
+        })
+        .from(syncConflictLogsTable)
+        .where(and(
+          eq(syncConflictLogsTable.scope, scope),
+          gte(syncConflictLogsTable.date, startDate),
+          lte(syncConflictLogsTable.date, today),
+        ));
+
+      const byDate = new Map<string, ConflictTrendPoint>(
+        dates.map((date) => [date, { date, conflicts: 0, events: 0 }]),
+      );
+      const fieldCounts = new Map<string, number>();
+      const runCounts = new Map<string, { count: number; fields: Set<string> }>();
+
+      for (const row of rows) {
+        const point = byDate.get(row.date);
+        if (point) {
+          point.conflicts += row.conflictCount;
+          point.events += 1;
+        }
+        const fields = Array.isArray(row.fieldsWithConflicts)
+          ? row.fieldsWithConflicts.filter((field): field is string => typeof field === "string")
+          : [];
+        for (const rawField of fields) {
+          const field = conflictFieldName(rawField);
+          fieldCounts.set(field, (fieldCounts.get(field) ?? 0) + 1);
+          const runId = conflictRunId(rawField);
+          if (runId) {
+            const run = runCounts.get(runId) ?? { count: 0, fields: new Set<string>() };
+            run.count += 1;
+            run.fields.add(field);
+            runCounts.set(runId, run);
+          }
+        }
+      }
+
+      const fields = [...fieldCounts]
+        .map(([field, count]) => ({ field, count }))
+        .sort((a, b) => b.count - a.count || a.field.localeCompare(b.field));
+      const runs = [...runCounts]
+        .map(([runId, value]) => ({ runId, count: value.count, fields: [...value.fields].sort() }))
+        .sort((a, b) => b.count - a.count || a.runId.localeCompare(b.runId));
+
+      res.json({
+        scope,
+        today,
+        totalConflictsToday: byDate.get(today)?.conflicts ?? 0,
+        trend: dates.map((date) => byDate.get(date)!),
+        fields,
+        runs,
+      });
+    } catch (err) {
+      req.log.error({ err }, "Failed to fetch sync conflict stats");
+      res.status(500).json({ error: "Failed to fetch sync conflict stats" });
+    }
+  },
+);
 
 async function upsertProtected(
   date: string,
@@ -448,7 +436,7 @@ router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<vo
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const today = clientToday(req);
-  const scope = currentScope();
+    const scope = currentScope();
 
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     res.status(400).json({ error: "payload must be a JSON object" }); return;
@@ -513,10 +501,12 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
     .from(dailySyncTable)
     .where(and(gt(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, currentScope())))
     .orderBy(asc(dailySyncTable.date));
+
   res.json(
     rows.map(r => {
       const data = r.data as any;
       const runs: Array<{ brand: string; flavor: string }> = data?.dayState?.runs ?? [];
+
       const runValues: Record<string, any> = data?.runValues ?? {};
       const base: Record<string, unknown> = {
         date: r.date,
@@ -550,7 +540,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
-  const scope = currentScope();
+    const scope = currentScope();
 
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     res.status(400).json({ error: "payload must be a JSON object" }); return;
@@ -595,9 +585,6 @@ router.post(
     const scope = currentScope();
     const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
-      // Reset only wipes the shared day-state for this scope. Master-data
-      // (profiles, recipes, etc.) is preserved. Use /sync/purge-all to wipe
-      // everything. Scope-isolated: live never touches sandbox.
       await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
       const [row] = await tx
         .insert(dataResetTable)

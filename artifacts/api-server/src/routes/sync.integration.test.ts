@@ -1021,6 +1021,95 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
   });
 });
 
+describe("GET /sync/conflict-stats", () => {
+  const TODAY = "2030-09-07";
+
+  beforeEach(async () => {
+    await db.insert(syncConflictLogsTable).values([
+      {
+        scope: "live",
+        date: TODAY,
+        fieldsWithConflicts: ["runValues:run-a", "packagingProgress:run-a"],
+        conflictCount: 2,
+        resolution: "additive-union",
+      },
+      {
+        scope: "live",
+        date: TODAY,
+        fieldsWithConflicts: ["runValues:run-a", "dayState.runs.meta:run-b"],
+        conflictCount: 3,
+        resolution: "additive-union",
+      },
+      {
+        scope: "live",
+        date: "2030-09-03",
+        fieldsWithConflicts: ["runValues:run-c"],
+        conflictCount: 1,
+        resolution: "additive-union",
+      },
+      {
+        scope: "live",
+        date: "2030-08-30",
+        fieldsWithConflicts: ["runValues:outside-window"],
+        conflictCount: 9,
+        resolution: "additive-union",
+      },
+      {
+        scope: "sandbox",
+        date: TODAY,
+        fieldsWithConflicts: ["runValues:other-scope"],
+        conflictCount: 8,
+        resolution: "additive-union",
+      },
+    ]);
+  });
+
+  it("requires manager access", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/conflict-stats?today=${TODAY}`, {
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("returns a client-local seven-day trend with field and run aggregates", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/conflict-stats?today=${TODAY}`, {
+      headers: managerAuthHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      scope: string;
+      today: string;
+      totalConflictsToday: number;
+      trend: Array<{ date: string; conflicts: number; events: number }>;
+      fields: Array<{ field: string; count: number }>;
+      runs: Array<{ runId: string; count: number; fields: string[] }>;
+    };
+
+    expect(body.scope).toBe("live");
+    expect(body.today).toBe(TODAY);
+    expect(body.totalConflictsToday).toBe(5);
+    expect(body.trend).toEqual([
+      { date: "2030-09-01", conflicts: 0, events: 0 },
+      { date: "2030-09-02", conflicts: 0, events: 0 },
+      { date: "2030-09-03", conflicts: 1, events: 1 },
+      { date: "2030-09-04", conflicts: 0, events: 0 },
+      { date: "2030-09-05", conflicts: 0, events: 0 },
+      { date: "2030-09-06", conflicts: 0, events: 0 },
+      { date: TODAY, conflicts: 5, events: 2 },
+    ]);
+    expect(body.fields).toEqual([
+      { field: "Run values", count: 3 },
+      { field: "Packaging progress", count: 1 },
+      { field: "Run details", count: 1 },
+    ]);
+    expect(body.runs).toEqual([
+      { runId: "run-a", count: 3, fields: ["Packaging progress", "Run values"] },
+      { runId: "run-b", count: 1, fields: ["Run details"] },
+      { runId: "run-c", count: 1, fields: ["Run values"] },
+    ]);
+  });
+});
+
 // DELETE /sync/:date enforces the server's real UTC date rather than a
 // client-supplied `today` param. This prevents a client from lying about
 // "today" to delete the actual live day. The manage-factory-settings capability

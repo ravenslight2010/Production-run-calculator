@@ -279,6 +279,7 @@ import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
+import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
@@ -14350,6 +14351,7 @@ export default function Home() {
                 {manageCategory === "audit" && canManageStaff && (
                   <div className="space-y-4">
                     <ProfileDataHealthCard />
+                    <SyncConflictStatsCard />
                     <AuditLogCard />
                   </div>
                 )}
