@@ -30,6 +30,7 @@ import type {
   AskInput,
   AskResult,
   AuditAiMemoryHealth200,
+  AuditProfileDataHealth200,
   AuthCredentials,
   AuthResponse,
   BrandProfileList,
@@ -122,6 +123,7 @@ import type {
   ProductionRunInput,
   ProductionSheetPhotoInput,
   ProductionSheetPhotoResult,
+  ProfileDataHealthApplyResult,
   QualityCheckPhotoInput,
   QualityCheckRecord,
   QualityCheckRecordInput,
@@ -8590,6 +8592,155 @@ export const useApplyAiMemorySafeFixes = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getApplyAiMemorySafeFixesMutationOptions(options));
+    }
+
+export const getAuditProfileDataHealthUrl = () => {
+
+
+
+
+  return `/api/profile-data/health-check`
+}
+
+/**
+ * Manager-only, read-only audit of saved brand profiles against the current dough and sauce recipe pools and the latest saved spec-sheet profile for each product. Only exact missing links and empty recipe rows are listed as safe repairs.
+ * @summary Preview production profile and recipe data health
+ */
+export const auditProfileDataHealth = async ( options?: RequestInit): Promise<AuditProfileDataHealth200> => {
+
+  return customFetch<AuditProfileDataHealth200>(getAuditProfileDataHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAuditProfileDataHealthQueryKey = () => {
+    return [
+    `/api/profile-data/health-check`
+    ] as const;
+    }
+
+
+export const getAuditProfileDataHealthQueryOptions = <TData = Awaited<ReturnType<typeof auditProfileDataHealth>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAuditProfileDataHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof auditProfileDataHealth>>> = ({ signal }) => auditProfileDataHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AuditProfileDataHealthQueryResult = NonNullable<Awaited<ReturnType<typeof auditProfileDataHealth>>>
+export type AuditProfileDataHealthQueryError = ErrorType<void>
+
+
+/**
+ * @summary Preview production profile and recipe data health
+ */
+
+export function useAuditProfileDataHealth<TData = Awaited<ReturnType<typeof auditProfileDataHealth>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditProfileDataHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAuditProfileDataHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getApplyProfileDataHealthRepairsUrl = () => {
+
+
+
+
+  return `/api/profile-data/health-check/apply`
+}
+
+/**
+ * Manager-only atomic repair. The server re-runs and revalidates each candidate inside the transaction, updates profile LWW stamps, and copies changed fields only to future unstarted run snapshots. Started and ended runs are never changed.
+ * @summary Apply deterministic production profile repairs
+ */
+export const applyProfileDataHealthRepairs = async ( options?: RequestInit): Promise<ProfileDataHealthApplyResult> => {
+
+  return customFetch<ProfileDataHealthApplyResult>(getApplyProfileDataHealthRepairsUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApplyProfileDataHealthRepairsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyProfileDataHealthRepairs>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyProfileDataHealthRepairs>>, TError,void, TContext> => {
+
+const mutationKey = ['applyProfileDataHealthRepairs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyProfileDataHealthRepairs>>, void> = () => {
+
+
+          return  applyProfileDataHealthRepairs(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyProfileDataHealthRepairsMutationResult = NonNullable<Awaited<ReturnType<typeof applyProfileDataHealthRepairs>>>
+
+    export type ApplyProfileDataHealthRepairsMutationError = ErrorType<void>
+
+    /**
+ * @summary Apply deterministic production profile repairs
+ */
+export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyProfileDataHealthRepairs>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof applyProfileDataHealthRepairs>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getApplyProfileDataHealthRepairsMutationOptions(options));
     }
 
 export const getListFacilityKnowledgeUrl = () => {

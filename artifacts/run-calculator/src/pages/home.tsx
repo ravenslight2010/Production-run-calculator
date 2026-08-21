@@ -279,6 +279,7 @@ import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
+import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
 import ProductionRulesManager from "../components/ProductionRulesManager";
@@ -14325,7 +14326,12 @@ export default function Home() {
                 )}
 
                 {/* Audit log — manager-only read-only event history */}
-                {manageCategory === "audit" && canManageStaff && <AuditLogCard />}
+                {manageCategory === "audit" && canManageStaff && (
+                  <div className="space-y-4">
+                    <ProfileDataHealthCard />
+                    <AuditLogCard />
+                  </div>
+                )}
 
                 {/* AI corrections memory — manager-only view + delete */}
                 {manageCategory === "ai-corrections" && canManageStaff && <AiCorrectionsCard />}

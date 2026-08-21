@@ -43,6 +43,11 @@ let aiConversationTurnsTable: DbModule["aiConversationTurnsTable"];
 let mergeAliasesTable: DbModule["mergeAliasesTable"];
 let importAliasesTable: DbModule["importAliasesTable"];
 let ingredientsTable: DbModule["ingredientsTable"];
+let brandProfilesTable: DbModule["brandProfilesTable"];
+let doughRecipesTable: DbModule["doughRecipesTable"];
+let sauceRecipesTable: DbModule["sauceRecipesTable"];
+let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
+let dailySyncTable: DbModule["dailySyncTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
 
@@ -92,6 +97,11 @@ beforeAll(async () => {
   mergeAliasesTable = dbMod.mergeAliasesTable;
   importAliasesTable = dbMod.importAliasesTable;
   ingredientsTable = dbMod.ingredientsTable;
+  brandProfilesTable = dbMod.brandProfilesTable;
+  doughRecipesTable = dbMod.doughRecipesTable;
+  sauceRecipesTable = dbMod.sauceRecipesTable;
+  savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
+  dailySyncTable = dbMod.dailySyncTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   pool.on("error", () => {});
 
@@ -123,7 +133,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${ingredientsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${aiCorrectionsTable}, ${facilityKnowledgeTable}, ${aiConversationTurnsTable}, ${mergeAliasesTable}, ${importAliasesTable}, ${ingredientsTable}, ${brandProfilesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${savedSpecSheetsTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
 });
@@ -388,5 +398,80 @@ describe("AI memory health check", () => {
     expect(corrections).toHaveLength(2);
     expect(corrections.find((row) => row.fromText === "Legacy Mozz")?.toText).toBe("Whole Mozz");
     expect(await db.select().from(facilityKnowledgeTable)).toHaveLength(1);
+  });
+});
+
+describe("profile data health check", () => {
+  it("is manager-only, reports without mutation, safely repairs exact links, and preserves started run snapshots", async () => {
+    const manager = await freshManager();
+    const operator = await freshOperator();
+    await db.insert(sauceRecipesTable).values({
+      id: "red-hot",
+      scope: "live",
+      name: "Red Hot Pizza Sauce",
+      components: [{ ingredient: "Garlic Sauce", lbs: 200 }],
+    });
+    await db.insert(savedSpecSheetsTable).values({
+      scope: "live",
+      label: "authoritative setup",
+      data: { profiles: [{ brand: "Corner Booth", flavor: "pepperoni", sauceName: "Red Hot Pizza Sauce" }] },
+    });
+    await db.insert(brandProfilesTable).values({
+      key: "corner booth__pepperoni",
+      scope: "live",
+      brand: "Corner Booth",
+      flavor: "pepperoni",
+      values: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+      updatedAtMs: 100,
+    });
+    await db.insert(dailySyncTable).values({
+      scope: "live",
+      date: "2099-01-01",
+      data: {
+        dayState: { runs: [
+          { id: "future", brand: "Corner Booth", flavor: "pepperoni" },
+          { id: "started", brand: "Corner Booth", flavor: "pepperoni", startedAt: 1 },
+        ] },
+        runValues: {
+          future: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+          started: { frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] },
+        },
+        runValuesUpdatedAt: { future: 10, started: 10 },
+      },
+    });
+
+    const denied = await fetch(`${baseUrl}/api/profile-data/health-check`, {
+      headers: { authorization: `Bearer ${signToken(operator)}` },
+    });
+    expect(denied.status).toBe(403);
+    const before = await fetch(`${baseUrl}/api/profile-data/health-check`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(before.status).toBe(200);
+    const report = await before.json() as { report: { safeRepairs: Array<{ recipeKind: string }>; findings: Array<{ status: string }> } };
+    expect(report.report.safeRepairs).toHaveLength(1);
+    expect(report.report.safeRepairs[0]?.recipeKind).toBe("sauce");
+    expect(report.report.findings.map((item) => item.status)).toContain("missing-recipe");
+    const [beforeProfile] = await db.select().from(brandProfilesTable);
+    expect((beforeProfile.values as Record<string, unknown>).frontlineRecipeName).toBe("Mystic Pizza Sauce");
+
+    const applied = await fetch(`${baseUrl}/api/profile-data/health-check/apply`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(applied.status).toBe(200);
+    const body = await applied.json() as { summary: { repairedProfiles: number; repairedRuns: number }; after: { safeRepairs: unknown[] } };
+    expect(body.summary).toEqual({ repairedProfiles: 1, repairedRuns: 1 });
+    expect(body.after.safeRepairs).toHaveLength(0);
+
+    const [profile] = await db.select().from(brandProfilesTable);
+    expect(profile.values).toMatchObject({
+      frontlineRecipeName: "Red Hot Pizza Sauce",
+      frontlineRecipe: [{ ingredient: "Garlic Sauce", lbs: 200 }],
+    });
+    const [day] = await db.select().from(dailySyncTable);
+    const data = day.data as Record<string, any>;
+    expect(data.runValues.future).toMatchObject({ frontlineRecipeName: "Red Hot Pizza Sauce" });
+    expect(data.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
   });
 });

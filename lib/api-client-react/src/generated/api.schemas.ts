@@ -2236,6 +2236,78 @@ export interface AiMemoryHealthApplyResult {
   summary: AiMemoryHealthApplyResultSummary;
 }
 
+export type ProfileDataHealthFindingRecipeKind = typeof ProfileDataHealthFindingRecipeKind[keyof typeof ProfileDataHealthFindingRecipeKind];
+
+
+export const ProfileDataHealthFindingRecipeKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+} as const;
+
+export type ProfileDataHealthFindingStatus = typeof ProfileDataHealthFindingStatus[keyof typeof ProfileDataHealthFindingStatus];
+
+
+export const ProfileDataHealthFindingStatus = {
+  healthy: 'healthy',
+  'missing-link': 'missing-link',
+  'missing-recipe': 'missing-recipe',
+  'missing-rows': 'missing-rows',
+  'saved-spec-mismatch': 'saved-spec-mismatch',
+} as const;
+
+export interface ProfileDataHealthFinding {
+  id: string;
+  profileKey: string;
+  brand: string;
+  flavor: string;
+  recipeKind: ProfileDataHealthFindingRecipeKind;
+  status: ProfileDataHealthFindingStatus;
+  currentName: string;
+  expectedName: string;
+  repairable: boolean;
+  message: string;
+  fingerprint: string;
+}
+
+export type ProfileDataHealthRepairRecipeKind = typeof ProfileDataHealthRepairRecipeKind[keyof typeof ProfileDataHealthRepairRecipeKind];
+
+
+export const ProfileDataHealthRepairRecipeKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+} as const;
+
+export type ProfileDataHealthRepairNextValues = { [key: string]: unknown };
+
+export interface ProfileDataHealthRepair {
+  id: string;
+  profileKey: string;
+  recipeKind: ProfileDataHealthRepairRecipeKind;
+  fingerprint: string;
+  fields: string[];
+  nextValues: ProfileDataHealthRepairNextValues;
+}
+
+export type ProfileDataHealthReportSummary = {[key: string]: number};
+
+export interface ProfileDataHealthReport {
+  findings: ProfileDataHealthFinding[];
+  safeRepairs: ProfileDataHealthRepair[];
+  summary: ProfileDataHealthReportSummary;
+}
+
+export type ProfileDataHealthApplyResultSummary = {
+  repairedProfiles: number;
+  repairedRuns: number;
+};
+
+export interface ProfileDataHealthApplyResult {
+  before: ProfileDataHealthReport;
+  after: ProfileDataHealthReport;
+  applied: ProfileDataHealthRepair[];
+  summary: ProfileDataHealthApplyResultSummary;
+}
+
 export interface FacilityKnowledgeList {
   knowledge: FacilityKnowledge[];
 }
@@ -3372,5 +3444,9 @@ export type FollowUpRunSuggestion200 = {
 
 export type AuditAiMemoryHealth200 = {
   report: AiMemoryHealthReport;
+};
+
+export type AuditProfileDataHealth200 = {
+  report: ProfileDataHealthReport;
 };
 

@@ -2800,6 +2800,50 @@ paths:
         "403":
           description: Missing manager capability
 
+  /profile-data/health-check:
+    get:
+      operationId: auditProfileDataHealth
+      tags: [productionRules]
+      summary: Preview production profile and recipe data health
+      description: >-
+        Manager-only, read-only audit of saved brand profiles against the
+        current dough and sauce recipe pools and the latest saved spec-sheet
+        profile for each product. Only exact missing links and empty recipe
+        rows are listed as safe repairs.
+      responses:
+        "200":
+          description: Read-only report and deterministic safe repair candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report]
+                properties:
+                  report:
+                    $ref: "#/components/schemas/ProfileDataHealthReport"
+        "403":
+          description: Missing manager capability
+
+  /profile-data/health-check/apply:
+    post:
+      operationId: applyProfileDataHealthRepairs
+      tags: [productionRules]
+      summary: Apply deterministic production profile repairs
+      description: >-
+        Manager-only atomic repair. The server re-runs and revalidates each
+        candidate inside the transaction, updates profile LWW stamps, and
+        copies changed fields only to future unstarted run snapshots. Started
+        and ended runs are never changed.
+      responses:
+        "200":
+          description: Before/after report and applied repair summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileDataHealthApplyResult"
+        "403":
+          description: Missing manager capability
+
   /ai-memory/facility:
     get:
       operationId: listFacilityKnowledge
@@ -7264,6 +7308,94 @@ components:
             deleted:
               type: integer
             retargeted:
+              type: integer
+
+    ProfileDataHealthFinding:
+      type: object
+      required: [id, profileKey, brand, flavor, recipeKind, status, currentName, expectedName, repairable, message, fingerprint]
+      properties:
+        id:
+          type: string
+        profileKey:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        recipeKind:
+          type: string
+          enum: [dough, sauce]
+        status:
+          type: string
+          enum: [healthy, missing-link, missing-recipe, missing-rows, saved-spec-mismatch]
+        currentName:
+          type: string
+        expectedName:
+          type: string
+        repairable:
+          type: boolean
+        message:
+          type: string
+        fingerprint:
+          type: string
+
+    ProfileDataHealthRepair:
+      type: object
+      required: [id, profileKey, recipeKind, fingerprint, fields, nextValues]
+      properties:
+        id:
+          type: string
+        profileKey:
+          type: string
+        recipeKind:
+          type: string
+          enum: [dough, sauce]
+        fingerprint:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+        nextValues:
+          type: object
+          additionalProperties: true
+
+    ProfileDataHealthReport:
+      type: object
+      required: [findings, safeRepairs, summary]
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileDataHealthFinding"
+        safeRepairs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileDataHealthRepair"
+        summary:
+          type: object
+          additionalProperties:
+            type: integer
+
+    ProfileDataHealthApplyResult:
+      type: object
+      required: [before, after, applied, summary]
+      properties:
+        before:
+          $ref: "#/components/schemas/ProfileDataHealthReport"
+        after:
+          $ref: "#/components/schemas/ProfileDataHealthReport"
+        applied:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileDataHealthRepair"
+        summary:
+          type: object
+          required: [repairedProfiles, repairedRuns]
+          properties:
+            repairedProfiles:
+              type: integer
+            repairedRuns:
               type: integer
 
     FacilityKnowledge:

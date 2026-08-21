@@ -3235,6 +3235,106 @@ export const ApplyAiMemorySafeFixesResponse = zod.object({
 
 
 /**
+ * Manager-only, read-only audit of saved brand profiles against the current dough and sauce recipe pools and the latest saved spec-sheet profile for each product. Only exact missing links and empty recipe rows are listed as safe repairs.
+ * @summary Preview production profile and recipe data health
+ */
+export const AuditProfileDataHealthResponse = zod.object({
+  "report": zod.object({
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "status": zod.enum(['healthy', 'missing-link', 'missing-recipe', 'missing-rows', 'saved-spec-mismatch']),
+  "currentName": zod.string(),
+  "expectedName": zod.string(),
+  "repairable": zod.boolean(),
+  "message": zod.string(),
+  "fingerprint": zod.string()
+})),
+  "safeRepairs": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "fingerprint": zod.string(),
+  "fields": zod.array(zod.string()),
+  "nextValues": zod.record(zod.string(), zod.unknown())
+})),
+  "summary": zod.record(zod.string(), zod.number())
+})
+})
+
+
+/**
+ * Manager-only atomic repair. The server re-runs and revalidates each candidate inside the transaction, updates profile LWW stamps, and copies changed fields only to future unstarted run snapshots. Started and ended runs are never changed.
+ * @summary Apply deterministic production profile repairs
+ */
+export const ApplyProfileDataHealthRepairsResponse = zod.object({
+  "before": zod.object({
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "status": zod.enum(['healthy', 'missing-link', 'missing-recipe', 'missing-rows', 'saved-spec-mismatch']),
+  "currentName": zod.string(),
+  "expectedName": zod.string(),
+  "repairable": zod.boolean(),
+  "message": zod.string(),
+  "fingerprint": zod.string()
+})),
+  "safeRepairs": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "fingerprint": zod.string(),
+  "fields": zod.array(zod.string()),
+  "nextValues": zod.record(zod.string(), zod.unknown())
+})),
+  "summary": zod.record(zod.string(), zod.number())
+}),
+  "after": zod.object({
+  "findings": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "status": zod.enum(['healthy', 'missing-link', 'missing-recipe', 'missing-rows', 'saved-spec-mismatch']),
+  "currentName": zod.string(),
+  "expectedName": zod.string(),
+  "repairable": zod.boolean(),
+  "message": zod.string(),
+  "fingerprint": zod.string()
+})),
+  "safeRepairs": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "fingerprint": zod.string(),
+  "fields": zod.array(zod.string()),
+  "nextValues": zod.record(zod.string(), zod.unknown())
+})),
+  "summary": zod.record(zod.string(), zod.number())
+}),
+  "applied": zod.array(zod.object({
+  "id": zod.string(),
+  "profileKey": zod.string(),
+  "recipeKind": zod.enum(['dough', 'sauce']),
+  "fingerprint": zod.string(),
+  "fields": zod.array(zod.string()),
+  "nextValues": zod.record(zod.string(), zod.unknown())
+})),
+  "summary": zod.object({
+  "repairedProfiles": zod.number(),
+  "repairedRuns": zod.number()
+})
+})
+
+
+/**
  * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
  * @summary List the shared facility-wide AI knowledge pool
  */
