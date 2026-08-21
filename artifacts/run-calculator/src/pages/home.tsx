@@ -434,7 +434,10 @@ import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
+import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
+import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider, calcRef } from "../contexts/LiveRunContext";
+import { HomeStationTabs } from "../components/HomeStationTabs";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
 import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
@@ -2150,27 +2153,6 @@ const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
  * (Vite Fast Refresh requires component-only exports from component files).
  */
 
-// Persisted last-active tab so an unexpected reload restores the user's place.
-const ACTIVE_TAB_STORAGE_KEY = "run-calc-active-tab";
-const VALID_TABS = new Set([
-  "run",
-  "setup",
-  "dough",
-  "sauce",
-  "frontline",
-  "packaging",
-  "warehouse",
-  "inventory",
-  "mixes",
-  "ai",
-  "incidents",
-  "downtime",
-  "quality",
-  "staff",
-  "stoppages",
-  "summary",
-]);
-
 /** m:ss for the dough-timer countdowns (e.g. 105 → "1:45"). */
 function fmtMS(totalSec: number): string {
   if (!Number.isFinite(totalSec)) return "—:—";
@@ -2844,12 +2826,9 @@ export default function Home() {
   const dayStateRef = useRef(dayState);
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
-  const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
-  const currentRunId = currentRun?.id ?? "";
-  // Latest current-run id, readable from the [] rollover effects without going
-  // stale when the user switches runs after the effect first ran.
-  const currentRunIdRef = useRef(currentRunId);
-  currentRunIdRef.current = currentRunId;
+  // One identity adapter feeds autosave, packaging progress, rollover, and
+  // station composition. It does not own selection or persistence.
+  const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
   const persistManualPackagingProgress = useCallback((
     runId: string,
     skidsCompleted: number,
@@ -3737,35 +3716,9 @@ export default function Home() {
   // Remember the last tab so an unexpected page reload (browser refresh, dev
   // preview reconnect, tab crash during a heavy import) puts the user back
   // where they were instead of bouncing them to the Run tab.
-  const [activeTab, setActiveTab] = useState(() => {
-    try {
-      const saved = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
-      return saved && VALID_TABS.has(saved) ? saved : "run";
-    } catch {
-      return "run";
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, activeTab);
-    } catch {
-      // Storage full/unavailable — losing tab restore is fine.
-    }
-  }, [activeTab]);
-
-  // ── Back-button trap (Android PWA / hardware back) ─────────────────────────
-  // Tab history for the back button trap: push the previous tab whenever the
-  // user navigates so the back button can unwind through tabs before staying.
-  const tabHistoryRef = useRef<string[]>([]);
-  const prevTabRef = useRef<string>(activeTab);
-  useEffect(() => {
-    if (activeTab !== prevTabRef.current) {
-      tabHistoryRef.current.push(prevTabRef.current);
-      // Cap at 20 entries to avoid unbounded growth.
-      if (tabHistoryRef.current.length > 20) tabHistoryRef.current.shift();
-      prevTabRef.current = activeTab;
-    }
-  }, [activeTab]);
+  // Navigation owns only tab persistence/history. Run selection and lifecycle
+  // transitions remain in Home's day-state coordinator.
+  const { activeTab, setActiveTab, tabHistoryRef } = useHomeNavigation();
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -14643,7 +14596,7 @@ export default function Home() {
                 };
               })()}
             />
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
+            <HomeStationTabs activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as HomeTab)}>
               {/* ─── RUN ─── */}
               <TabsContent value="run" className="max-w-[620px] mx-auto">
                 <LiveRunTabContent />
@@ -15718,7 +15671,7 @@ export default function Home() {
                 <LiveSummaryTabContent />
               </TabsContent>
 
-            </Tabs>
+            </HomeStationTabs>
           </form>
         </Form>
 
@@ -15740,7 +15693,9 @@ export default function Home() {
           open={showTour}
           onClose={() => setShowTour(false)}
           onComplete={() => void markTourCompleted()}
-          onNavigate={setActiveTab}
+              onNavigate={(tab) => {
+                if (HOME_TABS.includes(tab as HomeTab)) setActiveTab(tab as HomeTab);
+              }}
           isManager={isManager}
         />
 
