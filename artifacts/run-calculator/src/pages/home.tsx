@@ -133,6 +133,7 @@ import {
   shouldHealFormFromStored,
   isPristineSeedRun,
   isBlankRemovableRun,
+  removeRunByIdFromDayState,
   shouldResetFormOnRunSwitch,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
@@ -9452,27 +9453,15 @@ export default function Home() {
   // (not just the current one). Guards mirror removeRun: active/completed runs
   // and the last remaining run are protected.
   function removeRunById(id: string) {
-    const idx = dayState.runs.findIndex((r) => r.id === id);
-    if (idx === -1) return;
-    const run = dayState.runs[idx];
-    if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
-    const newRuns = dayState.runs.filter((_, i) => i !== idx);
-    if (newRuns.length === 0) return; // always keep at least one run
-    tombstoneDeleted("runs", run.id);
-    const curId = dayState.runs[dayState.currentIndex]?.id;
-    let newIndex: number;
-    if (curId === id) {
-      // Removed the current run — shift focus to the nearest remaining run.
-      newIndex = Math.max(0, idx - 1);
-    } else {
-      newIndex = Math.max(0, newRuns.findIndex((r) => r.id === curId));
-    }
-    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+    const result = removeRunByIdFromDayState(dayState, id);
+    if (!result) return;
+    tombstoneDeleted("runs", result.removedRun.id);
+    const { dayState: newDs, removedCurrent } = result;
     setDayState(newDs);
     saveDayState(newDs);
-    if (curId === id) {
+    if (removedCurrent) {
       // Removed current run — reload the new current run's form values.
-      const newVals = loadRunValues(newRuns[newIndex].id);
+      const newVals = loadRunValues(newDs.runs[newDs.currentIndex].id);
       form.reset(newVals);
       resetFieldArrays(newVals);
     }

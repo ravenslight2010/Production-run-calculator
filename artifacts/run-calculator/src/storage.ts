@@ -1321,6 +1321,37 @@ export function isBlankRemovableRun(run: RunMeta): boolean {
   );
 }
 
+/**
+ * Remove one not-started run while keeping the day focused on a surviving
+ * run.  The caller owns persistence and tombstoning because those are side
+ * effects; returning null makes active, completed, unknown, and last-run
+ * removals explicit no-ops.
+ */
+export function removeRunByIdFromDayState(
+  dayState: DayState,
+  id: string,
+): { dayState: DayState; removedRun: RunMeta; removedCurrent: boolean } | null {
+  const idx = dayState.runs.findIndex((run) => run.id === id);
+  if (idx === -1) return null;
+  const run = dayState.runs[idx];
+  if (run.startedAt || run.endedAt) return null;
+
+  const newRuns = dayState.runs.filter((_, i) => i !== idx);
+  if (newRuns.length === 0) return null;
+
+  const currentId = dayState.runs[dayState.currentIndex]?.id;
+  const removedCurrent = currentId === id;
+  const newIndex = removedCurrent
+    ? Math.max(0, idx - 1)
+    : Math.max(0, newRuns.findIndex((candidate) => candidate.id === currentId));
+
+  return {
+    dayState: { ...dayState, runs: newRuns, currentIndex: newIndex },
+    removedRun: run,
+    removedCurrent,
+  };
+}
+
 export function loadDayState(): DayState {
   try {
     const raw = localStorage.getItem(DAY_KEY);
