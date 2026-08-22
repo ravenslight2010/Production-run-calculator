@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";
 import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
+import { recordStartupEvent } from "./lib/observability";
 
 const rawPort = process.env["PORT"];
 
@@ -19,10 +20,12 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function startServer(): Promise<void> {
+  const startedAt = performance.now();
   // Seed the built-in and default editable roles (additive, only-if-absent) so
   // capability gating has a role catalog to resolve against.
   await seedRoles().catch((err) => {
     logger.error({ err }, "Failed to seed roles");
+    recordStartupEvent("seed_roles", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode: "seed_roles_failed" });
   });
 
   // Apply any pending one-time data heals (marker-guarded, exactly once per
@@ -30,12 +33,14 @@ async function startServer(): Promise<void> {
   // manager's profile write that would make its target recipe live.
   await runDataHeals().catch((err) => {
     logger.error({ err }, "Failed to run data heals");
+    recordStartupEvent("data_heals", { durationMs: performance.now() - startedAt, outcome: "degraded", errorCode: "data_heals_failed" });
   });
 
   const server = app.listen(port);
 
   server.once("listening", () => {
     logger.info({ port }, "Server listening");
+    recordStartupEvent("listen", { durationMs: performance.now() - startedAt, outcome: "success", safeCounts: { port } });
 
     // Ensure the seeded sandbox account exists with a known password + manager
     // role on every boot. Best-effort: a seeding failure must not take the server

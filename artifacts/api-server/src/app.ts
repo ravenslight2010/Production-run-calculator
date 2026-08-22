@@ -5,6 +5,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { enhancedErrorMessages } from "./middlewares/errorMessagesEnhanced";
+import { observabilityMiddleware } from "./lib/observability";
 
 // CORS is scoped to known dev/preview origins plus any configured production
 // domains. The mobile app's expo-web preview is served from a separate
@@ -73,6 +74,7 @@ app.use(
     },
   }),
 );
+app.use(observabilityMiddleware);
 
 app.use(cors(buildCorsOptions()));
 app.use(cookieParser());

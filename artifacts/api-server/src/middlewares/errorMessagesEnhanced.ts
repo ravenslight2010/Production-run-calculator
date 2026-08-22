@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
+import { safeErrorCode } from "../lib/observability";
 
 /**
  * Enhanced error message handler for common failures.
@@ -96,7 +97,14 @@ export function enhancedErrorMessages(
   }
 
   ((req as any).log ?? console).error?.(
-    { err, status, method: req.method, url: req.url?.split("?")[0] },
+    {
+      event: "request_error",
+      correlationId: (req as any).correlationId ?? (req as any).id,
+      errorCode: safeErrorCode(err),
+      status,
+      method: req.method,
+      url: req.url?.split("?")[0],
+    },
     "request errored",
   );
 

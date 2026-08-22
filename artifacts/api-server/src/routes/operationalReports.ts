@@ -214,7 +214,12 @@ router.post(
       incidentCount: incidentRows.length,
       wasteFlaggedCount: flaggedItems,
     };
-    const report: OperationalReport = {
+    const report: OperationalReport & {
+      evidence: {
+        release: { version: string; revision: string; environment: string };
+        recovery: { generatedAt: string; source: "live-database"; complete: boolean };
+      };
+    } = {
       scope: input.scope,
       date: input.date,
       periodStart,
@@ -243,6 +248,18 @@ router.post(
         availability: "available",
         value: { flaggedItems, historical: historicalInventory },
         note: "Current inventory snapshot; not a historical period total.",
+      },
+      evidence: {
+        release: {
+          version: process.env.npm_package_version ?? "unknown",
+          revision: process.env.REPLIT_GIT_COMMIT ?? process.env.GIT_COMMIT ?? "unknown",
+          environment: process.env.NODE_ENV ?? "unknown",
+        },
+        recovery: {
+          generatedAt: new Date().toISOString(),
+          source: "live-database",
+          complete: true,
+        },
       },
     };
     res.json(report);

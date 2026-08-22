@@ -94,14 +94,29 @@ type ProtectedUpsertResult = {
   data: unknown;
   wrote: boolean;
   partialFallback: boolean;
+  retries: number;
 };
 
 function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
   const snapshotId = syncSnapshotId(data);
   if (requested !== snapshotId) return false;
   res.setHeader("X-Sync-Snapshot", snapshotId);
+  res.setHeader("X-Sync-Response", "unchanged");
   res.json({ unchanged: true, snapshotId });
   return true;
+}
+
+function queueAgeMs(payload: unknown): number | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const record = payload as Record<string, unknown>;
+  const meta = record.syncMeta && typeof record.syncMeta === "object"
+    ? record.syncMeta as Record<string, unknown>
+    : record;
+  const queuedAt = meta.queuedAt;
+  if (typeof queuedAt !== "number" || !Number.isFinite(queuedAt)) return undefined;
+  // Keep queue age bounded and never log a future or ancient client timestamp.
+  const age = Date.now() - queuedAt;
+  return age >= 0 && age <= 7 * 24 * 60 * 60 * 1000 ? Math.round(age) : undefined;
 }
 
 function todayStr(): string {
@@ -430,6 +445,7 @@ async function upsertProtected(
               data: existing?.data ?? null,
               wrote: false,
               partialFallback: true,
+              retries: attempt,
             };
           }
         }
@@ -452,7 +468,7 @@ async function upsertProtected(
             .insert(dailySyncTable)
             .values({ date, scope, data: m as any, updatedAt: new Date() });
         }
-        return { data: m, wrote: true, partialFallback: false };
+        return { data: m, wrote: true, partialFallback: false, retries: attempt };
       });
       if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
@@ -527,13 +543,19 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   const result = await upsertProtected(today, scope, sanitized, today, req.ip);
   const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   if (result.wrote) broadcast(merged, senderId, scope, today);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
+  res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
+    ? "unchanged"
+    : result.partialFallback ? "partial-fallback" : "full");
+  res.setHeader("X-Sync-Retry-Count", String(result.retries));
+  res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(sanitized) ?? ""));
+  res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
   res.json(!result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? { ok: true, unchanged: true, snapshotId }
     : {
@@ -655,7 +677,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
   const staleEpoch = await isStaleResetPush(req, scope);
-  if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   const result = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
   const merged = result.data;
   // Broadcast to live SSE clients when writing today's date (supports same-day
@@ -664,6 +686,12 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
     broadcast(merged, senderId, scope, date);
   }
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
+  res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
+    ? "unchanged"
+    : result.partialFallback ? "partial-fallback" : "full");
+  res.setHeader("X-Sync-Retry-Count", String(result.retries));
+  res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(sanitized) ?? ""));
+  res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
   if (!result.partialFallback && snapshotId !== undefined && requestedId === snapshotId) {
     res.json({ ok: true, unchanged: true, snapshotId });
   } else {
