@@ -278,6 +278,7 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
+import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
 import RolesManager from "../components/RolesManager";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
@@ -640,7 +641,7 @@ applyMixCheeseOverlapDedupeIfNeeded();
 // writes (manage-profiles capability) — they run in a capability-gated effect
 // inside Home instead of at module init (see the profile-heal effect there).
 
-type NeedRow = { label: string; value: string; sub?: string };
+type NeedRow = { label: string; value: string; sub?: string; area?: WarehouseArea };
 
 function buildNeedRows(vals: FormValues): {
   dough: NeedRow[];
@@ -730,18 +731,18 @@ function aggregateNeedRows(
     mixComponentsByName?: ReadonlyMap<string, readonly { ingredient: string; perPizza: number }[]>;
   },
 ): NeedRow[] {
-  const map = new Map<string, { label: string; num: number; unit: string; order: number }>();
+  const map = new Map<string, { label: string; num: number; unit: string; order: number; area?: WarehouseArea }>();
   let order = 0;
-  const add = (label: string, num: number, unit: string) => {
+  const add = (label: string, num: number, unit: string, area?: WarehouseArea) => {
     const cleanedLabel = label.trim();
     if (!cleanedLabel || !Number.isFinite(num) || num <= 0) return;
     // A freezer-pull item matches case-insensitively. Keep ingredient rows
     // coalesced by that same key so one scheduled run never shows a component
     // twice when it appears in multiple recipe sources.
-    const key = `${cleanedLabel.toLowerCase()}__${unit}`;
+    const key = `${area ?? ""}__${cleanedLabel.toLowerCase()}__${unit}`;
     const ex = map.get(key);
     if (ex) ex.num += num;
-    else map.set(key, { label: cleanedLabel, num, unit, order: order++ });
+    else map.set(key, { label: cleanedLabel, num, unit, order: order++, area });
   };
   for (const vals of valsList) {
     const s = computeSummaryStats(vals);
@@ -759,13 +760,13 @@ function aggregateNeedRows(
           for (const r of vals.doughRecipe ?? []) {
             const ing = (r.ingredient ?? "").trim();
             const rowLbs = Number(r.lbs ?? 0);
-            if (ing && rowLbs > 0) add(ing, rowLbs * batches, "lbs");
+            if (ing && rowLbs > 0) add(ing, rowLbs * batches, "lbs", "Dough");
           }
         } else {
           // Non-warehouse view OR warehouse view with no recipe rows configured:
           // fall back to batch count so the card always shows something useful.
           const doughName = (vals.doughRecipeName ?? "").trim();
-          add(doughName || "Dough", batches, "batches");
+          add(doughName || "Dough", batches, "batches", "Dough");
         }
       }
     }
@@ -783,18 +784,18 @@ function aggregateNeedRows(
           for (const r of sauceRecipeRows) {
             const ing = (r.ingredient ?? "").trim();
             const rowLbs = Number(r.lbs ?? 0);
-            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs");
+            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs", "Sauce");
           }
         } else if (!hasSauceRecipe && s.sauceBatches > 0 && sauceName) {
           // No recipe rows but a named house sauce with batch math — fall back
           // to batch count so the warehouse card still shows something useful.
-          add(sauceName, s.sauceBatches, "batches");
+          add(sauceName, s.sauceBatches, "batches", "Sauce");
         }
         // Bought-as-is sauces (no recipe rows, no batch count) stay suppressed.
       } else {
         if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
-          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
-        } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs", "Sauce");
+        } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches", "Sauce");
       }
     }
     // Physical line order: App 1, App 2, then the pep applicators (they sit
@@ -818,7 +819,7 @@ function aggregateNeedRows(
           ? `${a.type} — ${blendName}`
           : a.type;
       if (isMix && a.lbs > 0) {
-        add(label, a.lbs, "lbs");
+        add(label, a.lbs, "lbs", "Frontline");
         // Mix library components are per-pizza ounces, not per-recipe-batch
         // pounds. Scale them from this scheduled run's total pizza count so a
         // tagged component gets the real warehouse pull amount.
@@ -828,7 +829,7 @@ function aggregateNeedRows(
             const ingredient = component.ingredient.trim();
             const perPizzaOz = Number(component.perPizza);
             if (ingredient && perPizzaOz > 0) {
-              add(ingredient, (perPizzaOz * s.totalPizzas) / OZ_PER_LB, "lbs");
+              add(ingredient, (perPizzaOz * s.totalPizzas) / OZ_PER_LB, "lbs", "Frontline");
             }
           }
         }
@@ -844,43 +845,43 @@ function aggregateNeedRows(
         const pull = computeCheesePull(a.recipe, a.batches);
         const expandedRows = pull.rows.filter(r => r.ingredient && r.lbs > 0);
         if (expandedRows.length > 0) {
-          for (const r of expandedRows) add(r.ingredient, r.lbs, "lbs");
+          for (const r of expandedRows) add(r.ingredient, r.lbs, "lbs", "Frontline");
         } else {
           // No recipe rows — fall back to batch count so display degrades gracefully.
-          add(label, a.batches, "batches");
+          add(label, a.batches, "batches", "Frontline");
         }
       } else if (!isMix && !isCheese && a.batches > 0) {
-        add(label, a.batches, "batches");
+        add(label, a.batches, "batches", "Frontline");
       } else if (!isMix && !isCheese && a.lbs > 0) {
         // No batch size configured for this applicator type — show lbs so
         // warehouse pullers still know how much to pull (e.g. Hamburger, Beef).
-        add(label, a.lbs, "lbs");
+        add(label, a.lbs, "lbs", "Frontline");
       }
     };
     for (const a of appsFront) addApp(a);
     if (s.pep1Type && s.pep1Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-      if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs");
-      else if (s.pep1Batches > 0) add(s.pep1Type, s.pep1Batches, "batches");
-      else add(s.pep1Type, s.pep1Lbs, "lbs"); // no batch size configured — show lbs so warehouse pullers know what to pull
+       if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs", "Frontline");
+       else if (s.pep1Batches > 0) add(s.pep1Type, s.pep1Batches, "batches", "Frontline");
+       else add(s.pep1Type, s.pep1Lbs, "lbs", "Frontline"); // no batch size configured — show lbs so warehouse pullers know what to pull
     }
     if (s.pep1TypeB && s.pep1LbsB > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
-      if (isPepStd) add(s.pep1TypeB, s.pep1LbsB, "lbs");
-      else if (s.pep1BatchesB > 0) add(s.pep1TypeB, s.pep1BatchesB, "batches");
-      else add(s.pep1TypeB, s.pep1LbsB, "lbs");
+       if (isPepStd) add(s.pep1TypeB, s.pep1LbsB, "lbs", "Frontline");
+       else if (s.pep1BatchesB > 0) add(s.pep1TypeB, s.pep1BatchesB, "batches", "Frontline");
+       else add(s.pep1TypeB, s.pep1LbsB, "lbs", "Frontline");
     }
     if (s.pep2Type && s.pep2Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-      if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs");
-      else if (s.pep2Batches > 0) add(s.pep2Type, s.pep2Batches, "batches");
-      else add(s.pep2Type, s.pep2Lbs, "lbs");
+       if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs", "Frontline");
+       else if (s.pep2Batches > 0) add(s.pep2Type, s.pep2Batches, "batches", "Frontline");
+       else add(s.pep2Type, s.pep2Lbs, "lbs", "Frontline");
     }
     if (s.pep2TypeB && s.pep2LbsB > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
-      if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs");
-      else if (s.pep2BatchesB > 0) add(s.pep2TypeB, s.pep2BatchesB, "batches");
-      else add(s.pep2TypeB, s.pep2LbsB, "lbs");
+       if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs", "Frontline");
+       else if (s.pep2BatchesB > 0) add(s.pep2TypeB, s.pep2BatchesB, "batches", "Frontline");
+       else add(s.pep2TypeB, s.pep2LbsB, "lbs", "Frontline");
     }
     for (const a of appsBack) addApp(a);
   }
@@ -889,7 +890,8 @@ function aggregateNeedRows(
     .map(([, val]) => ({
       label: val.label,
       value: fmtNum(val.num, val.unit === "batches" ? 2 : 1),
-      sub: val.unit,
+       sub: val.unit,
+       area: val.area,
     }));
 }
 
@@ -941,12 +943,12 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
     }
   }
   const rows: NeedRow[] = [];
-  for (const [type, n] of circleMap) rows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
-  for (const [type, n] of shipperMap) rows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
-  if (cartonCases > 0) rows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" });
-  if (labelRolls > 0) rows.push({ label: "Label Rolls", value: fmtNum(Math.ceil(labelRolls), 0), sub: "rolls" });
-  if (topLabelRolls > 0) rows.push({ label: "Label Rolls — Top", value: fmtNum(Math.ceil(topLabelRolls), 0), sub: "rolls" });
-  if (bottomLabelRolls > 0) rows.push({ label: "Label Rolls — Bottom", value: fmtNum(Math.ceil(bottomLabelRolls), 0), sub: "rolls" });
+  for (const [type, n] of circleMap) rows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles", area: "Packaging" });
+  for (const [type, n] of shipperMap) rows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers", area: "Packaging" });
+  if (cartonCases > 0) rows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases", area: "Packaging" });
+  if (labelRolls > 0) rows.push({ label: "Label Rolls", value: fmtNum(Math.ceil(labelRolls), 0), sub: "rolls", area: "Packaging" });
+  if (topLabelRolls > 0) rows.push({ label: "Label Rolls — Top", value: fmtNum(Math.ceil(topLabelRolls), 0), sub: "rolls", area: "Packaging" });
+  if (bottomLabelRolls > 0) rows.push({ label: "Label Rolls — Bottom", value: fmtNum(Math.ceil(bottomLabelRolls), 0), sub: "rolls", area: "Packaging" });
   return rows;
 }
 
