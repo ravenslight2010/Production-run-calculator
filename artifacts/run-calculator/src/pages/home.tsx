@@ -440,6 +440,7 @@ import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
 import { recordPerformance } from "../performanceDiagnostics";
+import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
@@ -4946,6 +4947,7 @@ export default function Home() {
   const [syncFailedCount, setSyncFailedCount] = useState(() =>
     loadSyncDiagnostics(syncDate).filter((event) => event.kind === "failure" || event.kind === "stale").length,
   );
+  const [syncRetryWaiting, setSyncRetryWaiting] = useState(false);
   const recordSyncEvent = (kind: SyncDiagnosticKind, message: string, response?: string, runId?: string) => {
     const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId });
     setSyncDiagnostics((current) => [...current, event].slice(-20));
@@ -6978,6 +6980,9 @@ export default function Home() {
   // or re-publish a captured running snapshot after a remote Stop is adopted.
   const syncPushGenerationRef = useRef(0);
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
+  const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncPushInFlightRef = useRef(false);
+  const queuedSyncPayloadRef = useRef<{ payload: SyncPayload; sig?: string } | null>(null);
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
   const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
@@ -7001,7 +7006,9 @@ export default function Home() {
   const [syncConnected, setSyncConnected] = useState(false);
   const syncStatus: SyncStatus = syncPushFailed
     ? "failed"
-    : syncPendingCount > 0
+    : syncRetryWaiting
+      ? "retrying"
+      : syncPendingCount > 0
       ? "syncing"
       : !isOnline || !syncConnected
         ? "delayed"
@@ -7938,7 +7945,16 @@ export default function Home() {
       // signing us out. Re-check /me; if the session is gone we land on login.
       revalidate();
     };
-    return () => { setSyncConnected(false); es.close(); };
+    return () => {
+      setSyncConnected(false);
+      if (syncRetryTimerRef.current) {
+        clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = null;
+      }
+      syncPushInFlightRef.current = false;
+      queuedSyncPayloadRef.current = null;
+      es.close();
+    };
   }, []);
 
   // Reconcile the shared live row before a screen-wake clock snap can turn
@@ -7955,6 +7971,13 @@ export default function Home() {
       setAutoTrackRebaseAfterBlock(false);
       setAutoTrackBlocked(true);
       syncPushGenerationRef.current += 1;
+      if (syncRetryTimerRef.current) {
+        clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = null;
+      }
+      setSyncRetryWaiting(false);
+      syncPushInFlightRef.current = false;
+      queuedSyncPayloadRef.current = null;
       for (const controller of syncPushAbortControllersRef.current) controller.abort();
       syncPushAbortControllersRef.current.clear();
       if (pushTimerRef.current) {
@@ -8418,8 +8441,17 @@ export default function Home() {
     retriesLeft: number,
     sig?: string,
     generation = syncPushGenerationRef.current,
+    internalRetry = false,
   ) {
     if (generation !== syncPushGenerationRef.current) return;
+    // A local edit, focus event, and online event can all arrive while a
+    // request is retrying. Keep only the newest payload; never start a second
+    // retry chain for the same tab.
+    if (syncPushInFlightRef.current && !internalRetry) {
+      queuedSyncPayloadRef.current = { payload, sig };
+      return;
+    }
+    syncPushInFlightRef.current = true;
     latestSyncPayloadRef.current = payload;
     recordSyncEvent("push", retriesLeft < 3 ? "Retrying retained change" : "Sending local change to server", undefined, currentRunId);
     // Guard the retry path too: buildSyncPayload stamps the payload with the
@@ -8441,6 +8473,18 @@ export default function Home() {
       signal: controller.signal,
     }).then(async (res) => {
       if (generation !== syncPushGenerationRef.current) return;
+      // Authentication failures are permanent for this request. Retrying them
+      // only creates a storm while the session is being repaired.
+      if (res.status === 401 || res.status === 403) {
+        if (res.status === 401) reportUnauthorized();
+        setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent("failure", "Sync needs attention before this change can be shared", String(res.status), currentRunId);
+        syncPushInFlightRef.current = false;
+        setSyncRetryWaiting(false);
+        return;
+      }
       const { stale } = await consumeCanonicalSyncWriteResponse(
         res,
         true,
@@ -8456,6 +8500,7 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
         recordSyncEvent("stale", "Server rejected the write after a reset; local change is retained", "reset-stale");
+        syncPushInFlightRef.current = false;
         return;
       }
       setSyncPushFailed(false);
@@ -8468,10 +8513,31 @@ export default function Home() {
       if (payload.history !== undefined) {
         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
       }
+      syncPushInFlightRef.current = false;
+      setSyncRetryWaiting(false);
+      const queued = queuedSyncPayloadRef.current;
+      queuedSyncPayloadRef.current = null;
+      if (queued) doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current);
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
       if (retriesLeft > 0) {
-        setTimeout(() => doFetch(payload, retriesLeft - 1, sig, generation), 5_000);
+        setSyncRetryWaiting(true);
+        const retryDelay = syncRetryDelay(3 - retriesLeft);
+        recordSyncEvent("push", `Sync waiting ${Math.ceil(retryDelay / 1000)}s before retrying`, "network", currentRunId);
+        if (syncRetryTimerRef.current) clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = setTimeout(() => {
+          syncRetryTimerRef.current = null;
+          setSyncRetryWaiting(false);
+          const queued = queuedSyncPayloadRef.current;
+          queuedSyncPayloadRef.current = null;
+          doFetch(
+            queued?.payload ?? payload,
+            retriesLeft - 1,
+            queued?.sig ?? sig,
+            generation,
+            true,
+          );
+        }, retryDelay);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
         pushAcknowledgedRef.current = true;
@@ -8480,6 +8546,8 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
         recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network");
+        syncPushInFlightRef.current = false;
+        setSyncRetryWaiting(false);
       }
     }).finally(() => {
       syncPushAbortControllersRef.current.delete(controller);
@@ -8600,6 +8668,13 @@ export default function Home() {
       return;
     }
     setSyncPushFailed(false);
+    if (syncRetryTimerRef.current) {
+      clearTimeout(syncRetryTimerRef.current);
+      syncRetryTimerRef.current = null;
+    }
+    setSyncRetryWaiting(false);
+    syncPushInFlightRef.current = false;
+    queuedSyncPayloadRef.current = null;
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
   }

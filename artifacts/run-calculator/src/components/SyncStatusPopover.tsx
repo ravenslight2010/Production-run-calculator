@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, Re
 import { useState } from "react";
 import type { SyncDiagnostic } from "../syncDiagnostics";
 
-export type SyncStatus = "connected" | "syncing" | "synchronized" | "delayed" | "failed";
+export type SyncStatus = "connected" | "syncing" | "retrying" | "synchronized" | "delayed" | "failed";
 
 type Props = {
   status: SyncStatus;
@@ -21,6 +21,7 @@ type Props = {
 const labels: Record<SyncStatus, string> = {
   connected: "Connected",
   syncing: "Syncing",
+  retrying: "Retrying",
   synchronized: "Synchronized",
   delayed: "Delayed",
   failed: "Sync failed",
@@ -34,8 +35,8 @@ export default function SyncStatusPopover(props: Props) {
   const [open, setOpen] = useState(false);
   const failed = props.status === "failed";
   const delayed = props.status === "delayed";
-  const Icon = failed ? AlertTriangle : !props.connected ? WifiOff : props.status === "syncing" ? Loader2 : props.status === "synchronized" ? CheckCircle2 : delayed ? Clock3 : Wifi;
-  const color = failed ? "text-red-400" : delayed ? "text-amber-400" : props.status === "synchronized" ? "text-emerald-400" : "text-muted-foreground";
+  const Icon = failed ? AlertTriangle : !props.connected ? WifiOff : props.status === "syncing" || props.status === "retrying" ? Loader2 : props.status === "synchronized" ? CheckCircle2 : delayed ? Clock3 : Wifi;
+  const color = failed ? "text-red-400" : delayed || props.status === "retrying" ? "text-amber-400" : props.status === "synchronized" ? "text-emerald-400" : "text-muted-foreground";
 
   return (
     <div className="relative">
@@ -53,12 +54,12 @@ export default function SyncStatusPopover(props: Props) {
             <div>
               <p className={`font-semibold ${color}`}>{labels[props.status]}</p>
               <p className="mt-1 text-muted-foreground">
-                {failed || delayed
+                {failed || delayed || props.status === "retrying"
                   ? "Your local change is retained on this device. It is not shared until the server acknowledges it."
                   : "Local changes are safe here; the server acknowledgment below confirms shared persistence."}
               </p>
             </div>
-            <span className={`h-2 w-2 rounded-full ${failed ? "bg-red-500" : delayed ? "bg-amber-400" : "bg-emerald-500"}`} />
+            <span className={`h-2 w-2 rounded-full ${failed ? "bg-red-500" : delayed || props.status === "retrying" ? "bg-amber-400" : "bg-emerald-500"}`} />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 rounded bg-muted/30 p-2">
             <span>Production date</span><strong className="text-right">{props.date}</strong>
