@@ -769,7 +769,6 @@ function aggregateNeedRows(
   valsList: FormValues[],
   opts?: {
     warehouse?: boolean;
-    mixComponentsByName?: ReadonlyMap<string, readonly { ingredient: string; perPizza: number }[]>;
   },
 ): NeedRow[] {
   const map = new Map<string, { label: string; num: number; unit: string; order: number; area?: WarehouseArea }>();
@@ -3802,17 +3801,6 @@ export default function Home() {
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
       if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
-    }
-    return map;
-  }, [mixes]);
-  // Mix components retain their per-pizza-ounce unit here. The warehouse need
-  // aggregation converts them to pounds for each run, the same basis used by
-  // the make-day plan.
-  const serverMixComponentsByName = useMemo(() => {
-    const map = new Map<string, { ingredient: string; perPizza: number }[]>();
-    for (const mix of mixes) {
-      const key = mix.name.trim().toLowerCase();
-      if (key) map.set(key, mix.components);
     }
     return map;
   }, [mixes]);
@@ -13407,9 +13395,8 @@ export default function Home() {
   const activeWarehouseRows = useMemo(
     () => needsWarehouseSnapshot ? aggregateNeedRows(activeRunValues, {
       warehouse: true,
-      mixComponentsByName: serverMixComponentsByName,
     }) : [],
-    [needsWarehouseSnapshot, activeRunValues, serverMixComponentsByName],
+    [needsWarehouseSnapshot, activeRunValues],
   );
   const activePackagingRows = useMemo(
     () => needsWarehouseSnapshot ? aggregatePackagingNeeds(activeRunValues) : [],
@@ -13424,13 +13411,12 @@ export default function Home() {
         rows: [
           ...aggregateNeedRows([values], {
             warehouse: true,
-            mixComponentsByName: serverMixComponentsByName,
           }),
           ...aggregatePackagingNeeds([values]),
         ],
       };
     }).map((detail) => [detail.id, detail] as const)) : new Map(),
-    [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById, serverMixComponentsByName],
+    [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById],
   );
   const scheduledWarehouseRuns = useMemo(
     () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
@@ -13446,7 +13432,6 @@ export default function Home() {
           const needRows = [
             ...aggregateNeedRows([values], {
               warehouse: true,
-              mixComponentsByName: serverMixComponentsByName,
             }),
             ...aggregatePackagingNeeds([values]),
           ];
@@ -13462,7 +13447,7 @@ export default function Home() {
           };
         }),
     ) : [],
-    [needsWarehouseSnapshot, scheduledDays, serverMixComponentsByName],
+    [needsWarehouseSnapshot, scheduledDays],
   );
   const freezerPullPlan = useMemo(
     () => needsWarehouseSnapshot ? buildFreezerPullPlan({

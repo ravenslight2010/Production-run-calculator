@@ -42,3 +42,19 @@ the warehouse flag; the freezer-pull scheduled path deliberately stays on
 default labels (its labels feed manager-tagged ingredient matching — renaming
 breaks existing tags). Label changes reset that day's staged checkmarks for the
 renamed rows (keys embed the label) — accepted, day-state only.
+
+## Pre-made mix staging
+
+Regular Mix applicators are made before production, so warehouse surfaces stage
+only the finished `Mix — <name>` amount and must never expand the mix's
+ingredient components. Cheese applicators continue to expand their recipe
+ingredients because those components still need to be pulled to make the
+cheese blend.
+
+**Why:** warehouse staging reflects the handoff to the line, not the separate
+pre-production mix-making job; expanding a regular mix double-directs the
+warehouse to pull ingredients that should already be in the completed mix.
+
+**How to apply:** keep this distinction in per-run checklists, all-runs
+rollups, and warehouse station screens. Do not change inventory consumption or
+make-day mix planning when changing the display rule.
