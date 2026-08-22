@@ -75,6 +75,7 @@ workflow names and commands are:
 
 ```sh
 pnpm run audit:recovery
+pnpm run check:clean-start
 pnpm --filter @workspace/api-server run test
 pnpm --filter @workspace/run-calculator run test
 pnpm --filter @workspace/production-rules run test
@@ -86,6 +87,18 @@ pnpm --filter @workspace/corpus-harness run test
 pnpm --filter @workspace/scripts run check-model-bump
 pnpm --filter @workspace/scripts run check-operational-skill-evidence
 ```
+
+`check:clean-start` is an operational smoke check. It preflights ports 5000 and
+5173, starts only its own API and Vite process groups, verifies
+`/api/healthz` (including the database check) and the initial HTML page, then
+terminates those process groups. To avoid disturbing a developer process, it
+fails rather than killing an occupied port; use `CLEAN_START_API_PORT` and
+`CLEAN_START_WEB_PORT` to select unused equivalent ports when needed. The
+default ports are the configured workflow ports, so a passing default run is
+evidence that those commands bind where the workflows expect. Startup output is
+included on failure to expose build errors, port conflicts, missing
+environment/database setup, and early process exits instead of leaving a
+misleading green result.
 
 The recovery evidence audit is a required, read-only gate before risky merges
 and releases. It exits nonzero for `MISSING` evidence and prints the missing

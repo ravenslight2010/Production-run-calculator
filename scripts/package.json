@@ -11,6 +11,7 @@
     "audit:recovery": "tsx ./src/recovery-audit.mts",
     "check-model-bump": "pnpm run test && bash ./src/check-model-version-bump.sh",
     "check-operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.mts",
+    "check:clean-start": "tsx ./src/verify-clean-start.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
