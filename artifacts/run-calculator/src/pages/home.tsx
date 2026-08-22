@@ -3749,7 +3749,7 @@ export default function Home() {
   // where they were instead of bouncing them to the Run tab.
   // Navigation owns only tab persistence/history. Run selection and lifecycle
   // transitions remain in Home's day-state coordinator.
-  const { activeTab, setActiveTab, tabHistoryRef } = useHomeNavigation();
+  const { activeTab, setActiveTab, goBack } = useHomeNavigation();
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -6665,8 +6665,8 @@ export default function Home() {
     if (showBrandDrop)          { setShowBrandDrop(false);          return; }
     if (showFlavorDrop)         { setShowFlavorDrop(false);         return; }
     // 2. Unwind tab history if anything is in the stack.
-    const prev = tabHistoryRef.current.pop();
-    if (prev) { setActiveTab(prev); return; }
+    goBack();
+    return;
     // 3. Nothing to close and no tab history — stay in the app (sentinel keeps
     //    the browser from exiting; no action needed here).
   });
