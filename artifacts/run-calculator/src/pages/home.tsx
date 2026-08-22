@@ -1547,15 +1547,51 @@ applyMixCheeseOverlapDedupeIfNeeded()
 // writes (manage-profiles capability) — they run in a capability-gated effect
 // inside Home instead of at module init (see the profile-heal effect there).
 
-type NeedRow = 
-{
- label: string
-;
- value: string
-;
- sub?: string 
+type NeedArea = "Dough" | "Sauce" | "Frontline" | "Packaging";
+
+type NeedRow = {
+  label: string;
+  value: string;
+  sub?: string;
+  area?: NeedArea;
+};
+
+const NEED_AREA_ORDER: NeedArea[] = ["Dough", "Sauce", "Frontline", "Packaging"];
+
+function groupNeedRows(rows: NeedRow[]): { area: NeedArea; rows: NeedRow[] }[] {
+  const grouped = new Map<NeedArea, NeedRow[]>();
+  for (const row of rows) {
+    const area = row.area ?? "Frontline";
+    const areaRows = grouped.get(area);
+    if (areaRows) areaRows.push(row);
+    else grouped.set(area, [row]);
+  }
+  return NEED_AREA_ORDER
+    .filter((area) => grouped.has(area))
+    .map((area) => ({ area, rows: grouped.get(area)! }));
 }
-;
+
+function GroupedNeedsList({ rows }: { rows: NeedRow[] }) {
+  const groups = groupNeedRows(rows);
+  if (groups.length === 0) {
+    return <p className="text-xs text-muted-foreground italic">No data</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {groups.map(({ area, rows: areaRows }) => (
+        <section key={area} aria-labelledby={`needs-area-${area.toLowerCase()}`}>
+          <h3
+            id={`needs-area-${area.toLowerCase()}`}
+            className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5"
+          >
+            {area}
+          </h3>
+          <NeedsList rows={areaRows} />
+        </section>
+      ))}
+    </div>
+  );
+}
 
 
 function buildNeedRows(vals: FormValues): 
@@ -1833,9 +1869,9 @@ function aggregateNeedRows(
     mixComponentsByName?: ReadonlyMap<string, readonly { ingredient: string; perPizza: number }[]>;
   },
 ): NeedRow[] {
-  const map = new Map<string, { label: string; num: number; unit: string; order: number }>();
+  const map = new Map<string, { label: string; num: number; unit: string; area: NeedArea; order: number }>();
   let order = 0;
-  const add = (label: string, num: number, unit: string) => {
+  const add = (label: string, num: number, unit: string, area: NeedArea) => {
     const cleanedLabel = label.trim();
     if (!cleanedLabel || !Number.isFinite(num) || num <= 0) return;
     // A freezer-pull item matches case-insensitively. Keep ingredient rows
@@ -1844,7 +1880,7 @@ function aggregateNeedRows(
     const key = `${cleanedLabel.toLowerCase()}__${unit}`;
     const ex = map.get(key);
     if (ex) ex.num += num;
-    else map.set(key, { label: cleanedLabel, num, unit, order: order++ });
+    else map.set(key, { label: cleanedLabel, num, unit, area, order: order++ });
   };
   for (const vals of valsList) {
     const s = computeSummaryStats(vals);
@@ -1862,13 +1898,13 @@ function aggregateNeedRows(
           for (const r of vals.doughRecipe ?? []) {
             const ing = (r.ingredient ?? "").trim();
             const rowLbs = Number(r.lbs ?? 0);
-            if (ing && rowLbs > 0) add(ing, rowLbs * batches, "lbs");
+            if (ing && rowLbs > 0) add(ing, rowLbs * batches, "lbs", "Dough");
           }
         } else {
           // Non-warehouse view OR warehouse view with no recipe rows configured:
           // fall back to batch count so the card always shows something useful.
           const doughName = (vals.doughRecipeName ?? "").trim();
-          add(doughName || "Dough", batches, "batches");
+          add(doughName || "Dough", batches, "batches", "Dough");
         }
       }
     }
@@ -1904,7 +1940,7 @@ function aggregateNeedRows(
             const rowLbs = Number(r.lbs ?? 0)
 ;
 
-            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs")
+            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs", "Sauce")
 ;
 
           
@@ -1917,7 +1953,7 @@ function aggregateNeedRows(
 
           // No recipe rows but a named house sauce with batch math — fall back
           // to batch count so the warehouse card still shows something useful.
-          add(sauceName, s.sauceBatches, "batches")
+          add(sauceName, s.sauceBatches, "batches", "Sauce")
 ;
 
         
@@ -1932,12 +1968,12 @@ function aggregateNeedRows(
         if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) 
 {
 
-          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs")
+          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs", "Sauce")
 ;
 
         
 }
- else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches")
+ else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches", "Sauce")
 ;
 
       
@@ -2095,9 +2131,7 @@ function aggregateNeedRows(
 // Roll up packaging consumables across the given runs: circles are 1 per pizza
 // and shippers are 1 per case, each grouped by the run's selected type. "none"
 // / unset selections contribute nothing. Labeled runs contribute label rolls
-// (pizzas / labels-per-roll
-;
- per position when Label Position is Both).
+// (pizzas / labels-per-roll per position when Label Position is Both).
 function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] 
 {
 
