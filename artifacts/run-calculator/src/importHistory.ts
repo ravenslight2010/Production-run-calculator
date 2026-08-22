@@ -3,6 +3,11 @@ import { inventoryClientId } from "./inventoryShared";
 export type ImportHistorySummary = {
   phases?: Record<string, string>;
   counts?: Record<string, number>;
+  source?: Record<string, number>;
+  landed?: Record<string, number>;
+  components?: Record<string, number>;
+  links?: Record<string, number>;
+  mismatches?: string[];
   warnings?: string[];
   unresolved?: string[];
   skipped?: string[];
@@ -12,7 +17,7 @@ export type ImportHistorySummary = {
 
 export type ImportHistoryItem = {
   id: number;
-  importType: "spec" | "premix";
+  importType: ImportHistoryImportType;
   sourceKey: string | null;
   sourceLabel: string;
   customerScope: string | null;
@@ -22,8 +27,11 @@ export type ImportHistoryItem = {
   createdAt: number;
 };
 
+export type ImportHistoryImportType =
+  | "spec" | "premix" | "cheese" | "sauce" | "dough" | "schedule" | "shipping" | "recipe";
+
 export type ImportHistoryReopenRequest = {
-  importType: ImportHistoryItem["importType"];
+  importType: "spec" | "premix";
   snapshotId: number;
   requestId: number;
 };
@@ -49,7 +57,7 @@ export async function fetchImportHistory(filters: {
 }
 
 export async function recordImportHistory(input: {
-  importType: "spec" | "premix";
+  importType: ImportHistoryImportType;
   sourceKey?: string;
   sourceLabel: string;
   customerScope?: string;

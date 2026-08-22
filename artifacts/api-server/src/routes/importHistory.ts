@@ -11,6 +11,11 @@ const MAX_TEXT = 300;
 type ImportHistorySummary = {
   phases?: Record<string, string>;
   counts?: Record<string, number>;
+  source?: Record<string, number>;
+  landed?: Record<string, number>;
+  components?: Record<string, number>;
+  links?: Record<string, number>;
+  mismatches?: string[];
   warnings?: string[];
   unresolved?: string[];
   skipped?: string[];
@@ -34,9 +39,23 @@ function sanitizeSummary(raw: unknown): ImportHistorySummary {
     const n = Number(v);
     if (Number.isFinite(n) && n >= 0) counts[k.slice(0, 60)] = Math.min(Math.floor(n), 1000000);
   }
+  const metric = (value: unknown) => {
+    const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(input).slice(0, 30)) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) out[k.slice(0, 60)] = Math.min(Math.floor(n), 1000000);
+    }
+    return out;
+  };
   return {
     phases,
     counts,
+    source: metric(o.source),
+    landed: metric(o.landed),
+    components: metric(o.components),
+    links: metric(o.links),
+    mismatches: cleanList(o.mismatches),
     warnings: cleanList(o.warnings),
     unresolved: cleanList(o.unresolved),
     skipped: cleanList(o.skipped),
@@ -84,7 +103,7 @@ router.post("/import-history", requireCapability("manage-profiles"), async (req:
   const importType = String(body.importType ?? "").trim();
   const sourceLabel = String(body.sourceLabel ?? "").trim().slice(0, MAX_TEXT);
   const status = String(body.status ?? "").trim();
-  if (!["spec", "premix"].includes(importType) || !sourceLabel || !["complete", "partial", "failed"].includes(status)) {
+  if (!["spec", "premix", "cheese", "sauce", "dough", "schedule", "shipping", "recipe"].includes(importType) || !sourceLabel || !["complete", "partial", "failed"].includes(status)) {
     res.status(400).json({ error: "Invalid import history record" });
     return;
   }

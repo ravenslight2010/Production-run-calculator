@@ -11632,6 +11632,25 @@ export default function Home() {
             unresolved: toCommit.skipped?.profiles?.length ?? 0,
             skipped: (toCommit.skipped?.recipes?.length ?? 0) + (toCommit.skipped?.profiles?.length ?? 0),
           },
+          source: {
+            profiles: toCommit.parsed.profiles.length,
+            recipes: toCommit.parsed.recipes.length,
+            ingredientRows: toCommit.parsed.recipes.reduce((n, r) => n + (r.rows?.length ?? 0), 0),
+          },
+          landed: {
+            profiles: touchedProfiles.length,
+            recipesCreated: mixesAdded + cheeseRecipesAdded,
+            recipesUpdated,
+            familyCollapses: autoLinkedRecipes,
+          },
+          components: {
+            ingredientRows: toCommit.parsed.recipes.reduce((n, r) => n + (r.rows?.length ?? 0), 0),
+          },
+          links: { profiles: touchedProfiles.length, autoLinkedRecipes },
+          mismatches: [
+            ...(toCommit.skipped?.profiles?.length ? [`${toCommit.skipped.profiles.length} profile link(s) were not landed.`] : []),
+            ...(toCommit.skipped?.recipes?.length ? [`${toCommit.skipped.recipes.length} recipe row(s) were skipped.`] : []),
+          ],
           warnings: [aliasSaveFailed ? "Learned mappings were not saved and may need review again." : "", toCommit.note ?? ""].filter(Boolean),
           unresolved: toCommit.skipped?.profiles?.map((p) => `${p.brand} ${p.flavor}`) ?? [],
           skipped: toCommit.skipped?.recipes?.map((r) => r.name) ?? [],
@@ -12070,6 +12089,24 @@ export default function Home() {
         summary: {
           phases: { parse: premixImportPrepared.note?.includes("reused") ? "reused saved parse" : "deterministic parse", linking: "deterministic linking", commit: "committed changes" },
           counts: { created: mixesToApply.filter((m) => !m.id || m.id.startsWith("import-")).length, updated: mixesToApply.length, removed: mixesToRemove.length, skipped: (premixImportPrepared.candidates?.length ?? 0) - mixesToApply.length },
+          source: {
+            mixes: premixImportPrepared.candidates.length,
+            ingredientRows: premixImportPrepared.candidates.reduce((n, c) => n + (c.mix.components?.length ?? 0), 0),
+          },
+          landed: {
+            mixes: mixesToApply.length,
+            removed: mixesToRemove.length,
+            freezerPulls: result.freezerPullCount,
+          },
+          components: {
+            ingredientRows: mixesToApply.reduce((n, m) => n + (m.components?.length ?? 0), 0),
+          },
+          links: { redirectedMixes: mixesToApply.filter((m) => m.id && !m.id.startsWith("import-")).length },
+          mismatches: [
+            ...(premixImportPrepared.candidates.length !== mixesToApply.length
+              ? [`${premixImportPrepared.candidates.length - mixesToApply.length} parsed mix(es) were not landed.`] : []),
+            ...(result.warning ? [result.warning] : []),
+          ],
           warnings: [premixImportPrepared.note ?? "", result.warning ?? ""].filter(Boolean),
           skipped: premixImportPrepared.candidates.filter((c) => !mixesToApply.some((m) => m.id === c.mix.id)).map((c) => c.mix.name),
           followUp: result.warning ? ["Open Freezer Pull settings and save the missing reminders."] : [],
@@ -12159,6 +12196,22 @@ export default function Home() {
     setShippingImportApplying(true);
     try {
       const result = commitShippingImport(rows);
+      const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
+      void recordImportHistory({
+        importType: "shipping",
+        sourceKey: deriveSourceKey(shippingImportFileNameRef.current ? [shippingImportFileNameRef.current] : []),
+        sourceLabel: buildShippingGuideLabel(rows.length, shippingImportFileNameRef.current),
+        status: shippingSkipped > 0 ? "partial" : "complete",
+        summary: {
+          phases: { parse: "deterministic parse", linking: "reviewed brand links", commit: "committed profile patches" },
+          source: { rows: rows.length, fields: rows.reduce((n, r) => n + Object.keys(r.patch).length, 0) },
+          landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
+          links: { profiles: result.profilesUpdated },
+          mismatches: shippingSkipped > 0 ? [`${shippingSkipped} row(s) had no usable brand or mapped fields.`] : [],
+          counts: { parsed: rows.length, updated: result.profilesUpdated, skipped: shippingSkipped },
+          followUp: shippingSkipped > 0 ? ["Reopen the guide and resolve the skipped brand rows."] : [],
+        },
+      }).catch(() => {});
       // Profiles changed in storage — refresh derived dropdowns/profiles so
       // the packaging pickers and the current form pick the values up.
       reloadMasterData();
@@ -12252,6 +12305,20 @@ export default function Home() {
     setSauceGuideImportApplying(true);
     try {
       const result = commitSauceGuideImport(rows);
+      void recordImportHistory({
+        importType: "sauce",
+        sourceLabel: "Sauce recipe guide",
+        status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
+        summary: {
+          phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
+          source: { rows: rows.length },
+          landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
+          links: { profiles: result.profilesUpdated },
+          mismatches: result.rowsSkippedBothUnmatched > 0 ? [`${result.rowsSkippedBothUnmatched} row(s) were not linked to a brand and recipe.`] : [],
+          counts: { parsed: rows.length, updated: result.profilesUpdated, skipped: result.rowsSkippedBothUnmatched },
+          followUp: result.rowsSkippedBothUnmatched > 0 ? ["Reopen the guide and resolve both unmatched fields."] : [],
+        },
+      }).catch(() => {});
       reloadMasterData();
       setShowSauceGuideImport(false);
       setSauceGuideImportPrepared(null);
@@ -12300,6 +12367,20 @@ export default function Home() {
     setDoughGuideImportApplying(true);
     try {
       const result = commitDoughGuideImport(rows);
+      void recordImportHistory({
+        importType: "dough",
+        sourceLabel: "Dough recipe guide",
+        status: result.rowsSkippedBothUnmatched > 0 ? "partial" : "complete",
+        summary: {
+          phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed profile patches" },
+          source: { rows: rows.length },
+          landed: { rows: result.rowsApplied, profiles: result.profilesUpdated },
+          links: { profiles: result.profilesUpdated },
+          mismatches: result.rowsSkippedBothUnmatched > 0 ? [`${result.rowsSkippedBothUnmatched} row(s) were not linked to a brand and recipe.`] : [],
+          counts: { parsed: rows.length, updated: result.profilesUpdated, skipped: result.rowsSkippedBothUnmatched },
+          followUp: result.rowsSkippedBothUnmatched > 0 ? ["Reopen the guide and resolve both unmatched fields."] : [],
+        },
+      }).catch(() => {});
       reloadMasterData();
       setShowDoughGuideImport(false);
       setDoughGuideImportPrepared(null);
@@ -12386,6 +12467,25 @@ export default function Home() {
       const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
+      void recordImportHistory({
+        importType: "cheese",
+        sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
+        sourceLabel: (cheeseImportPrepared.sourceNames ?? []).join(", ") || "Cheese recipe sheet",
+        customerScope: [...new Set(recipesToApply.map((r) => r.brand).filter(Boolean))].join(", "),
+        status: recipesToRemove.length > 0 ? "partial" : "complete",
+        summary: {
+          phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed recipe pool" },
+          source: {
+            recipes: cheeseImportPrepared.candidates.length,
+            ingredientRows: cheeseImportPrepared.recipes.reduce((n, r) => n + (r.components?.length ?? 0), 0),
+          },
+          landed: { recipes: result.count, removed: recipesToRemove.length },
+          components: { ingredientRows: recipesToApply.reduce((n, r) => n + (r.components?.length ?? 0), 0) },
+          links: { recipes: recipesToApply.length - result.count },
+          mismatches: recipesToApply.length !== result.count ? [`${recipesToApply.length - result.count} reviewed cheese recipe(s) were not landed.`] : [],
+          counts: { parsed: cheeseImportPrepared.candidates.length, updated: result.count, removed: recipesToRemove.length },
+        },
+      }).catch(() => {});
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
       void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
@@ -12506,6 +12606,18 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     if (ok) {
+      void recordImportHistory({
+        importType: "schedule",
+        sourceLabel: "Schedule workbook",
+        status: "complete",
+        summary: {
+          phases: { parse: "deterministic parse", linking: "reviewed brand/flavor links", commit: "saved schedule day" },
+          source: { runs: payload.runs.length, brands: payload.createBrands.length, flavors: payload.createFlavors.length },
+          landed: { runs: payload.runs.length },
+          links: { profiles: payload.runs.filter((r) => !!r.brand).length },
+          counts: { parsed: payload.runs.length, created: payload.runs.length, skipped: 0 },
+        },
+      }).catch(() => {});
       toast({
         title: "Import complete",
         description: `${payload.runs.length} run${payload.runs.length === 1 ? "" : "s"} imported to ${date}.`,
@@ -12698,11 +12810,38 @@ export default function Home() {
     // Tell the user why today's run count may be lower than the file's.
     const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
     if (failed === 0) {
+      void recordImportHistory({
+        importType: "schedule",
+        sourceLabel: "Schedule workbook",
+        status: skippedToday > 0 ? "partial" : "complete",
+        summary: {
+          phases: { parse: "deterministic multi-day parse", linking: "reviewed brand/flavor links", commit: "saved schedule days" },
+          source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
+          landed: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) - skippedToday },
+          links: { profiles: byDate.reduce((n, d) => n + d.runs.filter((r) => !!r.brand).length, 0) },
+          counts: { parsed: byDate.reduce((n, d) => n + d.runs.length, 0), created: byDate.reduce((n, d) => n + d.runs.length, 0) - skippedToday, skipped: skippedToday },
+          mismatches: skippedToday > 0 ? [`${skippedToday} run(s) were already started or finished and were not imported.`] : [],
+          followUp: skippedToday > 0 ? ["Review the existing runs if the office schedule changed."] : [],
+        },
+      }).catch(() => {});
       toast({
         title: "Import complete",
         description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.${skippedNote}`,
       });
     } else {
+      void recordImportHistory({
+        importType: "schedule",
+        sourceLabel: "Schedule workbook",
+        status: "failed",
+        summary: {
+          phases: { parse: "deterministic multi-day parse", linking: "completed", commit: "partially saved" },
+          source: { days: byDate.length, runs: byDate.reduce((n, d) => n + d.runs.length, 0) },
+          landed: { days: byDate.length - failed, runs: 0 },
+          counts: { parsed: byDate.length, landedDays: byDate.length - failed, failedDays: failed, skipped: skippedToday },
+          mismatches: [`${failed} schedule day(s) could not be saved.`],
+          followUp: ["Retry the import after checking the failed day(s)."],
+        },
+      }).catch(() => {});
       toast({
         variant: "destructive",
         title: failed === byDate.length ? "Import failed" : "Import partly failed",

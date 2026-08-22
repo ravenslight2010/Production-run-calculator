@@ -49,7 +49,7 @@ export default function ImportHistoryPanel({
         <div className="flex flex-wrap gap-2">
           <input className="rounded-md border border-border bg-background px-2 py-1 text-xs" placeholder="Customer scope" value={customer} onChange={(e) => setCustomer(e.target.value)} />
           <select className="rounded-md border border-border bg-background px-2 py-1 text-xs" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="">All import types</option><option value="spec">Spec sheets</option><option value="premix">Premix sheets</option>
+            <option value="">All import types</option><option value="spec">Spec sheets</option><option value="premix">Premix sheets</option><option value="cheese">Cheese</option><option value="sauce">Sauce</option><option value="dough">Dough</option><option value="schedule">Schedule</option><option value="shipping">Shipping</option><option value="recipe">Recipe</option>
           </select>
           <select className="rounded-md border border-border bg-background px-2 py-1 text-xs" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All outcomes</option><option value="complete">Complete</option><option value="partial">Partial</option><option value="failed">Failed</option>
@@ -64,24 +64,29 @@ export default function ImportHistoryPanel({
               return (
                 <div key={item.id} className="rounded-md border border-border p-3" data-testid={`import-history-${item.id}`}>
                   <button type="button" className="flex w-full items-start justify-between gap-2 text-left" onClick={() => setExpanded(isOpen ? null : item.id)}>
-                    <span className="min-w-0"><span className="font-medium">{item.sourceLabel}</span><span className="ml-2 text-xs text-muted-foreground">{date(item.createdAt)} · {item.importType === "spec" ? "Spec" : "Premix"}</span>{item.customerScope ? <span className="block text-xs text-muted-foreground">Customer: {item.customerScope}</span> : null}</span>
+                    <span className="min-w-0"><span className="font-medium">{item.sourceLabel}</span><span className="ml-2 text-xs text-muted-foreground">{date(item.createdAt)} · {item.importType}</span>{item.customerScope ? <span className="block text-xs text-muted-foreground">Customer: {item.customerScope}</span> : null}</span>
                     <Badge variant={item.status === "complete" ? "secondary" : item.status === "partial" ? "outline" : "destructive"}>{item.status}</Badge>
                   </button>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                     {Object.entries(counts).map(([key, value]) => <span key={key} className="rounded bg-muted px-2 py-0.5">{key}: {value}</span>)}
                   </div>
                   {isOpen && <div className="mt-3 space-y-2 border-t border-border pt-2 text-xs">
+                    {s.source && Object.keys(s.source).length > 0 ? <p><b>Source:</b> {Object.entries(s.source).map(([k, v]) => `${k}: ${v}`).join(" · ")}</p> : null}
+                    {s.landed && Object.keys(s.landed).length > 0 ? <p><b>Landed:</b> {Object.entries(s.landed).map(([k, v]) => `${k}: ${v}`).join(" · ")}</p> : null}
+                    {s.components && Object.keys(s.components).length > 0 ? <p><b>Components:</b> {Object.entries(s.components).map(([k, v]) => `${k}: ${v}`).join(" · ")}</p> : null}
+                    {s.links && Object.keys(s.links).length > 0 ? <p><b>Links:</b> {Object.entries(s.links).map(([k, v]) => `${k}: ${v}`).join(" · ")}</p> : null}
                     <p><b>Phases:</b> {Object.entries(s.phases ?? {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "Not recorded"}</p>
+                    {s.mismatches?.length ? <p className="rounded bg-amber-500/10 p-2 text-amber-800"><b>Action needed:</b> {s.mismatches.join(" ")}</p> : null}
                     {s.warnings?.length ? <p><b>Warnings:</b> {s.warnings.join(" ")}</p> : null}
                     {s.unresolved?.length ? <p><b>Unresolved:</b> {s.unresolved.join(" ")}</p> : null}
                     {s.skipped?.length ? <p><b>Skipped:</b> {s.skipped.join(" ")}</p> : null}
                     {s.followUp?.length ? <p className="text-amber-700"><b>Follow-up:</b> {s.followUp.join(" ")}</p> : null}
-                    {item.snapshotId != null && onReopen ? (
+                    {item.snapshotId != null && onReopen && (item.importType === "spec" || item.importType === "premix") ? (
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => onReopen({ importType: item.importType, snapshotId: item.snapshotId! })}
+                        onClick={() => onReopen({ importType: item.importType === "spec" ? "spec" : "premix", snapshotId: item.snapshotId! })}
                       >
                         Reopen saved review
                       </Button>
