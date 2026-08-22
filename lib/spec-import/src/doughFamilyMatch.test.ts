@@ -136,6 +136,42 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     });
   });
 
+  it("can commit-link a family recipe only when the pool target is an empty stub", () => {
+    const withRecipe = {
+      ...base,
+      recipes: [
+        { kind: "dough", name: "CRB Dough", rows: [{ name: "Flour", lbs: 200 }] },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linked = linkSpecImportNamedRecipesToExisting(withRecipe, "dough", ["CRB Recipe"], {
+      existingRecipes: [{ name: "CRB Recipe", rows: [] }],
+      autoApplyEmptyFamily: true,
+    });
+    expect(linked.recipes?.[0]?.name).toBe("CRB Recipe");
+    expect(linked.recipes?.[0]?.variantLabel).toBe("CRB Dough");
+  });
+
+  it("does not commit-link a populated family recipe", () => {
+    const withRecipe = {
+      ...base,
+      recipes: [
+        { kind: "dough", name: "CRB Dough", rows: [{ name: "Flour", lbs: 200 }] },
+      ],
+    } as unknown as ParsedSpecImport;
+    const suggestions: SpecImportLinkSuggestion[] = [];
+    const linked = linkSpecImportNamedRecipesToExisting(withRecipe, "dough", ["CRB Recipe"], {
+      existingRecipes: [{ name: "CRB Recipe", rows: [{ ingredient: "Flour" }] }],
+      autoApplyEmptyFamily: true,
+      suggestions,
+    });
+    expect(linked.recipes?.[0]?.name).toBe("CRB Dough");
+    expect(suggestions).toContainEqual({
+      kind: "dough",
+      importedName: "CRB Dough",
+      existingName: "CRB Recipe",
+    });
+  });
+
   it("no longer auto-anchors sibling collapse through a family fold — the fold is a SUGGESTION", () => {
     // The anchor here ("Costco CRB" → "CRB Dough") is itself a beyond-exact
     // family fold, so it no longer applies silently: every sheet name stays

@@ -60,6 +60,10 @@ import {
   planBrandAliasRepoints,
 } from "./brandDriftHeal";
 import {
+  CRB_INGREDIENT_HEAL_ROWS,
+  isAffectedCrbIngredientRow,
+} from "./crbIngredientHeal";
+import {
   healSeaSaltComponents,
   SEA_SALT_DOUGH_TARGETS,
   SEA_SALT_SAUCE_TARGETS,
@@ -74,6 +78,41 @@ import {
 // on the first boot after publishing.
 
 const CHEESE_POISON_HEAL_ID = "cheese-import-poison-cleanup-v1";
+
+// The CRB mixing workbook was parsed correctly (seven pounds-based rows and
+// twelve doughball variants), but a family-name backstop skipped the empty
+// landed "CRB Recipe" pool row. Repair only that proven stub; a non-empty row
+// is manager-entered data and must remain untouched.
+const CRB_INGREDIENT_HEAL_ID = "crb-ingredient-conversion-v1";
+
+async function runCrbIngredientHeal(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CRB_INGREDIENT_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const rows = await tx
+      .select()
+      .from(doughRecipesTable)
+      .where(and(eq(doughRecipesTable.scope, "live"), eq(sql`lower(${doughRecipesTable.name})`, "crb recipe")))
+      .for("update");
+    let updated = 0;
+    for (const row of rows) {
+      if (!isAffectedCrbIngredientRow(row)) continue;
+      await tx
+        .update(doughRecipesTable)
+        .set({ components: [...CRB_INGREDIENT_HEAL_ROWS], updatedAt: new Date() })
+        .where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, row.scope)));
+      updated++;
+    }
+    const result = { scanned: rows.length, updated, rowsAdded: CRB_INGREDIENT_HEAL_ROWS.length };
+    await tx.update(dataHealsTable).set({ result }).where(eq(dataHealsTable.id, CRB_INGREDIENT_HEAL_ID));
+    logger.info({ heal: CRB_INGREDIENT_HEAL_ID, ...result }, "Data heal applied");
+  });
+}
 
 // Heal only today-and-future day rows: past days are history (what actually
 // ran) and must not be rewritten. Date literal, not "today at runtime", so the
@@ -3442,6 +3481,7 @@ async function runHistoricalHealResultBackfill(): Promise<void> {
 
 export async function runDataHeals(): Promise<void> {
   await runHistoricalHealResultBackfill();
+  await runCrbIngredientHeal();
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
   await runCheeseDuplicateNamePurge();

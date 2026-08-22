@@ -1415,6 +1415,12 @@ export function linkSpecImportNamedRecipesToExisting(
      */
     autoApplyNearExact?: boolean;
     /**
+     * Allow the commit-time backstop to apply a family match only when the
+     * existing pool recipe has no ingredient rows. Empty rows identify an
+     * import stub, so this cannot overwrite a manager-entered formula.
+     */
+    autoApplyEmptyFamily?: boolean;
+    /**
      * When `autoApplyNearExact` is true, this accumulator is incremented for
      * each near-exact rename that was applied automatically. Lets callers
      * report "Auto-linked N near-duplicate recipe names" in the import summary.
@@ -1438,7 +1444,10 @@ export function linkSpecImportNamedRecipesToExisting(
   >();
   for (const er of opts?.existingRecipes ?? []) {
     const key = specImportNameMatchKey(er.name ?? "");
-    if (key && !poolRowsByKey.has(key)) poolRowsByKey.set(key, er.rows ?? []);
+    const rows = er.rows ?? [];
+    const exactName = (er.name ?? "").trim().toLowerCase();
+    if (exactName && !poolRowsByKey.has(exactName)) poolRowsByKey.set(exactName, rows);
+    if (key && !poolRowsByKey.has(key)) poolRowsByKey.set(key, rows);
   }
   // Cleanup-aware supplement: a pool entry saved under a RAW sheet name
   // ("Parbake Crust (11" CRB recipe - 11" Dies)") should still catch a cleaned
@@ -1524,6 +1533,17 @@ export function linkSpecImportNamedRecipesToExisting(
       // Only evaluated when no near-dup candidate was found above.
       const familyCand = findSpecImportNamedRecipeFamilyMatch(kind, name, existingNames);
       if (familyCand && familyCand !== name && formulaOk(familyCand)) {
+        const familyRows =
+          poolRowsByKey.get(familyCand.trim().toLowerCase()) ??
+          poolRowsByKey.get(specImportNameMatchKey(familyCand)) ??
+          [];
+        if (opts?.autoApplyEmptyFamily && familyRows.length === 0) {
+          changed = true;
+          if (kind === "dough" && !r.variantLabel) {
+            return { ...r, name: familyCand, variantLabel: name };
+          }
+          return { ...r, name: familyCand };
+        }
         pushSuggestion(name, familyCand);
       }
       return r;
