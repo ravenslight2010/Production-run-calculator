@@ -41,6 +41,10 @@ export type DataHealthWorkspace = {
       removedStubs: { dough: number; sauce: number; cheese: number; mix: number };
     };
   } | null;
+  repairBatches: Array<{
+    id: string; actor: string; appliedAt: string; undoneAt: string | null; status: string;
+    summary: { applied: number; skipped: number; failed: number; repairedRuns: number };
+  }>;
 };
 
 export type ProfileDataHealthReport = {
@@ -53,8 +57,19 @@ export type ProfileDataHealthApplyResult = {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: unknown[];
+  batchId: string | null;
+  outcome?: { applied: number; skipped: number; failed: number; repairedRuns: number };
   summary: { repairedProfiles: number; repairedRuns: number };
 };
+
+export async function undoProfileDataHealthRepair(batchId: string): Promise<{ batchId: string; summary: { applied: number; skipped: number; failed: number; repairedRuns: number } }> {
+  const res = await fetch(`/api/profile-data/health-check/batches/${encodeURIComponent(batchId)}/undo`, {
+    method: "POST",
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`Failed to undo profile data repairs: ${res.status}`);
+  return await res.json();
+}
 
 export async function fetchProfileDataHealth(): Promise<ProfileDataHealthReport> {
   const res = await fetch("/api/profile-data/health-check", { headers: { "x-client-id": inventoryClientId() } });

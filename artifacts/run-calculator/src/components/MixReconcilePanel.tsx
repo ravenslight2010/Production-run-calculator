@@ -51,10 +51,12 @@ function fmtDate(ms: number): string {
 export default function MixReconcilePanel({
   isManager,
   refreshSignal = 0,
+  reopenRequest,
 }: {
   isManager: boolean;
   /** Bump to re-fetch the saved sheet lists (e.g. right after an import saves one). */
   refreshSignal?: number;
+  reopenRequest?: { importType: "spec" | "premix"; snapshotId: number; requestId: number } | null;
 }) {
   const qc = useQueryClient();
   const [premixSheets, setPremixSheets] = useState<SavedPremixSheet[]>([]);
@@ -93,6 +95,12 @@ export default function MixReconcilePanel({
   useEffect(() => {
     void refresh();
   }, [refreshSignal]);
+
+  useEffect(() => {
+    if (!reopenRequest || reopenRequest.importType !== "premix") return;
+    const sheet = premixSheets.find((item) => item.id === reopenRequest.snapshotId);
+    if (sheet) void handleCheckPremix(sheet);
+  }, [reopenRequest?.requestId, premixSheets]);
 
   async function handleCheckPremix(s: SavedPremixSheet) {
     setBusyKey(`premix-${s.id}`);

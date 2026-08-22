@@ -166,11 +166,16 @@ function buildProfileView(sheets: SavedSpecSheet[]): ProfileEntry[] {
 const KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
 const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
 
-type Props = { autoCheckSignal?: number; canManageProfiles?: boolean };
+type Props = {
+  autoCheckSignal?: number;
+  canManageProfiles?: boolean;
+  reopenRequest?: { importType: "spec" | "premix"; snapshotId: number; requestId: number } | null;
+};
 
 export default function SpecReconcilePanel({
   autoCheckSignal = 0,
   canManageProfiles = false,
+  reopenRequest,
 }: Props) {
   const [sheets, setSheets] = useState<SavedSpecSheet[]>([]);
   const latestSpecIds = latestSourceKeyIds(sheets);
@@ -244,6 +249,12 @@ export default function SpecReconcilePanel({
       }
     })();
   }, [autoCheckSignal]);
+
+  useEffect(() => {
+    if (!reopenRequest || reopenRequest.importType !== "spec") return;
+    const sheet = sheets.find((item) => item.id === reopenRequest.snapshotId);
+    if (sheet) void handleAiCheck(sheet);
+  }, [reopenRequest?.requestId, sheets]);
 
   function handleCheckAll() {
     setCheckingAll(true);

@@ -5,6 +5,7 @@ import type { SummaryInput } from "../aiSummary";
 import { useMe } from "../useRole";
 
 type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput };
+export type OperationalReportDetailRange = { start: string; end: string; scope: "day" | "week" };
 
 function fmtDate(value: string): string {
   const d = new Date(`${value}T12:00:00`);
@@ -24,6 +25,9 @@ function reportText(report: OperationalReport): string {
     `Downtime: ${p.totalDowntimeMinutes} minutes across ${p.totalStoppages} stoppages`,
     `Unfinished runs: ${p.unfinishedRuns.length ? p.unfinishedRuns.join(", ") : "None recorded"}`,
     "",
+    report.inventory.value?.historical?.availability === "available"
+      ? `Historical inventory events: ${report.inventory.value.historical.value?.totalEvents ?? 0} total, ${report.inventory.value.historical.value?.consumptionEvents ?? 0} consumption, ${report.inventory.value.historical.value?.wasteEvents ?? 0} waste`
+      : `Historical inventory events: Unavailable${report.inventory.value?.historical?.note ? ` — ${report.inventory.value.historical.note}` : ""}`,
     report.quality.availability === "available"
       ? `Quality: ${report.quality.value?.checks ?? 0} checks, ${report.quality.value?.issues ?? 0} issues, ${report.quality.value?.failed ?? 0} failed, ${report.quality.value?.warnings ?? 0} warnings`
       : `Quality: Unavailable${report.quality.note ? ` — ${report.quality.note}` : ""}`,
@@ -37,7 +41,14 @@ function reportText(report: OperationalReport): string {
   return lines.join("\n");
 }
 
-export default function OperationalReportPanel({ buildInput }: Props) {
+export default function OperationalReportPanel({
+  buildInput,
+  onOpenQuality,
+  onOpenIncidents,
+}: Props & {
+  onOpenQuality?: (range: OperationalReportDetailRange) => void;
+  onOpenIncidents?: (range: OperationalReportDetailRange) => void;
+}) {
   const { hasCapability } = useMe();
   const allowed = hasCapability("review-incidents");
   const [scope, setScope] = useState<"day" | "week">("day");
@@ -122,10 +133,17 @@ export default function OperationalReportPanel({ buildInput }: Props) {
           </div>
           {report.production.unfinishedRuns.length > 0 && <p className="text-sm text-amber-400">Unfinished: {report.production.unfinishedRuns.join(", ")}</p>}
           <div className="grid sm:grid-cols-3 gap-2 text-xs">
-            <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
-            <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
+            <div>
+              <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
+              {report.quality.availability === "available" && onOpenQuality && <button type="button" className="mt-1 font-semibold text-primary hover:underline" onClick={() => onOpenQuality({ start: report.periodStart, end: report.periodEnd, scope: report.scope })}>Open quality details</button>}
+            </div>
+            <div>
+              <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
+              {report.incidents.availability === "available" && onOpenIncidents && <button type="button" className="mt-1 font-semibold text-primary hover:underline" onClick={() => onOpenIncidents({ start: report.periodStart, end: report.periodEnd, scope: report.scope })}>Open incident details</button>}
+            </div>
             <p>Inventory flags: {report.inventory.value?.flaggedItems ?? "Unavailable"}</p>
           </div>
+          {report.inventory.value?.historical && <p className="text-xs text-muted-foreground">Historical inventory events: {report.inventory.value.historical.value?.totalEvents ?? "Unavailable"} total · {report.inventory.value.historical.value?.consumptionEvents ?? "—"} consumption · {report.inventory.value.historical.value?.wasteEvents ?? "—"} waste</p>}
           <p className="text-[11px] text-muted-foreground">{report.inventory.note}</p>
         </div>
       )}

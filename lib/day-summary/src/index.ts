@@ -40,6 +40,16 @@ export interface OperationalReport {
   }>;
   inventory: OperationalReportSection<{
     flaggedItems: number;
+    historical?: {
+      availability: OperationalReportAvailability;
+      value: {
+        totalEvents: number;
+        consumptionEvents: number;
+        wasteEvents: number;
+        adjustmentEvents: number;
+      } | null;
+      note?: string;
+    };
   }>;
   narrative?: {
     text: string;

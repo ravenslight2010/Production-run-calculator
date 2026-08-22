@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ClipboardCheck, ExternalLink, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardCheck, ExternalLink, History, Loader2, RefreshCw, ShieldCheck, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   applyProfileDataHealthRepairs,
   fetchDataHealthWorkspace,
+  undoProfileDataHealthRepair,
   type DataHealthFinding,
 } from "@/profileDataHealth";
 
@@ -28,7 +29,8 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
   const [brand, setBrand] = useState("all");
   const [repairability, setRepairability] = useState("all");
   const [confirming, setConfirming] = useState(false);
-  const [result, setResult] = useState<{ repairedProfiles: number; repairedRuns: number } | null>(null);
+  const [result, setResult] = useState<{ applied: number; skipped: number; failed: number; repairedRuns: number } | null>(null);
+  const [undoingBatch, setUndoingBatch] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["data-health-workspace"],
     queryFn: fetchDataHealthWorkspace,
@@ -38,7 +40,7 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
   const applyMutation = useMutation({
     mutationFn: applyProfileDataHealthRepairs,
     onSuccess: (next) => {
-      setResult(next.summary);
+      setResult(next.outcome ?? { applied: next.summary.repairedProfiles, skipped: 0, failed: 0, repairedRuns: next.summary.repairedRuns });
       setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: ["data-health-workspace"] });
       void queryClient.invalidateQueries({ queryKey: ["brand-profiles"] });
@@ -153,7 +155,18 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
               ) : <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setConfirming(true)}>Review and apply safe repairs</Button>
             )}
             {applyMutation.isError && <p className="text-xs text-destructive">The repair did not complete. Nothing was reported as applied.</p>}
-            {result && <p className="text-xs text-emerald-600 dark:text-emerald-400">Applied {result.repairedProfiles} profile repair{result.repairedProfiles === 1 ? "" : "s"} and refreshed {result.repairedRuns} future run snapshot{result.repairedRuns === 1 ? "" : "s"}.</p>}
+            {result && <p className="text-xs text-emerald-600 dark:text-emerald-400">Applied {result.applied} repair{result.applied === 1 ? "" : "s"} and refreshed {result.repairedRuns} future run snapshot{result.repairedRuns === 1 ? "" : "s"}; skipped {result.skipped}, failed {result.failed}.</p>}
+            {workspace.repairBatches.length > 0 && <div className="space-y-2 rounded border border-border/70 bg-muted/20 p-2">
+              <p className="flex items-center gap-1.5 text-xs font-medium"><History className="h-3.5 w-3.5" /> Recent repair batches</p>
+              {workspace.repairBatches.map((batch) => <div key={batch.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-background/60 p-2 text-[11px]">
+                <div><p className="font-medium">{new Date(batch.appliedAt).toLocaleString()} · {batch.actor}</p><p className="text-muted-foreground">{batch.status} · applied {batch.summary.applied}, skipped {batch.summary.skipped}</p></div>
+                {batch.status === "applied" && <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[10px]" disabled={undoingBatch !== null} onClick={() => {
+                  if (!window.confirm("Undo this repair batch? Records changed since the repair will be skipped.")) return;
+                  setUndoingBatch(batch.id);
+                  void undoProfileDataHealthRepair(batch.id).then(() => void queryClient.invalidateQueries({ queryKey: ["data-health-workspace"] })).finally(() => setUndoingBatch(null));
+                }}>{undoingBatch === batch.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Undo2 className="mr-1 h-3 w-3" />} Undo batch</Button>}
+              </div>)}
+            </div>}
             {history && (
               <div className="rounded border border-border/70 bg-muted/20 p-2 text-[11px] text-muted-foreground">
                 <p className="font-medium text-foreground">Cleanup history</p>

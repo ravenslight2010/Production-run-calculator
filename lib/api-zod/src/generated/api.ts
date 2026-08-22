@@ -1426,7 +1426,7 @@ export const AiSummaryResponse = zod.object({
 
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReportBodyRunsMax = 600;
@@ -3393,6 +3393,7 @@ export const AuditProfileDataHealthResponse = zod.object({
   "recipeKind": zod.enum(['dough', 'sauce']),
   "fingerprint": zod.string(),
   "fields": zod.array(zod.string()),
+  "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
   "summary": zod.record(zod.string(), zod.number())
@@ -3425,6 +3426,7 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
   "recipeKind": zod.enum(['dough', 'sauce']),
   "fingerprint": zod.string(),
   "fields": zod.array(zod.string()),
+  "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
   "summary": zod.record(zod.string(), zod.number())
@@ -3449,6 +3451,7 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
   "recipeKind": zod.enum(['dough', 'sauce']),
   "fingerprint": zod.string(),
   "fields": zod.array(zod.string()),
+  "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
   "summary": zod.record(zod.string(), zod.number())
@@ -3459,12 +3462,22 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
   "recipeKind": zod.enum(['dough', 'sauce']),
   "fingerprint": zod.string(),
   "fields": zod.array(zod.string()),
+  "previousValues": zod.record(zod.string(), zod.unknown()),
   "nextValues": zod.record(zod.string(), zod.unknown())
 })),
+  "batchId": zod.string().nullish(),
   "summary": zod.object({
   "repairedProfiles": zod.number(),
   "repairedRuns": zod.number()
 })
+})
+
+
+/**
+ * @summary Undo an unchanged profile data repair batch
+ */
+export const UndoProfileDataHealthRepairBatchParams = zod.object({
+  "batchId": zod.coerce.string()
 })
 
 
@@ -4755,5 +4768,4 @@ export const ResetStaffPasswordBody = zod.object({
 export const DeleteStaffMemberParams = zod.object({
   "userId": zod.coerce.string()
 })
-
 

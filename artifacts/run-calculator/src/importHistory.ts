@@ -22,6 +22,12 @@ export type ImportHistoryItem = {
   createdAt: number;
 };
 
+export type ImportHistoryReopenRequest = {
+  importType: ImportHistoryItem["importType"];
+  snapshotId: number;
+  requestId: number;
+};
+
 function headers(json = false): Record<string, string> {
   return {
     "x-client-id": inventoryClientId(),

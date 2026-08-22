@@ -2527,6 +2527,8 @@ export const ProfileDataHealthRepairRecipeKind = {
   sauce: 'sauce',
 } as const;
 
+export type ProfileDataHealthRepairPreviousValues = { [key: string]: unknown };
+
 export type ProfileDataHealthRepairNextValues = { [key: string]: unknown };
 
 export interface ProfileDataHealthRepair {
@@ -2535,6 +2537,7 @@ export interface ProfileDataHealthRepair {
   recipeKind: ProfileDataHealthRepairRecipeKind;
   fingerprint: string;
   fields: string[];
+  previousValues: ProfileDataHealthRepairPreviousValues;
   nextValues: ProfileDataHealthRepairNextValues;
 }
 
@@ -2555,7 +2558,22 @@ export interface ProfileDataHealthApplyResult {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: ProfileDataHealthRepair[];
+  batchId?: string | null;
   summary: ProfileDataHealthApplyResultSummary;
+}
+
+export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
+
+export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown } | null;
+
+export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
+
+export interface ProfileDataHealthWorkspace {
+  findings: ProfileDataHealthFinding[];
+  safeRepairs: ProfileDataHealthRepair[];
+  summary: ProfileDataHealthWorkspaceSummary;
+  cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
+  repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
 }
 
 export type ProfileNameLinkCleanupSummaryRemovedStubs = {
@@ -3921,4 +3939,3 @@ export type ListIncidentAssignees200Item = {
 export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
 };
-

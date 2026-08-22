@@ -1218,7 +1218,8 @@ paths:
       description: >-
         Deterministically aggregates the supplied production run facts and
         enriches them with date-filtered quality and incident records plus a
-        clearly labeled current inventory snapshot. No AI is required and
+        clearly labeled current inventory snapshot plus date-scoped inventory
+        ledger events. No AI is required and
         source statistics are authoritative.
       requestBody:
         required: true
@@ -2900,6 +2901,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProfileDataHealthApplyResult"
+        "403":
+          description: Missing manager capability
+
+  /profile-data/health-workspace:
+    get:
+      operationId: getProfileDataHealthWorkspace
+      tags: [audit]
+      summary: Read the manager data-health workspace
+      responses:
+        "200":
+          description: Findings, safe repairs, cleanup history, and repair batches
+        "403":
+          description: Missing manager capability
+
+  /profile-data/health-check/batches/{batchId}/undo:
+    post:
+      operationId: undoProfileDataHealthRepairBatch
+      tags: [audit]
+      summary: Undo an unchanged profile data repair batch
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Guarded undo result
+        "404":
+          description: Repair batch not found
+        "409":
+          description: Repair batch is no longer eligible for undo
         "403":
           description: Missing manager capability
 
@@ -6635,6 +6667,20 @@ components:
               nullable: true
               properties:
                 flaggedItems: { type: integer }
+              historical:
+                type: object
+                required: [availability, value]
+                properties:
+                  availability: { type: string, enum: [available, unavailable] }
+                  value:
+                    type: object
+                    nullable: true
+                    properties:
+                      totalEvents: { type: integer }
+                      consumptionEvents: { type: integer }
+                      wasteEvents: { type: integer }
+                      adjustmentEvents: { type: integer }
+                  note: { type: string }
             note: { type: string }
 
     ShiftHandoffItem:
@@ -7760,7 +7806,7 @@ components:
 
     ProfileDataHealthRepair:
       type: object
-      required: [id, profileKey, recipeKind, fingerprint, fields, nextValues]
+      required: [id, profileKey, recipeKind, fingerprint, fields, previousValues, nextValues]
       properties:
         id:
           type: string
@@ -7775,6 +7821,9 @@ components:
           type: array
           items:
             type: string
+        previousValues:
+          type: object
+          additionalProperties: true
         nextValues:
           type: object
           additionalProperties: true
@@ -7808,6 +7857,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProfileDataHealthRepair"
+        batchId:
+          type: string
+          nullable: true
         summary:
           type: object
           required: [repairedProfiles, repairedRuns]
@@ -7816,6 +7868,16 @@ components:
               type: integer
             repairedRuns:
               type: integer
+
+    ProfileDataHealthWorkspace:
+      type: object
+      required: [findings, safeRepairs, summary, cleanupHistory, repairBatches]
+      properties:
+        findings: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthFinding" } }
+        safeRepairs: { type: array, items: { $ref: "#/components/schemas/ProfileDataHealthRepair" } }
+        summary: { type: object, additionalProperties: { type: integer } }
+        cleanupHistory: { type: object, nullable: true }
+        repairBatches: { type: array, items: { type: object, additionalProperties: true } }
 
     ProfileNameLinkCleanupAudit:
       type: object

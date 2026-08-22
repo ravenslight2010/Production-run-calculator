@@ -351,7 +351,7 @@ import AssistantTab from "../components/AssistantTab";
 import SpecReconcilePanel from "../components/SpecReconcilePanel";
 import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
-import { recordImportHistory } from "../importHistory";
+import { recordImportHistory, type ImportHistoryReopenRequest } from "../importHistory";
 import MixAssistChat from "../components/MixAssistChat";
 import {
   dispatchVoiceCommand,
@@ -375,7 +375,7 @@ import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
-import OperationalReportPanel from "../components/OperationalReportPanel";
+import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
@@ -5016,6 +5016,7 @@ export default function Home() {
   // Bumped after a spec sheet import so SpecReconcilePanel auto-runs the
   // cross-reference against the newly saved sheet.
   const [specReconcileSignal, setSpecReconcileSignal] = useState(0);
+  const [importReopenRequest, setImportReopenRequest] = useState<ImportHistoryReopenRequest | null>(null);
   // Bumped after ANY sheet-saving import (spec or premix) so the Mix
   // Monitoring panel re-fetches its saved-sheet lists instead of going stale.
   const [sheetListSignal, setSheetListSignal] = useState(0);
@@ -14358,7 +14359,7 @@ export default function Home() {
                       brandFlavors={brandFlavors}
                       ingredientSuggestions={unifiedIngredientUniverse}
                     />
-                    <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} />
+                    <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} reopenRequest={importReopenRequest} />
                     <MixAssistChat />
                   </div>
                 )}
@@ -15819,11 +15820,21 @@ export default function Home() {
                   <SpecReconcilePanel
                     autoCheckSignal={specReconcileSignal}
                     canManageProfiles={hasCapability("manage-profiles")}
+                    reopenRequest={importReopenRequest}
                   />
                 </div>
                 {hasCapability("manage-profiles") && (
                   <div className="mt-3">
-                    <ImportHistoryPanel refreshSignal={sheetListSignal} />
+                    <ImportHistoryPanel
+                      refreshSignal={sheetListSignal}
+                      onReopen={(request) => {
+                        setImportReopenRequest((previous) => ({
+                          ...request,
+                          requestId: (previous?.requestId ?? 0) + 1,
+                        }));
+                        setActiveTab(request.importType === "premix" ? "mixes" : "summary");
+                      }}
+                    />
                   </div>
                 )}
               </TabsContent>
@@ -15908,6 +15919,12 @@ export default function Home() {
                     />
                     <div className="mt-3">
                     <OperationalReportPanel
+                      onOpenQuality={(range: OperationalReportDetailRange) => {
+                        setActiveTab("quality");
+                      }}
+                      onOpenIncidents={(range: OperationalReportDetailRange) => {
+                        setActiveTab("incidents");
+                      }}
                       buildInput={(scope, date) =>
                         scope === "week"
                           ? buildWeekSummaryInput({

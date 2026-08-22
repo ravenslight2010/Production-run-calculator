@@ -3,7 +3,7 @@ import { History, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { fetchImportHistory, type ImportHistoryItem } from "@/importHistory";
+import { fetchImportHistory, type ImportHistoryItem, type ImportHistoryReopenRequest } from "@/importHistory";
 
 function date(ms: number) {
   return new Date(ms).toLocaleString(undefined, {
@@ -11,7 +11,13 @@ function date(ms: number) {
   });
 }
 
-export default function ImportHistoryPanel({ refreshSignal = 0 }: { refreshSignal?: number }) {
+export default function ImportHistoryPanel({
+  refreshSignal = 0,
+  onReopen,
+}: {
+  refreshSignal?: number;
+  onReopen?: (request: Omit<ImportHistoryReopenRequest, "requestId">) => void;
+}) {
   const [items, setItems] = useState<ImportHistoryItem[]>([]);
   const [type, setType] = useState("");
   const [status, setStatus] = useState("");
@@ -70,7 +76,18 @@ export default function ImportHistoryPanel({ refreshSignal = 0 }: { refreshSigna
                     {s.unresolved?.length ? <p><b>Unresolved:</b> {s.unresolved.join(" ")}</p> : null}
                     {s.skipped?.length ? <p><b>Skipped:</b> {s.skipped.join(" ")}</p> : null}
                     {s.followUp?.length ? <p className="text-amber-700"><b>Follow-up:</b> {s.followUp.join(" ")}</p> : null}
-                    <p className="text-muted-foreground">This record keeps the committed changes. Reopen the retained {item.importType === "spec" ? "spec cross-reference" : "mix monitoring"} panel to review the saved snapshot without uploading again.</p>
+                    {item.snapshotId != null && onReopen ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onReopen({ importType: item.importType, snapshotId: item.snapshotId! })}
+                      >
+                        Reopen saved review
+                      </Button>
+                    ) : (
+                      <p className="text-muted-foreground">This record keeps the committed changes. No saved review snapshot is available.</p>
+                    )}
                   </div>}
                 </div>
               );

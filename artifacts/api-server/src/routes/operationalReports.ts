@@ -165,6 +165,34 @@ router.post(
       db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.scope, scope)),
       db.select().from(inventoryLotsTable).where(eq(inventoryLotsTable.scope, scope)),
     ]);
+    let historicalInventory: NonNullable<
+      NonNullable<OperationalReport["inventory"]["value"]>["historical"]
+    >;
+    try {
+      const ledgerRows = await db.select().from(inventoryLedgerTable).where(
+        and(
+          eq(inventoryLedgerTable.scope, scope),
+          gte(inventoryLedgerTable.createdAt, new Date(`${periodStart}T00:00:00Z`)),
+          lte(inventoryLedgerTable.createdAt, new Date(`${periodEnd}T23:59:59.999Z`)),
+        ),
+      );
+      historicalInventory = {
+        availability: "available",
+        value: {
+          totalEvents: ledgerRows.length,
+          consumptionEvents: ledgerRows.filter((row) => row.type === "consume").length,
+          wasteEvents: ledgerRows.filter((row) => row.type === "adjust" && row.qtyDelta < 0).length,
+          adjustmentEvents: ledgerRows.filter((row) => row.type === "adjust").length,
+        },
+        note: "Historical inventory ledger events recorded during this period.",
+      };
+    } catch {
+      historicalInventory = {
+        availability: "unavailable",
+        value: null,
+        note: "Historical inventory ledger is unavailable; no historical event totals are shown.",
+      };
+    }
     const onHand = new Map<number, number>();
     for (const lot of lots) onHand.set(lot.itemId, (onHand.get(lot.itemId) ?? 0) + lot.qtyRemaining);
     const flaggedItems = inventoryRows.filter(
@@ -205,7 +233,7 @@ router.post(
       },
       inventory: {
         availability: "available",
-        value: { flaggedItems },
+        value: { flaggedItems, historical: historicalInventory },
         note: "Current inventory snapshot; not a historical period total.",
       },
     };

@@ -3809,7 +3809,7 @@ export const getExportOperationalReportUrl = () => {
 }
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReport = async (operationalReportInput: OperationalReportInput, options?: RequestInit): Promise<OperationalReport> => {
@@ -8914,6 +8914,153 @@ export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
       return useMutation(getApplyProfileDataHealthRepairsMutationOptions(options));
     }
 
+export const getGetProfileDataHealthWorkspaceUrl = () => {
+
+
+
+
+  return `/api/profile-data/health-workspace`
+}
+
+/**
+ * @summary Read the manager data-health workspace
+ */
+export const getProfileDataHealthWorkspace = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getGetProfileDataHealthWorkspaceUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProfileDataHealthWorkspaceQueryKey = () => {
+    return [
+    `/api/profile-data/health-workspace`
+    ] as const;
+    }
+
+
+export const getGetProfileDataHealthWorkspaceQueryOptions = <TData = Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProfileDataHealthWorkspaceQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>> = ({ signal }) => getProfileDataHealthWorkspace({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProfileDataHealthWorkspaceQueryResult = NonNullable<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>>
+export type GetProfileDataHealthWorkspaceQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read the manager data-health workspace
+ */
+
+export function useGetProfileDataHealthWorkspace<TData = Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProfileDataHealthWorkspace>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProfileDataHealthWorkspaceQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUndoProfileDataHealthRepairBatchUrl = (batchId: string,) => {
+
+
+
+
+  return `/api/profile-data/health-check/batches/${batchId}/undo`
+}
+
+/**
+ * @summary Undo an unchanged profile data repair batch
+ */
+export const undoProfileDataHealthRepairBatch = async (batchId: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getUndoProfileDataHealthRepairBatchUrl(batchId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getUndoProfileDataHealthRepairBatchMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>, TError,{batchId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>, TError,{batchId: string}, TContext> => {
+
+const mutationKey = ['undoProfileDataHealthRepairBatch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>, {batchId: string}> = (props) => {
+          const {batchId} = props ?? {};
+
+          return  undoProfileDataHealthRepairBatch(batchId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UndoProfileDataHealthRepairBatchMutationResult = NonNullable<Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>>
+
+    export type UndoProfileDataHealthRepairBatchMutationError = ErrorType<void>
+
+    /**
+ * @summary Undo an unchanged profile data repair batch
+ */
+export const useUndoProfileDataHealthRepairBatch = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>, TError,{batchId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof undoProfileDataHealthRepairBatch>>,
+        TError,
+        {batchId: string},
+        TContext
+      > => {
+      return useMutation(getUndoProfileDataHealthRepairBatchMutationOptions(options));
+    }
+
 export const getGetProfileNameLinkCleanupAuditUrl = () => {
 
 
@@ -12693,4 +12840,3 @@ export const useDeleteStaffMember = <TError = ErrorType<void>,
       > => {
       return useMutation(getDeleteStaffMemberMutationOptions(options));
     }
-

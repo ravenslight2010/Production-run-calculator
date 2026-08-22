@@ -13,5 +13,6 @@ export interface ProfileDataHealthApplyResult {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: ProfileDataHealthRepair[];
+  batchId?: string | null;
   summary: ProfileDataHealthApplyResultSummary;
 }

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProfileDataHealthRepairNextValues } from './profileDataHealthRepairNextValues';
+import type { ProfileDataHealthRepairPreviousValues } from './profileDataHealthRepairPreviousValues';
 import type { ProfileDataHealthRepairRecipeKind } from './profileDataHealthRepairRecipeKind';
 
 export interface ProfileDataHealthRepair {
@@ -14,5 +15,6 @@ export interface ProfileDataHealthRepair {
   recipeKind: ProfileDataHealthRepairRecipeKind;
   fingerprint: string;
   fields: string[];
+  previousValues: ProfileDataHealthRepairPreviousValues;
   nextValues: ProfileDataHealthRepairNextValues;
 }
