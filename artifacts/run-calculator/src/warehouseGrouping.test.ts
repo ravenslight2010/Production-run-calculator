@@ -24,6 +24,21 @@ describe("groupWarehouseNeedRows", () => {
     expect(groupWarehouseNeedRows(rows)).toEqual([{ area: "Sauce", rows }]);
   });
 
+  it("keeps regular mix components out of the frontline staging list", () => {
+    const rows = [
+      { label: "Mix — Red Fajita Mix", value: "465.5", sub: "lbs", area: "Frontline" as const },
+      { label: "Whole Mozzarella", value: "708.3", sub: "lbs", area: "Frontline" as const },
+    ];
+
+    const frontline = groupWarehouseNeedRows(rows).find((group) => group.area === "Frontline");
+
+    expect(frontline?.rows.map((row) => row.label)).toEqual([
+      "Mix — Red Fajita Mix",
+      "Whole Mozzarella",
+    ]);
+    expect(frontline?.rows.some((row) => row.label === "Red Onions")).toBe(false);
+  });
+
   it("groups a large warehouse dataset in one linear pass", () => {
     const rows = Array.from({ length: 20_000 }, (_, index) => ({
       label: `Ingredient ${index}`,

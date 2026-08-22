@@ -861,19 +861,10 @@ function aggregateNeedRows(
           : a.type;
       if (isMix && a.lbs > 0) {
         add(label, a.lbs, "lbs", "Frontline");
-        // Mix library components are per-pizza ounces, not per-recipe-batch
-        // pounds. Scale them from this scheduled run's total pizza count so a
-        // tagged component gets the real warehouse pull amount.
-        if (opts?.warehouse && blendName) {
-          const components = opts.mixComponentsByName?.get(blendName.toLowerCase()) ?? [];
-          for (const component of components) {
-            const ingredient = component.ingredient.trim();
-            const perPizzaOz = Number(component.perPizza);
-            if (ingredient && perPizzaOz > 0) {
-              add(ingredient, (perPizzaOz * s.totalPizzas) / OZ_PER_LB, "lbs", "Frontline");
-            }
-          }
-        }
+        // Regular mixes are prepared before the run, so warehouse staff pull
+        // the finished blend rather than its component ingredients. Cheese
+        // applicators are handled below and intentionally expand their recipe
+        // rows because those ingredients still need to be staged.
         // Also emit the specific blend name as a separate alias row so
         // managers can tag individual mix names (e.g. "Italian Blend") in the
         // freezer-pull config instead of just the generic "Mix" type.
