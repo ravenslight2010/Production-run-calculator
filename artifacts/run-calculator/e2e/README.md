@@ -57,6 +57,18 @@ E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
   pnpm --filter @workspace/run-calculator run test:e2e:smoke
 ```
 
+Run the two-browser sleep/offline/wake/reset convergence matrix with the same
+disposable-database boundary:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:sync-convergence
+```
+
+This matrix verifies deletion tombstones, reload persistence, reset epochs,
+client-date-scoped reads, and conditional unchanged responses in both desktop
+and phone-sized Chromium contexts.
+
 The smoke config uses the same disposable-database safety guard as the
 destructive browser suite. It runs one test in each project: Desktop Chrome
 and a 390×844 phone-sized Chromium layout. The test creates and removes its
