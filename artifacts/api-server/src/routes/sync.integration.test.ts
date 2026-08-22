@@ -367,6 +367,7 @@ describe("/sync partial payload contract", () => {
         "partial-r2": { casesNeeded: 24, doughRecipeName: "Large", doughRecipe: [{ ingredient: "Flour", lbs: 10 }] },
       },
       runValuesUpdatedAt: { "partial-r1": 1, "partial-r2": 1 },
+      history: [{ date: "2030-08-21", runs: [], runValues: {} }],
     };
     const first = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       method: "PUT",
@@ -396,10 +397,20 @@ describe("/sync partial payload contract", () => {
     expect(partialBody.data.runValues["partial-r1"].casesNeeded).toBe(18);
     expect(partialBody.data.runValues["partial-r2"].doughRecipeName).toBe("Large");
     expect(partialBody.data.runValues["partial-r2"].doughRecipe).toEqual([{ ingredient: "Flour", lbs: 10 }]);
+    expect(partialBody.data.history).toEqual(complete.history);
     expect(partialBody.snapshotId).not.toBe(firstBody.snapshotId);
   });
 
-  it("rejects a partial payload without its versioned canonical dependency", async () => {
+  it("returns the complete canonical snapshot for a malformed partial dependency", async () => {
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "seed", payload: {
+        dayState: { runs: [{ id: "malformed-base-run" }] },
+        runValues: { "malformed-base-run": { casesNeeded: 9 } },
+      } }),
+    });
+    expect(seed.status).toBe(200);
     const res = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
@@ -412,8 +423,68 @@ describe("/sync partial payload contract", () => {
         },
       }),
     });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: expect.stringContaining("partial payload") });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> }; partialFallback?: boolean };
+    expect(body.partialFallback).toBe(true);
+    expect(body.data?.runValues?.["malformed-base-run"]?.casesNeeded).toBe(9);
+  });
+
+  it("does not apply a stale partial delta and returns the complete current snapshot", async () => {
+    const first = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "seed", payload: {
+        dayState: { runs: [{ id: "stale-r1" }] },
+        runValues: { "stale-r1": { casesNeeded: 12 } },
+        runValuesUpdatedAt: { "stale-r1": 1 },
+      } }),
+    });
+    const firstBody = await first.json() as { snapshotId: string };
+    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "newer", payload: {
+        dayState: { runs: [{ id: "stale-r1" }] },
+        runValues: { "stale-r1": { casesNeeded: 24 } },
+        runValuesUpdatedAt: { "stale-r1": 2 },
+      } }),
+    });
+    const res = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "stale", payload: {
+        syncVersion: 1,
+        completeness: "partial",
+        baseSnapshotId: firstBody.snapshotId,
+        dayState: { runs: [{ id: "stale-r1" }] },
+        runValues: { "stale-r1": { casesNeeded: 99 } },
+        runValuesUpdatedAt: { "stale-r1": 3 },
+      } }),
+    });
+    const body = await res.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> }; partialFallback?: boolean };
+    expect(body.partialFallback).toBe(true);
+    expect(body.data?.runValues?.["stale-r1"]?.casesNeeded).toBe(24);
+  });
+
+  it("does not create a row from a partial payload with a missing dependency", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/today?today=2030-08-25`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "missing-row",
+        payload: {
+          syncVersion: 1,
+          completeness: "partial",
+          baseSnapshotId: "a".repeat(64),
+          dayState: { runs: [{ id: "must-not-land" }] },
+          runValues: { "must-not-land": { casesNeeded: 99 } },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ data: null, partialFallback: true });
+    const read = await fetch(`${baseUrl}/api/sync/2030-08-25`, { headers: authHeaders() });
+    expect(await read.json()).toBeNull();
   });
 });
 

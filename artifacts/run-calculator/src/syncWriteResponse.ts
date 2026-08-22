@@ -4,6 +4,7 @@ export interface SyncWriteResponseBody<T> {
   epoch?: number;
   unchanged?: boolean;
   snapshotId?: string;
+  partialFallback?: boolean;
 }
 
 interface ConsumeSyncWriteResponseOptions<T> {

@@ -90,6 +90,12 @@ function isValidPartialContract(payload: Record<string, unknown>): boolean {
     SNAPSHOT_ID_RE.test(payload.baseSnapshotId);
 }
 
+type ProtectedUpsertResult = {
+  data: unknown;
+  wrote: boolean;
+  partialFallback: boolean;
+};
+
 function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
   const snapshotId = syncSnapshotId(data);
   if (requested !== snapshotId) return false;
@@ -389,7 +395,7 @@ async function upsertProtected(
   payload: unknown,
   clientTodayDate: string,
   clientIp?: string,
-): Promise<unknown> {
+): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
       let existingData: unknown = undefined;
@@ -400,11 +406,38 @@ async function upsertProtected(
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
         existingData = existing?.data;
+        // A partial payload is a delta over the exact locked snapshot. Inherit
+        // omitted cold sections (such as history) from that snapshot before the
+        // normal per-run/LWW protection runs.
+        const payloadForMerge = isPartialSyncPayload(payload) && existing?.data
+          ? { ...(existing.data as Record<string, unknown>), ...(payload as Record<string, unknown>) }
+          : payload;
+        // Validate partial deltas while the canonical row lock is held.
+        // Otherwise another writer could change the row between validation and
+        // merge, making the client's base snapshot unsafe.
+        if (isPartialSyncPayload(payload)) {
+          const currentSnapshotId = existing?.data === undefined
+            ? undefined
+            : syncSnapshotId(existing.data);
+          if (
+            !isValidPartialContract(payload) ||
+            typeof currentSnapshotId !== "string" ||
+            payload.baseSnapshotId !== currentSnapshotId
+          ) {
+            // Do not apply a delta with a missing, malformed, or stale
+            // dependency. Return the complete authoritative snapshot instead.
+            return {
+              data: existing?.data ?? null,
+              wrote: false,
+              partialFallback: true,
+            };
+          }
+        }
         // Only a FUTURE scheduled row may use resetAt to replace its run list.
         // Today's row must always be additive/tombstone-driven: a new device can
         // hold a newer local marker before it receives this row, but that marker
         // must never erase other operators' scheduled or live runs.
-        const m = capMergedResult(protectRunValues(payload, existing?.data, {
+        const m = capMergedResult(protectRunValues(payloadForMerge, existing?.data, {
           allowRunListReplacement: date > clientTodayDate,
         }));
         canonicalizePepNames(m);
@@ -419,11 +452,12 @@ async function upsertProtected(
             .insert(dailySyncTable)
             .values({ date, scope, data: m as any, updatedAt: new Date() });
         }
-        return m;
+        return { data: m, wrote: true, partialFallback: false };
       });
+      if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
       // logging failure can never roll back the actual sync write.
-      const conflict = detectConflicts(payload, existingData, merged);
+      const conflict = detectConflicts(payload, existingData, merged.data);
       if (conflict) {
         void recordSyncConflict(scope, date, conflict, clientIp);
       }
@@ -492,20 +526,22 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
-  if (isPartialSyncPayload(sanitized) && !isValidPartialContract(sanitized)) {
-    res.status(400).json({ error: "partial payload requires syncVersion=1 and baseSnapshotId" }); return;
-  }
-
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const merged = await upsertProtected(today, scope, sanitized, today, req.ip);
+  const result = await upsertProtected(today, scope, sanitized, today, req.ip);
+  const merged = result.data;
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
-  broadcast(merged, senderId, scope, today);
-  const snapshotId = syncSnapshotId(merged);
-  res.json(requestedId === snapshotId
+  if (result.wrote) broadcast(merged, senderId, scope, today);
+  const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
+  res.json(!result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? { ok: true, unchanged: true, snapshotId }
-    : { ok: true, data: merged, snapshotId });
+    : {
+        ok: true,
+        data: merged,
+        ...(snapshotId ? { snapshotId } : {}),
+        ...(result.partialFallback ? { partialFallback: true } : {}),
+      });
 });
 
 router.get("/sync/events", async (req: Request, res: Response): Promise<void> => {
@@ -618,23 +654,25 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
-  if (isPartialSyncPayload(sanitized) && !isValidPartialContract(sanitized)) {
-    res.status(400).json({ error: "partial payload requires syncVersion=1 and baseSnapshotId" }); return;
-  }
-
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const merged = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
+  const result = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
+  const merged = result.data;
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
-  if (date === clientToday(req)) {
+  if (result.wrote && date === clientToday(req)) {
     broadcast(merged, senderId, scope, date);
   }
-  const snapshotId = syncSnapshotId(merged);
-  if (requestedId === snapshotId) {
+  const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
+  if (!result.partialFallback && snapshotId !== undefined && requestedId === snapshotId) {
     res.json({ ok: true, unchanged: true, snapshotId });
   } else {
-    res.json({ ok: true, data: merged, snapshotId });
+    res.json({
+      ok: true,
+      data: merged,
+      ...(snapshotId ? { snapshotId } : {}),
+      ...(result.partialFallback ? { partialFallback: true } : {}),
+    });
   }
 });
 

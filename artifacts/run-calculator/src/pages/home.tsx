@@ -8454,6 +8454,12 @@ export default function Home() {
     });
     const snapshot = result.body?.snapshotId;
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
+    if (result.body?.partialFallback && result.body.data === null) {
+      // A partial write against a missing row has no valid snapshot identity.
+      // Clear the partial baseline so the queued recovery push is complete.
+      syncSnapshotIdRef.current = "";
+      lastSyncSigRef.current = "";
+    }
     if (result.body?.data && typeof result.body.data === "object") {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
