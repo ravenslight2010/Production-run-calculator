@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearSyncDiagnostics, loadSyncDiagnostics, recordSyncDiagnostic } from "./syncDiagnostics";
+import { buildSyncDiagnosticReport, clearSyncDiagnostics, loadSyncDiagnostics, recordSyncDiagnostic } from "./syncDiagnostics";
 
 describe("sync diagnostics", () => {
   beforeEach(() => localStorage.clear());
@@ -21,5 +21,28 @@ describe("sync diagnostics", () => {
     clearSyncDiagnostics("2026-08-21");
     expect(loadSyncDiagnostics("2026-08-21")).toEqual([]);
     expect(loadSyncDiagnostics("2026-08-22")).toHaveLength(1);
+  });
+
+  it("builds a scoped report with counters, responses, and affected runs", () => {
+    const events = [
+      { id: "a", kind: "failure" as const, at: 1, date: "2026-08-21", message: "Failed", response: "network", runId: "run-a" },
+      { id: "b", kind: "ack" as const, at: 2, date: "2026-08-21", message: "Acknowledged", response: "200", runId: "run-a" },
+      { id: "c", kind: "failure" as const, at: 3, date: "2026-08-22", message: "Other date", response: "network", runId: "run-other" },
+    ];
+    const report = buildSyncDiagnosticReport({
+      date: "2026-08-21",
+      status: "delayed",
+      lastAcknowledgedAt: 2,
+      pendingCount: 3,
+      failedCount: 1,
+      diagnostics: events,
+      exportedAt: 4,
+    });
+    expect(report.label).toBe("Sync diagnostic history");
+    expect(report.scope).toBe("current facility");
+    expect(report.productionDate).toBe("2026-08-21");
+    expect(report.responseCategories).toEqual({ network: 1, "200": 1 });
+    expect(report.affectedRunIds).toEqual(["run-a"]);
+    expect(report.events).toHaveLength(2);
   });
 });
