@@ -720,6 +720,25 @@ function NeedsList({ rows }: { rows: NeedRow[] }) {
   );
 }
 
+function WarehouseNeedsList({ rows }: { rows: NeedRow[] }) {
+  const groups = groupWarehouseNeedRows(rows);
+  if (groups.length === 0) {
+    return <p className="text-xs text-muted-foreground italic">No data</p>;
+  }
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => (
+        <section key={group.area} aria-label={`${group.area} needs`}>
+          <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {group.area}
+          </h3>
+          <NeedsList rows={group.rows} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 // opts.warehouse tailors the rows for warehouse staff: sauce rows are omitted
 // (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
 // applicator rows are labeled with the specific blend name so staff know
@@ -837,7 +856,7 @@ function aggregateNeedRows(
         // managers can tag individual mix names (e.g. "Italian Blend") in the
         // freezer-pull config instead of just the generic "Mix" type.
         if (!opts?.warehouse && blendName && blendName.toLowerCase() !== lower) {
-          add(blendName, a.lbs, "lbs");
+          add(blendName, a.lbs, "lbs", "Frontline");
         }
       } else if (!isMix && isCheese && opts?.warehouse && a.batches > 0) {
         // Warehouse: expand cheese applicators to per-ingredient lbs using the
@@ -15170,7 +15189,7 @@ export default function Home() {
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="px-4 pb-4">
-                          <NeedsList rows={agg} />
+                          <WarehouseNeedsList rows={agg} />
                         </CardContent>
                       </Card>
                       {pkg.length > 0 && (
@@ -15181,7 +15200,7 @@ export default function Home() {
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="px-4 pb-4">
-                            <NeedsList rows={pkg} />
+                            <WarehouseNeedsList rows={pkg} />
                           </CardContent>
                         </Card>
                       )}
@@ -15221,13 +15240,19 @@ export default function Home() {
                               {rows.length === 0 ? (
                                 <p className="text-xs text-muted-foreground italic">No materials configured yet.</p>
                               ) : (
-                                <div className="space-y-1">
-                                  {rows.map((row) => {
+                                <div className="space-y-4">
+                                  {groupWarehouseNeedRows(rows).map((group) => (
+                                    <section key={group.area} aria-label={`${group.area} needs`}>
+                                      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        {group.area}
+                                      </h3>
+                                      <div className="space-y-1">
+                                  {group.rows.map((row) => {
                                     const rowKey = `${row.label}__${row.sub ?? ""}`;
                                     const checked = !!staged[`${r.id}::${rowKey}`];
                                     return (
                                       <button
-                                        key={rowKey}
+                                        key={`${group.area}::${rowKey}`}
                                         type="button"
                                         onClick={() => toggleStagedItem(r.id, rowKey)}
                                         aria-pressed={checked}
@@ -15246,6 +15271,9 @@ export default function Home() {
                                       </button>
                                     );
                                   })}
+                                      </div>
+                                    </section>
+                                  ))}
                                 </div>
                               )}
                             </div>
@@ -17835,7 +17863,11 @@ function ScreenModeView() {
   if (screenMode === "warehouse") {
     const activeRuns = dayState.runs.filter((r: any) => !r.endedAt);
     const valsList = activeRuns.map((r: any) => loadRunValues(r.id));
-    const agg = aggregateNeedRows(valsList, { warehouse: true });
+    const warehouseRows = [
+      ...aggregateNeedRows(valsList, { warehouse: true }),
+      ...aggregatePackagingNeeds(valsList),
+    ];
+    const warehouseGroups = groupWarehouseNeedRows(warehouseRows);
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
         {/* Top bar */}
@@ -17847,17 +17879,24 @@ function ScreenModeView() {
           <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
         </div>
 
-        <h1 className="text-4xl font-black">Total Ingredient Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
+        <h1 className="text-4xl font-black">Warehouse Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
 
-        {/* Aggregate ingredient grid */}
-        {agg.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 flex-1 content-start">
-            {agg.map((row: any, i: any) => (
-              <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
-                <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground truncate">{row.label}</p>
-                <p className="text-5xl font-black tabular-nums text-foreground">{row.value}</p>
-                {row.sub && <p className="text-base text-muted-foreground font-semibold">{row.sub}</p>}
-              </div>
+        {/* Aggregate ingredient grid, grouped to match the interactive warehouse tab. */}
+        {warehouseGroups.length > 0 ? (
+          <div className="space-y-6 flex-1 content-start">
+            {warehouseGroups.map((group) => (
+              <section key={group.area}>
+                <h2 className="mb-3 text-lg font-bold uppercase tracking-widest text-muted-foreground">{group.area}</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {group.rows.map((row, i) => (
+                    <div key={`${group.area}-${i}`} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
+                      <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground truncate">{row.label}</p>
+                      <p className="text-5xl font-black tabular-nums text-foreground">{row.value}</p>
+                      {row.sub && <p className="text-base text-muted-foreground font-semibold">{row.sub}</p>}
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         ) : (
