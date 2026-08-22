@@ -1,15 +1,75 @@
-import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
-import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
-import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
-import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
-import GlanceOverlay from "../components/GlanceOverlay";
-import CompactRunStrip from "../components/CompactRunStrip";
-import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
-import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
-import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
-import { useForm, useFieldArray } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import {
+import 
+{
+ createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext 
+}
+ from "react"
+;
+
+import 
+{
+ HomeCtx, useHomeCtx 
+}
+ from "../contexts/HomeCtx"
+;
+
+import 
+{
+ HomeTabCtx, useHomeTabCtx 
+}
+ from "../contexts/HomeTabCtx"
+;
+
+import 
+{
+ createForegroundSyncWakeGuard 
+}
+ from "../foregroundSyncWakeGuard"
+;
+
+import GlanceOverlay from "../components/GlanceOverlay"
+;
+
+import CompactRunStrip from "../components/CompactRunStrip"
+;
+
+import 
+{
+ ManualOverrideBanner, manualOverrideBannerShow 
+}
+ from "../components/ManualOverrideBanner"
+;
+
+import 
+{
+ MixAlreadyMadeInput 
+}
+ from "../components/MixAlreadyMadeInput"
+;
+
+import 
+{
+ PrepMixMissingAmountsWarning 
+}
+ from "../components/PrepMixMissingAmountsWarning"
+;
+
+import 
+{
+ useForm, useFieldArray 
+}
+ from "react-hook-form"
+;
+
+import 
+{
+ zodResolver 
+}
+ from "@hookform/resolvers/zod"
+;
+
+import 
+{
+
   formSchema,
   type FormValues,
   type RecipeRow,
@@ -73,8 +133,13 @@ import {
   type PrepPhase,
   withTempOverrides,
   PRE_POST_TUNNEL_DEFAULT_MIN,
-} from "../types";
-import {
+}
+ from "../types"
+;
+
+import 
+{
+
   fmtElapsed,
   fmtTime,
   fmtNum,
@@ -91,17 +156,45 @@ import {
   todayStr,
   writeDayResetAt,
   runLabel,
-} from "../utils";
-import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
-import { brandTagLabels } from "@workspace/name-match";
-import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
-import {
+}
+ from "../utils"
+;
+
+import 
+{
+ clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions 
+}
+ from "../substitutionState"
+;
+
+import 
+{
+ brandTagLabels 
+}
+ from "@workspace/name-match"
+;
+
+import 
+{
+ computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo 
+}
+ from "../linePhases"
+;
+
+import 
+{
+
   pauseDecisionRemainingMs,
   pauseStopsTunnel,
   canChoosePauseTunnelPolicy,
   shouldClosePauseDecision,
-} from "../pausePolicy";
-import {
+}
+ from "../pausePolicy"
+;
+
+import 
+{
+
   acceptPackagingSpeedNudge,
   canDetectPackagingSpeedNudge,
   createPackagingSpeedNudgeTracking,
@@ -109,12 +202,22 @@ import {
   evaluatePackagingSpeedNudge,
   recordPackagingSpeedCorrection,
   type PackagingSpeedNudge,
-} from "../packagingSpeedNudge";
-import {
+}
+ from "../packagingSpeedNudge"
+;
+
+import 
+{
+
   PackagingSpeedNudgeFeedback,
   type PackagingSpeedNudgeFeedbackStatus,
-} from "../components/PackagingSpeedNudgeFeedback";
-import {
+}
+ from "../components/PackagingSpeedNudgeFeedback"
+;
+
+import 
+{
+
   freshDayState,
   loadDayState,
   saveDayState,
@@ -222,24 +325,45 @@ import {
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
   type SpecImportDisplayKind,
-} from "../storage";
-import {
+}
+ from "../storage"
+;
+
+import 
+{
+
   loadPackagingProgress,
   overlayPackagingProgress,
   reconcilePackagingProgress,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
   savePackagingProgress,
-} from "../packagingProgress";
-import { consumeSyncWriteResponse } from "../syncWriteResponse";
-import {
+}
+ from "../packagingProgress"
+;
+
+import 
+{
+ consumeSyncWriteResponse 
+}
+ from "../syncWriteResponse"
+;
+
+import 
+{
+
   canonicalProfileKey,
   reconcileProfilesFromServer,
   reconcileProfilesFromServerDetailed,
   seedProfilesFromServer,
   type ProfileReconcileResult,
-} from "../profileServerSync";
-import {
+}
+ from "../profileServerSync"
+;
+
+import 
+{
+
   fetchFactoryData,
   hydrateFromServer,
   putFactoryKey,
@@ -252,77 +376,265 @@ import {
   FACTORY_KV_CACHED_KEYS,
   runFactoryKvMigration,
   runTemplatesMigration,
-} from "../factoryDataSync";
-import {
+}
+ from "../factoryDataSync"
+;
+
+import 
+{
+
   useRunTemplates,
   saveRunTemplateApi,
   deleteRunTemplatesApi,
   RUN_TEMPLATES_QUERY_KEY,
-} from "../hooks/useRunTemplates";
-import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
-import { saveDieLineDefaults } from "../dieLineDefaultsServer";
-import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../hooks/useDieLineDefaults";
-import RunInsightsCard from "../components/RunInsightsCard";
-import {
+}
+ from "../hooks/useRunTemplates"
+;
+
+import 
+{
+ resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor 
+}
+ from "../dieDefaults"
+;
+
+import 
+{
+ saveDieLineDefaults 
+}
+ from "../dieLineDefaultsServer"
+;
+
+import 
+{
+ DIE_LINE_DEFAULTS_QUERY_KEY 
+}
+ from "../hooks/useDieLineDefaults"
+;
+
+import RunInsightsCard from "../components/RunInsightsCard"
+;
+
+import 
+{
+
   reportRunInsightsAfterFinalize,
   buildTunnelDieDefaultEntry,
   type RunSuggestion,
-} from "../runInsights";
-import {
+}
+ from "../runInsights"
+;
+
+import 
+{
+
   fetchServerDieTypes,
   pushDieTypesToServer,
   deleteDieTypesOnServer,
   reconcileDieTypes,
   DIE_TYPES_SERVER_MIGRATED_KEY,
-} from "../dieTypesServer";
-import { findMixPresets, type MixPreset } from "../mixPresets";
-import { MIX_SEED } from "../mixSeed";
-import InventoryTab from "../components/InventoryTab";
-import RolesManager from "../components/RolesManager";
-import FactoryResetCard from "../components/FactoryResetCard";
-import AuditLogCard from "../components/AuditLogCard";
-import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
-import DataHealthWorkspace from "../components/DataHealthWorkspace";
-import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
-import { buildSyncDiagnosticReport, loadSyncDiagnostics, recordSyncDiagnostic, type SyncDiagnostic, type SyncDiagnosticKind } from "../syncDiagnostics";
-import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
-import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
-import AiCorrectionsCard from "../components/AiCorrectionsCard";
-import ManageRunsPanel from "../components/ManageRunsPanel";
-import ProductionRulesManager from "../components/ProductionRulesManager";
-import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
-import CycleCountManager from "../components/CycleCountManager";
-import ReorderCard from "../components/ReorderCard";
-import UseFirstCard from "../components/UseFirstCard";
-import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
-import ManagerAttentionDialog, {
+}
+ from "../dieTypesServer"
+;
+
+import 
+{
+ findMixPresets, type MixPreset 
+}
+ from "../mixPresets"
+;
+
+import 
+{
+ MIX_SEED 
+}
+ from "../mixSeed"
+;
+
+import InventoryTab from "../components/InventoryTab"
+;
+
+import RolesManager from "../components/RolesManager"
+;
+
+import FactoryResetCard from "../components/FactoryResetCard"
+;
+
+import AuditLogCard from "../components/AuditLogCard"
+;
+
+import SyncConflictStatsCard from "../components/SyncConflictStatsCard"
+;
+
+import DataHealthWorkspace from "../components/DataHealthWorkspace"
+;
+
+import SyncStatusPopover, 
+{
+ type SyncStatus 
+}
+ from "../components/SyncStatusPopover"
+;
+
+import 
+{
+ buildSyncDiagnosticReport, loadSyncDiagnostics, recordSyncDiagnostic, type SyncDiagnostic, type SyncDiagnosticKind 
+}
+ from "../syncDiagnostics"
+;
+
+import ProfileDataHealthCard from "../components/ProfileDataHealthCard"
+;
+
+import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard"
+;
+
+import AiCorrectionsCard from "../components/AiCorrectionsCard"
+;
+
+import ManageRunsPanel from "../components/ManageRunsPanel"
+;
+
+import ProductionRulesManager from "../components/ProductionRulesManager"
+;
+
+import FreezerPullItemsManager from "../components/FreezerPullItemsManager"
+;
+
+import CycleCountManager from "../components/CycleCountManager"
+;
+
+import ReorderCard from "../components/ReorderCard"
+;
+
+import UseFirstCard from "../components/UseFirstCard"
+;
+
+import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard"
+;
+
+import ManagerAttentionDialog, 
+{
+
   buildManagerAttentionItems,
   managerAttentionCount,
   type ManagerAttentionKind,
-} from "../components/ManagerAttentionDialog";
-import { RecipeShareButtons } from "../components/RecipeShareButtons";
-import AlertSettingsDialog from "../components/AlertSettingsDialog";
-import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
-import { TickBar } from "../components/TickBar";
-import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
-import { DoughRoleGate } from "../components/DoughRoleGate";
-import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
-import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
-import { useSupervisorPin } from "../hooks/useSupervisorPin";
-import { updateSupervisorPin } from "../supervisorPinApi";
-import { buildFreezerPullPlan } from "@workspace/freezer-pull";
-import MixesManager from "../components/MixesManager";
-import { useMixes } from "../hooks/useMixes";
-import { useIngredients } from "../hooks/useIngredients";
-import {
+}
+ from "../components/ManagerAttentionDialog"
+;
+
+import 
+{
+ RecipeShareButtons 
+}
+ from "../components/RecipeShareButtons"
+;
+
+import AlertSettingsDialog from "../components/AlertSettingsDialog"
+;
+
+import 
+{
+ SetupRecipesRoleGate 
+}
+ from "../components/SetupRecipesRoleGate"
+;
+
+import 
+{
+ TickBar 
+}
+ from "../components/TickBar"
+;
+
+import 
+{
+ LineSetupRoleGate 
+}
+ from "../components/LineSetupRoleGate"
+;
+
+import 
+{
+ DoughRoleGate 
+}
+ from "../components/DoughRoleGate"
+;
+
+import 
+{
+ useFreezerPullItems 
+}
+ from "../hooks/useFreezerPullItems"
+;
+
+import 
+{
+ useDropdownScrollKeeper 
+}
+ from "../hooks/useDropdownScrollKeeper"
+;
+
+import 
+{
+ useSupervisorPin 
+}
+ from "../hooks/useSupervisorPin"
+;
+
+import 
+{
+ updateSupervisorPin 
+}
+ from "../supervisorPinApi"
+;
+
+import 
+{
+ buildFreezerPullPlan 
+}
+ from "@workspace/freezer-pull"
+;
+
+import MixesManager from "../components/MixesManager"
+;
+
+import 
+{
+ useMixes 
+}
+ from "../hooks/useMixes"
+;
+
+import 
+{
+ useIngredients 
+}
+ from "../hooks/useIngredients"
+;
+
+import 
+{
+
   saveIngredients as saveIngredientsRemote,
   deleteIngredients as deleteIngredientsRemote,
   mergeIngredientsRemote,
   mergeCatalogEntriesByName,
   findOrBuildIngredient,
-} from "../ingredients";
-import { buildIngredientUniverse, type IngredientCategory } from "@workspace/ingredient-catalog";
-import {
+}
+ from "../ingredients"
+;
+
+import 
+{
+ buildIngredientUniverse, type IngredientCategory 
+}
+ from "@workspace/ingredient-catalog"
+;
+
+import 
+{
+
   buildMixPlan,
   OZ_PER_LB,
   repointMixesForBrandMerge,
@@ -331,38 +643,122 @@ import {
   backfillMixFromMergedSources,
   addSpecMixesIfAbsent,
   type Mix,
-} from "@workspace/mixes";
-import { specMixDraftToMix } from "@workspace/premix-import";
-import { fetchMixes, saveMixes, deleteMixes } from "@/mixes";
-import { createSwipeState, updateSwipeAxis, resolveSwipe, isSwipeExcludedTarget, type SwipeState as SwipeGestureState } from "@/swipeGesture";
-import {
+}
+ from "@workspace/mixes"
+;
+
+import 
+{
+ specMixDraftToMix 
+}
+ from "@workspace/premix-import"
+;
+
+import 
+{
+ fetchMixes, saveMixes, deleteMixes 
+}
+ from "@/mixes"
+;
+
+import 
+{
+ createSwipeState, updateSwipeAxis, resolveSwipe, isSwipeExcludedTarget, type SwipeState as SwipeGestureState 
+}
+ from "@/swipeGesture"
+;
+
+import 
+{
+
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
-} from "@workspace/cycle-count";
-import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
-import { markCycleCountCounted } from "../cycleCount";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import StaffRolesCard from "../components/StaffRolesCard";
-import ChangePasswordCard from "../components/ChangePasswordCard";
-import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
-import { describeSubstitution } from "../components/SubstitutionsManager";
-import AssistantTab from "../components/AssistantTab";
-import SpecReconcilePanel from "../components/SpecReconcilePanel";
-import MixReconcilePanel from "../components/MixReconcilePanel";
-import ImportHistoryPanel from "../components/ImportHistoryPanel";
-import {
+}
+ from "@workspace/cycle-count"
+;
+
+import 
+{
+ useCycleCountSchedules 
+}
+ from "../hooks/useCycleCountSchedules"
+;
+
+import 
+{
+ markCycleCountCounted 
+}
+ from "../cycleCount"
+;
+
+import 
+{
+ useMutation, useQuery, useQueryClient 
+}
+ from "@tanstack/react-query"
+;
+
+import StaffRolesCard from "../components/StaffRolesCard"
+;
+
+import ChangePasswordCard from "../components/ChangePasswordCard"
+;
+
+import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge"
+;
+
+import 
+{
+ describeSubstitution 
+}
+ from "../components/SubstitutionsManager"
+;
+
+import AssistantTab from "../components/AssistantTab"
+;
+
+import SpecReconcilePanel from "../components/SpecReconcilePanel"
+;
+
+import MixReconcilePanel from "../components/MixReconcilePanel"
+;
+
+import ImportHistoryPanel from "../components/ImportHistoryPanel"
+;
+
+import 
+{
+
   recordImportHistory,
   type ImportHistoryReopenRequest,
-} from "../importHistory";
-import MixAssistChat from "../components/MixAssistChat";
-import {
+}
+ from "../importHistory"
+;
+
+import MixAssistChat from "../components/MixAssistChat"
+;
+
+import 
+{
+
   dispatchVoiceCommand,
   type VoiceCommandAction,
   type VoiceCommandHandlers,
   type VoiceCommandResult,
-} from "@workspace/voice-commands";
-import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
-import {
+}
+ from "@workspace/voice-commands"
+;
+
+import 
+{
+ restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized 
+}
+ from "../inventoryShared"
+;
+
+import 
+{
+
   fetchIngredientBatchWeights,
   saveIngredientBatchWeights,
   buildBatchWeightMap,
@@ -372,33 +768,134 @@ import {
   type BatchWeightCandidate,
   type IngredientBatchWeightRow,
   type BatchWeightPropagationProfile,
-} from "../ingredientBatchWeights";
-import FillMissingPanel from "../components/FillMissingPanel";
-import IncidentsTab from "../components/IncidentsTab";
-import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
-import QualityHistoryTab from "../components/QualityHistoryTab";
-import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
-import ReportIssueDialog from "../components/ReportIssueDialog";
-import GetStartedDialog from "../components/GetStartedDialog";
-import { useGetStartedOverview } from "@workspace/onboarding";
-import GuidedTour from "../components/GuidedTour";
-import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
-import {
+}
+ from "../ingredientBatchWeights"
+;
+
+import FillMissingPanel from "../components/FillMissingPanel"
+;
+
+import IncidentsTab from "../components/IncidentsTab"
+;
+
+import DowntimeTrendsTab from "../components/DowntimeTrendsTab"
+;
+
+import QualityHistoryTab from "../components/QualityHistoryTab"
+;
+
+import OperationalReportPanel, 
+{
+ type OperationalReportDetailRange 
+}
+ from "../components/OperationalReportPanel"
+;
+
+import ManagerActionQueue from "../components/ManagerActionQueue"
+;
+
+import ReportIssueDialog from "../components/ReportIssueDialog"
+;
+
+import GetStartedDialog from "../components/GetStartedDialog"
+;
+
+import 
+{
+ useGetStartedOverview 
+}
+ from "@workspace/onboarding"
+;
+
+import GuidedTour from "../components/GuidedTour"
+;
+
+import 
+{
+ buildOptimizeInput, type OptimizeAction 
+}
+ from "../aiOptimize"
+;
+
+import 
+{
+
   buildRecipeAssistContext,
   type RecipeAssistSuggestion,
   type RecipeFieldId,
-} from "../aiRecipe";
-import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
-import { moveEntries, relocateValues } from "@workspace/schedule-move";
-import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
-import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
-import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
-import { buildAnomalyInput } from "../aiAnomaly";
-import { buildScheduleInput } from "../aiSchedule";
-import { useProactiveAlert } from "../aiProactive";
-import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
-import { computeCasesInFreezer } from "@workspace/inventory-math";
-import {
+}
+ from "../aiRecipe"
+;
+
+import 
+{
+ applyRecipeSuggestion as applyRecipeSuggestionShared 
+}
+ from "@workspace/recipe-apply"
+;
+
+import 
+{
+ moveEntries, relocateValues 
+}
+ from "@workspace/schedule-move"
+;
+
+import 
+{
+ findScheduledRecipeIssues 
+}
+ from "@workspace/scheduled-recipe-check"
+;
+
+import 
+{
+ buildForecastInput, buildForecastAccuracyInput, type ForecastPlan 
+}
+ from "../aiForecast"
+;
+
+import 
+{
+ buildDaySummaryInput, buildWeekSummaryInput 
+}
+ from "../aiSummary"
+;
+
+import 
+{
+ buildAnomalyInput 
+}
+ from "../aiAnomaly"
+;
+
+import 
+{
+ buildScheduleInput 
+}
+ from "../aiSchedule"
+;
+
+import 
+{
+ useProactiveAlert 
+}
+ from "../aiProactive"
+;
+
+import ProactiveAlertBanner from "../components/ProactiveAlertBanner"
+;
+
+import 
+{
+ computeCasesInFreezer 
+}
+ from "@workspace/inventory-math"
+;
+
+import 
+{
+
   computeRunConsumptionLines,
   consumeSauceBarrel,
   deriveCandidateItems,
@@ -408,24 +905,51 @@ import {
   scoreNameMatch,
   buildReorderDemandByKey,
   type MergeInventoryLine,
-} from "../inventoryShared";
-import { applySubstitutions, computeSummaryStats as computeSummaryStatsShared } from "@workspace/inventory-math";
-import {
+}
+ from "../inventoryShared"
+;
+
+import 
+{
+ applySubstitutions, computeSummaryStats as computeSummaryStatsShared 
+}
+ from "@workspace/inventory-math"
+;
+
+import 
+{
+
   buildMergeMap,
   countMergeReferences,
   mapName,
   type MergeMap,
-} from "../mergeIngredients";
-import {
+}
+ from "../mergeIngredients"
+;
+
+import 
+{
+
   type RecipeNameMergeCategory,
   RECIPE_NAME_FIELDS_BY_CATEGORY,
   countRecipeNameReferences,
   isStrayMixName,
   collectStaleRecipeLinkNames,
   buildStaleCleanupSuggestions,
-} from "../mergeRecipeNames";
-import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
-import {
+}
+ from "../mergeRecipeNames"
+;
+
+import 
+{
+ collectMergeAliases, type MergeSuggestion 
+}
+ from "@workspace/merge-suggest"
+;
+
+import 
+{
+
   allergenMeta,
   allergenOptions,
   allergenSequenceWarnings,
@@ -433,28 +957,137 @@ import {
   normalizeAllergen,
   type Allergen,
   type AllergenSequenceItem,
-} from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
-import { saveAiCorrections } from "../aiCorrections";
-import ReviewBadge from "../components/ReviewBadge";
-import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
-import { detectAppSlotConflicts } from "@workspace/setup-math-check";
+}
+ from "@workspace/allergen"
+;
 
-import { usePresentationCast } from "../hooks/usePresentationCast";
-import { suggestedDoughStaging } from "../hooks/useAutoTrack";
-import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
-import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
-import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
-import { useLiveRun, LiveRunProvider, calcRef } from "../contexts/LiveRunContext";
-import { HomeStationTabs } from "../components/HomeStationTabs";
+import 
+{
+ suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion, type MergeSuggestCategory 
+}
+ from "../mergeSuggest"
+;
+
+import 
+{
+ saveAiCorrections 
+}
+ from "../aiCorrections"
+;
+
+import ReviewBadge from "../components/ReviewBadge"
+;
+
+import 
+{
+ AppSlotMathBadge 
+}
+ from "../components/AppSlotMathBadge"
+;
+
+import 
+{
+ detectAppSlotConflicts 
+}
+ from "@workspace/setup-math-check"
+;
+
+
+import 
+{
+ usePresentationCast 
+}
+ from "../hooks/usePresentationCast"
+;
+
+import 
+{
+ suggestedDoughStaging 
+}
+ from "../hooks/useAutoTrack"
+;
+
+import 
+{
+ useBackButtonTrap 
+}
+ from "../hooks/useBackButtonTrap"
+;
+
+import 
+{
+ HOME_TABS, useHomeNavigation, type HomeTab 
+}
+ from "../hooks/useHomeNavigation"
+;
+
+import 
+{
+ useHomeRunIdentity 
+}
+ from "../hooks/useHomeRunIdentity"
+;
+
+import 
+{
+ useLiveRun, LiveRunProvider, calcRef 
+}
+ from "../contexts/LiveRunContext"
+;
+
+import 
+{
+ HomeStationTabs 
+}
+ from "../components/HomeStationTabs"
+;
+
 // showAppNotification is imported from useNotifications to fire sauce push alerts
-import { showAppNotification } from "../hooks/useNotifications";
-import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
-import { usePendingResetCount } from "../hooks/usePendingResetCount";
-import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
-import { useProductionRules } from "../hooks/useProductionRules";
-import { usePrepPhase, mergePrepPhaseClient, getPrepPhase, FRESH_PREP_PHASE } from "../hooks/usePrepPhase";
-import {
+import 
+{
+ showAppNotification 
+}
+ from "../hooks/useNotifications"
+;
+
+import 
+{
+ getSauceBarrelEntry, resetSauceBarrelEntry 
+}
+ from "../sauceBarrelStore"
+;
+
+import 
+{
+ usePendingResetCount 
+}
+ from "../hooks/usePendingResetCount"
+;
+
+import 
+{
+ useUnreviewedIncidentCount 
+}
+ from "../hooks/useUnreviewedIncidentCount"
+;
+
+import 
+{
+ useProductionRules 
+}
+ from "../hooks/useProductionRules"
+;
+
+import 
+{
+ usePrepPhase, mergePrepPhaseClient, getPrepPhase, FRESH_PREP_PHASE 
+}
+ from "../hooks/usePrepPhase"
+;
+
+import 
+{
+
   evaluateRules,
   newRule,
   defaultRuleName,
@@ -465,10 +1098,27 @@ import {
   type ProductionRule,
   type RuleType,
   type RuleSequenceItem,
-} from "@workspace/production-rules";
-import { saveProductionRules, deleteProductionRules } from "../productionRules";
-import { useMe } from "../useRole";
-import {
+}
+ from "@workspace/production-rules"
+;
+
+import 
+{
+ saveProductionRules, deleteProductionRules 
+}
+ from "../productionRules"
+;
+
+import 
+{
+ useMe 
+}
+ from "../useRole"
+;
+
+import 
+{
+
   Factory,
   Layers,
   Clock,
@@ -540,10 +1190,23 @@ import {
   Users,
   Truck,
   RefreshCw,
-} from "lucide-react";
-import { useAuth } from "@/useAuth";
-import * as XLSX from "xlsx";
-import {
+}
+ from "lucide-react"
+;
+
+import 
+{
+ useAuth 
+}
+ from "@/useAuth"
+;
+
+import * as XLSX from "xlsx"
+;
+
+import 
+{
+
   buildRunExportRow,
   buildRunWorkbook,
   buildQuickBooksCsv,
@@ -551,37 +1214,167 @@ import {
   filterImportFromDate,
   skipAlreadyRanRuns,
   type ImportParseResult,
-} from "@/utils/runExcel";
-import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
-import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
-import SpecImportDialog from "@/components/SpecImportDialog";
-import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
-import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
-import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
-import PremixImportDialog from "@/components/PremixImportDialog";
-import ShippingImportDialog from "@/components/ShippingImportDialog";
-import { SauceGuideImportDialog, DoughGuideImportDialog } from "@/components/RecipeGuideImportDialog";
-import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
-import { prepareShippingImport, commitShippingImport, type ShippingImportPrepared } from "@/shippingImport";
-import {
+}
+ from "@/utils/runExcel"
+;
+
+import 
+{
+ buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer 
+}
+ from "@/importCaseUpdates"
+;
+
+import ExcelImportDialog, 
+{
+ type ImportCommit 
+}
+ from "@/components/ExcelImportDialog"
+;
+
+import SpecImportDialog from "@/components/SpecImportDialog"
+;
+
+import 
+{
+ ConfirmDeleteButton 
+}
+ from "@/components/ConfirmDeleteButton"
+;
+
+import 
+{
+ prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared 
+}
+ from "@/specImport"
+;
+
+import 
+{
+ exportSpecRecipes, type ExportSelection 
+}
+ from "@/specExport"
+;
+
+import 
+{
+ mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias 
+}
+ from "@workspace/spec-import"
+;
+
+import PremixImportDialog from "@/components/PremixImportDialog"
+;
+
+import ShippingImportDialog from "@/components/ShippingImportDialog"
+;
+
+import 
+{
+ SauceGuideImportDialog, DoughGuideImportDialog 
+}
+ from "@/components/RecipeGuideImportDialog"
+;
+
+import 
+{
+ preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared 
+}
+ from "@/premixImport"
+;
+
+import 
+{
+ prepareShippingImport, commitShippingImport, type ShippingImportPrepared 
+}
+ from "@/shippingImport"
+;
+
+import 
+{
+
   prepareSauceGuideImport, commitSauceGuideImport,
   prepareDoughGuideImport, commitDoughGuideImport,
   type SauceGuideImportPrepared, type DoughGuideImportPrepared,
-} from "@/recipeGuideImport";
-import type { ShippingPatch } from "@workspace/shipping-import";
-import { saveShippingGuide, buildShippingGuideLabel } from "@/savedShippingGuides";
-import { deriveSourceKey, fetchSavedSpecSheets } from "@/savedSpecSheets";
-import { fetchSavedPremixSheets } from "@/savedPremixSheets";
-import type { PremixFreezerPull } from "@workspace/premix-import";
-import CheeseRecipesManager from "@/components/CheeseRecipesManager";
-import DieLineDefaultsManager from "@/components/DieLineDefaultsManager";
-import { useDieLineDefaults } from "../hooks/useDieLineDefaults";
-import CheeseImportDialog from "@/components/CheeseImportDialog";
-import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
-import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
-import type { CheeseRecipe, CheeseComponent } from "@workspace/cheese-recipes";
-import {
+}
+ from "@/recipeGuideImport"
+;
+
+import type 
+{
+ ShippingPatch 
+}
+ from "@workspace/shipping-import"
+;
+
+import 
+{
+ saveShippingGuide, buildShippingGuideLabel 
+}
+ from "@/savedShippingGuides"
+;
+
+import 
+{
+ deriveSourceKey, fetchSavedSpecSheets 
+}
+ from "@/savedSpecSheets"
+;
+
+import 
+{
+ fetchSavedPremixSheets 
+}
+ from "@/savedPremixSheets"
+;
+
+import type 
+{
+ PremixFreezerPull 
+}
+ from "@workspace/premix-import"
+;
+
+import CheeseRecipesManager from "@/components/CheeseRecipesManager"
+;
+
+import DieLineDefaultsManager from "@/components/DieLineDefaultsManager"
+;
+
+import 
+{
+ useDieLineDefaults 
+}
+ from "../hooks/useDieLineDefaults"
+;
+
+import CheeseImportDialog from "@/components/CheeseImportDialog"
+;
+
+import 
+{
+ prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared 
+}
+ from "@/cheeseImport"
+;
+
+import 
+{
+ useCheeseRecipes 
+}
+ from "@/hooks/useCheeseRecipes"
+;
+
+import type 
+{
+ CheeseRecipe, CheeseComponent 
+}
+ from "@workspace/cheese-recipes"
+;
+
+import 
+{
+
   cheesePerFlavorComponentOz,
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
@@ -589,43 +1382,143 @@ import {
   backfillCheeseRecipeFromMergedSources,
   specCheeseDraftToRecipe,
   addCheeseRecipesIfAbsentByName,
-} from "@workspace/cheese-recipes";
-import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
-import NamedRecipesManager from "@/components/NamedRecipesManager";
-import { useNamedRecipes } from "@/hooks/useNamedRecipes";
-import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag } from "@workspace/named-recipes";
-import { saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename } from "@/specImportAliases";
+}
+ from "@workspace/cheese-recipes"
+;
 
-import {
+import 
+{
+ fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes 
+}
+ from "@/cheeseRecipes"
+;
+
+import NamedRecipesManager from "@/components/NamedRecipesManager"
+;
+
+import 
+{
+ useNamedRecipes 
+}
+ from "@/hooks/useNamedRecipes"
+;
+
+import 
+{
+ addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes 
+}
+ from "@/namedRecipes"
+;
+
+import 
+{
+ namedRecipeFromDraft, repointNamedRecipeIngredients, backfillNamedRecipeFromMergedSources, planNameConsolidation, matchDoughballVariant, normalizeDoughballVariants, applyDoughCustomerAssignmentsToVariants, doughballVariantLabelKey, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type DoughballVariant, type NamedRecipe, type NamedRecipeTag 
+}
+ from "@workspace/named-recipes"
+;
+
+import 
+{
+ saveSpecImportAliases, learnSpecImportAliasesForNameChange, learnRecipeNameChangeAliases, learnIngredientChangeAliases, maybeLearnIngredientRename, maybeLearnTypeRename 
+}
+ from "@/specImportAliases"
+;
+
+
+import 
+{
+
   Form,
   FormControl,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
-import { toast } from "@/hooks/use-toast";
-import { ToastAction } from "@/components/ui/toast";
-import SetupProfileEditor from "@/components/SetupProfileEditor";
-import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
+}
+ from "@/components/ui/form"
+;
+
+import 
+{
+ Input 
+}
+ from "@/components/ui/input"
+;
+
+import 
+{
+ Card, CardContent, CardHeader, CardTitle 
+}
+ from "@/components/ui/card"
+;
+
+import 
+{
+ Separator 
+}
+ from "@/components/ui/separator"
+;
+
+import 
+{
+ Button 
+}
+ from "@/components/ui/button"
+;
+
+import 
+{
+ toast 
+}
+ from "@/hooks/use-toast"
+;
+
+import 
+{
+ ToastAction 
+}
+ from "@/components/ui/toast"
+;
+
+import SetupProfileEditor from "@/components/SetupProfileEditor"
+;
+
+import 
+{
+ noteBreadcrumb, getLastActionBeforeLoad 
+}
+ from "@/reloadBreadcrumbs"
+;
+
+import 
+{
+ Tabs, TabsContent, TabsList, TabsTrigger 
+}
+ from "@/components/ui/tabs"
+;
+
+import 
+{
+
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import {
+}
+ from "@/components/ui/dialog"
+;
+
+import 
+{
+
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+}
+ from "@/components/ui/dropdown-menu"
+;
+
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
 // sees a newer epoch — on boot via GET /api/sync/reset-epoch and live over SSE —
@@ -633,94 +1526,301 @@ import {
 //
 // Data-hygiene migrations below are kept — they are no-ops on empty data but still
 // heal devices that carry legacy data.
-applyPepTaxonomyMigrationIfNeeded();
-applyIngredientDedupeMigrationIfNeeded();
-applyMachineTimeDefaultsHealIfNeeded();
-applyStrayMixRecategorizeIfNeeded();
-applyMixCheeseOverlapDedupeIfNeeded();
+applyPepTaxonomyMigrationIfNeeded()
+;
+
+applyIngredientDedupeMigrationIfNeeded()
+;
+
+applyMachineTimeDefaultsHealIfNeeded()
+;
+
+applyStrayMixRecategorizeIfNeeded()
+;
+
+applyMixCheeseOverlapDedupeIfNeeded()
+;
+
 // applyMixSlotRecategorizeIfNeeded / applyProfileCleanupIfNeeded /
 // purgeOrphanedProfilesIfNeeded rewrite PROFILES, which are manager-only
 // writes (manage-profiles capability) — they run in a capability-gated effect
 // inside Home instead of at module init (see the profile-heal effect there).
 
-type NeedRow = { label: string; value: string; sub?: string };
+type NeedRow = 
+{
+ label: string
+;
+ value: string
+;
+ sub?: string 
+}
+;
 
-function buildNeedRows(vals: FormValues): {
-  dough: NeedRow[];
-  sauce: NeedRow[];
-  applicators: NeedRow[];
-  pep: NeedRow[];
-  all: NeedRow[];
-} {
-  const s = computeSummaryStats(vals);
-  const dough: NeedRow[] = [];
-  const sauce: NeedRow[] = [];
-  const applicators: NeedRow[] = [];
-  const pep: NeedRow[] = [];
-  {
-    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+
+function buildNeedRows(vals: FormValues): 
+{
+
+  dough: NeedRow[]
+;
+
+  sauce: NeedRow[]
+;
+
+  applicators: NeedRow[]
+;
+
+  pep: NeedRow[]
+;
+
+  all: NeedRow[]
+;
+
+}
+ 
+{
+
+  const s = computeSummaryStats(vals)
+;
+
+  const dough: NeedRow[] = []
+;
+
+  const sauce: NeedRow[] = []
+;
+
+  const applicators: NeedRow[] = []
+;
+
+  const pep: NeedRow[] = []
+;
+
+  
+{
+
+    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0)
+;
+
     const effYield =
       dRecipeLbs > 0 && vals.targetDoughballWeight > 0
         ? (dRecipeLbs * 16) / vals.targetDoughballWeight
-        : vals.doughBatchYield;
-    if (effYield > 0 && vals.targetDoughballWeight > 0) {
-      const batches = Math.ceil(s.totalPizzas / effYield);
-      if (batches > 0) dough.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
-    }
-  }
-  if (s.sauceBatches > 0) {
-    const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-    sauce.push(bd
-      ? { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: `batches · ${bd.totalBarrels} barrels` }
-      : { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
-  }
-  const apps = [
-    { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
-    { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
-    { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
-    { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
-  ];
-  for (const a of apps) {
-    if (!a.type) continue;
-    const isMix = a.type.trim().toLowerCase().includes("mix");
-    if (isMix && a.lbs > 0) applicators.push({ label: a.type, value: fmtNum(a.lbs, 1), sub: "lbs" });
-    else if (!isMix && a.batches > 0) applicators.push({ label: a.type, value: fmtNum(a.batches, 2), sub: "batches" });
-  }
-  if (s.pep1Type && s.pep1Lbs > 0) {
-    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-    pep.push({ label: s.pep1Type, value: isPepStd ? fmtNum(s.pep1Lbs, 1) : fmtNum(s.pep1Batches, 2), sub: isPepStd ? "lbs" : "batches" });
-  }
-  if (s.pep1TypeB && s.pep1LbsB > 0) {
-    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
-    pep.push({ label: s.pep1TypeB, value: isPepStd ? fmtNum(s.pep1LbsB, 1) : fmtNum(s.pep1BatchesB, 2), sub: isPepStd ? "lbs" : "batches" });
-  }
-  if (s.pep2Type && s.pep2Lbs > 0) {
-    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-    pep.push({ label: s.pep2Type, value: isPepStd ? fmtNum(s.pep2Lbs, 1) : fmtNum(s.pep2Batches, 2), sub: isPepStd ? "lbs" : "batches" });
-  }
-  if (s.pep2TypeB && s.pep2LbsB > 0) {
-    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
-    pep.push({ label: s.pep2TypeB, value: isPepStd ? fmtNum(s.pep2LbsB, 1) : fmtNum(s.pep2BatchesB, 2), sub: isPepStd ? "lbs" : "batches" });
-  }
-  return { dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] };
+        : vals.doughBatchYield
+;
+
+    if (effYield > 0 && vals.targetDoughballWeight > 0) 
+{
+
+      const batches = Math.ceil(s.totalPizzas / effYield)
+;
+
+      if (batches > 0) dough.push(
+{
+ label: "Dough", value: fmtNum(batches, 1), sub: "batches" 
+}
+)
+;
+
+    
 }
 
-function NeedsList({ rows }: { rows: NeedRow[] }) {
+  
+}
+
+  if (s.sauceBatches > 0) 
+{
+
+    const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel)
+;
+
+    sauce.push(bd
+      ? 
+{
+ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: `batches · ${bd.totalBarrels} barrels` 
+}
+
+      : 
+{
+ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" 
+}
+)
+;
+
+  
+}
+
+  const apps = [
+    
+{
+ type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches 
+}
+,
+    
+{
+ type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches 
+}
+,
+    
+{
+ type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches 
+}
+,
+    
+{
+ type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches 
+}
+,
+  ]
+;
+
+  for (const a of apps) 
+{
+
+    if (!a.type) continue
+;
+
+    const isMix = a.type.trim().toLowerCase().includes("mix")
+;
+
+    if (isMix && a.lbs > 0) applicators.push(
+{
+ label: a.type, value: fmtNum(a.lbs, 1), sub: "lbs" 
+}
+)
+;
+
+    else if (!isMix && a.batches > 0) applicators.push(
+{
+ label: a.type, value: fmtNum(a.batches, 2), sub: "batches" 
+}
+)
+;
+
+  
+}
+
+  if (s.pep1Type && s.pep1Lbs > 0) 
+{
+
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type)
+;
+
+    pep.push(
+{
+ label: s.pep1Type, value: isPepStd ? fmtNum(s.pep1Lbs, 1) : fmtNum(s.pep1Batches, 2), sub: isPepStd ? "lbs" : "batches" 
+}
+)
+;
+
+  
+}
+
+  if (s.pep1TypeB && s.pep1LbsB > 0) 
+{
+
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB)
+;
+
+    pep.push(
+{
+ label: s.pep1TypeB, value: isPepStd ? fmtNum(s.pep1LbsB, 1) : fmtNum(s.pep1BatchesB, 2), sub: isPepStd ? "lbs" : "batches" 
+}
+)
+;
+
+  
+}
+
+  if (s.pep2Type && s.pep2Lbs > 0) 
+{
+
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type)
+;
+
+    pep.push(
+{
+ label: s.pep2Type, value: isPepStd ? fmtNum(s.pep2Lbs, 1) : fmtNum(s.pep2Batches, 2), sub: isPepStd ? "lbs" : "batches" 
+}
+)
+;
+
+  
+}
+
+  if (s.pep2TypeB && s.pep2LbsB > 0) 
+{
+
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB)
+;
+
+    pep.push(
+{
+ label: s.pep2TypeB, value: isPepStd ? fmtNum(s.pep2LbsB, 1) : fmtNum(s.pep2BatchesB, 2), sub: isPepStd ? "lbs" : "batches" 
+}
+)
+;
+
+  
+}
+
+  return 
+{
+ dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] 
+}
+;
+
+}
+
+
+function NeedsList(
+{
+ rows 
+}
+: 
+{
+ rows: NeedRow[] 
+}
+) 
+{
+
   if (rows.length === 0)
-    return <p className="text-xs text-muted-foreground italic">No data</p>;
+    return <p className="text-xs text-muted-foreground italic">No data</p>
+;
+
   return (
     <div className="space-y-1.5">
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-baseline justify-between gap-2 text-sm">
-          <span className="text-muted-foreground truncate">{row.label}</span>
+      
+{
+rows.map((row, i) => (
+        <div key=
+{
+i
+}
+ className="flex items-baseline justify-between gap-2 text-sm">
+          <span className="text-muted-foreground truncate">
+{
+row.label
+}
+</span>
           <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
-            {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
+            
+{
+row.value
+}
+ <span className="font-normal text-muted-foreground">
+{
+row.sub
+}
+</span>
           </span>
         </div>
-      ))}
-    </div>
-  );
+      ))
 }
+
+    </div>
+  )
+;
+
+}
+
 
 // opts.warehouse tailors the rows for warehouse staff: sauce rows are omitted
 // (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
@@ -776,52 +1876,148 @@ function aggregateNeedRows(
     // as-is by name in LBS — mirrors computeRunLines in @workspace/inventory-math.
     // Warehouse view: sauces WITH recipe rows expand to per-ingredient lbs;
     // bought-as-is sauces (no recipe rows) stay suppressed (warehouse doesn't pull those).
-    {
-      const sauceName = (vals.frontlineRecipeName ?? "").trim();
-      const sauceRecipeRows = (vals.frontlineRecipe ?? []).filter(r => Number(r.lbs ?? 0) > 0);
-      const hasSauceRecipe = sauceRecipeRows.length > 0;
-      if (opts?.warehouse) {
-        if (hasSauceRecipe && s.sauceBatches > 0) {
+    
+{
+
+      const sauceName = (vals.frontlineRecipeName ?? "").trim()
+;
+
+      const sauceRecipeRows = (vals.frontlineRecipe ?? []).filter(r => Number(r.lbs ?? 0) > 0)
+;
+
+      const hasSauceRecipe = sauceRecipeRows.length > 0
+;
+
+      if (opts?.warehouse) 
+{
+
+        if (hasSauceRecipe && s.sauceBatches > 0) 
+{
+
           // Warehouse: expand sauce to per-ingredient lbs for warehouse pullers.
-          for (const r of sauceRecipeRows) {
-            const ing = (r.ingredient ?? "").trim();
-            const rowLbs = Number(r.lbs ?? 0);
-            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs");
-          }
-        } else if (!hasSauceRecipe && s.sauceBatches > 0 && sauceName) {
+          for (const r of sauceRecipeRows) 
+{
+
+            const ing = (r.ingredient ?? "").trim()
+;
+
+            const rowLbs = Number(r.lbs ?? 0)
+;
+
+            if (ing && rowLbs > 0) add(ing, rowLbs * s.sauceBatches, "lbs")
+;
+
+          
+}
+
+        
+}
+ else if (!hasSauceRecipe && s.sauceBatches > 0 && sauceName) 
+{
+
           // No recipe rows but a named house sauce with batch math — fall back
           // to batch count so the warehouse card still shows something useful.
-          add(sauceName, s.sauceBatches, "batches");
-        }
+          add(sauceName, s.sauceBatches, "batches")
+;
+
+        
+}
+
         // Bought-as-is sauces (no recipe rows, no batch count) stay suppressed.
-      } else {
-        if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
-          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
-        } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
-      }
-    }
+      
+}
+ else 
+{
+
+        if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) 
+{
+
+          if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs")
+;
+
+        
+}
+ else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches")
+;
+
+      
+}
+
+    
+}
+
     // Physical line order: App 1, App 2, then the pep applicators (they sit
     // between stations 2 and 3 on the line), then App 3, App 4.
     const appsFront = [
-      { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches, name: vals.app1CheeseRecipeName, recipe: vals.app1CheeseRecipe },
-      { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches, name: vals.app2CheeseRecipeName, recipe: vals.app2CheeseRecipe },
-    ];
+      
+{
+ type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches, name: vals.app1CheeseRecipeName, recipe: vals.app1CheeseRecipe 
+}
+,
+      
+{
+ type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches, name: vals.app2CheeseRecipeName, recipe: vals.app2CheeseRecipe 
+}
+,
+    ]
+;
+
     const appsBack = [
-      { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches, name: vals.app3CheeseRecipeName, recipe: vals.app3CheeseRecipe },
-      { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches, name: vals.app4CheeseRecipeName, recipe: vals.app4CheeseRecipe },
-    ];
-    const addApp = (a: { type: string; lbs: number; batches: number; name?: string; recipe?: readonly RecipeRow[] }) => {
-      if (!a.type) return;
-      const lower = a.type.trim().toLowerCase();
-      const isMix = lower.includes("mix");
-      const isCheese = lower.includes("cheese");
-      const blendName = (a.name ?? "").trim();
+      
+{
+ type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches, name: vals.app3CheeseRecipeName, recipe: vals.app3CheeseRecipe 
+}
+,
+      
+{
+ type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches, name: vals.app4CheeseRecipeName, recipe: vals.app4CheeseRecipe 
+}
+,
+    ]
+;
+
+    const addApp = (a: 
+{
+ type: string
+;
+ lbs: number
+;
+ batches: number
+;
+ name?: string
+;
+ recipe?: readonly RecipeRow[] 
+}
+) => 
+{
+
+      if (!a.type) return
+;
+
+      const lower = a.type.trim().toLowerCase()
+;
+
+      const isMix = lower.includes("mix")
+;
+
+      const isCheese = lower.includes("cheese")
+;
+
+      const blendName = (a.name ?? "").trim()
+;
+
       const label =
         opts?.warehouse && blendName && (isMix || isCheese)
           ? `${a.type} — ${blendName}`
-          : a.type;
-      if (isMix && a.lbs > 0) {
-        add(label, a.lbs, "lbs");
+          : a.type
+;
+
+      if (isMix && a.lbs > 0) 
+{
+
+        add(label, a.lbs, "lbs")
+;
+
         // Mix library components are per-pizza ounces, not per-recipe-batch
         // pounds. Scale them from this scheduled run's total pizza count so a
         // tagged component gets the real warehouse pull amount.
@@ -899,96 +2095,270 @@ function aggregateNeedRows(
 // Roll up packaging consumables across the given runs: circles are 1 per pizza
 // and shippers are 1 per case, each grouped by the run's selected type. "none"
 // / unset selections contribute nothing. Labeled runs contribute label rolls
-// (pizzas / labels-per-roll; per position when Label Position is Both).
-function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
-  const circleMap = new Map<string, number>();
-  const shipperMap = new Map<string, number>();
-  let cartonCases = 0;
-  let labelRolls = 0;
-  let topLabelRolls = 0;
-  let bottomLabelRolls = 0;
-  for (const vals of valsList) {
-    const cartonedVal = ((vals.cartoned as string) ?? "").trim().toLowerCase();
-    if (cartonedVal === "labeled") {
+// (pizzas / labels-per-roll
+;
+ per position when Label Position is Both).
+function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] 
+{
+
+  const circleMap = new Map<string, number>()
+;
+
+  const shipperMap = new Map<string, number>()
+;
+
+  let cartonCases = 0
+;
+
+  let labelRolls = 0
+;
+
+  let topLabelRolls = 0
+;
+
+  let bottomLabelRolls = 0
+;
+
+  for (const vals of valsList) 
+{
+
+    const cartonedVal = ((vals.cartoned as string) ?? "").trim().toLowerCase()
+;
+
+    if (cartonedVal === "labeled") 
+{
+
       // Labeled runs need label rolls staged: rolls = total pizzas / labels
       // per roll, per position (top+bottom separately) when position is Both.
-      const ls = computeSummaryStats(vals);
-      if (ls.totalPizzas > 0) {
-        const pos = ((vals.labelPosition as string) ?? "").trim().toLowerCase();
-        if (pos === "both") {
-          const top = Number(vals.topLabelsPerRoll) || 0;
-          const bottom = Number(vals.bottomLabelsPerRoll) || 0;
-          if (top > 0) topLabelRolls += ls.totalPizzas / top;
-          if (bottom > 0) bottomLabelRolls += ls.totalPizzas / bottom;
-        } else {
-          const single = Number(vals.labelsPerRoll) || 0;
-          if (single > 0) labelRolls += ls.totalPizzas / single;
-        }
-      }
-      continue;
-    }
-    // Only cartoned runs contribute to the remaining packaging needs; "n-a"
-    // runs are excluded entirely. Accepts legacy "yes" for pre-migration data.
-    if (!isCartonedValue(vals.cartoned)) continue;
-    const s = computeSummaryStats(vals);
-    // Cartons are bought by the case: cases = total pizzas / cartons per case.
-    const perCase = Number(vals.cartonsPerCase) || 0;
-    if (perCase > 0 && s.totalPizzas > 0) cartonCases += s.totalPizzas / perCase;
-    const circle = (vals.circles ?? "").trim();
-    if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
-      circleMap.set(circle, (circleMap.get(circle) ?? 0) + s.totalPizzas);
-    }
-    const shipper = (vals.shipper ?? "").trim();
-    if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) {
-      shipperMap.set(shipper, (shipperMap.get(shipper) ?? 0) + s.totalCases);
-    }
-  }
-  const rows: NeedRow[] = [];
-  for (const [type, n] of circleMap) rows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
-  for (const [type, n] of shipperMap) rows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
-  if (cartonCases > 0) rows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" });
-  if (labelRolls > 0) rows.push({ label: "Label Rolls", value: fmtNum(Math.ceil(labelRolls), 0), sub: "rolls" });
-  if (topLabelRolls > 0) rows.push({ label: "Label Rolls — Top", value: fmtNum(Math.ceil(topLabelRolls), 0), sub: "rolls" });
-  if (bottomLabelRolls > 0) rows.push({ label: "Label Rolls — Bottom", value: fmtNum(Math.ceil(bottomLabelRolls), 0), sub: "rolls" });
-  return rows;
+      const ls = computeSummaryStats(vals)
+;
+
+      if (ls.totalPizzas > 0) 
+{
+
+        const pos = ((vals.labelPosition as string) ?? "").trim().toLowerCase()
+;
+
+        if (pos === "both") 
+{
+
+          const top = Number(vals.topLabelsPerRoll) || 0
+;
+
+          const bottom = Number(vals.bottomLabelsPerRoll) || 0
+;
+
+          if (top > 0) topLabelRolls += ls.totalPizzas / top
+;
+
+          if (bottom > 0) bottomLabelRolls += ls.totalPizzas / bottom
+;
+
+        
+}
+ else 
+{
+
+          const single = Number(vals.labelsPerRoll) || 0
+;
+
+          if (single > 0) labelRolls += ls.totalPizzas / single
+;
+
+        
 }
 
-function StatRow({
+      
+}
+
+      continue
+;
+
+    
+}
+
+    // Only cartoned runs contribute to the remaining packaging needs
+;
+ "n-a"
+    // runs are excluded entirely. Accepts legacy "yes" for pre-migration data.
+    if (!isCartonedValue(vals.cartoned)) continue
+;
+
+    const s = computeSummaryStats(vals)
+;
+
+    // Cartons are bought by the case: cases = total pizzas / cartons per case.
+    const perCase = Number(vals.cartonsPerCase) || 0
+;
+
+    if (perCase > 0 && s.totalPizzas > 0) cartonCases += s.totalPizzas / perCase
+;
+
+    const circle = (vals.circles ?? "").trim()
+;
+
+    if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) 
+{
+
+      circleMap.set(circle, (circleMap.get(circle) ?? 0) + s.totalPizzas)
+;
+
+    
+}
+
+    const shipper = (vals.shipper ?? "").trim()
+;
+
+    if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) 
+{
+
+      shipperMap.set(shipper, (shipperMap.get(shipper) ?? 0) + s.totalCases)
+;
+
+    
+}
+
+  
+}
+
+  const rows: NeedRow[] = []
+;
+
+  for (const [type, n] of circleMap) rows.push(
+{
+ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" 
+}
+)
+;
+
+  for (const [type, n] of shipperMap) rows.push(
+{
+ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" 
+}
+)
+;
+
+  if (cartonCases > 0) rows.push(
+{
+ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" 
+}
+)
+;
+
+  if (labelRolls > 0) rows.push(
+{
+ label: "Label Rolls", value: fmtNum(Math.ceil(labelRolls), 0), sub: "rolls" 
+}
+)
+;
+
+  if (topLabelRolls > 0) rows.push(
+{
+ label: "Label Rolls — Top", value: fmtNum(Math.ceil(topLabelRolls), 0), sub: "rolls" 
+}
+)
+;
+
+  if (bottomLabelRolls > 0) rows.push(
+{
+ label: "Label Rolls — Bottom", value: fmtNum(Math.ceil(bottomLabelRolls), 0), sub: "rolls" 
+}
+)
+;
+
+  return rows
+;
+
+}
+
+
+function StatRow(
+{
+
   label,
   value,
   testId,
   highlight,
   sub,
-}: {
-  label: string;
-  value: string;
-  testId?: string;
-  highlight?: boolean;
-  sub?: string;
-}) {
+}
+: 
+{
+
+  label: string
+;
+
+  value: string
+;
+
+  testId?: string
+;
+
+  highlight?: boolean
+;
+
+  sub?: string
+;
+
+}
+) 
+{
+
   return (
     <div
-      className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
-    >
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <div className="flex flex-col items-end gap-0.5">
-        <span
-          className={`font-mono font-semibold text-sm tabular-nums ${highlight ? "text-primary text-base" : "text-foreground"}`}
-          data-testid={testId}
-        >
-          {value}
-        </span>
-        {sub && (
-          <span className="text-xs text-muted-foreground font-normal leading-tight">
-            {sub}
-          </span>
-        )}
-      </div>
-    </div>
-  );
+      className=
+{
+`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`
 }
 
-export function IngredientSelect({
+    >
+      <span className="text-sm text-muted-foreground">
+{
+label
+}
+</span>
+      <div className="flex flex-col items-end gap-0.5">
+        <span
+          className=
+{
+`font-mono font-semibold text-sm tabular-nums ${highlight ? "text-primary text-base" : "text-foreground"}`
+}
+
+          data-testid=
+{
+testId
+}
+
+        >
+          
+{
+value
+}
+
+        </span>
+        
+{
+sub && (
+          <span className="text-xs text-muted-foreground font-normal leading-tight">
+            
+{
+sub
+}
+
+          </span>
+        )
+}
+
+      </div>
+    </div>
+  )
+;
+
+}
+
+
+export function IngredientSelect(
+{
+
   value,
   onChange,
   options,
@@ -996,139 +2366,404 @@ export function IngredientSelect({
   onRemoveOption,
   placeholder,
   optionLabels,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption?: (v: string) => void;
-  onRemoveOption?: (v: string) => void;
-  placeholder?: string;
+}
+: 
+{
+
+  value: string
+;
+
+  onChange: (v: string) => void
+;
+
+  options: string[]
+;
+
+  onAddOption?: (v: string) => void
+;
+
+  onRemoveOption?: (v: string) => void
+;
+
+  placeholder?: string
+;
+
   // Optional display label per option value (e.g. brand tags for colliding
   // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
-  optionLabels?: ReadonlyMap<string, string>;
-}) {
-  const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
-  const [open, setOpen] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [dropUp, setDropUp] = useState(false);
-  const [rect, setRect] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
-  const confirmDeleteRef = useRef<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const scrollKeep = useDropdownScrollKeeper(open);
+  optionLabels?: ReadonlyMap<string, string>
+;
+
+}
+) 
+{
+
+  const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt
+;
+
+  const [open, setOpen] = useState(false)
+;
+
+  const [inputVal, setInputVal] = useState("")
+;
+
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+;
+
+  const [dropUp, setDropUp] = useState(false)
+;
+
+  const [rect, setRect] = useState<
+{
+ top: number
+;
+ bottom: number
+;
+ left: number
+;
+ width: number 
+}
+ | null>(null)
+;
+
+  const confirmDeleteRef = useRef<string | null>(null)
+;
+
+  const triggerRef = useRef<HTMLButtonElement>(null)
+;
+
+  const scrollKeep = useDropdownScrollKeeper(open)
+;
+
   const filtered = (options ?? []).filter(o =>
     labelOf(o).toLowerCase().includes(inputVal.toLowerCase())
-  );
+  )
+;
 
-  function openDropdown() {
-    setInputVal("");
-    setConfirmDelete(null);
-    confirmDeleteRef.current = null;
-    if (triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const dropdownH = Math.min(filtered.length * 32 + 80, 280);
-      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
-      setRect({ top: r.top, bottom: r.bottom, left: r.left, width: r.width });
-    }
-    setOpen(true);
-  }
+
+  function openDropdown() 
+{
+
+    setInputVal("")
+;
+
+    setConfirmDelete(null)
+;
+
+    confirmDeleteRef.current = null
+;
+
+    if (triggerRef.current) 
+{
+
+      const r = triggerRef.current.getBoundingClientRect()
+;
+
+      const spaceBelow = window.innerHeight - r.bottom
+;
+
+      const dropdownH = Math.min(filtered.length * 32 + 80, 280)
+;
+
+      setDropUp(spaceBelow < dropdownH && r.top > dropdownH)
+;
+
+      setRect(
+{
+ top: r.top, bottom: r.bottom, left: r.left, width: r.width 
+}
+)
+;
+
+    
+}
+
+    setOpen(true)
+;
+
+  
+}
+
 
   const dropStyle: React.CSSProperties = rect
-    ? {
+    ? 
+{
+
         position: "fixed",
         left: Math.max(4, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 192) - 8)),
         width: Math.max(rect.width, 192),
         zIndex: 9999,
         ...(dropUp
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
-      }
-    : {};
+          ? 
+{
+ bottom: window.innerHeight - rect.top + 4 
+}
+
+          : 
+{
+ top: rect.bottom + 4 
+}
+),
+      
+}
+
+    : 
+{
+}
+;
+
 
   return (
     <div className="relative w-full">
       <button
-        ref={triggerRef}
+        ref=
+{
+triggerRef
+}
+
         type="button"
-        onClick={openDropdown}
+        onClick=
+{
+openDropdown
+}
+
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
-        <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
-          {(value && labelOf(value)) || placeholder || "Select…"}
+        <span className=
+{
+`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`
+}
+>
+          
+{
+(value && labelOf(value)) || placeholder || "Select…"
+}
+
         </span>
         <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
       </button>
-      {open && (
+      
+{
+open && (
         <div
-          style={dropStyle}
+          style=
+{
+dropStyle
+}
+
           className="bg-popover border border-border rounded-md shadow-xl py-1"
         >
           <input
             autoFocus
-            value={inputVal}
-            onChange={e => setInputVal(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" && inputVal.trim() && onAddOption) {
-                onAddOption(inputVal.trim());
-                onChange(inputVal.trim());
-                setOpen(false);
-              }
-              if (e.key === "Escape") setOpen(false);
-            }}
-            onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
+            value=
+{
+inputVal
+}
+
+            onChange=
+{
+e => setInputVal(e.target.value)
+}
+
+            onKeyDown=
+{
+e => 
+{
+
+              if (e.key === "Enter" && inputVal.trim() && onAddOption) 
+{
+
+                onAddOption(inputVal.trim())
+;
+
+                onChange(inputVal.trim())
+;
+
+                setOpen(false)
+;
+
+              
+}
+
+              if (e.key === "Escape") setOpen(false)
+;
+
+            
+}
+}
+
+            onBlur=
+{
+() => setTimeout(() => 
+{
+ if (!confirmDeleteRef.current) setOpen(false)
+;
+ 
+}
+, 150)
+}
+
             placeholder="Search or add…"
             className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
           />
-          <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-60 overflow-y-auto overscroll-contain">
-            {filtered.map(opt =>
+          <div ref=
+{
+scrollKeep.listRef
+}
+ onScroll=
+{
+scrollKeep.onScroll
+}
+ className="max-h-60 overflow-y-auto overscroll-contain">
+            
+{
+filtered.map(opt =>
               confirmDelete === opt ? (
-                <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                <div key=
+{
+opt
+}
+ className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
                   <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
                   <span className="flex gap-1 shrink-0">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown=
+{
+() => 
+{
+ onRemoveOption?.(opt)
+;
+ confirmDeleteRef.current = null
+;
+ setConfirmDelete(null)
+;
+ setOpen(false)
+;
+ 
+}
+}
+>Yes</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown=
+{
+() => 
+{
+ confirmDeleteRef.current = null
+;
+ setConfirmDelete(null)
+;
+ 
+}
+}
+>No</button>
                   </span>
                 </div>
               ) : (
-                <div key={opt} className="flex items-center">
+                <div key=
+{
+opt
+}
+ className="flex items-center">
                   <button
                     type="button"
-                    className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                    onMouseDown={() => { onChange(opt); setOpen(false); }}
+                    className=
+{
+`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`
+}
+
+                    onMouseDown=
+{
+() => 
+{
+ onChange(opt)
+;
+ setOpen(false)
+;
+ 
+}
+}
+
                   >
-                    {labelOf(opt)}
+                    
+{
+labelOf(opt)
+}
+
                   </button>
-                  {onRemoveOption && (
+                  
+{
+onRemoveOption && (
                     <button
                       type="button"
-                      tabIndex={-1}
+                      tabIndex=
+{
+-1
+}
+
                       className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
+                      onMouseDown=
+{
+e => 
+{
+ e.stopPropagation()
+;
+ confirmDeleteRef.current = opt
+;
+ setConfirmDelete(opt)
+;
+ 
+}
+}
+
                     >
                       <X className="w-3 h-3" />
                     </button>
-                  )}
+                  )
+}
+
                 </div>
               )
-            )}
-            {inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && onAddOption && (
+            )
+}
+
+            
+{
+inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && onAddOption && (
               <button
                 type="button"
                 className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
+                onMouseDown=
+{
+() => 
+{
+ onAddOption(inputVal.trim())
+;
+ onChange(inputVal.trim())
+;
+ setOpen(false)
+;
+ 
+}
+}
+
               >
                 <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
               </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+            )
 }
 
-function CheeseRecipeCard({
+          </div>
+        </div>
+      )
+}
+
+    </div>
+  )
+;
+
+}
+
+
+function CheeseRecipeCard(
+{
+
   label,
   batches,
   fields,
@@ -1147,38 +2782,112 @@ function CheeseRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
-}: {
-  label: string;
-  batches: number;
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  fieldPrefix: string;
-  recipeName: string;
-  recipeNameOptions: string[];
-  register: any;
-  ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  onAddRecipeName: (v: string) => void;
-  onRemoveRecipeName: (v: string) => void;
-  onRecipeNameChange: (v: string) => void;
-  embedded?: boolean;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+}
+: 
+{
+
+  label: string
+;
+
+  batches: number
+;
+
+  fields: 
+{
+ id: string 
+}
+[]
+;
+
+  recipe: RecipeRow[]
+;
+
+  fieldPrefix: string
+;
+
+  recipeName: string
+;
+
+  recipeNameOptions: string[]
+;
+
+  register: any
+;
+
+  ingredientOptions: string[]
+;
+
+  onAddIngredient: (v: string) => void
+;
+
+  onRemoveIngredient: (v: string) => void
+;
+
+  onSetIngredient: (idx: number, val: string) => void
+;
+
+  onAppend: () => void
+;
+
+  onRemove: (idx: number) => void
+;
+
+  onAddRecipeName: (v: string) => void
+;
+
+  onRemoveRecipeName: (v: string) => void
+;
+
+  onRecipeNameChange: (v: string) => void
+;
+
+  embedded?: boolean
+;
+
+}
+) 
+{
+
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0)
+;
+
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null)
+;
+
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect value=
+{
+recipeName
+}
+ onChange=
+{
+onRecipeNameChange
+}
+ options=
+{
+recipeNameOptions
+}
+ onAddOption=
+{
+onAddRecipeName
+}
+ onRemoveOption=
+{
+onRemoveRecipeName
+}
+ placeholder="Recipe name…" />
     </div>
-  );
+  )
+;
+
 
   const body = (
     <>
-      {fields.length === 0 ? (
+      
+{
+fields.length === 0 ? (
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the blend.</p>
       ) : (
         <div className="w-full mb-3">
@@ -1189,69 +2898,225 @@ function CheeseRecipeCard({
             <span />
           </div>
           <div className="space-y-1.5">
-            {fields.map((field, idx) => {
-              const rowLbs = Number(recipe[idx]?.lbs ?? 0);
+            
+{
+fields.map((field, idx) => 
+{
+
+              const rowLbs = Number(recipe[idx]?.lbs ?? 0)
+;
+
               return (
-                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`}>
-                  <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs * Math.max(1, batches), 1)}</div>
-                  {confirmIdx === idx ? (
+                <div key=
+{
+field.id
+}
+ className=
+{
+`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`
+}
+>
+                  <IngredientSelect value=
+{
+recipe[idx]?.ingredient ?? ""
+}
+ onChange=
+{
+val => onSetIngredient(idx, val)
+}
+ options=
+{
+ingredientOptions
+}
+ onAddOption=
+{
+onAddIngredient
+}
+ onRemoveOption=
+{
+onRemoveIngredient
+}
+ />
+                  <input 
+{
+...register(`${fieldPrefix}.${idx}.lbs`, 
+{
+ valueAsNumber: true 
+}
+)
+}
+ type="number" min="0" step="0.1" placeholder="0" onFocus=
+{
+e => e.target.select()
+}
+ className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+{
+fmtNum(rowLbs * Math.max(1, batches), 1)
+}
+</div>
+                  
+{
+confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick=
+{
+() => 
+{
+ onRemove(idx)
+;
+ setConfirmIdx(null)
+;
+ 
+}
+}
+>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick=
+{
+() => setConfirmIdx(null)
+}
+>No</button>
                     </div>
                   ) : (
-                    <button type="button" onClick={() => setConfirmIdx(idx)} className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                  )}
+                    <button type="button" onClick=
+{
+() => setConfirmIdx(idx)
+}
+ className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )
+}
+
                 </div>
-              );
-            })}
+              )
+;
+
+            
+}
+)
+}
+
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)} lbs</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">
+{
+fmtNum(totalLbsPerBatch, 1)
+}
+ lbs</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">
+{
+fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)
+}
+ lbs</span>
             <span />
           </div>
         </div>
-      )}
-      <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
+      )
+}
+
+      <button type="button" onClick=
+{
+onAppend
+}
+ className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
         <Plus className="w-3.5 h-3.5" /> Add Ingredient
       </button>
     </>
-  );
+  )
+;
 
-  if (embedded) {
+
+  if (embedded) 
+{
+
     return (
       <>
         <Separator className="my-3 opacity-30" />
         <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+{
+label
+}
+ — Cheese Blend</span>
+          
+{
+recipeSelector
+}
+
+          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">
+{
+batches > 0 ? fmtNum(batches, 2) : "—"
+}
+</span> batches</span>
+          <RecipeShareButtons recipe=
+{
+{
+ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
-        {body}
+        
+{
+body
+}
+
       </>
-    );
-  }
+    )
+;
+
+  
+}
+
 
   return (
     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+{
+label
+}
+ — Cheese Blend Recipe</CardTitle>
+          
+{
+recipeSelector
+}
+
+          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">
+{
+batches > 0 ? fmtNum(batches, 2) : "—"
+}
+</span> batches</span>
+          <RecipeShareButtons recipe=
+{
+{
+ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
       </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
+      <CardContent className="px-5 pb-5">
+{
+body
 }
+</CardContent>
+    </Card>
+  )
+;
+
+}
+
 
 // Pick-only cheese card for the run applicators. Cheese blends are now
 // factory-wide server master-data (managed on the Manage Lists → Cheese Recipes
@@ -1279,28 +3144,55 @@ export function CheesePickCard({
   batches: number;
   // The applicator's set Oz/Pizza for this blend. Drives the per-ingredient
   // "Oz / Pizza" column so its total lines up with what the operator entered.
-  ozPerPizza: number;
-  recipe: RecipeRow[];
+  ozPerPizza: number
+;
+
+  recipe: RecipeRow[]
+;
+
   // The picked recipe's components from the server cheese pool, when known.
   // Carries each ingredient's blend share (sharePct / ozPerPizza / lbs
   // priority — see @workspace/cheese-recipes), so the per-ingredient Oz/Pizza
   // column is target oz × share even when the hydrated rows only hold lbs.
-  poolComponents?: CheeseComponent[];
-  recipeName: string;
-  recipeNameOptions: string[];
-  shredderSetting: string;
-  cellulose: string;
-  onRecipeNameChange: (v: string) => void;
-  embedded?: boolean;
+  poolComponents?: CheeseComponent[]
+;
+
+  recipeName: string
+;
+
+  recipeNameOptions: string[]
+;
+
+  shredderSetting: string
+;
+
+  cellulose: string
+;
+
+  onRecipeNameChange: (v: string) => void
+;
+
+  embedded?: boolean
+;
+
   // True when a non-empty recipeName does NOT match any recipe in the server
   // cheese pool (e.g. a spec sheet referenced a blend name that was never
   // imported). Drives an inline "pick a real blend" warning instead of a
   // silent, confusing blank body.
-  recipeMissing?: boolean;
+  recipeMissing?: boolean
+;
+
   // Optional display label per recipe name (brand tags for colliding names).
-  optionLabels?: ReadonlyMap<string, string>;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  optionLabels?: ReadonlyMap<string, string>
+;
+
+}
+) 
+{
+
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0)
+;
+
   // Scale each component up to the pounds to pull/mix for this run, using the
   // run's existing batch count so these numbers can never drift from the batch
   // and total-lbs figures on the card. Shared with mobile via @workspace/inventory-math.
@@ -1309,7 +3201,9 @@ export function CheesePickCard({
   // across ingredients by each one's SHARE of the blend, so the column total
   // equals the operator's set Oz/Pizza. When the server pool recipe is known
   // its components drive the shares (explicit sharePct first, then ozPerPizza,
-  // then lbs proportions — @workspace/cheese-recipes); otherwise fall back to
+  // then lbs proportions — @workspace/cheese-recipes)
+;
+ otherwise fall back to
   // the hydrated rows' lbs proportions (@workspace/inventory-math).
   const namedPool = (poolComponents ?? []).filter(c => c.ingredient.trim());
   const perPizzaOz =
@@ -1348,23 +3242,51 @@ export function CheesePickCard({
             <span className="font-semibold text-amber-200">“{recipeName.trim()}”</span> isn't in Cheese Recipes — pick a blend above, or a manager can add it in Manage Lists.
           </span>
         </div>
-      )}
-      {(shredderSetting.trim() || cellulose.trim()) && (
+      )
+}
+
+      
+{
+(shredderSetting.trim() || cellulose.trim()) && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-muted-foreground">
-          {shredderSetting.trim() && (
-            <span>Shredder setting: <span className="font-mono text-foreground">{shredderSetting}</span></span>
-          )}
-          {cellulose.trim() && (
-            <span>Cellulose: <span className="font-mono text-foreground">{cellulose}</span></span>
-          )}
+          
+{
+shredderSetting.trim() && (
+            <span>Shredder setting: <span className="font-mono text-foreground">
+{
+shredderSetting
+}
+</span></span>
+          )
+}
+
+          
+{
+cellulose.trim() && (
+            <span>Cellulose: <span className="font-mono text-foreground">
+{
+cellulose
+}
+</span></span>
+          )
+}
+
         </div>
-      )}
-      {recipe.length === 0 ? (
+      )
+}
+
+      
+{
+recipe.length === 0 ? (
         showMissingWarning ? null : (
           <p className="text-xs text-muted-foreground mb-1">
-            {recipeName.trim()
+            
+{
+recipeName.trim()
               ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
-              : "Pick a cheese recipe above to load its ingredients. Managers add recipes under Manage Lists → Cheese Recipes."}
+              : "Pick a cheese recipe above to load its ingredients. Managers add recipes under Manage Lists → Cheese Recipes."
+}
+
           </p>
         )
       ) : (
@@ -1376,61 +3298,172 @@ export function CheesePickCard({
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Pull<span className="hidden sm:inline"> / Run</span></span>
           </div>
           <div className="space-y-1.5">
-            {recipe.map((row, idx) => {
-              const rowLbs = Number(row.lbs ?? 0);
+            
+{
+recipe.map((row, idx) => 
+{
+
+              const rowLbs = Number(row.lbs ?? 0)
+;
+
               return (
-                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 items-center">
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm flex items-center truncate text-foreground/90">{row.ingredient || "—"}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(perPizzaOz.rows[idx] ?? 0, 2)}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs, 1)}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(pull.rows[idx].lbs, 1)}</div>
+                <div key=
+{
+idx
+}
+ className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 items-center">
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm flex items-center truncate text-foreground/90">
+{
+row.ingredient || "—"
+}
+</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+{
+fmtNum(perPizzaOz.rows[idx] ?? 0, 2)
+}
+</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+{
+fmtNum(rowLbs, 1)
+}
+</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+{
+fmtNum(pull.rows[idx].lbs, 1)
+}
+</div>
                 </div>
-              );
-            })}
+              )
+;
+
+            
+}
+)
+}
+
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(perPizzaOz.totalOz, 2)} oz</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(pull.totalLbs, 1)} lbs</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">
+{
+fmtNum(perPizzaOz.totalOz, 2)
+}
+ oz</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">
+{
+fmtNum(totalLbsPerBatch, 1)
+}
+ lbs</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">
+{
+fmtNum(pull.totalLbs, 1)
+}
+ lbs</span>
           </div>
         </div>
-      )}
-    </>
-  );
+      )
+}
 
-  if (embedded) {
+    </>
+  )
+;
+
+
+  if (embedded) 
+{
+
     return (
       <>
         <Separator className="my-3 opacity-30" />
         <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+{
+label
+}
+ — Cheese Blend</span>
+          
+{
+recipeSelector
+}
+
+          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">
+{
+batches > 0 ? fmtNum(batches, 2) : "—"
+}
+</span> batches</span>
+          <RecipeShareButtons recipe=
+{
+{
+ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
-        {body}
+        
+{
+body
+}
+
       </>
-    );
-  }
+    )
+;
+
+  
+}
+
 
   return (
     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
-          {recipeSelector}
-          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+{
+label
+}
+ — Cheese Blend Recipe</CardTitle>
+          
+{
+recipeSelector
 }
 
-export function MixRecipeCard({
+          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">
+{
+batches > 0 ? fmtNum(batches, 2) : "—"
+}
+</span> batches</span>
+          <RecipeShareButtons recipe=
+{
+{
+ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+{
+body
+}
+</CardContent>
+    </Card>
+  )
+;
+
+}
+
+
+export function MixRecipeCard(
+{
+
   label,
   totalRunLbs,
   fields,
@@ -1450,41 +3483,125 @@ export function MixRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   recipeNameLabels,
-}: {
-  label: string;
-  totalRunLbs: number;
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  fieldPrefix: string;
-  register: any;
-  ingredientOptions: string[];
-  onAddIngredient?: (v: string) => void;
-  onRemoveIngredient?: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  embedded?: boolean;
-  recipeName?: string;
-  recipeNameOptions?: string[];
-  onAddRecipeName?: (v: string) => void;
-  onRemoveRecipeName?: (v: string) => void;
-  onRecipeNameChange?: (v: string) => void;
+}
+: 
+{
+
+  label: string
+;
+
+  totalRunLbs: number
+;
+
+  fields: 
+{
+ id: string 
+}
+[]
+;
+
+  recipe: RecipeRow[]
+;
+
+  fieldPrefix: string
+;
+
+  register: any
+;
+
+  ingredientOptions: string[]
+;
+
+  onAddIngredient?: (v: string) => void
+;
+
+  onRemoveIngredient?: (v: string) => void
+;
+
+  onSetIngredient: (idx: number, val: string) => void
+;
+
+  onAppend: () => void
+;
+
+  onRemove: (idx: number) => void
+;
+
+  embedded?: boolean
+;
+
+  recipeName?: string
+;
+
+  recipeNameOptions?: string[]
+;
+
+  onAddRecipeName?: (v: string) => void
+;
+
+  onRemoveRecipeName?: (v: string) => void
+;
+
+  onRecipeNameChange?: (v: string) => void
+;
+
   // Optional display label per recipe name (brand tags for colliding names).
-  recipeNameLabels?: ReadonlyMap<string, string>;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+  recipeNameLabels?: ReadonlyMap<string, string>
+;
+
+}
+) 
+{
+
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0)
+;
+
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null)
+;
+
   const rowTotal = (rowLbs: number) =>
-    totalLbsPerBatch > 0 ? (rowLbs / totalLbsPerBatch) * totalRunLbs : 0;
+    totalLbsPerBatch > 0 ? (rowLbs / totalLbsPerBatch) * totalRunLbs : 0
+;
+
 
   const body = (
     <>
-      {recipeNameOptions && onRecipeNameChange && (
+      
+{
+recipeNameOptions && onRecipeNameChange && (
         <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
+          <IngredientSelect value=
+{
+recipeName ?? ""
+}
+ onChange=
+{
+onRecipeNameChange
+}
+ options=
+{
+recipeNameOptions
+}
+ onAddOption=
+{
+onAddRecipeName
+}
+ onRemoveOption=
+{
+onRemoveRecipeName
+}
+ placeholder="Recipe name…" optionLabels=
+{
+recipeNameLabels
+}
+ />
         </div>
-      )}
-      {fields.length === 0 ? (
+      )
+}
+
+      
+{
+fields.length === 0 ? (
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the mix.</p>
       ) : (
         <div className="w-full mb-3">
@@ -1495,69 +3612,219 @@ export function MixRecipeCard({
             <span />
           </div>
           <div className="space-y-1.5">
-            {fields.map((field, idx) => {
-              const rowLbs = Number(recipe[idx]?.lbs ?? 0);
+            
+{
+fields.map((field, idx) => 
+{
+
+              const rowLbs = Number(recipe[idx]?.lbs ?? 0)
+;
+
               return (
-                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`}>
-                  <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowTotal(rowLbs), 1)}</div>
-                  {confirmIdx === idx ? (
+                <div key=
+{
+field.id
+}
+ className=
+{
+`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`
+}
+>
+                  <IngredientSelect value=
+{
+recipe[idx]?.ingredient ?? ""
+}
+ onChange=
+{
+val => onSetIngredient(idx, val)
+}
+ options=
+{
+ingredientOptions
+}
+ onAddOption=
+{
+onAddIngredient
+}
+ onRemoveOption=
+{
+onRemoveIngredient
+}
+ />
+                  <input 
+{
+...register(`${fieldPrefix}.${idx}.lbs`, 
+{
+ valueAsNumber: true 
+}
+)
+}
+ type="number" min="0" step="0.1" placeholder="0" onFocus=
+{
+e => e.target.select()
+}
+ className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+{
+fmtNum(rowTotal(rowLbs), 1)
+}
+</div>
+                  
+{
+confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick=
+{
+() => 
+{
+ onRemove(idx)
+;
+ setConfirmIdx(null)
+;
+ 
+}
+}
+>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick=
+{
+() => setConfirmIdx(null)
+}
+>No</button>
                     </div>
                   ) : (
-                    <button type="button" onClick={() => setConfirmIdx(idx)} className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                  )}
+                    <button type="button" onClick=
+{
+() => setConfirmIdx(idx)
+}
+ className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )
+}
+
                 </div>
-              );
-            })}
+              )
+;
+
+            
+}
+)
+}
+
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 2)} oz</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalRunLbs, 1)} lbs</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">
+{
+fmtNum(totalLbsPerBatch, 2)
+}
+ oz</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">
+{
+fmtNum(totalRunLbs, 1)
+}
+ lbs</span>
             <span />
           </div>
         </div>
-      )}
-      <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
+      )
+}
+
+      <button type="button" onClick=
+{
+onAppend
+}
+ className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
         <Plus className="w-3.5 h-3.5" /> Add Ingredient
       </button>
     </>
-  );
+  )
+;
 
-  if (embedded) {
+
+  if (embedded) 
+{
+
     return (
       <>
         <Separator className="my-3 opacity-30" />
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label} — Mix Recipe</span>
-          <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+{
+label
+}
+ — Mix Recipe</span>
+          <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">
+{
+fmtNum(totalRunLbs, 1)
+}
+</span> lbs needed</span>
+          <RecipeShareButtons recipe=
+{
+{
+ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
-        {body}
+        
+{
+body
+}
+
       </>
-    );
-  }
+    )
+;
+
+  
+}
+
 
   return (
     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-purple-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{label} — Mix Recipe</CardTitle>
-          <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+{
+label
+}
+ — Mix Recipe</CardTitle>
+          <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">
+{
+fmtNum(totalRunLbs, 1)
+}
+</span> lbs needed</span>
+          <RecipeShareButtons recipe=
+{
+{
+ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
       </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
+      <CardContent className="px-5 pb-5">
+{
+body
+}
+</CardContent>
     </Card>
-  );
+  )
+;
+
 }
 
-export function DoughRecipeCard({
+
+export function DoughRecipeCard(
+{
+
   batchesNeeded,
   fields,
   recipe,
@@ -1576,34 +3843,92 @@ export function DoughRecipeCard({
   onAddRecipeName,
   onRemoveRecipeName,
   onRecipeNameChange,
-}: {
-  batchesNeeded: number;
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  register: any;
-  targetWeight: number;
-  doughBatchYield: number;
-  ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  onTargetWeightChange: (v: number) => void;
-  recipeName: string;
-  recipeNameOptions: string[];
-  onAddRecipeName: (v: string) => void;
-  onRemoveRecipeName: (v: string) => void;
-  onRecipeNameChange: (v: string) => void;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+}
+: 
+{
+
+  batchesNeeded: number
+;
+
+  fields: 
+{
+ id: string 
+}
+[]
+;
+
+  recipe: RecipeRow[]
+;
+
+  register: any
+;
+
+  targetWeight: number
+;
+
+  doughBatchYield: number
+;
+
+  ingredientOptions: string[]
+;
+
+  onAddIngredient: (v: string) => void
+;
+
+  onRemoveIngredient: (v: string) => void
+;
+
+  onSetIngredient: (idx: number, val: string) => void
+;
+
+  onAppend: () => void
+;
+
+  onRemove: (idx: number) => void
+;
+
+  onTargetWeightChange: (v: number) => void
+;
+
+  recipeName: string
+;
+
+  recipeNameOptions: string[]
+;
+
+  onAddRecipeName: (v: string) => void
+;
+
+  onRemoveRecipeName: (v: string) => void
+;
+
+  onRecipeNameChange: (v: string) => void
+;
+
+}
+) 
+{
+
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0)
+;
+
+  const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded)
+;
+
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null)
+;
+
   // Recipe yield: how many doughballs does the batch make at the target weight?
-  const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0;
+  const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0
+;
+
   // Run yield: what the line actually produced (from doughBatchYield field)
-  const runYield = Number(doughBatchYield);
-  const yieldDiff = runYield - recipeYield;
+  const runYield = Number(doughBatchYield)
+;
+
+  const yieldDiff = runYield - recipeYield
+;
+
 
   return (
     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
@@ -1615,23 +3940,65 @@ export function DoughRecipeCard({
           </CardTitle>
           <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
             <IngredientSelect
-              value={recipeName}
-              onChange={onRecipeNameChange}
-              options={recipeNameOptions}
-              onAddOption={onAddRecipeName}
-              onRemoveOption={onRemoveRecipeName}
+              value=
+{
+recipeName
+}
+
+              onChange=
+{
+onRecipeNameChange
+}
+
+              options=
+{
+recipeNameOptions
+}
+
+              onAddOption=
+{
+onAddRecipeName
+}
+
+              onRemoveOption=
+{
+onRemoveRecipeName
+}
+
               placeholder="Recipe name…"
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
-            <span className="font-mono text-foreground">{batchesNeeded > 0 ? fmtNum(batchesNeeded, 2) : "—"}</span> batches needed
+            <span className="font-mono text-foreground">
+{
+batchesNeeded > 0 ? fmtNum(batchesNeeded, 2) : "—"
+}
+</span> batches needed
           </span>
-          <RecipeShareButtons recipe={{ title: "Dough Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <RecipeShareButtons recipe=
+{
+{
+ title: "Dough Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        {/* Target weight + yield comparison */}
-        <div className={`grid grid-cols-1 gap-3 mb-4 ${runYield > 0 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+        
+{
+/* Target weight + yield comparison */
+}
+
+        <div className=
+{
+`grid grid-cols-1 gap-3 mb-4 ${runYield > 0 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`
+}
+>
           <div className="p-3 rounded-lg bg-muted/30">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
               Target Weight (oz)
@@ -1640,9 +4007,21 @@ export function DoughRecipeCard({
               type="number"
               min="0"
               step="0.01"
-              value={targetWeight || ""}
-              onChange={e => onTargetWeightChange(Number(e.target.value))}
-              onFocus={e => e.target.select()}
+              value=
+{
+targetWeight || ""
+}
+
+              onChange=
+{
+e => onTargetWeightChange(Number(e.target.value))
+}
+
+              onFocus=
+{
+e => e.target.select()
+}
+
               placeholder="0.00"
               className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 w-full"
             />
@@ -1650,33 +4029,66 @@ export function DoughRecipeCard({
           <div className="p-3 rounded-lg bg-muted/30 text-center">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Recipe Yield</p>
             <p className="text-xl font-mono font-bold text-foreground">
-              {recipeYield > 0 ? fmtNum(recipeYield, 1) : "—"}
+              
+{
+recipeYield > 0 ? fmtNum(recipeYield, 1) : "—"
+}
+
             </p>
             <p className="text-[10px] text-muted-foreground">doughballs / batch</p>
           </div>
-          {runYield > 0 && (
+          
+{
+runYield > 0 && (
             <div className="p-3 rounded-lg bg-muted/30 text-center">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Run Yield</p>
-              <p className={`text-xl font-mono font-bold ${
+              <p className=
+{
+`text-xl font-mono font-bold ${
                 recipeYield > 0
                   ? Math.abs(yieldDiff) < 0.5 ? "text-green-400"
                     : yieldDiff < 0 ? "text-red-400"
                     : "text-amber-400"
                   : "text-foreground"
-              }`}>
-                {fmtNum(runYield, 1)}
+              }`
+}
+>
+                
+{
+fmtNum(runYield, 1)
+}
+
               </p>
-              {recipeYield > 0 && (
+              
+{
+recipeYield > 0 && (
                 <p className="text-[10px] text-muted-foreground font-mono">
-                  {yieldDiff > 0 ? "+" : ""}{fmtNum(yieldDiff, 1)} vs recipe
+                  
+{
+yieldDiff > 0 ? "+" : ""
+}
+{
+fmtNum(yieldDiff, 1)
+}
+ vs recipe
                 </p>
-              )}
+              )
+}
+
             </div>
-          )}
+          )
+}
+
         </div>
 
-        {/* Ingredient rows */}
-        {fields.length === 0 ? (
+        
+{
+/* Ingredient rows */
+}
+
+        
+{
+fields.length === 0 ? (
           <p className="text-xs text-muted-foreground mb-3">
             No ingredients yet. Add rows to build the recipe.
           </p>
@@ -1688,63 +4100,145 @@ export function DoughRecipeCard({
               <span />
             </div>
             <div className="space-y-1.5">
-              {fields.map((field, idx) => (
-                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
+              
+{
+fields.map((field, idx) => (
+                <div key=
+{
+field.id
+}
+ className=
+{
+`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`
+}
+>
                   <IngredientSelect
-                    value={recipe[idx]?.ingredient ?? ""}
-                    onChange={val => onSetIngredient(idx, val)}
-                    options={ingredientOptions}
-                    onAddOption={onAddIngredient}
-                    onRemoveOption={onRemoveIngredient}
+                    value=
+{
+recipe[idx]?.ingredient ?? ""
+}
+
+                    onChange=
+{
+val => onSetIngredient(idx, val)
+}
+
+                    options=
+{
+ingredientOptions
+}
+
+                    onAddOption=
+{
+onAddIngredient
+}
+
+                    onRemoveOption=
+{
+onRemoveIngredient
+}
+
                   />
                   <input
-                    {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
+                    
+{
+...register(`doughRecipe.${idx}.lbs`, 
+{
+ valueAsNumber: true 
+}
+)
+}
+
                     type="number"
                     min="0"
                     step="0.1"
                     placeholder="0"
-                    onFocus={e => e.target.select()}
+                    onFocus=
+{
+e => e.target.select()
+}
+
                     className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                   />
-                  {confirmIdx === idx ? (
+                  
+{
+confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick=
+{
+() => 
+{
+ onRemove(idx)
+;
+ setConfirmIdx(null)
+;
+ 
+}
+}
+>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick=
+{
+() => setConfirmIdx(null)
+}
+>No</button>
                     </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setConfirmIdx(idx)}
+                      onClick=
+{
+() => setConfirmIdx(idx)
+}
+
                       className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  )
+}
+
                 </div>
-              ))}
+              ))
+}
+
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
               <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
-                {fmtNum(totalLbsPerBatch, 1)} lbs
+                
+{
+fmtNum(totalLbsPerBatch, 1)
+}
+ lbs
               </span>
               <span />
             </div>
           </div>
-        )}
+        )
+}
+
         <button
           type="button"
-          onClick={onAppend}
+          onClick=
+{
+onAppend
+}
+
           className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
         >
           <Plus className="w-3.5 h-3.5" /> Add Ingredient
         </button>
       </CardContent>
     </Card>
-  );
+  )
+;
+
 }
 
-export function FrontlineRecipeCard({
+
+export function FrontlineRecipeCard(
+{
+
   fields,
   recipe,
   register,
@@ -1760,35 +4254,103 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
-}: {
-  fields: { id: string }[];
-  recipe: RecipeRow[];
-  register: any;
-  ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
-  onSetIngredient: (idx: number, val: string) => void;
-  onAppend: () => void;
-  onRemove: (idx: number) => void;
-  recipeName: string;
-  recipeNameOptions: string[];
-  onAddRecipeName: (v: string) => void;
-  onRemoveRecipeName: (v: string) => void;
-  onRecipeNameChange: (v: string) => void;
-  embedded?: boolean;
-}) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+}
+: 
+{
+
+  fields: 
+{
+ id: string 
+}
+[]
+;
+
+  recipe: RecipeRow[]
+;
+
+  register: any
+;
+
+  ingredientOptions: string[]
+;
+
+  onAddIngredient: (v: string) => void
+;
+
+  onRemoveIngredient: (v: string) => void
+;
+
+  onSetIngredient: (idx: number, val: string) => void
+;
+
+  onAppend: () => void
+;
+
+  onRemove: (idx: number) => void
+;
+
+  recipeName: string
+;
+
+  recipeNameOptions: string[]
+;
+
+  onAddRecipeName: (v: string) => void
+;
+
+  onRemoveRecipeName: (v: string) => void
+;
+
+  onRecipeNameChange: (v: string) => void
+;
+
+  embedded?: boolean
+;
+
+}
+) 
+{
+
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0)
+;
+
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null)
+;
+
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect value=
+{
+recipeName
+}
+ onChange=
+{
+onRecipeNameChange
+}
+ options=
+{
+recipeNameOptions
+}
+ onAddOption=
+{
+onAddRecipeName
+}
+ onRemoveOption=
+{
+onRemoveRecipeName
+}
+ placeholder="Recipe name…" />
     </div>
-  );
+  )
+;
+
 
   const body = (
     <>
-      {fields.length === 0 ? (
+      
+{
+fields.length === 0 ? (
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the recipe.</p>
       ) : (
         <div className="w-full mb-3">
@@ -1798,47 +4360,150 @@ export function FrontlineRecipeCard({
             <span />
           </div>
           <div className="space-y-1.5">
-            {fields.map((field, idx) => (
-              <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
-                <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                <input {...register(`frontlineRecipe.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                {confirmIdx === idx ? (
+            
+{
+fields.map((field, idx) => (
+              <div key=
+{
+field.id
+}
+ className=
+{
+`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`
+}
+>
+                <IngredientSelect value=
+{
+recipe[idx]?.ingredient ?? ""
+}
+ onChange=
+{
+val => onSetIngredient(idx, val)
+}
+ options=
+{
+ingredientOptions
+}
+ onAddOption=
+{
+onAddIngredient
+}
+ onRemoveOption=
+{
+onRemoveIngredient
+}
+ />
+                <input 
+{
+...register(`frontlineRecipe.${idx}.lbs`, 
+{
+ valueAsNumber: true 
+}
+)
+}
+ type="number" min="0" step="0.1" placeholder="0" onFocus=
+{
+e => e.target.select()
+}
+ className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
+                
+{
+confirmIdx === idx ? (
                   <div className="flex items-center gap-1">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick=
+{
+() => 
+{
+ onRemove(idx)
+;
+ setConfirmIdx(null)
+;
+ 
+}
+}
+>Yes</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick=
+{
+() => setConfirmIdx(null)
+}
+>No</button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => setConfirmIdx(idx)} className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                )}
+                  <button type="button" onClick=
+{
+() => setConfirmIdx(idx)
+}
+ className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                )
+}
+
               </div>
-            ))}
+            ))
+}
+
           </div>
           <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">
+{
+fmtNum(totalLbsPerBatch, 1)
+}
+ lbs</span>
             <span />
           </div>
         </div>
-      )}
-      <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
+      )
+}
+
+      <button type="button" onClick=
+{
+onAppend
+}
+ className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
         <Plus className="w-3.5 h-3.5" /> Add Ingredient
       </button>
     </>
-  );
+  )
+;
 
-  if (embedded) {
+
+  if (embedded) 
+{
+
     return (
       <>
         <Separator className="my-3 opacity-30" />
         <div className="flex flex-wrap items-center gap-2 justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</span>
-          {recipeSelector}
-          <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          
+{
+recipeSelector
+}
+
+          <RecipeShareButtons recipe=
+{
+{
+ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
         </div>
-        {body}
+        
+{
+body
+}
+
       </>
-    );
-  }
+    )
+;
+
+  
+}
+
 
   return (
     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
@@ -1846,120 +4511,285 @@ export function FrontlineRecipeCard({
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</CardTitle>
-          {recipeSelector}
-          <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">{body}</CardContent>
-    </Card>
-  );
+          
+{
+recipeSelector
 }
 
-function ReadOnlyRecipeCard({
+          <RecipeShareButtons recipe=
+{
+{
+ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => (
+{
+ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) 
+}
+)) 
+}
+}
+ />
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+{
+body
+}
+</CardContent>
+    </Card>
+  )
+;
+
+}
+
+
+function ReadOnlyRecipeCard(
+{
+
   title,
   subtitle,
   recipe,
   accent,
   scalable = false,
-}: {
-  title: string;
-  subtitle?: string;
-  recipe: RecipeRow[];
-  accent: string;
-  scalable?: boolean;
-}) {
+}
+: 
+{
+
+  title: string
+;
+
+  subtitle?: string
+;
+
+  recipe: RecipeRow[]
+;
+
+  accent: string
+;
+
+  scalable?: boolean
+;
+
+}
+) 
+{
+
   const rows = (recipe ?? []).filter(
     r => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
-  );
-  const total = rows.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  )
+;
+
+  const total = rows.reduce((s, r) => s + Number(r.lbs ?? 0), 0)
+;
+
   // Batch-size scaler: shows the recipe weights at a different batch size.
-  // "4" is the base recipe (1×); other sizes scale the displayed weights.
-  const SCALE_OPTIONS: { label: string; value: number }[] = [
-    { label: "½", value: 0.5 },
-    { label: "4", value: 1 },
-    { label: "5", value: 1.25 },
-    { label: "6", value: 1.5 },
-  ];
-  const [scale, setScale] = useState(1);
+  // "4" is the base recipe (1×)
+;
+ other sizes scale the displayed weights.
+  const SCALE_OPTIONS: 
+{
+ label: string
+;
+ value: number 
+}
+[] = [
+    
+{
+ label: "½", value: 0.5 
+}
+,
+    
+{
+ label: "4", value: 1 
+}
+,
+    
+{
+ label: "5", value: 1.25 
+}
+,
+    
+{
+ label: "6", value: 1.5 
+}
+,
+  ]
+;
+
+  const [scale, setScale] = useState(1)
+;
+
   return (
     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
-      <div className={`h-1 ${accent} w-full`} />
+      <div className=
+{
+`h-1 ${accent} w-full`
+}
+ />
       <CardHeader className="pb-2 pt-4 px-5">
         <div className="flex items-center gap-2 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <ClipboardList className="w-4 h-4" /> {title}
+            <ClipboardList className="w-4 h-4" /> 
+{
+title
+}
+
           </CardTitle>
-          {subtitle ? (
-            <span className="text-xs text-muted-foreground font-mono truncate max-w-[55%] text-right">{subtitle}</span>
-          ) : null}
+          
+{
+subtitle ? (
+            <span className="text-xs text-muted-foreground font-mono truncate max-w-[55%] text-right">
+{
+subtitle
+}
+</span>
+          ) : null
+}
+
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        {rows.length === 0 ? (
+        
+{
+rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">No recipe configured. Add ingredients in Setup.</p>
         ) : (
           <div className="w-full">
-            {scalable && (
+            
+{
+scalable && (
               <div className="flex items-center flex-wrap gap-2 mb-3">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Batch Size</span>
                 <div className="flex gap-1 rounded-lg bg-muted/30 p-1">
-                  {SCALE_OPTIONS.map(opt => (
+                  
+{
+SCALE_OPTIONS.map(opt => (
                     <button
-                      key={opt.value}
+                      key=
+{
+opt.value
+}
+
                       type="button"
-                      onClick={() => setScale(opt.value)}
-                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                      onClick=
+{
+() => setScale(opt.value)
+}
+
+                      className=
+{
+`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
                         scale === opt.value
                           ? "bg-orange-500 text-white"
                           : "text-muted-foreground hover:bg-muted/50"
-                      }`}
+                      }`
+}
+
                     >
-                      {opt.label}
+                      
+{
+opt.label
+}
+
                     </button>
-                  ))}
+                  ))
+}
+
                 </div>
-                {scale !== 1 && (
+                
+{
+scale !== 1 && (
                   <span className="text-[10px] text-muted-foreground">
-                    ×{scale} — view only
+                    ×
+{
+scale
+}
+ — view only
                   </span>
-                )}
+                )
+}
+
               </div>
-            )}
+            )
+}
+
             <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mb-1 px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
             </div>
             <div className="space-y-0.5">
-              {rows.map((r, idx) => (
-                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 items-center py-1.5 px-1 rounded odd:bg-muted/20">
-                  <span className="text-sm text-foreground">{r.ingredient || "—"}</span>
-                  <span className="text-sm font-mono text-right text-foreground tabular-nums">{fmtNum(Number(r.lbs ?? 0) * scale, 1)}</span>
+              
+{
+rows.map((r, idx) => (
+                <div key=
+{
+idx
+}
+ className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 items-center py-1.5 px-1 rounded odd:bg-muted/20">
+                  <span className="text-sm text-foreground">
+{
+r.ingredient || "—"
+}
+</span>
+                  <span className="text-sm font-mono text-right text-foreground tabular-nums">
+{
+fmtNum(Number(r.lbs ?? 0) * scale, 1)
+}
+</span>
                 </div>
-              ))}
+              ))
+}
+
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
               <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
-              <span className="text-xs font-mono text-right font-semibold text-foreground tabular-nums">{fmtNum(total * scale, 1)} lbs</span>
+              <span className="text-xs font-mono text-right font-semibold text-foreground tabular-nums">
+{
+fmtNum(total * scale, 1)
+}
+ lbs</span>
             </div>
           </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+        )
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+      </CardContent>
+    </Card>
+  )
+;
+
+}
+
+
+function SectionLabel(
+{
+ children 
+}
+: 
+{
+ children: React.ReactNode 
+}
+) 
+{
+
   return (
     <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
-      {children}
-    </p>
-  );
+      
+{
+children
 }
+
+    </p>
+  )
+;
+
+}
+
 
 // useDropdownScrollKeeper lives in src/hooks/useDropdownScrollKeeper.ts
 // (moved out of home.tsx so Fast Refresh is not broken by a hook export)
 
-export function TypeDropdown({
+export function TypeDropdown(
+{
+
   label,
   value,
   onChange,
@@ -1967,191 +4797,534 @@ export function TypeDropdown({
   onAddOption,
   onRemoveOption,
   allowClear,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-  onAddOption: (v: string) => void;
-  onRemoveOption: (v: string) => void;
-  allowClear?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [inputVal, setInputVal] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [dropUp, setDropUp] = useState(false);
-  const [rect, setRect] = useState<{ top: number; bottom: number; right: number } | null>(null);
-  const confirmDeleteRef = useRef<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const scrollKeep = useDropdownScrollKeeper(open);
+}
+: 
+{
+
+  label: string
+;
+
+  value: string
+;
+
+  onChange: (v: string) => void
+;
+
+  options: string[]
+;
+
+  onAddOption: (v: string) => void
+;
+
+  onRemoveOption: (v: string) => void
+;
+
+  allowClear?: boolean
+;
+
+}
+) 
+{
+
+  const [open, setOpen] = useState(false)
+;
+
+  const [inputVal, setInputVal] = useState("")
+;
+
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+;
+
+  const [dropUp, setDropUp] = useState(false)
+;
+
+  const [rect, setRect] = useState<
+{
+ top: number
+;
+ bottom: number
+;
+ right: number 
+}
+ | null>(null)
+;
+
+  const confirmDeleteRef = useRef<string | null>(null)
+;
+
+  const triggerRef = useRef<HTMLButtonElement>(null)
+;
+
+  const scrollKeep = useDropdownScrollKeeper(open)
+;
+
   const filtered = options.filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
-  );
+  )
+;
 
-  const MENU_W = 176;
-  function openDropdown() {
-    setInputVal("");
-    setConfirmDelete(null);
-    confirmDeleteRef.current = null;
-    if (triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom;
-      const dropdownH = Math.min(filtered.length * 32 + 80, 240);
-      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
-      setRect({ top: r.top, bottom: r.bottom, right: r.right });
-    }
-    setOpen(true);
-  }
+
+  const MENU_W = 176
+;
+
+  function openDropdown() 
+{
+
+    setInputVal("")
+;
+
+    setConfirmDelete(null)
+;
+
+    confirmDeleteRef.current = null
+;
+
+    if (triggerRef.current) 
+{
+
+      const r = triggerRef.current.getBoundingClientRect()
+;
+
+      const spaceBelow = window.innerHeight - r.bottom
+;
+
+      const dropdownH = Math.min(filtered.length * 32 + 80, 240)
+;
+
+      setDropUp(spaceBelow < dropdownH && r.top > dropdownH)
+;
+
+      setRect(
+{
+ top: r.top, bottom: r.bottom, right: r.right 
+}
+)
+;
+
+    
+}
+
+    setOpen(true)
+;
+
+  
+}
+
 
   const dropStyle: React.CSSProperties = rect
-    ? {
+    ? 
+{
+
         position: "fixed",
         left: Math.max(4, Math.min(rect.right - MENU_W, window.innerWidth - MENU_W - 8)),
         width: MENU_W,
         zIndex: 9999,
         ...(dropUp
-          ? { bottom: window.innerHeight - rect.top + 4 }
-          : { top: rect.bottom + 4 }),
-      }
-    : {};
+          ? 
+{
+ bottom: window.innerHeight - rect.top + 4 
+}
+
+          : 
+{
+ top: rect.bottom + 4 
+}
+),
+      
+}
+
+    : 
+{
+}
+;
+
 
   return (
     <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        {label}
+        
+{
+label
+}
+
       </p>
       <div className="relative">
         <button
-          ref={triggerRef}
+          ref=
+{
+triggerRef
+}
+
           type="button"
-          onClick={openDropdown}
+          onClick=
+{
+openDropdown
+}
+
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
-          <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
-            {value || "Select…"}
+          <span className=
+{
+value ? "text-foreground" : "text-muted-foreground/50"
+}
+>
+            
+{
+value || "Select…"
+}
+
           </span>
           <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
         </button>
-        {open && (
+        
+{
+open && (
           <div
-            style={dropStyle}
+            style=
+{
+dropStyle
+}
+
             className="bg-popover border border-border rounded-md shadow-lg py-1"
           >
             <input
               autoFocus
-              value={inputVal}
-              onChange={e => setInputVal(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && inputVal.trim()) {
-                  onAddOption(inputVal.trim());
-                  onChange(inputVal.trim());
-                  setOpen(false);
-                }
-                if (e.key === "Escape") setOpen(false);
-              }}
-              onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
+              value=
+{
+inputVal
+}
+
+              onChange=
+{
+e => setInputVal(e.target.value)
+}
+
+              onKeyDown=
+{
+e => 
+{
+
+                if (e.key === "Enter" && inputVal.trim()) 
+{
+
+                  onAddOption(inputVal.trim())
+;
+
+                  onChange(inputVal.trim())
+;
+
+                  setOpen(false)
+;
+
+                
+}
+
+                if (e.key === "Escape") setOpen(false)
+;
+
+              
+}
+}
+
+              onBlur=
+{
+() => setTimeout(() => 
+{
+ if (!confirmDeleteRef.current) setOpen(false)
+;
+ 
+}
+, 150)
+}
+
               placeholder="Search or add…"
               className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
             />
-            <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-48 overflow-y-auto overscroll-contain">
-              {allowClear && value && (
+            <div ref=
+{
+scrollKeep.listRef
+}
+ onScroll=
+{
+scrollKeep.onScroll
+}
+ className="max-h-48 overflow-y-auto overscroll-contain">
+              
+{
+allowClear && value && (
                 <button
                   type="button"
                   className="w-full text-left px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors italic"
-                  onMouseDown={() => { onChange(""); setOpen(false); }}
+                  onMouseDown=
+{
+() => 
+{
+ onChange("")
+;
+ setOpen(false)
+;
+ 
+}
+}
+
                 >
                   — None
                 </button>
-              )}
-              {filtered.map(opt =>
+              )
+}
+
+              
+{
+filtered.map(opt =>
                 confirmDelete === opt ? (
-                  <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                  <div key=
+{
+opt
+}
+ className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
                     <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
                     <span className="flex gap-1 shrink-0">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown=
+{
+() => 
+{
+ onRemoveOption?.(opt)
+;
+ confirmDeleteRef.current = null
+;
+ setConfirmDelete(null)
+;
+ setOpen(false)
+;
+ 
+}
+}
+>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown=
+{
+() => 
+{
+ confirmDeleteRef.current = null
+;
+ setConfirmDelete(null)
+;
+ 
+}
+}
+>No</button>
                     </span>
                   </div>
                 ) : (
-                  <div key={opt} className="flex items-center">
+                  <div key=
+{
+opt
+}
+ className="flex items-center">
                     <button
                       type="button"
-                      className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                      onMouseDown={() => { onChange(opt); setOpen(false); }}
+                      className=
+{
+`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`
+}
+
+                      onMouseDown=
+{
+() => 
+{
+ onChange(opt)
+;
+ setOpen(false)
+;
+ 
+}
+}
+
                     >
-                      {opt}
+                      
+{
+opt
+}
+
                     </button>
                     <button
                       type="button"
-                      tabIndex={-1}
+                      tabIndex=
+{
+-1
+}
+
                       className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
+                      onMouseDown=
+{
+e => 
+{
+ e.stopPropagation()
+;
+ confirmDeleteRef.current = opt
+;
+ setConfirmDelete(opt)
+;
+ 
+}
+}
+
                     >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 )
-              )}
-              {inputVal.trim() && !options.includes(inputVal.trim()) && (
+              )
+}
+
+              
+{
+inputVal.trim() && !options.includes(inputVal.trim()) && (
                 <button
                   type="button"
                   className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                  onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
+                  onMouseDown=
+{
+() => 
+{
+ onAddOption(inputVal.trim())
+;
+ onChange(inputVal.trim())
+;
+ setOpen(false)
+;
+ 
+}
+}
+
                 >
                   <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
                 </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+              )
 }
 
-export function NumField({
+            </div>
+          </div>
+        )
+}
+
+      </div>
+    </div>
+  )
+;
+
+}
+
+
+export function NumField(
+{
+
   control,
   name,
   label,
   step,
   testId,
   disabled,
-}: {
-  control: any;
-  name: keyof FormValues;
-  label: string;
-  step?: string;
-  testId?: string;
-  disabled?: boolean;
-}) {
+}
+: 
+{
+
+  control: any
+;
+
+  name: keyof FormValues
+;
+
+  label: string
+;
+
+  step?: string
+;
+
+  testId?: string
+;
+
+  disabled?: boolean
+;
+
+}
+) 
+{
+
   return (
     <FormField
-      control={control}
-      name={name}
-      render={({ field }) => (
+      control=
+{
+control
+}
+
+      name=
+{
+name
+}
+
+      render=
+{
+(
+{
+ field 
+}
+) => (
         <FormItem>
-          <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
+          <FormLabel className="text-xs text-muted-foreground">
+{
+label
+}
+</FormLabel>
           <FormControl>
             <Input
               type="number"
               inputMode="decimal"
-              step={step ?? "any"}
+              step=
+{
+step ?? "any"
+}
+
               className="font-mono bg-background/50 h-9 text-sm"
-              data-testid={testId ?? `input-${name}`}
-              disabled={disabled}
-              {...field}
-              onChange={(e) =>
+              data-testid=
+{
+testId ?? `input-${name}`
+}
+
+              disabled=
+{
+disabled
+}
+
+              
+{
+...field
+}
+
+              onChange=
+{
+(e) =>
                 field.onChange(e.target.value === "" ? "" : Number(e.target.value))
-              }
-              onFocus={e => e.target.select()}
+              
+}
+
+              onFocus=
+{
+e => e.target.select()
+}
+
             />
           </FormControl>
           <FormMessage />
         </FormItem>
-      )}
-    />
-  );
+      )
 }
+
+    />
+  )
+;
+
+}
+
 
 // How long a manual stepper edit holds off auto-track writes. 1 minute is the
 // user's explicit preference on web (a manual entry is the new baseline and
@@ -2431,17 +5604,30 @@ function NotesTextarea({ initialValue, onCommit, className }: { initialValue: st
 
 // Format the sandbox "copied from live" ISO timestamp for the banner. Shows the
 // local date + time; falls back to the raw value if it can't be parsed.
-function fmtSandboxCopiedAt(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString([], {
+function fmtSandboxCopiedAt(iso: string): string 
+{
+
+  const d = new Date(iso)
+;
+
+  if (Number.isNaN(d.getTime())) return iso
+;
+
+  return d.toLocaleString([], 
+{
+
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-  });
+  
 }
+)
+;
+
+}
+
 
 // Merge a raw (possibly legacy) run-value record over DEFAULT_VALUES while
 // correctly resolving `pep1Combined`. A blind DEFAULT merge would wrongly
@@ -2449,15 +5635,35 @@ function fmtSandboxCopiedAt(iso: string): string {
 // so we must infer the flag from the RAW record before it is masked by the
 // default `true`. Use this for any raw payload/storage record (NOT for values
 // already read through loadRunValues, which normalizes on read).
-function mergeRunDefaults(raw: Partial<FormValues> | undefined): FormValues {
-  const rawHadFlag = typeof (raw as Record<string, unknown> | undefined)?.pep1Combined === "boolean";
-  const merged = { ...DEFAULT_VALUES, ...(raw ?? {}) } as FormValues;
-  resolvePep1Combined(merged as unknown as Record<string, unknown>, rawHadFlag);
+function mergeRunDefaults(raw: Partial<FormValues> | undefined): FormValues 
+{
+
+  const rawHadFlag = typeof (raw as Record<string, unknown> | undefined)?.pep1Combined === "boolean"
+;
+
+  const merged = 
+{
+ ...DEFAULT_VALUES, ...(raw ?? 
+{
+}
+) 
+}
+ as FormValues
+;
+
+  resolvePep1Combined(merged as unknown as Record<string, unknown>, rawHadFlag)
+;
+
   // Migrate legacy yes/no packaging values coming in from sync/imports/mobile so
   // the UI and roll-up gate see the new cartoned/labeled/n-a set consistently.
-  normalizePackagingFields(merged as unknown as Record<string, unknown>);
-  return merged;
+  normalizePackagingFields(merged as unknown as Record<string, unknown>)
+;
+
+  return merged
+;
+
 }
+
 
 // ── Manage Lists panels ─────────────────────────────────────────────────
 // MUST live at module scope. They were previously defined inline inside the
@@ -2600,15 +5806,39 @@ const ListPanel = ({
                           <p className="text-[11px] text-amber-600 dark:text-amber-400">
                             "{item}" → "{mergeIntoVal.trim()}" — this can't be undone.
                           </p>
-                        )}
-                      </div>
-                    )}
+                        )
+}
 
-                    {/* Remove — only for non-protected items */}
-                    {!isProt && (
+                      </div>
+                    )
+}
+
+
+{
+/* Remove — only for non-protected items */
+}
+
+                    
+{
+!isProt && (
                       <ConfirmDeleteButton
-                        onConfirm={() => { onRemove(item); setExpandedItem(null); }}
-                        title={`Remove "${item}"?`}
+                        onConfirm=
+{
+() => 
+{
+ onRemove(item)
+;
+ setExpandedItem(null)
+;
+ 
+}
+}
+
+                        title=
+{
+`Remove "${item}"?`
+}
+
                         description="This removes it from your saved list. You can undo master-data changes from Change History."
                         confirmLabel="Remove"
                       >
@@ -2617,38 +5847,94 @@ const ListPanel = ({
                           Remove
                         </button>
                       </ConfirmDeleteButton>
-                    )}
+                    )
+}
+
                   </div>
-                )}
+                )
+}
+
               </li>
-            );
-          })}
+            )
+;
+
+          
+}
+)
+}
+
         </ul>
-    }
+    
+}
+
   </div>
-  );
-};
+  )
+;
+
+}
+;
+
 
 // ── Ingredient Batch Weights panel ───────────────────────────────────────────
 // Module-scope so it keeps its local edit state across Home re-renders (the
 // run clock ticks every second and would otherwise wipe mid-edit values).
-const IngredientWeightsPanel = ({
+const IngredientWeightsPanel = (
+{
+
   items,
   learnedWeights,
   onSave,
-}: {
-  items: string[];
-  learnedWeights: Map<string, number>;
-  onSave: (entries: { name: string; lbs: number }[]) => void;
-}) => {
-  const [vals, setVals] = useState<Record<string, string>>(() => {
-    const m: Record<string, string> = {};
-    for (const n of items) {
-      const w = learnedWeights.get(n.trim().toLowerCase());
-      m[n] = w != null ? String(w) : "";
-    }
-    return m;
-  });
+}
+: 
+{
+
+  items: string[]
+;
+
+  learnedWeights: Map<string, number>
+;
+
+  onSave: (entries: 
+{
+ name: string
+;
+ lbs: number 
+}
+[]) => void
+;
+
+}
+) => 
+{
+
+  const [vals, setVals] = useState<Record<string, string>>(() => 
+{
+
+    const m: Record<string, string> = 
+{
+}
+;
+
+    for (const n of items) 
+{
+
+      const w = learnedWeights.get(n.trim().toLowerCase())
+;
+
+      m[n] = w != null ? String(w) : ""
+;
+
+    
+}
+
+    return m
+;
+
+  
+}
+)
+;
+
 
   // Re-sync when the external learned map updates (e.g. after a save completes
   // and the query cache refreshes). Only fills in values that the user hasn't
@@ -2807,73 +6093,163 @@ export default function Home() {
   // while a file picker was open (the preview frame can restart the app when
   // focus moves to the OS picker), tell the user what happened instead of
   // leaving them on a silently restarted screen with their file selection gone.
-  useEffect(() => {
-    const last = getLastActionBeforeLoad();
-    if (last && (last.includes("picker opening") || last.includes("file(s) selected"))) {
-      toast({
+  useEffect(() => 
+{
+
+    const last = getLastActionBeforeLoad()
+;
+
+    if (last && (last.includes("picker opening") || last.includes("file(s) selected"))) 
+{
+
+      toast(
+{
+
         title: "The screen restarted during your import",
         description:
           "Your place was saved, but the files you were picking were lost — please select them again. If this keeps happening, open the app in its own browser tab for big imports.",
-      });
-    }
+      
+}
+)
+;
+
+    
+}
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const autoSandboxResetRef = useRef(false);
-  useEffect(() => {
-    if (autoSandboxResetRef.current || !me) return;
-    autoSandboxResetRef.current = true;
-    if (!me.sandbox || !me.sandboxStale) return;
+  
+}
+, [])
+;
+
+  const autoSandboxResetRef = useRef(false)
+;
+
+  useEffect(() => 
+{
+
+    if (autoSandboxResetRef.current || !me) return
+;
+
+    autoSandboxResetRef.current = true
+;
+
+    if (!me.sandbox || !me.sandboxStale) return
+;
+
     resetSandboxRequest()
       .then(() => window.location.reload())
-      .catch(() => {
-        // Best-effort; if the re-copy fails we leave the stale data in place and
+      .catch(() => 
+{
+
+        // Best-effort
+;
+ if the re-copy fails we leave the stale data in place and
         // let the NEXT app load (or a manual reset) try again — never mid-session.
-      });
-  }, [me]);
-  const [dayState, setDayState] = useState<DayState>(() => loadDayState());
+      
+}
+)
+;
+
+  
+}
+, [me])
+;
+
+  const [dayState, setDayState] = useState<DayState>(() => loadDayState())
+;
+
   // Declared here (not with the other sync refs below) because render-time
   // callers — e.g. the mergeUniverse memo via collectMergeSurfaces() — run
   // before the sync-ref block and would hit a TDZ ReferenceError otherwise.
-  const dayStateRef = useRef(dayState);
+  const dayStateRef = useRef(dayState)
+;
+
   // Keep dayStateRef current
-  useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
+  useEffect(() => 
+{
+ dayStateRef.current = dayState
+;
+ 
+}
+, [dayState])
+;
+
   // One identity adapter feeds autosave, packaging progress, rollover, and
   // station composition. It does not own selection or persistence.
-  const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
+  const 
+{
+ currentRun, currentRunId, currentRunIdRef 
+}
+ = useHomeRunIdentity(dayState)
+;
+
   const persistManualPackagingProgress = useCallback((
     runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
     manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
-  ) => {
-    const now = Date.now();
-    recordManualPackagingProgress({
+  ) => 
+{
+
+    const now = Date.now()
+;
+
+    recordManualPackagingProgress(
+{
+
       runId,
       skidsCompleted,
       casesOnCurrentSkid,
       manualOverrideUntil,
       now,
-    });
-    markRunValuesUpdated(runId, now);
-    lastLocalEditRef.current = now;
-    if (runId === currentRunIdRef.current) {
+    
+}
+)
+;
+
+    markRunValuesUpdated(runId, now)
+;
+
+    lastLocalEditRef.current = now
+;
+
+    if (runId === currentRunIdRef.current) 
+{
+
       autoSuppressUntilRef.current = Math.max(
         autoSuppressUntilRef.current,
         manualOverrideUntil,
-      );
-    }
-  }, []);
+      )
+;
+
+    
+}
+
+  
+}
+, [])
+;
+
   const persistAutomaticPackagingProgress = useCallback((
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ): boolean => (
-    recordAutomaticPackagingProgress({
+    recordAutomaticPackagingProgress(
+{
+
       runId: currentRunIdRef.current,
       skidsCompleted,
       casesOnCurrentSkid,
-    }) !== null
-  ), []);
-  useEffect(() => {
+    
+}
+) !== null
+  ), [])
+;
+
+  useEffect(() => 
+{
+
     // A correction may arrive while this device is viewing another run. Adopt
     // that run's shared deadline when the operator later switches to it, rather
     // than letting auto-track fire from a stale per-screen suppression ref.
@@ -2933,54 +6309,148 @@ export default function Home() {
   });
   // HMR-safe heal: dedup the live React state on every mount so duplicates that
   // survived across a hot-swap (useState doesn't re-run on HMR) are removed.
-  useEffect(() => {
-    setBrands(prev => {
-      const seen = new Map<string, string>();
-      for (const b of prev) { const k = b.trim().toLowerCase(); if (!seen.has(k)) seen.set(k, b.trim()); }
-      const deduped = [...seen.values()].sort((a, b) => a.localeCompare(b));
-      if (deduped.length === prev.length && deduped.every((v, i) => v === prev[i])) return prev;
-      saveList(BRANDS_KEY, deduped);
-      return deduped;
-    });
+  useEffect(() => 
+{
+
+    setBrands(prev => 
+{
+
+      const seen = new Map<string, string>()
+;
+
+      for (const b of prev) 
+{
+ const k = b.trim().toLowerCase()
+;
+ if (!seen.has(k)) seen.set(k, b.trim())
+;
+ 
+}
+
+      const deduped = [...seen.values()].sort((a, b) => a.localeCompare(b))
+;
+
+      if (deduped.length === prev.length && deduped.every((v, i) => v === prev[i])) return prev
+;
+
+      saveList(BRANDS_KEY, deduped)
+;
+
+      return deduped
+;
+
+    
+}
+)
+;
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
+  
+}
+, [])
+;
+
+  const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors)
+;
+
   // Custom allergens (beyond the built-in egg/soy) currently assigned to any
   // saved brand/flavor profile — e.g. a NEW allergen a spec-sheet import wrote.
   // Feeding these into the allergen pickers keeps them selectable/re-selectable
   // instead of vanishing after a run is switched away from them.
-  const customAllergens = useMemo(() => {
-    const set = new Set<string>();
-    for (const [brand, flavors] of Object.entries(brandFlavors)) {
-      for (const flavor of flavors) {
-        const a = normalizeAllergen(loadProfile(brand, flavor)?.allergen);
-        if (a !== "none") set.add(a);
-      }
-    }
-    return [...set];
-  }, [brandFlavors]);
+  const customAllergens = useMemo(() => 
+{
+
+    const set = new Set<string>()
+;
+
+    for (const [brand, flavors] of Object.entries(brandFlavors)) 
+{
+
+      for (const flavor of flavors) 
+{
+
+        const a = normalizeAllergen(loadProfile(brand, flavor)?.allergen)
+;
+
+        if (a !== "none") set.add(a)
+;
+
+      
+}
+
+    
+}
+
+    return [...set]
+;
+
+  
+}
+, [brandFlavors])
+;
+
   // Standalone Setup Profiles editor: lets a manager/supervisor pick any
   // brand/flavor and edit its saved setup directly, without touching the
   // current run. Independent of dayState/currentRun.
-  const [setupEditorOpen, setSetupEditorOpen] = useState(false);
-  const [setupEditorBrand, setSetupEditorBrand] = useState<string | undefined>(undefined);
-  const [setupEditorFlavor, setSetupEditorFlavor] = useState<string | undefined>(undefined);
-  function openSetupEditor(brand?: string, flavor?: string) {
-    setSetupEditorBrand(brand);
-    setSetupEditorFlavor(flavor);
-    setSetupEditorOpen(true);
-  }
+  const [setupEditorOpen, setSetupEditorOpen] = useState(false)
+;
+
+  const [setupEditorBrand, setSetupEditorBrand] = useState<string | undefined>(undefined)
+;
+
+  const [setupEditorFlavor, setSetupEditorFlavor] = useState<string | undefined>(undefined)
+;
+
+  function openSetupEditor(brand?: string, flavor?: string) 
+{
+
+    setSetupEditorBrand(brand)
+;
+
+    setSetupEditorFlavor(flavor)
+;
+
+    setSetupEditorOpen(true)
+;
+
+  
+}
+
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
     [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
-  );
+  )
+;
+
   // Applicator-type pickers pin the two generic types (Cheese, Mix) to the top
-  // so the most-used picks never require scrolling; the rest stay alphabetical.
+  // so the most-used picks never require scrolling
+;
+ the rest stay alphabetical.
   // Display-only reorder — the stored list stays sorted alphabetically.
-  const ingredientTypeOptions = useMemo(() => {
-    const pinned = ingredientTypes.filter(t => { const k = t.trim().toLowerCase(); return k === "cheese" || k === "mix"; });
-    const rest = ingredientTypes.filter(t => !pinned.includes(t));
-    return [...pinned, ...rest];
-  }, [ingredientTypes]);
+  const ingredientTypeOptions = useMemo(() => 
+{
+
+    const pinned = ingredientTypes.filter(t => 
+{
+ const k = t.trim().toLowerCase()
+;
+ return k === "cheese" || k === "mix"
+;
+ 
+}
+)
+;
+
+    const rest = ingredientTypes.filter(t => !pinned.includes(t))
+;
+
+    return [...pinned, ...rest]
+;
+
+  
+}
+, [ingredientTypes])
+;
+
 
   // React mirror of the local mergedAway tombstone (localStorage). The unified
   // ingredient universe filters through it so a merged-away name vanishes from
@@ -2988,123 +6458,314 @@ export default function Home() {
   // ingredient-catalog query copy or a server pool row is briefly stale. Kept
   // in step wherever the stored tombstone changes (merge apply, sync receive,
   // durable-tombstone load, explicit re-add).
-  const [mergedAwayTomb, setMergedAwayTomb] = useState<string[]>(() => loadMergedAway());
+  const [mergedAwayTomb, setMergedAwayTomb] = useState<string[]>(() => loadMergedAway())
+;
+
 
   // Re-adding a previously merged-away name must resurrect it everywhere: clear
   // it from the LOCAL tombstone AND the DURABLE factory-wide one, otherwise the
   // load-time/sync prune would strip it right back out on the next device.
-  function clearMergedAwayBoth(name: string) {
-    clearMergedAway(name);
-    setMergedAwayTomb(loadMergedAway());
-    void deleteMergedAwayNames([name]).catch(() => {});
-  }
+  function clearMergedAwayBoth(name: string) 
+{
 
-  function addIngredientType(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed || ingredientTypes.includes(trimmed)) return;
-    const updated = [...ingredientTypes, trimmed].sort((a, b) => a.localeCompare(b));
-    setIngredientTypes(updated);
-    saveList(INGREDIENT_TYPES_KEY, updated);
-    clearMergedAwayBoth(trimmed);
-    clearDeleted("ingredientTypes", trimmed);
-    schedulePush(dayStateRef.current);
-    void saveCatalogEntry(trimmed, "general");
-  }
+    clearMergedAway(name)
+;
 
-  function removeIngredientType(name: string) {
-    const updated = ingredientTypes.filter(t => t !== name);
-    setIngredientTypes(updated);
-    saveList(INGREDIENT_TYPES_KEY, updated);
-    tombstoneDeleted("ingredientTypes", name);
-    schedulePush(dayStateRef.current);
-    void deleteCatalogEntryByName(name);
-  }
+    setMergedAwayTomb(loadMergedAway())
+;
 
-  function renameIngredientType(oldName: string, newName: string) {
-    const trimmed = newName.trim();
-    if (!trimmed || trimmed === oldName || ingredientTypes.includes(trimmed)) return;
-    const updated = ingredientTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
-    setIngredientTypes(updated);
-    saveList(INGREDIENT_TYPES_KEY, updated);
+    void deleteMergedAwayNames([name]).catch(() => 
+{
+}
+)
+;
+
+  
+}
+
+
+  function addIngredientType(name: string) 
+{
+
+    const trimmed = name.trim()
+;
+
+    if (!trimmed || ingredientTypes.includes(trimmed)) return
+;
+
+    const updated = [...ingredientTypes, trimmed].sort((a, b) => a.localeCompare(b))
+;
+
+    setIngredientTypes(updated)
+;
+
+    saveList(INGREDIENT_TYPES_KEY, updated)
+;
+
+    clearMergedAwayBoth(trimmed)
+;
+
+    clearDeleted("ingredientTypes", trimmed)
+;
+
+    schedulePush(dayStateRef.current)
+;
+
+    void saveCatalogEntry(trimmed, "general")
+;
+
+  
+}
+
+
+  function removeIngredientType(name: string) 
+{
+
+    const updated = ingredientTypes.filter(t => t !== name)
+;
+
+    setIngredientTypes(updated)
+;
+
+    saveList(INGREDIENT_TYPES_KEY, updated)
+;
+
+    tombstoneDeleted("ingredientTypes", name)
+;
+
+    schedulePush(dayStateRef.current)
+;
+
+    void deleteCatalogEntryByName(name)
+;
+
+  
+}
+
+
+  function renameIngredientType(oldName: string, newName: string) 
+{
+
+    const trimmed = newName.trim()
+;
+
+    if (!trimmed || trimmed === oldName || ingredientTypes.includes(trimmed)) return
+;
+
+    const updated = ingredientTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b))
+;
+
+    setIngredientTypes(updated)
+;
+
+    saveList(INGREDIENT_TYPES_KEY, updated)
+;
+
     // Tombstone the old name (+ un-tombstone the new) so a stale peer's additive
     // sync union can't resurrect the old spelling as a duplicate (see renameDieType).
-    tombstoneDeleted("ingredientTypes", oldName);
-    clearDeleted("ingredientTypes", trimmed);
-    schedulePush(dayStateRef.current);
-    void renameCatalogEntry(oldName, trimmed, "general");
+    tombstoneDeleted("ingredientTypes", oldName)
+;
+
+    clearDeleted("ingredientTypes", trimmed)
+;
+
+    schedulePush(dayStateRef.current)
+;
+
+    void renameCatalogEntry(oldName, trimmed, "general")
+;
+
     // Record the rename as a factory-wide AI correction so every AI feature
     // knows the old name maps to the new one. Best-effort, fire-and-forget.
-    void saveAiCorrections([{ domain: "ingredient", fromText: oldName, toText: trimmed }]);
+    void saveAiCorrections([
+{
+ domain: "ingredient", fromText: oldName, toText: trimmed 
+}
+])
+;
+
     // Learn the rename as a spec-import appType alias (chain re-point inside)
     // so a spec-sheet re-import maps the old applicator type onto the new name
     // instead of resurrecting it. Best-effort, fire-and-forget.
-    maybeLearnTypeRename("appType", oldName, trimmed);
-  }
+    maybeLearnTypeRename("appType", oldName, trimmed)
+;
 
-  function mergeIngredientType(from: string, into: string) {
-    const trimmed = into.trim();
-    if (!trimmed || trimmed === from) return;
+  
+}
+
+
+  function mergeIngredientType(from: string, into: string) 
+{
+
+    const trimmed = into.trim()
+;
+
+    if (!trimmed || trimmed === from) return
+;
+
     // Remove source, ensure target is present, re-sort.
     const updated = Array.from(
       new Set(ingredientTypes.map(n => (n === from ? trimmed : n))),
-    ).sort((a, b) => a.localeCompare(b));
-    setIngredientTypes(updated);
-    saveList(INGREDIENT_TYPES_KEY, updated);
-    tombstoneDeleted("ingredientTypes", from);
-    clearDeleted("ingredientTypes", trimmed);
+    ).sort((a, b) => a.localeCompare(b))
+;
+
+    setIngredientTypes(updated)
+;
+
+    saveList(INGREDIENT_TYPES_KEY, updated)
+;
+
+    tombstoneDeleted("ingredientTypes", from)
+;
+
+    clearDeleted("ingredientTypes", trimmed)
+;
+
     // Rewrite all run values referencing the merged-away type.
-    const now = Date.now();
-    const ds = dayStateRef.current;
-    for (const run of ds.runs) {
-      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
-      const appFields = ["app1Type", "app2Type", "app3Type", "app4Type"] as const;
-      const needsUpdate = appFields.some(f => vals[f] === from);
-      if (needsUpdate) {
-        const newVals = { ...vals };
-        for (const f of appFields) { if (newVals[f] === from) newVals[f] = trimmed; }
-        saveRunValues(run.id, newVals);
-        markRunValuesUpdated(run.id, now);
-        if (run.id === currentRunId) {
-          for (const f of appFields) { if (vals[f] === from) form.setValue(f, trimmed); }
-        }
-      }
-    }
+    const now = Date.now()
+;
+
+    const ds = dayStateRef.current
+;
+
+    for (const run of ds.runs) 
+{
+
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id)
+;
+
+      const appFields = ["app1Type", "app2Type", "app3Type", "app4Type"] as const
+;
+
+      const needsUpdate = appFields.some(f => vals[f] === from)
+;
+
+      if (needsUpdate) 
+{
+
+        const newVals = 
+{
+ ...vals 
+}
+;
+
+        for (const f of appFields) 
+{
+ if (newVals[f] === from) newVals[f] = trimmed
+;
+ 
+}
+
+        saveRunValues(run.id, newVals)
+;
+
+        markRunValuesUpdated(run.id, now)
+;
+
+        if (run.id === currentRunId) 
+{
+
+          for (const f of appFields) 
+{
+ if (vals[f] === from) form.setValue(f, trimmed)
+;
+ 
+}
+
+        
+}
+
+      
+}
+
+    
+}
+
     // Rewrite saved profiles so they don't re-introduce the merged-away type.
     rewriteAppTypeInProfiles(from, trimmed);
     schedulePush(dayStateRef.current);
     // Merge catalog entries so recipe rows referencing the old ingredient id
     // get redirected to the surviving name's catalog entry.
-    void mergeCatalogEntries([from], trimmed);
-    maybeLearnTypeRename("appType", from, trimmed);
-  }
+    void mergeCatalogEntries([from], trimmed)
+;
+
+    maybeLearnTypeRename("appType", from, trimmed)
+;
+
+  
+}
+
 
   // ── Ingredient catalog dual-write (Task #102) ──────────────────────────────
   // The 6 local option lists above stay the immediate, offline-first source of
-  // truth for these UI handlers (nothing above changed); these best-effort
+  // truth for these UI handlers (nothing above changed)
+;
+ these best-effort
   // calls additionally keep the server catalog in step so it stays populated
   // and authoritative — every recipe row resolves its display name through it
   // (see the hydration effect above), so a rename/merge/delete here is what
   // propagates the change everywhere a row references that ingredient by id.
-  function saveCatalogEntry(name: string, category: IngredientCategory) {
-    const built = findOrBuildIngredient(name, category, ingredientCatalog);
-    return saveIngredientsRemote([built]).catch(() => {});
-  }
-  function renameCatalogEntry(oldName: string, newName: string, category: IngredientCategory) {
+  function saveCatalogEntry(name: string, category: IngredientCategory) 
+{
+
+    const built = findOrBuildIngredient(name, category, ingredientCatalog)
+;
+
+    return saveIngredientsRemote([built]).catch(() => 
+{
+}
+)
+;
+
+  
+}
+
+  function renameCatalogEntry(oldName: string, newName: string, category: IngredientCategory) 
+{
+
     const existing = ingredientCatalog.find(
       (i) => i.name.trim().toLowerCase() === oldName.trim().toLowerCase(),
-    );
+    )
+;
+
     const target = existing
-      ? { ...existing, name: newName }
-      : findOrBuildIngredient(newName, category, ingredientCatalog);
-    return saveIngredientsRemote([target]).catch(() => {});
-  }
-  function deleteCatalogEntryByName(name: string) {
+      ? 
+{
+ ...existing, name: newName 
+}
+
+      : findOrBuildIngredient(newName, category, ingredientCatalog)
+;
+
+    return saveIngredientsRemote([target]).catch(() => 
+{
+}
+)
+;
+
+  
+}
+
+  function deleteCatalogEntryByName(name: string) 
+{
+
     const existing = ingredientCatalog.find(
       (i) => i.name.trim().toLowerCase() === name.trim().toLowerCase(),
-    );
-    if (!existing) return Promise.resolve();
-    return deleteIngredientsRemote([existing.id]).catch(() => {});
-  }
+    )
+;
+
+    if (!existing) return Promise.resolve()
+;
+
+    return deleteIngredientsRemote([existing.id]).catch(() => 
+{
+}
+)
+;
+
+  
+}
+
   // Mirrors a confirmed manual ingredient merge (any source names -> one
   // target name) into the server catalog: creates the target if it's not in
   // the catalog yet (e.g. it only ever lived in a local list), then merges any
@@ -3426,50 +7087,138 @@ export default function Home() {
   // spec-sheet importer writes brand/flavor/type/ingredient/recipe-name lists
   // directly to storage, so the Setup dropdowns reflect the new options
   // immediately without a reload. Mirrors each list's initializer above.
-  function reloadMasterData() {
-    const reloadRaw = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
-    const reloadSeen = new Map<string, string>();
-    for (const b of reloadRaw) { const k = b.trim().toLowerCase(); if (!reloadSeen.has(k)) reloadSeen.set(k, b.trim()); }
-    setBrands([...reloadSeen.values()].sort((a, b) => a.localeCompare(b)));
-    setBrandFlavors(loadBrandFlavors());
-    setIngredientTypes([...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b)));
-    setPepTypes(() => {
-      const LEGACY_PEP_TYPES = ["Natural", "Cured"];
-      const saved = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES);
+  function reloadMasterData() 
+{
+
+    const reloadRaw = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b))
+;
+
+    const reloadSeen = new Map<string, string>()
+;
+
+    for (const b of reloadRaw) 
+{
+ const k = b.trim().toLowerCase()
+;
+ if (!reloadSeen.has(k)) reloadSeen.set(k, b.trim())
+;
+ 
+}
+
+    setBrands([...reloadSeen.values()].sort((a, b) => a.localeCompare(b)))
+;
+
+    setBrandFlavors(loadBrandFlavors())
+;
+
+    setIngredientTypes([...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b)))
+;
+
+    setPepTypes(() => 
+{
+
+      const LEGACY_PEP_TYPES = ["Natural", "Cured"]
+;
+
+      const saved = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES)
+;
+
       const cleaned = saved
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
-        .filter(t => !LEGACY_PEP_TYPES.includes(t) && !RETIRED_PEP_TYPES.includes(t));
-      return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
-    });
-    setDieTypes(healDieTypesFromProfiles());
-    // Packaging settings are server-only (no localStorage copy); keep whatever
-    // the startup fetch already put into module/React state.
-    const _pkg = getPackagingSettings();
-    setCircles(_pkg.circles);
-    setShipper(_pkg.shipper);
-    setSkidStacking(_pkg.skidStacking);
-    setGripSheets(_pkg.gripSheets);
-    setCheeseIngredients([...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
-    setDoughIngredients([...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
-    setDoughRecipeNames([...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b)));
-    setFrontlineIngredients([...loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
-    setFrontlineRecipeNames([...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].filter(n => !SEED_MIX_RECIPE_NAMES.has(n)).sort((a, b) => a.localeCompare(b)));
-    setCheeseRecipeNames([...loadList(CHEESE_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
-    setMixIngredients([...loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
-    setMixRecipeNames([...loadList(MIX_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
-  }
+        .filter(t => !LEGACY_PEP_TYPES.includes(t) && !RETIRED_PEP_TYPES.includes(t))
+;
 
-  function refreshFactoryDataConsumers() {
-    setStopReasonsList(getStopReasons());
-    const packaging = getPackagingSettings();
-    setCircles(packaging.circles);
-    setShipper(packaging.shipper);
-    setSkidStacking(packaging.skidStacking);
-    setGripSheets(packaging.gripSheets);
-    setShiftStartTime(getShiftStartTime());
-    setProductionStartTime(getProductionStartTime());
-    reloadMasterData();
-  }
+      return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b))
+;
+
+    
+}
+)
+;
+
+    setDieTypes(healDieTypesFromProfiles())
+;
+
+    // Packaging settings are server-only (no localStorage copy)
+;
+ keep whatever
+    // the startup fetch already put into module/React state.
+    const _pkg = getPackagingSettings()
+;
+
+    setCircles(_pkg.circles)
+;
+
+    setShipper(_pkg.shipper)
+;
+
+    setSkidStacking(_pkg.skidStacking)
+;
+
+    setGripSheets(_pkg.gripSheets)
+;
+
+    setCheeseIngredients([...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)))
+;
+
+    setDoughIngredients([...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b)))
+;
+
+    setDoughRecipeNames([...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b)))
+;
+
+    setFrontlineIngredients([...loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)))
+;
+
+    setFrontlineRecipeNames([...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].filter(n => !SEED_MIX_RECIPE_NAMES.has(n)).sort((a, b) => a.localeCompare(b)))
+;
+
+    setCheeseRecipeNames([...loadList(CHEESE_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)))
+;
+
+    setMixIngredients([...loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)].sort((a, b) => a.localeCompare(b)))
+;
+
+    setMixRecipeNames([...loadList(MIX_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)))
+;
+
+  
+}
+
+
+  function refreshFactoryDataConsumers() 
+{
+
+    setStopReasonsList(getStopReasons())
+;
+
+    const packaging = getPackagingSettings()
+;
+
+    setCircles(packaging.circles)
+;
+
+    setShipper(packaging.shipper)
+;
+
+    setSkidStacking(packaging.skidStacking)
+;
+
+    setGripSheets(packaging.gripSheets)
+;
+
+    setShiftStartTime(getShiftStartTime())
+;
+
+    setProductionStartTime(getProductionStartTime())
+;
+
+    reloadMasterData()
+;
+
+  
+}
+
 
   // Re-sync every React surface a merge rewrites in localStorage, in place, so the
   // Merge panel (and its remaining suggestions) stays open instead of being torn
@@ -3535,43 +7284,158 @@ export default function Home() {
       // target already has rows under this name, keep the target's (don't
       // clobber) — the source entry is removed either way since the name is
       // leaving that category.
-      let rows: RecipeRow[] = [];
-      if (mapOf(from) === "dough") {
-        const p = loadDoughRecipePresets();
-        rows = p[name]?.rows ?? [];
-        if (p[name]) { delete p[name]; saveDoughRecipePresets(p); }
-      } else if (mapOf(from) === "sauce") {
-        const p = loadFrontlineRecipePresets();
-        rows = p[name] ?? [];
-        if (p[name]) { delete p[name]; saveFrontlineRecipePresets(p); }
-      } else {
-        const p = loadCheeseRecipePresets();
-        rows = p[name] ?? [];
-        if (p[name]) { delete p[name]; saveCheeseRecipePresets(p); }
-      }
-      if (rows.length > 0) {
-        if (mapOf(to) === "dough") {
-          const p = loadDoughRecipePresets();
-          if (!p[name]) { p[name] = { rows }; saveDoughRecipePresets(p); }
-        } else if (mapOf(to) === "sauce") {
-          const p = loadFrontlineRecipePresets();
-          if (!p[name]) { p[name] = rows; saveFrontlineRecipePresets(p); }
-        } else {
-          const p = loadCheeseRecipePresets();
-          if (!p[name]) { p[name] = rows; saveCheeseRecipePresets(p); }
-        }
-      }
-    }
-    const removers: Record<RecipeNameCategory, (n: string) => void> = {
+      let rows: RecipeRow[] = []
+;
+
+      if (mapOf(from) === "dough") 
+{
+
+        const p = loadDoughRecipePresets()
+;
+
+        rows = p[name]?.rows ?? []
+;
+
+        if (p[name]) 
+{
+ delete p[name]
+;
+ saveDoughRecipePresets(p)
+;
+ 
+}
+
+      
+}
+ else if (mapOf(from) === "sauce") 
+{
+
+        const p = loadFrontlineRecipePresets()
+;
+
+        rows = p[name] ?? []
+;
+
+        if (p[name]) 
+{
+ delete p[name]
+;
+ saveFrontlineRecipePresets(p)
+;
+ 
+}
+
+      
+}
+ else 
+{
+
+        const p = loadCheeseRecipePresets()
+;
+
+        rows = p[name] ?? []
+;
+
+        if (p[name]) 
+{
+ delete p[name]
+;
+ saveCheeseRecipePresets(p)
+;
+ 
+}
+
+      
+}
+
+      if (rows.length > 0) 
+{
+
+        if (mapOf(to) === "dough") 
+{
+
+          const p = loadDoughRecipePresets()
+;
+
+          if (!p[name]) 
+{
+ p[name] = 
+{
+ rows 
+}
+;
+ saveDoughRecipePresets(p)
+;
+ 
+}
+
+        
+}
+ else if (mapOf(to) === "sauce") 
+{
+
+          const p = loadFrontlineRecipePresets()
+;
+
+          if (!p[name]) 
+{
+ p[name] = rows
+;
+ saveFrontlineRecipePresets(p)
+;
+ 
+}
+
+        
+}
+ else 
+{
+
+          const p = loadCheeseRecipePresets()
+;
+
+          if (!p[name]) 
+{
+ p[name] = rows
+;
+ saveCheeseRecipePresets(p)
+;
+ 
+}
+
+        
+}
+
+      
+}
+
+    
+}
+
+    const removers: Record<RecipeNameCategory, (n: string) => void> = 
+{
+
       dough: removeDoughRecipeName, sauce: removeFrontlineRecipeName,
       cheese: removeCheeseRecipeName, mix: removeMixRecipeName,
-    };
-    const adders: Record<RecipeNameCategory, (n: string) => void> = {
+    
+}
+;
+
+    const adders: Record<RecipeNameCategory, (n: string) => void> = 
+{
+
       dough: addDoughRecipeName, sauce: addFrontlineRecipeName,
       cheese: addCheeseRecipeName, mix: addMixRecipeName,
-    };
-    removers[from](name);
-    adders[to](name);
+    
+}
+;
+
+    removers[from](name)
+;
+
+    adders[to](name)
+;
+
     // The name is leaving its source category, so any run/template/history/
     // profile selection field still pointing at it (e.g. doughRecipeName) would
     // dangle — blank those references and bump the changed runs' edit stamps so
@@ -3611,14 +7475,37 @@ export default function Home() {
   // touching every historical surface (profiles/templates/history keep
   // whatever name was cached until next edited — never lost, just not
   // eagerly rewritten).
-  const { items: ingredientCatalog } = useIngredients();
-  useEffect(() => {
-    void migrateIngredientListsToCatalogIfNeeded(ingredientCatalog).catch(() => {});
+  const 
+{
+ items: ingredientCatalog 
+}
+ = useIngredients()
+;
+
+  useEffect(() => 
+{
+
+    void migrateIngredientListsToCatalogIfNeeded(ingredientCatalog).catch(() => 
+{
+}
+)
+;
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    if (ingredientCatalog.length === 0) return;
-    const hydrated = hydrateRecipeRowsWithCatalog(form.getValues(), ingredientCatalog);
+  
+}
+, [])
+;
+
+  useEffect(() => 
+{
+
+    if (ingredientCatalog.length === 0) return
+;
+
+    const hydrated = hydrateRecipeRowsWithCatalog(form.getValues(), ingredientCatalog)
+;
+
     (
       [
         "doughRecipe",
@@ -3628,15 +7515,39 @@ export default function Home() {
         "app4CheeseRecipe",
         "frontlineRecipe",
       ] as const
-    ).forEach((key) => {
-      const current = form.getValues(key);
-      const next = hydrated[key];
-      if (JSON.stringify(current) !== JSON.stringify(next)) {
-        form.setValue(key, next as never, { shouldDirty: false });
-      }
-    });
+    ).forEach((key) => 
+{
+
+      const current = form.getValues(key)
+;
+
+      const next = hydrated[key]
+;
+
+      if (JSON.stringify(current) !== JSON.stringify(next)) 
+{
+
+        form.setValue(key, next as never, 
+{
+ shouldDirty: false 
+}
+)
+;
+
+      
+}
+
+    
+}
+)
+;
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ingredientCatalog]);
+  
+}
+, [ingredientCatalog])
+;
+
 
   // Food-safety advisory: allergen transitions across the day's run sequence.
   // The current run uses the live form value; others read persisted run values.
@@ -3654,10 +7565,22 @@ export default function Home() {
 
   // Manager-defined production rules (factory-wide, server-persisted). Evaluated
   // against the current run + the day's sequence. "flexible" rules warn inline
-  // (alongside the allergen advisory); "strict" rules block starting the run.
-  const { rules: productionRules } = useProductionRules();
-  const ruleViolations = useMemo(() => {
-    const fields = {
+  // (alongside the allergen advisory)
+;
+ "strict" rules block starting the run.
+  const 
+{
+ rules: productionRules 
+}
+ = useProductionRules()
+;
+
+  const ruleViolations = useMemo(() => 
+{
+
+    const fields = 
+{
+
       brand: currentRun?.brand,
       flavor: currentRun?.flavor,
       casesNeeded: v.casesNeeded,
@@ -3665,25 +7588,48 @@ export default function Home() {
       targetDoughballWeight: v.targetDoughballWeight,
       sauceOzPerPizza: v.sauceOzPerPizza,
       dieType: v.dieType,
-    };
-    const seq: RuleSequenceItem[] = dayState.runs.map((run, i) => ({
+    
+}
+;
+
+    const seq: RuleSequenceItem[] = dayState.runs.map((run, i) => (
+{
+
       id: run.id,
       label: `Run ${i + 1} · ${runLabel(run)}`,
-      attributes: {
+      attributes: 
+{
+
         allergen: normalizeAllergen(
           run.id === currentRunId ? (v.allergen as Allergen) : loadRunValues(run.id).allergen,
         ),
-      },
-    }));
-    const current = dayState.runs.find(r => r.id === currentRunId);
-    return evaluateRules(productionRules, {
+      
+}
+,
+    
+}
+))
+;
+
+    const current = dayState.runs.find(r => r.id === currentRunId)
+;
+
+    return evaluateRules(productionRules, 
+{
+
       fields,
       runLabel: current ? runLabel(current) : undefined,
       sequence: seq,
       currentRunId,
-    });
+    
+}
+)
+;
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
+  
+}
+, [
     productionRules,
     dayState.runs,
     currentRunId,
@@ -3695,34 +7641,141 @@ export default function Home() {
     v.sauceOzPerPizza,
     v.dieType,
     v.allergen,
-  ]);
-  const flexibleViolations = ruleViolations.filter(x => x.enforcement === "flexible");
-  const strictViolations = ruleViolations.filter(x => x.enforcement === "strict");
+  ])
+;
+
+  const flexibleViolations = ruleViolations.filter(x => x.enforcement === "flexible")
+;
+
+  const strictViolations = ruleViolations.filter(x => x.enforcement === "strict")
+;
+
 
   // Per-run acknowledgement of strict-rule checklists. Keyed by
   // `${runId}#${ruleId}#${stepIndex}` so checks reset per run yet stay satisfied
   // when returning to a run. A strict violation with a checklist blocks Start
-  // until every step is checked; a strict violation without one blocks outright.
-  const [checklistAcks, setChecklistAcks] = useState<Record<string, boolean>>({});
-  const ackKey = (ruleId: string, i: number) => `${currentRunId}#${ruleId}#${i}`;
-  const toggleAck = (ruleId: string, i: number) =>
-    setChecklistAcks(prev => {
-      const k = ackKey(ruleId, i);
-      return { ...prev, [k]: !prev[k] };
-    });
-  const checklistSatisfied = (rv: { ruleId: string; checklist?: string[] }) => {
-    const cl = rv.checklist ?? [];
-    if (cl.length === 0) return false;
-    return cl.every((_, i) => checklistAcks[ackKey(rv.ruleId, i)]);
-  };
-  const blockingViolations = strictViolations.filter(rv => !checklistSatisfied(rv));
+  // until every step is checked
+;
+ a strict violation without one blocks outright.
+  const [checklistAcks, setChecklistAcks] = useState<Record<string, boolean>>(
+{
+}
+)
+;
 
-  const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
-  const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2, replace: replaceCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
-  const { fields: cheese3Fields, append: appendCheese3, remove: removeCheese3, replace: replaceCheese3 } = useFieldArray({ control: form.control, name: "app3CheeseRecipe" });
-  const { fields: cheese4Fields, append: appendCheese4, remove: removeCheese4, replace: replaceCheese4 } = useFieldArray({ control: form.control, name: "app4CheeseRecipe" });
-  const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
-  const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
+  const ackKey = (ruleId: string, i: number) => `${currentRunId}#${ruleId}#${i}`
+;
+
+  const toggleAck = (ruleId: string, i: number) =>
+    setChecklistAcks(prev => 
+{
+
+      const k = ackKey(ruleId, i)
+;
+
+      return 
+{
+ ...prev, [k]: !prev[k] 
+}
+;
+
+    
+}
+)
+;
+
+  const checklistSatisfied = (rv: 
+{
+ ruleId: string
+;
+ checklist?: string[] 
+}
+) => 
+{
+
+    const cl = rv.checklist ?? []
+;
+
+    if (cl.length === 0) return false
+;
+
+    return cl.every((_, i) => checklistAcks[ackKey(rv.ruleId, i)])
+;
+
+  
+}
+;
+
+  const blockingViolations = strictViolations.filter(rv => !checklistSatisfied(rv))
+;
+
+
+  const 
+{
+ fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 
+}
+ = useFieldArray(
+{
+ control: form.control, name: "app1CheeseRecipe" 
+}
+)
+;
+
+  const 
+{
+ fields: cheese2Fields, append: appendCheese2, remove: removeCheese2, replace: replaceCheese2 
+}
+ = useFieldArray(
+{
+ control: form.control, name: "app2CheeseRecipe" 
+}
+)
+;
+
+  const 
+{
+ fields: cheese3Fields, append: appendCheese3, remove: removeCheese3, replace: replaceCheese3 
+}
+ = useFieldArray(
+{
+ control: form.control, name: "app3CheeseRecipe" 
+}
+)
+;
+
+  const 
+{
+ fields: cheese4Fields, append: appendCheese4, remove: removeCheese4, replace: replaceCheese4 
+}
+ = useFieldArray(
+{
+ control: form.control, name: "app4CheeseRecipe" 
+}
+)
+;
+
+  const 
+{
+ fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough 
+}
+ = useFieldArray(
+{
+ control: form.control, name: "doughRecipe" 
+}
+)
+;
+
+  const 
+{
+ fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline 
+}
+ = useFieldArray(
+{
+ control: form.control, name: "frontlineRecipe" 
+}
+)
+;
+
 
   // Remember the last tab so an unexpected page reload (browser refresh, dev
   // preview reconnect, tab crash during a heavy import) puts the user back
@@ -3740,98 +7793,240 @@ export default function Home() {
   const { items: freezerPullItems } = useFreezerPullItems();
   // Facility-wide run templates + supervisor PIN (server-side master-data, open
   // to all signed-in users for reads). These used to live in this device's local
-  // storage, so they never followed the facility; the server is now the source
+  // storage, so they never followed the facility
+;
+ the server is now the source
   // of truth, with localStorage kept only as an offline fallback / migration
   // seed.
-  const { templates: serverTemplates, isLoaded: templatesLoaded } = useRunTemplates();
-  const { pin: serverPin } = useSupervisorPin();
+  const 
+{
+ templates: serverTemplates, isLoaded: templatesLoaded 
+}
+ = useRunTemplates()
+;
+
+  const 
+{
+ pin: serverPin 
+}
+ = useSupervisorPin()
+;
+
   // Factory-wide mixes (open to all signed-in users) — drives the Mixes
   // make-day plan and the manager Mix Recipes editor.
-  const { items: mixes } = useMixes();
+  const 
+{
+ items: mixes 
+}
+ = useMixes()
+;
+
   // Imported mixes by name (case-insensitive) → recipe rows for the per-run
   // Mix Recipe card. The old built-in factory presets were purged, so the
   // server-side Mixes master data (from premix sheet imports / the Settings
   // Mix Recipes editor) is the real ingredient source when a mix name is picked.
-  const serverMixRowsByName = useMemo(() => {
-    const map = new Map<string, RecipeRow[]>();
-    for (const mix of mixes) {
+  const serverMixRowsByName = useMemo(() => 
+{
+
+    const map = new Map<string, RecipeRow[]>()
+;
+
+    for (const mix of mixes) 
+{
+
       const rows = (mix.components ?? [])
         .filter((c) => c.ingredient.trim())
-        .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
-      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
-    }
-    return map;
-  }, [mixes]);
+        .map((c) => (
+{
+ ingredient: c.ingredient, lbs: c.perPizza 
+}
+))
+;
+
+      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [mixes])
+;
+
   // Mix components retain their per-pizza-ounce unit here. The warehouse need
   // aggregation converts them to pounds for each run, the same basis used by
   // the make-day plan.
-  const serverMixComponentsByName = useMemo(() => {
-    const map = new Map<string, { ingredient: string; perPizza: number }[]>();
-    for (const mix of mixes) {
-      const key = mix.name.trim().toLowerCase();
-      if (key) map.set(key, mix.components);
-    }
-    return map;
-  }, [mixes]);
+  const serverMixComponentsByName = useMemo(() => 
+{
+
+    const map = new Map<string, 
+{
+ ingredient: string
+;
+ perPizza: number 
+}
+[]>()
+;
+
+    for (const mix of mixes) 
+{
+
+      const key = mix.name.trim().toLowerCase()
+;
+
+      if (key) map.set(key, mix.components)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [mixes])
+;
+
   // Names + ingredient vocabulary for the per-run Mix Recipe card come from the
   // server Mixes master data — the single source for mixes across the app now
   // that the separate "Mix" recipe-type lists have been merged into Mixes.
   const serverMixNames = useMemo(
     () => [...new Set(mixes.map((m) => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [mixes],
-  );
+  )
+;
+
   // Factory-wide cheese recipes (server master-data, like Mixes but a SEPARATE
   // pool). The per-run applicator "Cheese" cards pick one of these and hydrate
   // their rows from it — cheese presets are no longer stored per-device in the
   // synced day-state.
-  const { items: cheeseRecipesList } = useCheeseRecipes();
+  const 
+{
+ items: cheeseRecipesList 
+}
+ = useCheeseRecipes()
+;
+
   const enabledCheeseRecipes = useMemo(
     () => cheeseRecipesList.filter((r) => r.enabled !== false),
     [cheeseRecipesList],
-  );
+  )
+;
+
   // Name (case-insensitive) → full recipe, so a picked name hydrates rows and we
   // can show its shredder setting / assigned flavors.
-  const serverCheeseByName = useMemo(() => {
-    const map = new Map<string, CheeseRecipe>();
-    for (const r of enabledCheeseRecipes) {
-      const key = r.name.trim().toLowerCase();
-      if (key) map.set(key, r);
-    }
-    return map;
-  }, [enabledCheeseRecipes]);
-  // Recipe rows ({ ingredient, lbs }) for a picked cheese recipe — a straight
+  const serverCheeseByName = useMemo(() => 
+{
+
+    const map = new Map<string, CheeseRecipe>()
+;
+
+    for (const r of enabledCheeseRecipes) 
+{
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      if (key) map.set(key, r)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [enabledCheeseRecipes])
+;
+
+  // Recipe rows (
+{
+ ingredient, lbs 
+}
+) for a picked cheese recipe — a straight
   // copy of its components (already the per-batch-lbs RecipeRow shape).
-  const serverCheeseRowsByName = useMemo(() => {
-    const map = new Map<string, RecipeRow[]>();
-    for (const r of enabledCheeseRecipes) {
+  const serverCheeseRowsByName = useMemo(() => 
+{
+
+    const map = new Map<string, RecipeRow[]>()
+;
+
+    for (const r of enabledCheeseRecipes) 
+{
+
       const rows = r.components
         .filter((c) => c.ingredient.trim())
-        .map((c) => ({
+        .map((c) => (
+{
+
           ingredient: c.ingredient,
           lbs: c.lbs,
-        }));
-      const key = r.name.trim().toLowerCase();
-      if (key) map.set(key, rows);
-    }
-    return map;
-  }, [enabledCheeseRecipes]);
+        
+}
+))
+;
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      if (key) map.set(key, rows)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [enabledCheeseRecipes])
+;
+
   const serverCheeseNames = useMemo(
     () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [enabledCheeseRecipes],
-  );
+  )
+;
+
   // Brand tags for cheese/mix names that collide across customers (same name
   // under 2+ brands, or a bare name whose brand-prefixed twin exists) — the
   // pickers show "Taco Mix (Marco's)" while the stored value stays the name.
   const cheeseNameBrandTags = useMemo(
-    () => brandTagLabels(enabledCheeseRecipes.map((r) => ({ name: r.name, brand: r.brand }))),
+    () => brandTagLabels(enabledCheeseRecipes.map((r) => (
+{
+ name: r.name, brand: r.brand 
+}
+))),
     [enabledCheeseRecipes],
-  );
-  const mixNameBrandTags = useMemo(
-    () => brandTagLabels(mixes.map((m) => ({ name: m.name, brand: m.brand ?? "" }))),
-    [mixes],
-  );
+  )
+;
 
-  const { isManager, hasCapability } = useMe();
+  const mixNameBrandTags = useMemo(
+    () => brandTagLabels(mixes.map((m) => (
+{
+ name: m.name, brand: m.brand ?? "" 
+}
+))),
+    [mixes],
+  )
+;
+
+
+  const 
+{
+ isManager, hasCapability 
+}
+ = useMe()
+;
+
   // Profile writes are gated on the manage-profiles capability (NOT the
   // manage-staff-derived isManager alias) so a custom role granted
   // manage-profiles can save profiles without full manager rights — matching
@@ -3843,9 +8038,17 @@ export default function Home() {
   // mutating local blobs or enqueuing doomed 403 server writes for
   // non-managers — including helpers called from components that don't know
   // about capabilities.
-  useEffect(() => {
-    setProfileWritesAllowed(canManageProfiles);
-  }, [canManageProfiles]);
+  useEffect(() => 
+{
+
+    setProfileWritesAllowed(canManageProfiles)
+;
+
+  
+}
+, [canManageProfiles])
+;
+
   // One-time profile-rewriting boot heals, deferred from module init until the
   // signed-in user's capabilities resolve: they call saveProfile/deleteProfile
   // helpers (markProfileEdited/markProfileDeleted → server POST/DELETE), so a
@@ -3900,20 +8103,58 @@ export default function Home() {
   // name and hydrate their rows from the chosen recipe. We keep a name (case-
   // insensitive) → rows map for hydration and a sorted name list for the run-form
   // dropdowns.
-  const { items: doughRecipesList } = useNamedRecipes("dough");
-  const { items: sauceRecipesList } = useNamedRecipes("sauce");
-  const serverDoughRowsByName = useMemo(() => {
-    const map = new Map<string, RecipeRow[]>();
-    for (const r of doughRecipesList) {
-      if (r.enabled === false) continue;
+  const 
+{
+ items: doughRecipesList 
+}
+ = useNamedRecipes("dough")
+;
+
+  const 
+{
+ items: sauceRecipesList 
+}
+ = useNamedRecipes("sauce")
+;
+
+  const serverDoughRowsByName = useMemo(() => 
+{
+
+    const map = new Map<string, RecipeRow[]>()
+;
+
+    for (const r of doughRecipesList) 
+{
+
+      if (r.enabled === false) continue
+;
+
       const rows = r.components
         .filter((c) => c.ingredient.trim())
-        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
-      if (key) map.set(key, rows);
-    }
-    return map;
-  }, [doughRecipesList]);
+        .map((c) => (
+{
+ ingredient: c.ingredient, lbs: c.lbs 
+}
+))
+;
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      if (key) map.set(key, rows)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [doughRecipesList])
+;
+
   // Pool doughball weights (oz) by name — hydrates the run form's Target
   // Doughball Weight when a dough recipe is picked (0/absent = unknown).
   const serverDoughWeightByName = useMemo(() => {
@@ -3928,50 +8169,124 @@ export default function Home() {
   }, [doughRecipesList]);
   // Pool doughballs-per-tray by name — hydrates the run form's Doughballs Per
   // Tray when a dough recipe is picked (0/absent = unknown).
-  const serverDoughTrayByName = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of doughRecipesList) {
-      if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
-      const n = r.doughballsPerTray ?? 0;
-      if (key && n > 0) map.set(key, n);
-    }
-    return map;
-  }, [doughRecipesList]);
+  const serverDoughTrayByName = useMemo(() => 
+{
+
+    const map = new Map<string, number>()
+;
+
+    for (const r of doughRecipesList) 
+{
+
+      if (r.enabled === false) continue
+;
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      const n = r.doughballsPerTray ?? 0
+;
+
+      if (key && n > 0) map.set(key, n)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [doughRecipesList])
+;
+
   // Pool per-VARIANT doughball numbers by name — one dough family recipe
   // carries every variant's weight/per-tray; the run form auto-matches one
   // (die size in the label, or the only variant) and offers a manual pick
   // when it can't tell.
-  const serverDoughVariantsByName = useMemo(() => {
-    const map = new Map<string, DoughballVariant[]>();
-    for (const r of doughRecipesList) {
-      if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
-      const variants = normalizeDoughballVariants(r.doughballVariants);
-      if (key && variants.length > 0) map.set(key, variants);
-    }
-    return map;
-  }, [doughRecipesList]);
-  const serverSauceRowsByName = useMemo(() => {
-    const map = new Map<string, RecipeRow[]>();
-    for (const r of sauceRecipesList) {
-      if (r.enabled === false) continue;
+  const serverDoughVariantsByName = useMemo(() => 
+{
+
+    const map = new Map<string, DoughballVariant[]>()
+;
+
+    for (const r of doughRecipesList) 
+{
+
+      if (r.enabled === false) continue
+;
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      const variants = normalizeDoughballVariants(r.doughballVariants)
+;
+
+      if (key && variants.length > 0) map.set(key, variants)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [doughRecipesList])
+;
+
+  const serverSauceRowsByName = useMemo(() => 
+{
+
+    const map = new Map<string, RecipeRow[]>()
+;
+
+    for (const r of sauceRecipesList) 
+{
+
+      if (r.enabled === false) continue
+;
+
       const rows = r.components
         .filter((c) => c.ingredient.trim())
-        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
-      if (key) map.set(key, rows);
-    }
-    return map;
-  }, [sauceRecipesList]);
+        .map((c) => (
+{
+ ingredient: c.ingredient, lbs: c.lbs 
+}
+))
+;
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      if (key) map.set(key, rows)
+;
+
+    
+}
+
+    return map
+;
+
+  
+}
+, [sauceRecipesList])
+;
+
   const serverDoughNames = useMemo(
     () => [...new Set(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
     [doughRecipesList],
-  );
+  )
+;
+
   const serverSauceNames = useMemo(
     () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
     [sauceRecipesList],
-  );
+  )
+;
+
   // ── Unified ingredient universe ──
   // ONE factory-wide suggestion list: every ingredient used anywhere — the
   // server ingredient catalog, every recipe row in every server pool (mixes,
@@ -4027,21 +8342,64 @@ export default function Home() {
     // Drift is ROWS-only: doughball weight + per-tray are per-flavor values
     // (one dough family serves many flavors with different specs), so a form
     // value differing from the pool's backfill copy is normal, not drift.
-    const rowsDiffer = !recipeRowsEqual(v.doughRecipe ?? [], poolRows);
-    return rowsDiffer ? { name } : null;
-  })();
-  const saucePoolDrift = (() => {
-    const name = (v.frontlineRecipeName ?? "").trim();
-    if (!name) return null;
-    const poolRows = serverSauceRowsByName.get(name.toLowerCase());
-    if (!poolRows) return null;
-    return recipeRowsEqual(v.frontlineRecipe ?? [], poolRows) ? null : { name };
-  })();
-  const [promotingRecipeKind, setPromotingRecipeKind] = useState<null | "dough" | "sauce">(null);
+    const rowsDiffer = !recipeRowsEqual(v.doughRecipe ?? [], poolRows)
+;
+
+    return rowsDiffer ? 
+{
+ name 
+}
+ : null
+;
+
+  
+}
+)()
+;
+
+  const saucePoolDrift = (() => 
+{
+
+    const name = (v.frontlineRecipeName ?? "").trim()
+;
+
+    if (!name) return null
+;
+
+    const poolRows = serverSauceRowsByName.get(name.toLowerCase())
+;
+
+    if (!poolRows) return null
+;
+
+    return recipeRowsEqual(v.frontlineRecipe ?? [], poolRows) ? null : 
+{
+ name 
+}
+;
+
+  
+}
+)()
+;
+
+  const [promotingRecipeKind, setPromotingRecipeKind] = useState<null | "dough" | "sauce">(null)
+;
+
   // Manual doughball-variant pick: set when a picked dough family recipe has
   // several variants and none auto-matched (weight left blank). The operator
-  // picks one; blank-fill only, same invariant as the auto path.
-  const [doughVariantPick, setDoughVariantPick] = useState<{ recipeName: string; variants: DoughballVariant[] } | null>(null);
+  // picks one
+;
+ blank-fill only, same invariant as the auto path.
+  const [doughVariantPick, setDoughVariantPick] = useState<
+{
+ recipeName: string
+;
+ variants: DoughballVariant[] 
+}
+ | null>(null)
+;
+
   // Drop a stale prompt: the form moved to a different recipe (run switch,
   // sync, profile load) or the weight got filled some other way (typed, die
   // change resolved it via the self-heal) — a leftover prompt would apply the
@@ -4062,8 +8420,12 @@ export default function Home() {
   // "Malted Barley recipe") — are suppressed so the user never sees
   // near-duplicate options. The server pool name is authoritative.
   const doughRecipeNameOptions = useMemo(
-    () => {
-      const server = serverDoughNames.map((n) => n.trim()).filter(Boolean);
+    () => 
+{
+
+      const server = serverDoughNames.map((n) => n.trim()).filter(Boolean)
+;
+
       const uncoveredLocal = doughRecipeNames
         .map((n) => n.trim())
         .filter(
@@ -4071,14 +8433,26 @@ export default function Home() {
             n &&
             !server.some((p) => specImportNamedRecipeNamesEqual(p, n)) &&
             !findSpecImportNamedRecipeFamilyMatch("dough", n, server),
-        );
-      return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b));
-    },
+        )
+;
+
+      return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b))
+;
+
+    
+}
+,
     [serverDoughNames, doughRecipeNames],
-  );
+  )
+;
+
   const frontlineRecipeNameOptions = useMemo(
-    () => {
-      const server = serverSauceNames.map((n) => n.trim()).filter(Boolean);
+    () => 
+{
+
+      const server = serverSauceNames.map((n) => n.trim()).filter(Boolean)
+;
+
       const uncoveredLocal = frontlineRecipeNames
         .map((n) => n.trim())
         .filter(
@@ -4086,104 +8460,242 @@ export default function Home() {
             n &&
             !server.some((p) => specImportNamedRecipeNamesEqual(p, n)) &&
             !findSpecImportNamedRecipeFamilyMatch("sauce", n, server),
-        );
-      return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b));
-    },
+        )
+;
+
+      return [...new Set([...server, ...uncoveredLocal])].sort((a, b) => a.localeCompare(b))
+;
+
+    
+}
+,
     [serverSauceNames, frontlineRecipeNames],
-  );
+  )
+;
+
   // "Use my existing recipe" options for the spec-import review, per kind. Dough,
   // sauce, cheese and mixes are all server-backed factory master-data now, so the
   // picker must list the LIVE server pool names — unioned with any dormant local
   // presets for backward compat — not just the one-time local seed (which held a
   // single "Aldo's Standard Cheese Mix" and made every import offer only "Aldos").
-  const existingImportRecipeNames = useMemo<Record<SpecImportDisplayKind, string[]>>(() => {
+  const existingImportRecipeNames = useMemo<Record<SpecImportDisplayKind, string[]>>(() => 
+{
+
     const union = (server: string[], kind: SpecImportDisplayKind) =>
       [...new Set([...server, ...existingRecipeNamesForImport(kind)].map((n) => n.trim()).filter(Boolean))].sort(
         (a, b) => a.localeCompare(b),
-      );
-    return {
+      )
+;
+
+    return 
+{
+
       dough: union(serverDoughNames, "dough"),
       sauce: union(serverSauceNames, "sauce"),
       cheese: union(serverCheeseNames, "cheese"),
       mix: union(serverMixNames, "mix"),
-    };
-  }, [serverDoughNames, serverSauceNames, serverCheeseNames, serverMixNames]);
+    
+}
+;
+
+  
+}
+, [serverDoughNames, serverSauceNames, serverCheeseNames, serverMixNames])
+;
+
   // Names filtered to the current run's brand/flavor: prefer recipes for this
   // customer (brand) and — among those — ones assigned to this flavor (or "all
   // varieties", i.e. no flavors). Returns ALL names when nothing matches so the
   // operator is never stuck without a choice. Pure over the run's identity.
-  const cheeseNamesForRun = useMemo(() => {
-    return (brand: string, flavor: string): string[] => {
-      const b = brand.trim().toLowerCase();
-      const f = flavor.trim().toLowerCase();
-      if (!b) return serverCheeseNames;
+  const cheeseNamesForRun = useMemo(() => 
+{
+
+    return (brand: string, flavor: string): string[] => 
+{
+
+      const b = brand.trim().toLowerCase()
+;
+
+      const f = flavor.trim().toLowerCase()
+;
+
+      if (!b) return serverCheeseNames
+;
+
       const brandMatches = enabledCheeseRecipes.filter(
         (r) => r.brand.trim().toLowerCase() === b,
-      );
-      if (brandMatches.length === 0) return serverCheeseNames;
+      )
+;
+
+      if (brandMatches.length === 0) return serverCheeseNames
+;
+
       const matchesFlavor = (r: (typeof brandMatches)[number]) =>
         r.flavors.length === 0 ||
-        r.flavors.some((x) => x.trim().toLowerCase() === f);
-      const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
-      const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
+        r.flavors.some((x) => x.trim().toLowerCase() === f)
+;
+
+      const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches
+;
+
+      const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : []
+;
+
       const toNames = (pool: typeof brandMatches) =>
-        [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
-      const first = toNames(flavorMatches);
-      const firstSet = new Set(first);
-      return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
-    };
-  }, [enabledCheeseRecipes, serverCheeseNames]);
+        [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y))
+;
+
+      const first = toNames(flavorMatches)
+;
+
+      const firstSet = new Set(first)
+;
+
+      return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))]
+;
+
+    
+}
+;
+
+  
+}
+, [enabledCheeseRecipes, serverCheeseNames])
+;
+
   // The make-day chosen on the Mix Plan tab (defaults to today).
-  const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
-  const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
+  const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr())
+;
+
+  const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set())
+;
+
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
   // Warehouse "Time to Count" card. Marking a section counted is open to any
   // signed-in user (floor staff perform the counts).
-  const { schedules: cycleCountSchedules } = useCycleCountSchedules();
-  const cycleCountQc = useQueryClient();
+  const 
+{
+ schedules: cycleCountSchedules 
+}
+ = useCycleCountSchedules()
+;
+
+  const cycleCountQc = useQueryClient()
+;
+
   // Template create/delete — call the API then update the React Query cache
   // directly so the UI updates without waiting for the next background refetch.
-  async function saveServerTemplate(tpl: import("../types").RunTemplate): Promise<void> {
-    try {
-      const updated = await saveRunTemplateApi(tpl);
-      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
-    } catch {
-      void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
-    }
-  }
-  async function deleteServerTemplate(id: string): Promise<void> {
-    try {
-      const updated = await deleteRunTemplatesApi([id]);
-      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated);
-    } catch {
-      void cycleCountQc.invalidateQueries({ queryKey: RUN_TEMPLATES_QUERY_KEY });
-    }
-  }
-  const markCountedMutation = useMutation({
+  async function saveServerTemplate(tpl: import("../types").RunTemplate): Promise<void> 
+{
+
+    try 
+{
+
+      const updated = await saveRunTemplateApi(tpl)
+;
+
+      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated)
+;
+
+    
+}
+ catch 
+{
+
+      void cycleCountQc.invalidateQueries(
+{
+ queryKey: RUN_TEMPLATES_QUERY_KEY 
+}
+)
+;
+
+    
+}
+
+  
+}
+
+  async function deleteServerTemplate(id: string): Promise<void> 
+{
+
+    try 
+{
+
+      const updated = await deleteRunTemplatesApi([id])
+;
+
+      cycleCountQc.setQueryData(RUN_TEMPLATES_QUERY_KEY, updated)
+;
+
+    
+}
+ catch 
+{
+
+      void cycleCountQc.invalidateQueries(
+{
+ queryKey: RUN_TEMPLATES_QUERY_KEY 
+}
+)
+;
+
+    
+}
+
+  
+}
+
+  const markCountedMutation = useMutation(
+{
+
     mutationFn: (id: string) => markCycleCountCounted(id),
     onSuccess: (saved) =>
       cycleCountQc.setQueryData(["cycleCountSchedules"], saved),
-  });
+  
+}
+)
+;
+
   // Learned per-ingredient batch weights (factory-wide server memory, open to
   // all signed-in users like the other learned stores). Mixes and cheese
-  // recipes carry their batch weight from their recipe rows; plain ingredients
+  // recipes carry their batch weight from their recipe rows
+;
+ plain ingredients
   // only have the typed "Batch Weight (lbs)" field — once someone enters it,
   // the weight follows the ingredient: picking that ingredient again (on any
   // device) auto-fills the remembered weight.
-  const { data: learnedBatchWeightRows, isSuccess: batchWeightsLoaded } = useQuery({
+  const 
+{
+ data: learnedBatchWeightRows, isSuccess: batchWeightsLoaded 
+}
+ = useQuery(
+{
+
     queryKey: ["ingredientBatchWeights"],
     queryFn: fetchIngredientBatchWeights,
     staleTime: 5 * 60_000,
-  });
+  
+}
+)
+;
+
   const learnedBatchWeights = useMemo(
     () => buildBatchWeightMap(learnedBatchWeightRows ?? []),
     [learnedBatchWeightRows],
-  );
-  const learnedBatchWeightsRef = useRef(learnedBatchWeights);
-  learnedBatchWeightsRef.current = learnedBatchWeights;
+  )
+;
+
+  const learnedBatchWeightsRef = useRef(learnedBatchWeights)
+;
+
+  learnedBatchWeightsRef.current = learnedBatchWeights
+;
+
   // Saves are chained so an older in-flight request can never land after (and
   // overwrite) a newer one — the server applies them in the order entered.
-  const batchWeightSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const batchWeightSaveChainRef = useRef<Promise<void>>(Promise.resolve())
+;
+
   // Called from the type dropdowns when an ingredient is picked: fills the
   // matching batch-lbs field with the remembered weight (if any). Reads the
   // ref so the inline JSX handlers never go stale.
@@ -4200,12 +8712,26 @@ export default function Home() {
         | "pep2BatchLbs"
         | "pep2BatchLbsB"
         | "sauceBarrelLbs",
-    ) => {
-      const lbs = lookupBatchWeight(learnedBatchWeightsRef.current, name);
-      if (lbs !== null) form.setValue(field, lbs, { shouldDirty: true });
-    },
+    ) => 
+{
+
+      const lbs = lookupBatchWeight(learnedBatchWeightsRef.current, name)
+;
+
+      if (lbs !== null) form.setValue(field, lbs, 
+{
+ shouldDirty: true 
+}
+)
+;
+
+    
+}
+,
     [form],
-  );
+  )
+;
+
 
   // Server-side role (distinct from the local supervisor PIN toggle below).
   // Declared BEFORE the propagation callbacks below so they can list isManager
@@ -4216,211 +8742,581 @@ export default function Home() {
   // saved brand/flavor profile that uses that ingredient in a plain applicator
   // slot (not recipe-backed). Also updates the open form and pending runs.
   const propagateBatchWeightUpdates = useCallback(
-    async (entries: { name: string; lbs: number }[]) => {
-      if (entries.length === 0) return;
+    async (entries: 
+{
+ name: string
+;
+ lbs: number 
+}
+[]) => 
+{
+
+      if (entries.length === 0) return
+;
+
 
       // Ensure all server profiles are present in localStorage before scanning
       // (gap-fill only — never clobbers local edits). This covers the race
       // where a manager saves a batch weight before the boot reconciliation
       // effect has finished downloading the full factory profile pool.
-      let serverPairs: { brand: string; flavor: string }[] = [];
-      try {
-        serverPairs = await seedProfilesFromServer();
-      } catch {
+      let serverPairs: 
+{
+ brand: string
+;
+ flavor: string 
+}
+[] = []
+;
+
+      try 
+{
+
+        serverPairs = await seedProfilesFromServer()
+;
+
+      
+}
+ catch 
+{
+
         // Network unavailable — fall back to whatever localStorage already holds.
-      }
+      
+}
+
 
       // Collect all saved dough-profile localStorage keys (run-calc-profile-<brand>__<flavor>),
       // then union with the server pairs so profiles seeded above are included.
-      const seenSuffixes = new Set<string>();
-      const profileSuffixes: string[] = [];
-      const PREFIX = "run-calc-profile-";
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k) continue;
-        if (!k.startsWith(PREFIX)) continue;
-        const suffix = k.slice(PREFIX.length);
-        // Only brand__flavor blobs; bookkeeping keys (e.g. "-cleanup-v1") lack "__".
-        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
+      const seenSuffixes = new Set<string>()
+;
+
+      const profileSuffixes: string[] = []
+;
+
+      const PREFIX = "run-calc-profile-"
+;
+
+      for (let i = 0
+;
+ i < localStorage.length
+;
+ i++) 
+{
+
+        const k = localStorage.key(i)
+;
+
+        if (!k) continue
+;
+
+        if (!k.startsWith(PREFIX)) continue
+;
+
+        const suffix = k.slice(PREFIX.length)
+;
+
+        // Only brand__flavor blobs
+;
+ bookkeeping keys (e.g. "-cleanup-v1") lack "__".
+        if (suffix.includes("__") && !seenSuffixes.has(suffix)) 
+{
+
+          seenSuffixes.add(suffix)
+;
+
+          profileSuffixes.push(suffix)
+;
+
+        
+}
+
+      
+}
+
       // Add any server profiles that seedProfilesFromServer reported but
       // couldn't write to localStorage (quota issues) — we still want to
       // attempt to load them if they're already there under a different casing.
-      for (const { brand, flavor } of serverPairs) {
-        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-        if (!seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
+      for (const 
+{
+ brand, flavor 
+}
+ of serverPairs) 
+{
 
-      const profiles: BatchWeightPropagationProfile[] = [];
+        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`
+;
 
-      for (const suffix of profileSuffixes) {
-        const dunderIdx = suffix.indexOf("__");
-        if (dunderIdx < 0) continue;
-        const brand  = suffix.slice(0, dunderIdx);
-        const flavor = suffix.slice(dunderIdx + 2);
+        if (!seenSuffixes.has(suffix)) 
+{
 
-        const profile = loadProfile(brand, flavor);
-        if (!profile) continue;
-        profiles.push({ brand, flavor, profile: profile as Record<string, unknown> });
-      }
+          seenSuffixes.add(suffix)
+;
 
-      await executeBatchWeightPropagation({
+          profileSuffixes.push(suffix)
+;
+
+        
+}
+
+      
+}
+
+
+      const profiles: BatchWeightPropagationProfile[] = []
+;
+
+
+      for (const suffix of profileSuffixes) 
+{
+
+        const dunderIdx = suffix.indexOf("__")
+;
+
+        if (dunderIdx < 0) continue
+;
+
+        const brand  = suffix.slice(0, dunderIdx)
+;
+
+        const flavor = suffix.slice(dunderIdx + 2)
+;
+
+
+        const profile = loadProfile(brand, flavor)
+;
+
+        if (!profile) continue
+;
+
+        profiles.push(
+{
+ brand, flavor, profile: profile as Record<string, unknown> 
+}
+)
+;
+
+      
+}
+
+
+      await executeBatchWeightPropagation(
+{
+
         profiles,
         openForm: form.getValues() as Record<string, unknown>,
         entries,
         defaultPepTypes: DEFAULT_PEP_TYPES,
-        saveProfile: (brand, flavor, updates) => {
-          const profile = loadProfile(brand, flavor);
-          if (!profile) return false;
-          // Profile writes are manager-only; non-managers still get the
+        saveProfile: (brand, flavor, updates) => 
+{
+
+          const profile = loadProfile(brand, flavor)
+;
+
+          if (!profile) return false
+;
+
+          // Profile writes are manager-only
+;
+ non-managers still get the
           // in-memory heal (open-form update below) but never persist it.
           return canManageProfiles && saveProfile(
             brand,
             flavor,
-            { ...profile, ...updates } as FormValues,
-          );
-        },
+            
+{
+ ...profile, ...updates 
+}
+ as FormValues,
+          )
+;
+
+        
+}
+,
         propagateToPendingRuns: propagateProfileToPendingRuns,
         setOpenFormValue: (field, lbs) => form.setValue(
           field as Parameters<typeof form.setValue>[0],
           lbs as never,
-          { shouldDirty: true },
+          
+{
+ shouldDirty: true 
+}
+,
         ),
         notify: toast,
-      });
-    },
+      
+}
+)
+;
+
+    
+}
+,
     // propagateProfileToPendingRuns is a stable function reference (defined in component body)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [form, canManageProfiles],
-  );
+  )
+;
+
 
   // After a cheese recipe workbook import, fan the updated per-batch lbs into
   // every saved brand/flavor profile whose appNCheeseRecipeName matches one of
   // the saved recipes. Also updates the open form and pending runs.
   const propagateCheeseRecipeUpdates = useCallback(
-    async (updatedRecipes: CheeseRecipe[]) => {
-      if (updatedRecipes.length === 0) return;
+    async (updatedRecipes: CheeseRecipe[]) => 
+{
+
+      if (updatedRecipes.length === 0) return
+;
+
 
       // Build name-key → fresh row snapshot for recipes that have real lbs.
-      const recipeByName = new Map<string, Array<{ ingredient: string; lbs: number }>>();
-      for (const recipe of updatedRecipes) {
-        const key = (recipe.name ?? "").trim().toLowerCase();
-        if (!key) continue;
+      const recipeByName = new Map<string, Array<
+{
+ ingredient: string
+;
+ lbs: number 
+}
+>>()
+;
+
+      for (const recipe of updatedRecipes) 
+{
+
+        const key = (recipe.name ?? "").trim().toLowerCase()
+;
+
+        if (!key) continue
+;
+
         const rows = recipe.components
           .filter((c) => Number(c.lbs) > 0)
-          .map((c) => ({ ingredient: c.ingredient, lbs: Number(c.lbs) }));
-        if (rows.length > 0) recipeByName.set(key, rows);
-      }
-      if (recipeByName.size === 0) return;
+          .map((c) => (
+{
+ ingredient: c.ingredient, lbs: Number(c.lbs) 
+}
+))
+;
+
+        if (rows.length > 0) recipeByName.set(key, rows)
+;
+
+      
+}
+
+      if (recipeByName.size === 0) return
+;
+
 
       // Seed all server profiles into localStorage before scanning.
-      let serverPairs: { brand: string; flavor: string }[] = [];
-      try {
-        serverPairs = await seedProfilesFromServer();
-      } catch {
+      let serverPairs: 
+{
+ brand: string
+;
+ flavor: string 
+}
+[] = []
+;
+
+      try 
+{
+
+        serverPairs = await seedProfilesFromServer()
+;
+
+      
+}
+ catch 
+{
+
         // Network unavailable — fall back to whatever localStorage already holds.
-      }
+      
+}
+
 
       // Collect all brand__flavor profile keys.
-      const seenSuffixes = new Set<string>();
-      const profileSuffixes: string[] = [];
-      const PREFIX = "run-calc-profile-";
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k?.startsWith(PREFIX)) continue;
-        const suffix = k.slice(PREFIX.length);
-        if (suffix.includes("__") && !seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
-      for (const { brand, flavor } of serverPairs) {
-        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-        if (!seenSuffixes.has(suffix)) {
-          seenSuffixes.add(suffix);
-          profileSuffixes.push(suffix);
-        }
-      }
+      const seenSuffixes = new Set<string>()
+;
+
+      const profileSuffixes: string[] = []
+;
+
+      const PREFIX = "run-calc-profile-"
+;
+
+      for (let i = 0
+;
+ i < localStorage.length
+;
+ i++) 
+{
+
+        const k = localStorage.key(i)
+;
+
+        if (!k?.startsWith(PREFIX)) continue
+;
+
+        const suffix = k.slice(PREFIX.length)
+;
+
+        if (suffix.includes("__") && !seenSuffixes.has(suffix)) 
+{
+
+          seenSuffixes.add(suffix)
+;
+
+          profileSuffixes.push(suffix)
+;
+
+        
+}
+
+      
+}
+
+      for (const 
+{
+ brand, flavor 
+}
+ of serverPairs) 
+{
+
+        const suffix = `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`
+;
+
+        if (!seenSuffixes.has(suffix)) 
+{
+
+          seenSuffixes.add(suffix)
+;
+
+          profileSuffixes.push(suffix)
+;
+
+        
+}
+
+      
+}
+
 
       const cheeseSlots = [
-        { nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe" },
-        { nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe" },
-        { nameField: "app3CheeseRecipeName", rowsField: "app3CheeseRecipe" },
-        { nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe" },
-      ] as const;
+        
+{
+ nameField: "app1CheeseRecipeName", rowsField: "app1CheeseRecipe" 
+}
+,
+        
+{
+ nameField: "app2CheeseRecipeName", rowsField: "app2CheeseRecipe" 
+}
+,
+        
+{
+ nameField: "app3CheeseRecipeName", rowsField: "app3CheeseRecipe" 
+}
+,
+        
+{
+ nameField: "app4CheeseRecipeName", rowsField: "app4CheeseRecipe" 
+}
+,
+      ] as const
+;
 
-      let updatedCount = 0;
-      const propagations: Promise<void>[] = [];
 
-      for (const suffix of profileSuffixes) {
-        const dunderIdx = suffix.indexOf("__");
-        if (dunderIdx < 0) continue;
-        const brand  = suffix.slice(0, dunderIdx);
-        const flavor = suffix.slice(dunderIdx + 2);
+      let updatedCount = 0
+;
 
-        const profile = loadProfile(brand, flavor);
-        if (!profile) continue;
+      const propagations: Promise<void>[] = []
+;
 
-        const profileRec = profile as unknown as Record<string, unknown>;
-        const updates: Record<string, unknown> = {};
 
-        for (const { nameField, rowsField } of cheeseSlots) {
-          const recipeName = ((profileRec[nameField] as string) ?? "").trim();
-          if (!recipeName) continue;
-          const freshRows = recipeByName.get(recipeName.toLowerCase());
-          if (!freshRows) continue;
+      for (const suffix of profileSuffixes) 
+{
+
+        const dunderIdx = suffix.indexOf("__")
+;
+
+        if (dunderIdx < 0) continue
+;
+
+        const brand  = suffix.slice(0, dunderIdx)
+;
+
+        const flavor = suffix.slice(dunderIdx + 2)
+;
+
+
+        const profile = loadProfile(brand, flavor)
+;
+
+        if (!profile) continue
+;
+
+
+        const profileRec = profile as unknown as Record<string, unknown>
+;
+
+        const updates: Record<string, unknown> = 
+{
+}
+;
+
+
+        for (const 
+{
+ nameField, rowsField 
+}
+ of cheeseSlots) 
+{
+
+          const recipeName = ((profileRec[nameField] as string) ?? "").trim()
+;
+
+          if (!recipeName) continue
+;
+
+          const freshRows = recipeByName.get(recipeName.toLowerCase())
+;
+
+          if (!freshRows) continue
+;
+
           // Skip if every ingredient and its lbs is already identical (full row comparison,
           // not just sum — catches ingredient renames, additions, or removals that preserve total).
-          const currentRows = (profileRec[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
-          const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => {
-            const cr = currentRows[i];
-            return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001;
-          });
-          if (!rowsChanged) continue;
-          updates[rowsField] = freshRows;
-        }
+          const currentRows = (profileRec[rowsField] as Array<
+{
+ ingredient: string
+;
+ lbs: number 
+}
+> | undefined) ?? []
+;
 
-        if (Object.keys(updates).length === 0) continue;
+          const rowsChanged = currentRows.length !== freshRows.length || freshRows.some((fr, i) => 
+{
 
-        const updated = { ...profile, ...updates } as FormValues;
-        // Profile writes are manager-only; non-managers still get the
+            const cr = currentRows[i]
+;
+
+            return !cr || cr.ingredient !== fr.ingredient || Math.abs(Number(cr.lbs) - fr.lbs) >= 0.001
+;
+
+          
+}
+)
+;
+
+          if (!rowsChanged) continue
+;
+
+          updates[rowsField] = freshRows
+;
+
+        
+}
+
+
+        if (Object.keys(updates).length === 0) continue
+;
+
+
+        const updated = 
+{
+ ...profile, ...updates 
+}
+ as FormValues
+;
+
+        // Profile writes are manager-only
+;
+ non-managers still get the
         // in-memory heal (open-form update below) but never persist it.
-        const saved = canManageProfiles && saveProfile(brand, flavor, updated);
-        if (saved) {
-          updatedCount++;
-          propagations.push(propagateProfileToPendingRuns(brand, flavor));
-        }
-      }
+        const saved = canManageProfiles && saveProfile(brand, flavor, updated)
+;
 
-      await Promise.allSettled(propagations);
+        if (saved) 
+{
+
+          updatedCount++
+;
+
+          propagations.push(propagateProfileToPendingRuns(brand, flavor))
+;
+
+        
+}
+
+      
+}
+
+
+      await Promise.allSettled(propagations)
+;
+
 
       // Update the open form if it references any of the updated recipes.
-      const cv = form.getValues() as unknown as Record<string, unknown>;
-      for (const { nameField, rowsField } of cheeseSlots) {
-        const recipeName = ((cv[nameField] as string) ?? "").trim();
-        if (!recipeName) continue;
-        const freshRows = recipeByName.get(recipeName.toLowerCase());
-        if (!freshRows) continue;
-        form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
-      }
+      const cv = form.getValues() as unknown as Record<string, unknown>
+;
 
-      if (updatedCount > 0) {
-        toast({
+      for (const 
+{
+ nameField, rowsField 
+}
+ of cheeseSlots) 
+{
+
+        const recipeName = ((cv[nameField] as string) ?? "").trim()
+;
+
+        if (!recipeName) continue
+;
+
+        const freshRows = recipeByName.get(recipeName.toLowerCase())
+;
+
+        if (!freshRows) continue
+;
+
+        form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, 
+{
+ shouldDirty: true 
+}
+)
+;
+
+      
+}
+
+
+      if (updatedCount > 0) 
+{
+
+        toast(
+{
+
           title: "Cheese recipes updated",
           description: `${updatedCount} profile${updatedCount === 1 ? "" : "s"} refreshed with new recipe weights`,
-        });
-      }
-    },
+        
+}
+)
+;
+
+      
+}
+
+    
+}
+,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [form, canManageProfiles],
-  );
-  // Manager-set per-die line-setting overrides (server master-data); the run
+  )
+;
+
+  // Manager-set per-die line-setting overrides (server master-data)
+;
+ the run
   // form's die pre-fill resolves through these first, then the built-in map.
   const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
 
@@ -4432,16 +9328,26 @@ export default function Home() {
   // them backfilled additively (never overriding a manager's different brand).
   // Best-effort: the server enforces manage-inventory on writes, so a non-manager
   // (or offline device) simply no-ops. Updates the react-query cache on success.
-  const pushLocalDoughSauceToServer = useCallback(async (tags?: {
-    dough?: ReadonlyMap<string, NamedRecipeTag>;
-    sauce?: ReadonlyMap<string, NamedRecipeTag>;
+  const pushLocalDoughSauceToServer = useCallback(async (tags?: 
+{
+
+    dough?: ReadonlyMap<string, NamedRecipeTag>
+;
+
+    sauce?: ReadonlyMap<string, NamedRecipeTag>
+;
+
     /** Learned doughballs-per-tray by lowercased dough name (spec import) —
-     * backfills unset pool values; local presets don't carry per-tray. */
+     * backfills unset pool values
+;
+ local presets don't carry per-tray. */
     doughTrays?: ReadonlyMap<string, number>;
     /** Learned per-VARIANT doughball numbers by lowercased FAMILY dough name
      * (spec import) — merged additively into the pool recipe's variants list,
      * or replaced wholesale when `replaceVariants` is true. */
-    doughVariants?: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>;
+    doughVariants?: ReadonlyMap<string, ReadonlyArray<DoughballVariant>>
+;
+
     /**
      * When true, passes upsert semantics to the dough/sauce pool writes so
      * EXISTING pool recipes have their components updated from the local
@@ -4456,59 +9362,189 @@ export default function Home() {
      * the incoming one rather than merging additively. Use for spec re-imports
      * so renamed variants replace the old entry instead of piling up.
      */
-    replaceVariants?: boolean;
-  }): Promise<number> => {
+    replaceVariants?: boolean
+;
+
+  
+}
+): Promise<number> => 
+{
+
     const tagFor = (map: ReadonlyMap<string, NamedRecipeTag> | undefined, name: string) =>
-      map?.get(name.trim().toLowerCase());
-    const doughPresetEntries = Object.entries(loadDoughRecipePresets());
+      map?.get(name.trim().toLowerCase())
+;
+
+    const doughPresetEntries = Object.entries(loadDoughRecipePresets())
+;
+
     const doughDrafts = doughPresetEntries
-      .map(([name, p]) => {
-        const tag = tagFor(tags?.dough, name);
-        return namedRecipeFromDraft({ name, components: p?.rows ?? [], idPrefix: "dough", brand: tag?.brand, flavors: tag?.flavors, doughballWeightOz: p?.doughballWeightOz });
-      })
-      .filter((r): r is NamedRecipe => r !== null);
+      .map(([name, p]) => 
+{
+
+        const tag = tagFor(tags?.dough, name)
+;
+
+        return namedRecipeFromDraft(
+{
+ name, components: p?.rows ?? [], idPrefix: "dough", brand: tag?.brand, flavors: tag?.flavors, doughballWeightOz: p?.doughballWeightOz 
+}
+)
+;
+
+      
+}
+)
+      .filter((r): r is NamedRecipe => r !== null)
+;
+
     // Learned doughball weights (from spec imports / the run form) so EXISTING
     // pool recipes with no weight get backfilled, not just newly added drafts.
-    const doughWeights = new Map<string, number>();
-    for (const [name, p] of doughPresetEntries) {
-      const oz = p?.doughballWeightOz ?? 0;
-      const key = name.trim().toLowerCase();
-      if (key && oz > 0) doughWeights.set(key, oz);
-    }
+    const doughWeights = new Map<string, number>()
+;
+
+    for (const [name, p] of doughPresetEntries) 
+{
+
+      const oz = p?.doughballWeightOz ?? 0
+;
+
+      const key = name.trim().toLowerCase()
+;
+
+      if (key && oz > 0) doughWeights.set(key, oz)
+;
+
+    
+}
+
     const sauceDrafts = Object.entries(loadFrontlineRecipePresets())
-      .map(([name, rows]) => {
-        const tag = tagFor(tags?.sauce, name);
-        return namedRecipeFromDraft({ name, components: rows ?? [], idPrefix: "sauce", brand: tag?.brand, flavors: tag?.flavors });
-      })
-      .filter((r): r is NamedRecipe => r !== null);
+      .map(([name, rows]) => 
+{
+
+        const tag = tagFor(tags?.sauce, name)
+;
+
+        return namedRecipeFromDraft(
+{
+ name, components: rows ?? [], idPrefix: "sauce", brand: tag?.brand, flavors: tag?.flavors 
+}
+)
+;
+
+      
+}
+)
+      .filter((r): r is NamedRecipe => r !== null)
+;
+
     const [d, s] = await Promise.all([
       doughDrafts.length || (tags?.dough?.size ?? 0) > 0 || doughWeights.size > 0 || (tags?.doughTrays?.size ?? 0) > 0 || (tags?.doughVariants?.size ?? 0) > 0
-        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays, tags?.doughVariants, { upsertComponents: tags?.upsertComponents, replaceVariants: tags?.replaceVariants })
-        : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
+        ? addNamedRecipesToServerIfAbsent("dough", doughDrafts, tags?.dough, doughWeights, tags?.doughTrays, tags?.doughVariants, 
+{
+ upsertComponents: tags?.upsertComponents, replaceVariants: tags?.replaceVariants 
+}
+)
+        : Promise.resolve(
+{
+ added: 0, items: [] as NamedRecipe[] 
+}
+),
       sauceDrafts.length || (tags?.sauce?.size ?? 0) > 0
-        ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce, undefined, undefined, undefined, { upsertComponents: tags?.upsertComponents })
-        : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
-    ]);
-    if (d.items.length > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
-    if (s.items.length > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items);
-    return d.added + s.added;
-  }, [cycleCountQc]);
+        ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts, tags?.sauce, undefined, undefined, undefined, 
+{
+ upsertComponents: tags?.upsertComponents 
+}
+)
+        : Promise.resolve(
+{
+ added: 0, items: [] as NamedRecipe[] 
+}
+),
+    ])
+;
+
+    if (d.items.length > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items)
+;
+
+    if (s.items.length > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items)
+;
+
+    return d.added + s.added
+;
+
+  
+}
+, [cycleCountQc])
+;
+
 
   // One-time migration: run pushLocalDoughSauceToServer once so pre-existing
-  // recipes stop living only on this device. Manager-only (server-enforced);
+  // recipes stop living only on this device. Manager-only (server-enforced)
+;
+
   // marker-guarded so it runs once, and re-armed on failure to retry next mount.
-  const doughSauceMigratedRef = useRef(false);
-  useEffect(() => {
-    if (doughSauceMigratedRef.current || !canManageInventory) return;
-    const MARKER = "run-calc-dough-sauce-server-migrated-v1";
-    try {
-      if (localStorage.getItem(MARKER)) { doughSauceMigratedRef.current = true; return; }
-    } catch {}
-    doughSauceMigratedRef.current = true;
+  const doughSauceMigratedRef = useRef(false)
+;
+
+  useEffect(() => 
+{
+
+    if (doughSauceMigratedRef.current || !canManageInventory) return
+;
+
+    const MARKER = "run-calc-dough-sauce-server-migrated-v1"
+;
+
+    try 
+{
+
+      if (localStorage.getItem(MARKER)) 
+{
+ doughSauceMigratedRef.current = true
+;
+ return
+;
+ 
+}
+
+    
+}
+ catch 
+{
+}
+
+    doughSauceMigratedRef.current = true
+;
+
     pushLocalDoughSauceToServer()
-      .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
-      .catch(() => { doughSauceMigratedRef.current = false; });
-  }, [canManageInventory, pushLocalDoughSauceToServer]);
+      .then(() => 
+{
+ try 
+{
+ localStorage.setItem(MARKER, "1")
+;
+ 
+}
+ catch 
+{
+}
+ 
+}
+)
+      .catch(() => 
+{
+ doughSauceMigratedRef.current = false
+;
+ 
+}
+)
+;
+
+  
+}
+, [canManageInventory, pushLocalDoughSauceToServer])
+;
+
 
   // One-time name cleanup: rename existing server dough/sauce pool entries that
   // still carry spec-sheet formatting noise (sourcing qualifiers like
@@ -4520,85 +9556,275 @@ export default function Home() {
   // renamed entries. Collisions (clean name already taken by another pool
   // entry) are skipped — that's a real merge decision for the manager, not a
   // rename. Manager-only, marker-guarded, re-armed on failure.
-  const nameCleanupRef = useRef(false);
-  useEffect(() => {
-    if (nameCleanupRef.current || !canManageInventory) return;
-    const MARKER = "run-calc-dough-sauce-name-cleanup-v1";
-    try {
-      if (localStorage.getItem(MARKER)) { nameCleanupRef.current = true; return; }
-    } catch {}
-    nameCleanupRef.current = true;
-    (async () => {
-      const affectedRunIds: string[] = [];
-      const aliasesToSave: SpecImportAlias[] = [];
-      let renamedAny = false;
-      for (const kind of ["dough", "sauce"] as const) {
+  const nameCleanupRef = useRef(false)
+;
+
+  useEffect(() => 
+{
+
+    if (nameCleanupRef.current || !canManageInventory) return
+;
+
+    const MARKER = "run-calc-dough-sauce-name-cleanup-v1"
+;
+
+    try 
+{
+
+      if (localStorage.getItem(MARKER)) 
+{
+ nameCleanupRef.current = true
+;
+ return
+;
+ 
+}
+
+    
+}
+ catch 
+{
+}
+
+    nameCleanupRef.current = true
+;
+
+    (async () => 
+{
+
+      const affectedRunIds: string[] = []
+;
+
+      const aliasesToSave: SpecImportAlias[] = []
+;
+
+      let renamedAny = false
+;
+
+      for (const kind of ["dough", "sauce"] as const) 
+{
+
         // Crash/retry safety: the intended old→new map is persisted BEFORE the
         // server write. If a previous attempt renamed the server pool but died
         // before re-pointing local references (marker re-armed), the pool no
         // longer yields those old names — this pending map is the only way to
         // still repair the stranded local references on retry.
-        const PENDING_KEY = `${MARKER}-pending-${kind}`;
-        let pending: Record<string, string> = {};
-        try {
-          pending = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "{}") as Record<string, string>;
-        } catch {}
-        const pool = await fetchNamedRecipes(kind);
-        const taken = new Set(pool.map((r) => r.name.trim().toLowerCase()));
-        const map: Record<string, string> = { ...pending };
-        const changed: NamedRecipe[] = [];
-        for (const r of pool) {
-          const clean = cleanSpecNamedRecipeName(kind, r.name);
-          if (!clean || clean === r.name) continue;
-          const key = clean.trim().toLowerCase();
+        const PENDING_KEY = `${MARKER}-pending-${kind}`
+;
+
+        let pending: Record<string, string> = 
+{
+}
+;
+
+        try 
+{
+
+          pending = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "{}") as Record<string, string>
+;
+
+        
+}
+ catch 
+{
+}
+
+        const pool = await fetchNamedRecipes(kind)
+;
+
+        const taken = new Set(pool.map((r) => r.name.trim().toLowerCase()))
+;
+
+        const map: Record<string, string> = 
+{
+ ...pending 
+}
+;
+
+        const changed: NamedRecipe[] = []
+;
+
+        for (const r of pool) 
+{
+
+          const clean = cleanSpecNamedRecipeName(kind, r.name)
+;
+
+          if (!clean || clean === r.name) continue
+;
+
+          const key = clean.trim().toLowerCase()
+;
+
           // Same name modulo trim/case: rename in place, no re-pointing needed
           // beyond the exact-string surfaces applyRecipeNameMerge covers.
-          if (taken.has(key) && key !== r.name.trim().toLowerCase()) continue;
-          taken.add(key);
-          map[r.name] = clean;
-          changed.push({ ...r, name: clean });
-        }
-        if (Object.keys(map).length === 0) continue;
-        try { localStorage.setItem(PENDING_KEY, JSON.stringify(map)); } catch {}
-        if (changed.length > 0) {
+          if (taken.has(key) && key !== r.name.trim().toLowerCase()) continue
+;
+
+          taken.add(key)
+;
+
+          map[r.name] = clean
+;
+
+          changed.push(
+{
+ ...r, name: clean 
+}
+)
+;
+
+        
+}
+
+        if (Object.keys(map).length === 0) continue
+;
+
+        try 
+{
+ localStorage.setItem(PENDING_KEY, JSON.stringify(map))
+;
+ 
+}
+ catch 
+{
+}
+
+        if (changed.length > 0) 
+{
+
           // Server pool first (the endpoint saves the batch in ONE
           // transaction): if this write fails (offline / lost role) we abort
           // before touching local references, and the marker re-arms.
-          const saved = await saveNamedRecipes(kind, changed);
+          const saved = await saveNamedRecipes(kind, changed)
+;
+
           cycleCountQc.setQueryData(
             [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
             saved,
-          );
-        }
-        affectedRunIds.push(...applyRecipeNameMerge(kind, map));
-        try { localStorage.removeItem(PENDING_KEY); } catch {}
-        for (const [oldName, newName] of Object.entries(map)) {
-          // "recipeName" is the dough/sauce use-existing link namespace; the
+          )
+;
+
+        
+}
+
+        affectedRunIds.push(...applyRecipeNameMerge(kind, map))
+;
+
+        try 
+{
+ localStorage.removeItem(PENDING_KEY)
+;
+ 
+}
+ catch 
+{
+}
+
+        for (const [oldName, newName] of Object.entries(map)) 
+{
+
+          // "recipeName" is the dough/sauce use-existing link namespace
+;
+ the
           // kind rides in `context` so a dough alias never fires on a sauce row.
-          aliasesToSave.push({ kind: "recipeName", externalName: oldName, canonicalName: newName, context: kind });
-        }
-        renamedAny = true;
-      }
-      if (!renamedAny) return;
+          aliasesToSave.push(
+{
+ kind: "recipeName", externalName: oldName, canonicalName: newName, context: kind 
+}
+)
+;
+
+        
+}
+
+        renamedAny = true
+;
+
+      
+}
+
+      if (!renamedAny) return
+;
+
       // Advance edit stamps on re-pointed runs so the push below wins the
       // per-run lost-update guard (mirrors the manual merge flow).
-      if (affectedRunIds.length > 0) {
-        const stamp = Date.now();
-        const upd = loadRunValuesUpdated();
-        for (const id of affectedRunIds) upd[id] = stamp;
-        saveRunValuesUpdated(upd);
-      }
-      refreshAfterMerge();
-      try {
-        await saveSpecImportAliases(aliasesToSave);
-      } catch {}
-      try {
-        await pushTodayCanonical(buildSyncPayload(loadDayState()));
-      } catch {}
-    })()
-      .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
-      .catch(() => { nameCleanupRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+      if (affectedRunIds.length > 0) 
+{
+
+        const stamp = Date.now()
+;
+
+        const upd = loadRunValuesUpdated()
+;
+
+        for (const id of affectedRunIds) upd[id] = stamp
+;
+
+        saveRunValuesUpdated(upd)
+;
+
+      
+}
+
+      refreshAfterMerge()
+;
+
+      try 
+{
+
+        await saveSpecImportAliases(aliasesToSave)
+;
+
+      
+}
+ catch 
+{
+}
+
+      try 
+{
+
+        await pushTodayCanonical(buildSyncPayload(loadDayState()))
+;
+
+      
+}
+ catch 
+{
+}
+
+    
+}
+)()
+      .then(() => 
+{
+ try 
+{
+ localStorage.setItem(MARKER, "1")
+;
+ 
+}
+ catch 
+{
+}
+ 
+}
+)
+      .catch(() => 
+{
+ nameCleanupRef.current = false
+;
+ 
+}
+)
+;
+
+  
+}
+, [canManageInventory, cycleCountQc])
+;
+
 
   // One-time phantom-name heal: a dough/sauce name in the synced option list
   // that NO recipe anywhere backs (no server-pool entry, no local preset
@@ -4608,44 +9834,134 @@ export default function Home() {
   // family-matched it. Merge each onto its pool family name — re-points
   // profiles/runs and tombstones the old name so the sync union can't
   // resurrect it. Manager-only, marker-guarded, re-armed on failure.
-  const phantomNameHealRef = useRef(false);
-  useEffect(() => {
-    if (phantomNameHealRef.current || !canManageInventory) return;
-    const MARKER = "run-calc-dough-sauce-phantom-names-heal-v1";
-    try {
-      if (localStorage.getItem(MARKER)) { phantomNameHealRef.current = true; return; }
-    } catch {}
-    phantomNameHealRef.current = true;
-    (async () => {
-      const affectedRunIds: string[] = [];
-      let mergedAny = false;
-      for (const kind of ["dough", "sauce"] as const) {
-        const pool = await fetchNamedRecipes(kind);
-        const poolNames = pool.map((r) => r.name);
-        const listKey = kind === "dough" ? DOUGH_RECIPE_NAMES_KEY : FRONTLINE_RECIPE_NAMES_KEY;
-        const names = loadList(listKey, []);
-        const presets = kind === "dough" ? loadDoughRecipePresets() : loadFrontlineRecipePresets();
-        const hasPresetRows = (n: string): boolean => {
-          const key = Object.keys(presets).find((k) => k.trim().toLowerCase() === n.trim().toLowerCase());
-          if (!key) return false;
-          const p = presets[key] as { rows?: unknown[] } | unknown[] | undefined;
-          const rows = Array.isArray(p) ? p : (p?.rows ?? []);
-          return rows.length > 0;
-        };
-        const map: Record<string, string> = {};
-        for (const n of names) {
-          const t = (n ?? "").trim();
-          if (!t) continue;
+  const phantomNameHealRef = useRef(false)
+;
+
+  useEffect(() => 
+{
+
+    if (phantomNameHealRef.current || !canManageInventory) return
+;
+
+    const MARKER = "run-calc-dough-sauce-phantom-names-heal-v1"
+;
+
+    try 
+{
+
+      if (localStorage.getItem(MARKER)) 
+{
+ phantomNameHealRef.current = true
+;
+ return
+;
+ 
+}
+
+    
+}
+ catch 
+{
+}
+
+    phantomNameHealRef.current = true
+;
+
+    (async () => 
+{
+
+      const affectedRunIds: string[] = []
+;
+
+      let mergedAny = false
+;
+
+      for (const kind of ["dough", "sauce"] as const) 
+{
+
+        const pool = await fetchNamedRecipes(kind)
+;
+
+        const poolNames = pool.map((r) => r.name)
+;
+
+        const listKey = kind === "dough" ? DOUGH_RECIPE_NAMES_KEY : FRONTLINE_RECIPE_NAMES_KEY
+;
+
+        const names = loadList(listKey, [])
+;
+
+        const presets = kind === "dough" ? loadDoughRecipePresets() : loadFrontlineRecipePresets()
+;
+
+        const hasPresetRows = (n: string): boolean => 
+{
+
+          const key = Object.keys(presets).find((k) => k.trim().toLowerCase() === n.trim().toLowerCase())
+;
+
+          if (!key) return false
+;
+
+          const p = presets[key] as 
+{
+ rows?: unknown[] 
+}
+ | unknown[] | undefined
+;
+
+          const rows = Array.isArray(p) ? p : (p?.rows ?? [])
+;
+
+          return rows.length > 0
+;
+
+        
+}
+;
+
+        const map: Record<string, string> = 
+{
+}
+;
+
+        for (const n of names) 
+{
+
+          const t = (n ?? "").trim()
+;
+
+          if (!t) continue
+;
+
           // Backed by the pool (loose-equal) or by local preset rows: keep.
-          if (poolNames.some((p) => specImportNamedRecipeNamesEqual(p, t))) continue;
-          if (hasPresetRows(t)) continue;
-          const family = findSpecImportNamedRecipeFamilyMatch(kind, t, poolNames);
-          if (family) map[t] = family;
-        }
-        if (Object.keys(map).length !== 0) {
-          affectedRunIds.push(...applyRecipeNameMerge(kind, map));
-          mergedAny = true;
-        }
+          if (poolNames.some((p) => specImportNamedRecipeNamesEqual(p, t))) continue
+;
+
+          if (hasPresetRows(t)) continue
+;
+
+          const family = findSpecImportNamedRecipeFamilyMatch(kind, t, poolNames)
+;
+
+          if (family) map[t] = family
+;
+
+        
+}
+
+        if (Object.keys(map).length !== 0) 
+{
+
+          affectedRunIds.push(...applyRecipeNameMerge(kind, map))
+;
+
+          mergedAny = true
+;
+
+        
+}
+
         // Hydrate saved profiles that point at this pool recipe by name but
         // carry NO ingredient rows (imported before pool hydration existed —
         // a re-import of the unchanged sheet is pruned, so it can't repair
@@ -4701,29 +10017,99 @@ export default function Home() {
   // Best-effort follow-through for the one-time mix-slot cleanup migration:
   // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
   // are pushed into the server Mixes pool so the run form's Mix card can
-  // hydrate them. Manager-only (server enforces manage-inventory); the queue
+  // hydrate them. Manager-only (server enforces manage-inventory)
+;
+ the queue
   // survives failures and retries on the next mount/session.
-  const pendingMixPushRef = useRef(false);
-  useEffect(() => {
-    if (pendingMixPushRef.current || !canManageInventory) return;
-    const pending = loadPendingServerMixPushes();
-    if (pending.length === 0) { pendingMixPushRef.current = true; return; }
-    pendingMixPushRef.current = true;
-    (async () => {
-      const existing = await fetchMixes();
-      const candidates = pending
-        .map((p) => specMixDraftToMix({ name: p.name, brand: "", flavor: "", components: (p.componentIngredients ?? []).map((ingredient: string) => ({ ingredient, perPizza: 0 })) }))
-        .filter((m): m is Mix => m != null);
-      const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
-      if (added > 0) {
-        await saveMixes(merged);
-        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
-      }
-      clearPendingServerMixPushes();
-    })().catch(() => { pendingMixPushRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  const pendingMixPushRef = useRef(false)
+;
 
-  const [showReportIssue, setShowReportIssue] = useState(false);
+  useEffect(() => 
+{
+
+    if (pendingMixPushRef.current || !canManageInventory) return
+;
+
+    const pending = loadPendingServerMixPushes()
+;
+
+    if (pending.length === 0) 
+{
+ pendingMixPushRef.current = true
+;
+ return
+;
+ 
+}
+
+    pendingMixPushRef.current = true
+;
+
+    (async () => 
+{
+
+      const existing = await fetchMixes()
+;
+
+      const candidates = pending
+        .map((p) => specMixDraftToMix(
+{
+ name: p.name, brand: "", flavor: "", components: (p.componentIngredients ?? []).map((ingredient: string) => (
+{
+ ingredient, perPizza: 0 
+}
+)) 
+}
+))
+        .filter((m): m is Mix => m != null)
+;
+
+      const 
+{
+ merged, added 
+}
+ = addSpecMixesIfAbsent(existing, candidates)
+;
+
+      if (added > 0) 
+{
+
+        await saveMixes(merged)
+;
+
+        void cycleCountQc.invalidateQueries(
+{
+ queryKey: ["mixes"] 
+}
+)
+;
+
+      
+}
+
+      clearPendingServerMixPushes()
+;
+
+    
+}
+)().catch(() => 
+{
+ pendingMixPushRef.current = false
+;
+ 
+}
+)
+;
+
+  
+}
+, [canManageInventory, cycleCountQc])
+;
+
+
+  const [showReportIssue, setShowReportIssue] = useState(false)
+;
+
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
   // Latch + dismiss behavior lives in a shared hook kept at web/mobile parity.
@@ -4779,18 +10165,32 @@ export default function Home() {
       ? serverPin
       : (typeof window !== "undefined"
           ? localStorage.getItem(SUPERVISOR_PIN_KEY)
-          : null);
-  const noFacilityPin = resolvedPin === "";
-  const isSupervisor = isManager || role === "supervisor" || noFacilityPin;
+          : null)
+;
+
+  const noFacilityPin = resolvedPin === ""
+;
+
+  const isSupervisor = isManager || role === "supervisor" || noFacilityPin
+;
+
 
   // ── Glance overlay ────────────────────────────────────────────────────────
-  const [showGlance, setShowGlance] = useState(false);
-  const [showFloorMode, setShowFloorMode] = useState(false);
+  const [showGlance, setShowGlance] = useState(false)
+;
+
+  const [showFloorMode, setShowFloorMode] = useState(false)
+;
+
   // Combined per-user "Alerts & Floor Mode" settings panel (header menu).
-  const [showAlertSettings, setShowAlertSettings] = useState(false);
+  const [showAlertSettings, setShowAlertSettings] = useState(false)
+;
+
   // One durable inbox for manager work. This is deliberately separate from
   // account alert preferences and local form errors.
-  const [showManagerAttention, setShowManagerAttention] = useState(false);
+  const [showManagerAttention, setShowManagerAttention] = useState(false)
+;
+
   // Floor Mode can be turned off entirely for users who don't want the big-number
   // monitor (manual launch + idle auto-activate both gated on this). The
   // preference is per-USER (stored on the account server-side) so it follows
@@ -4801,27 +10201,73 @@ export default function Home() {
     if (!next) setShowFloorMode(false);
     // Optimistic cache flip happens inside persistFloorModeEnabled; a failed
     // save re-probes /me so the toggle falls back to the server's truth.
-    void persistFloorModeEnabled(next).catch(() => { /* reverted via /me re-probe */ });
-  }
+    void persistFloorModeEnabled(next).catch(() => 
+{
+ /* reverted via /me re-probe */ 
+}
+)
+;
+
+  
+}
+
   // One-time migration of the old device-local preference: if this browser had
   // Floor Mode explicitly turned OFF before the preference moved to the user
   // account, carry that choice over once, then drop the legacy key so it never
   // fights the account-level setting again.
-  const floorModeMigratedRef = useRef(false);
-  useEffect(() => {
-    if (!me || floorModeMigratedRef.current) return;
-    floorModeMigratedRef.current = true;
-    try {
-      const legacy = localStorage.getItem("run-calc-floor-mode");
-      if (legacy !== null) {
-        localStorage.removeItem("run-calc-floor-mode");
-        if (legacy === "0" && me.floorModeEnabled) {
-          void persistFloorModeEnabled(false).catch(() => { /* best-effort */ });
-        }
-      }
-    } catch { /* ignore storage errors */ }
+  const floorModeMigratedRef = useRef(false)
+;
+
+  useEffect(() => 
+{
+
+    if (!me || floorModeMigratedRef.current) return
+;
+
+    floorModeMigratedRef.current = true
+;
+
+    try 
+{
+
+      const legacy = localStorage.getItem("run-calc-floor-mode")
+;
+
+      if (legacy !== null) 
+{
+
+        localStorage.removeItem("run-calc-floor-mode")
+;
+
+        if (legacy === "0" && me.floorModeEnabled) 
+{
+
+          void persistFloorModeEnabled(false).catch(() => 
+{
+ /* best-effort */ 
+}
+)
+;
+
+        
+}
+
+      
+}
+
+    
+}
+ catch 
+{
+ /* ignore storage errors */ 
+}
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me]);
+  
+}
+, [me])
+;
+
   // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
   // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
   const [floorDimmed, setFloorDimmed] = useState(false);
@@ -4905,129 +10351,321 @@ export default function Home() {
   // (they retry then give up). Previously a final failure was swallowed silently,
   // so the user had no idea their work wasn't saved server-side. Track the two
   // failure modes and surface a clear, dismissible banner + a red status dot.
-  const [syncPushFailed, setSyncPushFailed] = useState(false);
-  const [writeError, setWriteError] = useState<string | null>(null);
-  const syncDate = todayStr();
-  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate));
-  const [lastAcknowledgedAt, setLastAcknowledgedAt] = useState<number | null>(() => {
-    const events = loadSyncDiagnostics(syncDate);
-    return events.filter((event) => event.kind === "ack").at(-1)?.at ?? null;
-  });
-  const [syncPendingCount, setSyncPendingCount] = useState(0);
+  const [syncPushFailed, setSyncPushFailed] = useState(false)
+;
+
+  const [writeError, setWriteError] = useState<string | null>(null)
+;
+
+  const syncDate = todayStr()
+;
+
+  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate))
+;
+
+  const [lastAcknowledgedAt, setLastAcknowledgedAt] = useState<number | null>(() => 
+{
+
+    const events = loadSyncDiagnostics(syncDate)
+;
+
+    return events.filter((event) => event.kind === "ack").at(-1)?.at ?? null
+;
+
+  
+}
+)
+;
+
+  const [syncPendingCount, setSyncPendingCount] = useState(0)
+;
+
   const [syncFailedCount, setSyncFailedCount] = useState(() =>
     loadSyncDiagnostics(syncDate).filter((event) => event.kind === "failure" || event.kind === "stale").length,
-  );
-  const recordSyncEvent = (kind: SyncDiagnosticKind, message: string, response?: string, runId?: string) => {
-    const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId });
-    setSyncDiagnostics((current) => [...current, event].slice(-20));
-    if (kind === "ack") setLastAcknowledgedAt(event.at);
-  };
-  const exportSyncDiagnostics = () => {
-    const report = buildSyncDiagnosticReport({
+  )
+;
+
+  const recordSyncEvent = (kind: SyncDiagnosticKind, message: string, response?: string, runId?: string) => 
+{
+
+    const event = recordSyncDiagnostic(
+{
+ kind, at: Date.now(), date: syncDate, message, response, runId 
+}
+)
+;
+
+    setSyncDiagnostics((current) => [...current, event].slice(-20))
+;
+
+    if (kind === "ack") setLastAcknowledgedAt(event.at)
+;
+
+  
+}
+;
+
+  const exportSyncDiagnostics = () => 
+{
+
+    const report = buildSyncDiagnosticReport(
+{
+
       date: syncDate,
       status: syncStatus,
       lastAcknowledgedAt,
       pendingCount: syncPendingCount,
       failedCount: syncFailedCount,
       diagnostics: syncDiagnostics,
-    });
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `sync-diagnostic-history-${syncDate}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
+    
+}
+)
+;
+
+    const blob = new Blob([JSON.stringify(report, null, 2)], 
+{
+ type: "application/json;charset=utf-8" 
+}
+)
+;
+
+    const url = URL.createObjectURL(blob)
+;
+
+    const anchor = document.createElement("a")
+;
+
+    anchor.href = url
+;
+
+    anchor.download = `sync-diagnostic-history-${syncDate}.json`
+;
+
+    anchor.click()
+;
+
+    URL.revokeObjectURL(url)
+;
+
+  
+}
+;
 
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
-  useEffect(() => {
-    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
-  }, []);
+  useEffect(() => 
+{
+
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as 
+{
+date:string
+;
+runCount:number
+;
+runs?:
+{
+id:string
+;
+brand:string
+;
+flavor:string
+;
+casesNeeded:number
+;
+dieType:string
+}
+[]
+}
+[])).catch(() => 
+{
+}
+)
+;
+
+  
+}
+, [])
+;
+
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
-  const [showReorderDialog, setShowReorderDialog] = useState(false);
+  const [showReorderDialog, setShowReorderDialog] = useState(false)
+;
+
 
   // ── Manage Lists dialog ────────────────────────────────────────────────────
-  const mergeFormRef = useRef<HTMLDivElement | null>(null);
-  const [showManageDialog, setShowManageDialog] = useState(false);
-  const [manageCategory, setManageCategory] = useState("brands");
-  const [manageBrandFilter, setManageBrandFilter] = useState("");
-  const [manageInput, setManageInput] = useState("");
-  const [mgNamesInput, setMgNamesInput] = useState("");
-  const [mgIngInput, setMgIngInput] = useState("");
-  const [mgStandaloneInput, setMgStandaloneInput] = useState("");
-  const [mgSelectedPreset, setMgSelectedPreset] = useState<string | null>(null);
-  const [mgPresetRows, setMgPresetRows] = useState<RecipeRow[]>([]);
-  const [exportSelection, setExportSelection] = useState<ExportSelection>({
+  const mergeFormRef = useRef<HTMLDivElement | null>(null)
+;
+
+  const [showManageDialog, setShowManageDialog] = useState(false)
+;
+
+  const [manageCategory, setManageCategory] = useState("brands")
+;
+
+  const [manageBrandFilter, setManageBrandFilter] = useState("")
+;
+
+  const [manageInput, setManageInput] = useState("")
+;
+
+  const [mgNamesInput, setMgNamesInput] = useState("")
+;
+
+  const [mgIngInput, setMgIngInput] = useState("")
+;
+
+  const [mgStandaloneInput, setMgStandaloneInput] = useState("")
+;
+
+  const [mgSelectedPreset, setMgSelectedPreset] = useState<string | null>(null)
+;
+
+  const [mgPresetRows, setMgPresetRows] = useState<RecipeRow[]>([])
+;
+
+  const [exportSelection, setExportSelection] = useState<ExportSelection>(
+{
+
     profiles: true,
     dough: true,
     sauce: true,
     cheese: true,
     mixes: true,
-  });
-  const [exporting, setExporting] = useState(false);
-  const [newPin, setNewPin] = useState("");
-  const [newPinConfirm, setNewPinConfirm] = useState("");
-  const [pinChangeMsg, setPinChangeMsg] = useState("");
+  
+}
+)
+;
+
+  const [exporting, setExporting] = useState(false)
+;
+
+  const [newPin, setNewPin] = useState("")
+;
+
+  const [newPinConfirm, setNewPinConfirm] = useState("")
+;
+
+  const [pinChangeMsg, setPinChangeMsg] = useState("")
+;
+
 
   // ── Merge ingredients ───────────────────────────────────────────────────────
-  const [mergeSources, setMergeSources] = useState<string[]>([]);
-  const [mergeTarget, setMergeTarget] = useState("");
-  const [mergeConfirming, setMergeConfirming] = useState(false);
-  const [mergeBusy, setMergeBusy] = useState(false);
-  const [mergeError, setMergeError] = useState("");
+  const [mergeSources, setMergeSources] = useState<string[]>([])
+;
+
+  const [mergeTarget, setMergeTarget] = useState("")
+;
+
+  const [mergeConfirming, setMergeConfirming] = useState(false)
+;
+
+  const [mergeBusy, setMergeBusy] = useState(false)
+;
+
+  const [mergeError, setMergeError] = useState("")
+;
+
   // AI + learned-memory merge suggestions (groups of duplicates, each with a
   // recommended canonical name). Reviewed before applying — merge is destructive.
-  const [mergeSuggestions, setMergeSuggestions] = useState<ReviewedMergeSuggestion[]>([]);
-  const [mergeSuggestBusy, setMergeSuggestBusy] = useState(false);
-  const [mergeSuggestError, setMergeSuggestError] = useState("");
-  const [mergeSuggestNote, setMergeSuggestNote] = useState("");
-  const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
+  const [mergeSuggestions, setMergeSuggestions] = useState<ReviewedMergeSuggestion[]>([])
+;
+
+  const [mergeSuggestBusy, setMergeSuggestBusy] = useState(false)
+;
+
+  const [mergeSuggestError, setMergeSuggestError] = useState("")
+;
+
+  const [mergeSuggestNote, setMergeSuggestNote] = useState("")
+;
+
+  const [mergeSuggestRan, setMergeSuggestRan] = useState(false)
+;
+
   // Checked suggestion groups for batch apply, keyed by target+sources (stable
-  // across list re-renders; stale keys from removed suggestions are harmless
+  // across list re-renders
+;
+ stale keys from removed suggestions are harmless
   // because counts intersect against the live list).
-  const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
-  const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
+  const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set())
+;
+
+  const [mergeBatchBusy, setMergeBatchBusy] = useState(false)
+;
+
   // Bumped after a recipe/spec import so an effect can auto-run the merge check
   // (imported recipe ingredients can duplicate standalone individual ones).
-  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
+  const [mergeCheckRequest, setMergeCheckRequest] = useState(0)
+;
+
   // Bumped after a spec sheet import so SpecReconcilePanel auto-runs the
   // cross-reference against the newly saved sheet.
-  const [specReconcileSignal, setSpecReconcileSignal] = useState(0);
+  const [specReconcileSignal, setSpecReconcileSignal] = useState(0)
+;
+
   // Bumped after ANY sheet-saving import (spec or premix) so the Mix
   // Monitoring panel re-fetches its saved-sheet lists instead of going stale.
-  const [sheetListSignal, setSheetListSignal] = useState(0);
+  const [sheetListSignal, setSheetListSignal] = useState(0)
+;
+
   // A manager can reopen the exact saved snapshot referenced by import history
   // without uploading the workbook again. The request id lets the panels
   // distinguish repeated clicks on the same snapshot.
   const [importReopenRequest, setImportReopenRequest] =
-    useState<ImportHistoryReopenRequest | null>(null);
+    useState<ImportHistoryReopenRequest | null>(null)
+;
+
   // True when the merge review was opened automatically by an import, so we can
   // show a one-line explainer of why the user landed here.
-  const [mergeFromImport, setMergeFromImport] = useState(false);
+  const [mergeFromImport, setMergeFromImport] = useState(false)
+;
+
   // Which category the merge picker is scoped to. The first five scope the
   // manual source/target lists to one master-data group so merges stay within a
-  // category; "brandflavor" swaps in a separate brand/flavor merge path.
-  type MergeCategory = "ingredients" | "mixes" | "dough" | "sauce" | "cheese" | "brandflavor";
-  const [mergeCategory, setMergeCategory] = useState<MergeCategory>("ingredients");
+  // category
+;
+ "brandflavor" swaps in a separate brand/flavor merge path.
+  type MergeCategory = "ingredients" | "mixes" | "dough" | "sauce" | "cheese" | "brandflavor"
+;
+
+  const [mergeCategory, setMergeCategory] = useState<MergeCategory>("ingredients")
+;
+
   // Brand/flavor sub-mode: merge whole brands (folding their flavors together)
   // or merge flavors within one chosen brand.
-  const [mergeBfMode, setMergeBfMode] = useState<"brands" | "flavors">("brands");
-  const [mergeBfBrand, setMergeBfBrand] = useState("");
+  const [mergeBfMode, setMergeBfMode] = useState<"brands" | "flavors">("brands")
+;
+
+  const [mergeBfBrand, setMergeBfBrand] = useState("")
+;
+
 
   // Local (per-device) master-data change history for the undo trail.
-  const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
-  const [undoBusy, setUndoBusy] = useState(false);
+  const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory())
+;
+
+  const [undoBusy, setUndoBusy] = useState(false)
+;
+
   // Record a change (snapshot already taken before the edit) and refresh the list.
   const noteChange = useCallback(
-    (type: MasterDataChangeType, description: string, before: Record<string, string>) => {
-      recordMasterDataChange(type, description, before);
-      setChangeHistory(loadChangeHistory());
-    },
+    (type: MasterDataChangeType, description: string, before: Record<string, string>) => 
+{
+
+      recordMasterDataChange(type, description, before)
+;
+
+      setChangeHistory(loadChangeHistory())
+;
+
+    
+}
+,
     [],
-  );
+  )
+;
+
 
   // ── One-time recipe-name consolidation into the server master-data pools ──
   // The run-form pickers union server pool names with legacy LOCAL name lists,
@@ -5040,17 +10678,48 @@ export default function Home() {
   // can't resurrect them), then empties the legacy local lists. Marker-guarded;
   // re-armed on failure so it retries next mount. Names that can't safely land
   // on the server (ambiguous near-dups) are left in the local list untouched.
-  const nameConsolidationRef = useRef(false);
-  useEffect(() => {
-    if (nameConsolidationRef.current || !canManageInventory) return;
-    const MARKER = "run-calc-recipe-name-consolidation-v1";
-    try {
-      if (localStorage.getItem(MARKER)) { nameConsolidationRef.current = true; return; }
-    } catch {}
-    const localSauce = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n) => !SEED_MIX_RECIPE_NAMES.has(n));
-    const localDough = loadList(DOUGH_RECIPE_NAMES_KEY, []);
-    const localCheeseAll = loadList(CHEESE_RECIPE_NAMES_KEY, []);
-    const localMix = loadList(MIX_RECIPE_NAMES_KEY, []);
+  const nameConsolidationRef = useRef(false)
+;
+
+  useEffect(() => 
+{
+
+    if (nameConsolidationRef.current || !canManageInventory) return
+;
+
+    const MARKER = "run-calc-recipe-name-consolidation-v1"
+;
+
+    try 
+{
+
+      if (localStorage.getItem(MARKER)) 
+{
+ nameConsolidationRef.current = true
+;
+ return
+;
+ 
+}
+
+    
+}
+ catch 
+{
+}
+
+    const localSauce = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n) => !SEED_MIX_RECIPE_NAMES.has(n))
+;
+
+    const localDough = loadList(DOUGH_RECIPE_NAMES_KEY, [])
+;
+
+    const localCheeseAll = loadList(CHEESE_RECIPE_NAMES_KEY, [])
+;
+
+    const localMix = loadList(MIX_RECIPE_NAMES_KEY, [])
+;
+
     // A fresh device may simply not have pulled its first sync yet. Don't set
     // the marker; the list states in the deps re-fire this effect when the
     // legacy lists actually arrive (and if they never do, there is no work).
@@ -5223,55 +10892,157 @@ export default function Home() {
         listKey: string,
         namespace: string,
         keep: Set<string>,
-      ) => {
-        const cur = loadList(listKey, []);
-        const kept = cur.filter((n) => keep.has(n));
-        const dropped = cur.filter((n) => !keep.has(n));
-        if (dropped.length === 0) return;
-        for (const n of dropped) tombstoneDeleted(namespace, n);
-        saveList(listKey, kept);
-      };
-      const cheeseKeep = new Set([...leftovers.cheese, ...[...leftovers.mixes].filter((n) => cheeseOriginLower.has(n.trim().toLowerCase()))]);
-      const mixKeep = new Set([...leftovers.mixes].filter((n) => !cheeseOriginLower.has(n.trim().toLowerCase())));
+      ) => 
+{
+
+        const cur = loadList(listKey, [])
+;
+
+        const kept = cur.filter((n) => keep.has(n))
+;
+
+        const dropped = cur.filter((n) => !keep.has(n))
+;
+
+        if (dropped.length === 0) return
+;
+
+        for (const n of dropped) tombstoneDeleted(namespace, n)
+;
+
+        saveList(listKey, kept)
+;
+
+      
+}
+;
+
+      const cheeseKeep = new Set([...leftovers.cheese, ...[...leftovers.mixes].filter((n) => cheeseOriginLower.has(n.trim().toLowerCase()))])
+;
+
+      const mixKeep = new Set([...leftovers.mixes].filter((n) => !cheeseOriginLower.has(n.trim().toLowerCase())))
+;
+
       // Namespace strings mirror RECIPE_NAME_MERGE_STORE in storage.ts so these
       // tombstones land in the same per-list namespace the merge path uses.
-      wipeCovered(FRONTLINE_RECIPE_NAMES_KEY, "frontlineRecipeNames", leftovers.sauce);
-      wipeCovered(DOUGH_RECIPE_NAMES_KEY, "doughRecipeNames", leftovers.dough);
-      wipeCovered(CHEESE_RECIPE_NAMES_KEY, "cheeseRecipeNames", cheeseKeep);
-      wipeCovered(MIX_RECIPE_NAMES_KEY, "mixRecipeNames", mixKeep);
+      wipeCovered(FRONTLINE_RECIPE_NAMES_KEY, "frontlineRecipeNames", leftovers.sauce)
+;
+
+      wipeCovered(DOUGH_RECIPE_NAMES_KEY, "doughRecipeNames", leftovers.dough)
+;
+
+      wipeCovered(CHEESE_RECIPE_NAMES_KEY, "cheeseRecipeNames", cheeseKeep)
+;
+
+      wipeCovered(MIX_RECIPE_NAMES_KEY, "mixRecipeNames", mixKeep)
+;
+
       // Advance the edit stamp on every run the renames re-pointed so the sync
       // push below wins the per-run lost-update guard on every peer.
-      if (affectedRunIds.length > 0) {
-        const stamp = Date.now();
-        const upd = loadRunValuesUpdated();
-        for (const id of affectedRunIds) upd[id] = stamp;
-        saveRunValuesUpdated(upd);
-      }
-      refreshAfterMerge();
+      if (affectedRunIds.length > 0) 
+{
+
+        const stamp = Date.now()
+;
+
+        const upd = loadRunValuesUpdated()
+;
+
+        for (const id of affectedRunIds) upd[id] = stamp
+;
+
+        saveRunValuesUpdated(upd)
+;
+
+      
+}
+
+      refreshAfterMerge()
+;
+
       // Push immediately so an incoming sync-pull's additive union can't
       // resurrect the wiped names on this device. Best-effort.
-      try {
-        await pushTodayCanonical(buildSyncPayload(loadDayState()));
-      } catch {}
+      try 
+{
+
+        await pushTodayCanonical(buildSyncPayload(loadDayState()))
+;
+
+      
+}
+ catch 
+{
+}
+
       noteChange(
         "merge",
         "Consolidated legacy recipe names into the shared Manage Lists pools",
         before,
-      );
-      try { localStorage.setItem(MARKER, "1"); } catch {}
-    })().catch(() => { nameConsolidationRef.current = false; });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManageInventory, frontlineRecipeNames, doughRecipeNames, cheeseRecipeNames, mixRecipeNames, cycleCountQc, noteChange]);
+      )
+;
 
-  const dedupSorted = (all: string[]) => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const n of all) {
-      const key = n.toLowerCase();
-      if (!seen.has(key)) { seen.add(key); out.push(n); }
-    }
-    return out.sort((a, b) => a.localeCompare(b));
-  };
+      try 
+{
+ localStorage.setItem(MARKER, "1")
+;
+ 
+}
+ catch 
+{
+}
+
+    
+}
+)().catch(() => 
+{
+ nameConsolidationRef.current = false
+;
+ 
+}
+)
+;
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  
+}
+, [canManageInventory, frontlineRecipeNames, doughRecipeNames, cheeseRecipeNames, mixRecipeNames, cycleCountQc, noteChange])
+;
+
+
+  const dedupSorted = (all: string[]) => 
+{
+
+    const seen = new Set<string>()
+;
+
+    const out: string[] = []
+;
+
+    for (const n of all) 
+{
+
+      const key = n.toLowerCase()
+;
+
+      if (!seen.has(key)) 
+{
+ seen.add(key)
+;
+ out.push(n)
+;
+ 
+}
+
+    
+}
+
+    return out.sort((a, b) => a.localeCompare(b))
+;
+
+  
+}
+;
+
 
   // The full mergeable universe: every master-data list whose values get
   // rewritten by an ingredient merge. Die types are intentionally EXCLUDED —
@@ -5333,8 +11104,12 @@ export default function Home() {
     } catch (e) {
       // Never let a surface-scan failure blank the whole tab — but don't
       // swallow it silently either (a TDZ error hid here once).
-      console.warn(`${cat} merge stale-name scan failed:`, e);
-    }
+      console.warn(`${cat} merge stale-name scan failed:`, e)
+;
+
+    
+}
+
     // The legacy local name lists still feed some pickers (e.g. the schedule
     // editor's Advanced selects) and are synced factory-wide, so a legacy name
     // lives on every device forever. Any entry that matches NO pool name is a
@@ -5371,22 +11146,40 @@ export default function Home() {
       // lists, which held legacy names that no longer appear in the app. Every
       // recipe tab ALSO unions in the stale referenced names (mergeStaleNames)
       // so leftover names in any category can be merged away.
-      case "mixes": return dedupSorted([...serverMixNames, ...mergeStaleNames]);
-      case "dough": return dedupSorted([...serverDoughNames, ...mergeStaleNames]);
-      case "sauce": return dedupSorted([...serverSauceNames, ...mergeStaleNames]);
-      case "cheese": {
+      case "mixes": return dedupSorted([...serverMixNames, ...mergeStaleNames])
+;
+
+      case "dough": return dedupSorted([...serverDoughNames, ...mergeStaleNames])
+;
+
+      case "sauce": return dedupSorted([...serverSauceNames, ...mergeStaleNames])
+;
+
+      case "cheese": 
+{
+
         // A name that also lives in the user Mix list is a mix, not a cheese
         // recipe, so keep the Cheese tab mix-free.
-        const mixNameSet = new Set(serverMixNames.map((n) => n.toLowerCase()));
+        const mixNameSet = new Set(serverMixNames.map((n) => n.toLowerCase()))
+;
+
         return dedupSorted([
           ...serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())),
           ...mergeStaleNames,
-        ]);
-      }
+        ])
+;
+
+      
+}
+
       case "brandflavor":
-        return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));
+        return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []))
+;
+
       case "ingredients":
-      default: {
+      default: 
+{
+
         // Individual + pep ingredient names, MINUS any name that is a recipe
         // name in another category (those are merged on their own tabs), so the
         // Ingredients tab stays real-ingredient-only. The mix set must be the
@@ -5418,7 +11211,9 @@ export default function Home() {
           ["mix", "cheese", ...DEFAULT_INGREDIENT_TYPES, ...MIX_SEED.frontlineIngredients, ...pepTypes].map((n) =>
             n.toLowerCase(),
           ),
-        );
+        )
+;
+
         return dedupSorted(
           // The unified universe (catalog + every server pool's recipe rows +
           // all local lists) so every ingredient used anywhere is mergeable —
@@ -5443,28 +11238,48 @@ export default function Home() {
     mergeCategory === "mixes" ? "Mix Recipes"
     : mergeCategory === "dough" ? "Dough Recipes"
     : mergeCategory === "sauce" ? "Sauce Recipes"
-    : "Cheese Recipes";
+    : "Cheese Recipes"
+;
+
 
   // One suggested cleanup per stale reference: the closest REAL pool recipe
   // via the shared near-duplicate matcher (ambiguity-guarded — no single safe
-  // match ⇒ no suggestion). Suggestions only PRE-FILL the merge pair; the user
+  // match ⇒ no suggestion). Suggestions only PRE-FILL the merge pair
+;
+ the user
   // confirms each one through the normal merge flow, never auto-applied.
-  const staleCleanupSuggestions = useMemo(() => {
-    if (!isRecipeNameCategory || mergeStaleNames.length === 0) return [];
+  const staleCleanupSuggestions = useMemo(() => 
+{
+
+    if (!isRecipeNameCategory || mergeStaleNames.length === 0) return []
+;
+
     const poolNames =
       mergeCategory === "dough" ? serverDoughNames
       : mergeCategory === "sauce" ? serverSauceNames
       : mergeCategory === "mixes" ? serverMixNames
-      : serverCheeseNames;
-    return buildStaleCleanupSuggestions(mergeStaleNames, poolNames);
-  }, [isRecipeNameCategory, mergeCategory, mergeStaleNames, serverDoughNames, serverSauceNames, serverMixNames, serverCheeseNames]);
+      : serverCheeseNames
+;
+
+    return buildStaleCleanupSuggestions(mergeStaleNames, poolNames)
+;
+
+  
+}
+, [isRecipeNameCategory, mergeCategory, mergeStaleNames, serverDoughNames, serverSauceNames, serverMixNames, serverCheeseNames])
+;
+
 
   // Which merge-suggest category/brand/pool the AI scan and learned-alias
   // memory should use for the currently active tab. Each tab scans and stores
   // ONLY its own name pool so a suggestion, alias, or denial never leaks across
   // tabs. "ingredients" intentionally keeps scanning the cross-category
-  // mergeFullUniverse (unchanged prior behavior); every recipe-name tab scans
-  // just its own recipe-name list (mergeUniverse, already scoped); Brand/Flavor
+  // mergeFullUniverse (unchanged prior behavior)
+;
+ every recipe-name tab scans
+  // just its own recipe-name list (mergeUniverse, already scoped)
+;
+ Brand/Flavor
   // scans brands or one brand's flavors depending on the active sub-mode.
   const mergeSuggestScope = useMemo((): {
     category: MergeSuggestCategory;
@@ -5513,15 +11328,29 @@ export default function Home() {
   // top so the user can quickly pick one of the names they selected as the one to
   // keep (the common case) instead of hunting for it in the full list.
   const mergeTargetOptions = useMemo(
-    () => {
-      const base = mergeCategory === "mixes" ? dedupSorted([...serverMixNames, ...allMixRecipeOptions]) : mergeUniverseRanked;
-      if (mergeSources.length === 0) return base;
-      const chosen = new Set(mergeSources);
-      return [...mergeSources, ...base.filter(n => !chosen.has(n))];
-    },
+    () => 
+{
+
+      const base = mergeCategory === "mixes" ? dedupSorted([...serverMixNames, ...allMixRecipeOptions]) : mergeUniverseRanked
+;
+
+      if (mergeSources.length === 0) return base
+;
+
+      const chosen = new Set(mergeSources)
+;
+
+      return [...mergeSources, ...base.filter(n => !chosen.has(n))]
+;
+
+    
+}
+,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mergeCategory, serverMixNames, allMixRecipeOptions, mergeUniverseRanked, mergeSources],
-  );
+  )
+;
+
 
   // Gather every value surface a merge would touch, so the confirmation preview
   // can count affected references. Mirrors buildSyncPayload's localStorage scan.
@@ -5534,97 +11363,252 @@ export default function Home() {
       frontlineIngredients,
       mixIngredients,
       pepTypes,
-    ];
-    const settingsObjects: Record<string, unknown>[] = [];
-    for (const run of dayStateRef.current.runs) {
-      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
-      settingsObjects.push(vals as unknown as Record<string, unknown>);
-    }
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key) continue;
-      if (key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")) {
-        try {
-          const obj = JSON.parse(localStorage.getItem(key) ?? "null");
-          if (obj && typeof obj === "object") settingsObjects.push(obj as Record<string, unknown>);
-        } catch {}
-      }
-    }
-    for (const day of loadHistory()) {
-      for (const vals of Object.values(day.runValues ?? {})) {
-        settingsObjects.push(vals as unknown as Record<string, unknown>);
-      }
-    }
-    const doughPresets = loadDoughRecipePresets();
-    const doughRows: Record<string, { ingredient?: unknown }[]> = {};
-    for (const [n, p] of Object.entries(doughPresets)) doughRows[n] = p.rows ?? [];
-    const presetMaps = [doughRows, loadFrontlineRecipePresets(), loadCheeseRecipePresets()];
+    ]
+;
+
+    const settingsObjects: Record<string, unknown>[] = []
+;
+
+    for (const run of dayStateRef.current.runs) 
+{
+
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id)
+;
+
+      settingsObjects.push(vals as unknown as Record<string, unknown>)
+;
+
+    
+}
+
+    for (let i = 0
+;
+ i < localStorage.length
+;
+ i++) 
+{
+
+      const key = localStorage.key(i)
+;
+
+      if (!key) continue
+;
+
+      if (key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")) 
+{
+
+        try 
+{
+
+          const obj = JSON.parse(localStorage.getItem(key) ?? "null")
+;
+
+          if (obj && typeof obj === "object") settingsObjects.push(obj as Record<string, unknown>)
+;
+
+        
+}
+ catch 
+{
+}
+
+      
+}
+
+    
+}
+
+    for (const day of loadHistory()) 
+{
+
+      for (const vals of Object.values(day.runValues ?? 
+{
+}
+)) 
+{
+
+        settingsObjects.push(vals as unknown as Record<string, unknown>)
+;
+
+      
+}
+
+    
+}
+
+    const doughPresets = loadDoughRecipePresets()
+;
+
+    const doughRows: Record<string, 
+{
+ ingredient?: unknown 
+}
+[]> = 
+{
+}
+;
+
+    for (const [n, p] of Object.entries(doughPresets)) doughRows[n] = p.rows ?? []
+;
+
+    const presetMaps = [doughRows, loadFrontlineRecipePresets(), loadCheeseRecipePresets()]
+;
+
     // Server master-data pools (cheese recipes, mixes, dough/sauce recipes) —
     // the merge re-points their ingredient rows case-insensitively via the
     // repoint helpers, so the preview must count them too or a name that lives
     // only in factory recipes shows a misleading "0 references".
-    const ciRowLists: { ingredient?: unknown }[][] = [
+    const ciRowLists: 
+{
+ ingredient?: unknown 
+}
+[][] = [
       ...cheeseRecipesList.map((r) => r.components ?? []),
       ...mixes.map((m) => m.components ?? []),
       ...doughRecipesList.map((r) => r.components ?? []),
       ...sauceRecipesList.map((r) => r.components ?? []),
-    ];
-    return { lists, settingsObjects, presetMaps, ciRowLists };
-  }
+    ]
+;
+
+    return 
+{
+ lists, settingsObjects, presetMaps, ciRowLists 
+}
+;
+
+  
+}
+
 
   // Recipe-name preview surfaces: the category's name list, the settings objects
   // (runs/profiles/templates/history) whose recipe-name selection fields get
   // re-pointed, and the category's recipe-preset map (its KEYS get folded).
-  function collectRecipeNameSurfaces(category: RecipeNameMergeCategory) {
-    const listMap: Record<RecipeNameMergeCategory, string[]> = {
+  function collectRecipeNameSurfaces(category: RecipeNameMergeCategory) 
+{
+
+    const listMap: Record<RecipeNameMergeCategory, string[]> = 
+{
+
       dough: serverDoughNames,
       sauce: serverSauceNames,
       cheese: serverCheeseNames,
       mixes: serverMixNames,
-    };
-    const { settingsObjects } = collectMergeSurfaces();
+    
+}
+;
+
+    const 
+{
+ settingsObjects 
+}
+ = collectMergeSurfaces()
+;
+
     const presetKeyMaps: Record<string, unknown>[] =
       category === "dough" ? [loadDoughRecipePresets()]
       : category === "sauce" ? [loadFrontlineRecipePresets()]
       : category === "cheese" ? [loadCheeseRecipePresets()]
-      : [];
-    return { lists: [listMap[category]], settingsObjects, presetKeyMaps };
-  }
+      : []
+;
 
-  const mergeMap: MergeMap = buildMergeMap(mergeSources, mergeTarget);
-  const mergePreviewCount = useMemo(() => {
-    if (Object.keys(mergeMap).length === 0) return 0;
-    try {
-      if (isRecipeNameCategory) {
+    return 
+{
+ lists: [listMap[category]], settingsObjects, presetKeyMaps 
+}
+;
+
+  
+}
+
+
+  const mergeMap: MergeMap = buildMergeMap(mergeSources, mergeTarget)
+;
+
+  const mergePreviewCount = useMemo(() => 
+{
+
+    if (Object.keys(mergeMap).length === 0) return 0
+;
+
+    try 
+{
+
+      if (isRecipeNameCategory) 
+{
+
         return countRecipeNameReferences(
           mergeMap,
           RECIPE_NAME_FIELDS_BY_CATEGORY[mergeCategory as RecipeNameMergeCategory],
           collectRecipeNameSurfaces(mergeCategory as RecipeNameMergeCategory),
-        );
-      }
-      return countMergeReferences(mergeMap, collectMergeSurfaces());
-    } catch { return 0; }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeSources, mergeTarget, mergeCategory, cheeseRecipesList, mixes, doughRecipesList, sauceRecipesList]);
+        )
+;
 
-  function toggleMergeSource(name: string) {
-    setMergeError("");
-    setMergeConfirming(false);
+      
+}
+
+      return countMergeReferences(mergeMap, collectMergeSurfaces())
+;
+
+    
+}
+ catch 
+{
+ return 0
+;
+ 
+}
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  
+}
+, [mergeSources, mergeTarget, mergeCategory, cheeseRecipesList, mixes, doughRecipesList, sauceRecipesList])
+;
+
+
+  function toggleMergeSource(name: string) 
+{
+
+    setMergeError("")
+;
+
+    setMergeConfirming(false)
+;
+
     setMergeSources(prev =>
       prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name],
-    );
-  }
+    )
+;
 
-  function resetMergeForm() {
-    setMergeSources([]);
-    setMergeTarget("");
-    setMergeConfirming(false);
-    setMergeBusy(false);
-    setMergeError("");
-  }
+  
+}
+
+
+  function resetMergeForm() 
+{
+
+    setMergeSources([])
+;
+
+    setMergeTarget("")
+;
+
+    setMergeConfirming(false)
+;
+
+    setMergeBusy(false)
+;
+
+    setMergeError("")
+;
+
+  
+}
+
 
   // Ask for duplicate-group suggestions: combines AI clustering with learned
-  // "previously merged" aliases. Results are reviewed (never auto-applied);
+  // "previously merged" aliases. Results are reviewed (never auto-applied)
+;
+
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
   async function handleSuggestMerges(fromImport = false): Promise<number> {
@@ -5635,14 +11619,34 @@ export default function Home() {
     // in the caller effect hasn't re-rendered yet and the scope memo would
     // still reflect whatever tab was active before.
     const scope = fromImport
-      ? { category: "ingredient" as const, universe: mergeFullUniverse }
-      : mergeSuggestScope;
-    setMergeSuggestBusy(true);
-    setMergeSuggestError("");
-    setMergeSuggestNote("");
-    setMergeSuggestRan(true);
-    try {
-      const { suggestions, usedAi, error } = await suggestMerges(
+      ? 
+{
+ category: "ingredient" as const, universe: mergeFullUniverse 
+}
+
+      : mergeSuggestScope
+;
+
+    setMergeSuggestBusy(true)
+;
+
+    setMergeSuggestError("")
+;
+
+    setMergeSuggestNote("")
+;
+
+    setMergeSuggestRan(true)
+;
+
+    try 
+{
+
+      const 
+{
+ suggestions, usedAi, error 
+}
+ = await suggestMerges(
         scope.universe,
         scope.category,
         scope.brand,
@@ -5650,74 +11654,165 @@ export default function Home() {
         // pairing names that mention DIFFERENT brands ("Lowes …" vs "Bashas …")
         // is dropped no matter what the AI said.
         brands,
-      );
-      setMergeSuggestions(suggestions);
-      setMergeSuggestSelected(new Set());
-      if (!usedAi && error) {
+      )
+;
+
+      setMergeSuggestions(suggestions)
+;
+
+      setMergeSuggestSelected(new Set())
+;
+
+      if (!usedAi && error) 
+{
+
         setMergeSuggestError(
           `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
-        );
-      }
-      if (usedAi && suggestions.length === 0) {
-        setMergeSuggestNote("No duplicate groups found.");
-      }
-      return suggestions.length;
-    } catch (e) {
-      setMergeSuggestions([]);
-      setMergeSuggestSelected(new Set());
-      setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
-      return 0;
-    } finally {
-      setMergeSuggestBusy(false);
-    }
-  }
+        )
+;
+
+      
+}
+
+      if (usedAi && suggestions.length === 0) 
+{
+
+        setMergeSuggestNote("No duplicate groups found.")
+;
+
+      
+}
+
+      return suggestions.length
+;
+
+    
+}
+ catch (e) 
+{
+
+      setMergeSuggestions([])
+;
+
+      setMergeSuggestSelected(new Set())
+;
+
+      setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.")
+;
+
+      return 0
+;
+
+    
+}
+ finally 
+{
+
+      setMergeSuggestBusy(false)
+;
+
+    
+}
+
+  
+}
+
 
   // After a spec/recipe import that added recipes, auto-run the merge check in
   // the BACKGROUND: imported cheese/mix recipe ingredients can duplicate
   // standalone individual ingredients. This used to yank the user straight to
   // the Merge screen after EVERY import — importing several sheets back-to-back
   // felt broken ("where did the import buttons go?"). Now the scan runs without
-  // navigating; if duplicates are found, a toast offers a "Review" button that
+  // navigating
+;
+ if duplicates are found, a toast offers a "Review" button that
   // jumps to the Merge screen with the results already loaded. The effect
   // re-runs only when the request counter is bumped, so by then the merge
   // universe reflects the new lists.
-  useEffect(() => {
-    if (mergeCheckRequest === 0) return;
+  useEffect(() => 
+{
+
+    if (mergeCheckRequest === 0) return
+;
+
     // Pre-select the Ingredients tab (where the cross-category suggestions
     // show) so the results match the screen when the user does come look.
-    setMergeCategory("ingredients");
-    setMergeFromImport(true);
-    void handleSuggestMerges(true).then((count) => {
-      if (count <= 0) return;
-      toast({
+    setMergeCategory("ingredients")
+;
+
+    setMergeFromImport(true)
+;
+
+    void handleSuggestMerges(true).then((count) => 
+{
+
+      if (count <= 0) return
+;
+
+      toast(
+{
+
         title: "Possible duplicate ingredients",
         description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
         action: (
           <ToastAction
             altText="Review duplicates"
-            onClick={() => {
-              setActiveTab("setup");
-              setManageCategory("merge");
-              setMergeCategory("ingredients");
-            }}
+            onClick=
+{
+() => 
+{
+
+              setActiveTab("setup")
+;
+
+              setManageCategory("merge")
+;
+
+              setMergeCategory("ingredients")
+;
+
+            
+}
+}
+
           >
             Review
           </ToastAction>
         ),
-      });
-    });
+      
+}
+)
+;
+
+    
+}
+)
+;
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCheckRequest]);
+  
+}
+, [mergeCheckRequest])
+;
+
 
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
   // universe's exact spelling so the source checkboxes actually tick (AI/learned
   // suggestion names can differ in case), and the form (which sits below the
   // suggestion list) is scrolled into view so it's obvious Load did something.
-  function loadMergeSuggestion(s: MergeSuggestion) {
-    setMergeError("");
-    setMergeConfirming(false);
-    setMergeFromImport(false);
+  function loadMergeSuggestion(s: MergeSuggestion) 
+{
+
+    setMergeError("")
+;
+
+    setMergeConfirming(false)
+;
+
+    setMergeFromImport(false)
+;
+
     // Suggestions shown are always scoped to the currently active tab (each
     // scan uses that tab's own pool), so snap names against that same pool —
     // never force a tab switch.
@@ -5744,77 +11839,189 @@ export default function Home() {
   // Stable identity for a suggestion group, used for batch-apply checkboxes.
   // Sources are sorted and every part URI-encoded so names containing the
   // delimiter can't collide across groups.
-  function mergeSuggestKey(s: MergeSuggestion): string {
+  function mergeSuggestKey(s: MergeSuggestion): string 
+{
+
     const parts = s.sources
       .filter((n) => n !== s.target)
       .map((n) => encodeURIComponent(n))
-      .sort();
-    return `${encodeURIComponent(s.target)}::${parts.join("|")}`;
-  }
+      .sort()
+;
 
-  function toggleMergeSuggestSelected(s: ReviewedMergeSuggestion) {
-    const key = mergeSuggestKey(s);
-    setMergeSuggestSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+    return `${encodeURIComponent(s.target)}::${parts.join("|")}`
+;
+
+  
+}
+
+
+  function toggleMergeSuggestSelected(s: ReviewedMergeSuggestion) 
+{
+
+    const key = mergeSuggestKey(s)
+;
+
+    setMergeSuggestSelected((prev) => 
+{
+
+      const next = new Set(prev)
+;
+
+      if (next.has(key)) next.delete(key)
+;
+
+      else next.add(key)
+;
+
+      return next
+;
+
+    
+}
+)
+;
+
+  
+}
+
 
   // Apply a suggested group directly through the destructive merge path. On
   // success drop just this suggestion so the user can keep working through the
   // rest of the list (the panel stays open — no reload).
-  async function applyMergeSuggestion(s: ReviewedMergeSuggestion): Promise<boolean> {
-    const sources = s.sources.filter((n) => n !== s.target);
-    if (sources.length === 0) return false;
-    setMergeFromImport(false);
+  async function applyMergeSuggestion(s: ReviewedMergeSuggestion): Promise<boolean> 
+{
+
+    const sources = s.sources.filter((n) => n !== s.target)
+;
+
+    if (sources.length === 0) return false
+;
+
+    setMergeFromImport(false)
+;
+
     const ok = mergeCategory === "brandflavor"
       ? await handleApplyBrandFlavorMerge(sources, s.target)
       : isRecipeNameCategory
       ? await handleApplyRecipeNameMerge(mergeCategory as RecipeNameMergeCategory, sources, s.target)
-      : await handleApplyMerge(sources, s.target);
-    if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
-    return ok;
-  }
+      : await handleApplyMerge(sources, s.target)
+;
+
+    if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s))
+;
+
+    return ok
+;
+
+  
+}
+
 
   // Batch apply: run each checked group through the SAME per-group merge path,
-  // strictly one at a time (each merge rewrites lists + pushes sync; running
+  // strictly one at a time (each merge rewrites lists + pushes sync
+;
+ running
   // them concurrently would race). Stops on the first failure so the error for
   // that group stays visible and the remaining checked groups are untouched.
-  async function applySelectedSuggestions() {
-    const chosen = mergeSuggestions.filter((s) => mergeSuggestSelected.has(mergeSuggestKey(s)));
-    if (chosen.length === 0 || mergeBatchBusy) return;
-    setMergeBatchBusy(true);
-    try {
-      for (const s of chosen) {
-        const ok = await applyMergeSuggestion(s);
-        if (!ok) break;
-        setMergeSuggestSelected((prev) => {
-          const next = new Set(prev);
-          next.delete(mergeSuggestKey(s));
-          return next;
-        });
-      }
-    } finally {
-      setMergeBatchBusy(false);
-    }
-  }
+  async function applySelectedSuggestions() 
+{
 
-  // Ignore a suggested group: persist the {target, source} pairs as denied so
+    const chosen = mergeSuggestions.filter((s) => mergeSuggestSelected.has(mergeSuggestKey(s)))
+;
+
+    if (chosen.length === 0 || mergeBatchBusy) return
+;
+
+    setMergeBatchBusy(true)
+;
+
+    try 
+{
+
+      for (const s of chosen) 
+{
+
+        const ok = await applyMergeSuggestion(s)
+;
+
+        if (!ok) break
+;
+
+        setMergeSuggestSelected((prev) => 
+{
+
+          const next = new Set(prev)
+;
+
+          next.delete(mergeSuggestKey(s))
+;
+
+          return next
+;
+
+        
+}
+)
+;
+
+      
+}
+
+    
+}
+ finally 
+{
+
+      setMergeBatchBusy(false)
+;
+
+    
+}
+
+  
+}
+
+
+  // Ignore a suggested group: persist the 
+{
+target, source
+}
+ pairs as denied so
   // the suggester never proposes them again (factory-wide), then drop it from
   // the open list. Persisting is best-effort — even if the POST fails the user
   // still gets the suggestion out of their way for this session.
-  async function ignoreMergeSuggestion(s: ReviewedMergeSuggestion) {
-    const sources = s.sources.filter((n) => n !== s.target);
-    if (sources.length === 0) return;
-    setMergeFromImport(false);
-    setMergeSuggestions((prev) => prev.filter((x) => x !== s));
-    const scope = mergeSuggestScope;
-    try {
-      await denyMerge(s.target, sources, scope.category, scope.brand);
-    } catch {
-      // Non-fatal: the suggestion is already hidden for this session; it may
+  async function ignoreMergeSuggestion(s: ReviewedMergeSuggestion) 
+{
+
+    const sources = s.sources.filter((n) => n !== s.target)
+;
+
+    if (sources.length === 0) return
+;
+
+    setMergeFromImport(false)
+;
+
+    setMergeSuggestions((prev) => prev.filter((x) => x !== s))
+;
+
+    const scope = mergeSuggestScope
+;
+
+    try 
+{
+
+      await denyMerge(s.target, sources, scope.category, scope.brand)
+;
+
+    
+}
+ catch 
+{
+
+      // Non-fatal: the suggestion is already hidden for this session
+;
+ it may
       // reappear on a later scan if the deny didn't persist.
     }
   }
@@ -5993,7 +12200,9 @@ export default function Home() {
   // the target, drop the source brands (tombstoned so the additive sync union
   // can't resurrect them), and re-point today's runs from a merged-away brand to
   // the target. Mirrors renameBrand's surface coverage (master lists + open
-  // runs); brands carry no inventory, so nothing is folded there. State writes
+  // runs)
+;
+ brands carry no inventory, so nothing is folded there. State writes
   // are synchronous to localStorage so the caller's immediate sync push ships the
   // merged data.
   function mergeBrands(sources: string[], target: string) {
@@ -6004,26 +12213,63 @@ export default function Home() {
     );
     if (srcSet.size === 0) return;
     // Union every merged-away brand's flavors into the target brand.
-    const nextFlavors = { ...brandFlavors };
-    const targetFlavors = new Set(nextFlavors[tgt] ?? []);
-    for (const b of Object.keys(nextFlavors)) {
-      if (srcSet.has(b.toLowerCase())) {
-        for (const f of nextFlavors[b] ?? []) targetFlavors.add(f);
-        delete nextFlavors[b];
-      }
-    }
-    nextFlavors[tgt] = [...targetFlavors].sort((a, b) => a.localeCompare(b));
-    setBrandFlavors(nextFlavors);
-    saveBrandFlavors(nextFlavors);
+    const nextFlavors = 
+{
+ ...brandFlavors 
+}
+;
+
+    const targetFlavors = new Set(nextFlavors[tgt] ?? [])
+;
+
+    for (const b of Object.keys(nextFlavors)) 
+{
+
+      if (srcSet.has(b.toLowerCase())) 
+{
+
+        for (const f of nextFlavors[b] ?? []) targetFlavors.add(f)
+;
+
+        delete nextFlavors[b]
+;
+
+      
+}
+
+    
+}
+
+    nextFlavors[tgt] = [...targetFlavors].sort((a, b) => a.localeCompare(b))
+;
+
+    setBrandFlavors(nextFlavors)
+;
+
+    saveBrandFlavors(nextFlavors)
+;
+
     // Brand list: drop sources, keep the target, sort.
-    let nextBrands = brands.filter((b) => !srcSet.has(b.toLowerCase()));
-    if (!nextBrands.some((b) => b.toLowerCase() === tgt.toLowerCase())) nextBrands = [...nextBrands, tgt];
-    nextBrands = nextBrands.sort((a, b) => a.localeCompare(b));
-    setBrands(nextBrands);
-    saveList(BRANDS_KEY, nextBrands);
+    let nextBrands = brands.filter((b) => !srcSet.has(b.toLowerCase()))
+;
+
+    if (!nextBrands.some((b) => b.toLowerCase() === tgt.toLowerCase())) nextBrands = [...nextBrands, tgt]
+;
+
+    nextBrands = nextBrands.sort((a, b) => a.localeCompare(b))
+;
+
+    setBrands(nextBrands)
+;
+
+    saveList(BRANDS_KEY, nextBrands)
+;
+
     // Tombstone the merged-away brand names (flavors moved to the target, so their
     // source-brand flavor namespaces need no tombstones).
-    for (const b of brands) if (srcSet.has(b.toLowerCase())) tombstoneDeleted("brands", b);
+    for (const b of brands) if (srcSet.has(b.toLowerCase())) tombstoneDeleted("brands", b)
+;
+
     // Re-point today's runs from a merged-away brand to the target.
     const ds = dayStateRef.current;
     const updatedRuns = ds.runs.map((r) =>
@@ -6069,36 +12315,78 @@ export default function Home() {
   async function handleApplyBrandFlavorMerge(
     sourcesArg?: string[],
     targetArg?: string,
-  ): Promise<boolean> {
-    const map = buildMergeMap(sourcesArg ?? mergeSources, targetArg ?? mergeTarget);
-    const srcs = Object.keys(map);
-    const tgt = (targetArg ?? mergeTarget).trim();
-    if (srcs.length === 0) {
-      setMergeError("Pick at least one source and a different target.");
-      return false;
-    }
-    if (mergeBfMode === "flavors" && !mergeBfBrand.trim()) {
-      setMergeError("Pick a brand first.");
-      return false;
-    }
-    setMergeBusy(true);
-    setMergeError("");
-    const before = captureMasterDataSnapshot();
-    try {
-      if (mergeBfMode === "brands") mergeBrands(srcs, tgt);
-      else mergeFlavors(mergeBfBrand, srcs, tgt);
+  ): Promise<boolean> 
+{
+
+    const map = buildMergeMap(sourcesArg ?? mergeSources, targetArg ?? mergeTarget)
+;
+
+    const srcs = Object.keys(map)
+;
+
+    const tgt = (targetArg ?? mergeTarget).trim()
+;
+
+    if (srcs.length === 0) 
+{
+
+      setMergeError("Pick at least one source and a different target.")
+;
+
+      return false
+;
+
+    
+}
+
+    if (mergeBfMode === "flavors" && !mergeBfBrand.trim()) 
+{
+
+      setMergeError("Pick a brand first.")
+;
+
+      return false
+;
+
+    
+}
+
+    setMergeBusy(true)
+;
+
+    setMergeError("")
+;
+
+    const before = captureMasterDataSnapshot()
+;
+
+    try 
+{
+
+      if (mergeBfMode === "brands") mergeBrands(srcs, tgt)
+;
+
+      else mergeFlavors(mergeBfBrand, srcs, tgt)
+;
+
       // Record each confirmed source→target as a factory-wide AI correction
       // (brand or flavor domain) so every name-resolving AI feature knows the
       // merged-away names map to the survivor. Best-effort, fire-and-forget.
       void saveAiCorrections(
         srcs
           .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
-          .map((src) => ({
+          .map((src) => (
+{
+
             domain: mergeBfMode === "brands" ? "brand" : "flavor",
             fromText: src,
             toText: tgt,
-          })),
-      );
+          
+}
+)),
+      )
+;
+
       // Persist the confirmed merge as a learned alias, scoped to this
       // category ("brand", or "flavor" scoped to the one brand it happened
       // within) so it feeds the AI suggester and "previously merged" list for
@@ -6116,21 +12404,41 @@ export default function Home() {
       // cheese) canonicalize through the spec-import alias store, not the merge
       // suggester's — without this, re-importing an old workbook resurrects the
       // merged-away brand/flavor as if it were new.
-      try {
+      try 
+{
+
         await learnSpecImportAliasesForNameChange(
           mergeBfMode === "brands" ? "brand" : "flavor",
           srcs,
           tgt,
           mergeBfMode === "flavors" ? mergeBfBrand : undefined,
-        );
-      } catch {
+        )
+;
+
+      
+}
+ catch 
+{
+
         // Non-fatal: the next re-import just shows the old name for review.
-      }
-      try {
-        await pushTodayCanonical(buildSyncPayload(loadDayState()));
-      } catch {
+      
+}
+
+      try 
+{
+
+        await pushTodayCanonical(buildSyncPayload(loadDayState()))
+;
+
+      
+}
+ catch 
+{
+
         // Non-fatal: tombstones are persisted locally.
-      }
+      
+}
+
       // Cheese recipes and mixes are server-backed master-data (NOT in day-state
       // sync), so a brand/flavor merge won't touch them — re-point any that still
       // name a merged-away brand (or flavor, within the brand) so they stop
@@ -6187,9 +12495,15 @@ export default function Home() {
     category: RecipeNameMergeCategory,
     sourcesArg?: string[],
     targetArg?: string,
-  ): Promise<boolean> {
-    const sourcesAll = sourcesArg ?? mergeSources;
-    const tgt = targetArg ?? mergeTarget;
+  ): Promise<boolean> 
+{
+
+    const sourcesAll = sourcesArg ?? mergeSources
+;
+
+    const tgt = targetArg ?? mergeTarget
+;
+
     // Guardrail: mergeable mix sources are real (server) mix names OR stale
     // references (names in NO pool — leftover picks the merge cleans up).
     // Factory MIX_SEED names stay excluded: they'd just be re-seeded locally.
@@ -6222,30 +12536,66 @@ export default function Home() {
       // Persist the confirmed merge as a learned alias scoped to this recipe-
       // name category so it feeds the AI suggester and "previously merged"
       // list for this tab's own pool only.
-      try {
-        await saveMergeAliases(collectMergeAliases(Object.keys(map), tgt), category);
-      } catch {
-        // Non-fatal: the merge itself already succeeded; learning is additive.
-      }
+      try 
+{
+
+        await saveMergeAliases(collectMergeAliases(Object.keys(map), tgt), category)
+;
+
+      
+}
+ catch 
+{
+
+        // Non-fatal: the merge itself already succeeded
+;
+ learning is additive.
+      
+}
+
       // Advance the edit stamp on every run the merge re-pointed, so the push
       // below strictly wins the per-run lost-update guard on the server and every
       // peer. Without this, a stale remote payload carrying the pre-merge recipe
       // name at an equal/older stamp (common for unedited/imported runs at ts 0)
       // could overwrite the merged selection on the next sync pull.
-      if (affectedRunIds.length > 0) {
-        const stamp = Date.now();
-        const upd = loadRunValuesUpdated();
-        for (const id of affectedRunIds) upd[id] = stamp;
-        saveRunValuesUpdated(upd);
-      }
-      refreshAfterMerge();
+      if (affectedRunIds.length > 0) 
+{
+
+        const stamp = Date.now()
+;
+
+        const upd = loadRunValuesUpdated()
+;
+
+        for (const id of affectedRunIds) upd[id] = stamp
+;
+
+        saveRunValuesUpdated(upd)
+;
+
+      
+}
+
+      refreshAfterMerge()
+;
+
       // Push the merged payload (with its deletion tombstones) immediately so an
       // incoming sync-pull's additive union can't re-add the merged-away names.
-      try {
-        await pushTodayCanonical(buildSyncPayload(loadDayState()));
-      } catch {
+      try 
+{
+
+        await pushTodayCanonical(buildSyncPayload(loadDayState()))
+;
+
+      
+}
+ catch 
+{
+
         // Non-fatal: tombstones are persisted locally.
-      }
+      
+}
+
       // Dough / sauce / cheese / mix recipes are server-backed factory master-
       // data (NOT in day-state sync), and the merge picker's universe is derived
       // from those live server pools. Rewriting only localStorage above lets a
@@ -6255,15 +12605,25 @@ export default function Home() {
       // how handleApplyBrandFlavorMerge re-points these same pools.
       // The surviving recipe's brand (when its pool row is found below) scopes
       // the learned import alias — captured here, used after the cleanup block.
-      let aliasBrandCtx: string | undefined;
-      try {
-        const tgtLc = tgt.trim().toLowerCase();
+      let aliasBrandCtx: string | undefined
+;
+
+      try 
+{
+
+        const tgtLc = tgt.trim().toLowerCase()
+;
+
         const sourceNamesLc = new Set(
           Object.keys(map)
             .map((s) => s.trim().toLowerCase())
             .filter((s) => s && s !== tgtLc),
-        );
-        if (sourceNamesLc.size > 0) {
+        )
+;
+
+        if (sourceNamesLc.size > 0) 
+{
+
           // Before deleting the merged-away recipes, backfill the TARGET's
           // blank/zero/missing fields from them (blank-fill-only — real data
           // already on the target always wins). Without this, merging a real
@@ -6295,9 +12655,15 @@ export default function Home() {
               const enriched = backfillCheeseRecipeFromMergedSources(targetRow, sourceRows);
               if (enriched) await saveCheeseRecipes([enriched]);
             }
-            // Fan the target's current rows out to every profile whose app{n}
+            // Fan the target's current rows out to every profile whose app
+{
+n
+}
+
             // slot was just re-pointed to the target by applyRecipeNameMerge.
-            // The name fields were already rewritten; without this the profiles
+            // The name fields were already rewritten
+;
+ without this the profiles
             // keep the old recipe's ingredient rows under the new name.
             if (targetRow) {
               const tRows = normalizeRecipeRowsForCompare(targetRow.components);
@@ -6332,94 +12698,230 @@ export default function Home() {
               if (enriched) await saveMixes([enriched]);
             }
             // Fan the target mix's rows to profiles (same reason as cheese above).
-            if (targetRow) {
-              const tRows = normalizeRecipeRowsForCompare(targetRow.components);
-              if (tRows.length > 0) refreshCheeseOrMixProfileRows(tgt, tRows);
-            }
-            const ids = sourceRows.map((m) => m.id);
-            if (ids.length > 0) {
-              cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids));
-            } else if (targetRow) {
-              cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
-            }
-          } else {
+            if (targetRow) 
+{
+
+              const tRows = normalizeRecipeRowsForCompare(targetRow.components)
+;
+
+              if (tRows.length > 0) refreshCheeseOrMixProfileRows(tgt, tRows)
+;
+
+            
+}
+
+            const ids = sourceRows.map((m) => m.id)
+;
+
+            if (ids.length > 0) 
+{
+
+              cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids))
+;
+
+            
+}
+ else if (targetRow) 
+{
+
+              cycleCountQc.invalidateQueries(
+{
+ queryKey: ["mixes"] 
+}
+)
+;
+
+            
+}
+
+          
+}
+ else 
+{
+
             // dough | sauce — their own named-recipe pools.
-            const pool = await fetchNamedRecipes(category);
-            let targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc);
+            const pool = await fetchNamedRecipes(category)
+;
+
+            let targetRow = pool.find((r) => r.name.trim().toLowerCase() === tgtLc)
+;
+
             let sourceRows = pool.filter((r) =>
               sourceNamesLc.has(r.name.trim().toLowerCase()),
-            );
+            )
+;
+
             // No pool row for the target name: rename the richest source to
             // the target instead of deleting every copy of the data (see the
             // cheese branch above).
-            if (!targetRow && sourceRows.length > 0) {
+            if (!targetRow && sourceRows.length > 0) 
+{
+
               const best = [...sourceRows].sort(
                 (a, b) => (b.components?.length ?? 0) - (a.components?.length ?? 0),
-              )[0];
-              targetRow = { ...best, name: tgt.trim() };
-              sourceRows = sourceRows.filter((r) => r.id !== best.id);
-              await saveNamedRecipes(category, [targetRow]);
-            }
-            if (targetRow && sourceRows.length > 0) {
-              const enriched = backfillNamedRecipeFromMergedSources(targetRow, sourceRows);
-              if (enriched) await saveNamedRecipes(category, [enriched]);
-            }
+              )[0]
+;
+
+              targetRow = 
+{
+ ...best, name: tgt.trim() 
+}
+;
+
+              sourceRows = sourceRows.filter((r) => r.id !== best.id)
+;
+
+              await saveNamedRecipes(category, [targetRow])
+;
+
+            
+}
+
+            if (targetRow && sourceRows.length > 0) 
+{
+
+              const enriched = backfillNamedRecipeFromMergedSources(targetRow, sourceRows)
+;
+
+              if (enriched) await saveNamedRecipes(category, [enriched])
+;
+
+            
+}
+
             // Fan the target recipe's rows to every profile that now references
             // it. applyNamedPoolChange's diff path won't fire here because the
             // TARGET recipe's rows didn't change in the pool — only a source was
             // deleted. Without this, profiles keep the old source's rows under
             // the target name until the server recipe itself changes.
-            if (targetRow) {
-              const tRows = normalizeRecipeRowsForCompare(targetRow.components);
-              if (tRows.length > 0) {
+            if (targetRow) 
+{
+
+              const tRows = normalizeRecipeRowsForCompare(targetRow.components)
+;
+
+              if (tRows.length > 0) 
+{
+
                 refreshProfilesFromNamedRecipes(category as "dough" | "sauce", [
-                  { name: tgt, rows: tRows },
-                ]);
-              }
-            }
-            const ids = sourceRows.map((r) => r.id);
-            if (ids.length > 0) {
+                  
+{
+ name: tgt, rows: tRows 
+}
+,
+                ])
+;
+
+              
+}
+
+            
+}
+
+            const ids = sourceRows.map((r) => r.id)
+;
+
+            if (ids.length > 0) 
+{
+
               cycleCountQc.setQueryData(
                 [category === "dough" ? "doughRecipes" : "sauceRecipes"],
                 await deleteNamedRecipes(category, ids),
-              );
-            } else if (targetRow) {
-              cycleCountQc.invalidateQueries({
+              )
+;
+
+            
+}
+ else if (targetRow) 
+{
+
+              cycleCountQc.invalidateQueries(
+{
+
                 queryKey: [category === "dough" ? "doughRecipes" : "sauceRecipes"],
-              });
-            }
-          }
-        }
-      } catch {
-        // Non-fatal: the local merge already succeeded; server pool cleanup is
+              
+}
+)
+;
+
+            
+}
+
+          
+}
+
+        
+}
+
+      
+}
+ catch 
+{
+
+        // Non-fatal: the local merge already succeeded
+;
+ server pool cleanup is
         // best-effort (the delete endpoints are manager-gated).
-      }
+      
+}
+
       // Learn spec-import aliases (old name → survivor) so a RE-IMPORT of the
       // original workbook maps onto the merged recipe instead of resurrecting
       // it — the importers canonicalize through the SpecImportAlias store, not
       // the merge-suggester aliases saved above. Mixes/cheese use the shared
-      // "appType" blend namespace (brand-scoped + context-free); dough/sauce
+      // "appType" blend namespace (brand-scoped + context-free)
+;
+ dough/sauce
       // use "recipeName" with the kind in context. Fire-and-forget like the
       // brand/flavor merge path — a failure never blocks the merge.
       void learnRecipeNameChangeAliases(category, Object.keys(map), tgt, aliasBrandCtx).catch(
-        () => {},
-      );
-      resetMergeForm();
+        () => 
+{
+}
+,
+      )
+;
+
+      resetMergeForm()
+;
+
       const label =
-        category === "mixes" ? "mix" : category === "sauce" ? "sauce" : category;
+        category === "mixes" ? "mix" : category === "sauce" ? "sauce" : category
+;
+
       noteChange(
         "merge",
         `Merged ${label} recipe ${Object.keys(map).map((s) => `"${s}"`).join(", ")} into "${tgt.trim()}"`,
         before,
-      );
-      setMergeBusy(false);
-      return true;
-    } catch (e) {
-      setMergeBusy(false);
-      setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
-      return false;
-    }
-  }
+      )
+;
+
+      setMergeBusy(false)
+;
+
+      return true
+;
+
+    
+}
+ catch (e) 
+{
+
+      setMergeBusy(false)
+;
+
+      setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.")
+;
+
+      return false
+;
+
+    
+}
+
+  
+}
+
 
   // Remove a stale ("old reference") recipe name outright — for names with no
   // real pool recipe behind them and no good merge target. Clears the name from
@@ -6444,7 +12946,11 @@ export default function Home() {
     if (poolCi.has(nameCi)) {
       toast({
         title: "Can't remove a real recipe here",
-        description: `"${name}" exists as a recipe in Manage Lists. Delete it from its own section there instead.`,
+        description: `"$
+{
+name
+}
+" exists as a recipe in Manage Lists. Delete it from its own section there instead.`,
         variant: "destructive",
       });
       return;
@@ -6474,10 +12980,18 @@ export default function Home() {
       } catch {
         // Non-fatal: the tombstone is persisted locally and rides the next push.
       }
-      noteChange("remove", `Removed old reference "${name}" (${mergePoolLabel})`, before);
+      noteChange("remove", `Removed old reference "$
+{
+name
+}
+" (${mergePoolLabel})`, before);
       toast({
         title: "Old reference removed",
-        description: `"${name}" was cleared from runs, saved setups, templates and history.`,
+        description: `"$
+{
+name
+}
+" was cleared from runs, saved setups, templates and history.`,
       });
     } finally {
       setMergeBusy(false);
@@ -6520,7 +13034,11 @@ export default function Home() {
       : "";
     const extra = discarded.length - 1;
     const tail = extra > 0 ? ` and ${extra} later change${extra === 1 ? "" : "s"}` : "";
-    if (!window.confirm(`Undo "${entry.description}"${tail}?${warn}`)) return;
+    if (!window.confirm(`Undo "$
+{
+entry.description
+}
+"${tail}?${warn}`)) return;
     setUndoBusy(true);
     try {
       const ok = undoChange(entry.id);
@@ -6794,179 +13312,561 @@ export default function Home() {
         const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
         // Stored editor values are a snapshot — if their sauce is blank but the
         // profile has one now, carry the profile's sauce (blank-fill only).
-        runValues[r.id] = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
-      }
-      const payload: SyncPayload = {
-        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) },
+        runValues[r.id] = backfillFromProfile(
+{
+ ...base, casesNeeded: r.casesNeeded 
+}
+, r.brand, r.flavor)
+;
+
+      
+}
+
+      const payload: SyncPayload = 
+{
+
+        dayState: 
+{
+ runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) 
+}
+,
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
         deletedItems: loadDeletedItems(),
         deletedStamps: loadDeletedStamps(),
         undeletedStamps: loadUndeletedStamps(),
-      };
-      const res = await fetch(`/api/sync/${scheduleEditorDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+      
+}
+;
+
+      const res = await fetch(`/api/sync/${scheduleEditorDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, 
+{
+
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload }),
-      });
-      const { stale } = await consumeCanonicalSyncWriteResponse(
+        headers: 
+{
+ "Content-Type": "application/json" 
+}
+,
+        body: JSON.stringify(
+{
+ payload 
+}
+),
+      
+}
+)
+;
+
+      const 
+{
+ stale 
+}
+ = await consumeCanonicalSyncWriteResponse(
         res,
         scheduleEditorDate === todayStr(),
-      );
-      if (res.ok && !stale) {
-        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
-        setScheduleView("list");
-      } else if (!res.ok) {
-        setScheduleError(res.status === 401 ? "Session expired — please sign in again and re-save." : `Couldn't save (server error ${res.status}) — check your connection and try again.`);
-      }
-    } catch {
-      setScheduleError("Couldn't save — check your connection and try again.");
-    }
-    setScheduleSaving(false);
-  }
-  async function deleteScheduledDay(date: string) {
-    try {
-      await fetch(`/api/sync/${date}?today=${todayStr()}`, { method: "DELETE" });
-      setScheduledDays(prev => prev.filter(d => d.date !== date));
-      setScheduleDeleteConfirm(null);
-    } catch {}
-  }
-  async function fetchSchedulePayload(date: string): Promise<SyncPayload | null> {
-    try {
-      const res = await fetch(`/api/sync/${date}`);
-      if (!res.ok) return null;
-      return (await res.json()) as SyncPayload | null;
-    } catch { return null; }
-  }
-  async function refreshScheduledDays() {
-    try {
-      const d = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json());
-      setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[]);
-    } catch {}
-  }
+      )
+;
+
+      if (res.ok && !stale) 
+{
+
+        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as 
+{
+date:string
+;
+runCount:number
+;
+runs?:
+{
+id:string
+;
+brand:string
+;
+flavor:string
+;
+casesNeeded:number
+;
+dieType:string
+}
+[]
+}
+[])).catch(() => 
+{
+}
+)
+;
+
+        setScheduleView("list")
+;
+
+      
+}
+ else if (!res.ok) 
+{
+
+        setScheduleError(res.status === 401 ? "Session expired — please sign in again and re-save." : `Couldn't save (server error ${res.status}) — check your connection and try again.`)
+;
+
+      
+}
+
+    
+}
+ catch 
+{
+
+      setScheduleError("Couldn't save — check your connection and try again.")
+;
+
+    
+}
+
+    setScheduleSaving(false)
+;
+
+  
+}
+
+  async function deleteScheduledDay(date: string) 
+{
+
+    try 
+{
+
+      await fetch(`/api/sync/${date}?today=${todayStr()}`, 
+{
+ method: "DELETE" 
+}
+)
+;
+
+      setScheduledDays(prev => prev.filter(d => d.date !== date))
+;
+
+      setScheduleDeleteConfirm(null)
+;
+
+    
+}
+ catch 
+{
+}
+
+  
+}
+
+  async function fetchSchedulePayload(date: string): Promise<SyncPayload | null> 
+{
+
+    try 
+{
+
+      const res = await fetch(`/api/sync/${date}`)
+;
+
+      if (!res.ok) return null
+;
+
+      return (await res.json()) as SyncPayload | null
+;
+
+    
+}
+ catch 
+{
+ return null
+;
+ 
+}
+
+  
+}
+
+  async function refreshScheduledDays() 
+{
+
+    try 
+{
+
+      const d = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json())
+;
+
+      setScheduledDays(d as 
+{
+date:string
+;
+runCount:number
+;
+runs?:
+{
+id:string
+;
+brand:string
+;
+flavor:string
+;
+casesNeeded:number
+;
+dieType:string
+}
+[]
+}
+[])
+;
+
+    
+}
+ catch 
+{
+}
+
+  
+}
+
   // Move a whole scheduled day (sel "all") or a single run (sel.runId) to another
   // future date. Web schedule pool is future days only — the live "today" runs are
-  // never a move source or target (mobile allows today; see schedule-move memory).
+  // never a move source or target (mobile allows today
+;
+ see schedule-move memory).
   // Target is written before the source is trimmed/deleted, so a partial network
   // failure can only leave a duplicate (visible, user-fixable) — never lose runs.
-  async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string) {
-    if (!toDate || toDate === fromDate) return;
-    const src = await fetchSchedulePayload(fromDate);
-    if (!src?.dayState) return;
-    let ids: string[] | "all";
-    if (sel === "all") ids = "all";
-    else {
-      if (!src.dayState.runs.some(r => r.id === sel.runId)) return;
-      ids = [sel.runId];
-    }
-    const tgt = await fetchSchedulePayload(toDate);
-    const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
-    if (idMap.length === 0) return;
+  async function performScheduleMove(fromDate: string, sel: "all" | 
+{
+ runId: string 
+}
+, toDate: string) 
+{
+
+    if (!toDate || toDate === fromDate) return
+;
+
+    const src = await fetchSchedulePayload(fromDate)
+;
+
+    if (!src?.dayState) return
+;
+
+    let ids: string[] | "all"
+;
+
+    if (sel === "all") ids = "all"
+;
+
+    else 
+{
+
+      if (!src.dayState.runs.some(r => r.id === sel.runId)) return
+;
+
+      ids = [sel.runId]
+;
+
+    
+}
+
+    const tgt = await fetchSchedulePayload(toDate)
+;
+
+    const 
+{
+ source, target, idMap 
+}
+ = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId)
+;
+
+    if (idMap.length === 0) return
+;
+
     const vals = relocateValues(
-      (src.runValues ?? {}) as Record<string, FormValues>,
-      (tgt?.runValues ?? {}) as Record<string, FormValues>,
+      (src.runValues ?? 
+{
+}
+) as Record<string, FormValues>,
+      (tgt?.runValues ?? 
+{
+}
+) as Record<string, FormValues>,
       idMap,
-    );
-    const base = tgt ?? src;
-    const targetPayload: SyncPayload = {
+    )
+;
+
+    const base = tgt ?? src
+;
+
+    const targetPayload: SyncPayload = 
+{
+
       ...base,
-      dayState: { ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: writeDayResetAt(toDate, todayStr(), (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()) },
+      dayState: 
+{
+ ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: writeDayResetAt(toDate, todayStr(), (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()) 
+}
+,
       runValues: vals.target,
-    };
-    const tRes = await fetch(`/api/sync/${toDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+    
+}
+;
+
+    const tRes = await fetch(`/api/sync/${toDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, 
+{
+
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ payload: targetPayload }),
-    });
-    const targetResult = await consumeCanonicalSyncWriteResponse(tRes, false);
-    if (!tRes.ok || targetResult.stale) return;
-    if (source.length === 0) {
-      await fetch(`/api/sync/${fromDate}?today=${todayStr()}`, { method: "DELETE" });
-    } else {
-      const sourcePayload: SyncPayload = {
+      headers: 
+{
+ "Content-Type": "application/json" 
+}
+,
+      body: JSON.stringify(
+{
+ payload: targetPayload 
+}
+),
+    
+}
+)
+;
+
+    const targetResult = await consumeCanonicalSyncWriteResponse(tRes, false)
+;
+
+    if (!tRes.ok || targetResult.stale) return
+;
+
+    if (source.length === 0) 
+{
+
+      await fetch(`/api/sync/${fromDate}?today=${todayStr()}`, 
+{
+ method: "DELETE" 
+}
+)
+;
+
+    
+}
+ else 
+{
+
+      const sourcePayload: SyncPayload = 
+{
+
         ...src,
-        dayState: { ...src.dayState, runs: source, date: fromDate },
+        dayState: 
+{
+ ...src.dayState, runs: source, date: fromDate 
+}
+,
         runValues: vals.source,
-      };
-      const sRes = await fetch(`/api/sync/${fromDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+      
+}
+;
+
+      const sRes = await fetch(`/api/sync/${fromDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, 
+{
+
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload: sourcePayload }),
-      });
-      await consumeCanonicalSyncWriteResponse(sRes, false);
-    }
-    await refreshScheduledDays();
-  }
-  function updateAdvancedField<K extends keyof FormValues>(runId: string, field: K, value: FormValues[K]) {
-    setScheduleEditorRunValues(prev => ({
+        headers: 
+{
+ "Content-Type": "application/json" 
+}
+,
+        body: JSON.stringify(
+{
+ payload: sourcePayload 
+}
+),
+      
+}
+)
+;
+
+      await consumeCanonicalSyncWriteResponse(sRes, false)
+;
+
+    
+}
+
+    await refreshScheduledDays()
+;
+
+  
+}
+
+  function updateAdvancedField<K extends keyof FormValues>(runId: string, field: K, value: FormValues[K]) 
+{
+
+    setScheduleEditorRunValues(prev => (
+{
+
       ...prev,
-      [runId]: { ...(prev[runId] ?? DEFAULT_VALUES), [field]: value },
-    }));
-  }
-  function updateAdvancedArray(runId: string, field: keyof FormValues, rows: {ingredient: string; lbs: number}[]) {
-    setScheduleEditorRunValues(prev => ({
+      [runId]: 
+{
+ ...(prev[runId] ?? DEFAULT_VALUES), [field]: value 
+}
+,
+    
+}
+))
+;
+
+  
+}
+
+  function updateAdvancedArray(runId: string, field: keyof FormValues, rows: 
+{
+ingredient: string
+;
+ lbs: number
+}
+[]) 
+{
+
+    setScheduleEditorRunValues(prev => (
+{
+
       ...prev,
-      [runId]: { ...(prev[runId] ?? DEFAULT_VALUES), [field]: rows },
-    }));
-  }
+      [runId]: 
+{
+ ...(prev[runId] ?? DEFAULT_VALUES), [field]: rows 
+}
+,
+    
+}
+))
+;
+
+  
+}
+
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
-    (() => {
-      let id = sessionStorage.getItem("run-calc-client-id");
-      if (!id) { id = genId(); sessionStorage.setItem("run-calc-client-id", id); }
-      return id;
-    })()
-  );
-  const lastLocalEditRef = useRef(0);
+    (() => 
+{
+
+      let id = sessionStorage.getItem("run-calc-client-id")
+;
+
+      if (!id) 
+{
+ id = genId()
+;
+ sessionStorage.setItem("run-calc-client-id", id)
+;
+ 
+}
+
+      return id
+;
+
+    
+}
+)()
+  )
+;
+
+  const lastLocalEditRef = useRef(0)
+;
+
   // Tracks which run the live form was last reset to. The autosave useEffect([v])
   // reads run identity from dayStateRef.current (always the latest ref), so if
   // dayState.currentIndex advances to run B while `v` still carries run A's values
   // (form.reset hasn't fired yet for the new run), the effect would stamp A's
   // applicator/recipe data onto B's localStorage slot — cross-run contamination.
   // Guard: skip the autosave whenever the form ID and the current run ID disagree.
-  const lastFormRunIdRef = useRef<string>("");
+  const lastFormRunIdRef = useRef<string>("")
+;
+
   // The first server snapshot must switch the run list and bind the live form as
-  // one handoff. The fence rises immediately before that identity change; local
+  // one handoff. The fence rises immediately before that identity change
+;
+ local
   // offline edits remain available before a connection establishes a baseline.
-  const formHandoffRef = useRef(false);
-  const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncBaselineGateRef = useRef(createSyncBaselineGate());
-  const isSyncApplyingRef = useRef(false);
+  const formHandoffRef = useRef(false)
+;
+
+  const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+;
+
+  const syncBaselineGateRef = useRef(createSyncBaselineGate())
+;
+
+  const isSyncApplyingRef = useRef(false)
+;
+
   // Foreground reconciliation fence. A clock snap can arrive in the same
   // frame as a stale recovery push, so keep auto-track and outgoing pushes
   // blocked until the date-scoped shared row has been pulled and applied.
-  const foregroundSyncBarrierRef = useRef(false);
-  const foregroundPushPendingRef = useRef(false);
+  const foregroundSyncBarrierRef = useRef(false)
+;
+
+  const foregroundPushPendingRef = useRef(false)
+;
+
   // Every foreground reconciliation starts a new push generation and aborts
   // requests built before wake. The server's metaUpdatedAt merge is still the
   // durable last line of defense if an already-received request completes, but
   // stale responses/retries may no longer update this client's sync signature
   // or re-publish a captured running snapshot after a remote Stop is adopted.
-  const syncPushGenerationRef = useRef(0);
-  const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
-  const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
-  const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
-  const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
+  const syncPushGenerationRef = useRef(0)
+;
+
+  const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set())
+;
+
+  const latestSyncPayloadRef = useRef<SyncPayload | null>(null)
+;
+
+  const [autoTrackBlocked, setAutoTrackBlocked] = useState(false)
+;
+
+  const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false)
+;
+
   const applySyncCallbackRef = useRef<
-    (p: SyncPayload, options?: { initialSnapshot?: boolean }) => void
-  >(() => {});
+    (p: SyncPayload, options?: 
+{
+ initialSnapshot?: boolean 
+}
+) => void
+  >(() => 
+{
+}
+)
+;
+
   const applyProfileReconcileRef = useRef<
     (result: ProfileReconcileResult) => void
-  >(() => {});
-  const initialFinishTimestampRef = useRef<number>(0);
-  const pushAcknowledgedRef = useRef(true);
+  >(() => 
+{
+}
+)
+;
+
+  const initialFinishTimestampRef = useRef<number>(0)
+;
+
+  const pushAcknowledgedRef = useRef(true)
+;
+
   // Signature of the last payload we successfully pushed. Idle clients must not
   // re-broadcast an unchanged state (periodic 30s push / reconnect re-push),
   // otherwise a second open tab keeps overwriting another tab's live edits.
   // Mirrors the mobile app's lastSyncSigRef gate (web/mobile parity).
-  const lastSyncSigRef = useRef<string>("");
+  const lastSyncSigRef = useRef<string>("")
+;
+
   // History is independently persisted and merged by date. Keep it on the
   // first/change payload for recovery, but omit the unchanged cold section
   // from ordinary live updates.
-  const lastSyncedHistorySigRef = useRef<string>("");
-  const [syncConnected, setSyncConnected] = useState(false);
+  const lastSyncedHistorySigRef = useRef<string>("")
+;
+
+  const [syncConnected, setSyncConnected] = useState(false)
+;
+
   const syncStatus: SyncStatus = syncPushFailed
     ? "failed"
     : syncPendingCount > 0
@@ -6975,24 +13875,44 @@ export default function Home() {
         ? "delayed"
         : lastAcknowledgedAt
           ? "synchronized"
-          : "connected";
+          : "connected"
+;
+
 
   // Mirror today's substitution overlay into the shared-calc module so every
   // call site (calc useMemo, warehouse roll-up, consumeRun, schedule/history
   // totals) overlays it without threading it through each call. See
   // substitutionState.ts. Runs synchronously enough for the next render's calc.
-  useEffect(() => { setActiveSubstitutions(dayState.substitutions ?? []); }, [dayState.substitutions]);
+  useEffect(() => 
+{
+ setActiveSubstitutions(dayState.substitutions ?? [])
+;
+ 
+}
+, [dayState.substitutions])
+;
+
 
   // ── Proactive shift alerts ────────────────────────────────────────────────
   // Poll the server on a cadence for at most one timely, dismissible nudge.
-  // Manager-only; runs even on an idle day so an expiring-stock heads-up can
+  // Manager-only
+;
+ runs even on an idle day so an expiring-stock heads-up can
   // surface before any run begins (the server gates behind-plan/break nudges to
   // an active day and skips the AI call when idle with no at-risk stock). The
   // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
   // provider in (tabs)/_layout.tsx (replit.md parity).
-  const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
+  const 
+{
+ alert: proactiveAlert, dismiss: dismissProactiveAlert 
+}
+ = useProactiveAlert(
+{
+
     enabled: isManager,
-    buildInput: () => {
+    buildInput: () => 
+{
+
       // Resolve upcoming scheduled runs to their FormValues (scheduled runs carry
       // no recipe rows) exactly like the warehouse "Reorder Now" card does, then
       // aggregate to a per-item demand map. Sent to the server so the proactive
@@ -7114,58 +14034,111 @@ export default function Home() {
 
       // ── Reset guard: only apply day state + run values if remote reset is at least as recent
       //    AND the remote date matches today (prevents yesterday's stale device from overwriting a fresh day) ──
-      const remoteResetAt = payload.dayState.resetAt ?? 0;
-      const localResetAt = dayStateRef.current.resetAt ?? 0;
-      const remoteDate = payload.dayState.date;
-      const initialSnapshot = options?.initialSnapshot === true;
+      const remoteResetAt = payload.dayState.resetAt ?? 0
+;
+
+      const localResetAt = dayStateRef.current.resetAt ?? 0
+;
+
+      const remoteDate = payload.dayState.date
+;
+
+      const initialSnapshot = options?.initialSnapshot === true
+;
+
       // Only a genuinely fresh automatic placeholder may adopt an initial
       // snapshot wholesale. A reconnect can also carry `initial: true`, but it
       // must preserve an intentional offline New Run or local edit until the
       // ordinary additive/LWW merge can publish it.
-      const atomicSeedSnapshot = shouldAtomicallyAdoptFirstSnapshot({
+      const atomicSeedSnapshot = shouldAtomicallyAdoptFirstSnapshot(
+{
+
         initialSnapshot,
         localRuns: dayStateRef.current.runs,
         hasLocalUserEdit: form.formState.isDirty,
-      });
-      const acceptRemoteDay = shouldAcceptSyncDaySnapshot({
+      
+}
+)
+;
+
+      const acceptRemoteDay = shouldAcceptSyncDaySnapshot(
+{
+
         remoteDate,
         localDate: todayStr(),
         remoteResetAt,
         localResetAt,
         initialSnapshot,
-      });
+      
+}
+)
+;
+
 
       // Per-run lost-update guard: compare each run's edit timestamp. We only
       // REJECT a remote run's values when our local edit is STRICTLY newer — so
       // unedited/imported runs (both ts 0) still adopt the remote exactly as
       // before. `rejectedStale` triggers a re-push so peers converge on our edit.
-      const remoteUpd = payload.runValuesUpdatedAt ?? {};
-      const localUpd = loadRunValuesUpdated();
-      let rejectedStale = false;
-      const localPackaging = loadPackagingProgress();
+      const remoteUpd = payload.runValuesUpdatedAt ?? 
+{
+}
+;
+
+      const localUpd = loadRunValuesUpdated()
+;
+
+      let rejectedStale = false
+;
+
+      const localPackaging = loadPackagingProgress()
+;
+
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
       const packagingMerge = acceptRemoteDay
         ? reconcilePackagingProgress(
-            atomicSeedSnapshot || remoteResetAt > localResetAt ? {} : localPackaging,
+            atomicSeedSnapshot || remoteResetAt > localResetAt ? 
+{
+}
+ : localPackaging,
             payload.packagingProgress,
           )
-        : reconcilePackagingProgress(localPackaging, undefined);
-      if (acceptRemoteDay) savePackagingProgress(packagingMerge.merged);
-      if (packagingMerge.rejectedRemoteIds.size > 0) rejectedStale = true;
+        : reconcilePackagingProgress(localPackaging, undefined)
+;
+
+      if (acceptRemoteDay) savePackagingProgress(packagingMerge.merged)
+;
+
+      if (packagingMerge.rejectedRemoteIds.size > 0) rejectedStale = true
+;
+
       const packagingRunAtApplyStart =
-        dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+        dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id
+;
+
       const packagingFenceRaised =
         !!packagingRunAtApplyStart &&
-        packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart);
-      if (packagingFenceRaised) {
-        const accepted = packagingMerge.merged[packagingRunAtApplyStart];
+        packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart)
+;
+
+      if (packagingFenceRaised) 
+{
+
+        const accepted = packagingMerge.merged[packagingRunAtApplyStart]
+;
+
         autoSuppressUntilRef.current = Math.max(
           autoSuppressUntilRef.current,
           accepted?.manualOverrideUntil ?? 0,
-        );
-        setAutoTrackBlocked(true);
-      }
+        )
+;
+
+        setAutoTrackBlocked(true)
+;
+
+      
+}
+
 
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
@@ -7196,26 +14169,54 @@ export default function Home() {
             // empty-over-populated corruption, advance our stamp so the heal
             // re-push strictly wins; a genuinely-fresher local edit keeps its
             // stamp as-is (the merge already bumped re-pointed runs' stamps).
-            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now();
-            rejectedStale = true;
-          } else {
+            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now()
+;
+
+            rejectedStale = true
+;
+
+          
+}
+ else 
+{
+
             // Field-level preservation: casesNeeded is the planned target, set
             // once from the schedule. A peer without the schedule carries
-            // casesNeeded=0; if they make any real edit their newer stamp wins
+            // casesNeeded=0
+;
+ if they make any real edit their newer stamp wins
             // the LWW check above, but we must NOT let their 0 wipe our target.
-            const remoteVals = vals as FormValues;
-            acceptedVals = {
+            const remoteVals = vals as FormValues
+;
+
+            acceptedVals = 
+{
+
               ...remoteVals,
               ...(remoteVals.casesNeeded === 0 && localVals.casesNeeded > 0
-                ? { casesNeeded: localVals.casesNeeded }
-                : {}),
+                ? 
+{
+ casesNeeded: localVals.casesNeeded 
+}
+
+                : 
+{
+}
+),
               // Guard against float values written before the modulo paths were
               // wrapped in Math.round(). A pre-fix float in stored day-state that
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
-            };
-            if (rTs > lTs) mergedUpd[id] = rTs;
-          }
+            
+}
+;
+
+            if (rTs > lTs) mergedUpd[id] = rTs
+;
+
+          
+}
+
           // Packaging progress is a separate causal register. Its winning pair
           // overlays whichever whole-run copy won above, so a stale automatic
           // writer cannot restore pre-correction skid/case values while genuine
@@ -7223,11 +14224,21 @@ export default function Home() {
           acceptedVals = overlayPackagingProgress(
             acceptedVals,
             packagingMerge.merged[id],
-          );
-          saveRunValues(id, acceptedVals);
-        }
-        saveRunValuesUpdated(mergedUpd);
-      }
+          )
+;
+
+          saveRunValues(id, acceptedVals)
+;
+
+        
+}
+
+        saveRunValuesUpdated(mergedUpd)
+;
+
+      
+}
+
 
       // Bind the form BEFORE publishing the incoming current run. React effects
       // run after setDayState, so doing this only in the currentRunId effect
@@ -7272,9 +14283,15 @@ export default function Home() {
       // dropDeleted below consults them so a deliberately re-added name (e.g.
       // a spec import re-registering a once-deleted flavor) survives the
       // tombstone union instead of being stripped right back out.
-      saveDeletedStamps(mergeStampMaps(loadDeletedStamps(), payload.deletedStamps));
-      saveUndeletedStamps(mergeStampMaps(loadUndeletedStamps(), payload.undeletedStamps));
-      const deletedMap = unionDeletedItems(loadDeletedItems(), payload.deletedItems);
+      saveDeletedStamps(mergeStampMaps(loadDeletedStamps(), payload.deletedStamps))
+;
+
+      saveUndeletedStamps(mergeStampMaps(loadUndeletedStamps(), payload.undeletedStamps))
+;
+
+      const deletedMap = unionDeletedItems(loadDeletedItems(), payload.deletedItems)
+;
+
       // Runs are per-day: on a true daily reset (resetAt strictly forward) drop the
       // run tombstones — those ids can never match today's fresh runs and would
       // otherwise accumulate forever.
@@ -7296,7 +14313,9 @@ export default function Home() {
         // converge on ours. Computed here (against the same current state the
         // updater sees) because `rejectedStale` is read right after this block,
         // possibly before React runs the updater.
-        if (remoteResetAt <= localResetAt) {
+        if (remoteResetAt <= localResetAt) 
+{
+
           // Same stamp-source fix as the functional updater below: use
           // overlayRunMetaStamps so we see the latest localStorage stamp
           // (e.g. T_start from startRun's saveDayState) even when React
@@ -7304,18 +14323,36 @@ export default function Home() {
           // the old stamp. Without this, the rejectedStale re-push is
           // suppressed and a startRun push dropped by isSyncApplyingRef
           // never gets retried — leaving the run un-started on the server.
-          const localMetaById = new Map(overlayRunMetaStamps(dayStateRef.current.runs).map(r => [r.id, r]));
-          if (payload.dayState.runs.some(rr => {
-            const lr = localMetaById.get(rr.id);
-            return !!lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0);
-          })) rejectedStale = true;
-        }
-        setDayState(prev => {
+          const localMetaById = new Map(overlayRunMetaStamps(dayStateRef.current.runs).map(r => [r.id, r]))
+;
+
+          if (payload.dayState.runs.some(rr => 
+{
+
+            const lr = localMetaById.get(rr.id)
+;
+
+            return !!lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0)
+;
+
+          
+}
+)) rejectedStale = true
+;
+
+        
+}
+
+        setDayState(prev => 
+{
+
           // The first snapshot is authoritative only for a fresh seeded
           // placeholder. Reconnect initial frames use the regular additive/LWW
           // path, preserving intentional offline changes while still converging
           // with the server row.
-          const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;
+          const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt
+;
+
           // Runs are day-state and converge like the substitution/staging overlays
           // below: on a true daily reset adopt the remote runs wholesale (the reset's
           // empty set replaces ours); during same-day concurrent editing union by id
@@ -7335,7 +14372,9 @@ export default function Home() {
                 // the local stored run was stamped by startRun's saveDayState, so a
                 // stale server copy (the push hadn't landed before the refresh)
                 // can't clobber it back to unstarted. Absent/equal stamps keep the
-                // old remote-wins behavior; a kept-local run triggers the
+                // old remote-wins behavior
+;
+ a kept-local run triggers the
                 // rejectedStale re-push below so peers converge on ours.
                 // Use overlayRunMetaStamps so the LWW comparison sees the
                 // STORED (localStorage) metaUpdatedAt stamps, not the React
@@ -7345,14 +14384,32 @@ export default function Home() {
                 // from the prior push (e.g. the "trick" push) would otherwise
                 // beat the local run and erase startedAt even though the
                 // operator just pressed Start.
-                const localById = new Map(overlayRunMetaStamps(prev.runs).map(r => [r.id, r]));
-                const mergedRemote = remoteRuns.map(rr => {
-                  const lr = localById.get(rr.id);
-                  return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr;
-                });
-                const remoteIds = new Set(remoteRuns.map(r => r.id));
-                const localOnly = prev.runs.filter(r => {
-                  if (remoteIds.has(r.id)) return false;
+                const localById = new Map(overlayRunMetaStamps(prev.runs).map(r => [r.id, r]))
+;
+
+                const mergedRemote = remoteRuns.map(rr => 
+{
+
+                  const lr = localById.get(rr.id)
+;
+
+                  return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr
+;
+
+                
+}
+)
+;
+
+                const remoteIds = new Set(remoteRuns.map(r => r.id))
+;
+
+                const localOnly = prev.runs.filter(r => 
+{
+
+                  if (remoteIds.has(r.id)) return false
+;
+
                   // Drop our untouched auto-created placeholder run once the
                   // shared day has real runs — it was never pushed (see
                   // buildSyncPayload), and keeping it would leave a stray blank
@@ -7368,22 +14425,46 @@ export default function Home() {
                       (Date.now() - lastLocalEditRef.current < 2000 ||
                         !deepEqual(form.getValues(), DEFAULT_VALUES))
                     )
-                  ) {
-                    return false;
-                  }
-                  return true;
-                });
+                  ) 
+{
+
+                    return false
+;
+
+                  
+}
+
+                  return true
+;
+
+                
+}
+)
+;
+
                 return [...mergedRemote, ...localOnly].filter(
                   r => !deletedRunSet.has(r.id.trim().toLowerCase()),
-                );
-              })();
+                )
+;
+
+              
+}
+)()
+;
+
           // Never leave the day with zero runs (the UI assumes ≥1). A reset
           // pushed by a peer now carries an EMPTY run list (its own placeholder
           // is local-only), and a fully-tombstoned remote list can also drain
           // the union — seed a fresh local-only placeholder in that case.
           const newRuns = mergedRuns.length > 0
             ? mergedRuns
-            : [{ id: genId(), brand: "", flavor: "", seeded: true }];
+            : [
+{
+ id: genId(), brand: "", flavor: "", seeded: true 
+}
+]
+;
+
           // Track the current run by its ID, not just by position. If a peer
           // pushes a new run that lands before the current run in the remote
           // ordering (e.g. they add a run that sorts to index 0), a plain
@@ -7391,14 +14472,20 @@ export default function Home() {
           // blank run instead of the run the user was actively viewing — which
           // produces the "run stopped / no case count / line setup gone" symptom
           // on the next SSE receive or reconnect. Find the current run in the
-          // merged list by ID and use its new position; fall back to clamping
+          // merged list by ID and use its new position
+;
+ fall back to clamping
           // only when the run was deleted (tombstoned) or filtered out.
           const foundIdx = currentLocalId
             ? newRuns.findIndex(r => r.id === currentLocalId)
-            : -1;
+            : -1
+;
+
           const newIndex = foundIdx >= 0
             ? foundIdx
-            : Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
+            : Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1))
+;
+
           // A true daily reset bumps resetAt strictly forward: adopt the remote
           // day's overlays wholesale so the reset's empty maps clear ours. When
           // resetAt is EQUAL (normal same-day concurrent editing across devices)
@@ -7434,14 +14521,22 @@ export default function Home() {
           // Merge prepPhase: earliest non-null start, MAX counts, sticky prepCarriedOver.
           // On reset: adopt remote prepPhase or FRESH_PREP_PHASE — NEVER prev.prepPhase.
           // A legacy/omitted remote payload (no prepPhase key) must still clear the prior
-          // day's prepStartedAt; falling back to prev would resurrect it into the new shift.
-          const remotePrepPhase = (payload.dayState as Record<string, unknown>).prepPhase;
+          // day's prepStartedAt
+;
+ falling back to prev would resurrect it into the new shift.
+          const remotePrepPhase = (payload.dayState as Record<string, unknown>).prepPhase
+;
+
           const mergedPrepPhase: PrepPhase = isReset
             ? (remotePrepPhase && typeof remotePrepPhase === "object"
                 ? (remotePrepPhase as PrepPhase)
                 : FRESH_PREP_PHASE)
-            : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase);
-          const newDs = {
+            : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase)
+;
+
+          const newDs = 
+{
+
             ...prev,
             runs: newRuns,
             currentIndex: newIndex,
@@ -7452,13 +14547,26 @@ export default function Home() {
             substitutionLog: mergedSubLog,
             stagedItems: mergedStaged,
             prepPhase: mergedPrepPhase,
-          };
+          
+}
+;
+
           // Skip the re-render when nothing actually changed (sync echoes its own
-          // pushes ~every 10s); a fresh object every time reset open-menu scroll.
-          if (JSON.stringify(newDs) === JSON.stringify(prev)) {
-            dayStateRef.current = prev;
-            return prev;
-          }
+          // pushes ~every 10s)
+;
+ a fresh object every time reset open-menu scroll.
+          if (JSON.stringify(newDs) === JSON.stringify(prev)) 
+{
+
+            dayStateRef.current = prev
+;
+
+            return prev
+;
+
+          
+}
+
           // stampMeta:false — the merged runs carry the winning side's stamp
           // already; re-stamping a remote-adopted run here would re-claim it as
           // a local edit and defeat the newer-stamp-wins merge on every peer.
@@ -7534,27 +14642,55 @@ export default function Home() {
           // carries a positive planned target (a peer without the schedule
           // pushed casesNeeded=0, which was patched in saveRunValues but the
           // form reset reads the raw payload directly).
-          const storedCasesNeeded = loadRunValues(currentId).casesNeeded;
-          if (merged.casesNeeded === 0 && storedCasesNeeded > 0) {
-            merged.casesNeeded = storedCasesNeeded;
-          }
+          const storedCasesNeeded = loadRunValues(currentId).casesNeeded
+;
+
+          if (merged.casesNeeded === 0 && storedCasesNeeded > 0) 
+{
+
+            merged.casesNeeded = storedCasesNeeded
+;
+
+          
+}
+
           // Skip the reset entirely when the merged remote values equal what
           // the form already shows (idle SSE reconnect echo). An unnecessary
           // form.reset() re-emits through form.watch(), which retriggers the
           // autosave [v] effect and can stamp a fresh markRunValuesUpdated() on
           // an otherwise-idle run — defeating the lost-update guard on peers.
-          if (!deepEqual(form.getValues(), merged)) {
-            lastFormRunIdRef.current = currentId;
-            form.reset(merged);
-            resetFieldArrays(merged);
-          }
-        }
-      }
+          if (!deepEqual(form.getValues(), merged)) 
+{
+
+            lastFormRunIdRef.current = currentId
+;
+
+            form.reset(merged)
+;
+
+            resetFieldArrays(merged)
+;
+
+          
+}
+
+        
+}
+
+      
+}
+
 
       // ── Brands ──
-      if (payload.brands && payload.brands.length > 0) {
-        const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
-        const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
+      if (payload.brands && payload.brands.length > 0) 
+{
+
+        const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b))
+;
+
+        const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b))
+;
+
         // Trim+case-insensitive dedup before the deletion-tombstone filter so
         // trailing-space near-duplicates from an old import can't survive.
         const preDrop = (() => {
@@ -7583,18 +14719,30 @@ export default function Home() {
           if (STALE_BRANDS.includes(brand)) continue;
           // A brand deleted on any peer takes its flavors with it — don't let an
           // incoming flavor list resurrect a deleted brand.
-          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
+          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue
+;
+
           merged[brand] = dropDeleted(
             [...new Set([...(merged[brand] ?? []), ...flavors])],
             deletedMap,
             flavorNamespace(brand),
-          ).sort((a, b) => a.localeCompare(b));
-        }
-        saveBrandFlavors(merged);
+          ).sort((a, b) => a.localeCompare(b))
+;
+
+        
+}
+
+        saveBrandFlavors(merged)
+;
+
         setBrandFlavors(prev =>
           JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged
-        );
-      }
+        )
+;
+
+      
+}
+
 
       // ── Ingredient types ──
       // Rename legacy/near-duplicate names from incoming sync so an un-migrated
@@ -7626,48 +14774,100 @@ export default function Home() {
       // namespaced) `mergedAway` tombstone set — an ingredient merge whose source
       // name happens to match a die type would otherwise delete that die type.
       // Their own per-namespace deletion tombstones (`dropDeleted`) still apply.
-      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void, namespace: string, applyMergedAway = true) {
-        if (!remote || remote.length === 0) return;
-        const stored = loadList(key, defaults);
-        const local = applyMergedAway ? dropMergedAway(stored, tombSet) : stored;
-        const union = [...new Set([...local, ...remote])];
+      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void, namespace: string, applyMergedAway = true) 
+{
+
+        if (!remote || remote.length === 0) return
+;
+
+        const stored = loadList(key, defaults)
+;
+
+        const local = applyMergedAway ? dropMergedAway(stored, tombSet) : stored
+;
+
+        const union = [...new Set([...local, ...remote])]
+;
+
         const merged = dropDeleted(
           applyMergedAway ? dropMergedAway(union, tombSet) : union,
           deletedMap,
           namespace,
-        ).sort((a, b) => a.localeCompare(b));
-        if (arraysEqual(merged, stored)) return;
-        saveList(key, merged);
-        setter(merged);
-      }
+        ).sort((a, b) => a.localeCompare(b))
+;
+
+        if (arraysEqual(merged, stored)) return
+;
+
+        saveList(key, merged)
+;
+
+        setter(merged)
+;
+
+      
+}
+
       // Drop retired pep names + rename legacy ones from incoming sync so a peer that
       // hasn't migrated yet can't re-add "Diced Pepperoni"/"Pep - Cured" to the list.
       const cleanedRemotePep = (payload.pepTypes ?? [])
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
-        .filter(t => !RETIRED_PEP_TYPES.includes(t));
-      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
+        .filter(t => !RETIRED_PEP_TYPES.includes(t))
+;
+
+      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes")
+;
+
       // Die types deliberately NOT merged from the day-state sync payload any
       // more: they are a factory-wide server pool now (see the reconcile effect
       // near addDieType). Unioning a stale peer's list here would resurrect
       // dies deleted factory-wide. The payload still CARRIES dieTypes for the
       // mobile app, which hasn't migrated yet (parity paused).
       // Editable packaging lists: non-merge-aware union.
-      mergeList(CIRCLES_KEY, DEFAULT_CIRCLES, payload.circles, setCircles, "circles", false);
-      mergeList(SHIPPER_KEY, DEFAULT_SHIPPERS, payload.shipper, setShipper, "shipper", false);
-      mergeList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, payload.skidStacking, setSkidStacking, "skidStacking", false);
-      mergeList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, payload.gripSheets, setGripSheets, "gripSheets", false);
-      const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
-      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
-      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");
+      mergeList(CIRCLES_KEY, DEFAULT_CIRCLES, payload.circles, setCircles, "circles", false)
+;
+
+      mergeList(SHIPPER_KEY, DEFAULT_SHIPPERS, payload.shipper, setShipper, "shipper", false)
+;
+
+      mergeList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, payload.skidStacking, setSkidStacking, "skidStacking", false)
+;
+
+      mergeList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, payload.gripSheets, setGripSheets, "gripSheets", false)
+;
+
+      const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t)
+;
+
+      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients")
+;
+
+      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients")
+;
+
       // Strip topping items from incoming frontline payload — old server payloads may still carry them
-      const toppingSet = new Set(MIX_SEED.frontlineIngredients);
-      const cleanedIncomingFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => !toppingSet.has(i));
-      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients, "frontlineIngredients");
+      const toppingSet = new Set(MIX_SEED.frontlineIngredients)
+;
+
+      const cleanedIncomingFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => !toppingSet.has(i))
+;
+
+      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients, "frontlineIngredients")
+;
+
       // Redirect any toppings from the incoming frontline payload into mix ingredients
-      const toppingsFromFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => toppingSet.has(i));
-      const incomingMix = [...new Set([...(payload.mixIngredients ?? []), ...toppingsFromFrontline])];
-      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients, "mixIngredients");
-      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames, "doughRecipeNames");
+      const toppingsFromFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => toppingSet.has(i))
+;
+
+      const incomingMix = [...new Set([...(payload.mixIngredients ?? []), ...toppingsFromFrontline])]
+;
+
+      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients, "mixIngredients")
+;
+
+      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames, "doughRecipeNames")
+;
+
       // Filter mix-category names out of the incoming frontline list (server may still have old data)
       // Pre-clean localStorage so mergeList doesn't re-add mix names from the local side
       const cleanedLocalFrontline = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
@@ -7750,13 +14950,32 @@ export default function Home() {
         // We kept a strictly-newer local run value over a stale remote — re-push so
         // peers adopt ours and converge. Clear the signature gate so the push isn't
         // skipped as a no-op, and defer until isSyncApplyingRef is cleared above.
-        if (rejectedStale) {
-          lastSyncSigRef.current = "";
-          schedulePush(dayStateRef.current, 0);
-        }
-      });
-    };
-  });
+        if (rejectedStale) 
+{
+
+          lastSyncSigRef.current = ""
+;
+
+          schedulePush(dayStateRef.current, 0)
+;
+
+        
+}
+
+      
+}
+)
+;
+
+    
+}
+;
+
+  
+}
+)
+;
+
 
   // ── Boot reset check (once on mount) ──
   // Ask the server for the current data-reset epoch. If it is newer than what
@@ -7764,16 +14983,50 @@ export default function Home() {
   // local state and reload onto the clean slate before sync starts. Best-effort —
   // a failure just leaves existing behavior unchanged (the SSE reset frame and
   // the PUT epoch guard are the live backstops).
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/sync/reset-epoch");
-        if (!res.ok) return;
-        const { epoch } = (await res.json()) as { epoch: number };
-        if (typeof epoch === "number" && applyResetWipe(epoch)) window.location.reload();
-      } catch {}
-    })();
-  }, []);
+  useEffect(() => 
+{
+
+    (async () => 
+{
+
+      try 
+{
+
+        const res = await fetch("/api/sync/reset-epoch")
+;
+
+        if (!res.ok) return
+;
+
+        const 
+{
+ epoch 
+}
+ = (await res.json()) as 
+{
+ epoch: number 
+}
+;
+
+        if (typeof epoch === "number" && applyResetWipe(epoch)) window.location.reload()
+;
+
+      
+}
+ catch 
+{
+}
+
+    
+}
+)()
+;
+
+  
+}
+, [])
+;
+
 
   // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -7781,34 +15034,82 @@ export default function Home() {
   // stop reasons, packaging settings), then refresh React state.  After that,
   // register the storage mutation hook so every subsequent localStorage write
   // for a cached key also fires a server write-through PUT.
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await fetchFactoryData();
-        hydrateFromServer(data);
-        refreshFactoryDataConsumers();
+  useEffect(() => 
+{
+
+    (async () => 
+{
+
+      try 
+{
+
+        const data = await fetchFactoryData()
+;
+
+        hydrateFromServer(data)
+;
+
+        refreshFactoryDataConsumers()
+;
+
         // Only flush after comparing each durable operation with the server
         // timestamp. A pre-read flush could let a sleeping device overwrite a
         // setting that another device saved while it was offline.
-        void flushFactoryQueue();
+        void flushFactoryQueue()
+;
+
         // One-time migration heals: push localStorage data to the server for
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
-        void runFactoryKvMigration(data);
-        void runTemplatesMigration();
-      } catch {
+        void runFactoryKvMigration(data)
+;
+
+        void runTemplatesMigration()
+;
+
+      
+}
+ catch 
+{
+
         // Offline / error — keep whatever is in localStorage already
-      }
-    })();
+      
+}
+
+    
+}
+)()
+;
+
     // Register write-through: every storage mutation for a cached factory key
     // bumps the local stamp and fires a server PUT.
-    setKvMutationHook(({ key, value }) => {
-      if (FACTORY_KV_CACHED_KEYS.has(key)) {
-        putFactoryKey(key, value);
-      }
-    });
+    setKvMutationHook((
+{
+ key, value 
+}
+) => 
+{
+
+      if (FACTORY_KV_CACHED_KEYS.has(key)) 
+{
+
+        putFactoryKey(key, value)
+;
+
+      
+}
+
+    
+}
+)
+;
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  
+}
+, [])
+;
+
 
   // ── Brand+flavor profile pool reconcile (boot + 60s poll) ──
   // Profiles live in their own factory-wide server pool with per-profile
@@ -7818,14 +15119,28 @@ export default function Home() {
   // are pushed up with a floor stamp) and then reconciles: adopt server-newer
   // copies into the localStorage cache, push local-newer ones up, and drop
   // local copies of profiles deleted remotely. The poll keeps long-lived tabs
-  // converged; queued pushes retry on each pass, so offline edits are safe.
+  // converged
+;
+ queued pushes retry on each pass, so offline edits are safe.
   // Best-effort — a fetch failure changes nothing locally.
-  useEffect(() => {
-    let cancelled = false;
-    const pass = async () => {
-      try {
-        const result = await reconcileProfilesFromServerDetailed();
-        if (cancelled || !result.changed) return;
+  useEffect(() => 
+{
+
+    let cancelled = false
+;
+
+    const pass = async () => 
+{
+
+      try 
+{
+
+        const result = await reconcileProfilesFromServerDetailed()
+;
+
+        if (cancelled || !result.changed) return
+;
+
         // Profile-derived pickers/cards read localStorage lazily, but the die
         // types list self-heals from profiles — re-run so an adopted profile's
         // die size shows up without a reload.
@@ -7903,151 +15218,398 @@ export default function Home() {
       syncBaselineGateRef.current.beginConnection();
       setSyncConnected(false);
       // EventSource can't read the HTTP status, so a drop may be the daily reset
-      // signing us out. Re-check /me; if the session is gone we land on login.
-      revalidate();
-    };
-    return () => { setSyncConnected(false); es.close(); };
-  }, []);
+      // signing us out. Re-check /me
+;
+ if the session is gone we land on login.
+      revalidate()
+;
+
+    
+}
+;
+
+    return () => 
+{
+ setSyncConnected(false)
+;
+ es.close()
+;
+ 
+}
+;
+
+  
+}
+, [])
+;
+
 
   // Reconcile the shared live row before a screen-wake clock snap can turn
   // hidden time into a stale Cases on Skid write. Focus is a fallback for
   // browsers that do not reliably emit visibilitychange on tablet wake.
-  useEffect(() => {
-    let cancelled = false;
+  useEffect(() => 
+{
 
-    const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => {
-      foregroundSyncBarrierRef.current = true;
+    let cancelled = false
+;
+
+
+    const reconcileForeground = createForegroundSyncWakeGuard(async (): Promise<boolean> => 
+{
+
+      foregroundSyncBarrierRef.current = true
+;
+
       // Raise both the synchronous ref fence and its rendered companion before
       // the wake clock can publish hidden-time progress. A normal unchanged
       // pull releases without rebasing, preserving ordinary screen-off catch-up.
-      setAutoTrackRebaseAfterBlock(false);
-      setAutoTrackBlocked(true);
-      syncPushGenerationRef.current += 1;
-      for (const controller of syncPushAbortControllersRef.current) controller.abort();
-      syncPushAbortControllersRef.current.clear();
-      if (pushTimerRef.current) {
-        clearTimeout(pushTimerRef.current);
-        pushTimerRef.current = null;
-        foregroundPushPendingRef.current = true;
-      }
-      if (!pushAcknowledgedRef.current) foregroundPushPendingRef.current = true;
+      setAutoTrackRebaseAfterBlock(false)
+;
 
-      return (async () => {
-        let reconciled = false;
-        try {
+      setAutoTrackBlocked(true)
+;
+
+      syncPushGenerationRef.current += 1
+;
+
+      for (const controller of syncPushAbortControllersRef.current) controller.abort()
+;
+
+      syncPushAbortControllersRef.current.clear()
+;
+
+      if (pushTimerRef.current) 
+{
+
+        clearTimeout(pushTimerRef.current)
+;
+
+        pushTimerRef.current = null
+;
+
+        foregroundPushPendingRef.current = true
+;
+
+      
+}
+
+      if (!pushAcknowledgedRef.current) foregroundPushPendingRef.current = true
+;
+
+
+      return (async () => 
+{
+
+        let reconciled = false
+;
+
+        try 
+{
+
           // Check the reset epoch first because a device can miss the SSE reset
           // frame while asleep. The ordinary reset wipe remains the single
           // authority for clearing pre-reset local state.
-          const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
-          if (epochRes.ok) {
-            const epochBody = await epochRes.json().catch(() => null) as { epoch?: number } | null;
-            if (typeof epochBody?.epoch === "number" && applyResetWipe(epochBody.epoch)) {
-              window.location.reload();
-              return false;
-            }
-          }
+          const epochRes = await fetch("/api/sync/reset-epoch", 
+{
+ cache: "no-store" 
+}
+)
+;
 
-          const res = await fetch(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" });
-          if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-          const payload = await res.json() as SyncPayload | null;
+          if (epochRes.ok) 
+{
+
+            const epochBody = await epochRes.json().catch(() => null) as 
+{
+ epoch?: number 
+}
+ | null
+;
+
+            if (typeof epochBody?.epoch === "number" && applyResetWipe(epochBody.epoch)) 
+{
+
+              window.location.reload()
+;
+
+              return false
+;
+
+            
+}
+
+          
+}
+
+
+          const res = await fetch(`/api/sync/today?today=${todayStr()}`, 
+{
+ cache: "no-store" 
+}
+)
+;
+
+          if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`)
+;
+
+          const payload = await res.json() as SyncPayload | null
+;
+
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
-          if (payload) {
+          if (payload) 
+{
+
             // Preserve ordinary screen-off catch-up when the live row is
             // unchanged. Re-baselining every successful wake would erase the
             // legitimate production delta accumulated while the display slept.
             // Only a newer lifecycle frame needs the auto-track fence.
-            const durableLocalDay = {
+            const durableLocalDay = 
+{
+
               ...dayStateRef.current,
               runs: overlayRunMetaStamps(dayStateRef.current.runs),
-            };
-            const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot({
+            
+}
+;
+
+            const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot(
+{
+
               remoteDate: payload.dayState.date,
               localDate: todayStr(),
               remoteResetAt: payload.dayState.resetAt ?? 0,
               localResetAt: durableLocalDay.resetAt ?? 0,
-            });
+            
+}
+)
+;
+
             const lifecycleAdoption = acceptsRemoteLifecycle
               ? adoptStrictlyNewerRemoteLifecycles(
                   durableLocalDay,
                   payload.dayState.runs,
                 )
-              : { dayState: durableLocalDay, adoptedRunIds: [] };
-            if (lifecycleAdoption.adoptedRunIds.length > 0) {
-              setAutoTrackRebaseAfterBlock(true);
+              : 
+{
+ dayState: durableLocalDay, adoptedRunIds: [] 
+}
+;
+
+            if (lifecycleAdoption.adoptedRunIds.length > 0) 
+{
+
+              setAutoTrackRebaseAfterBlock(true)
+;
+
               // Persist and publish the winning lifecycle synchronously before
               // the general inbound merge and before recovery pushes are
               // released. Lifecycle handlers read dayStateRef, so this also
               // fences a late tap against the old running copy.
-              saveDayState(lifecycleAdoption.dayState, { stampMeta: false });
-              dayStateRef.current = lifecycleAdoption.dayState;
-              setDayState(lifecycleAdoption.dayState);
-              lastSyncSigRef.current = "";
-            }
-            applySyncCallbackRef.current(payload);
-          }
+              saveDayState(lifecycleAdoption.dayState, 
+{
+ stampMeta: false 
+}
+)
+;
+
+              dayStateRef.current = lifecycleAdoption.dayState
+;
+
+              setDayState(lifecycleAdoption.dayState)
+;
+
+              lastSyncSigRef.current = ""
+;
+
+            
+}
+
+            applySyncCallbackRef.current(payload)
+;
+
+          
+}
+
           // The live row is the authority that must land first. Profile and
           // factory pools are intentionally outside that payload, so hydrate
           // them only after the day-state LWW merge is safely applied.
-          const profileResult = await reconcileProfilesFromServerDetailed();
-          if (profileResult.changed) {
-            setDieTypes(healDieTypesFromProfiles());
-            applyProfileReconcileRef.current(profileResult);
-          }
-          try {
-            const factoryData = await fetchFactoryData();
-            hydrateFromServer(factoryData);
-            refreshFactoryDataConsumers();
-            await flushFactoryQueue();
-          } catch {
+          const profileResult = await reconcileProfilesFromServerDetailed()
+;
+
+          if (profileResult.changed) 
+{
+
+            setDieTypes(healDieTypesFromProfiles())
+;
+
+            applyProfileReconcileRef.current(profileResult)
+;
+
+          
+}
+
+          try 
+{
+
+            const factoryData = await fetchFactoryData()
+;
+
+            hydrateFromServer(factoryData)
+;
+
+            refreshFactoryDataConsumers()
+;
+
+            await flushFactoryQueue()
+;
+
+          
+}
+ catch 
+{
+
             // Factory data is independent of the live row. A failed factory
-            // pull leaves the local cache and durable queue intact; the next
+            // pull leaves the local cache and durable queue intact
+;
+ the next
             // foreground/reconnect attempt will retry it.
-          }
-          reconciled = true;
-          return true;
-        } catch {
+          
+}
+
+          reconciled = true
+;
+
+          return true
+;
+
+        
+}
+ catch 
+{
+
           // Failed pulls are not successful reconciliation. Release the
           // barrier so local tracking continues, and let the existing retry /
           // stamped push behavior handle connectivity recovery.
-          return false;
-        } finally {
-          if (!cancelled) {
-            foregroundSyncBarrierRef.current = false;
+          return false
+;
+
+        
+}
+ finally 
+{
+
+          if (!cancelled) 
+{
+
+            foregroundSyncBarrierRef.current = false
+;
+
             // No-op if this wake did not adopt lifecycle state. If it did, the
             // hook sees the true→false transition and re-baselines safely.
-            setAutoTrackBlocked(false);
-            const shouldPush = foregroundPushPendingRef.current;
-            foregroundPushPendingRef.current = false;
-            if (shouldPush || !reconciled) {
-              requestAnimationFrame(() => {
-                if (!cancelled) schedulePush(dayStateRef.current, 0);
-              });
-            }
-          }
-        }
-      })();
-    });
+            setAutoTrackBlocked(false)
+;
 
-    function onVisibility() {
-      if (document.visibilityState === "visible") void reconcileForeground();
-    }
-    function onFocus() {
-      void reconcileForeground();
-    }
-    function onOnline() {
-      void reconcileForeground();
-    }
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("online", onOnline);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("online", onOnline);
-    };
-  }, []);
+            const shouldPush = foregroundPushPendingRef.current
+;
+
+            foregroundPushPendingRef.current = false
+;
+
+            if (shouldPush || !reconciled) 
+{
+
+              requestAnimationFrame(() => 
+{
+
+                if (!cancelled) schedulePush(dayStateRef.current, 0)
+;
+
+              
+}
+)
+;
+
+            
+}
+
+          
+}
+
+        
+}
+
+      
+}
+)()
+;
+
+    
+}
+)
+;
+
+
+    function onVisibility() 
+{
+
+      if (document.visibilityState === "visible") void reconcileForeground()
+;
+
+    
+}
+
+    function onFocus() 
+{
+
+      void reconcileForeground()
+;
+
+    
+}
+
+    function onOnline() 
+{
+
+      void reconcileForeground()
+;
+
+    
+}
+
+    document.addEventListener("visibilitychange", onVisibility)
+;
+
+    window.addEventListener("focus", onFocus)
+;
+
+    window.addEventListener("online", onOnline)
+;
+
+    return () => 
+{
+
+      cancelled = true
+;
+
+      document.removeEventListener("visibilitychange", onVisibility)
+;
+
+      window.removeEventListener("focus", onFocus)
+;
+
+      window.removeEventListener("online", onOnline)
+;
+
+    
+}
+;
+
+  
+}
+, [])
+;
+
 
   // ── Durable merged-away tombstone (once on mount) ──
   // The per-day sync blob can't carry a merge across a day boundary: a new day's
@@ -8056,62 +15618,179 @@ export default function Home() {
   // names from every master list. This makes a merge stick across days and
   // across a device that was offline during the merge. Best-effort: a failure
   // just leaves the existing local/sync behavior unchanged.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      let remoteNames: string[];
-      try {
-        remoteNames = await fetchMergedAwayNames();
-      } catch {
-        return; // offline / server error — local + sync tombstones still apply
-      }
-      if (cancelled || remoteNames.length === 0) return;
-      const mergedTomb = [...new Set([...loadMergedAway(), ...remoteNames])];
-      saveMergedAway(mergedTomb);
-      setMergedAwayTomb(mergedTomb);
-      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+  useEffect(() => 
+{
+
+    let cancelled = false
+;
+
+    (async () => 
+{
+
+      let remoteNames: string[]
+;
+
+      try 
+{
+
+        remoteNames = await fetchMergedAwayNames()
+;
+
+      
+}
+ catch 
+{
+
+        return
+;
+ // offline / server error — local + sync tombstones still apply
+      
+}
+
+      if (cancelled || remoteNames.length === 0) return
+;
+
+      const mergedTomb = [...new Set([...loadMergedAway(), ...remoteNames])]
+;
+
+      saveMergedAway(mergedTomb)
+;
+
+      setMergedAwayTomb(mergedTomb)
+;
+
+      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()))
+;
+
       const prune = (
         key: string,
         defaults: string[],
         setter: (v: string[]) => void,
-      ) => {
-        const current = loadList(key, defaults);
-        const pruned = dropMergedAway(current, tombSet);
-        if (pruned.length === current.length) return;
-        saveList(key, pruned);
-        setter(pruned);
-      };
-      prune(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES, setIngredientTypes);
-      prune(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, setPepTypes);
-      prune(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, setDieTypes);
-      prune(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, setCheeseIngredients);
-      prune(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, setDoughIngredients);
-      prune(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, setFrontlineIngredients);
-      prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      ) => 
+{
+
+        const current = loadList(key, defaults)
+;
+
+        const pruned = dropMergedAway(current, tombSet)
+;
+
+        if (pruned.length === current.length) return
+;
+
+        saveList(key, pruned)
+;
+
+        setter(pruned)
+;
+
+      
+}
+;
+
+      prune(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES, setIngredientTypes)
+;
+
+      prune(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, setPepTypes)
+;
+
+      prune(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, setDieTypes)
+;
+
+      prune(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, setCheeseIngredients)
+;
+
+      prune(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, setDoughIngredients)
+;
+
+      prune(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, setFrontlineIngredients)
+;
+
+      prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients)
+;
+
+    
+}
+)()
+;
+
+    return () => 
+{
+ cancelled = true
+;
+ 
+}
+;
+
+  
+}
+, [])
+;
+
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
-  useEffect(() => {
-    const id = setInterval(() => { schedulePush(dayStateRef.current, 0); }, 30_000);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => 
+{
+
+    const id = setInterval(() => 
+{
+ schedulePush(dayStateRef.current, 0)
+;
+ 
+}
+, 30_000)
+;
+
+    return () => clearInterval(id)
+;
+
+  
+}
+, [])
+;
+
 
   // Auto-save dough recipe preset whenever name + rows are set. The typed
   // Target Doughball Weight rides along (falling back to any weight the preset
   // already carried) so the weight follows the recipe name.
-  useEffect(() => {
-    const name = v.doughRecipeName?.trim();
-    if (!name || (v.doughRecipe ?? []).length === 0) return;
-    const presets = loadDoughRecipePresets();
-    const typedOz = Number(v.targetDoughballWeight) || 0;
-    const ballOz = typedOz > 0 ? typedOz : presets[name]?.doughballWeightOz;
+  useEffect(() => 
+{
+
+    const name = v.doughRecipeName?.trim()
+;
+
+    if (!name || (v.doughRecipe ?? []).length === 0) return
+;
+
+    const presets = loadDoughRecipePresets()
+;
+
+    const typedOz = Number(v.targetDoughballWeight) || 0
+;
+
+    const ballOz = typedOz > 0 ? typedOz : presets[name]?.doughballWeightOz
+;
+
     presets[name] = ballOz && ballOz > 0
-      ? { rows: v.doughRecipe ?? [], doughballWeightOz: ballOz }
-      : { rows: v.doughRecipe ?? [] };
-    saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+      ? 
+{
+ rows: v.doughRecipe ?? [], doughballWeightOz: ballOz 
+}
+
+      : 
+{
+ rows: v.doughRecipe ?? [] 
+}
+;
+
+    saveDoughRecipePresets(presets)
+;
+
+  
+}
+, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight])
+;
+
 
   // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
   // doughball weight, while the form still sits at 0 oz, adopts the pool
@@ -8205,21 +15884,48 @@ export default function Home() {
           // Auto-deduct inventory for every run being closed by the rollover, the
           // same as an explicit endRun. consume is idempotent per runId, so runs
           // already deducted via endRun won't double-count.
-          for (const r of prevDs.runs) {
-            if (r.startedAt && !r.endedAt) {
-              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
-            }
-          }
-          const finalDs: DayState = {
+          for (const r of prevDs.runs) 
+{
+
+            if (r.startedAt && !r.endedAt) 
+{
+
+              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id)
+;
+
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."))
+;
+
+            
+}
+
+          
+}
+
+          const finalDs: DayState = 
+{
+
             ...prevDs,
             runs: prevDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+              r.startedAt && !r.endedAt ? 
+{
+ ...r, endedAt: Date.now(), pausedAt: undefined 
+}
+ : r
             ),
-          };
-          archiveDayToHistory(finalDs, stored.date);
-        }
-        const newDate = todayStr();
+          
+}
+;
+
+          archiveDayToHistory(finalDs, stored.date)
+;
+
+        
+}
+
+        const newDate = todayStr()
+;
+
         // Try to load any pre-scheduled data for the new day.
         // IMPORTANT: only push a fresh empty state when the server CONFIRMED
         // there are no scheduled runs (GET succeeded with an empty row). If the
@@ -8228,32 +15934,91 @@ export default function Home() {
         // previously saved scheduled runs (protectRunValues escape hatch). The
         // session boundary (resetBoundaryAt) will be established on the next
         // successful push once the connection recovers.
-        let serverConfirmedNoRuns = false;
-        try {
-          const res = await fetch(`/api/sync/${newDate}`);
-          if (res.ok) {
-            const payload = await res.json() as SyncPayload | null;
-            if (payload?.dayState?.runs?.length) {
+        let serverConfirmedNoRuns = false
+;
+
+        try 
+{
+
+          const res = await fetch(`/api/sync/${newDate}`)
+;
+
+          if (res.ok) 
+{
+
+            const payload = await res.json() as SyncPayload | null
+;
+
+            if (payload?.dayState?.runs?.length) 
+{
+
               // Apply the saved line-type (dough/crusts) preference to each run
               // that has no subTab set — so brands always scheduled as "crusts"
               // start in the right mode without a manual toggle every morning.
-              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
-                if (r.subTab) return r;
-                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
-                return pref ? { ...r, subTab: pref } : r;
-              });
-              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              clearActiveSubstitutions();
-              // Scheduled run values are a snapshot from scheduling time; blank
+              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => 
+{
+
+                if (r.subTab) return r
+;
+
+                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "")
+;
+
+                return pref ? 
+{
+ ...r, subTab: pref 
+}
+ : r
+;
+
+              
+}
+)
+;
+
+              const ds: DayState = 
+{
+ runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: 
+{
+}
+ 
+}
+;
+
+              clearActiveSubstitutions()
+;
+
+              // Scheduled run values are a snapshot from scheduling time
+;
+ blank
               // sauce fields backfill from the CURRENT profile (mobile parity —
               // its pull-up spreads the live profile).
-              const metaById = new Map(ds.runs.map(r => [r.id, r]));
-              const pulledVals: Record<string, FormValues> = {};
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
-                const meta = metaById.get(id);
-                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
-                saveRunValues(id, pulledVals[id]);
-              }
+              const metaById = new Map(ds.runs.map(r => [r.id, r]))
+;
+
+              const pulledVals: Record<string, FormValues> = 
+{
+}
+;
+
+              for (const [id, vals] of Object.entries(payload.runValues ?? 
+{
+}
+)) 
+{
+
+                const meta = metaById.get(id)
+;
+
+                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor)
+;
+
+                saveRunValues(id, pulledVals[id])
+;
+
+              
+}
+
               // Adopt the scheduled row's per-run value stamps: these values are
               // server-sourced, not a local edit (stamping them with local time
               // would fake one), but saving them completely unstamped would lose
@@ -8281,12 +16046,27 @@ export default function Home() {
               // forceSignedOut only wipes the in-memory cache, so a hard refresh
               // would re-authenticate from the cookie before resetBoundaryAt
               // propagates. The push is already in-flight so it lands fine.
-              void signOut();
-              return;
-            }
-            serverConfirmedNoRuns = true;
-          }
-        } catch {}
+              void signOut()
+;
+
+              return
+;
+
+            
+}
+
+            serverConfirmedNoRuns = true
+;
+
+          
+}
+
+        
+}
+ catch 
+{
+}
+
         // Fallback: fresh empty state. Only push to the server if the GET
         // confirmed there are no scheduled runs — otherwise we'd risk wiping
         // them via the wholesale-adopt escape hatch (see comment above).
@@ -8303,11 +16083,19 @@ export default function Home() {
         // See note above: the daily reset signs everyone out, including us.
         // Use signOut (not forceSignedOut) to clear the rc_auth cookie so a
         // hard refresh can't bypass sign-in via the still-valid cookie.
-        void signOut();
-      }
-    }
+        void signOut()
+;
+
+      
+}
+
+    
+}
+
     // Run once on mount too. loadDayState() only resets the in-memory view when
-    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
+    // the stored date is stale
+;
+ it does NOT archive, stamp resetAt, push the new
     // boundary, or sign out. Without this immediate call, the rollover (and its
     // signOut) only fires up to 60s later via the interval — by which
     // time another device's pushed resetAt may have already 401-bounced us to
@@ -8327,19 +16115,43 @@ export default function Home() {
   // unsynced. The browser can cancel an in-flight fetch when a tab is hidden,
   // and setTimeout-based retries are throttled to ≥1 min on mobile — so the
   // tab returning to the foreground is the reliable recovery point.
-  useEffect(() => {
-    function onVisibility() {
-      if (document.visibilityState === "visible") {
-        schedulePush(dayStateRef.current, 300);
-      }
-    }
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+  useEffect(() => 
+{
+
+    function onVisibility() 
+{
+
+      if (document.visibilityState === "visible") 
+{
+
+        schedulePush(dayStateRef.current, 300)
+;
+
+      
+}
+
+    
+}
+
+    document.addEventListener("visibilitychange", onVisibility)
+;
+
+    return () => document.removeEventListener("visibilitychange", onVisibility)
+;
+
+  
+}
+, [])
+;
+
 
   // The server's PUT epoch guard fails CLOSED once the scope has ever been
   // reset: any sync write that doesn't carry a current `?epoch=` is answered
-  // with {ok:true, stale:true} and silently DROPPED — the client thinks it
+  // with 
+{
+ok:true, stale:true
+}
+ and silently DROPPED — the client thinks it
   // synced while nothing persisted (runs "un-starting" on the next receive).
   // So every sync write must append `epoch=${getStoredResetEpoch()}` and run
   // its response through this handler. A stale rejection means this device
@@ -8396,7 +16208,15 @@ export default function Home() {
     // /api/sync/today row — the same leak schedulePush guards. If the payload's
     // build-date is no longer today, drop it (the rollover will push the fresh
     // day instead).
-    if (payload.dayState.date && payload.dayState.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
+    if (payload.dayState.date && payload.dayState.date !== todayStr()) 
+{
+ pushAcknowledgedRef.current = true
+;
+ return
+;
+ 
+}
+
     // Key the live row by the CLIENT's local date (?today=). The server is UTC, so
     // without this a client behind UTC writes the live day into its local
     // "tomorrow" row — clobbering a scheduled day (and its case counts).
@@ -8444,26 +16264,66 @@ export default function Home() {
         // All retries exhausted — stop blocking remote state so other devices can still sync
         pushAcknowledgedRef.current = true;
         // ...but tell the user their changes aren't backed up / shared yet.
-        setSyncPushFailed(true);
-        setSyncPendingCount(0);
-        setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network");
-      }
-    }).finally(() => {
-      syncPushAbortControllersRef.current.delete(controller);
-    });
-  }
+        setSyncPushFailed(true)
+;
+
+        setSyncPendingCount(0)
+;
+
+        setSyncFailedCount((count) => count + 1)
+;
+
+        recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network")
+;
+
+      
+}
+
+    
+}
+).finally(() => 
+{
+
+      syncPushAbortControllersRef.current.delete(controller)
+;
+
+    
+}
+)
+;
+
+  
+}
+
 
   // Build the full sync payload from current form + localStorage. Extracted so
   // both the debounced schedulePush and the merge flow (which must push the
   // merged payload synchronously before reloading) share one source of truth.
-  function buildSyncPayload(ds: DayState): SyncPayload {
-    const curId = ds.runs[ds.currentIndex]?.id;
-    const runValues: Record<string, FormValues> = {};
-    const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = {};
-    const storedPackagingProgress = loadPackagingProgress();
-    const pushRuns: RunMeta[] = [];
-    for (const run of ds.runs) {
+  function buildSyncPayload(ds: DayState): SyncPayload 
+{
+
+    const curId = ds.runs[ds.currentIndex]?.id
+;
+
+    const runValues: Record<string, FormValues> = 
+{
+}
+;
+
+    const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = 
+{
+}
+;
+
+    const storedPackagingProgress = loadPackagingProgress()
+;
+
+    const pushRuns: RunMeta[] = []
+;
+
+    for (const run of ds.runs) 
+{
+
       // The current run is normally pushed from the LIVE form so an in-progress
       // edit is shared immediately. But the form is transiently all-default
       // during mount/hydration and right after a programmatic form.reset()
@@ -8476,7 +16336,9 @@ export default function Home() {
       // guard on every peer ACCEPTS the empty value, wiping real data on the
       // shared day-state row (the recurring "I entered it, refreshed, it
       // vanished" loss). Never push an all-default current-run form over a
-      // populated stored value; fall back to the durable localStorage copy.
+      // populated stored value
+;
+ fall back to the durable localStorage copy.
       // Mirrors the autosave [v] effect's guard, applied at the push boundary
       // so it covers EVERY push path, not just direct edits.
       const value =
@@ -8492,14 +16354,34 @@ export default function Home() {
       // local-only until the user gives it any data (then it's no longer
       // pristine and syncs normally). The `seeded` flag is stripped below so it
       // never travels over the wire.
-      if (isPristineSeedRun(run)) continue;
-      const { seeded: _seeded, ...meta } = run;
-      pushRuns.push(meta);
-      runValues[run.id] = value;
-      if (storedPackagingProgress[run.id]) {
-        packagingProgress[run.id] = storedPackagingProgress[run.id];
-      }
-    }
+      if (isPristineSeedRun(run)) continue
+;
+
+      const 
+{
+ seeded: _seeded, ...meta 
+}
+ = run
+;
+
+      pushRuns.push(meta)
+;
+
+      runValues[run.id] = value
+;
+
+      if (storedPackagingProgress[run.id]) 
+{
+
+        packagingProgress[run.id] = storedPackagingProgress[run.id]
+;
+
+      
+}
+
+    
+}
+
     // Drop edit stamps for runs excluded above so a stray stamp can't pair with
     // an absent value server-side (benign, but keeps the row clean).
     const runValuesUpdatedAt = { ...loadRunValuesUpdated() };
@@ -8534,21 +16416,45 @@ export default function Home() {
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
-    if (!syncBaselineGateRef.current.requestPush()) return;
-    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
-    pushAcknowledgedRef.current = false;
-    setSyncPendingCount(1);
-    recordSyncEvent("local", "Local change is queued for server sync");
-    pushTimerRef.current = setTimeout(() => {
+    if (!syncBaselineGateRef.current.requestPush()) return
+;
+
+    if (pushTimerRef.current) clearTimeout(pushTimerRef.current)
+;
+
+    pushAcknowledgedRef.current = false
+;
+
+    setSyncPendingCount(1)
+;
+
+    recordSyncEvent("local", "Local change is queued for server sync")
+;
+
+    pushTimerRef.current = setTimeout(() => 
+{
+
       // Never push a stale-dated day into today's sync row. A tab left open
-      // across midnight still holds yesterday's runs until the rollover fires;
+      // across midnight still holds yesterday's runs until the rollover fires
+;
+
       // pushing them to /api/sync/today (the server resolves "today" by its own
       // clock) would leak yesterday's runs into today's row. The rollover then
       // fetches that row and "pulls them up" as if they were pre-scheduled, so
       // the daily reset never clears. Skip until the rollover swaps in the fresh
       // day. The SSE-onopen reconnect re-push is the main offender here.
-      if (ds.date && ds.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
-      const payload = buildSyncPayload(ds);
+      if (ds.date && ds.date !== todayStr()) 
+{
+ pushAcknowledgedRef.current = true
+;
+ return
+;
+ 
+}
+
+      const payload = buildSyncPayload(ds)
+;
+
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
@@ -8627,12 +16533,26 @@ export default function Home() {
         mergeRunDefaults(stored),
         lastFormRunIdRef.current === currentRunId,
       )
-    ) {
-      const merged = mergeRunDefaults(stored);
-      lastFormRunIdRef.current = currentRunId;
-      form.reset(merged);
-      resetFieldArrays(merged);
-    } else {
+    ) 
+{
+
+      const merged = mergeRunDefaults(stored)
+;
+
+      lastFormRunIdRef.current = currentRunId
+;
+
+      form.reset(merged)
+;
+
+      resetFieldArrays(merged)
+;
+
+    
+}
+ else 
+{
+
       // Even when no heal is needed, record that the form is now settled for
       // this run so the autosave guard doesn't block the first genuine edit.
       lastFormRunIdRef.current = currentRunId;
@@ -8653,8 +16573,12 @@ export default function Home() {
     // product's applicator/recipe data onto the new run's localStorage slot and
     // profile — the cross-run contamination bug. Only proceed once the form is
     // confirmed settled for the current run.
-    if (lastFormRunIdRef.current !== runId) return;
-    if (formHandoffRef.current) return;
+    if (lastFormRunIdRef.current !== runId) return
+;
+
+    if (formHandoffRef.current) return
+;
+
     // Only treat this as a real user edit when the live form actually DIFFERS from
     // the values already stored for this run. A programmatic form.reset() — run
     // switch, sync-apply (the merge resets the live form to the accepted remote),
@@ -8665,7 +16589,9 @@ export default function Home() {
     // clobber a peer's genuine edit (the "I entered cases needed and it vanished"
     // multi-device data loss). Mirrors mobile's primed-baseline diffStampRunEdits,
     // which only stamps genuine changes.
-    if (deepEqual(loadRunValues(runId), v)) return;
+    if (deepEqual(loadRunValues(runId), v)) return
+;
+
     // Safety net for the recurring "I entered cases-needed, waited, refreshed,
     // and it all vanished" data loss on the shared day-state row. A genuine user
     // edit never reduces EVERY field to its default at once — an all-default form
@@ -8677,44 +16603,91 @@ export default function Home() {
     // an empty form overwrite a populated stored value. (Equality of stored ==
     // DEFAULT is already short-circuited above, so this only blocks the
     // populated→empty transition, never a legitimately blank run.)
-    if (isEmptyOverPopulated(v, loadRunValues(runId))) return;
-    const now = Date.now();
+    if (isEmptyOverPopulated(v, loadRunValues(runId))) return
+;
+
+    const now = Date.now()
+;
+
     // Claim an automatic placeholder as soon as an actual operator edit lands.
     // A clean programmatic form reset never reaches this point (the stored-value
     // equality guard above returns), so stale form contamination stays local-only.
     // Persisting the provenance before the delayed sync push means reconnects and
     // offline recovery retain this intentional run instead of treating it as a
     // disposable startup seed.
-    if (run.seeded) {
-      ds = {
+    if (run.seeded) 
+{
+
+      ds = 
+{
+
         ...ds,
         runs: ds.runs.map((candidate) =>
-          candidate.id === runId ? { ...candidate, seeded: false } : candidate,
+          candidate.id === runId ? 
+{
+ ...candidate, seeded: false 
+}
+ : candidate,
         ),
-      };
-      dayStateRef.current = ds;
-      saveDayState(ds);
-      setDayState(ds);
-    }
-    saveRunValues(runId, v);
+      
+}
+;
+
+      dayStateRef.current = ds
+;
+
+      saveDayState(ds)
+;
+
+      setDayState(ds)
+;
+
+    
+}
+
+    saveRunValues(runId, v)
+;
+
     // Stamp this run's edit time so an in-flight stale remote can't clobber it
     // (the "click away and my change disappeared" lost-update).
-    markRunValuesUpdated(runId, now);
+    markRunValuesUpdated(runId, now)
+;
+
     // Profile writes are manager-only: floor staff editing the run form must
     // never silently overwrite the manager-configured profile (run values
     // above still save for everyone).
-    if (canManageProfiles && (run?.brand || run?.flavor)) {
-      if (saveProfile(run.brand, run.flavor, v)) {
-        void propagateProfileToPendingRuns(run.brand, run.flavor);
-      }
-    }
-    lastLocalEditRef.current = now;
+    if (canManageProfiles && (run?.brand || run?.flavor)) 
+{
+
+      if (saveProfile(run.brand, run.flavor, v)) 
+{
+
+        void propagateProfileToPendingRuns(run.brand, run.flavor)
+;
+
+      
+}
+
+    
+}
+
+    lastLocalEditRef.current = now
+;
+
     // Use the default 600ms debounce so the push fires between 1-second
     // auto-track ticks (2000ms was starving the push — the timer kept being
     // reset before it could fire, delaying syncs up to the 30s interval).
-    schedulePush(ds);
-    flashSaved();
-  }, [v]);
+    schedulePush(ds)
+;
+
+    flashSaved()
+;
+
+  
+}
+, [v])
+;
+
 
   // ── Unified setup editing: edit once, updates everywhere ──────────────────
   // (1) Setup Profiles editor → open run form. After Save Setup persists a
@@ -8724,65 +16697,145 @@ export default function Home() {
   // profile writer must handle). Per-run inputs (cases needed, temp overrides)
   // and progress fields of a started run are kept: mergeProfileIntoOpenForm
   // only overlays profile-owned fields.
-  function handleSetupProfileSaved(brand: string, flavor: string) {
+  function handleSetupProfileSaved(brand: string, flavor: string) 
+{
+
     // The profile is the source of truth for every run that hasn't started:
     // fan the fresh save out to today's pending runs and future scheduled days.
-    void propagateProfileToPendingRuns(brand, flavor);
-    const liveDay = dayStateRef.current;
-    const liveRun = liveDay?.runs[liveDay.currentIndex];
-    if (!liveRun) return;
+    void propagateProfileToPendingRuns(brand, flavor)
+;
+
+    const liveDay = dayStateRef.current
+;
+
+    const liveRun = liveDay?.runs[liveDay.currentIndex]
+;
+
+    if (!liveRun) return
+;
+
     if (
       (liveRun.brand ?? "").trim().toLowerCase() !== brand.trim().toLowerCase() ||
       (liveRun.flavor ?? "").trim().toLowerCase() !== flavor.trim().toLowerCase()
-    ) {
-      return;
-    }
-    const profile = loadProfile(liveRun.brand, liveRun.flavor);
-    if (!profile) return;
+    ) 
+{
+
+      return
+;
+
+    
+}
+
+    const profile = loadProfile(liveRun.brand, liveRun.flavor)
+;
+
+    if (!profile) return
+;
+
     // Same guard as the spec-import reload: a mix recipe name must never land
     // in the sauce fields (mixes live on the applicator cards).
-    if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
-      profile.frontlineRecipeName = "";
-      profile.frontlineRecipe = [];
-    }
-    const current = form.getValues();
-    const merged = mergeProfileIntoOpenForm(current, profile);
-    if (merged === current) return;
-    const now = Date.now();
-    saveRunValues(liveRun.id, merged);
-    markRunValuesUpdated(liveRun.id, now);
-    lastLocalEditRef.current = now;
-    lastFormRunIdRef.current = liveRun.id;
-    form.reset(merged);
-    resetFieldArrays(merged);
-    schedulePush(dayStateRef.current, 0);
-    toast({
+    if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) 
+{
+
+      profile.frontlineRecipeName = ""
+;
+
+      profile.frontlineRecipe = []
+;
+
+    
+}
+
+    const current = form.getValues()
+;
+
+    const merged = mergeProfileIntoOpenForm(current, profile)
+;
+
+    if (merged === current) return
+;
+
+    const now = Date.now()
+;
+
+    saveRunValues(liveRun.id, merged)
+;
+
+    markRunValuesUpdated(liveRun.id, now)
+;
+
+    lastLocalEditRef.current = now
+;
+
+    lastFormRunIdRef.current = liveRun.id
+;
+
+    form.reset(merged)
+;
+
+    resetFieldArrays(merged)
+;
+
+    schedulePush(dayStateRef.current, 0)
+;
+
+    toast(
+{
+
       title: "Run form updated",
       description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
-    });
-  }
+    
+}
+)
+;
+
+  
+}
+
 
   // Profile reconciliation is invoked by boot/poll/foreground effects that
   // intentionally have stable subscriptions. Keep their behavior fresh without
   // rebuilding those listeners on every form or run change.
-  applyProfileReconcileRef.current = (result) => {
-    const liveDay = dayStateRef.current;
-    const liveRun = liveDay.runs[liveDay.currentIndex];
+  applyProfileReconcileRef.current = (result) => 
+{
+
+    const liveDay = dayStateRef.current
+;
+
+    const liveRun = liveDay.runs[liveDay.currentIndex]
+;
+
     const liveKey = liveRun
       ? canonicalProfileKey(liveRun.brand ?? "", liveRun.flavor ?? "")
-      : "";
+      : ""
+;
 
-    for (const key of result.deletedKeys) {
-      markProfileRemotelyDeleted(key, result.deletedSnapshots[key]);
-    }
 
-    if (liveKey && result.adoptedKeys.includes(liveKey) && liveRun) {
+    for (const key of result.deletedKeys) 
+{
+
+      markProfileRemotelyDeleted(key, result.deletedSnapshots[key])
+;
+
+    
+}
+
+
+    if (liveKey && result.adoptedKeys.includes(liveKey) && liveRun) 
+{
+
       // Reuse the profile-owned merge: progress, planned cases, and temporary
       // run overrides stay intact while the visible setup updates immediately.
-      handleSetupProfileSaved(liveRun.brand ?? "", liveRun.flavor ?? "");
-    }
+      handleSetupProfileSaved(liveRun.brand ?? "", liveRun.flavor ?? "")
+;
 
-    if (liveKey && result.deletedKeys.includes(liveKey)) {
+    
+}
+
+
+    if (liveKey && result.deletedKeys.includes(liveKey)) 
+{
+
       // Keep the active run's values (a profile deletion must never erase
       // production progress), but close a matching editor so it cannot submit
       // an old snapshot back into the now-deleted server row.
@@ -8802,13 +16855,27 @@ export default function Home() {
   // (cases needed, temp overrides) and progress are never touched
   // (mergeProfileIntoOpenForm skips them), and untouched runs are never
   // re-stamped, so this can't clobber operator-entered data.
-  const propagateSigRef = useRef<Map<string, string>>(new Map());
-  async function propagateProfileToPendingRuns(brand: string, flavor: string) {
-    const b = (brand ?? "").trim();
-    const f = (flavor ?? "").trim();
-    if (!b && !f) return;
-    const profile = loadProfile(b, f);
-    if (!profile) return;
+  const propagateSigRef = useRef<Map<string, string>>(new Map())
+;
+
+  async function propagateProfileToPendingRuns(brand: string, flavor: string) 
+{
+
+    const b = (brand ?? "").trim()
+;
+
+    const f = (flavor ?? "").trim()
+;
+
+    if (!b && !f) return
+;
+
+    const profile = loadProfile(b, f)
+;
+
+    if (!profile) return
+;
+
     // Cheap dedup: nav-saves fire on every tab change — skip the fan-out when
     // the profile hasn't actually changed since the last propagation.
     const sigKey = `${b.toLowerCase()}::${f.toLowerCase()}`;
@@ -8827,70 +16894,263 @@ export default function Home() {
       (r.flavor ?? "").trim().toLowerCase() === f.toLowerCase();
     // 1) Today's pending runs (never started, not the open form — the open
     //    form is handled by mergeProfileIntoOpenForm + form.reset above).
-    const ds = dayStateRef.current;
-    const openId = ds.runs[ds.currentIndex]?.id;
-    const now = Date.now();
-    let todayChanged = false;
-    for (const r of ds.runs) {
-      if (r.id === openId || r.startedAt || r.endedAt) continue;
-      if (!matches(r)) continue;
-      const stored = loadRunValues(r.id);
-      const merged = mergeProfileIntoOpenForm(stored, profile);
-      if (merged === stored) continue;
-      saveRunValues(r.id, merged);
-      markRunValuesUpdated(r.id, now);
-      todayChanged = true;
-    }
-    if (todayChanged) {
-      lastLocalEditRef.current = now;
-      schedulePush(ds, 0);
-    }
+    const ds = dayStateRef.current
+;
+
+    const openId = ds.runs[ds.currentIndex]?.id
+;
+
+    const now = Date.now()
+;
+
+    let todayChanged = false
+;
+
+    for (const r of ds.runs) 
+{
+
+      if (r.id === openId || r.startedAt || r.endedAt) continue
+;
+
+      if (!matches(r)) continue
+;
+
+      const stored = loadRunValues(r.id)
+;
+
+      const merged = mergeProfileIntoOpenForm(stored, profile)
+;
+
+      if (merged === stored) continue
+;
+
+      saveRunValues(r.id, merged)
+;
+
+      markRunValuesUpdated(r.id, now)
+;
+
+      todayChanged = true
+;
+
+    
+}
+
+    if (todayChanged) 
+{
+
+      lastLocalEditRef.current = now
+;
+
+      schedulePush(ds, 0)
+;
+
+    
+}
+
     // 2) Future scheduled days. Each day's payload is fetched, matching
     //    not-started runs get the overlay, and the day is PUT back with fresh
     //    per-run edit stamps so the server's LWW merge accepts the update.
-    try {
-      const listRes = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`);
-      if (listRes.status === 401) { reportUnauthorized(); return; }
-      if (!listRes.ok) return;
+    try 
+{
+
+      const listRes = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`)
+;
+
+      if (listRes.status === 401) 
+{
+ reportUnauthorized()
+;
+ return
+;
+ 
+}
+
+      if (!listRes.ok) return
+;
+
       const days = (await listRes.json()) as
-        { date: string; runs?: { id: string; brand: string; flavor: string }[] }[];
-      let updatedAny = false;
-      let allOk = true;
-      for (const day of days) {
-        if (day.date <= todayStr()) continue;
-        if (!(day.runs ?? []).some(matches)) continue;
-        const payload = await fetchSchedulePayload(day.date);
-        if (!payload?.dayState?.runs) { allOk = false; continue; }
-        const rv = { ...(payload.runValues ?? {}) };
-        const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
-        let dayChanged = false;
-        for (const run of payload.dayState.runs) {
-          if (!matches(run) || run.startedAt || run.endedAt) continue;
-          const stored = rv[run.id];
-          const merged = mergeProfileIntoOpenForm(stored ?? { ...DEFAULT_VALUES }, profile);
-          if (stored && merged === stored) continue;
-          rv[run.id] = merged;
-          stamps[run.id] = now;
-          dayChanged = true;
-        }
-        if (!dayChanged) continue;
-        const res = await fetch(`/api/sync/${day.date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
+        
+{
+ date: string
+;
+ runs?: 
+{
+ id: string
+;
+ brand: string
+;
+ flavor: string 
+}
+[] 
+}
+[]
+;
+
+      let updatedAny = false
+;
+
+      let allOk = true
+;
+
+      for (const day of days) 
+{
+
+        if (day.date <= todayStr()) continue
+;
+
+        if (!(day.runs ?? []).some(matches)) continue
+;
+
+        const payload = await fetchSchedulePayload(day.date)
+;
+
+        if (!payload?.dayState?.runs) 
+{
+ allOk = false
+;
+ continue
+;
+ 
+}
+
+        const rv = 
+{
+ ...(payload.runValues ?? 
+{
+}
+) 
+}
+;
+
+        const stamps = 
+{
+ ...(payload.runValuesUpdatedAt ?? 
+{
+}
+) 
+}
+;
+
+        let dayChanged = false
+;
+
+        for (const run of payload.dayState.runs) 
+{
+
+          if (!matches(run) || run.startedAt || run.endedAt) continue
+;
+
+          const stored = rv[run.id]
+;
+
+          const merged = mergeProfileIntoOpenForm(stored ?? 
+{
+ ...DEFAULT_VALUES 
+}
+, profile)
+;
+
+          if (stored && merged === stored) continue
+;
+
+          rv[run.id] = merged
+;
+
+          stamps[run.id] = now
+;
+
+          dayChanged = true
+;
+
+        
+}
+
+        if (!dayChanged) continue
+;
+
+        const res = await fetch(`/api/sync/${day.date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, 
+{
+
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
-        });
-        if (res.status === 401) { reportUnauthorized(); return; }
-        if (!res.ok) { allOk = false; continue; }
-        const { stale } = await consumeCanonicalSyncWriteResponse(res, false);
-        if (stale) { allOk = false; continue; }
-        updatedAny = true;
-      }
-      if (updatedAny) void refreshScheduledDays();
-      // Only remember this profile as fully propagated when every write stuck;
+          headers: 
+{
+ "Content-Type": "application/json" 
+}
+,
+          body: JSON.stringify(
+{
+ payload: 
+{
+ ...payload, runValues: rv, runValuesUpdatedAt: stamps 
+}
+ 
+}
+),
+        
+}
+)
+;
+
+        if (res.status === 401) 
+{
+ reportUnauthorized()
+;
+ return
+;
+ 
+}
+
+        if (!res.ok) 
+{
+ allOk = false
+;
+ continue
+;
+ 
+}
+
+        const 
+{
+ stale 
+}
+ = await consumeCanonicalSyncWriteResponse(res, false)
+;
+
+        if (stale) 
+{
+ allOk = false
+;
+ continue
+;
+ 
+}
+
+        updatedAny = true
+;
+
+      
+}
+
+      if (updatedAny) void refreshScheduledDays()
+;
+
+      // Only remember this profile as fully propagated when every write stuck
+;
+
       // otherwise the next save retries the fan-out.
-      if (allOk) propagateSigRef.current.set(sigKey, sig);
-    } catch {}
-  }
+      if (allOk) propagateSigRef.current.set(sigKey, sig)
+;
+
+    
+}
+ catch 
+{
+}
+
+  
+}
+
 
   // (2) Manage Lists dough/sauce pool → run forms + saved profiles. When a
   // shared recipe's rows (or dough target weight) change — edited locally or
@@ -8900,18 +17160,52 @@ export default function Home() {
   // OPEN form's linked rows via setValue so the normal autosave persists and
   // stamps it. The first snapshot of each pool only primes the ref — a page
   // load must not look like "everything changed".
-  const namedPoolSnapRef = useRef<{ dough: Map<string, string> | null; sauce: Map<string, string> | null }>({ dough: null, sauce: null });
-  function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) {
-    const snap = new Map<string, string>();
-    const byKey = new Map<string, NamedRecipePoolPatch>();
-    for (const r of list) {
-      if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
-      if (!key) continue;
-      const rows = normalizeRecipeRowsForCompare(r.components);
-      const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
-      const perTray = kind === "dough" ? Number(r.doughballsPerTray ?? 0) : 0;
-      const variants = kind === "dough" ? normalizeDoughballVariants(r.doughballVariants) : [];
+  const namedPoolSnapRef = useRef<
+{
+ dough: Map<string, string> | null
+;
+ sauce: Map<string, string> | null 
+}
+>(
+{
+ dough: null, sauce: null 
+}
+)
+;
+
+  function applyNamedPoolChange(kind: "dough" | "sauce", list: NamedRecipe[]) 
+{
+
+    const snap = new Map<string, string>()
+;
+
+    const byKey = new Map<string, NamedRecipePoolPatch>()
+;
+
+    for (const r of list) 
+{
+
+      if (r.enabled === false) continue
+;
+
+      const key = r.name.trim().toLowerCase()
+;
+
+      if (!key) continue
+;
+
+      const rows = normalizeRecipeRowsForCompare(r.components)
+;
+
+      const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0
+;
+
+      const perTray = kind === "dough" ? Number(r.doughballsPerTray ?? 0) : 0
+;
+
+      const variants = kind === "dough" ? normalizeDoughballVariants(r.doughballVariants) : []
+;
+
       // Include customer-assignment fingerprint in the snap so that re-importing
       // a dough procedure (which adds customer entries to variants) triggers the
       // profile fan-out even when recipe rows didn't change.
@@ -9217,7 +17511,11 @@ export default function Home() {
       const saved = await saveNamedRecipes(kind, [next]);
       cycleCountQc.setQueryData([kind === "dough" ? "doughRecipes" : "sauceRecipes"], saved);
       toast({
-        title: `Shared recipe "${target.name}" updated`,
+        title: `Shared recipe "$
+{
+target.name
+}
+" updated`,
         description: "Every run and saved setup linked to it now uses this version.",
       });
     } catch {
@@ -9244,25 +17542,64 @@ export default function Home() {
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
-      }
-    }
-    const newId = dayState.runs[newIndex].id;
-    const newDs = { ...dayState, currentIndex: newIndex };
-    setDayState(newDs);
-    saveDayState(newDs);
-    const newVals = loadRunValues(newId);
-    lastFormRunIdRef.current = newId;
-    form.reset(newVals);
-    resetFieldArrays(newVals);
-    setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) 
+{
+
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) 
+{
+
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor)
+;
+
+      
+}
+
+    
+}
+
+    const newId = dayState.runs[newIndex].id
+;
+
+    const newDs = 
+{
+ ...dayState, currentIndex: newIndex 
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    const newVals = loadRunValues(newId)
+;
+
+    lastFormRunIdRef.current = newId
+;
+
+    form.reset(newVals)
+;
+
+    resetFieldArrays(newVals)
+;
+
+    setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough")
+;
+
     // Restore open stoppage for the new run (or clear if none)
-    const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt);
-    setActiveStopId(openStop?.id ?? null);
-    setConfirmDeleteStopId(null);
-  }
+    const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt)
+;
+
+    setActiveStopId(openStop?.id ?? null)
+;
+
+    setConfirmDeleteStopId(null)
+;
+
+  
+}
+
 
   // ── Temporary ingredient substitutions (day-state overlay) ─────────────────
   // Floor staff overlay today's recipes when an ingredient is low/out. These
@@ -9339,47 +17676,121 @@ export default function Home() {
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
-      }
-    }
-    const newId = genId();
-    const newIndex = dayState.runs.length;
-    const newDs = {
-      runs: [...dayState.runs, { id: newId, brand: "", flavor: "" }],
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) 
+{
+
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) 
+{
+
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor)
+;
+
+      
+}
+
+    
+}
+
+    const newId = genId()
+;
+
+    const newIndex = dayState.runs.length
+;
+
+    const newDs = 
+{
+
+      runs: [...dayState.runs, 
+{
+ id: newId, brand: "", flavor: "" 
+}
+],
       currentIndex: newIndex,
-    };
-    setDayState(newDs);
-    saveDayState(newDs);
+    
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
     // Settle the form for the new run explicitly (like switchToRun does) so
     // the [currentRunId] heal effect and the autosave guard both see a
     // consistent "form belongs to this run" state from the first render.
-    lastFormRunIdRef.current = newId;
-    form.reset(DEFAULT_VALUES);
-    resetFieldArrays(DEFAULT_VALUES);
-    schedulePush(newDs, 0);
-  }
+    lastFormRunIdRef.current = newId
+;
 
-  function removeRun() {
-    const idx = dayState.currentIndex;
-    const run = dayState.runs[idx];
-    if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
-    const newRuns = dayState.runs.filter((_, i) => i !== idx);
-    if (newRuns.length === 0) return; // always keep at least one run
+    form.reset(DEFAULT_VALUES)
+;
+
+    resetFieldArrays(DEFAULT_VALUES)
+;
+
+    schedulePush(newDs, 0)
+;
+
+  
+}
+
+
+  function removeRun() 
+{
+
+    const idx = dayState.currentIndex
+;
+
+    const run = dayState.runs[idx]
+;
+
+    if (!run || run.startedAt || run.endedAt) return
+;
+ // active or completed — cannot remove
+    const newRuns = dayState.runs.filter((_, i) => i !== idx)
+;
+
+    if (newRuns.length === 0) return
+;
+ // always keep at least one run
     // Tombstone the removed run id so live-sync's additive run-union can't
     // resurrect it from a peer that still has it.
-    tombstoneDeleted("runs", run.id);
-    const newIndex = Math.max(0, idx - 1);
-    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
-    setDayState(newDs);
-    saveDayState(newDs);
-    const removedVals = loadRunValues(newRuns[newIndex].id);
-    form.reset(removedVals);
-    resetFieldArrays(removedVals);
-    schedulePush(newDs, 0);
-    setConfirmRemoveRun(false);
-  }
+    tombstoneDeleted("runs", run.id)
+;
+
+    const newIndex = Math.max(0, idx - 1)
+;
+
+    const newDs = 
+{
+ ...dayState, runs: newRuns, currentIndex: newIndex 
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    const removedVals = loadRunValues(newRuns[newIndex].id)
+;
+
+    form.reset(removedVals)
+;
+
+    resetFieldArrays(removedVals)
+;
+
+    schedulePush(newDs, 0)
+;
+
+    setConfirmRemoveRun(false)
+;
+
+  
+}
+
 
   // Blank runs eligible for the one-tap cleanup sweep: every NON-CURRENT run
   // with no identity/notes, never started, no stoppages, and an all-default
@@ -9394,7 +17805,9 @@ export default function Home() {
         .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r))
         .map((r) => r.id),
     [dayState],
-  );
+  )
+;
+
 
   // Remove every blank run in one action, tombstoning each id
   // (deletedItems.runs) so the removal propagates through /api/sync to all
@@ -9432,12 +17845,24 @@ export default function Home() {
     saveDayState(newDs);
     if (removedCurrent) {
       // Removed current run — reload the new current run's form values.
-      const newVals = loadRunValues(newDs.runs[newDs.currentIndex].id);
-      form.reset(newVals);
-      resetFieldArrays(newVals);
-    }
-    schedulePush(newDs, 0);
-  }
+      const newVals = loadRunValues(newDs.runs[newDs.currentIndex].id)
+;
+
+      form.reset(newVals)
+;
+
+      resetFieldArrays(newVals)
+;
+
+    
+}
+
+    schedulePush(newDs, 0)
+;
+
+  
+}
+
 
   // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
   // target brand+flavor and make it current, in one dayState computation, so
@@ -9453,41 +17878,115 @@ export default function Home() {
     saveRunValues(currentRunId, cur);
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
-    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
-      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) {
-        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor);
-      }
-    }
-    const newId = genId();
-    const preferredSubTab = loadProfileSubTab(brand, flavor);
-    const newDs = {
-      runs: [...dayState.runs, { id: newId, brand, flavor, ...(preferredSubTab ? { subTab: preferredSubTab } : {}) }],
-      currentIndex: dayState.runs.length,
-    };
-    setDayState(newDs);
-    saveDayState(newDs);
-    if (preferredSubTab) setDoughSubTab(preferredSubTab);
-    const profile = loadProfile(brand, flavor);
-    if (profile) {
-      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
-      if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
-        profile.frontlineRecipeName = "";
-        profile.frontlineRecipe = [];
-      }
-      form.reset(profile);
-      resetFieldArrays(profile);
-    } else {
-      form.reset(DEFAULT_VALUES);
-      resetFieldArrays(DEFAULT_VALUES);
-    }
-    schedulePush(newDs, 0);
-    return true;
-  }
+    if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) 
+{
 
-  function setRunBrandFlavor(brand: string, flavor: string) {
+      if (saveProfile(currentRun.brand, currentRun.flavor, cur)) 
+{
+
+        void propagateProfileToPendingRuns(currentRun.brand, currentRun.flavor)
+;
+
+      
+}
+
+    
+}
+
+    const newId = genId()
+;
+
+    const preferredSubTab = loadProfileSubTab(brand, flavor)
+;
+
+    const newDs = 
+{
+
+      runs: [...dayState.runs, 
+{
+ id: newId, brand, flavor, ...(preferredSubTab ? 
+{
+ subTab: preferredSubTab 
+}
+ : 
+{
+}
+) 
+}
+],
+      currentIndex: dayState.runs.length,
+    
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    if (preferredSubTab) setDoughSubTab(preferredSubTab)
+;
+
+    const profile = loadProfile(brand, flavor)
+;
+
+    if (profile) 
+{
+
+      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+      if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) 
+{
+
+        profile.frontlineRecipeName = ""
+;
+
+        profile.frontlineRecipe = []
+;
+
+      
+}
+
+      form.reset(profile)
+;
+
+      resetFieldArrays(profile)
+;
+
+    
+}
+ else 
+{
+
+      form.reset(DEFAULT_VALUES)
+;
+
+      resetFieldArrays(DEFAULT_VALUES)
+;
+
+    
+}
+
+    schedulePush(newDs, 0)
+;
+
+    return true
+;
+
+  
+}
+
+
+  function setRunBrandFlavor(brand: string, flavor: string) 
+{
+
     // Save current values to old profile
-    const cur = form.getValues();
-    saveRunValues(currentRunId, cur);
+    const cur = form.getValues()
+;
+
+    saveRunValues(currentRunId, cur)
+;
+
     // Profile writes are manager-only: run values still save for everyone,
     // but only a manager's open form persists back to the shared profile.
     if (canManageProfiles && (currentRun?.brand || currentRun?.flavor)) {
@@ -10854,98 +19353,293 @@ export default function Home() {
           }
           // Stamp: bypasses the form-watch autosave; unstamped values lose the
           // per-run LWW merge to a peer's stale stamped copy.
-          const now = Date.now();
-          markRunValuesUpdated(isCurrent ? currentRunId : runId, now);
-          lastLocalEditRef.current = now;
-          schedulePush(dayStateRef.current, 0);
-        };
-        writeProgress(progress);
-        return {
+          const now = Date.now()
+;
+
+          markRunValuesUpdated(isCurrent ? currentRunId : runId, now)
+;
+
+          lastLocalEditRef.current = now
+;
+
+          schedulePush(dayStateRef.current, 0)
+;
+
+        
+}
+;
+
+        writeProgress(progress)
+;
+
+        return 
+{
+
           ok: true,
           message: "Progress updated",
           undo: () => writeProgress(prev),
-        };
-      },
-      logActualCases(runId, actualCases) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prev = dayStateRef.current.runs[idx].actualCases;
-        pageUpdateRunMeta(runId, { actualCases });
-        return {
+        
+}
+;
+
+      
+}
+,
+      logActualCases(runId, actualCases) 
+{
+
+        const idx = findIdx(runId)
+;
+
+        if (idx < 0) return 
+{
+ ok: false, message: "Run no longer exists" 
+}
+;
+
+        const prev = dayStateRef.current.runs[idx].actualCases
+;
+
+        pageUpdateRunMeta(runId, 
+{
+ actualCases 
+}
+)
+;
+
+        return 
+{
+
           ok: true,
           message: `Logged ${actualCases} cases`,
-          undo: () => pageUpdateRunMeta(runId, { actualCases: prev }),
-        };
-      },
-      logWaste(runId, wasteLbs) {
-        const idx = findIdx(runId);
-        if (idx < 0) return { ok: false, message: "Run no longer exists" };
-        const prev = dayStateRef.current.runs[idx].wasteLbs;
-        pageUpdateRunMeta(runId, { wasteLbs });
-        return {
+          undo: () => pageUpdateRunMeta(runId, 
+{
+ actualCases: prev 
+}
+),
+        
+}
+;
+
+      
+}
+,
+      logWaste(runId, wasteLbs) 
+{
+
+        const idx = findIdx(runId)
+;
+
+        if (idx < 0) return 
+{
+ ok: false, message: "Run no longer exists" 
+}
+;
+
+        const prev = dayStateRef.current.runs[idx].wasteLbs
+;
+
+        pageUpdateRunMeta(runId, 
+{
+ wasteLbs 
+}
+)
+;
+
+        return 
+{
+
           ok: true,
           message: `Logged ${wasteLbs} lbs waste`,
-          undo: () => pageUpdateRunMeta(runId, { wasteLbs: prev }),
-        };
-      },
-      async restockItem(body) {
-        await restockInventory({
+          undo: () => pageUpdateRunMeta(runId, 
+{
+ wasteLbs: prev 
+}
+),
+        
+}
+;
+
+      
+}
+,
+      async restockItem(body) 
+{
+
+        await restockInventory(
+{
+
           itemKey: body.itemKey,
           category: body.category,
           name: body.name,
           unit: body.unit,
           qty: body.qty,
-        });
-        return { ok: true, message: `Restocked ${body.qty} ${body.unit} of ${body.name}` };
-      },
-      async adjustItem(body) {
-        await adjustInventory({ itemId: body.itemId, qtyDelta: body.qtyDelta, note: body.note });
-        const sign = body.qtyDelta >= 0 ? "+" : "";
-        return {
+        
+}
+)
+;
+
+        return 
+{
+ ok: true, message: `Restocked ${body.qty} ${body.unit} of ${body.name}` 
+}
+;
+
+      
+}
+,
+      async adjustItem(body) 
+{
+
+        await adjustInventory(
+{
+ itemId: body.itemId, qtyDelta: body.qtyDelta, note: body.note 
+}
+)
+;
+
+        const sign = body.qtyDelta >= 0 ? "+" : ""
+;
+
+        return 
+{
+
           ok: true,
           message: `Adjusted stock ${sign}${body.qtyDelta}`,
-          undo: async () => {
-            await adjustInventory({
+          undo: async () => 
+{
+
+            await adjustInventory(
+{
+
               itemId: body.itemId,
               qtyDelta: -body.qtyDelta,
               note: "Undo voice adjustment",
-            });
-          },
-        };
-      },
-      rollover() {
+            
+}
+)
+;
+
+          
+}
+,
+        
+}
+;
+
+      
+}
+,
+      rollover() 
+{
+
         // Manually trigger the same day close-out the midnight reset performs:
         // auto-deduct inventory for open runs, freeze them at now, archive the
         // day to history, then reset to a fresh day and push it. Irreversible by
         // design (no undo) — gated to managers in VOICE_COMMAND_ROLES.
-        const cur = dayStateRef.current;
-        for (const r of cur.runs) {
-          if (r.startedAt && !r.endedAt) {
-            const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-            void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
-          }
-        }
-        const now = Date.now();
-        const finalDs: DayState = {
+        const cur = dayStateRef.current
+;
+
+        for (const r of cur.runs) 
+{
+
+          if (r.startedAt && !r.endedAt) 
+{
+
+            const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id)
+;
+
+            void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => 
+{
+}
+)
+;
+
+          
+}
+
+        
+}
+
+        const now = Date.now()
+;
+
+        const finalDs: DayState = 
+{
+
           ...cur,
           runs: cur.runs.map((r) =>
-            r.startedAt && !r.endedAt ? { ...r, endedAt: now, pausedAt: undefined } : r,
+            r.startedAt && !r.endedAt ? 
+{
+ ...r, endedAt: now, pausedAt: undefined 
+}
+ : r,
           ),
-        };
-        archiveDayToHistory(finalDs, cur.date ?? todayStr());
-        const fresh = { ...freshDayState(), resetAt: now };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        setDayState(fresh);
-        saveDayState(fresh);
-        setRunToTime("19:15");
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        schedulePush(fresh, 0);
-        return { ok: true, message: "Day rolled over" };
-      },
-    };
-  }
+        
+}
+;
+
+        archiveDayToHistory(finalDs, cur.date ?? todayStr())
+;
+
+        const fresh = 
+{
+ ...freshDayState(), resetAt: now 
+}
+;
+
+        clearActiveSubstitutions()
+;
+
+        
+{
+ const dm = loadDeletedItems()
+;
+ if (dm["runs"]) 
+{
+ delete dm["runs"]
+;
+ saveDeletedItems(dm)
+;
+ 
+}
+ 
+}
+
+        setDayState(fresh)
+;
+
+        saveDayState(fresh)
+;
+
+        setRunToTime("19:15")
+;
+
+        form.reset(DEFAULT_VALUES)
+;
+
+        resetFieldArrays(DEFAULT_VALUES)
+;
+
+        schedulePush(fresh, 0)
+;
+
+        return 
+{
+ ok: true, message: "Day rolled over" 
+}
+;
+
+      
+}
+,
+    
+}
+;
+
+  
+}
+
 
   // Entry point passed to AssistantTab: dispatch the server-resolved actions
   // through the shared, parity-critical mapping with this user's role.
@@ -10963,7 +19657,17 @@ export default function Home() {
   function applyRecipeSuggestion(
     s: RecipeAssistSuggestion,
     runId?: string,
-  ): { ok: boolean; message: string; undo?: () => void } {
+  ): 
+{
+ ok: boolean
+;
+ message: string
+;
+ undo?: () => void 
+}
+ 
+{
+
     // Field-array writers for the current run's live form.
     const formWriters: Record<RecipeFieldId, (rows: { ingredient: string; lbs: number }[]) => void> = {
       doughRecipe: (next) => {
@@ -11017,16 +19721,34 @@ export default function Home() {
         }
         // Stamp: bypasses the form-watch autosave; unstamped values lose the
         // per-run LWW merge to a peer's stale stamped copy.
-        const now = Date.now();
-        markRunValuesUpdated(targetId, now);
-        lastLocalEditRef.current = now;
-        schedulePush(dayStateRef.current, 0);
-      },
-    });
-  }
+        const now = Date.now()
+;
+
+        markRunValuesUpdated(targetId, now)
+;
+
+        lastLocalEditRef.current = now
+;
+
+        schedulePush(dayStateRef.current, 0)
+;
+
+      
+}
+,
+    
+}
+)
+;
+
+  
+}
+
 
   // Persist skid/case progress for a SPECIFIC (non-active) draining run. The
-  // active run writes through the live form + autosave effect; a just-ended run
+  // active run writes through the live form + autosave effect
+;
+ a just-ended run
   // still draining its freezer is written here through the EXISTING per-run
   // saveRunValues path (no new write surface), pushed to sync, and a bump forces
   // an immediate re-render of the draining panel. Manual logging only — we never
@@ -11035,107 +19757,287 @@ export default function Home() {
     id: string,
     partial: Partial<FormValues>,
     source: "manual" | "auto" = "manual",
-  ) {
-    const vals = { ...DEFAULT_VALUES, ...loadRunValues(id), ...partial } as FormValues;
-    if (partial.skidsCompleted != null || partial.casesOnCurrentSkid != null) {
-      if (source === "auto") {
-        const accepted = recordAutomaticPackagingProgress({
+  ) 
+{
+
+    const vals = 
+{
+ ...DEFAULT_VALUES, ...loadRunValues(id), ...partial 
+}
+ as FormValues
+;
+
+    if (partial.skidsCompleted != null || partial.casesOnCurrentSkid != null) 
+{
+
+      if (source === "auto") 
+{
+
+        const accepted = recordAutomaticPackagingProgress(
+{
+
           runId: id,
           skidsCompleted: vals.skidsCompleted,
           casesOnCurrentSkid: vals.casesOnCurrentSkid,
-        });
-        if (!accepted) return;
-      } else {
+        
+}
+)
+;
+
+        if (!accepted) return
+;
+
+      
+}
+ else 
+{
+
         persistManualPackagingProgress(
           id,
           vals.skidsCompleted,
           vals.casesOnCurrentSkid,
-        );
-      }
-    }
-    saveRunValues(id, vals);
+        )
+;
+
+      
+}
+
+    
+}
+
+    saveRunValues(id, vals)
+;
+
     // Stamp: this run isn't the active form, so the autosave never stamps it;
     // an unstamped value loses the per-run LWW merge to a peer's stale copy.
-    const now = Date.now();
-    markRunValuesUpdated(id, now);
-    lastLocalEditRef.current = now;
-    schedulePush(dayStateRef.current, 0);
-    setDrainBump((b) => b + 1);
-  }
+    const now = Date.now()
+;
 
-  function flashSaved() {
-    const el = savedFlashRef.current;
-    if (!el) return;
-    el.style.opacity = "1";
-    if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current);
-    savedFlashTimer.current = setTimeout(() => { if (savedFlashRef.current) savedFlashRef.current.style.opacity = "0"; }, 1800);
-  }
+    markRunValuesUpdated(id, now)
+;
+
+    lastLocalEditRef.current = now
+;
+
+    schedulePush(dayStateRef.current, 0)
+;
+
+    setDrainBump((b) => b + 1)
+;
+
+  
+}
+
+
+  function flashSaved() 
+{
+
+    const el = savedFlashRef.current
+;
+
+    if (!el) return
+;
+
+    el.style.opacity = "1"
+;
+
+    if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current)
+;
+
+    savedFlashTimer.current = setTimeout(() => 
+{
+ if (savedFlashRef.current) savedFlashRef.current.style.opacity = "0"
+;
+ 
+}
+, 1800)
+;
+
+  
+}
+
 
   // ── Downtime log ──────────────────────────────────────────────────────────
-  function logStop(reason = "", notes = "") {
-    const id = genId();
-    const newStop: Stoppage = { id, type: "stop", reason, startedAt: Date.now(), notes: notes.trim() || undefined };
+  function logStop(reason = "", notes = "") 
+{
+
+    const id = genId()
+;
+
+    const newStop: Stoppage = 
+{
+ id, type: "stop", reason, startedAt: Date.now(), notes: notes.trim() || undefined 
+}
+;
+
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex
-        ? { ...r, stoppages: [...(r.stoppages ?? []), newStop] }
-        : r
-    );
-    const newDs = { ...dayState, runs: newRuns };
-    setDayState(newDs);
-    saveDayState(newDs);
-    setActiveStopId(id);
-    schedulePush(newDs, 0);
-  }
+        ? 
+{
+ ...r, stoppages: [...(r.stoppages ?? []), newStop] 
+}
 
-  function updateStop(id: string, patch: Partial<Stoppage>) {
+        : r
+    )
+;
+
+    const newDs = 
+{
+ ...dayState, runs: newRuns 
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    setActiveStopId(id)
+;
+
+    schedulePush(newDs, 0)
+;
+
+  
+}
+
+
+  function updateStop(id: string, patch: Partial<Stoppage>) 
+{
+
     // Search ALL runs (not just the current one) — the Stoppage Log lists the
     // whole day's events, so edits must reach earlier runs' stoppages too.
     const newRuns = dayState.runs.map(r =>
       (r.stoppages ?? []).some(s => s.id === id)
-        ? { ...r, stoppages: (r.stoppages ?? []).map(s => s.id === id ? { ...s, ...patch } : s) }
-        : r
-    );
-    const newDs = { ...dayState, runs: newRuns };
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 600);
-  }
+        ? 
+{
+ ...r, stoppages: (r.stoppages ?? []).map(s => s.id === id ? 
+{
+ ...s, ...patch 
+}
+ : s) 
+}
 
-  function addManualStop(type: "stop" | "pause" | "manual", startTs: number, endTs: number | undefined, reason: string, notes: string) {
-    const newStop: Stoppage = {
+        : r
+    )
+;
+
+    const newDs = 
+{
+ ...dayState, runs: newRuns 
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    schedulePush(newDs, 600)
+;
+
+  
+}
+
+
+  function addManualStop(type: "stop" | "pause" | "manual", startTs: number, endTs: number | undefined, reason: string, notes: string) 
+{
+
+    const newStop: Stoppage = 
+{
+
       id: genId(),
       type,
       reason,
       startedAt: startTs,
       endedAt: endTs,
       notes: notes.trim() || undefined,
-    };
-    const merged = [...(currentRun?.stoppages ?? []), newStop].sort((a, b) => a.startedAt - b.startedAt);
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, stoppages: merged } : r
-    );
-    const newDs = { ...dayState, runs: newRuns };
-    setDayState(newDs);
-    saveDayState(newDs);
-    schedulePush(newDs, 0);
-  }
+    
+}
+;
 
-  function endStop() {
-    if (!activeStopId) return;
-    const endedAt = Date.now();
+    const merged = [...(currentRun?.stoppages ?? []), newStop].sort((a, b) => a.startedAt - b.startedAt)
+;
+
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex ? 
+{
+ ...r, stoppages: merged 
+}
+ : r
+    )
+;
+
+    const newDs = 
+{
+ ...dayState, runs: newRuns 
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    schedulePush(newDs, 0)
+;
+
+  
+}
+
+
+  function endStop() 
+{
+
+    if (!activeStopId) return
+;
+
+    const endedAt = Date.now()
+;
+
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex
-        ? { ...r, stoppages: (r.stoppages ?? []).map(s => s.id === activeStopId ? { ...s, endedAt } : s) }
-        : r
-    );
-    const newDs = { ...dayState, runs: newRuns };
-    setDayState(newDs);
-    saveDayState(newDs);
-    setActiveStopId(null);
-    schedulePush(newDs, 0);
-  }
+        ? 
+{
+ ...r, stoppages: (r.stoppages ?? []).map(s => s.id === activeStopId ? 
+{
+ ...s, endedAt 
+}
+ : s) 
+}
 
-  function deleteStop(stopId: string) {
+        : r
+    )
+;
+
+    const newDs = 
+{
+ ...dayState, runs: newRuns 
+}
+;
+
+    setDayState(newDs)
+;
+
+    saveDayState(newDs)
+;
+
+    setActiveStopId(null)
+;
+
+    schedulePush(newDs, 0)
+;
+
+  
+}
+
+
+  function deleteStop(stopId: string) 
+{
+
     // Search ALL runs — the Stoppage Log lists the whole day's events.
     const newRuns = dayState.runs.map(r =>
       (r.stoppages ?? []).some(s => s.id === stopId)
@@ -11268,19 +20170,43 @@ export default function Home() {
       const parsed = parseRunWorkbook(buf);
       // Multi-sheet schedule planner: keep only runs dated today-or-later (the
       // user's chosen behavior) and route to the multi-date override commit.
-      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed;
-      setImportIntoEditor(false);
-      setImportDefaultDate(todayStr());
-      setImportResult(result);
-      setShowImportDialog(true);
-    } catch {
-      toast({
+      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed
+;
+
+      setImportIntoEditor(false)
+;
+
+      setImportDefaultDate(todayStr())
+;
+
+      setImportResult(result)
+;
+
+      setShowImportDialog(true)
+;
+
+    
+}
+ catch 
+{
+
+      toast(
+{
+
         variant: "destructive",
         title: "Couldn't read that file",
         description: "The spreadsheet couldn't be read. Check the format and try again.",
-      });
-    }
-  }
+      
+}
+)
+;
+
+    
+}
+
+  
+}
+
 
   // Each import kind gets a "generation" counter so a slow in-flight parse
   // can't clobber a newer one: picking new files or closing the dialog bumps
@@ -11308,13 +20234,31 @@ export default function Home() {
     // later and clobbers the NEW import's state (stale file info, spinner
     // flags flipping off early). Any state write below is a no-op once a
     // newer pick (or dialog close) bumped the generation.
-    const gen = ++specImportGenRef.current;
-    setSpecImportPrepared(null);
-    setSpecImportError(null);
-    setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
-    setSpecImportLoading(true);
-    setShowSpecImport(true);
-    try {
+    const gen = ++specImportGenRef.current
+;
+
+    setSpecImportPrepared(null)
+;
+
+    setSpecImportError(null)
+;
+
+    setSpecImportProgress(files.length > 1 ? 
+{
+ done: 0, total: files.length 
+}
+ : null)
+;
+
+    setSpecImportLoading(true)
+;
+
+    setShowSpecImport(true)
+;
+
+    try 
+{
+
       // Read each workbook independently so one unreadable file doesn't sink the
       // batch — prepareSpecImportMulti skips unparseable buffers and throws only
       // if every file failed. Reads run one at a time (not Promise.all) to keep
@@ -11376,69 +20320,149 @@ export default function Home() {
     // preserved. The user's step-1 brand/flavor renames are folded into the
     // learned aliases (rename wins on key collisions) so a re-upload of the
     // same sheet remembers the corrections.
-    const toCommit: SpecImportPrepared = {
+    const toCommit: SpecImportPrepared = 
+{
+
       ...specImportPrepared,
       parsed: editedParsed,
       newAliases: mergeSpecAliases(specImportPrepared.newAliases, learnedRenames),
-    };
+    
+}
+;
+
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
-    const importedRecipes = editedParsed.recipes.length > 0;
-    try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
-        await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
-      let specSnapshotId: number | null = null;
-      try {
-        const saved = await fetchSavedSpecSheets();
-        const key = deriveSourceKey(toCommit.sourceNames ?? []);
-        specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
-      } catch { /* history still records without the optional snapshot reference */ }
-      void recordImportHistory({
+    const importedRecipes = editedParsed.recipes.length > 0
+;
+
+    try 
+{
+
+      const 
+{
+ mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed 
+}
+ =
+        await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames)
+;
+
+      let specSnapshotId: number | null = null
+;
+
+      try 
+{
+
+        const saved = await fetchSavedSpecSheets()
+;
+
+        const key = deriveSourceKey(toCommit.sourceNames ?? [])
+;
+
+        specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null
+;
+
+      
+}
+ catch 
+{
+ /* history still records without the optional snapshot reference */ 
+}
+
+      void recordImportHistory(
+{
+
         importType: "spec",
         sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
         sourceLabel: (toCommit.sourceNames ?? []).join(", ") || "Spec sheet",
         customerScope: [...new Set(appliedParsed.profiles.map((p) => p.brand).filter(Boolean))].join(", "),
         status: aliasSaveFailed ? "partial" : "complete",
-        summary: {
-          phases: { parse: toCommit.note?.includes("reused") ? "reused saved parse" : "fresh AI parse", linking: "deterministic linking", commit: "committed changes" },
-          counts: {
+        summary: 
+{
+
+          phases: 
+{
+ parse: toCommit.note?.includes("reused") ? "reused saved parse" : "fresh AI parse", linking: "deterministic linking", commit: "committed changes" 
+}
+,
+          counts: 
+{
+
             created: mixesAdded + cheeseRecipesAdded,
             updated: recipesUpdated,
             renamed: toCommit.newAliases.length,
             removed: profilesToRemove.length,
             unresolved: toCommit.skipped?.profiles?.length ?? 0,
             skipped: (toCommit.skipped?.recipes?.length ?? 0) + (toCommit.skipped?.profiles?.length ?? 0),
-          },
+          
+}
+,
           warnings: [aliasSaveFailed ? "Learned mappings were not saved and may need review again." : "", toCommit.note ?? ""].filter(Boolean),
           unresolved: toCommit.skipped?.profiles?.map((p) => `${p.brand} ${p.flavor}`) ?? [],
           skipped: toCommit.skipped?.recipes?.map((r) => r.name) ?? [],
           followUp: aliasSaveFailed ? ["Reopen the saved import review and confirm the name mappings again."] : [],
           snapshotId: specSnapshotId,
-        },
-      }).catch(() => {});
+        
+}
+,
+      
+}
+).catch(() => 
+{
+}
+)
+;
+
       // The import itself succeeded, but the learned rename / "use existing"
       // aliases failed to save — warn instead of failing silently, since the
       // next re-import of this sheet would otherwise forget these picks.
-      if (aliasSaveFailed) {
-        toast({
+      if (aliasSaveFailed) 
+{
+
+        toast(
+{
+
           title: "Import applied — mappings not remembered",
           description:
             "Saving the learned name mappings failed, so the next re-import of this sheet may ask about the same renames and links again. Check your connection and re-apply if needed.",
           variant: "destructive",
-        });
-      }
+        
+}
+)
+;
+
+      
+}
+
       // Tombstone profiles the manager marked as removed from the workbook.
-      // Done after commit so the new profiles are written first; deletion is
+      // Done after commit so the new profiles are written first
+;
+ deletion is
       // local-only (same tombstone path as manual brand/flavor deletion in the
       // UI). Each deleteProfileEntry call is synchronous and best-effort.
-      if (profilesToRemove.length > 0) {
-        for (const { brand, flavor } of profilesToRemove) {
-          deleteProfileEntry(brand, flavor);
-        }
-      }
+      if (profilesToRemove.length > 0) 
+{
+
+        for (const 
+{
+ brand, flavor 
+}
+ of profilesToRemove) 
+{
+
+          deleteProfileEntry(brand, flavor)
+;
+
+        
+}
+
+      
+}
+
       // Refresh derived dropdowns/profiles now that storage changed.
-      reloadMasterData();
+      reloadMasterData()
+;
+
       // If the CURRENT run's brand+flavor profile was rewritten by this import,
       // reload it into the live form immediately. Otherwise the open form still
       // holds the pre-import values, and the next navigation/autosave saves them
@@ -11446,27 +20470,59 @@ export default function Home() {
       // but the run never changed" clobber). Mirrors addRunWithIdentity's load.
       // Re-resolve the run from the live ref — the captured currentRun/dayState
       // may be stale after the (slow) await if the user navigated meanwhile.
-      const liveDay = dayStateRef.current;
-      const liveRun = liveDay.runs[liveDay.currentIndex] ?? liveDay.runs[0];
-      if (liveRun && (liveRun.brand || liveRun.flavor)) {
+      const liveDay = dayStateRef.current
+;
+
+      const liveRun = liveDay.runs[liveDay.currentIndex] ?? liveDay.runs[0]
+;
+
+      if (liveRun && (liveRun.brand || liveRun.flavor)) 
+{
+
         const touched = touchedProfiles.some(
           (t) =>
             t.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
             t.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
-        );
-        const profile = touched ? loadProfile(liveRun.brand, liveRun.flavor) : null;
-        if (profile) {
+        )
+;
+
+        const profile = touched ? loadProfile(liveRun.brand, liveRun.flavor) : null
+;
+
+        if (profile) 
+{
+
           // Strip mix recipe names from sauce fields — they belong in the applicator mix field
-          if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
-            profile.frontlineRecipeName = "";
-            profile.frontlineRecipe = [];
-          }
-          const now = Date.now();
-          saveRunValues(liveRun.id, profile);
-          markRunValuesUpdated(liveRun.id, now);
-          lastLocalEditRef.current = now;
-          form.reset(profile);
-          resetFieldArrays(profile);
+          if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) 
+{
+
+            profile.frontlineRecipeName = ""
+;
+
+            profile.frontlineRecipe = []
+;
+
+          
+}
+
+          const now = Date.now()
+;
+
+          saveRunValues(liveRun.id, profile)
+;
+
+          markRunValuesUpdated(liveRun.id, now)
+;
+
+          lastLocalEditRef.current = now
+;
+
+          form.reset(profile)
+;
+
+          resetFieldArrays(profile)
+;
+
           // If this profile is a purchased-crust product (no die type, crust-named
           // doughName), automatically switch the run's Line Type to "Crust" so the
           // operator doesn't have to toggle it manually. Mirrors the manual button
@@ -11475,30 +20531,77 @@ export default function Home() {
             (c) =>
               c.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
               c.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
-          );
-          if (isImportedCrust && doughSubTab !== "crusts") {
-            setDoughSubTab("crusts");
+          )
+;
+
+          if (isImportedCrust && doughSubTab !== "crusts") 
+{
+
+            setDoughSubTab("crusts")
+;
+
             const updatedRuns = dayStateRef.current.runs.map((r: any, i: any) =>
-              i === dayStateRef.current.currentIndex ? { ...r, subTab: "crusts" as const } : r,
-            );
-            const updatedDs = { ...dayStateRef.current, runs: updatedRuns };
-            setDayState(updatedDs);
-            saveDayState(updatedDs);
-            const fills = resolveCrustLineDefaults(form.getValues());
-            for (const [k, val] of Object.entries(fills)) {
-              form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
-            }
-          }
-          schedulePush(dayStateRef.current, 0);
-        }
-      }
+              i === dayStateRef.current.currentIndex ? 
+{
+ ...r, subTab: "crusts" as const 
+}
+ : r,
+            )
+;
+
+            const updatedDs = 
+{
+ ...dayStateRef.current, runs: updatedRuns 
+}
+;
+
+            setDayState(updatedDs)
+;
+
+            saveDayState(updatedDs)
+;
+
+            const fills = resolveCrustLineDefaults(form.getValues())
+;
+
+            for (const [k, val] of Object.entries(fills)) 
+{
+
+              form.setValue(k as keyof typeof fills, val, 
+{
+ shouldDirty: true 
+}
+)
+;
+
+            
+}
+
+          
+}
+
+          schedulePush(dayStateRef.current, 0)
+;
+
+        
+}
+
+      
+}
+
       // Any dough / sauce recipes the sheet added are pushed into the server pool
       // so they become factory-wide master-data (like the Mixes / Cheese pools).
       // Recipes attach by NAME only — no "who it goes to" brand/flavor tags are
       // computed or pushed anymore (stored tags on existing pool rows are inert).
-      // Best-effort, manager-only server-side; never blocks the committed import.
-      if (importedRecipes && canManageInventory) {
-        const doughTrays = new Map<string, number>();
+      // Best-effort, manager-only server-side
+;
+ never blocks the committed import.
+      if (importedRecipes && canManageInventory) 
+{
+
+        const doughTrays = new Map<string, number>()
+;
+
         // Per-VARIANT doughball numbers by FAMILY recipe name: the family snap
         // collapses variant names ("11\" CRB recipe") onto one pool recipe but
         // stamps each with its original name (variantLabel) — collect every
@@ -11524,16 +20627,39 @@ export default function Home() {
             // customer assignments can be merged in even when the AI parse
             // of a dough PROCEDURE didn't extract doughball weights (those
             // live in the yield table, not the ingredient body).
-            if (!doughVariants.has(key)) doughVariants.set(key, []);
-            const label = (r.variantLabel ?? r.name).trim();
-            const v: DoughballVariant = { label };
-            if ((r.doughballOz ?? 0) > 0) v.weightOz = r.doughballOz;
-            if ((r.doughballsPerTray ?? 0) > 0) v.perTray = Math.round(r.doughballsPerTray!);
-            if (label && (v.weightOz !== undefined || v.perTray !== undefined)) {
-              doughVariants.get(key)!.push(v);
-            }
-          }
-        }
+            if (!doughVariants.has(key)) doughVariants.set(key, [])
+;
+
+            const label = (r.variantLabel ?? r.name).trim()
+;
+
+            const v: DoughballVariant = 
+{
+ label 
+}
+;
+
+            if ((r.doughballOz ?? 0) > 0) v.weightOz = r.doughballOz
+;
+
+            if ((r.doughballsPerTray ?? 0) > 0) v.perTray = Math.round(r.doughballsPerTray!)
+;
+
+            if (label && (v.weightOz !== undefined || v.perTray !== undefined)) 
+{
+
+              doughVariants.get(key)!.push(v)
+;
+
+            
+}
+
+          
+}
+
+        
+}
+
         // Fold in variant-table entries parsed deterministically from the dough
         // workbook's yield table ("OZ / LBS / YIELD / PER TRAY"). The AI may
         // omit rows whose label name differs from the recipe family (e.g.
@@ -11549,24 +20675,44 @@ export default function Home() {
           // Only merge when the AI produced exactly one dough family from this
           // workbook — with multiple families we can't safely decide which one
           // the table rows belong to.
-          if (familyKeys.length === 1) {
-            const familyKey = familyKeys[0]!;
-            const existing = doughVariants.get(familyKey) ?? [];
-            const existingLow = new Set(existing.map((v) => v.label.trim().toLowerCase()));
-            const toAdd: DoughballVariant[] = [];
-            for (const tv of specImportPrepared.doughVariantsFromTable) {
-              if (existingLow.has(tv.label.trim().toLowerCase())) continue;
+          if (familyKeys.length === 1) 
+{
+
+            const familyKey = familyKeys[0]!
+;
+
+            const existing = doughVariants.get(familyKey) ?? []
+;
+
+            const existingLow = new Set(existing.map((v) => v.label.trim().toLowerCase()))
+;
+
+            const toAdd: DoughballVariant[] = []
+;
+
+            for (const tv of specImportPrepared.doughVariantsFromTable) 
+{
+
+              if (existingLow.has(tv.label.trim().toLowerCase())) continue
+;
+
               // Skip table entries whose LABEL KEY matches an existing variant.
               // "Brand Dough" and "BRAND 12\" DOUGH" have the same label key on
               // the "brand dough" family (both reduce to "brand") so the AI-named
               // duplicate is suppressed. But "LOWE'S MARGHERITA DOUGH" and
               // "HANNAFORD MARGHERITA DOUGH" have distinct keys even though they
               // share the same weight (11oz/16), so they are kept as two variants.
-              const tvKey = doughballVariantLabelKey(tv.label, familyKey);
+              const tvKey = doughballVariantLabelKey(tv.label, familyKey)
+;
+
               const labelDuplicate = existing.some(
                 (ev) => doughballVariantLabelKey(ev.label, familyKey) === tvKey,
-              );
-              if (labelDuplicate) continue;
+              )
+;
+
+              if (labelDuplicate) continue
+;
+
               // Secondary dedup: when exactly ONE existing variant carries the
               // same weight+perTray, the table entry describes the same doughball
               // under a different label (e.g. AI "Aldo's Dough" 7.7oz/24 vs
@@ -11603,12 +20749,28 @@ export default function Home() {
         // (AI-parsed AND table-parsed) are present. This prevents blindly
         // tagging the first AI-parsed variant (e.g. "CORKY'S 7\" DOUGH") when
         // other variants from the yield table would be the correct target.
-        for (const { brand: tBrand, flavor: tFlavor } of touchedProfiles) {
-          const savedProfile = loadProfile(tBrand, tFlavor);
-          const dName = (savedProfile?.doughRecipeName ?? "").trim().toLowerCase();
-          if (!dName) continue;
-          const familyVariants = doughVariants.get(dName);
-          if (!familyVariants) continue;
+        for (const 
+{
+ brand: tBrand, flavor: tFlavor 
+}
+ of touchedProfiles) 
+{
+
+          const savedProfile = loadProfile(tBrand, tFlavor)
+;
+
+          const dName = (savedProfile?.doughRecipeName ?? "").trim().toLowerCase()
+;
+
+          if (!dName) continue
+;
+
+          const familyVariants = doughVariants.get(dName)
+;
+
+          if (!familyVariants) continue
+;
+
           // Find which variant this import linked to this family recipe.
           // When the family has multiple same-named variants (one per customer
           // weight tier), prefer the one whose doughball oz matches the
@@ -11665,39 +20827,84 @@ export default function Home() {
         // entry needed on the profile. Runs AFTER the table-variant merge so
         // that every variant (AI-parsed and table-parsed) is present when
         // applyDoughCustomerAssignmentsToVariants resolves the full pool.
-        if (specImportPrepared?.doughCustomerAssignments?.length) {
-          for (const [recipeName, variants] of doughVariants) {
-            const allVariants = [...doughVariants.values()].flat();
+        if (specImportPrepared?.doughCustomerAssignments?.length) 
+{
+
+          for (const [recipeName, variants] of doughVariants) 
+{
+
+            const allVariants = [...doughVariants.values()].flat()
+;
+
             const enriched = applyDoughCustomerAssignmentsToVariants(
               variants,
               specImportPrepared.doughCustomerAssignments,
               allVariants,
-            );
-            if (enriched !== variants) doughVariants.set(recipeName, enriched);
-          }
-        }
+            )
+;
+
+            if (enriched !== variants) doughVariants.set(recipeName, enriched)
+;
+
+          
+}
+
+        
+}
+
         // Apply static customer assignments derived from spec sheets for dough
         // families whose workbooks have no customer-assignment section (or need
         // supplemental entries not present in the workbook section). Applied
         // unconditionally and ADDITIVELY alongside the workbook-parsed assignments
         // above so that matchDoughballVariant can auto-select the correct weight
         // from brand+flavor alone across all 13 dough families.
-        for (const [recipeName, variants] of doughVariants) {
-          const staticAssignments = SPEC_STATIC_CUSTOMER_ASSIGNMENTS.get(recipeName);
-          if (!staticAssignments?.length) continue;
-          const allVariants = [...doughVariants.values()].flat();
+        for (const [recipeName, variants] of doughVariants) 
+{
+
+          const staticAssignments = SPEC_STATIC_CUSTOMER_ASSIGNMENTS.get(recipeName)
+;
+
+          if (!staticAssignments?.length) continue
+;
+
+          const allVariants = [...doughVariants.values()].flat()
+;
+
           const enriched = applyDoughCustomerAssignmentsToVariants(
             variants,
             staticAssignments,
             allVariants,
-          );
-          if (enriched !== variants) doughVariants.set(recipeName, enriched);
-        }
-        void pushLocalDoughSauceToServer({ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true }).catch(() => {});
-      }
+          )
+;
+
+          if (enriched !== variants) doughVariants.set(recipeName, enriched)
+;
+
+        
+}
+
+        void pushLocalDoughSauceToServer(
+{
+ doughTrays, doughVariants, upsertComponents: true, replaceVariants: true 
+}
+).catch(() => 
+{
+}
+)
+;
+
+      
+}
+
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh Mix Recipes so they appear right away.
-      if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      if (mixesAdded > 0) void cycleCountQc.invalidateQueries(
+{
+ queryKey: ["mixes"] 
+}
+)
+;
+
       // Any named cheese blends were added to the Cheese Recipes pool — refresh
       // so the run applicator "Cheese" pickers list them right away. Existing
       // pool recipes may also have had their per-pizza OZ column refreshed
@@ -11706,42 +20913,88 @@ export default function Home() {
       // replaced via the review's "update it with this sheet" checkbox
       // (dough/sauce ONLY), those pickers must refetch too.
       if (cheeseRecipesAdded > 0)
-        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+        void cycleCountQc.invalidateQueries(
+{
+ queryKey: ["cheeseRecipes"] 
+}
+)
+;
+
       // Invalidate dough recipes when server recipe rows were replaced or
       // doughball variants were pushed to the server — so autofill and recipe
       // pickers always see the fresh variant/customer lists without waiting for
       // the next app load.
-      if (recipesUpdated > 0 || (importedRecipes && canManageInventory)) {
-        void cycleCountQc.invalidateQueries({ queryKey: ["doughRecipes"] });
-      }
-      if (recipesUpdated > 0) {
-        void cycleCountQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
-      }
-      setShowSpecImport(false);
-      setSpecImportPrepared(null);
+      if (recipesUpdated > 0 || (importedRecipes && canManageInventory)) 
+{
+
+        void cycleCountQc.invalidateQueries(
+{
+ queryKey: ["doughRecipes"] 
+}
+)
+;
+
+      
+}
+
+      if (recipesUpdated > 0) 
+{
+
+        void cycleCountQc.invalidateQueries(
+{
+ queryKey: ["sauceRecipes"] 
+}
+)
+;
+
+      
+}
+
+      setShowSpecImport(false)
+;
+
+      setSpecImportPrepared(null)
+;
+
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
       // have re-rendered. Never blocks or fails the already-committed import.
-      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
+      if (importedRecipes) setMergeCheckRequest((c) => c + 1)
+;
+
       // Auto-run spec cross-reference with the newly saved sheet.
-      setSpecReconcileSignal((c) => c + 1);
-      setSheetListSignal((c) => c + 1);
+      setSpecReconcileSignal((c) => c + 1)
+;
+
+      setSheetListSignal((c) => c + 1)
+;
+
       const mixNote =
         mixesAdded > 0
           ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to Mix Recipes — set batch size and per-pizza amounts there.`
-          : "";
+          : ""
+;
+
       const cheeseNote =
         cheeseRecipesAdded > 0
           ? ` ${cheeseRecipesAdded} cheese recipe${cheeseRecipesAdded === 1 ? "" : "s"} added to the Cheese Recipes pool — check batch pounds there.`
-          : "";
+          : ""
+;
+
       const updatedNote =
         recipesUpdated > 0
           ? ` ${recipesUpdated} saved recipe${recipesUpdated === 1 ? "" : "s"} updated with this sheet's ingredients.`
-          : "";
+          : ""
+;
+
       const autoLinkedNote =
         autoLinkedRecipes > 0
           ? ` Auto-linked ${autoLinkedRecipes} near-duplicate recipe name${autoLinkedRecipes === 1 ? "" : "s"} (word order or minor typo) to an existing recipe.`
-          : "";
-      toast({
+          : ""
+;
+
+      toast(
+{
+
         title: "Spec sheet imported",
         description:
           (importedRecipes
@@ -11751,36 +21004,85 @@ export default function Home() {
           cheeseNote +
           updatedNote +
           autoLinkedNote,
-      });
-    } catch (err) {
-      void recordImportHistory({
+      
+}
+)
+;
+
+    
+}
+ catch (err) 
+{
+
+      void recordImportHistory(
+{
+
         importType: "spec",
         sourceKey: deriveSourceKey(specImportPrepared?.sourceNames ?? []),
         sourceLabel: (specImportPrepared?.sourceNames ?? []).join(", ") || "Spec sheet",
         status: "failed",
-        summary: {
-          phases: { parse: "completed", linking: "not completed", commit: "not completed" },
+        summary: 
+{
+
+          phases: 
+{
+ parse: "completed", linking: "not completed", commit: "not completed" 
+}
+,
           warnings: [err instanceof Error ? err.message : "Import failed while saving."],
           followUp: ["Retry the import; no rollback is implied by this record."],
-        },
-      }).catch(() => {});
+        
+}
+,
+      
+}
+).catch(() => 
+{
+}
+)
+;
+
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
-      );
-    } finally {
-      setSpecImportApplying(false);
-    }
-  }
+      )
+;
+
+    
+}
+ finally 
+{
+
+      setSpecImportApplying(false)
+;
+
+    
+}
+
+  
+}
+
 
   // Premix-sheet importer: read the .xlsx, parse each product tab/block into a
   // Mix deterministically (the AI only disambiguates product names), ground the
   // names, and show a single review/summary screen. Nothing is written until the
-  // user confirms; re-importing updates existing mixes by id.
-  async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES);
-    e.target.value = "";
-    noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
-    if (files.length === 0) return;
+  // user confirms
+;
+ re-importing updates existing mixes by id.
+  async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) 
+{
+
+    const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES)
+;
+
+    e.target.value = ""
+;
+
+    noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled")
+;
+
+    if (files.length === 0) return
+;
+
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
     const gen = ++premixImportGenRef.current;
@@ -11918,91 +21220,241 @@ export default function Home() {
     shippingImportFileNameRef.current = file.name ?? "";
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
-    const gen = ++shippingImportGenRef.current;
-    setShippingImportPrepared(null);
-    setShippingImportError(null);
-    setShippingImportLoading(true);
-    setShowShippingImport(true);
-    try {
-      const buffer = await file.arrayBuffer();
-      const prepared = await prepareShippingImport(buffer);
-      if (gen !== shippingImportGenRef.current) return;
-      setShippingImportPrepared(prepared);
-    } catch (err) {
-      if (gen !== shippingImportGenRef.current) return;
+    const gen = ++shippingImportGenRef.current
+;
+
+    setShippingImportPrepared(null)
+;
+
+    setShippingImportError(null)
+;
+
+    setShippingImportLoading(true)
+;
+
+    setShowShippingImport(true)
+;
+
+    try 
+{
+
+      const buffer = await file.arrayBuffer()
+;
+
+      const prepared = await prepareShippingImport(buffer)
+;
+
+      if (gen !== shippingImportGenRef.current) return
+;
+
+      setShippingImportPrepared(prepared)
+;
+
+    
+}
+ catch (err) 
+{
+
+      if (gen !== shippingImportGenRef.current) return
+;
+
       setShippingImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
-      );
-    } finally {
-      if (gen === shippingImportGenRef.current) setShippingImportLoading(false);
-    }
-  }
+      )
+;
 
-  function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[]) {
-    setShippingImportApplying(true);
-    try {
-      const result = commitShippingImport(rows);
+    
+}
+ finally 
+{
+
+      if (gen === shippingImportGenRef.current) setShippingImportLoading(false)
+;
+
+    
+}
+
+  
+}
+
+
+  function handleShippingImportConfirm(rows: 
+{
+ brand: string
+;
+ flavors: string[]
+;
+ patch: ShippingPatch 
+}
+[]) 
+{
+
+    setShippingImportApplying(true)
+;
+
+    try 
+{
+
+      const result = commitShippingImport(rows)
+;
+
       // Profiles changed in storage — refresh derived dropdowns/profiles so
       // the packaging pickers and the current form pick the values up.
-      reloadMasterData();
+      reloadMasterData()
+;
+
       // If the currently-open run's brand+flavor was patched by the shipping
       // guide, reload its freshly-updated profile into the live form so
       // packaging values appear immediately rather than on the next nav.
       // Mirrors the same reload that handleSpecImportConfirm does after a spec
       // import rewrites the active run's profile.
-      {
-        const shipLiveDay = dayStateRef.current;
-        const shipLiveRun = shipLiveDay.runs[shipLiveDay.currentIndex] ?? shipLiveDay.runs[0];
-        if (shipLiveRun?.brand || shipLiveRun?.flavor) {
-          const runB = (shipLiveRun.brand ?? "").trim().toLowerCase();
-          const runF = (shipLiveRun.flavor ?? "").trim().toLowerCase();
-          const wasPatched = rows.some((row) => {
-            if ((row.brand ?? "").trim().toLowerCase() !== runB) return false;
-            const fl = row.flavors ?? [];
-            return fl.length === 0 || fl.some((f) => f.trim().toLowerCase() === runF);
-          });
-          if (wasPatched) {
-            const shippingProfile = loadProfile(shipLiveRun.brand, shipLiveRun.flavor);
-            if (shippingProfile) {
-              const now = Date.now();
-              saveRunValues(shipLiveRun.id, shippingProfile);
-              markRunValuesUpdated(shipLiveRun.id, now);
-              lastLocalEditRef.current = now;
-              form.reset(shippingProfile);
-              resetFieldArrays(shippingProfile);
-              schedulePush(dayStateRef.current, 0);
-            }
-          }
-        }
-      }
+      
+{
+
+        const shipLiveDay = dayStateRef.current
+;
+
+        const shipLiveRun = shipLiveDay.runs[shipLiveDay.currentIndex] ?? shipLiveDay.runs[0]
+;
+
+        if (shipLiveRun?.brand || shipLiveRun?.flavor) 
+{
+
+          const runB = (shipLiveRun.brand ?? "").trim().toLowerCase()
+;
+
+          const runF = (shipLiveRun.flavor ?? "").trim().toLowerCase()
+;
+
+          const wasPatched = rows.some((row) => 
+{
+
+            if ((row.brand ?? "").trim().toLowerCase() !== runB) return false
+;
+
+            const fl = row.flavors ?? []
+;
+
+            return fl.length === 0 || fl.some((f) => f.trim().toLowerCase() === runF)
+;
+
+          
+}
+)
+;
+
+          if (wasPatched) 
+{
+
+            const shippingProfile = loadProfile(shipLiveRun.brand, shipLiveRun.flavor)
+;
+
+            if (shippingProfile) 
+{
+
+              const now = Date.now()
+;
+
+              saveRunValues(shipLiveRun.id, shippingProfile)
+;
+
+              markRunValuesUpdated(shipLiveRun.id, now)
+;
+
+              lastLocalEditRef.current = now
+;
+
+              form.reset(shippingProfile)
+;
+
+              resetFieldArrays(shippingProfile)
+;
+
+              schedulePush(dayStateRef.current, 0)
+;
+
+            
+}
+
+          
+}
+
+        
+}
+
+      
+}
+
       // Persist a durable snapshot of the reviewed guide so the Setup Profiles
       // "Auto-Fill From Imports" panel can later cross-reference what this
       // palletizing guide said against the spec sheets. Best-effort: the import
       // itself already succeeded, so a failed snapshot must not surface as an
       // import error.
-      const fileName = shippingImportFileNameRef.current.trim();
-      const sourceKey = deriveSourceKey(fileName ? [fileName] : []);
+      const fileName = shippingImportFileNameRef.current.trim()
+;
+
+      const sourceKey = deriveSourceKey(fileName ? [fileName] : [])
+;
+
       void saveShippingGuide(
         buildShippingGuideLabel(rows.length, fileName),
-        { rows },
+        
+{
+ rows 
+}
+,
         sourceKey,
-      ).catch(() => {
-        /* snapshot is advisory; import already applied */
-      });
-      setShowShippingImport(false);
-      setShippingImportPrepared(null);
-      toast({
+      ).catch(() => 
+{
+
+        /* snapshot is advisory
+;
+ import already applied */
+      
+}
+)
+;
+
+      setShowShippingImport(false)
+;
+
+      setShippingImportPrepared(null)
+;
+
+      toast(
+{
+
         title: "Shipping guide imported",
         description: `Packaging settings updated for ${result.rowsApplied} brand${result.rowsApplied === 1 ? "" : "s"}.`,
-      });
-    } catch (err) {
+      
+}
+)
+;
+
+    
+}
+ catch (err) 
+{
+
       setShippingImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
-      );
-    } finally {
-      setShippingImportApplying(false);
-    }
-  }
+      )
+;
+
+    
+}
+ finally 
+{
+
+      setShippingImportApplying(false)
+;
+
+    
+}
+
+  
+}
+
 
   // ── Sauce Guide importer (Joe's Sauce Guide .docx) ──────────────────────────
   async function handleSauceGuideImportFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -12112,81 +21564,207 @@ export default function Home() {
     if (files.length === 0) return;
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
-    const gen = ++cheeseImportGenRef.current;
-    setCheeseImportPrepared(null);
-    setCheeseImportError(null);
-    setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
-    setCheeseImportLoading(true);
-    setShowCheeseImport(true);
-    try {
-      const buffers: ArrayBuffer[] = [];
-      for (const f of files) {
-        buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
-      }
+    const gen = ++cheeseImportGenRef.current
+;
+
+    setCheeseImportPrepared(null)
+;
+
+    setCheeseImportError(null)
+;
+
+    setCheeseImportProgress(files.length > 1 ? 
+{
+ done: 0, total: files.length 
+}
+ : null)
+;
+
+    setCheeseImportLoading(true)
+;
+
+    setShowCheeseImport(true)
+;
+
+    try 
+{
+
+      const buffers: ArrayBuffer[] = []
+;
+
+      for (const f of files) 
+{
+
+        buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)))
+;
+
+      
+}
+
       const prepared = await prepareCheeseImport(
         buffers,
-        (done, total) => {
+        (done, total) => 
+{
+
           if (gen === cheeseImportGenRef.current)
-            setCheeseImportProgress(total > 1 ? { done, total } : null);
-        },
+            setCheeseImportProgress(total > 1 ? 
+{
+ done, total 
+}
+ : null)
+;
+
+        
+}
+,
         files.map((f) => f.name),
-      );
-      if (gen !== cheeseImportGenRef.current) return;
-      prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
-      setCheeseImportPrepared(prepared);
-    } catch (err) {
-      if (gen !== cheeseImportGenRef.current) return;
+      )
+;
+
+      if (gen !== cheeseImportGenRef.current) return
+;
+
+      prepared.sourceNames = files.map((f) => f.name).filter(Boolean)
+;
+
+      setCheeseImportPrepared(prepared)
+;
+
+    
+}
+ catch (err) 
+{
+
+      if (gen !== cheeseImportGenRef.current) return
+;
+
       setCheeseImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
-      );
-    } finally {
-      if (gen === cheeseImportGenRef.current) {
-        setCheeseImportLoading(false);
-        setCheeseImportProgress(null);
-      }
-    }
-  }
+      )
+;
+
+    
+}
+ finally 
+{
+
+      if (gen === cheeseImportGenRef.current) 
+{
+
+        setCheeseImportLoading(false)
+;
+
+        setCheeseImportProgress(null)
+;
+
+      
+}
+
+    
+}
+
+  
+}
+
 
   async function handleCheeseImportConfirm(
     recipesToApply: CheeseRecipe[],
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
-  ) {
-    if (!cheeseImportPrepared) return;
-    setCheeseImportApplying(true);
-    try {
-      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+  ) 
+{
+
+    if (!cheeseImportPrepared) return
+;
+
+    setCheeseImportApplying(true)
+;
+
+    try 
+{
+
+      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove)
+;
+
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
-      void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
-      setShowCheeseImport(false);
-      setCheeseImportPrepared(null);
-      toast({
+      void cycleCountQc.invalidateQueries(
+{
+ queryKey: ["cheeseRecipes"] 
+}
+)
+;
+
+      setShowCheeseImport(false)
+;
+
+      setCheeseImportPrepared(null)
+;
+
+      toast(
+{
+
         title: "Cheese recipes imported",
         description: `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved.`,
-      });
+      
+}
+)
+;
+
       // Fan updated per-batch lbs into all profiles that reference the changed
       // recipes by name, and refresh pending runs + the open form.
-      void propagateCheeseRecipeUpdates(result.saved);
-    } catch (err) {
+      void propagateCheeseRecipeUpdates(result.saved)
+;
+
+    
+}
+ catch (err) 
+{
+
       setCheeseImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
-      );
-    } finally {
-      setCheeseImportApplying(false);
-    }
-  }
+      )
+;
+
+    
+}
+ finally 
+{
+
+      setCheeseImportApplying(false)
+;
+
+    
+}
+
+  
+}
+
 
   // Excel upload triggered from within the Schedule editor: extracts rows into
   // the in-memory editor (scoped to the day being planned) instead of writing
   // to the server directly, so the user reviews then hits "Save Schedule".
-  async function handleScheduleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      const buf = await file.arrayBuffer();
-      const parsed = parseRunWorkbook(buf);
+  async function handleScheduleImportFile(e: React.ChangeEvent<HTMLInputElement>) 
+{
+
+    const file = e.target.files?.[0]
+;
+
+    e.target.value = ""
+;
+
+    if (!file) return
+;
+
+    try 
+{
+
+      const buf = await file.arrayBuffer()
+;
+
+      const parsed = parseRunWorkbook(buf)
+;
+
       // A multi-sheet planner spans many days, so it can't load into the single
       // open editor day — route it to the multi-date override commit instead
       // (today-or-later only), exactly like the toolbar import.
@@ -12303,42 +21881,106 @@ export default function Home() {
     setScheduleEditorRunValues(prev => ({ ...prev, ...newVals }));
     // Drop any empty placeholder rows so the imported rows don't leave a blank
     // run that blocks the Save Schedule validation.
-    setScheduleEditorRuns(prev => [...prev.filter(r => r.brand || r.casesNeeded), ...newRuns]);
-    if (payload.date) setScheduleEditorDate(payload.date);
-    setShowImportDialog(false);
-    setImportResult(null);
-    setImportIntoEditor(false);
-  }
+    setScheduleEditorRuns(prev => [...prev.filter(r => r.brand || r.casesNeeded), ...newRuns])
+;
+
+    if (payload.date) setScheduleEditorDate(payload.date)
+;
+
+    setShowImportDialog(false)
+;
+
+    setImportResult(null)
+;
+
+    setImportIntoEditor(false)
+;
+
+  
+}
+
 
   // Multi-sheet schedule planner commit: each date in `payload.byDate` is written
   // independently. Per the user's choice, a re-import OVERRIDES the prior import
   // for a date — previously imported runs are dropped and replaced — but manual
   // runs and any imported run already started/ended are preserved (so an
   // in-progress day isn't wiped). Only dates present in the file are touched.
-  async function commitMultiDayImport(payload: ImportCommit) {
-    for (const b of payload.createBrands) addBrand(b);
-    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
-    const byDate = payload.byDate ?? [];
-    setImportProgress({ done: 0, total: byDate.length });
-    let done = 0;
-    let failed = 0;
-    let skippedToday = 0;
-    let lastErrorDetail = "";
+  async function commitMultiDayImport(payload: ImportCommit) 
+{
+
+    for (const b of payload.createBrands) addBrand(b)
+;
+
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand)
+;
+
+    const byDate = payload.byDate ?? []
+;
+
+    setImportProgress(
+{
+ done: 0, total: byDate.length 
+}
+)
+;
+
+    let done = 0
+;
+
+    let failed = 0
+;
+
+    let skippedToday = 0
+;
+
+    let lastErrorDetail = ""
+;
+
     // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
     // auto-applied). Finished runs are never modified.
-    const caseUpdateOffers: CaseUpdateOffer[] = [];
-    for (const day of byDate) {
-      const date = day.date;
-      let existing: SyncPayload | null = null;
-      try {
-        const res = await fetch(`/api/sync/${date}`);
-        if (res.ok) existing = (await res.json()) as SyncPayload | null;
-      } catch {}
-      const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
-      const existingRuns: RunMeta[] = existingDayState.runs ?? [];
-      const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
+    const caseUpdateOffers: CaseUpdateOffer[] = []
+;
+
+    for (const day of byDate) 
+{
+
+      const date = day.date
+;
+
+      let existing: SyncPayload | null = null
+;
+
+      try 
+{
+
+        const res = await fetch(`/api/sync/${date}`)
+;
+
+        if (res.ok) existing = (await res.json()) as SyncPayload | null
+;
+
+      
+}
+ catch 
+{
+}
+
+      const existingDayState = existing?.dayState ?? 
+{
+ runs: [] as RunMeta[] 
+}
+;
+
+      const existingRuns: RunMeta[] = existingDayState.runs ?? []
+;
+
+      const existingRunValues: Record<string, FormValues> = existing?.runValues ?? 
+{
+}
+;
+
       // Keep manual runs, and imported runs that have already been started/ended
       // (don't disturb an in-progress/completed day). Drop untouched prior imports.
       const keptRuns = existingRuns.filter(r => !r.imported || r.startedAt || r.endedAt);
@@ -12370,38 +22012,108 @@ export default function Home() {
         caseUpdateOffers.push(...buildCaseUpdateOffers(
           skipRes.matches,
           (runId) => runId === currentRunIdRef.current ? form.getValues() : loadRunValues(runId),
-        ));
-      }
-      const newRuns: RunMeta[] = [];
-      const newRunValues: Record<string, FormValues> = {};
-      for (const r of dayRuns) {
-        const id = genId();
-        const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
-        const base: FormValues = profile ?? DEFAULT_VALUES;
-        newRunValues[id] = { ...base, casesNeeded: r.casesPlanned };
-        newRuns.push({ id, brand: r.brand, flavor: r.flavor, notes: r.notes || undefined, imported: true });
-      }
-      const runs = [...keptRuns, ...newRuns];
-      const runValues = { ...keptRunValues, ...newRunValues };
-      const outPayload: SyncPayload = {
-        ...(existing ?? {}),
-        dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
+        ))
+;
+
+      
+}
+
+      const newRuns: RunMeta[] = []
+;
+
+      const newRunValues: Record<string, FormValues> = 
+{
+}
+;
+
+      for (const r of dayRuns) 
+{
+
+        const id = genId()
+;
+
+        const profile = r.brand ? loadProfile(r.brand, r.flavor) : null
+;
+
+        const base: FormValues = profile ?? DEFAULT_VALUES
+;
+
+        newRunValues[id] = 
+{
+ ...base, casesNeeded: r.casesPlanned 
+}
+;
+
+        newRuns.push(
+{
+ id, brand: r.brand, flavor: r.flavor, notes: r.notes || undefined, imported: true 
+}
+)
+;
+
+      
+}
+
+      const runs = [...keptRuns, ...newRuns]
+;
+
+      const runValues = 
+{
+ ...keptRunValues, ...newRunValues 
+}
+;
+
+      const outPayload: SyncPayload = 
+{
+
+        ...(existing ?? 
+{
+}
+),
+        dayState: 
+{
+ ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) 
+}
+,
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
-        deletedItems: (() => {
-          const base = unionDeletedItems(loadDeletedItems(), existing?.deletedItems);
-          if (droppedIds.length > 0) {
-            const prev = Array.isArray(base.runs) ? base.runs : [];
-            base.runs = [...new Set([...prev, ...droppedIds])];
-          }
-          return base;
-        })(),
+        deletedItems: (() => 
+{
+
+          const base = unionDeletedItems(loadDeletedItems(), existing?.deletedItems)
+;
+
+          if (droppedIds.length > 0) 
+{
+
+            const prev = Array.isArray(base.runs) ? base.runs : []
+;
+
+            base.runs = [...new Set([...prev, ...droppedIds])]
+;
+
+          
+}
+
+          return base
+;
+
+        
+}
+)(),
         deletedStamps: mergeStampMaps(loadDeletedStamps(), existing?.deletedStamps),
         undeletedStamps: mergeStampMaps(loadUndeletedStamps(), existing?.undeletedStamps),
-      };
-      let dayOk = false;
-      try {
+      
+}
+;
+
+      let dayOk = false
+;
+
+      try 
+{
+
         // Pass the client's local `today` so the server keys the day boundary
         // (and its live-view SSE broadcast) on the OPERATOR's date, not its own
         // UTC date. Without this, an import whose "today" differs from the
@@ -12484,7 +22196,9 @@ export default function Home() {
     // current target. Finished runs are never modified. The dialog lets the
     // user Accept/Keep EACH run independently (the office may be right about
     // one run and wrong about another).
-    if (caseUpdateOffers.length > 0) {
+    if (caseUpdateOffers.length > 0) 
+{
+
       // Runs whose new target is BELOW what's already made default to Keep
       // (accepting would instantly show the run as over target); all others
       // default to Accept, matching the old apply-all behavior.
@@ -12495,132 +22209,355 @@ export default function Home() {
 
   // Apply the user's per-run choices from the case-update offer dialog.
   // Accepted runs get the new target through the SAME write paths as any
-  // manual edit (form for the current run, saveRunValues otherwise); runs
+  // manual edit (form for the current run, saveRunValues otherwise)
+;
+ runs
   // marked Keep are untouched.
-  function applyCaseUpdateChoices() {
-    const accepted = (caseUpdatePrompt ?? []).filter(o => caseUpdateAccepted[o.runId]);
-    setCaseUpdatePrompt(null);
-    if (accepted.length === 0) return;
-    const now = Date.now();
-    for (const o of accepted) {
-      if (o.runId === currentRunIdRef.current) {
-        form.setValue("casesNeeded", o.to, { shouldDirty: true });
-        saveRunValues(o.runId, form.getValues());
-      } else {
-        const vals = loadRunValues(o.runId);
-        saveRunValues(o.runId, { ...vals, casesNeeded: o.to });
-      }
+  function applyCaseUpdateChoices() 
+{
+
+    const accepted = (caseUpdatePrompt ?? []).filter(o => caseUpdateAccepted[o.runId])
+;
+
+    setCaseUpdatePrompt(null)
+;
+
+    if (accepted.length === 0) return
+;
+
+    const now = Date.now()
+;
+
+    for (const o of accepted) 
+{
+
+      if (o.runId === currentRunIdRef.current) 
+{
+
+        form.setValue("casesNeeded", o.to, 
+{
+ shouldDirty: true 
+}
+)
+;
+
+        saveRunValues(o.runId, form.getValues())
+;
+
+      
+}
+ else 
+{
+
+        const vals = loadRunValues(o.runId)
+;
+
+        saveRunValues(o.runId, 
+{
+ ...vals, casesNeeded: o.to 
+}
+)
+;
+
+      
+}
+
       // Stamp the edit ourselves: this path bypasses the form-watch autosave
       // (saveRunValues above makes the watcher's loadRunValues===v guard skip),
       // and the server's per-run LWW merge only accepts a value whose
       // runValuesUpdatedAt stamp is strictly newer than the stored one. Without
       // this the accepted count lived only in localStorage and reverted to the
       // old target on reload / on every peer.
-      markRunValuesUpdated(o.runId, now);
-    }
-    lastLocalEditRef.current = now;
-    schedulePush(dayStateRef.current, 0);
-    toast({
+      markRunValuesUpdated(o.runId, now)
+;
+
+    
+}
+
+    lastLocalEditRef.current = now
+;
+
+    schedulePush(dayStateRef.current, 0)
+;
+
+    toast(
+{
+
       title: "Run targets updated",
       description: `${accepted.length} in-progress run${accepted.length === 1 ? "" : "s"} updated to the new case count${accepted.length === 1 ? "" : "s"}.`,
-    });
-  }
+    
+}
+)
+;
 
-  function printSummary() {
-    window.print();
-  }
+  
+}
+
+
+  function printSummary() 
+{
+
+    window.print()
+;
+
+  
+}
+
 
   const runStatus: "pending" | "running" | "paused" | "ended" =
     currentRun?.endedAt ? "ended"
     : currentRun?.pausedAt ? "paused"
     : currentRun?.startedAt ? "running"
-    : "pending";
+    : "pending"
+;
+
 
   // Effective values for calculation/display: the Run-tab temporary overrides
   // (freezer time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
   // Setup fields themselves are never touched.
-  const ve = useMemo(() => withTempOverrides(v), [v]);
+  const ve = useMemo(() => withTempOverrides(v), [v])
+;
 
 
-  useEffect(() => {
-    document.documentElement.classList.add("dark");
-  }, []);
+  useEffect(() => 
+{
+
+    document.documentElement.classList.add("dark")
+;
+
+  
+}
+, [])
+;
 
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
-  useEffect(() => {
-    if (!floorModeEnabled) return; // Floor Mode disabled — never auto-activate
-    const IDLE_MS = 3 * 60 * 1000;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    function resetTimer() {
-      if (timerId) clearTimeout(timerId);
-      timerId = setTimeout(() => setShowFloorMode(true), IDLE_MS);
-    }
-    resetTimer();
-    const events = ["touchstart", "mousedown", "keydown"] as const;
-    events.forEach(ev => window.addEventListener(ev, resetTimer, { passive: true }));
-    return () => {
-      if (timerId) clearTimeout(timerId);
-      events.forEach(ev => window.removeEventListener(ev, resetTimer));
-    };
-  }, [floorModeEnabled]); // setShowFloorMode is a stable setter
+  useEffect(() => 
+{
+
+    if (!floorModeEnabled) return
+;
+ // Floor Mode disabled — never auto-activate
+    const IDLE_MS = 3 * 60 * 1000
+;
+
+    let timerId: ReturnType<typeof setTimeout> | null = null
+;
+
+    function resetTimer() 
+{
+
+      if (timerId) clearTimeout(timerId)
+;
+
+      timerId = setTimeout(() => setShowFloorMode(true), IDLE_MS)
+;
+
+    
+}
+
+    resetTimer()
+;
+
+    const events = ["touchstart", "mousedown", "keydown"] as const
+;
+
+    events.forEach(ev => window.addEventListener(ev, resetTimer, 
+{
+ passive: true 
+}
+))
+;
+
+    return () => 
+{
+
+      if (timerId) clearTimeout(timerId)
+;
+
+      events.forEach(ev => window.removeEventListener(ev, resetTimer))
+;
+
+    
+}
+;
+
+  
+}
+, [floorModeEnabled])
+;
+ // setShowFloorMode is a stable setter
 
   // Floor Mode auto-dim: once Floor Mode is showing, dim it after a stretch of
   // inactivity and restore instantly on any interaction. Paired with the slow
   // CSS drift (.floor-drift) this keeps a left-on floor monitor safe from
   // burn-in/glare without hiding the live numbers when someone is watching.
-  useEffect(() => {
-    if (!showFloorMode) { setFloorDimmed(false); return; }
-    const DIM_MS = 90 * 1000;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    function arm() {
-      setFloorDimmed(false);
-      if (timerId) clearTimeout(timerId);
-      timerId = setTimeout(() => setFloorDimmed(true), DIM_MS);
-    }
-    arm();
-    const events = ["touchstart", "mousedown", "keydown", "mousemove"] as const;
-    events.forEach(ev => window.addEventListener(ev, arm, { passive: true }));
-    return () => {
-      if (timerId) clearTimeout(timerId);
-      events.forEach(ev => window.removeEventListener(ev, arm));
-    };
-  }, [showFloorMode]);
+  useEffect(() => 
+{
+
+    if (!showFloorMode) 
+{
+ setFloorDimmed(false)
+;
+ return
+;
+ 
+}
+
+    const DIM_MS = 90 * 1000
+;
+
+    let timerId: ReturnType<typeof setTimeout> | null = null
+;
+
+    function arm() 
+{
+
+      setFloorDimmed(false)
+;
+
+      if (timerId) clearTimeout(timerId)
+;
+
+      timerId = setTimeout(() => setFloorDimmed(true), DIM_MS)
+;
+
+    
+}
+
+    arm()
+;
+
+    const events = ["touchstart", "mousedown", "keydown", "mousemove"] as const
+;
+
+    events.forEach(ev => window.addEventListener(ev, arm, 
+{
+ passive: true 
+}
+))
+;
+
+    return () => 
+{
+
+      if (timerId) clearTimeout(timerId)
+;
+
+      events.forEach(ev => window.removeEventListener(ev, arm))
+;
+
+    
+}
+;
+
+  
+}
+, [showFloorMode])
+;
+
 
   // Reset all runs at midnight — archive current day first, auto-end any active run
-  useEffect(() => {
-    function msUntilMidnight() {
-      const now = new Date();
-      const midnight = new Date(now);
-      midnight.setHours(24, 0, 0, 0);
-      return midnight.getTime() - now.getTime();
-    }
-    let timeout: ReturnType<typeof setTimeout>;
-    function scheduleReset() {
-      timeout = setTimeout(async () => {
-        const storedDs = (() => {
-          try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; }
-          catch { return null; }
-        })();
-        if (storedDs?.date && storedDs.date !== todayStr()) {
+  useEffect(() => 
+{
+
+    function msUntilMidnight() 
+{
+
+      const now = new Date()
+;
+
+      const midnight = new Date(now)
+;
+
+      midnight.setHours(24, 0, 0, 0)
+;
+
+      return midnight.getTime() - now.getTime()
+;
+
+    
+}
+
+    let timeout: ReturnType<typeof setTimeout>
+;
+
+    function scheduleReset() 
+{
+
+      timeout = setTimeout(async () => 
+{
+
+        const storedDs = (() => 
+{
+
+          try 
+{
+ return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null
+;
+ 
+}
+
+          catch 
+{
+ return null
+;
+ 
+}
+
+        
+}
+)()
+;
+
+        if (storedDs?.date && storedDs.date !== todayStr()) 
+{
+
           // Auto-deduct inventory for every run closed by the midnight rollover,
           // matching endRun. consume is idempotent per runId — no double-count.
-          for (const r of storedDs.runs) {
-            if (r.startedAt && !r.endedAt) {
-              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
-            }
-          }
+          for (const r of storedDs.runs) 
+{
+
+            if (r.startedAt && !r.endedAt) 
+{
+
+              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id)
+;
+
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."))
+;
+
+            
+}
+
+          
+}
+
           // Auto-end any run that was still active when midnight hit
-          const finalDs: DayState = {
+          const finalDs: DayState = 
+{
+
             ...storedDs,
             runs: storedDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+              r.startedAt && !r.endedAt ? 
+{
+ ...r, endedAt: Date.now(), pausedAt: undefined 
+}
+ : r
             ),
-          };
-          archiveDayToHistory(finalDs, storedDs.date);
-        }
-        const newDate = todayStr();
+          
+}
+;
+
+          archiveDayToHistory(finalDs, storedDs.date)
+;
+
+        
+}
+
+        const newDate = todayStr()
+;
+
         // Try to load any pre-scheduled data for the new day.
         // IMPORTANT: only push a fresh empty state when the server CONFIRMED
         // there are no scheduled runs (GET succeeded with an empty row). If the
@@ -12629,32 +22566,91 @@ export default function Home() {
         // previously saved scheduled runs (protectRunValues escape hatch). The
         // session boundary (resetBoundaryAt) will be established on the next
         // successful push once the connection recovers.
-        let serverConfirmedNoRuns = false;
-        try {
-          const res = await fetch(`/api/sync/${newDate}`);
-          if (res.ok) {
-            const payload = await res.json() as SyncPayload | null;
-            if (payload?.dayState?.runs?.length) {
+        let serverConfirmedNoRuns = false
+;
+
+        try 
+{
+
+          const res = await fetch(`/api/sync/${newDate}`)
+;
+
+          if (res.ok) 
+{
+
+            const payload = await res.json() as SyncPayload | null
+;
+
+            if (payload?.dayState?.runs?.length) 
+{
+
               // Apply the saved line-type (dough/crusts) preference to each run
               // that has no subTab set — so brands always scheduled as "crusts"
               // start in the right mode without a manual toggle every morning.
-              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
-                if (r.subTab) return r;
-                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
-                return pref ? { ...r, subTab: pref } : r;
-              });
-              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              clearActiveSubstitutions();
-              // Scheduled run values are a snapshot from scheduling time; blank
+              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => 
+{
+
+                if (r.subTab) return r
+;
+
+                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "")
+;
+
+                return pref ? 
+{
+ ...r, subTab: pref 
+}
+ : r
+;
+
+              
+}
+)
+;
+
+              const ds: DayState = 
+{
+ runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: 
+{
+}
+ 
+}
+;
+
+              clearActiveSubstitutions()
+;
+
+              // Scheduled run values are a snapshot from scheduling time
+;
+ blank
               // sauce fields backfill from the CURRENT profile (mobile parity —
               // its pull-up spreads the live profile).
-              const metaById = new Map(ds.runs.map(r => [r.id, r]));
-              const pulledVals: Record<string, FormValues> = {};
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
-                const meta = metaById.get(id);
-                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
-                saveRunValues(id, pulledVals[id]);
-              }
+              const metaById = new Map(ds.runs.map(r => [r.id, r]))
+;
+
+              const pulledVals: Record<string, FormValues> = 
+{
+}
+;
+
+              for (const [id, vals] of Object.entries(payload.runValues ?? 
+{
+}
+)) 
+{
+
+                const meta = metaById.get(id)
+;
+
+                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor)
+;
+
+                saveRunValues(id, pulledVals[id])
+;
+
+              
+}
+
               // Adopt the scheduled row's per-run value stamps: these values are
               // server-sourced, not a local edit (stamping them with local time
               // would fake one), but saving them completely unstamped would lose
@@ -12689,16 +22685,51 @@ export default function Home() {
         // Fallback: fresh empty state. Only push to the server if the GET
         // confirmed there are no scheduled runs — otherwise we'd risk wiping
         // them via the wholesale-adopt escape hatch (see comment above).
-        const fresh = { ...freshDayState(), resetAt: Date.now() };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        setDayState(fresh);
-        saveDayState(fresh);
-        setRunToTime("19:15");
-        lastFormRunIdRef.current = "";
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        if (serverConfirmedNoRuns) schedulePush(fresh, 0);
+        const fresh = 
+{
+ ...freshDayState(), resetAt: Date.now() 
+}
+;
+
+        clearActiveSubstitutions()
+;
+
+        
+{
+ const dm = loadDeletedItems()
+;
+ if (dm["runs"]) 
+{
+ delete dm["runs"]
+;
+ saveDeletedItems(dm)
+;
+ 
+}
+ 
+}
+
+        setDayState(fresh)
+;
+
+        saveDayState(fresh)
+;
+
+        setRunToTime("19:15")
+;
+
+        lastFormRunIdRef.current = ""
+;
+
+        form.reset(DEFAULT_VALUES)
+;
+
+        resetFieldArrays(DEFAULT_VALUES)
+;
+
+        if (serverConfirmedNoRuns) schedulePush(fresh, 0)
+;
+
         // Clear the rc_auth cookie so a hard refresh can't bypass sign-in.
         void signOut();
         scheduleReset();
@@ -12791,37 +22822,94 @@ export default function Home() {
         .then(() => propagateBatchWeightUpdates(candidates))
         .then(() => cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
         .catch(() => {}); // best-effort: never block the user's entry
-    }, 2000);
-    return () => clearTimeout(t);
+    
+}
+, 2000)
+;
+
+    return () => clearTimeout(t)
+;
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchWeightCandidatesSig]);
+  
+}
+, [batchWeightCandidatesSig])
+;
+
 
   // ── Next-run die type (for change warning) ────────────────────────────────
-  const nextRunDieType = useMemo(() => {
-    const nextRun = dayState.runs[dayState.currentIndex + 1];
-    if (!nextRun) return "";
-    return loadRunValues(nextRun.id).dieType ?? "";
-  }, [dayState.runs, dayState.currentIndex]);
+  const nextRunDieType = useMemo(() => 
+{
+
+    const nextRun = dayState.runs[dayState.currentIndex + 1]
+;
+
+    if (!nextRun) return ""
+;
+
+    return loadRunValues(nextRun.id).dieType ?? ""
+;
+
+  
+}
+, [dayState.runs, dayState.currentIndex])
+;
+
 
   // ── Last-run recall (same brand+flavor from history) ──────────────────────
-  const lastRunRecall = useMemo(() => {
-    if (!currentRun?.brand || !currentRun?.flavor) return null;
-    const history = loadHistory();
-    for (const day of history) {
-      for (const run of [...day.runs].reverse()) {
-        if (run.brand === currentRun.brand && run.flavor === currentRun.flavor && run.endedAt) {
-          const vals = (day as HistoryDay & { runValues?: Record<string, FormValues> }).runValues?.[run.id];
-          return {
+  const lastRunRecall = useMemo(() => 
+{
+
+    if (!currentRun?.brand || !currentRun?.flavor) return null
+;
+
+    const history = loadHistory()
+;
+
+    for (const day of history) 
+{
+
+      for (const run of [...day.runs].reverse()) 
+{
+
+        if (run.brand === currentRun.brand && run.flavor === currentRun.flavor && run.endedAt) 
+{
+
+          const vals = (day as HistoryDay & 
+{
+ runValues?: Record<string, FormValues> 
+}
+).runValues?.[run.id]
+;
+
+          return 
+{
+
             date: day.date,
             actualCases: run.actualCases,
             wasteLbs: run.wasteLbs,
             casesNeeded: vals?.casesNeeded,
-          };
-        }
-      }
-    }
-    return null;
-  }, [currentRun?.brand, currentRun?.flavor]);
+          
+}
+;
+
+        
+}
+
+      
+}
+
+    
+}
+
+    return null
+;
+
+  
+}
+, [currentRun?.brand, currentRun?.flavor])
+;
+
 
   // Upcoming (not yet started) runs AFTER the current run in day order — the
   // warehouse switchover alert names what to stage next. Pending runs sitting
@@ -12834,29 +22922,44 @@ export default function Home() {
         .slice(0, 3)
         .map((r) => runLabel(r)),
     [dayState.runs, dayState.currentIndex],
-  );
+  )
+;
+
 
   // ── Downtime trends input (today live + synced 14-day history) ────────────
   // Today first so the live day-state wins if history ever carries a stale
   // snapshot of the same date (aggregateDowntime keeps the first occurrence).
   const downtimeDays = useMemo(
     () => [
-      { date: todayStr(), runs: dayState.runs },
-      ...history.map(h => ({ date: h.date, runs: h.runs })),
+      
+{
+ date: todayStr(), runs: dayState.runs 
+}
+,
+      ...history.map(h => (
+{
+ date: h.date, runs: h.runs 
+}
+)),
     ],
     [history, dayState.runs],
-  );
+  )
+;
 
 
   // ── Context value for extracted sub-components ──────────────────────────
   // Wrapped in useMemo so the object reference only changes when reactive
   // state actually changes.  Plain-function closures (addBrand, pauseRun,
   // etc.) are NOT listed as deps because all the state they close over IS
-  // already listed; when those state values are unchanged the closures
+  // already listed
+;
+ when those state values are unchanged the closures
   // behave identically to fresh ones.  setState dispatches and refs are
   // stable by React contract and also omitted.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const homeCtxValue = useMemo(() => ({
+  const homeCtxValue = useMemo(() => (
+{
+
     RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
@@ -12969,7 +23072,9 @@ export default function Home() {
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
     v, ve, writeError,
-  }), [
+  
+}
+), [
     // ── Reactive state values that actually live in this context object ──
     // setState dispatches (set*), refs (*Ref), plain-function callbacks, and
     // constants are intentionally omitted: they are either stable by React
@@ -13039,13 +23144,19 @@ export default function Home() {
     serverTemplates, templatesLoaded,
     undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount, upcomingRunLabels,
     v, ve, writeError,
-  ]);
+  ])
+;
+
 
   // ── Narrow context for live tab components (Packaging/Frontline/Dough/SetupRecipes/Summary) ──
   // Always-current ref so the useMemo below can capture the latest homeCtxValue at
   // the moment its deps change, without listing homeCtxValue itself as a dep.
-  const homeCtxValueRef = useRef(homeCtxValue);
-  homeCtxValueRef.current = homeCtxValue;
+  const homeCtxValueRef = useRef(homeCtxValue)
+;
+
+  homeCtxValueRef.current = homeCtxValue
+;
+
 
   // homeTabCtxValue re-fires only on non-dialog, non-manage, non-import deps.
   // When ONLY dialog/manage/merge/import state changes (showManageDialog flips,
@@ -13100,17 +23211,40 @@ export default function Home() {
       templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
       upcomingRunLabels, v, ve, writeError,
     ]
-  );
+  )
+;
+
 
   const mainContent = (
     <div
       className="min-h-screen bg-background text-foreground p-4 md:p-6 pb-20 font-sans"
-      onTouchStart={e => {
+      onTouchStart=
+{
+e => 
+{
+
         // Swipes starting on inputs/buttons/horizontal scrollers never switch runs
-        if (isSwipeExcludedTarget(e.target)) { swipeState.current = null; return; }
-        swipeState.current = createSwipeState(e.touches[0].clientX, e.touches[0].clientY, e.timeStamp);
-      }}
-      onTouchMove={e => {
+        if (isSwipeExcludedTarget(e.target)) 
+{
+ swipeState.current = null
+;
+ return
+;
+ 
+}
+
+        swipeState.current = createSwipeState(e.touches[0].clientX, e.touches[0].clientY, e.timeStamp)
+;
+
+      
+}
+}
+
+      onTouchMove=
+{
+e => 
+{
+
         // Lock the gesture's axis early from the initial move direction
         if (swipeState.current) swipeState.current = updateSwipeAxis(swipeState.current, e.touches[0].clientX, e.touches[0].clientY);
       }}
@@ -13389,22 +23523,46 @@ export default function Home() {
         const histAdd = (label: string, fn: (v: string) => void) => (v: string) => {
           const before = captureMasterDataSnapshot();
           fn(v);
-          noteChange("add", `Added "${v}" to ${label}`, before);
+          noteChange("add", `Added "$
+{
+v
+}
+" to ${label}`, before);
         };
         const histRemove = (label: string, fn: (v: string) => void) => (v: string) => {
           const before = captureMasterDataSnapshot();
           fn(v);
-          noteChange("remove", `Removed "${v}" from ${label}`, before);
+          noteChange("remove", `Removed "$
+{
+v
+}
+" from ${label}`, before);
         };
         const histRename = (label: string, fn: (o: string, n: string) => void) => (o: string, n: string) => {
           const before = captureMasterDataSnapshot();
           fn(o, n);
-          noteChange("rename", `Renamed "${o}" to "${n}" in ${label}`, before);
+          noteChange("rename", `Renamed "$
+{
+o
+}
+" to "$
+{
+n
+}
+" in ${label}`, before);
         };
         const histMerge = (label: string, fn: (from: string, into: string) => void) => (from: string, into: string) => {
           const before = captureMasterDataSnapshot();
           fn(from, into);
-          noteChange("rename", `Merged "${from}" into "${into}" in ${label}`, before);
+          noteChange("rename", `Merged "$
+{
+from
+}
+" into "$
+{
+into
+}
+" in ${label}`, before);
         };
         type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; onMerge?: (from: string, into: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
@@ -13623,58 +23781,181 @@ export default function Home() {
                         master-data (like Cheese Recipes / Mixes). The recipe
                         manager is the only editor here — matching the Mixes /
                         Cheese tabs. The run form's Dough / Sauce cards pick one
-                        by name and hydrate their rows from the chosen recipe. */}
-                    {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
-                      <NamedRecipesManager
-                        kind={manageCategory === "dough" ? "dough" : "sauce"}
-                        ingredientSuggestions={unifiedIngredientUniverse}
-                      />
-                    )}
-                  </div>
-                )}
+                        by name and hydrate their rows from the chosen recipe. */
+}
 
-                {/* Standalone: flavors brand picker */}
-                {manageCategory === "flavors" && (
+                    
+{
+(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
+                      <NamedRecipesManager
+                        kind=
+{
+manageCategory === "dough" ? "dough" : "sauce"
+}
+
+                        ingredientSuggestions=
+{
+unifiedIngredientUniverse
+}
+
+                      />
+                    )
+}
+
+                  </div>
+                )
+}
+
+
+{
+/* Standalone: flavors brand picker */
+}
+
+                
+{
+manageCategory === "flavors" && (
                   <div className="space-y-3">
                     <div className="space-y-1.5">
                       <label className="text-xs text-muted-foreground">Select brand to manage its flavors</label>
                       <select
-                        value={manageBrandFilter}
-                        onChange={e => { setManageBrandFilter(e.target.value); setMgStandaloneInput(""); }}
+                        value=
+{
+manageBrandFilter
+}
+
+                        onChange=
+{
+e => 
+{
+ setManageBrandFilter(e.target.value)
+;
+ setMgStandaloneInput("")
+;
+ 
+}
+}
+
                         className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                       >
                         <option value="">— choose a brand —</option>
-                        {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                        
+{
+brands.map(b => <option key=
+{
+b
+}
+ value=
+{
+b
+}
+>
+{
+b
+}
+</option>)
+}
+
                       </select>
                     </div>
-                    {manageBrandFilter && standaloneTab && (
+                    
+{
+manageBrandFilter && standaloneTab && (
                       <ListPanel
-                        items={standaloneTab.items}
-                        onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}
-                        onRemove={standaloneTab.onRemove}
-                        onRename={standaloneTab.onRename}
-                        placeholder={`Add flavor for ${manageBrandFilter}…`}
-                        inputVal={mgStandaloneInput}
-                        setInputVal={setMgStandaloneInput}
-                        onMerge={(from, into) => {
-                          setMergeCategory("brandflavor");
-                          setMergeBfMode("flavors");
-                          setMergeBfBrand(manageBrandFilter);
-                          setMergeSources([from]);
-                          setMergeTarget(into);
-                          setMergeConfirming(false);
-                          setMergeError("");
-                          setManageCategory("merge");
-                        }}
-                      />
-                    )}
-                  </div>
-                )}
+                        items=
+{
+standaloneTab.items
+}
 
-                {/* Standalone: Merge ingredients */}
-                {manageCategory === "merge" && (
+                        onAdd=
+{
+(v) => 
+{
+ standaloneTab.onAdd(v)
+;
+ setMgStandaloneInput("")
+;
+ 
+}
+}
+
+                        onRemove=
+{
+standaloneTab.onRemove
+}
+
+                        onRename=
+{
+standaloneTab.onRename
+}
+
+                        placeholder=
+{
+`Add flavor for ${manageBrandFilter}…`
+}
+
+                        inputVal=
+{
+mgStandaloneInput
+}
+
+                        setInputVal=
+{
+setMgStandaloneInput
+}
+
+                        onMerge=
+{
+(from, into) => 
+{
+
+                          setMergeCategory("brandflavor")
+;
+
+                          setMergeBfMode("flavors")
+;
+
+                          setMergeBfBrand(manageBrandFilter)
+;
+
+                          setMergeSources([from])
+;
+
+                          setMergeTarget(into)
+;
+
+                          setMergeConfirming(false)
+;
+
+                          setMergeError("")
+;
+
+                          setManageCategory("merge")
+;
+
+                        
+}
+}
+
+                      />
+                    )
+}
+
+                  </div>
+                )
+}
+
+
+{
+/* Standalone: Merge ingredients */
+}
+
+                
+{
+manageCategory === "merge" && (
                   <div className="space-y-4">
-                    {mergeFromImport && (
+                    
+{
+mergeFromImport && (
                       <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2.5">
                         <p className="text-xs text-foreground">
                           Recipes were imported. Since recipe ingredients can also be used on
@@ -13682,10 +23963,18 @@ export default function Home() {
                           suggestions before they become separate items.
                         </p>
                       </div>
-                    )}
-                    {/* Category selector: scope the manual merge to one group. */}
+                    )
+}
+
+                    
+{
+/* Category selector: scope the manual merge to one group. */
+}
+
                     <div className="flex flex-wrap gap-1.5">
-                      {([
+                      
+{
+([
                         ["ingredients", "Ingredients"],
                         ["mixes", "Mix Recipes"],
                         ["dough", "Dough"],
@@ -13694,73 +23983,199 @@ export default function Home() {
                         ["brandflavor", "Brand/Flavor"],
                       ] as [MergeCategory, string][]).map(([key, label]) => (
                         <button
-                          key={key}
+                          key=
+{
+key
+}
+
                           type="button"
-                          disabled={mergeBusy || mergeBatchBusy}
-                          onClick={() => switchMergeCategory(key)}
-                          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeCategory === key ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
-                        >{label}</button>
-                      ))}
+                          disabled=
+{
+mergeBusy || mergeBatchBusy
+}
+
+                          onClick=
+{
+() => switchMergeCategory(key)
+}
+
+                          className=
+{
+`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeCategory === key ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`
+}
+
+                        >
+{
+label
+}
+</button>
+                      ))
+}
+
                     </div>
 
-                    {/* Brand/Flavor sub-mode: merge whole brands, or flavors within one brand. */}
-                    {mergeCategory === "brandflavor" && (
+                    
+{
+/* Brand/Flavor sub-mode: merge whole brands, or flavors within one brand. */
+}
+
+                    
+{
+mergeCategory === "brandflavor" && (
                       <div className="space-y-2">
                         <div className="flex gap-1.5">
-                          {([["brands", "Brands"], ["flavors", "Flavors"]] as ["brands" | "flavors", string][]).map(([m, label]) => (
+                          
+{
+([["brands", "Brands"], ["flavors", "Flavors"]] as ["brands" | "flavors", string][]).map(([m, label]) => (
                             <button
-                              key={m}
+                              key=
+{
+m
+}
+
                               type="button"
-                              disabled={mergeBusy}
-                              onClick={() => {
-                                if (m === mergeBfMode) return;
-                                setMergeBfMode(m);
-                                resetMergeForm();
-                                setMergeSuggestions([]);
-                                setMergeSuggestRan(false);
-                                setMergeSuggestError("");
-                                setMergeSuggestNote("");
-                                if (m === "flavors" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0]);
-                              }}
-                              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeBfMode === m ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
-                            >{label}</button>
-                          ))}
+                              disabled=
+{
+mergeBusy
+}
+
+                              onClick=
+{
+() => 
+{
+
+                                if (m === mergeBfMode) return
+;
+
+                                setMergeBfMode(m)
+;
+
+                                resetMergeForm()
+;
+
+                                setMergeSuggestions([])
+;
+
+                                setMergeSuggestRan(false)
+;
+
+                                setMergeSuggestError("")
+;
+
+                                setMergeSuggestNote("")
+;
+
+                                if (m === "flavors" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0])
+;
+
+                              
+}
+}
+
+                              className=
+{
+`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeBfMode === m ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`
+}
+
+                            >
+{
+label
+}
+</button>
+                          ))
+}
+
                         </div>
-                        {mergeBfMode === "flavors" && (
+                        
+{
+mergeBfMode === "flavors" && (
                           <div className="space-y-1.5">
                             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Brand</p>
                             <select
-                              value={mergeBfBrand}
-                              disabled={mergeBusy}
-                              onChange={e => {
-                                setMergeBfBrand(e.target.value);
-                                resetMergeForm();
-                                setMergeSuggestions([]);
-                                setMergeSuggestRan(false);
-                                setMergeSuggestError("");
-                                setMergeSuggestNote("");
-                              }}
+                              value=
+{
+mergeBfBrand
+}
+
+                              disabled=
+{
+mergeBusy
+}
+
+                              onChange=
+{
+e => 
+{
+
+                                setMergeBfBrand(e.target.value)
+;
+
+                                resetMergeForm()
+;
+
+                                setMergeSuggestions([])
+;
+
+                                setMergeSuggestRan(false)
+;
+
+                                setMergeSuggestError("")
+;
+
+                                setMergeSuggestNote("")
+;
+
+                              
+}
+}
+
                               className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                             >
                               <option value="">Select a brand…</option>
-                              {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                              
+{
+brands.map(b => <option key=
+{
+b
+}
+ value=
+{
+b
+}
+>
+{
+b
+}
+</option>)
+}
+
                             </select>
                           </div>
-                        )}
+                        )
+}
+
                       </div>
-                    )}
+                    )
+}
+
 
                     <p className="text-xs text-muted-foreground">
-                      {mergeCategory === "brandflavor"
+                      
+{
+mergeCategory === "brandflavor"
                         ? (mergeBfMode === "brands"
                           ? "Combine duplicate brands into one. Pick the brand(s) to merge away, then the one to keep — their flavors are folded together and today's runs are re-pointed. This can't be undone."
                           : "Combine duplicate flavors within a brand. Pick the flavor(s) to merge away, then the one to keep — today's runs are re-pointed. This can't be undone.")
                         : isRecipeNameCategory
                         ? "Combine duplicate recipe names in this category into one. Pick the recipe name(s) to merge away (sources), then the one to keep (target). Their recipe presets are folded and today's runs are re-pointed to the kept recipe. This can't be undone."
-                        : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
+                        : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."
+}
+
                     </p>
 
-                    {/* AI + learned-memory suggestions: each tab scans ONLY its own
+                    
+{
+/* AI + learned-memory suggestions: each tab scans ONLY its own
                         name pool (mergeSuggestScope.universe) — Ingredients scans
                         the full cross-category ingredient list, every recipe-name
                         tab scans just its own recipe names, and Brand/Flavor scans
@@ -14665,6 +25080,11 @@ export default function Home() {
                 {isManager && (
                   <DropdownMenuItem onClick={() => setActiveTab("incidents")}>
                     <LifeBuoy className="w-4 h-4 mr-2" /> Reported issues
+                  </DropdownMenuItem>
+                )}
+                {isManager && (
+                  <DropdownMenuItem onClick={() => setActiveTab("summary")}>
+                    <ClipboardCheck className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
                 {isManager && (
@@ -15877,6 +26297,11 @@ export default function Home() {
               <TabsContent value="summary">
                 {isManager && (
                   <div className="max-w-3xl mx-auto mb-4">
+                    <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
+                  </div>
+                )}
+                {isManager && (
+                  <div className="max-w-3xl mx-auto mb-4">
                     <OperationalReportPanel
                       onOpenQuality={(range) => {
                         setReportDetailRange(range);
@@ -16163,16 +26588,36 @@ export default function Home() {
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</label>
                 <div className="flex gap-2">
-                  {(["stop", "pause"] as const).map(t => (
+                  
+{
+(["stop", "pause"] as const).map(t => (
                     <button
-                      key={t}
+                      key=
+{
+t
+}
+
                       type="button"
-                      onClick={() => setManualStopType(t)}
-                      className={`flex-1 py-2 rounded-md border text-sm font-semibold transition-colors ${manualStopType === t ? (t === "stop" ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-blue-500 bg-blue-500/10 text-blue-400") : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                      onClick=
+{
+() => setManualStopType(t)
+}
+
+                      className=
+{
+`flex-1 py-2 rounded-md border text-sm font-semibold transition-colors ${manualStopType === t ? (t === "stop" ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-blue-500 bg-blue-500/10 text-blue-400") : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`
+}
+
                     >
-                      {t === "stop" ? "Line Stop" : "Pause"}
+                      
+{
+t === "stop" ? "Line Stop" : "Pause"
+}
+
                     </button>
-                  ))}
+                  ))
+}
+
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -16180,8 +26625,16 @@ export default function Home() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Start <span className="text-destructive">*</span></label>
                   <input
                     type="datetime-local"
-                    value={manualStopStart}
-                    onChange={e => setManualStopStart(e.target.value)}
+                    value=
+{
+manualStopStart
+}
+
+                    onChange=
+{
+e => setManualStopStart(e.target.value)
+}
+
                     className="w-full border border-input rounded-md px-2 py-1.5 text-xs bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
@@ -16189,8 +26642,16 @@ export default function Home() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">End <span className="text-muted-foreground/50">(opt)</span></label>
                   <input
                     type="datetime-local"
-                    value={manualStopEnd}
-                    onChange={e => setManualStopEnd(e.target.value)}
+                    value=
+{
+manualStopEnd
+}
+
+                    onChange=
+{
+e => setManualStopEnd(e.target.value)
+}
+
                     className="w-full border border-input rounded-md px-2 py-1.5 text-xs bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
@@ -16198,37 +26659,102 @@ export default function Home() {
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-muted-foreground/50">(optional)</span></label>
                 <div className="grid grid-cols-2 gap-2">
-                  {[...stopReasonsList, "Other"].map(r => (
+                  
+{
+[...stopReasonsList, "Other"].map(r => (
                     <button
-                      key={r}
+                      key=
+{
+r
+}
+
                       type="button"
-                      onClick={() => setManualStopReason(manualStopReason === r ? "" : r)}
-                      className={`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${manualStopReason === r ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                      onClick=
+{
+() => setManualStopReason(manualStopReason === r ? "" : r)
+}
+
+                      className=
+{
+`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${manualStopReason === r ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`
+}
+
                     >
-                      {r}
+                      
+{
+r
+}
+
                     </button>
-                  ))}
+                  ))
+}
+
                 </div>
-                {manualStopReason && ![...stopReasonsList, "Other", ""].includes(manualStopReason) && (
-                  <input type="text" value={manualStopReason} onChange={e => setManualStopReason(e.target.value)} placeholder="Custom reason…" className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
-                )}
+                
+{
+manualStopReason && ![...stopReasonsList, "Other", ""].includes(manualStopReason) && (
+                  <input type="text" value=
+{
+manualStopReason
+}
+ onChange=
+{
+e => setManualStopReason(e.target.value)
+}
+ placeholder="Custom reason…" className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
+                )
+}
+
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes</label>
-                <input type="text" value={manualStopNotes} onChange={e => setManualStopNotes(e.target.value)} placeholder="Optional…" className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
+                <input type="text" value=
+{
+manualStopNotes
+}
+ onChange=
+{
+e => setManualStopNotes(e.target.value)
+}
+ placeholder="Optional…" className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
               </div>
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={() => setShowManualStopDialog(false)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
+                <button type="button" onClick=
+{
+() => setShowManualStopDialog(false)
+}
+ className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
                 <button
                   type="button"
-                  disabled={!manualStopStart}
-                  onClick={() => {
-                    const startTs = new Date(manualStopStart).getTime();
-                    const endTs = manualStopEnd ? new Date(manualStopEnd).getTime() : undefined;
-                    if (isNaN(startTs)) return;
-                    addManualStop("manual", startTs, endTs, manualStopReason.trim(), manualStopNotes.trim());
-                    setShowManualStopDialog(false);
-                  }}
+                  disabled=
+{
+!manualStopStart
+}
+
+                  onClick=
+{
+() => 
+{
+
+                    const startTs = new Date(manualStopStart).getTime()
+;
+
+                    const endTs = manualStopEnd ? new Date(manualStopEnd).getTime() : undefined
+;
+
+                    if (isNaN(startTs)) return
+;
+
+                    addManualStop("manual", startTs, endTs, manualStopReason.trim(), manualStopNotes.trim())
+;
+
+                    setShowManualStopDialog(false)
+;
+
+                  
+}
+}
+
                   className="flex-1 px-4 py-2 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors disabled:opacity-40"
                 >
                   Add Event
@@ -16236,60 +26762,150 @@ export default function Home() {
               </div>
             </div>
           </div>
-        )}
+        )
+}
 
-        {/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */}
-        {showEditReasonsDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+
+{
+/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */
+}
+
+        
+{
+showEditReasonsDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick=
+{
+() => setShowEditReasonsDialog(false)
+}
+>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick=
+{
+e => e.stopPropagation()
+}
+>
               <div className="flex items-center gap-2">
                 <ListChecks className="w-5 h-5 text-primary shrink-0" />
                 <h2 className="text-base font-bold">Quick Reason List</h2>
-                <button type="button" onClick={() => setShowEditReasonsDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <button type="button" onClick=
+{
+() => setShowEditReasonsDialog(false)
+}
+ className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="space-y-2">
-                {stopReasonsList.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <span className="flex-1 text-sm px-3 py-2 rounded-md bg-muted/30 border border-border/50">{r}</span>
+                
+{
+stopReasonsList.map((r, i) => (
+                  <div key=
+{
+i
+}
+ className="flex items-center gap-2">
+                    <span className="flex-1 text-sm px-3 py-2 rounded-md bg-muted/30 border border-border/50">
+{
+r
+}
+</span>
                     <button
                       type="button"
-                      onClick={() => {
-                        const updated = stopReasonsList.filter((_, j) => j !== i);
-                        setStopReasonsList(updated);
-                        putFactoryKey(STOP_REASONS_KEY, updated);
-                      }}
+                      onClick=
+{
+() => 
+{
+
+                        const updated = stopReasonsList.filter((_, j) => j !== i)
+;
+
+                        setStopReasonsList(updated)
+;
+
+                        putFactoryKey(STOP_REASONS_KEY, updated)
+;
+
+                      
+}
+}
+
                       className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                ))}
+                ))
+}
+
               </div>
               <div className="flex gap-2">
                 <input
                   type="text"
-                  value={newReasonInput}
-                  onChange={e => setNewReasonInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" && newReasonInput.trim()) {
-                      const updated = [...stopReasonsList, newReasonInput.trim()];
-                      setStopReasonsList(updated);
-                      putFactoryKey(STOP_REASONS_KEY, updated);
-                      setNewReasonInput("");
-                    }
-                  }}
+                  value=
+{
+newReasonInput
+}
+
+                  onChange=
+{
+e => setNewReasonInput(e.target.value)
+}
+
+                  onKeyDown=
+{
+e => 
+{
+
+                    if (e.key === "Enter" && newReasonInput.trim()) 
+{
+
+                      const updated = [...stopReasonsList, newReasonInput.trim()]
+;
+
+                      setStopReasonsList(updated)
+;
+
+                      putFactoryKey(STOP_REASONS_KEY, updated)
+;
+
+                      setNewReasonInput("")
+;
+
+                    
+}
+
+                  
+}
+}
+
                   placeholder="Add new reason…"
                   className="flex-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                 />
                 <button
                   type="button"
-                  disabled={!newReasonInput.trim()}
-                  onClick={() => {
-                    const updated = [...stopReasonsList, newReasonInput.trim()];
-                    setStopReasonsList(updated);
-                    putFactoryKey(STOP_REASONS_KEY, updated);
-                    setNewReasonInput("");
-                  }}
+                  disabled=
+{
+!newReasonInput.trim()
+}
+
+                  onClick=
+{
+() => 
+{
+
+                    const updated = [...stopReasonsList, newReasonInput.trim()]
+;
+
+                    setStopReasonsList(updated)
+;
+
+                    putFactoryKey(STOP_REASONS_KEY, updated)
+;
+
+                    setNewReasonInput("")
+;
+
+                  
+}
+}
+
                   className="px-4 py-2 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors disabled:opacity-40"
                 >
                   Add
@@ -16297,95 +26913,208 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setStopReasonsList(DEFAULT_STOP_REASONS);
-                  putFactoryKey(STOP_REASONS_KEY, DEFAULT_STOP_REASONS);
-                }}
+                onClick=
+{
+() => 
+{
+
+                  setStopReasonsList(DEFAULT_STOP_REASONS)
+;
+
+                  putFactoryKey(STOP_REASONS_KEY, DEFAULT_STOP_REASONS)
+;
+
+                
+}
+}
+
                 className="w-full text-xs text-muted-foreground hover:text-foreground text-center transition-colors"
               >
                 Reset to defaults
               </button>
             </div>
           </div>
-        )}
+        )
+}
 
-        {/* Hidden file inputs for imports — kept always-mounted so they can be
-            triggered from the Manage Lists → Import section regardless of tab. */}
+
+{
+/* Hidden file inputs for imports — kept always-mounted so they can be
+            triggered from the Manage Lists → Import section regardless of tab. */
+}
+
         <input
-          ref={importInputRef}
+          ref=
+{
+importInputRef
+}
+
           type="file"
           accept=".xlsx,.xls"
           className="hidden"
-          onChange={handleImportFile}
+          onChange=
+{
+handleImportFile
+}
+
         />
-        {isManager && (
+        
+{
+isManager && (
           <input
-            ref={specImportInputRef}
+            ref=
+{
+specImportInputRef
+}
+
             type="file"
             accept=".xlsx"
             multiple
             className="hidden"
-            onChange={handleSpecImportFile}
+            onChange=
+{
+handleSpecImportFile
+}
+
           />
-        )}
-        {isManager && (
+        )
+}
+
+        
+{
+isManager && (
           <input
-            ref={premixImportInputRef}
+            ref=
+{
+premixImportInputRef
+}
+
             type="file"
             accept=".xlsx"
             multiple
             className="hidden"
-            onChange={handlePremixImportFile}
+            onChange=
+{
+handlePremixImportFile
+}
+
           />
-        )}
-        {isManager && (
+        )
+}
+
+        
+{
+isManager && (
           <input
-            ref={cheeseImportInputRef}
+            ref=
+{
+cheeseImportInputRef
+}
+
             type="file"
             accept=".xlsx"
             multiple
             className="hidden"
-            onChange={handleCheeseImportFile}
+            onChange=
+{
+handleCheeseImportFile
+}
+
           />
-        )}
-        {isManager && (
+        )
+}
+
+        
+{
+isManager && (
           <input
-            ref={shippingImportInputRef}
+            ref=
+{
+shippingImportInputRef
+}
+
             type="file"
             accept=".xlsx"
             className="hidden"
-            onChange={handleShippingImportFile}
+            onChange=
+{
+handleShippingImportFile
+}
+
           />
-        )}
-        {isManager && (
+        )
+}
+
+        
+{
+isManager && (
           <input
-            ref={sauceGuideImportInputRef}
+            ref=
+{
+sauceGuideImportInputRef
+}
+
             type="file"
             accept=".docx,.doc,.txt"
             className="hidden"
-            onChange={handleSauceGuideImportFile}
+            onChange=
+{
+handleSauceGuideImportFile
+}
+
           />
-        )}
-        {isManager && (
+        )
+}
+
+        
+{
+isManager && (
           <input
-            ref={doughGuideImportInputRef}
+            ref=
+{
+doughGuideImportInputRef
+}
+
             type="file"
             accept=".xlsx,.xls"
             className="hidden"
-            onChange={handleDoughGuideImportFile}
-          />
-        )}
+            onChange=
+{
+handleDoughGuideImportFile
+}
 
-        {/* ── Change Password Dialog ───────────────────────────────────────── */}
-        {showPasswordDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
-            <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          />
+        )
+}
+
+
+{
+/* ── Change Password Dialog ───────────────────────────────────────── */
+}
+
+        
+{
+showPasswordDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick=
+{
+() => setShowPasswordDialog(false)
+}
+>
+            <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick=
+{
+e => e.stopPropagation()
+}
+>
               <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-primary" />
                   <h2 className="font-bold text-base">Password</h2>
                 </div>
-                <button type="button" onClick={() => setShowPasswordDialog(false)} className="text-muted-foreground hover:text-foreground">
+                <button type="button" onClick=
+{
+() => setShowPasswordDialog(false)
+}
+ className="text-muted-foreground hover:text-foreground">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -16394,29 +27123,106 @@ export default function Home() {
               </div>
             </div>
           </div>
-        )}
+        )
+}
 
-        {/* ── Excel Import Dialog ──────────────────────────────────────────── */}
+
+{
+/* ── Excel Import Dialog ──────────────────────────────────────────── */
+}
+
         <ExcelImportDialog
-          open={showImportDialog}
-          onClose={() => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); }}
-          result={importResult}
-          brands={brands}
-          brandFlavors={brandFlavors}
-          canCreate={isSupervisor}
-          defaultDate={importDefaultDate}
-          onConfirm={(payload) => {
-            if (payload.multiDay) { void commitMultiDayImport(payload); return; }
-            if (importIntoEditor) importExcelIntoEditor(payload);
-            else void commitExcelImport(payload);
-          }}
-          progress={importProgress}
+          open=
+{
+showImportDialog
+}
+
+          onClose=
+{
+() => 
+{
+ setShowImportDialog(false)
+;
+ setImportResult(null)
+;
+ setImportIntoEditor(false)
+;
+ 
+}
+}
+
+          result=
+{
+importResult
+}
+
+          brands=
+{
+brands
+}
+
+          brandFlavors=
+{
+brandFlavors
+}
+
+          canCreate=
+{
+isSupervisor
+}
+
+          defaultDate=
+{
+importDefaultDate
+}
+
+          onConfirm=
+{
+(payload) => 
+{
+
+            if (payload.multiDay) 
+{
+ void commitMultiDayImport(payload)
+;
+ return
+;
+ 
+}
+
+            if (importIntoEditor) importExcelIntoEditor(payload)
+;
+
+            else void commitExcelImport(payload)
+;
+
+          
+}
+}
+
+          progress=
+{
+importProgress
+}
+
         />
 
-        {/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */}
+        
+{
+/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */
+}
+
         <SpecImportDialog
-          open={showSpecImport}
-          onClose={() => {
+          open=
+{
+showSpecImport
+}
+
+          onClose=
+{
+() => 
+{
+
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.
@@ -16623,44 +27429,97 @@ export default function Home() {
                         warn managers and let them jump to set the profile up. Lives on
                         the Schedule screen (moved from Warehouse) so the warning sits
                         beside the runs it's about. Detection stays in the shared
-                        @workspace/scheduled-recipe-check lib. */}
-                    {isManager &&
-                      (() => {
+                        @workspace/scheduled-recipe-check lib. */
+}
+
+                    
+{
+isManager &&
+                      (() => 
+{
+
                         const scheduledRuns = scheduledDays.flatMap((day) =>
                           (day.runs ?? [])
                             .filter((r) => r.brand)
-                            .map((r) => ({
+                            .map((r) => (
+{
+
                               date: day.date,
                               brand: r.brand,
                               flavor: r.flavor,
                               casesNeeded: r.casesNeeded,
-                            })),
-                        );
+                            
+}
+)),
+                        )
+;
+
                         return (
                           <ScheduledRecipeWarningCard
-                            scheduledRuns={scheduledRuns}
-                            onSetup={(brand, flavor) => {
+                            scheduledRuns=
+{
+scheduledRuns
+}
+
+                            onSetup=
+{
+(brand, flavor) => 
+{
+
                               // Opens the standalone Setup Profiles editor
                               // directly on this brand+flavor, instead of
                               // reusing/creating a run — editing the saved
                               // profile never touches the current run.
-                              setShowScheduleDialog(false);
-                              openSetupEditor(brand, flavor);
-                            }}
+                              setShowScheduleDialog(false)
+;
+
+                              openSetupEditor(brand, flavor)
+;
+
+                            
+}
+}
+
                           />
-                        );
-                      })()}
-                    {/* Today — the LIVE day. Editing routes through the live
+                        )
+;
+
+                      
+}
+)()
+}
+
+                    
+{
+/* Today — the LIVE day. Editing routes through the live
                         day-state path (stamped values + tombstones + push), so
                         changes stick instead of being reverted by the next
-                        sync push (e.g. Start Run). */}
+                        sync push (e.g. Start Run). */
+}
+
                     <div className="rounded-lg bg-primary/5 border border-primary/30 overflow-hidden">
                       <div className="flex items-center justify-between gap-3 p-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold truncate">
-                            Today — {new Date(todayStr() + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                            Today — 
+{
+new Date(todayStr() + "T12:00:00").toLocaleDateString(undefined, 
+{
+ weekday: "long", month: "long", day: "numeric" 
+}
+)
+}
+
                           </p>
-                          <p className="text-xs text-muted-foreground">{dayState.runs.length} run{dayState.runs.length !== 1 ? "s" : ""} on today's plan</p>
+                          <p className="text-xs text-muted-foreground">
+{
+dayState.runs.length
+}
+ run
+{
+dayState.runs.length !== 1 ? "s" : ""
+}
+ on today's plan</p>
                         </div>
                         <button
                           type="button"
@@ -16677,190 +27536,460 @@ export default function Home() {
                         <p className="text-sm font-medium text-muted-foreground">No days scheduled yet</p>
                         <p className="text-xs text-muted-foreground/60 mt-1">Pre-plan a future day's runs so they load automatically at midnight.</p>
                       </div>
-                    ) : scheduledDays.map(day => {
-                      const isExpanded = expandedScheduleDay === day.date;
+                    ) : scheduledDays.map(day => 
+{
+
+                      const isExpanded = expandedScheduleDay === day.date
+;
+
                       return (
-                        <div key={day.date} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
-                          {/* ── Header row ── */}
+                        <div key=
+{
+day.date
+}
+ className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
+                          
+{
+/* ── Header row ── */
+}
+
                           <div className="flex items-center justify-between gap-3 p-3">
                             <button
                               type="button"
                               className="flex items-center gap-2 min-w-0 flex-1 text-left"
-                              onClick={() => setExpandedScheduleDay(isExpanded ? null : day.date)}
+                              onClick=
+{
+() => setExpandedScheduleDay(isExpanded ? null : day.date)
+}
+
                             >
                               <ChevronDown
-                                className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                                className=
+{
+`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`
+}
+
                               />
                               <div className="min-w-0">
                                 <p className="text-sm font-semibold truncate">
-                                  {new Date(day.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                                  
+{
+new Date(day.date + "T12:00:00").toLocaleDateString(undefined, 
+{
+ weekday: "long", month: "long", day: "numeric" 
+}
+)
+}
+
                                 </p>
-                                <p className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""} planned</p>
+                                <p className="text-xs text-muted-foreground">
+{
+day.runCount
+}
+ run
+{
+day.runCount !== 1 ? "s" : ""
+}
+ planned</p>
                               </div>
                             </button>
                             <div className="flex gap-1.5 shrink-0 items-center">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setScheduleDeleteConfirm(null);
-                                  if (scheduleMove?.from === day.date && scheduleMove.runId === null) {
-                                    setScheduleMove(null);
-                                  } else {
-                                    setScheduleMove({ from: day.date, runId: null });
-                                    setScheduleMoveDate(tomorrowStr());
-                                  }
-                                }}
+                                onClick=
+{
+() => 
+{
+
+                                  setScheduleDeleteConfirm(null)
+;
+
+                                  if (scheduleMove?.from === day.date && scheduleMove.runId === null) 
+{
+
+                                    setScheduleMove(null)
+;
+
+                                  
+}
+ else 
+{
+
+                                    setScheduleMove(
+{
+ from: day.date, runId: null 
+}
+)
+;
+
+                                    setScheduleMoveDate(tomorrowStr())
+;
+
+                                  
+}
+
+                                
+}
+}
+
                                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
                               >
                                 <ArrowRight className="w-3 h-3" /> Move
                               </button>
                               <button
                                 type="button"
-                                onClick={() => openScheduleEditor(day.date)}
+                                onClick=
+{
+() => openScheduleEditor(day.date)
+}
+
                                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
                               >
                                 <Pencil className="w-3 h-3" /> Edit
                               </button>
-                              {scheduleDeleteConfirm === day.date ? (
+                              
+{
+scheduleDeleteConfirm === day.date ? (
                                 <span className="flex gap-1 items-center">
-                                  <button type="button" className="px-2 py-1 text-xs rounded-md bg-destructive text-destructive-foreground font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => deleteScheduledDay(day.date)}>Yes</button>
-                                  <button type="button" className="px-2 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors" onMouseDown={() => setScheduleDeleteConfirm(null)}>No</button>
+                                  <button type="button" className="px-2 py-1 text-xs rounded-md bg-destructive text-destructive-foreground font-semibold hover:bg-destructive/80 transition-colors" onMouseDown=
+{
+() => deleteScheduledDay(day.date)
+}
+>Yes</button>
+                                  <button type="button" className="px-2 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors" onMouseDown=
+{
+() => setScheduleDeleteConfirm(null)
+}
+>No</button>
                                 </span>
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => setScheduleDeleteConfirm(day.date)}
+                                  onClick=
+{
+() => setScheduleDeleteConfirm(day.date)
+}
+
                                   className="p-1 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
-                              )}
+                              )
+}
+
                             </div>
                           </div>
-                          {/* ── Move whole-day panel ── */}
-                          {scheduleMove?.from === day.date && scheduleMove.runId === null && (
+                          
+{
+/* ── Move whole-day panel ── */
+}
+
+                          
+{
+scheduleMove?.from === day.date && scheduleMove.runId === null && (
                             <div className="border-t border-border/40 px-3 py-2.5 bg-primary/5">
                               <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Move all runs to</label>
                               <div className="flex items-center gap-2">
                                 <input
                                   type="date"
-                                  value={scheduleMoveDate}
-                                  min={tomorrowStr()}
-                                  onChange={e => setScheduleMoveDate(e.target.value)}
+                                  value=
+{
+scheduleMoveDate
+}
+
+                                  min=
+{
+tomorrowStr()
+}
+
+                                  onChange=
+{
+e => setScheduleMoveDate(e.target.value)
+}
+
                                   className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
                                 />
                                 <button
                                   type="button"
-                                  disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
-                                  onClick={async () => {
-                                    setScheduleMoving(true);
-                                    await performScheduleMove(day.date, "all", scheduleMoveDate);
-                                    setScheduleMoving(false);
-                                    setScheduleMove(null);
-                                  }}
+                                  disabled=
+{
+scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date
+}
+
+                                  onClick=
+{
+async () => 
+{
+
+                                    setScheduleMoving(true)
+;
+
+                                    await performScheduleMove(day.date, "all", scheduleMoveDate)
+;
+
+                                    setScheduleMoving(false)
+;
+
+                                    setScheduleMove(null)
+;
+
+                                  
+}
+}
+
                                   className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
                                 >
-                                  {scheduleMoving ? "Moving…" : "Move"}
+                                  
+{
+scheduleMoving ? "Moving…" : "Move"
+}
+
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setScheduleMove(null)}
+                                  onClick=
+{
+() => setScheduleMove(null)
+}
+
                                   className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
                                 >
                                   Cancel
                                 </button>
                               </div>
                             </div>
-                          )}
-                          {/* ── Expandable run list ── */}
+                          )
+}
+
+                          
+{
+/* ── Expandable run list ── */
+}
+
                           <div
                             className="overflow-hidden transition-all duration-200"
-                            style={{ maxHeight: isExpanded ? `${(day.runs?.length ?? 0) * 72 + 8}px` : "0px", opacity: isExpanded ? 1 : 0 }}
+                            style=
+{
+{
+ maxHeight: isExpanded ? `${(day.runs?.length ?? 0) * 72 + 8}px` : "0px", opacity: isExpanded ? 1 : 0 
+}
+}
+
                           >
                             <div className="border-t border-border/40 px-3 pb-2 pt-1 space-y-1">
-                              {(day.runs ?? []).length === 0 ? (
+                              
+{
+(day.runs ?? []).length === 0 ? (
                                 <p className="text-xs text-muted-foreground/60 py-1 pl-5">No runs recorded</p>
                               ) : (day.runs ?? []).map((run, i) => (
-                                <div key={i} className="py-1 pl-5">
+                                <div key=
+{
+i
+}
+ className="py-1 pl-5">
                                   <div className="flex items-center gap-2">
-                                    <span className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
+                                    <span className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
+{
+i + 1
+}
+</span>
                                     <span className="text-xs font-medium truncate flex-1 min-w-0">
-                                      {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
+                                      
+{
+run.brand
+}
+{
+run.flavor ? ` — ${run.flavor}` : ""
+}
+
                                     </span>
-                                    {run.casesNeeded > 0 && (
-                                      <span className="text-xs text-muted-foreground shrink-0">{run.casesNeeded} cs</span>
-                                    )}
+                                    
+{
+run.casesNeeded > 0 && (
+                                      <span className="text-xs text-muted-foreground shrink-0">
+{
+run.casesNeeded
+}
+ cs</span>
+                                    )
+}
+
                                     <button
                                       type="button"
-                                      disabled={!run.brand && !run.flavor}
-                                      onClick={() => {
-                                        setSetupEditorBrand(run.brand || undefined);
-                                        setSetupEditorFlavor(run.flavor || undefined);
-                                        setSetupEditorOpen(true);
-                                      }}
+                                      disabled=
+{
+!run.brand && !run.flavor
+}
+
+                                      onClick=
+{
+() => 
+{
+
+                                        setSetupEditorBrand(run.brand || undefined)
+;
+
+                                        setSetupEditorFlavor(run.flavor || undefined)
+;
+
+                                        setSetupEditorOpen(true)
+;
+
+                                      
+}
+}
+
                                       className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"
                                     >
                                       <Pencil className="w-2.5 h-2.5" /> Setup
                                     </button>
                                     <button
                                       type="button"
-                                      disabled={!run.id}
-                                      onClick={() => {
-                                        if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) {
-                                          setScheduleMove(null);
-                                        } else {
-                                          setScheduleMove({ from: day.date, runId: run.id });
-                                          setScheduleMoveDate(tomorrowStr());
-                                        }
-                                      }}
+                                      disabled=
+{
+!run.id
+}
+
+                                      onClick=
+{
+() => 
+{
+
+                                        if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) 
+{
+
+                                          setScheduleMove(null)
+;
+
+                                        
+}
+ else 
+{
+
+                                          setScheduleMove(
+{
+ from: day.date, runId: run.id 
+}
+)
+;
+
+                                          setScheduleMoveDate(tomorrowStr())
+;
+
+                                        
+}
+
+                                      
+}
+}
+
                                       className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"
                                     >
                                       <ArrowRight className="w-2.5 h-2.5" /> Move
                                     </button>
                                   </div>
-                                  {scheduleMove?.from === day.date && scheduleMove.runId === run.id && run.id && (
+                                  
+{
+scheduleMove?.from === day.date && scheduleMove.runId === run.id && run.id && (
                                     <div className="flex items-center gap-2 mt-1.5 ml-6">
                                       <input
                                         type="date"
-                                        value={scheduleMoveDate}
-                                        min={tomorrowStr()}
-                                        onChange={e => setScheduleMoveDate(e.target.value)}
+                                        value=
+{
+scheduleMoveDate
+}
+
+                                        min=
+{
+tomorrowStr()
+}
+
+                                        onChange=
+{
+e => setScheduleMoveDate(e.target.value)
+}
+
                                         className="flex-1 h-7 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
                                       />
                                       <button
                                         type="button"
-                                        disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
-                                        onClick={async () => {
-                                          setScheduleMoving(true);
-                                          await performScheduleMove(day.date, { runId: run.id }, scheduleMoveDate);
-                                          setScheduleMoving(false);
-                                          setScheduleMove(null);
-                                        }}
+                                        disabled=
+{
+scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date
+}
+
+                                        onClick=
+{
+async () => 
+{
+
+                                          setScheduleMoving(true)
+;
+
+                                          await performScheduleMove(day.date, 
+{
+ runId: run.id 
+}
+, scheduleMoveDate)
+;
+
+                                          setScheduleMoving(false)
+;
+
+                                          setScheduleMove(null)
+;
+
+                                        
+}
+}
+
                                         className="px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
                                       >
-                                        {scheduleMoving ? "Moving…" : "Move"}
+                                        
+{
+scheduleMoving ? "Moving…" : "Move"
+}
+
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => setScheduleMove(null)}
+                                        onClick=
+{
+() => setScheduleMove(null)
+}
+
                                         className="px-2.5 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
                                       >
                                         Cancel
                                       </button>
                                     </div>
-                                  )}
+                                  )
+}
+
                                 </div>
-                              ))}
+                              ))
+}
+
                             </div>
                           </div>
                         </div>
-                      );
-                    })}
+                      )
+;
+
+                    
+}
+)
+}
+
                   </div>
                   <div className="px-5 py-4 border-t border-border/40">
                     <button
                       type="button"
-                      onClick={() => openScheduleEditor()}
+                      onClick=
+{
+() => openScheduleEditor()
+}
+
                       className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
                     >
                       <Plus className="w-4 h-4" /> Schedule New Day
@@ -16870,57 +27999,134 @@ export default function Home() {
               ) : scheduleView === "editor" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
-                    <button type="button" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                    <button type="button" onClick=
+{
+() => setScheduleView("list")
+}
+ className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
                     <h2 className="text-base font-bold flex-1">
-                      {scheduleEditorDate ? `Plan for ${new Date(scheduleEditorDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Plan Future Day"}
+                      
+{
+scheduleEditorDate ? `Plan for ${new Date(scheduleEditorDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Plan Future Day"
+}
+
                     </h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <button type="button" onClick=
+{
+() => setShowScheduleDialog(false)
+}
+ className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-5 min-h-0">
-                    {/* Date picker */}
+                    
+{
+/* Date picker */
+}
+
                     <div>
                       <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Date</label>
                       <input
                         type="date"
-                        value={scheduleEditorDate}
-                        min={todayStr()}
-                        disabled={scheduleEditorIsLiveDay}
-                        onChange={e => setScheduleEditorDate(e.target.value)}
+                        value=
+{
+scheduleEditorDate
+}
+
+                        min=
+{
+todayStr()
+}
+
+                        disabled=
+{
+scheduleEditorIsLiveDay
+}
+
+                        onChange=
+{
+e => setScheduleEditorDate(e.target.value)
+}
+
                         className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-60"
                       />
-                      {scheduleEditorIsLiveDay && (
+                      
+{
+scheduleEditorIsLiveDay && (
                         <p className="text-[11px] text-muted-foreground mt-1">You're editing today's live plan — changes apply right away.</p>
-                      )}
+                      )
+}
+
                     </div>
-                    {/* Runs */}
+                    
+{
+/* Runs */
+}
+
                     <div>
                       <div className="flex items-center justify-between mb-2.5">
                         <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Runs</label>
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
-                            onClick={() => scheduleImportInputRef.current?.click()}
+                            onClick=
+{
+() => scheduleImportInputRef.current?.click()
+}
+
                             className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
                           >
                             <Upload className="w-3.5 h-3.5" /> Import Excel
                           </button>
                           <input
-                            ref={scheduleImportInputRef}
+                            ref=
+{
+scheduleImportInputRef
+}
+
                             type="file"
                             accept=".xlsx,.xls"
                             className="hidden"
-                            onChange={handleScheduleImportFile}
+                            onChange=
+{
+handleScheduleImportFile
+}
+
                           />
                           <button
                             type="button"
-                            onClick={() => {
-                              const newId = genId();
-                              setScheduleEditorRuns(prev => [...prev, { id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
-                              setScheduleEditorRunValues(prev => ({ ...prev, [newId]: { ...DEFAULT_VALUES } }));
-                            }}
+                            onClick=
+{
+() => 
+{
+
+                              const newId = genId()
+;
+
+                              setScheduleEditorRuns(prev => [...prev, 
+{
+ id: newId, brand: "", flavor: "", casesNeeded: 0 
+}
+])
+;
+
+                              setScheduleEditorRunValues(prev => (
+{
+ ...prev, [newId]: 
+{
+ ...DEFAULT_VALUES 
+}
+ 
+}
+))
+;
+
+                            
+}
+}
+
                             className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
                           >
                             <Plus className="w-3.5 h-3.5" /> Add Run
@@ -16928,58 +28134,174 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="space-y-3">
-                        {scheduleEditorRuns.map((run, idx) => (
-                          <div key={run.id} className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-2.5">
+                        
+{
+scheduleEditorRuns.map((run, idx) => (
+                          <div key=
+{
+run.id
+}
+ className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-2.5">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-semibold text-muted-foreground">Run {idx + 1}</span>
-                              {scheduleEditorRuns.length > 1 && (
+                              <span className="text-xs font-semibold text-muted-foreground">Run 
+{
+idx + 1
+}
+</span>
+                              
+{
+scheduleEditorRuns.length > 1 && (
                                 <button
                                   type="button"
-                                  onClick={() => setScheduleEditorRuns(prev => prev.filter((_, i) => i !== idx))}
+                                  onClick=
+{
+() => setScheduleEditorRuns(prev => prev.filter((_, i) => i !== idx))
+}
+
                                   className="text-muted-foreground/40 hover:text-destructive transition-colors"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
-                              )}
+                              )
+}
+
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Brand</label>
                                 <select
-                                  value={run.brand}
-                                  onChange={e => {
-                                    const brand = e.target.value;
-                                    setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, brand, flavor: "" } : r));
-                                    const profile = brand ? loadProfile(brand, "") : null;
-                                    setScheduleEditorRunValues(prev => ({
+                                  value=
+{
+run.brand
+}
+
+                                  onChange=
+{
+e => 
+{
+
+                                    const brand = e.target.value
+;
+
+                                    setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? 
+{
+ ...r, brand, flavor: "" 
+}
+ : r))
+;
+
+                                    const profile = brand ? loadProfile(brand, "") : null
+;
+
+                                    setScheduleEditorRunValues(prev => (
+{
+
                                       ...prev,
-                                      [run.id]: { ...(profile ?? DEFAULT_VALUES), casesNeeded: prev[run.id]?.casesNeeded ?? 0 },
-                                    }));
-                                  }}
+                                      [run.id]: 
+{
+ ...(profile ?? DEFAULT_VALUES), casesNeeded: prev[run.id]?.casesNeeded ?? 0 
+}
+,
+                                    
+}
+))
+;
+
+                                  
+}
+}
+
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                 >
                                   <option value="">— Brand —</option>
-                                  {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                                  
+{
+brands.map(b => <option key=
+{
+b
+}
+ value=
+{
+b
+}
+>
+{
+b
+}
+</option>)
+}
+
                                 </select>
                               </div>
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Flavor</label>
                                 <select
-                                  value={run.flavor}
-                                  onChange={e => {
-                                    const flavor = e.target.value;
-                                    setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, flavor } : r));
-                                    const profile = run.brand ? loadProfile(run.brand, flavor) : null;
-                                    if (profile) setScheduleEditorRunValues(prev => ({
+                                  value=
+{
+run.flavor
+}
+
+                                  onChange=
+{
+e => 
+{
+
+                                    const flavor = e.target.value
+;
+
+                                    setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? 
+{
+ ...r, flavor 
+}
+ : r))
+;
+
+                                    const profile = run.brand ? loadProfile(run.brand, flavor) : null
+;
+
+                                    if (profile) setScheduleEditorRunValues(prev => (
+{
+
                                       ...prev,
-                                      [run.id]: { ...profile, casesNeeded: prev[run.id]?.casesNeeded ?? 0 },
-                                    }));
-                                  }}
-                                  disabled={!run.brand}
+                                      [run.id]: 
+{
+ ...profile, casesNeeded: prev[run.id]?.casesNeeded ?? 0 
+}
+,
+                                    
+}
+))
+;
+
+                                  
+}
+}
+
+                                  disabled=
+{
+!run.brand
+}
+
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-40"
                                 >
                                   <option value="">— Flavor —</option>
-                                  {(brandFlavors[run.brand] ?? []).map(f => <option key={f} value={f}>{f}</option>)}
+                                  
+{
+(brandFlavors[run.brand] ?? []).map(f => <option key=
+{
+f
+}
+ value=
+{
+f
+}
+>
+{
+f
+}
+</option>)
+}
+
                                 </select>
                               </div>
                             </div>
@@ -16988,66 +28310,153 @@ export default function Home() {
                               <input
                                 type="number"
                                 min="0"
-                                value={run.casesNeeded || ""}
-                                onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, casesNeeded: Number(e.target.value) || 0 } : r))}
+                                value=
+{
+run.casesNeeded || ""
+}
+
+                                onChange=
+{
+e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? 
+{
+ ...r, casesNeeded: Number(e.target.value) || 0 
+}
+ : r))
+}
+
                                 placeholder="0"
                                 className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                               />
                             </div>
                             <button
                               type="button"
-                              onClick={() => { setScheduleAdvancedRunId(run.id); setScheduleView("advanced"); }}
+                              onClick=
+{
+() => 
+{
+ setScheduleAdvancedRunId(run.id)
+;
+ setScheduleView("advanced")
+;
+ 
+}
+}
+
                               className="flex items-center justify-between w-full pt-1 border-t border-border/30 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 hover:text-primary transition-colors"
                             >
-                              <span>Full Recipe &amp; Settings</span>
+                              <span>Full Recipe &amp
+;
+ Settings</span>
                               <ChevronLeft className="w-3 h-3 rotate-180" />
                             </button>
                           </div>
-                        ))}
+                        ))
+}
+
                       </div>
                     </div>
                   </div>
                   <div className="px-5 pt-3 pb-4 border-t border-border/40">
-                    {scheduleError && (
-                      <p className="text-xs text-destructive mb-3 text-center">{scheduleError}</p>
-                    )}
+                    
+{
+scheduleError && (
+                      <p className="text-xs text-destructive mb-3 text-center">
+{
+scheduleError
+}
+</p>
+                    )
+}
+
                     <div className="flex gap-3">
                       <button
                         type="button"
-                        onClick={() => setScheduleView("list")}
+                        onClick=
+{
+() => setScheduleView("list")
+}
+
                         className="flex-1 py-2 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40 transition-colors"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
-                        disabled={!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.length === 0 || scheduleEditorRuns.some(r => !r.brand)}
-                        onClick={saveScheduledDay}
+                        disabled=
+{
+!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.length === 0 || scheduleEditorRuns.some(r => !r.brand)
+}
+
+                        onClick=
+{
+saveScheduledDay
+}
+
                         className="flex-1 py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {scheduleSaving ? "Saving…" : "Save Schedule"}
+                        
+{
+scheduleSaving ? "Saving…" : "Save Schedule"
+}
+
                       </button>
                     </div>
                   </div>
                 </>
               ) : scheduleAdvancedRunId ? (
                 <>
-                  {/* ── Advanced Settings full-form view ──────────────────────── */}
+                  
+{
+/* ── Advanced Settings full-form view ──────────────────────── */
+}
+
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
-                    <button type="button" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                    <button type="button" onClick=
+{
+() => setScheduleView("editor")
+}
+ className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <h2 className="text-base font-bold flex-1 min-w-0 truncate">
-                      {(() => { const r = scheduleEditorRuns.find(r => r.id === scheduleAdvancedRunId); return r?.brand ? `${r.brand}${r.flavor ? ` / ${r.flavor}` : ""} — Settings` : "Advanced Settings"; })()}
+                      
+{
+(() => 
+{
+ const r = scheduleEditorRuns.find(r => r.id === scheduleAdvancedRunId)
+;
+ return r?.brand ? `${r.brand}${r.flavor ? ` / $
+{
+r.flavor
+}
+` : ""} — Settings` : "Advanced Settings"
+;
+ 
+}
+)()
+}
+
                     </h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <button type="button" onClick=
+{
+() => setShowScheduleDialog(false)
+}
+ className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 min-h-0 space-y-6">
-                    {/* ── Dough & Crust ──────────────────────────────────────── */}
+                    
+{
+/* ── Dough & Crust ──────────────────────────────────────── */
+}
+
                     <section>
-                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough &amp; Crust</h3>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough &amp
+;
+ Crust</h3>
                       <div className="grid grid-cols-2 gap-3">
-                        {([
+                        
+{
+([
                           ["targetDoughballWeight", "Target Ball Wt (oz)"],
                           ["casesPerSkid", "Cases / Skid"],
                           ["crustsPerCycle", "Crusts / Cycle"],
@@ -17062,268 +28471,884 @@ export default function Home() {
                           ["crustsPerCase", "Crusts / Case"],
                           ["doughBatchYield", "Dough Batch Yield"],
                         ] as [keyof FormValues, string][]).map(([field, label]) => (
-                          <div key={field}>
-                            <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">{label}</label>
+                          <div key=
+{
+field
+}
+>
+                            <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">
+{
+label
+}
+</label>
                             <input type="number" min="0"
-                              value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[field] as number) || ""}
-                              onChange={e => updateAdvancedField(scheduleAdvancedRunId!, field, Number(e.target.value) || 0)}
+                              value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[field] as number) || ""
+}
+
+                              onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, field, Number(e.target.value) || 0)
+}
+
                               placeholder="0"
                               className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                             />
                           </div>
-                        ))}
+                        ))
+}
+
                       </div>
                       <div className="mt-3">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
                         <select
-                          value={scheduleEditorRunValues[scheduleAdvancedRunId]?.dieType ?? ""}
-                          onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "dieType", e.target.value)}
+                          value=
+{
+scheduleEditorRunValues[scheduleAdvancedRunId]?.dieType ?? ""
+}
+
+                          onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, "dieType", e.target.value)
+}
+
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
-                          {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
+                          
+{
+dieTypes.map(d => <option key=
+{
+d
+}
+ value=
+{
+d
+}
+>
+{
+d
+}
+</option>)
+}
+
                         </select>
                       </div>
                     </section>
-                    {/* ── Dough Recipe ───────────────────────────────────────── */}
+                    
+{
+/* ── Dough Recipe ───────────────────────────────────────── */
+}
+
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough Recipe</h3>
                       <div className="mb-2">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Recipe Name</label>
                         <select
-                          value={scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipeName ?? ""}
-                          onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "doughRecipeName", e.target.value)}
+                          value=
+{
+scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipeName ?? ""
+}
+
+                          onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, "doughRecipeName", e.target.value)
+}
+
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
-                          {doughRecipeNames.map(n => <option key={n} value={n}>{n}</option>)}
+                          
+{
+doughRecipeNames.map(n => <option key=
+{
+n
+}
+ value=
+{
+n
+}
+>
+{
+n
+}
+</option>)
+}
+
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        {(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).map((row, ri) => (
-                          <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
-                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
+                        
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).map((row, ri) => (
+                          <div key=
+{
+ri
+}
+ className="flex gap-2 items-center">
+                            <select value=
+{
+row.ingredient
+}
+
+                              onChange=
+{
+e => 
+{
+ const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]
+;
+ rows[ri] = 
+{
+ ...rows[ri], ingredient: e.target.value 
+}
+;
+ updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows)
+;
+ 
+}
+}
+
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
-                              {doughIngredients.map(i => <option key={i} value={i}>{i}</option>)}
+                              
+{
+doughIngredients.map(i => <option key=
+{
+i
+}
+ value=
+{
+i
+}
+>
+{
+i
+}
+</option>)
+}
+
                             </select>
-                            <input type="number" min="0" step="0.1" value={row.lbs || ""}
-                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
+                            <input type="number" min="0" step="0.1" value=
+{
+row.lbs || ""
+}
+
+                              onChange=
+{
+e => 
+{
+ const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]
+;
+ rows[ri] = 
+{
+ ...rows[ri], lbs: Number(e.target.value) || 0 
+}
+;
+ updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows)
+;
+ 
+}
+}
+
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                             />
-                            <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", (scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).filter((_, i) => i !== ri))} className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
+                            <button type="button" onClick=
+{
+() => updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", (scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).filter((_, i) => i !== ri))
+}
+ className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
                           </div>
-                        ))}
-                        <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []), { ingredient: "", lbs: 0 }])} className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
+                        ))
+}
+
+                        <button type="button" onClick=
+{
+() => updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []), 
+{
+ ingredient: "", lbs: 0 
+}
+])
+}
+ className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
                       </div>
                     </section>
-                    {/* ── Applicators & Sauce ────────────────────────────────── */}
+                    
+{
+/* ── Applicators & Sauce ────────────────────────────────── */
+}
+
                     <section>
-                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Applicators &amp; Sauce</h3>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Applicators &amp
+;
+ Sauce</h3>
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Sauce Oz / Pizza</label>
-                            <input type="number" min="0" step="0.1" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.sauceOzPerPizza || ""} onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "sauceOzPerPizza", Number(e.target.value) || 0)} placeholder="0" className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors" />
+                            <input type="number" min="0" step="0.1" value=
+{
+scheduleEditorRunValues[scheduleAdvancedRunId]?.sauceOzPerPizza || ""
+}
+ onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, "sauceOzPerPizza", Number(e.target.value) || 0)
+}
+ placeholder="0" className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors" />
                           </div>
                           <div>
                             <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Sauce Barrel (lbs)</label>
-                            <input type="number" min="0" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.sauceBarrelLbs || ""} onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "sauceBarrelLbs", Number(e.target.value) || 0)} placeholder="0" className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors" />
+                            <input type="number" min="0" value=
+{
+scheduleEditorRunValues[scheduleAdvancedRunId]?.sauceBarrelLbs || ""
+}
+ onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, "sauceBarrelLbs", Number(e.target.value) || 0)
+}
+ placeholder="0" className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors" />
                           </div>
                         </div>
-                        {([1, 2, 3, 4] as const).map(n => (
-                          <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Applicator {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
-                              onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}Type` as keyof FormValues, e.target.value)}
+                        
+{
+([1, 2, 3, 4] as const).map(n => (
+                          <div key=
+{
+n
+}
+ className="rounded-md bg-muted/20 p-2.5 space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Applicator 
+{
+n
+}
+</p>
+                            <select value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""
+}
+
+                              onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}Type` as keyof FormValues, e.target.value)
+}
+
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
-                              {ingredientTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                              
+{
+ingredientTypeOptions.map(t => <option key=
+{
+t
+}
+ value=
+{
+t
+}
+>
+{
+t
+}
+</option>)
+}
+
                             </select>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
-                                <input type="number" min="0" step="0.1" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}OzPerPizza` as keyof FormValues] as number) || ""}
-                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}OzPerPizza` as keyof FormValues, Number(e.target.value) || 0)}
+                                <input type="number" min="0" step="0.1" value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}OzPerPizza` as keyof FormValues] as number) || ""
+}
+
+                                  onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}OzPerPizza` as keyof FormValues, Number(e.target.value) || 0)
+}
+
                                   placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                                 />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Batch (lbs)</label>
-                                <input type="number" min="0" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}BatchLbs` as keyof FormValues] as number) || ""}
-                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}BatchLbs` as keyof FormValues, Number(e.target.value) || 0)}
+                                <input type="number" min="0" value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}BatchLbs` as keyof FormValues] as number) || ""
+}
+
+                                  onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}BatchLbs` as keyof FormValues, Number(e.target.value) || 0)
+}
+
                                   placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                                 />
                               </div>
                             </div>
                           </div>
-                        ))}
-                        {([1, 2] as const).map(n => (
-                          <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pepperoni {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
-                              onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Type` as keyof FormValues, e.target.value)}
+                        ))
+}
+
+                        
+{
+([1, 2] as const).map(n => (
+                          <div key=
+{
+n
+}
+ className="rounded-md bg-muted/20 p-2.5 space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pepperoni 
+{
+n
+}
+</p>
+                            <select value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""
+}
+
+                              onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Type` as keyof FormValues, e.target.value)
+}
+
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
-                              {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
+                              
+{
+pepTypes.map(p => <option key=
+{
+p
+}
+ value=
+{
+p
+}
+>
+{
+p
+}
+</option>)
+}
+
                             </select>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Sticks</label>
-                                <input type="number" min="0" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Sticks` as keyof FormValues] as number) || ""}
-                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Sticks` as keyof FormValues, Number(e.target.value) || 0)}
+                                <input type="number" min="0" value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Sticks` as keyof FormValues] as number) || ""
+}
+
+                                  onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Sticks` as keyof FormValues, Number(e.target.value) || 0)
+}
+
                                   placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                                 />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
-                                <input type="number" min="0" step="0.1" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}OzPerPizza` as keyof FormValues] as number) || ""}
-                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}OzPerPizza` as keyof FormValues, Number(e.target.value) || 0)}
+                                <input type="number" min="0" step="0.1" value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}OzPerPizza` as keyof FormValues] as number) || ""
+}
+
+                                  onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}OzPerPizza` as keyof FormValues, Number(e.target.value) || 0)
+}
+
                                   placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                                 />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Batch (lbs)</label>
-                                <input type="number" min="0" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}BatchLbs` as keyof FormValues] as number) || ""}
-                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}BatchLbs` as keyof FormValues, Number(e.target.value) || 0)}
+                                <input type="number" min="0" value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}BatchLbs` as keyof FormValues] as number) || ""
+}
+
+                                  onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}BatchLbs` as keyof FormValues, Number(e.target.value) || 0)
+}
+
                                   placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                                 />
                               </div>
                             </div>
                           </div>
-                        ))}
+                        ))
+}
+
                       </div>
                     </section>
-                    {/* ── Cheese / Mix Recipes (App 1–4) ─────────────────────── */}
+                    
+{
+/* ── Cheese / Mix Recipes (App 1–4) ─────────────────────── */
+}
+
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Cheese / Mix Recipes</h3>
                       <div className="space-y-4">
-                        {([1, 2, 3, 4] as const).map(n => {
-                          const recipeField = `app${n}CheeseRecipe` as keyof FormValues;
-                          const nameField = `app${n}CheeseRecipeName` as keyof FormValues;
-                          const rows = (scheduleEditorRunValues[scheduleAdvancedRunId]?.[recipeField] ?? []) as {ingredient: string; lbs: number}[];
+                        
+{
+([1, 2, 3, 4] as const).map(n => 
+{
+
+                          const recipeField = `app${n}CheeseRecipe` as keyof FormValues
+;
+
+                          const nameField = `app${n}CheeseRecipeName` as keyof FormValues
+;
+
+                          const rows = (scheduleEditorRunValues[scheduleAdvancedRunId]?.[recipeField] ?? []) as 
+{
+ingredient: string
+;
+ lbs: number
+}
+[]
+;
+
                           return (
-                            <div key={n}>
-                              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">App {n} Recipe</p>
+                            <div key=
+{
+n
+}
+>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">App 
+{
+n
+}
+ Recipe</p>
                               <div className="mb-2">
-                                <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
-                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, nameField, e.target.value)}
+                                <select value=
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""
+}
+
+                                  onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, nameField, e.target.value)
+}
+
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                 >
                                   <option value="">— Recipe Name —</option>
-                                  {cheeseRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
+                                  
+{
+cheeseRecipeNames.map(r => <option key=
+{
+r
+}
+ value=
+{
+r
+}
+>
+{
+r
+}
+</option>)
+}
+
                                 </select>
                               </div>
                               <div className="space-y-1.5">
-                                {rows.map((row, ri) => (
-                                  <div key={ri} className="flex gap-2 items-center">
-                                    <select value={row.ingredient}
-                                      onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
+                                
+{
+rows.map((row, ri) => (
+                                  <div key=
+{
+ri
+}
+ className="flex gap-2 items-center">
+                                    <select value=
+{
+row.ingredient
+}
+
+                                      onChange=
+{
+e => 
+{
+ const next = [...rows]
+;
+ next[ri] = 
+{
+ ...next[ri], ingredient: e.target.value 
+}
+;
+ updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next)
+;
+ 
+}
+}
+
                                       className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                     >
                                       <option value="">— Ingredient —</option>
-                                      {cheeseIngredients.map(i => <option key={i} value={i}>{i}</option>)}
+                                      
+{
+cheeseIngredients.map(i => <option key=
+{
+i
+}
+ value=
+{
+i
+}
+>
+{
+i
+}
+</option>)
+}
+
                                     </select>
-                                    <input type="number" min="0" step="0.1" value={row.lbs || ""}
-                                      onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
+                                    <input type="number" min="0" step="0.1" value=
+{
+row.lbs || ""
+}
+
+                                      onChange=
+{
+e => 
+{
+ const next = [...rows]
+;
+ next[ri] = 
+{
+ ...next[ri], lbs: Number(e.target.value) || 0 
+}
+;
+ updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next)
+;
+ 
+}
+}
+
                                       placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                                     />
-                                    <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, recipeField, rows.filter((_, i) => i !== ri))} className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
+                                    <button type="button" onClick=
+{
+() => updateAdvancedArray(scheduleAdvancedRunId!, recipeField, rows.filter((_, i) => i !== ri))
+}
+ className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
                                   </div>
-                                ))}
-                                <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, recipeField, [...rows, { ingredient: "", lbs: 0 }])} className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
+                                ))
+}
+
+                                <button type="button" onClick=
+{
+() => updateAdvancedArray(scheduleAdvancedRunId!, recipeField, [...rows, 
+{
+ ingredient: "", lbs: 0 
+}
+])
+}
+ className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
                               </div>
                             </div>
-                          );
-                        })}
+                          )
+;
+
+                        
+}
+)
+}
+
                       </div>
                     </section>
-                    {/* ── Frontline Recipe ───────────────────────────────────── */}
+                    
+{
+/* ── Frontline Recipe ───────────────────────────────────── */
+}
+
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Frontline Recipe</h3>
                       <div className="mb-2">
-                        <select value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
-                          onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "frontlineRecipeName", e.target.value)}
+                        <select value=
+{
+scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""
+}
+
+                          onChange=
+{
+e => updateAdvancedField(scheduleAdvancedRunId!, "frontlineRecipeName", e.target.value)
+}
+
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
-                          {frontlineRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
+                          
+{
+frontlineRecipeNames.map(r => <option key=
+{
+r
+}
+ value=
+{
+r
+}
+>
+{
+r
+}
+</option>)
+}
+
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        {(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).map((row, ri) => (
-                          <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
-                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
+                        
+{
+(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).map((row, ri) => (
+                          <div key=
+{
+ri
+}
+ className="flex gap-2 items-center">
+                            <select value=
+{
+row.ingredient
+}
+
+                              onChange=
+{
+e => 
+{
+ const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]
+;
+ rows[ri] = 
+{
+ ...rows[ri], ingredient: e.target.value 
+}
+;
+ updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows)
+;
+ 
+}
+}
+
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
-                              {frontlineIngredients.map(i => <option key={i} value={i}>{i}</option>)}
+                              
+{
+frontlineIngredients.map(i => <option key=
+{
+i
+}
+ value=
+{
+i
+}
+>
+{
+i
+}
+</option>)
+}
+
                             </select>
-                            <input type="number" min="0" step="0.1" value={row.lbs || ""}
-                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
+                            <input type="number" min="0" step="0.1" value=
+{
+row.lbs || ""
+}
+
+                              onChange=
+{
+e => 
+{
+ const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]
+;
+ rows[ri] = 
+{
+ ...rows[ri], lbs: Number(e.target.value) || 0 
+}
+;
+ updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows)
+;
+ 
+}
+}
+
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                             />
-                            <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", (scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).filter((_, i) => i !== ri))} className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
+                            <button type="button" onClick=
+{
+() => updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", (scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).filter((_, i) => i !== ri))
+}
+ className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
                           </div>
-                        ))}
-                        <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []), { ingredient: "", lbs: 0 }])} className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
+                        ))
+}
+
+                        <button type="button" onClick=
+{
+() => updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []), 
+{
+ ingredient: "", lbs: 0 
+}
+])
+}
+ className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
                       </div>
                     </section>
                   </div>
                   <div className="px-5 py-4 border-t border-border/40">
-                    <button type="button" onClick={() => setScheduleView("editor")} className="w-full py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
+                    <button type="button" onClick=
+{
+() => setScheduleView("editor")
+}
+ className="w-full py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
                       Done — Back to Run List
                     </button>
                   </div>
                 </>
-              ) : null}
+              ) : null
+}
+
             </div>
           </div>
-        )}
+        )
+}
 
 
       </div>
     </div>
-  );
+  )
+;
+
 
   return (
-    <HomeCtx.Provider value={homeCtxValue}>
-      <HomeTabCtx.Provider value={homeTabCtxValue}>
+    <HomeCtx.Provider value=
+{
+homeCtxValue
+}
+>
+      <HomeTabCtx.Provider value=
+{
+homeTabCtxValue
+}
+>
       <LiveRunProvider
-        v={v}
-        ve={ve}
-        runStatus={runStatus}
-        currentRun={currentRun}
-        currentRunId={currentRunId}
-        form={form}
-        dayState={dayState}
-        doughSubTab={doughSubTab}
-        upcomingRunLabels={upcomingRunLabels}
-        prefs={me?.notificationPrefs}
-        screenMode={screenMode}
-        externalAutoSuppressRef={autoSuppressUntilRef}
-        onPackagingProgressAutoAdvance={persistAutomaticPackagingProgress}
-        machine={{
+        v=
+{
+v
+}
+
+        ve=
+{
+ve
+}
+
+        runStatus=
+{
+runStatus
+}
+
+        currentRun=
+{
+currentRun
+}
+
+        currentRunId=
+{
+currentRunId
+}
+
+        form=
+{
+form
+}
+
+        dayState=
+{
+dayState
+}
+
+        doughSubTab=
+{
+doughSubTab
+}
+
+        upcomingRunLabels=
+{
+upcomingRunLabels
+}
+
+        prefs=
+{
+me?.notificationPrefs
+}
+
+        screenMode=
+{
+screenMode
+}
+
+        externalAutoSuppressRef=
+{
+autoSuppressUntilRef
+}
+
+        onPackagingProgressAutoAdvance=
+{
+persistAutomaticPackagingProgress
+}
+
+        machine=
+{
+{
+
           spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
           hopperSec: Number(v.hopperSec) || 0,
-        }}
-        autoTrackBlocked={autoTrackBlocked}
-        autoTrackBlockedRef={foregroundSyncBarrierRef}
-        autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
+        
+}
+}
+
+        autoTrackBlocked=
+{
+autoTrackBlocked
+}
+
+        autoTrackBlockedRef=
+{
+foregroundSyncBarrierRef
+}
+
+        autoTrackRebaseAfterBlock=
+{
+autoTrackRebaseAfterBlock
+}
+
       >
-        {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
+        
+{
+/* Always-mounted: resets prepPhase once per run at depletion handoff */
+}
+
         <LiveRunHandoffGuard />
-        {screenMode ? <ScreenModeView /> : mainContent}
+        
+{
+screenMode ? <ScreenModeView /> : mainContent
+}
+
       </LiveRunProvider>
       </HomeTabCtx.Provider>
     </HomeCtx.Provider>
-  );
+  )
+;
+
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extracted sub-components — co-located with Home
@@ -17331,13 +29356,23 @@ export default function Home() {
 // uses HomeCtx because it must surface the short-lived pause decision overlay.
 // ═══════════════════════════════════════════════════════════════════════════
 
-function ScreenModeView() {
-  const {
+function ScreenModeView() 
+{
+
+  const 
+{
+
     currentRun, dayState, doughSubTab, nextRunDieType, runStatus,
     scheduledDays, screenMode, v, ve,
-  } = useHomeTabCtx();
+  
+}
+ = useHomeTabCtx()
+;
 
-  const {
+
+  const 
+{
+
     calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
     casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
@@ -17345,16 +29380,34 @@ function ScreenModeView() {
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
-  } = useLiveRun();
+  
+}
+ = useLiveRun()
+;
 
-  if (screenMode === "dashboard") {
-    const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400";
-    const paceLabel = calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE";
-    const dashDowntimeSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-    const dashMinutesDelta = calc.ppm > 0 && calc.paceDelta !== 0 ? Math.round(Math.abs(calc.paceDelta) * v.pizzasPerCase / calc.ppm) : 0;
+
+  if (screenMode === "dashboard") 
+{
+
+    const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400"
+;
+
+    const paceLabel = calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE"
+;
+
+    const dashDowntimeSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0)
+;
+
+    const dashMinutesDelta = calc.ppm > 0 && calc.paceDelta !== 0 ? Math.round(Math.abs(calc.paceDelta) * v.pizzasPerCase / calc.ppm) : 0
+;
+
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-6 gap-6 select-none">
-        {/* Top bar */}
+        
+{
+/* Top bar */
+}
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
@@ -17362,209 +29415,579 @@ function ScreenModeView() {
             </div>
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Production Dashboard</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <span className="text-2xl font-black tabular-nums">
+{
+fmtClock(nowTime.getTime())
+}
+</span>
         </div>
 
-        {/* Run name + status */}
+        
+{
+/* Run name + status */
+}
+
         <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-5xl font-black tracking-tight break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
-          {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
-          {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
-          {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
-          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
+          <h1 className="text-5xl font-black tracking-tight break-words min-w-0">
+{
+currentRun ? runLabel(currentRun) : "No Active Run"
+}
+</h1>
+          
+{
+runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>
+}
+
+          
+{
+runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>
+}
+
+          
+{
+runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>
+}
+
+          
+{
+v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">
+{
+v.dieType
+}
+</span>
+}
+
         </div>
 
-        {/* Main stats row */}
+        
+{
+/* Main stats row */
+}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 flex-1">
-          {/* PPM */}
+          
+{
+/* PPM */
+}
+
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Pizzas / Min</p>
-            <p className="text-8xl font-black tabular-nums text-primary">{calc.ppm > 0 ? fmtComma(calc.ppm) : "—"}</p>
+            <p className="text-8xl font-black tabular-nums text-primary">
+{
+calc.ppm > 0 ? fmtComma(calc.ppm) : "—"
+}
+</p>
           </div>
 
-          {/* Cases progress */}
+          
+{
+/* Cases progress */
+}
+
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cases Done</p>
             <p className="text-7xl font-black tabular-nums">
-              {fmtComma(calc.casesCompleted)}
-              <span className="text-3xl text-muted-foreground"> / {fmtComma(v.casesNeeded)}</span>
+              
+{
+fmtComma(calc.casesCompleted)
+}
+
+              <span className="text-3xl text-muted-foreground"> / 
+{
+fmtComma(v.casesNeeded)
+}
+</span>
             </p>
             <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
-              <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
-              {casesFreezerPct > 0 && (
-                <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
-              )}
+              <div className="h-full bg-primary transition-all duration-1000" style=
+{
+{
+ width: `${casesPct * 100}%` 
+}
+}
+ />
+              
+{
+casesFreezerPct > 0 && (
+                <div className="h-full bg-sky-400/40 transition-all duration-1000" style=
+{
+{
+ width: `${casesFreezerPct * 100}%` 
+}
+}
+ />
+              )
+}
+
             </div>
             <div className="flex items-center gap-6 flex-wrap">
               <p className="text-lg font-semibold text-muted-foreground">
-                {Math.round(casesPct * 100)}% complete
-                {calc.casesInFreezer > 0 && (
-                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer ({Math.round(casesPctWithFreezer * 100)}%)</span>
-                )}
+                
+{
+Math.round(casesPct * 100)
+}
+% complete
+                
+{
+calc.casesInFreezer > 0 && (
+                  <span className="text-sky-400"> · +
+{
+fmtComma(calc.casesInFreezer)
+}
+ in freezer (
+{
+Math.round(casesPctWithFreezer * 100)
+}
+%)</span>
+                )
+}
+
               </p>
-              {v.casesPerSkid > 0 && v.casesNeeded > 0 && (
+              
+{
+v.casesPerSkid > 0 && v.casesNeeded > 0 && (
                 <p className="text-lg font-semibold text-muted-foreground">
-                  {v.skidsCompleted} / {Math.floor(v.casesNeeded / v.casesPerSkid)} skids
+                  
+{
+v.skidsCompleted
+}
+ / 
+{
+Math.floor(v.casesNeeded / v.casesPerSkid)
+}
+ skids
                 </p>
-              )}
+              )
+}
+
             </div>
           </div>
 
-          {/* Pace + time */}
+          
+{
+/* Pace + time */
+}
+
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Pace</p>
-            <p className={`text-6xl font-black ${paceColor}`}>{paceLabel}</p>
-            {calc.paceDelta !== 0 && (
+            <p className=
+{
+`text-6xl font-black ${paceColor}`
+}
+>
+{
+paceLabel
+}
+</p>
+            
+{
+calc.paceDelta !== 0 && (
               <p className="text-2xl font-bold text-muted-foreground">
-                {calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))} cases
-                {dashMinutesDelta > 0 && <span className="text-lg ml-2 opacity-70">(~{fmtMins(dashMinutesDelta)})</span>}
+                
+{
+calc.paceDelta > 0 ? "+" : ""
+}
+{
+fmtComma(Math.abs(calc.paceDelta))
+}
+ cases
+                
+{
+dashMinutesDelta > 0 && <span className="text-lg ml-2 opacity-70">(~
+{
+fmtMins(dashMinutesDelta)
+}
+)</span>
+}
+
               </p>
-            )}
-            {dashDowntimeSec > 0 && (
+            )
+}
+
+            
+{
+dashDowntimeSec > 0 && (
               <p className="text-lg font-semibold text-red-400/80">
-                ↓ {fmtTime(dashDowntimeSec)} downtime
+                ↓ 
+{
+fmtTime(dashDowntimeSec)
+}
+ downtime
               </p>
-            )}
-            {calc.adjustedTimeSec > 0 && (
+            )
+}
+
+            
+{
+calc.adjustedTimeSec > 0 && (
               <div className="mt-2 pt-4 border-t border-border">
                 <p className="text-sm text-muted-foreground uppercase tracking-wider font-semibold mb-1">Est. Finish</p>
-                <p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p>
-                <p className="text-lg text-muted-foreground">{fmtTime(calc.adjustedTimeSec)} remaining</p>
+                <p className="text-3xl font-black tabular-nums">
+{
+fmtClock(Date.now() + calc.adjustedTimeSec * 1000)
+}
+</p>
+                <p className="text-lg text-muted-foreground">
+{
+fmtTime(calc.adjustedTimeSec)
+}
+ remaining</p>
               </div>
-            )}
+            )
+}
+
           </div>
         </div>
 
-        {/* Next run footer */}
-        {dayState.runs[dayState.currentIndex + 1] && (
+        
+{
+/* Next run footer */
+}
+
+        
+{
+dayState.runs[dayState.currentIndex + 1] && (
           <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-muted/20 border border-border/50 text-muted-foreground">
             <ArrowRight className="w-4 h-4 shrink-0" />
-            <span className="text-sm font-semibold min-w-0 truncate">Next: {runLabel(dayState.runs[dayState.currentIndex + 1])}</span>
-            {nextRunDieType && nextRunDieType !== v.dieType && (
-              <span className="ml-2 text-xs font-bold text-amber-400">⚠ Die change → {nextRunDieType}</span>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
+            <span className="text-sm font-semibold min-w-0 truncate">Next: 
+{
+runLabel(dayState.runs[dayState.currentIndex + 1])
+}
+</span>
+            
+{
+nextRunDieType && nextRunDieType !== v.dieType && (
+              <span className="ml-2 text-xs font-bold text-amber-400">⚠ Die change → 
+{
+nextRunDieType
+}
+</span>
+            )
+}
 
-  if (screenMode === "dough") {
-    const batchUrgent = secUntilNextBatch > 0 && secUntilNextBatch < 120;
-    const batchDue = secUntilNextBatch <= 0 || (elapsedBatchSec > 0 && secUntilNextBatch < 5);
-    const mm = Math.floor(secUntilNextBatch / 60);
-    const ss = Math.floor(secUntilNextBatch % 60);
+          </div>
+        )
+}
+
+      </div>
+    )
+;
+
+  
+}
+
+
+  if (screenMode === "dough") 
+{
+
+    const batchUrgent = secUntilNextBatch > 0 && secUntilNextBatch < 120
+;
+
+    const batchDue = secUntilNextBatch <= 0 || (elapsedBatchSec > 0 && secUntilNextBatch < 5)
+;
+
+    const mm = Math.floor(secUntilNextBatch / 60)
+;
+
+    const ss = Math.floor(secUntilNextBatch % 60)
+;
+
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
-        {/* Top bar */}
+        
+{
+/* Top bar */
+}
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Droplets className="w-6 h-6 text-primary" />
             <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Dough Station</span>
           </div>
-          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+          <span className="text-2xl font-black tabular-nums">
+{
+fmtClock(nowTime.getTime())
+}
+</span>
         </div>
 
-        <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+        <h1 className="text-4xl font-black break-words min-w-0">
+{
+currentRun ? runLabel(currentRun) : "No Active Run"
+}
+</h1>
 
-        {/* Big countdown */}
-        {runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
-          <div className={`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`}>
-            <p className={`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`}>
-              {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
+        
+{
+/* Big countdown */
+}
+
+        
+{
+runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
+          <div className=
+{
+`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`
+}
+>
+            <p className=
+{
+`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`
+}
+>
+              
+{
+batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"
+}
+
             </p>
-            <p className={`text-[10rem] font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`}>
-              {batchDue ? "GO" : `${fmtCountdownParts(mm, ss)}`}
+            <p className=
+{
+`text-[10rem] font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`
+}
+>
+              
+{
+batchDue ? "GO" : `${fmtCountdownParts(mm, ss)}`
+}
+
             </p>
             <div className="flex items-center gap-8 text-center mt-4">
               <div>
                 <p className="text-sm text-muted-foreground uppercase tracking-wider">Current Batch</p>
-                <p className="text-5xl font-black tabular-nums">{currentBatchNum + 1}</p>
+                <p className="text-5xl font-black tabular-nums">
+{
+currentBatchNum + 1
+}
+</p>
               </div>
-              {totalBatchesNeeded > 0 && (
+              
+{
+totalBatchesNeeded > 0 && (
                 <>
                   <p className="text-4xl text-muted-foreground font-light">of</p>
                   <div>
                     <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Batches</p>
-                    <p className="text-5xl font-black tabular-nums">{totalBatchesNeeded}</p>
+                    <p className="text-5xl font-black tabular-nums">
+{
+totalBatchesNeeded
+}
+</p>
                   </div>
                 </>
-              )}
+              )
+}
+
             </div>
             <div className="flex items-center gap-6 text-muted-foreground">
               <div className="text-center">
                 <p className="text-xs uppercase tracking-wider mb-1">Time Per Batch</p>
-                <p className="text-2xl font-bold">{fmtTime(calc.timePerBatchSec)}</p>
+                <p className="text-2xl font-bold">
+{
+fmtTime(calc.timePerBatchSec)
+}
+</p>
               </div>
-              {calc.perBatch > 0 && (
+              
+{
+calc.perBatch > 0 && (
                 <div className="text-center">
                   <p className="text-xs uppercase tracking-wider mb-1">Yield / Batch</p>
-                  <p className="text-2xl font-bold">{fmtComma(Math.round(calc.perBatch))}</p>
+                  <p className="text-2xl font-bold">
+{
+fmtComma(Math.round(calc.perBatch))
+}
+</p>
                 </div>
-              )}
+              )
+}
+
             </div>
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center rounded-3xl border border-border bg-card">
             <p className="text-2xl text-muted-foreground">
-              {doughSubTab === "crusts" ? "Crust run — no dough batches to mix" : runStatus === "pending" ? "Run not started" : runStatus === "ended" ? "Run ended" : "Enter line speed to see batch timing"}
+              
+{
+doughSubTab === "crusts" ? "Crust run — no dough batches to mix" : runStatus === "pending" ? "Run not started" : runStatus === "ended" ? "Run ended" : "Enter line speed to see batch timing"
+}
+
             </p>
           </div>
-        )}
+        )
+}
 
-        {/* Dough stats row */}
+
+{
+/* Dough stats row */
+}
+
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="rounded-2xl bg-card border border-border p-4 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{doughSubTab === "crusts" ? "Stacks Ready" : "Trays on Line"}</p>
-            <p className="text-3xl font-black tabular-nums">{v.traysOnLine > 0 ? v.traysOnLine : "—"}</p>
-            {calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.traysNeeded, 0)} still needed <span className="opacity-60">(net)</span></p>}
+            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
+{
+doughSubTab === "crusts" ? "Stacks Ready" : "Trays on Line"
+}
+</p>
+            <p className="text-3xl font-black tabular-nums">
+{
+v.traysOnLine > 0 ? v.traysOnLine : "—"
+}
+</p>
+            
+{
+calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ 
+{
+fmtNum(calc.traysNeeded, 0)
+}
+ still needed <span className="opacity-60">(net)</span></p>
+}
+
           </div>
-          {doughSubTab !== "crusts" && (
+          
+{
+doughSubTab !== "crusts" && (
             <div className="rounded-2xl bg-card border border-border p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batches Ready</p>
-              <p className="text-3xl font-black tabular-nums">{v.batchesReady}</p>
-              {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} still needed <span className="opacity-60">(net)</span></p>}
+              <p className="text-3xl font-black tabular-nums">
+{
+v.batchesReady
+}
+</p>
+              
+{
+calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ 
+{
+fmtNum(calc.batchesNeeded, 1)
+}
+ still needed <span className="opacity-60">(net)</span></p>
+}
+
             </div>
-          )}
-          {v.doughBatchYield > 0 && doughSubTab !== "crusts" && (
+          )
+}
+
+          
+{
+v.doughBatchYield > 0 && doughSubTab !== "crusts" && (
             <div className="rounded-2xl bg-card border border-border p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batch Yield</p>
-              <p className="text-3xl font-black tabular-nums">{fmtComma(v.doughBatchYield)}</p>
+              <p className="text-3xl font-black tabular-nums">
+{
+fmtComma(v.doughBatchYield)
+}
+</p>
               <p className="text-sm text-muted-foreground">doughballs</p>
             </div>
-          )}
-          {v.casesNeeded > 0 && (
+          )
+}
+
+          
+{
+v.casesNeeded > 0 && (
             <div className="rounded-2xl bg-card border border-border p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Cases Done</p>
-              <p className="text-3xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
-              <p className="text-sm text-muted-foreground">/ {fmtComma(v.casesNeeded)}</p>
-              {calc.casesInFreezer > 0 && (
-                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</p>
-              )}
+              <p className="text-3xl font-black tabular-nums">
+{
+fmtComma(calc.casesCompleted)
+}
+</p>
+              <p className="text-sm text-muted-foreground">/ 
+{
+fmtComma(v.casesNeeded)
+}
+</p>
+              
+{
+calc.casesInFreezer > 0 && (
+                <p className="text-sm font-semibold text-sky-400 tabular-nums">+
+{
+fmtComma(calc.casesInFreezer)
+}
+ in freezer</p>
+              )
+}
+
             </div>
-          )}
+          )
+}
+
         </div>
       </div>
-    );
-  }
+    )
+;
 
-  if (screenMode === "frontline") {
-    const s = computeSummaryStats(v);
-    const items: { label: string; value: string; sub?: string }[] = [];
-    if (s.sauceBatches > 0) {
-      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-      items.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
-    }
-    if (s.app1Type) {
-      const isMix = s.app1Type.trim().toLowerCase().includes("mix");
+  
+}
+
+
+  if (screenMode === "frontline") 
+{
+
+    const s = computeSummaryStats(v)
+;
+
+    const items: 
+{
+ label: string
+;
+ value: string
+;
+ sub?: string 
+}
+[] = []
+;
+
+    if (s.sauceBatches > 0) 
+{
+
+      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel)
+;
+
+      items.push(
+{
+ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" 
+}
+)
+;
+
+    
+}
+
+    if (s.app1Type) 
+{
+
+      const isMix = s.app1Type.trim().toLowerCase().includes("mix")
+;
+
       if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0)
-        items.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app1Lbs, 1) + " lbs total" });
-    }
-    if (s.app2Type) {
-      const isMix = s.app2Type.trim().toLowerCase().includes("mix");
+        items.push(
+{
+ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app1Lbs, 1) + " lbs total" 
+}
+)
+;
+
+    
+}
+
+    if (s.app2Type) 
+{
+
+      const isMix = s.app2Type.trim().toLowerCase().includes("mix")
+;
+
       if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0)
-        items.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" });
-    }
+        items.push(
+{
+ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" 
+}
+)
+;
+
+    
+}
+
     // Pep applicators sit between App 2 and App 3, matching the physical line
     // order (and the Run/Frontline tabs' card order).
     const pep1Label = v.pep1Combined === true ? "Pep 1 & 2" : "Pep 1";
@@ -18328,25 +30751,62 @@ function FloorModeView() {
 //   lower: Math.max(0, nowMs - pausedAt)  — future pausedAt adds nothing
 //   upper: Math.min(runAge, …)            — addend never exceeds the run's age
 // This bounds the displayed total to [runAge, 2 × runAge] regardless of clock skew.
-export function ElapsedTimeBadge({
+export function ElapsedTimeBadge(
+{
+
   nowMs,
   startedAt,
   pausedAt,
   "data-testid": testId,
   className,
-}: {
-  nowMs: number;
-  startedAt: number;
-  pausedAt?: number | null;
-  "data-testid"?: string;
-  className?: string;
-}) {
-  const runAge = nowMs - startedAt;
+}
+: 
+{
+
+  nowMs: number
+;
+
+  startedAt: number
+;
+
+  pausedAt?: number | null
+;
+
+  "data-testid"?: string
+;
+
+  className?: string
+;
+
+}
+) 
+{
+
+  const runAge = nowMs - startedAt
+;
+
   const addend = pausedAt != null
     ? Math.min(runAge, Math.max(0, nowMs - pausedAt))
-    : 0;
-  return <span data-testid={testId} className={className}>{fmtElapsed(runAge + addend)}</span>;
+    : 0
+;
+
+  return <span data-testid=
+{
+testId
 }
+ className=
+{
+className
+}
+>
+{
+fmtElapsed(runAge + addend)
+}
+</span>
+;
+
+}
+
 
 /**
  * SetupMathConflictBadge — aggregate math conflicts for the Setup header.
@@ -18355,37 +30815,80 @@ export function ElapsedTimeBadge({
  * slot are reflected immediately, including in-place recipe-row updates from
  * react-hook-form.
  */
-export function SetupMathConflictBadge({
+export function SetupMathConflictBadge(
+{
+
   slots,
-}: {
-  slots: Array<{
-    rows?: RecipeRow[];
-    ozPerPizza?: number;
-  }>;
-}) {
+}
+: 
+{
+
+  slots: Array<
+{
+
+    rows?: RecipeRow[]
+;
+
+    ozPerPizza?: number
+;
+
+  
+}
+>
+;
+
+}
+) 
+{
+
   const conflictCount = slots.reduce(
     (count, slot) =>
       count +
       detectAppSlotConflicts(
-        (slot.rows ?? []) as { ingredient: string; lbs: number }[],
+        (slot.rows ?? []) as 
+{
+ ingredient: string
+;
+ lbs: number 
+}
+[],
         Number(slot.ozPerPizza) || 0,
       ).length,
     0,
-  );
+  )
+;
 
-  if (conflictCount === 0) return null;
+
+  if (conflictCount === 0) return null
+;
+
 
   return (
     <span
       className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400"
       data-testid="setup-math-conflict-count"
-      aria-label={`${conflictCount} math conflict${conflictCount === 1 ? "" : "s"}`}
+      aria-label=
+{
+`${conflictCount} math conflict${conflictCount === 1 ? "" : "s"}`
+}
+
     >
       <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-      {conflictCount} math conflict{conflictCount === 1 ? "" : "s"}
-    </span>
-  );
+      
+{
+conflictCount
 }
+ math conflict
+{
+conflictCount === 1 ? "" : "s"
+}
+
+    </span>
+  )
+;
+
+}
+
 
 /**
  * PerRunMixSlotBadge — the math-check badge as it appears on the per-run
@@ -18400,37 +30903,93 @@ export function SetupMathConflictBadge({
  *   appType  = v.appNType
  *   rows     = v.appNCheeseRecipe ?? []
  *   ozPerPizza = Number(v.appNOzPerPizza) || 0
- *   onResolveByRowSum = (newOz) => form.setValue("appNOzPerPizza", newOz, { shouldDirty: true })
- *   onResolveByTotal  = (scaledRows) => { form.setValue("appNCheeseRecipe", scaledRows, ...); replaceCheeseN(scaledRows); }
+ *   onResolveByRowSum = (newOz) => form.setValue("appNOzPerPizza", newOz, 
+{
+ shouldDirty: true 
+}
+)
+ *   onResolveByTotal  = (scaledRows) => 
+{
+ form.setValue("appNCheeseRecipe", scaledRows, ...)
+;
+ replaceCheeseN(scaledRows)
+;
+ 
+}
+
  */
-export function PerRunMixSlotBadge({
+export function PerRunMixSlotBadge(
+{
+
   appType,
   rows,
   ozPerPizza,
   onResolveByRowSum,
   onResolveByTotal,
-}: {
-  appType: string;
-  rows: RecipeRow[];
-  ozPerPizza: number;
-  onResolveByRowSum: (newOz: number) => void;
-  onResolveByTotal: (scaledRows: RecipeRow[]) => void;
-}) {
-  if (!appType.trim().toLowerCase().includes("mix")) return null;
+}
+: 
+{
+
+  appType: string
+;
+
+  rows: RecipeRow[]
+;
+
+  ozPerPizza: number
+;
+
+  onResolveByRowSum: (newOz: number) => void
+;
+
+  onResolveByTotal: (scaledRows: RecipeRow[]) => void
+;
+
+}
+) 
+{
+
+  if (!appType.trim().toLowerCase().includes("mix")) return null
+;
+
   return (
     <AppSlotMathBadge
-      rows={rows}
-      ozPerPizza={ozPerPizza}
-      onResolveByRowSum={onResolveByRowSum}
-      onResolveByTotal={onResolveByTotal}
+      rows=
+{
+rows
+}
+
+      ozPerPizza=
+{
+ozPerPizza
+}
+
+      onResolveByRowSum=
+{
+onResolveByRowSum
+}
+
+      onResolveByTotal=
+{
+onResolveByTotal
+}
+
     />
-  );
+  )
+;
+
 }
 
 
-const LiveRunTabContent = memo(function LiveRunTabContent() {
-  const hx = useHomeCtx();
-  const {
+const LiveRunTabContent = memo(function LiveRunTabContent() 
+{
+
+  const hx = useHomeCtx()
+;
+
+  const 
+{
+
     ackKey, activeStopId, addBrand, addFlavor, addRun, allergenWarnings,
     autoSuppressUntilRef, blankRunIds, blockingViolations, brandFlavors,
     brandInput, brandScrollKeep, brands, checklistAcks, checklistSatisfied,
@@ -18448,9 +31007,15 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     setShowGlance, setShowManageDialog, setShowReorderDialog, setShowStopDialog,
     setStopNotes, setStopReason, showBrandDrop, showFlavorDrop, startRun, swipeCue,
     switchToRun, toggleAck, upcomingRunLabels, v, ve,
-  } = hx;
+  
+}
+ = hx
+;
 
-  const {
+
+  const 
+{
+
     calc, nowTime, liveFreezerMin, elapsedBatchSec, currentRunDowntimeMs,
     casesPct, casesFreezerPct, casesPctWithFreezer,
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
@@ -18459,7 +31024,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     fireAutoTrackNow, tickDueRefs,
     stallPrompt, setStallPrompt, stallCheck,
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
-  } = useLiveRun();
+  
+}
+ = useLiveRun()
+;
+
 
   // Confirm before starting a run that is not the next unstarted run in the
   // schedule, so an accidental tap on the wrong run can be caught before it
@@ -18468,40 +31037,104 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   // Only named runs (brand or flavor set) count as "pending" for the purposes
   // of the check — blank placeholder runs have no meaningful order and should
   // not trigger a false-positive warning.
-  function handleStartRun() {
+  function handleStartRun() 
+{
+
     const firstPendingIdx = dayState.runs.findIndex(
       (r: RunMeta) => !r.startedAt && (r.brand || r.flavor),
-    );
-    if (firstPendingIdx !== -1 && firstPendingIdx !== dayState.currentIndex) {
-      const nextRun = dayState.runs[firstPendingIdx];
+    )
+;
+
+    if (firstPendingIdx !== -1 && firstPendingIdx !== dayState.currentIndex) 
+{
+
+      const nextRun = dayState.runs[firstPendingIdx]
+;
+
       const nextLabel =
         [nextRun.brand, nextRun.flavor].filter(Boolean).join(" – ") ||
-        `Run ${firstPendingIdx + 1}`;
-      const thisRun = dayState.runs[dayState.currentIndex];
+        `Run ${firstPendingIdx + 1}`
+;
+
+      const thisRun = dayState.runs[dayState.currentIndex]
+;
+
       const thisLabel =
         [thisRun?.brand, thisRun?.flavor].filter(Boolean).join(" – ") ||
-        `Run ${dayState.currentIndex + 1}`;
+        `Run ${dayState.currentIndex + 1}`
+;
+
       if (
         !window.confirm(
           `"${nextLabel}" is next in the schedule.\n\nStart "${thisLabel}" out of order instead?`,
         )
       )
-        return;
-    }
-    startRun();
-  }
+        return
+;
+
+    
+}
+
+    startRun()
+;
+
+  
+}
+
 
   return (
     <>
-                {/* Blank-run sweep confirmation dialog */}
-                {confirmRemoveBlanks && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setConfirmRemoveBlanks(false)}>
-                    <div className="bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" onClick={e => e.stopPropagation()}>
-                      <h2 className="text-base font-bold">Remove {blankRunIds.length} blank run{blankRunIds.length > 1 ? "s" : ""}?</h2>
+                
+{
+/* Blank-run sweep confirmation dialog */
+}
+
+                
+{
+confirmRemoveBlanks && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick=
+{
+() => setConfirmRemoveBlanks(false)
+}
+>
+                    <div className="bg-card border border-border rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" onClick=
+{
+e => e.stopPropagation()
+}
+>
+                      <h2 className="text-base font-bold">Remove 
+{
+blankRunIds.length
+}
+ blank run
+{
+blankRunIds.length > 1 ? "s" : ""
+}
+?</h2>
                       <p className="text-sm text-muted-foreground">
-                        {blankRunIds.length > 1 ? "These runs have" : "This run has"} no brand, flavor, or data. Removing{" "}
-                        {blankRunIds.length > 1 ? "them" : "it"} clears{" "}
-                        {blankRunIds.length > 1 ? "them" : "it"} from all devices and can't be undone.
+                        
+{
+blankRunIds.length > 1 ? "These runs have" : "This run has"
+}
+ no brand, flavor, or data. Removing
+{
+" "
+}
+
+                        
+{
+blankRunIds.length > 1 ? "them" : "it"
+}
+ clears
+{
+" "
+}
+
+                        
+{
+blankRunIds.length > 1 ? "them" : "it"
+}
+ from all devices and can't be undone.
                       </p>
                       <div className="flex gap-2 justify-end">
                         <button type="button" onClick={() => setConfirmRemoveBlanks(false)} className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted/40 transition-colors">Cancel</button>
@@ -18896,12 +31529,20 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 // Compute actual virtual (pause-excluded) elapsed for the ended run.
                 // computeEndedRunElapsedSec caps open/unclosed pause stoppages at
                 // endedAt so auto-ended paused runs don't count the pause as production.
-                const endedElapsedSec = computeEndedRunElapsedSec({
+                const endedElapsedSec = computeEndedRunElapsedSec(
+{
+
                   startedAt: lastEndedRun.startedAt,
                   endedAt: refEndedAt,
                   stoppages: lastEndedRun.stoppages,
-                });
-                const phases2 = computeLinePhases({
+                
+}
+)
+;
+
+                const phases2 = computeLinePhases(
+{
+
                   elapsedBatchSec: endedElapsedSec,
                   pausedAt: null,
                   lastResumeWallMs: 0,
@@ -18914,34 +31555,83 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   freezerTime: freezerMin2,
                   nowMs: nowMs2,
                   endedAt: refEndedAt,
-                });
-                const activePhase = pickMostActivePhase(phases2);
+                
+}
+)
+;
+
+                const activePhase = pickMostActivePhase(phases2)
+;
+
                 if (!activePhase) return (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
                     <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
                     Ended · Line clear
                   </span>
-                );
-                const mm2 = Math.floor(activePhase.remainMs / 60000);
-                const ss2 = Math.floor((activePhase.remainMs % 60000) / 1000);
+                )
+;
+
+                const mm2 = Math.floor(activePhase.remainMs / 60000)
+;
+
+                const ss2 = Math.floor((activePhase.remainMs % 60000) / 1000)
+;
+
                 return (
                   <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
                     <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                    {activePhase.label} draining{activePhase.remainMs > 0 ? ` · ${fmtCountdownParts(mm2, ss2)}` : ""}
+                    
+{
+activePhase.label
+}
+ draining
+{
+activePhase.remainMs > 0 ? ` · ${fmtCountdownParts(mm2, ss2)}` : ""
+}
+
                   </span>
-                );
-              })()}
+                )
+;
+
+              
+}
+)()
+}
+
                     </div>
-                  )}
-            {/* Auto-detected stall nudge (advisory — never writes on its own) */}
-            {stallPrompt && (
+                  )
+}
+
+            
+{
+/* Auto-detected stall nudge (advisory — never writes on its own) */
+}
+
+            
+{
+stallPrompt && (
               <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-amber-950/40 border border-amber-700/30 text-amber-400" data-testid="stall-banner">
-                <span>⚠ Line looks stalled — about {fmtMins(stallCheck.behindMinutes)} behind with no stoppage logged</span>
+                <span>⚠ Line looks stalled — about 
+{
+fmtMins(stallCheck.behindMinutes)
+}
+ behind with no stoppage logged</span>
                 <button
                   type="button"
                   data-testid="button-stall-log"
                   className="px-2.5 py-1 rounded-md bg-amber-500 text-black font-bold hover-elevate active-elevate-2"
-                  onClick={() => { logStop("Auto-detected stall", ""); setStallPrompt(false); }}
+                  onClick=
+{
+() => 
+{
+ logStop("Auto-detected stall", "")
+;
+ setStallPrompt(false)
+;
+ 
+}
+}
+
                 >
                   Log stoppage
                 </button>
@@ -18949,44 +31639,90 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   type="button"
                   data-testid="button-stall-dismiss"
                   className="px-2.5 py-1 rounded-md border border-amber-700/40 hover-elevate"
-                  onClick={() => setStallPrompt(false)}
+                  onClick=
+{
+() => setStallPrompt(false)
+}
+
                 >
                   Dismiss
                 </button>
               </div>
-            )}
-            {showPaceAlert && (
+            )
+}
+
+            
+{
+showPaceAlert && (
               <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-red-950/40 border border-red-700/30 text-red-400" data-testid="pace-alert-banner">
-                <span>🐢 {paceAlertMsg}</span>
+                <span>🐢 
+{
+paceAlertMsg
+}
+</span>
                 <button
                   type="button"
                   data-testid="button-pace-alert-dismiss"
                   className="px-2.5 py-1 rounded-md border border-red-700/40 hover-elevate"
-                  onClick={() => setShowPaceAlert(false)}
+                  onClick=
+{
+() => setShowPaceAlert(false)
+}
+
                 >
                   Dismiss
                 </button>
               </div>
-            )}
-                  {/* 3-phase line status — filling at run start, draining only after
+            )
+}
+
+                  
+{
+/* 3-phase line status — filling at run start, draining only after
                       a persisted pause or stop.
-                      Auto-hidden when all stages are in steady-state active. */}
-                  {!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => {
-                    const freezerMin = Number(ve.freezerTime) || 0;
-                    if (freezerMin <= 0) return null;
-                    if (calc.ppm <= 0 && runStatus === "running") return null;
-                    const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
-                    const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN;
+                      Auto-hidden when all stages are in steady-state active. */
+}
+
+                  
+{
+!currentRun?.endedAt && (runStatus === "running" || runStatus === "paused") && (() => 
+{
+
+                    const freezerMin = Number(ve.freezerTime) || 0
+;
+
+                    if (freezerMin <= 0) return null
+;
+
+                    if (calc.ppm <= 0 && runStatus === "running") return null
+;
+
+                    const preTun = Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN
+;
+
+                    const postTun = Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : PRE_POST_TUNNEL_DEFAULT_MIN
+;
+
                     // Last resume: most recent closed "pause" stoppage (endedAt=resume, startedAt=pause start).
                     const lastClosedPause = (currentRun?.stoppages ?? [])
                       .filter((s: any) => s.type === "pause" && s.endedAt)
-                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any);
-                    const lastResumeWallMs = lastClosedPause?.endedAt ?? 0;
-                    const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0;
+                      .reduce((best: any, s: any) => (!best || s.endedAt > best.endedAt ? s : best), null as any)
+;
+
+                    const lastResumeWallMs = lastClosedPause?.endedAt ?? 0
+;
+
+                    const lastPauseStartWallMs = lastClosedPause?.startedAt ?? 0
+;
+
                     const openPause = (currentRun?.stoppages ?? [])
                       .filter((s: any) => s.type === "pause" && !s.endedAt)
-                      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
-                    const phases = computeLinePhases({
+                      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any)
+;
+
+                    const phases = computeLinePhases(
+{
+
                       elapsedBatchSec,
                       pausedAt: currentRun?.pausedAt ?? null,
                       lastResumeWallMs,
@@ -18998,50 +31734,151 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       postTunnelMin: postTun,
                       freezerTime: freezerMin,
                       nowMs: nowTime.getTime(),
-                    });
-                    const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[];
+                    
+}
+)
+;
+
+                    const rows = [phases.stage1, phases.stage2, phases.stage3] as PhaseInfo[]
+;
+
                     // Hide the strip entirely when everything is in steady-state or empty.
-                    const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty");
-                    if (!anyVisible) return null;
-                    function phaseRowStyle(state: PhaseInfo["state"]) {
-                      if (state === "filling" || state === "resuming") return { text: "text-sky-400", dot: "bg-sky-400", badge: "bg-sky-950/40 border-sky-700/30" };
-                      if (state === "draining") return { text: "text-amber-400", dot: "bg-amber-400 animate-pulse", badge: "bg-amber-950/40 border-amber-700/30" };
-                      if (state === "paused") return { text: "text-muted-foreground", dot: "bg-muted-foreground", badge: "bg-muted/20 border-border/30" };
-                      return { text: "text-muted-foreground", dot: "bg-muted-foreground/40", badge: "bg-muted/10 border-border/20" };
-                    }
-                    function phaseLabel(phase: PhaseInfo): string {
-                      const mm = Math.floor(phase.remainMs / 60000);
-                      const ss = Math.floor((phase.remainMs % 60000) / 1000);
-                      const t = fmtCountdownParts(mm, ss);
-                      if (phase.state === "filling") return `${phase.label} — filling → ${t}`;
-                      if (phase.state === "draining") return phase.remainMs > 0 ? `${phase.label} — draining → ${t}` : `${phase.label} — draining`;
-                      if (phase.state === "resuming") return `${phase.label} — product arriving in ${t}`;
-                      if (phase.state === "paused") return `${phase.label} — stopped`;
-                      return phase.label;
-                    }
+                    const anyVisible = rows.some(r => r.state !== "active" && r.state !== "empty")
+;
+
+                    if (!anyVisible) return null
+;
+
+                    function phaseRowStyle(state: PhaseInfo["state"]) 
+{
+
+                      if (state === "filling" || state === "resuming") return 
+{
+ text: "text-sky-400", dot: "bg-sky-400", badge: "bg-sky-950/40 border-sky-700/30" 
+}
+;
+
+                      if (state === "draining") return 
+{
+ text: "text-amber-400", dot: "bg-amber-400 animate-pulse", badge: "bg-amber-950/40 border-amber-700/30" 
+}
+;
+
+                      if (state === "paused") return 
+{
+ text: "text-muted-foreground", dot: "bg-muted-foreground", badge: "bg-muted/20 border-border/30" 
+}
+;
+
+                      return 
+{
+ text: "text-muted-foreground", dot: "bg-muted-foreground/40", badge: "bg-muted/10 border-border/20" 
+}
+;
+
+                    
+}
+
+                    function phaseLabel(phase: PhaseInfo): string 
+{
+
+                      const mm = Math.floor(phase.remainMs / 60000)
+;
+
+                      const ss = Math.floor((phase.remainMs % 60000) / 1000)
+;
+
+                      const t = fmtCountdownParts(mm, ss)
+;
+
+                      if (phase.state === "filling") return `${phase.label} — filling → ${t}`
+;
+
+                      if (phase.state === "draining") return phase.remainMs > 0 ? `${phase.label} — draining → ${t}` : `${phase.label} — draining`
+;
+
+                      if (phase.state === "resuming") return `${phase.label} — product arriving in ${t}`
+;
+
+                      if (phase.state === "paused") return `${phase.label} — stopped`
+;
+
+                      return phase.label
+;
+
+                    
+}
+
                     return (
                       <div className="mb-4 rounded-lg border border-border/40 bg-card/60 overflow-hidden divide-y divide-border/20">
-                        {rows.filter(r => r.state !== "empty").map((phase, i) => {
-                          const s = phaseRowStyle(phase.state);
-                          return (
-                            <div key={i} className={`flex items-center gap-2.5 px-4 py-2.5 ${s.badge}`}>
-                              <span className={`h-2 w-2 rounded-full shrink-0 ${s.dot}`} />
-                              <span className={`text-xs font-semibold ${s.text}`}>{phaseLabel(phase)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
+                        
+{
+rows.filter(r => r.state !== "empty").map((phase, i) => 
+{
 
-                  {/* KPI tiles — completion, pace, estimated finish */}
-                  {(v.casesNeeded > 0 || calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
+                          const s = phaseRowStyle(phase.state)
+;
+
+                          return (
+                            <div key=
+{
+i
+}
+ className=
+{
+`flex items-center gap-2.5 px-4 py-2.5 ${s.badge}`
+}
+>
+                              <span className=
+{
+`h-2 w-2 rounded-full shrink-0 ${s.dot}`
+}
+ />
+                              <span className=
+{
+`text-xs font-semibold ${s.text}`
+}
+>
+{
+phaseLabel(phase)
+}
+</span>
+                            </div>
+                          )
+;
+
+                        
+}
+)
+}
+
+                      </div>
+                    )
+;
+
+                  
+}
+)()
+}
+
+
+{
+/* KPI tiles — completion, pace, estimated finish */
+}
+
+                  
+{
+(v.casesNeeded > 0 || calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {v.casesNeeded > 0 && (
+                      
+{
+v.casesNeeded > 0 && (
                         <div className="rounded-xl border border-border/60 bg-card/60 p-5 flex flex-col items-center justify-center relative overflow-hidden shadow-lg">
                           <div className="absolute top-3 left-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Completion</div>
                           <div className="absolute top-3 right-3 flex items-center gap-1.5">
-                            {runStatus === "running" ? (
+                            
+{
+runStatus === "running" ? (
                               <>
                                 <span className="relative flex h-2.5 w-2.5">
                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -19064,180 +31901,425 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                                 <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" />
                                 <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Not started</span>
                               </>
-                            )}
+                            )
+}
+
                           </div>
                           <div className="mt-7 mb-2 text-6xl font-black text-foreground tabular-nums tracking-tighter" data-testid="tile-cases-completed">
-                            {fmtComma(calc.casesCompleted)}
+                            
+{
+fmtComma(calc.casesCompleted)
+}
+
                           </div>
                           <div className="flex items-center gap-2 flex-wrap justify-center">
-                            {calc.casesCompleted >= v.casesNeeded ? (
+                            
+{
+calc.casesCompleted >= v.casesNeeded ? (
                               <div className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
                                 <CheckCircle2 className="w-4 h-4" /> Target reached!
                               </div>
                             ) : (
                               <div className="text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20 tabular-nums">
-                                {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}% Done
+                                
+{
+Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))
+}
+% Done
                               </div>
-                            )}
-                            {calc.casesInFreezer > 0 && (
+                            )
+}
+
+                            
+{
+calc.casesInFreezer > 0 && (
                               <div className="text-sm font-bold text-sky-400 bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/30 tabular-nums" data-testid="tile-cases-in-freezer">
-                                +{fmtComma(calc.casesInFreezer)} in freezer
+                                +
+{
+fmtComma(calc.casesInFreezer)
+}
+ in freezer
                               </div>
-                            )}
+                            )
+}
+
                           </div>
                           <div className="w-full h-3.5 rounded-full mt-5 bg-muted/30 border border-border/40 overflow-hidden shadow-inner flex">
                             <div
                               className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500"
-                              style={{ width: `${casesPct * 100}%` }}
+                              style=
+{
+{
+ width: `${casesPct * 100}%` 
+}
+}
+
                             />
-                            {casesFreezerPct > 0 && (
+                            
+{
+casesFreezerPct > 0 && (
                               <div
                                 className="h-full bg-sky-400/40 transition-all duration-500"
-                                style={{ width: `${casesFreezerPct * 100}%` }}
+                                style=
+{
+{
+ width: `${casesFreezerPct * 100}%` 
+}
+}
+
                               />
-                            )}
+                            )
+}
+
                           </div>
                           <div className="w-full flex justify-between mt-2 text-xs text-muted-foreground font-medium tabular-nums">
                             <span>0</span>
-                            <span>{fmtComma(Math.max(0, v.casesNeeded - calc.casesCompleted))} left</span>
-                            <span>{fmtComma(v.casesNeeded)}</span>
+                            <span>
+{
+fmtComma(Math.max(0, v.casesNeeded - calc.casesCompleted))
+}
+ left</span>
+                            <span>
+{
+fmtComma(v.casesNeeded)
+}
+</span>
                           </div>
                         </div>
-                      )}
-                      {(calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
+                      )
+}
+
+                      
+{
+(calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
                         <div className="flex flex-col gap-4">
-                          {calc.paceStatus !== null && (
+                          
+{
+calc.paceStatus !== null && (
                             <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
                               <div className="flex items-center justify-between gap-2 mb-2">
                                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pace</span>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded border tabular-nums ${
+                                <span className=
+{
+`text-xs font-bold px-2 py-0.5 rounded border tabular-nums ${
                                   calc.paceStatus === "behind"
                                     ? "text-red-400 bg-red-400/10 border-red-400/20"
                                     : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
-                                }`}>
-                                  {calc.paceStatus === "on-pace" ? "On Pace" : calc.paceStatus === "ahead" ? `${calc.paceDelta} cases ahead` : `${Math.abs(calc.paceDelta)} cases behind`}
+                                }`
+}
+>
+                                  
+{
+calc.paceStatus === "on-pace" ? "On Pace" : calc.paceStatus === "ahead" ? `${calc.paceDelta} cases ahead` : `${Math.abs(calc.paceDelta)} cases behind`
+}
+
                                 </span>
                               </div>
                               <div className="flex items-baseline gap-2">
-                                <span className="text-4xl font-black text-foreground tabular-nums tracking-tight">{calc.ppm}</span>
+                                <span className="text-4xl font-black text-foreground tabular-nums tracking-tight">
+{
+calc.ppm
+}
+</span>
                                 <span className="text-sm text-muted-foreground font-bold uppercase">PPM</span>
                               </div>
-                              {calc.catchUpPpm !== null && (
+                              
+{
+calc.catchUpPpm !== null && (
                                 <div className="text-xs font-medium text-muted-foreground mt-2">
-                                  Need <strong className="text-amber-500">{calc.catchUpPpm} PPM</strong> to finish on time
+                                  Need <strong className="text-amber-500">
+{
+calc.catchUpPpm
+}
+ PPM</strong> to finish on time
                                 </div>
-                              )}
-                              {(() => {
-                                const dtSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                              )
+}
+
+                              
+{
+(() => 
+{
+
+                                const dtSec = (currentRun?.stoppages ?? []).filter((s: any) => s.endedAt && s.type !== "pause").reduce((a: any, s: any) => a + (s.endedAt! - s.startedAt) / 1000, 0)
+;
+
                                 return dtSec > 0 ? (
                                   <div className="text-xs font-medium text-muted-foreground mt-1 flex items-center gap-1.5">
                                     <Clock className="w-3 h-3" />
-                                    {fmtTime(dtSec)} downtime
+                                    
+{
+fmtTime(dtSec)
+}
+ downtime
                                   </div>
-                                ) : null;
-                              })()}
+                                ) : null
+;
+
+                              
+}
+)()
+}
+
                             </div>
-                          )}
-                          {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => {
-                            const projectedFinish = Date.now() + calc.totalTimeSec * 1000;
+                          )
+}
+
+                          
+{
+(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => 
+{
+
+                            const projectedFinish = Date.now() + calc.totalTimeSec * 1000
+;
+
                             const driftMs = initialFinishTimestampRef.current > 0
                               ? projectedFinish - initialFinishTimestampRef.current
-                              : 0;
-                            const driftSec = driftMs / 1000;
-                            const showDrift = Math.abs(driftSec) >= 30;
-                            const ahead = driftSec < 0;
+                              : 0
+;
+
+                            const driftSec = driftMs / 1000
+;
+
+                            const showDrift = Math.abs(driftSec) >= 30
+;
+
+                            const ahead = driftSec < 0
+;
+
                             return (
                               <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
                                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Est. Finish</div>
                                 <div className="flex items-baseline gap-2">
-                                  <span className="text-3xl font-black text-foreground tabular-nums tracking-tight">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</span>
+                                  <span className="text-3xl font-black text-foreground tabular-nums tracking-tight">
+{
+fmtClock(Date.now() + calc.adjustedTimeSec * 1000)
+}
+</span>
                                 </div>
                                 <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
-                                  <div className="text-sm font-medium text-foreground tabular-nums">{fmtTime(calc.adjustedTimeSec)} remaining</div>
-                                  {v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
+                                  <div className="text-sm font-medium text-foreground tabular-nums">
+{
+fmtTime(calc.adjustedTimeSec)
+}
+ remaining</div>
+                                  
+{
+v.casesNeeded > 0 && currentRun?.startedAt && !currentRun?.endedAt && (
                                     <div className="text-xs font-semibold text-foreground/80 tabular-nums" data-testid="text-press-cases-left">
-                                      {fmtComma(Math.ceil(calc.pressCasesLeft))} cases left to press (packing + freezer counted done)
+                                      
+{
+fmtComma(Math.ceil(calc.pressCasesLeft))
+}
+ cases left to press (packing + freezer counted done)
                                     </div>
-                                  )}
-                                  {Number(ve.freezerTime) > 0 && (
+                                  )
+}
+
+                                  
+{
+Number(ve.freezerTime) > 0 && (
                                     <div className="text-xs font-semibold text-sky-400 tabular-nums" data-testid="text-line-clear-time">
-                                      Line clear ~{fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)} (incl. freezer)
+                                      Line clear ~
+{
+fmtClock(Date.now() + (calc.adjustedTimeSec + Number(ve.freezerTime) * 60) * 1000)
+}
+ (incl. freezer)
                                     </div>
-                                  )}
-                                  {showDrift && (
-                                    <div className={`text-xs font-bold border px-1.5 py-0.5 rounded tabular-nums ${
+                                  )
+}
+
+                                  
+{
+showDrift && (
+                                    <div className=
+{
+`text-xs font-bold border px-1.5 py-0.5 rounded tabular-nums ${
                                       ahead
                                         ? "text-emerald-400 border-emerald-400/20 bg-emerald-400/10"
                                         : "text-red-400 border-red-400/20 bg-red-400/10"
-                                    }`}>
-                                      {ahead ? "−" : "+"}{fmtMins(Math.max(1, Math.round(Math.abs(driftSec) / 60)))}
+                                    }`
+}
+>
+                                      
+{
+ahead ? "−" : "+"
+}
+{
+fmtMins(Math.max(1, Math.round(Math.abs(driftSec) / 60)))
+}
+
                                     </div>
-                                  )}
+                                  )
+}
+
                                 </div>
                               </div>
-                            );
-                          })()}
+                            )
+;
+
+                          
+}
+)()
+}
+
                         </div>
-                      )}
+                      )
+}
+
                     </div>
-                  )}
+                  )
+}
+
                 </div>
-                {/* Ended-run banner */}
-                {currentRun?.endedAt && (() => {
-                  const emptyMs = Number(ve.freezerTime) * 60000;
+                
+{
+/* Ended-run banner */
+}
+
+                
+{
+currentRun?.endedAt && (() => 
+{
+
+                  const emptyMs = Number(ve.freezerTime) * 60000
+;
+
                   const remainMs = emptyMs > 0
                     ? Math.max(0, currentRun.endedAt + emptyMs - nowTime.getTime())
-                    : 0;
-                  const draining = remainMs > 0;
-                  const mm = Math.floor(remainMs / 60000);
-                  const ss = Math.floor((remainMs % 60000) / 1000);
-                  const pct = emptyMs > 0 ? Math.max(0, 1 - remainMs / emptyMs) : 1;
+                    : 0
+;
+
+                  const draining = remainMs > 0
+;
+
+                  const mm = Math.floor(remainMs / 60000)
+;
+
+                  const ss = Math.floor((remainMs % 60000) / 1000)
+;
+
+                  const pct = emptyMs > 0 ? Math.max(0, 1 - remainMs / emptyMs) : 1
+;
+
                   return (
                     <div className="mb-4 rounded-lg border overflow-hidden">
-                      <div className={`flex items-start gap-2.5 px-4 py-3 ${draining ? "bg-amber-950/30 border-amber-700/30" : "bg-emerald-950/40 border-emerald-700/30"}`}>
-                        {draining
+                      <div className=
+{
+`flex items-start gap-2.5 px-4 py-3 ${draining ? "bg-amber-950/30 border-amber-700/30" : "bg-emerald-950/40 border-emerald-700/30"}`
+}
+>
+                        
+{
+draining
                           ? <Timer className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                          : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />}
+                          : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+}
+
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`}>
-                            {draining
+                          <p className=
+{
+`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`
+}
+>
+                            
+{
+draining
                               ? `Freezer draining — ${fmtCountdownParts(mm, ss)} remaining`
-                              : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."}
+                              : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."
+}
+
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} freezer time` : ""} — switch to another run to continue.
+                            Run stopped at 
+{
+fmtClock(currentRun.endedAt)
+}
+{
+emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} freezer time` : ""
+}
+ — switch to another run to continue.
                           </p>
-                          {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
+                          
+{
+v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
                               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                              Die change: <span className="font-bold">{v.dieType}</span> → <span className="font-bold">{nextRunDieType}</span>
+                              Die change: <span className="font-bold">
+{
+v.dieType
+}
+</span> → <span className="font-bold">
+{
+nextRunDieType
+}
+</span>
                             </div>
-                          )}
-                          {emptyMs > 0 && (
+                          )
+}
+
+                          
+{
+emptyMs > 0 && (
                             <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
                               <div
-                                className={`h-full rounded-full transition-all duration-1000 ${draining ? "bg-amber-500" : "bg-emerald-500"}`}
-                                style={{ width: `${pct * 100}%` }}
+                                className=
+{
+`h-full rounded-full transition-all duration-1000 ${draining ? "bg-amber-500" : "bg-emerald-500"}`
+}
+
+                                style=
+{
+{
+ width: `${pct * 100}%` 
+}
+}
+
                               />
                             </div>
-                          )}
-                          {/* Auto-advance to next run */}
-                          {!draining && dayState.runs[dayState.currentIndex + 1] && (
+                          )
+}
+
+                          
+{
+/* Auto-advance to next run */
+}
+
+                          
+{
+!draining && dayState.runs[dayState.currentIndex + 1] && (
                             <button
                               type="button"
-                              onClick={() => switchToRun(dayState.currentIndex + 1)}
+                              onClick=
+{
+() => switchToRun(dayState.currentIndex + 1)
+}
+
                               className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
                             >
-                              Switch to {runLabel(dayState.runs[dayState.currentIndex + 1])} →
+                              Switch to 
+{
+runLabel(dayState.runs[dayState.currentIndex + 1])
+}
+ →
                             </button>
-                          )}
+                          )
+}
+
                         </div>
                       </div>
                     </div>
-                  );
-                })()}
+                  )
+;
 
-                {/* Missing-setup nudge — a running run with no line-speed /
+                
+}
+)()
+}
+
+
+{
+/* Missing-setup nudge — a running run with no line-speed /
                     case / freezer numbers can't compute anything: the count,
                     timing, and freezer status all silently sit at 0. Tell the
                     operator exactly which numbers are missing instead. */}
@@ -19256,7 +32338,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                   const freezerMissing = !(Number(ve.freezerTime) > 0);
                   if (missing.length === 0 && !freezerMissing) return null;
                   const headline = missing.length > 0
-                    ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Total line time"] : [])].join(", ")} not set`
+                    ? `Counts can't track yet — $
+{
+[...missing, ...(freezerMissing ? ["Total line time"] : [])].join(", ")
+}
+ not set`
                     : "Line phase status can't show yet — Total line time not set";
                   const detail = missing.length > 0
                     ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and line phase status all start working once they're in."
@@ -19296,7 +32382,19 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">
                           {shortRun
                             ? `Warehouse: short run (under 2 skids) — stage frontline + packaging for the next 2+ runs now`
-                            : `Warehouse: ${fmtNum(skidsLeft, 1)} skid${skidsLeft === 1 ? "" : "s"} to switchover — stage ${packagingStage ? "packaging" : "frontline"} for the next run`}
+                            : `Warehouse: $
+{
+fmtNum(skidsLeft, 1)
+}
+ skid$
+{
+skidsLeft === 1 ? "" : "s"
+}
+ to switchover — stage $
+{
+packagingStage ? "packaging" : "frontline"
+}
+ for the next run`}
                         </p>
                         {!shortRun && packagingStage && (
                           <p className="text-xs font-semibold text-violet-400/90 mt-0.5" data-testid="text-switchover-packaging-stage">
@@ -19305,9 +32403,21 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         )}
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + freezer counted done)
-                          {calc.adjustedTimeSec > 0 ? ` — press stops ~${fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}` : ""}
-                          {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
-                          {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
+                          {calc.adjustedTimeSec > 0 ? ` — press stops ~$
+{
+fmtClock(Date.now() + calc.adjustedTimeSec * 1000)
+}
+` : ""}
+                          {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~$
+{
+fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)
+}
+` : ""}.
+                          {names.length > 0 ? ` Next up: $
+{
+names.join(", ")
+}
+.` : " No upcoming runs scheduled yet."}
                         </p>
                       </div>
                     </div>
@@ -19457,7 +32567,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         name={t.name}
                         render={({ field }) => (
                           <FormItem className="space-y-0">
-                            <div className={`bg-background/60 border rounded-lg p-3 relative transition-colors focus-within:border-amber-500/50 ${Number(v[t.name]) > 0 ? "border-amber-600/40" : "border-border/60 hover:border-border"}`}>
+                            <div className={`bg-background/60 border rounded-lg p-3 relative transition-colors focus-within:border-amber-500/50 $
+{
+Number(v[t.name]) > 0 ? "border-amber-600/40" : "border-border/60 hover:border-border"
+}
+`}>
                               {Number(v[t.name]) > 0 && (
                                 <div className="absolute top-0 right-0 w-2 h-2 bg-amber-500 rounded-full -mt-1 -mr-1 shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
                               )}
@@ -19523,7 +32637,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                         key={i}
                         type="button"
                         onClick={() => switchToRun(i)}
-                        className={`rounded-full transition-all shrink-0 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                        className={`rounded-full transition-all shrink-0 $
+{
+i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"
+}
+`}
                       />
                     ))}
                   </div>
@@ -19541,7 +32659,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       key={i}
                       type="button"
                       onClick={() => switchToRun(i)}
-                      className={`rounded-full transition-all shrink-0 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                      className={`rounded-full transition-all shrink-0 $
+{
+i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"
+}
+`}
                     />
                   ))}
                   {end < total && <span className="text-[9px] text-muted-foreground/50 leading-none">…</span>}
@@ -19603,7 +32725,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       </span>
                       <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
                     </summary>
-                    <div className={`border-t border-border/40 px-5 pb-5 pt-4 space-y-3${!isSupervisor ? " opacity-60 pointer-events-none" : ""}`}>
+                    <div className={`border-t border-border/40 px-5 pb-5 pt-4 space-y-3$
+{
+!isSupervisor ? " opacity-60 pointer-events-none" : ""
+}
+`}>
                     <LineSetupRoleGate isSupervisor={!!isSupervisor}>
                       {/* Dough / Crust toggle */}
                       <div>
@@ -19619,7 +32745,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                               saveDayState(newDs);
                               saveProfileSubTab(currentRun?.brand ?? "", currentRun?.flavor ?? "", "dough");
                             }}
-                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors $
+{
+doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+}
+`}
                           >
                             Dough
                           </button>
@@ -19640,7 +32770,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                                 form.setValue(k as keyof typeof fills, val, { shouldDirty: true });
                               }
                             }}
-                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors $
+{
+doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+}
+`}
                           >
                             Crust
                           </button>
@@ -19669,11 +32803,15 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                                   }
                                 }
                               }}
-                              className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                              className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors $
+{
+
                                 v.dieType === dt
                                   ? "bg-primary text-primary-foreground border-primary"
                                   : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
-                              }`}
+                              
+}
+`}
                             >
                               {dt}
                             </button>
@@ -19716,12 +32854,24 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                           <div className="mt-2 flex flex-col gap-1.5">
                             {allergenWarnings.map((w: any) => (
                               <div
-                                key={`${w.fromId}-${w.toId}`}
-                                className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border ${
+                                key={`$
+{
+w.fromId
+}
+-$
+{
+w.toId
+}
+`}
+                                className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border $
+{
+
                                   w.kind === "clean-not-advisable"
                                     ? "bg-red-950/40 border-red-700/40 text-red-300"
                                     : "bg-amber-950/30 border-amber-700/40 text-amber-300"
-                                }`}
+                                
+}
+`}
                               >
                                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                                 <span>
@@ -19741,13 +32891,17 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                               return (
                                 <div
                                   key={rv.ruleId}
-                                  className={`px-2.5 py-1.5 rounded-md text-xs border ${
+                                  className={`px-2.5 py-1.5 rounded-md text-xs border $
+{
+
                                     rv.enforcement === "strict"
                                       ? cleared
                                         ? "bg-green-950/40 border-green-700/40 text-green-300"
                                         : "bg-red-950/40 border-red-700/40 text-red-300"
                                       : "bg-amber-950/30 border-amber-700/40 text-amber-300"
-                                  }`}
+                                  
+}
+`}
                                 >
                                   <div className="flex items-start gap-2">
                                     <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -20112,7 +33266,15 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                   const casesDone = skids * casesPerSkid + casesOnSkid;
                   const id = drainingRun.id;
                   const name =
-                    `${drainingRun.brand ?? ""}${drainingRun.flavor ? ` – ${drainingRun.flavor}` : ""}`.trim() ||
+                    `$
+{
+drainingRun.brand ?? ""
+}
+$
+{
+drainingRun.flavor ? ` – ${drainingRun.flavor}` : ""
+}
+`.trim() ||
                     "Finished run";
                   const maxSkids = casesPerSkid > 0 ? Math.floor(casesNeeded / casesPerSkid) : undefined;
                   const maxCasesOnSkid = casesPerSkid > 0 ? casesPerSkid : undefined;
@@ -20128,7 +33290,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                       <div className="flex-1 mt-2">
                         <div className="bg-amber-950/30 border border-amber-600/30 rounded-xl p-3 relative overflow-hidden flex flex-col gap-3">
                           <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber-950">
-                            <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${pct * 100}%` }} />
+                            <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `$
+{
+pct * 100
+}
+%` }} />
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
@@ -20258,19 +33424,43 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     <div className="flex mb-4">
                       <TimelineNode icon={Snowflake} active />
                       <div className="flex-1 mt-2 space-y-2">
-                        <div className={`border rounded-lg p-3 ${drainDone ? "bg-emerald-950/20 border-emerald-700/30" : lifecycleDraining ? "bg-amber-950/20 border-amber-600/30" : "bg-primary/5 border-primary/20"}`}>
+                        <div className={`border rounded-lg p-3 $
+{
+drainDone ? "bg-emerald-950/20 border-emerald-700/30" : lifecycleDraining ? "bg-amber-950/20 border-amber-600/30" : "bg-primary/5 border-primary/20"
+}
+`}>
                           <div className="flex justify-between items-end mb-2">
-                            <span className={`text-sm font-semibold uppercase tracking-wider ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary"}`}>
+                            <span className={`text-sm font-semibold uppercase tracking-wider $
+{
+drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary"
+}
+`}>
                               {drainDone ? "Line Clear" : lifecycleDraining ? "Line Draining" : "Line Loading"}
                             </span>
-                            <span className={`text-xs font-mono font-bold ${drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary/80"}`}>
-                              {drainDone ? "✓ Line clear" : `${fmtNum(pct * 100, 0)}%`}
+                            <span className={`text-xs font-mono font-bold $
+{
+drainDone ? "text-emerald-400" : lifecycleDraining ? "text-amber-400" : "text-primary/80"
+}
+`}>
+                              {drainDone ? "✓ Line clear" : `$
+{
+fmtNum(pct * 100, 0)
+}
+%`}
                             </span>
                           </div>
                           <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden mb-2">
                             <div
-                              className={`h-full rounded-full transition-all duration-1000 ${drainDone ? "bg-emerald-500" : lifecycleDraining ? "bg-amber-500" : "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"}`}
-                              style={{ width: `${pct * 100}%` }}
+                              className={`h-full rounded-full transition-all duration-1000 $
+{
+drainDone ? "bg-emerald-500" : lifecycleDraining ? "bg-amber-500" : "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"
+}
+`}
+                              style={{ width: `$
+{
+pct * 100
+}
+%` }}
                             />
                           </div>
                           <div className="space-y-1">
@@ -20279,16 +33469,36 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               const ss = Math.floor((phase.remainMs % 60000) / 1000);
                               const dotCls = phase.state === "paused" ? "bg-muted-foreground" : phase.state === "active" ? "bg-emerald-500" : phase.state === "draining" ? "bg-amber-400 animate-pulse" : "bg-sky-400 animate-pulse";
                               const textCls = phase.state === "paused" ? "text-muted-foreground" : phase.state === "active" ? "text-emerald-400" : phase.state === "draining" ? "text-amber-300" : "text-sky-300";
-                              const stateText = phase.state === "filling" ? `filling → ${fmtCountdownParts(mm, ss)}`
-                                : phase.state === "draining" ? (phase.remainMs > 0 ? `draining → ${fmtCountdownParts(mm, ss)}` : "draining")
-                                : phase.state === "resuming" ? `product arriving in ${fmtCountdownParts(mm, ss)}`
+                              const stateText = phase.state === "filling" ? `filling → $
+{
+fmtCountdownParts(mm, ss)
+}
+`
+                                : phase.state === "draining" ? (phase.remainMs > 0 ? `draining → $
+{
+fmtCountdownParts(mm, ss)
+}
+` : "draining")
+                                : phase.state === "resuming" ? `product arriving in $
+{
+fmtCountdownParts(mm, ss)
+}
+`
                                 : phase.state === "paused" ? "stopped"
                                 : phase.state === "active" ? "flowing" : "";
                               return (
                                 <div key={i} className="flex items-center gap-2 text-[11px]">
-                                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotCls}`} />
+                                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 $
+{
+dotCls
+}
+`} />
                                   <span className="text-muted-foreground font-medium">{phase.label}</span>
-                                  <span className={`font-semibold ${textCls}`}>— {stateText}</span>
+                                  <span className={`font-semibold $
+{
+textCls
+}
+`}>— {stateText}</span>
                                 </div>
                               );
                             })}
@@ -20322,7 +33532,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                         <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Active Skid Building</h3>
                         {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
                           <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${autoTrackProgress ? "bg-primary animate-pulse shadow-[0_0_8px_rgba(255,149,0,0.8)]" : "bg-muted-foreground"}`} />
+                            <div className={`w-2 h-2 rounded-full $
+{
+autoTrackProgress ? "bg-primary animate-pulse shadow-[0_0_8px_rgba(255,149,0,0.8)]" : "bg-muted-foreground"
+}
+`} />
                             <button
                               type="button"
                               onClick={() => {
@@ -20448,7 +33662,11 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <div className="flex-1 relative h-8 bg-muted/30 rounded-md overflow-hidden border border-border/40">
                                     <div
                                       className="absolute inset-y-0 left-0 bg-primary transition-all duration-300 ease-out shadow-[0_0_15px_rgba(255,149,0,0.6)]"
-                                      style={{ width: `${skidPct * 100}%` }}
+                                      style={{ width: `$
+{
+skidPct * 100
+}
+%` }}
                                     />
                                     {skidNearlyFull && (
                                       <div className="absolute inset-0 flex items-center justify-center text-primary-foreground font-bold text-[10px] uppercase tracking-widest animate-pulse">
@@ -20600,16 +33818,24 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                         const badgeText = isCartoned
                           ? "Cartoned"
                           : isLabeled
-                            ? posLabel ? `Labeled · ${posLabel}` : "Labeled"
+                            ? posLabel ? `Labeled · $
+{
+posLabel
+}
+` : "Labeled"
                             : "N/A";
                         return (
                           <div className="flex gap-1.5 group-open:hidden">
                             <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border $
+{
+
                                 isCartoned
                                   ? "bg-primary/10 text-primary border-primary/20"
                                   : "bg-muted text-muted-foreground border-border/60"
-                              }`}
+                              
+}
+`}
                             >
                               {badgeText}
                             </span>
@@ -20718,14 +33944,30 @@ function BatchMadeRow({
     valueStr = done
       ? "done ✓"
       : bd
-        ? `${fmtNum(remaining, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
+        ? `$
+{
+fmtNum(remaining, 2)
+}
+ batches · $
+{
+bd.batchesPerBarrel
+}
+/barrel → $
+{
+bd.totalBarrels
+}
+ barrels`
         : fmtNum(remaining, 2) + " batches";
   } else {
     valueStr = done ? "done ✓" : fmtNum(remaining, 2) + " batches";
   }
   const highlight = totalBatches > 0 && !done;
   return (
-    <div className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : done ? "text-emerald-400" : ""}`}>
+    <div className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 $
+{
+highlight ? "text-primary" : done ? "text-emerald-400" : ""
+}
+`}>
       <span className="text-sm text-muted-foreground">{label}</span>
       <div className="flex items-start gap-2">
         {isLive && (totalBatches > 0 || made > 0) && (
@@ -20747,7 +33989,11 @@ function BatchMadeRow({
         )}
         <div className="flex flex-col items-end gap-0.5">
           <span
-            className={`font-mono font-semibold text-sm tabular-nums ${done ? "text-emerald-400" : highlight ? "text-primary text-base" : "text-foreground"}`}
+            className={`font-mono font-semibold text-sm tabular-nums $
+{
+done ? "text-emerald-400" : highlight ? "text-primary text-base" : "text-foreground"
+}
+`}
             data-testid={testId}
           >
             {valueStr}
@@ -20894,15 +34140,35 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     const secLeft = Math.max(0, depletionSec - barrelElapsed);
     const pctLeft = secLeft / depletionSec;
     if (pctLeft >= 0.15) return;
-    const key = `${currentRun.id}-${sauceMade}`;
+    const key = `$
+{
+currentRun.id
+}
+-$
+{
+sauceMade
+}
+`;
     if (sauceBarrelDueKeyRef.current === key) return;
     sauceBarrelDueKeyRef.current = key;
     getSauceBarrelEntry(currentRunId).barrelDueKey = key;
     setShowSauceBarrelDue(true);
     showAppNotification("🍅 Sauce barrel nearly empty", {
-      body: `${v.frontlineRecipeName?.trim() || "Sauce"} — start the next barrel soon.`,
+      body: `$
+{
+v.frontlineRecipeName?.trim() || "Sauce"
+}
+ — start the next barrel soon.`,
       icon: "/icons/icon-192.png",
-      tag: `sauce-barrel-${currentRun.id}-${sauceMade}`,
+      tag: `sauce-barrel-$
+{
+currentRun.id
+}
+-$
+{
+sauceMade
+}
+`,
     });
   }, [elapsedBatchSec, runStatus, currentRun?.id, currentRun?.startedAt, calc.sauceDepletionSec, calc.pressDone, nextRunPrepActive, sauceMade, v.frontlineRecipeName]);
 
@@ -20919,7 +34185,15 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     if (runStatus !== "running" || !currentRun?.startedAt || batchSec <= 0 || nextRunPrepActive || calc.pressDone) return;
     const batchNum = Math.floor(elapsedBatchSec / batchSec);
     if (batchNum < 1) return;
-    const key = `${currentRun.id}-${batchNum}`;
+    const key = `$
+{
+currentRun.id
+}
+-$
+{
+batchNum
+}
+`;
     if (sauceQuickCheckKeyRef.current === key) return;
     sauceQuickCheckKeyRef.current = key;
     getSauceBarrelEntry(currentRunId).quickCheckKey = key;
@@ -20969,7 +34243,15 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>Prep elapsed:</span>
                   <span className="font-mono font-semibold tabular-nums text-foreground">
-                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
+                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `$
+{
+Math.floor(s / 60)
+}
+:$
+{
+String(s % 60).padStart(2, "0")
+}
+`; })()}
                   </span>
                 </div>
               </div>
@@ -21010,7 +34292,11 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 const itemKey = hasSauceRecipe
                   ? "ingredient:Sauce:batches"
                   : sauceName
-                    ? `ingredient:${sauceName}:lbs`
+                    ? `ingredient:$
+{
+sauceName
+}
+:lbs`
                     : "";
                 const barrelQty = hasSauceRecipe ? 1 : calc.sauceEffBarrel;
                 if (itemKey && barrelQty > 0) {
@@ -21110,18 +34396,34 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         };
         const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
         return (
-          <div className={`mb-4 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
+          <div className={`mb-4 rounded-lg border px-4 py-3 $
+{
+packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"
+}
+`}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
               </p>
               {hasCps && expectedTotal !== null && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border $
+{
+
                   packOnPace
                     ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
                     : "text-amber-400 border-amber-500/30 bg-amber-950/20"
-                }`}>
-                  {packOnPace ? "On pace" : `Behind ${packGapCases} case${packGapCases !== 1 ? "s" : ""}`}
+                
+}
+`}>
+                  {packOnPace ? "On pace" : `Behind $
+{
+packGapCases
+}
+ case$
+{
+packGapCases !== 1 ? "s" : ""
+}
+`}
                 </span>
               )}
             </div>
@@ -21236,7 +34538,15 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       return (
                         <StatRow
                           label="Sauce"
-                          value={bd ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(calc.sauceBatches, 2) + " batches"}
+                          value={bd ? `$
+{
+fmtNum(calc.sauceBatches, 2)
+}
+ batches · $
+{
+bd.totalBarrels
+}
+ barrels` : fmtNum(calc.sauceBatches, 2) + " batches"}
                           testId="output-sauce-batches"
                           highlight={calc.sauceBatches > 0}
                           sub={v.frontlineRecipeName?.trim() || undefined}
@@ -21246,7 +34556,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     <div className="border-t border-border/60" aria-hidden="true" />
                     {v.app1Type.trim().toLowerCase().includes("mix") ? (
                       <StatRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
+                        label={v.app1Type ? `App 1 — $
+{
+v.app1Type
+}
+` : "Applicator 1"}
                         value={fmtNum(calc.app1Lbs, 1) + " lbs"}
                         testId="output-app1-batches"
                         highlight={calc.app1Lbs > 0}
@@ -21254,7 +34568,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       />
                     ) : (
                       <BatchMadeRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
+                        label={v.app1Type ? `App 1 — $
+{
+v.app1Type
+}
+` : "Applicator 1"}
                         totalBatches={calc.app1Batches}
                         made={app1Made}
                         onIncrement={() => setApp1Made(n => n + 1)}
@@ -21267,7 +34585,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     <div className="border-t border-border/60" aria-hidden="true" />
                     {v.app2Type.trim().toLowerCase().includes("mix") ? (
                       <StatRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
+                        label={v.app2Type ? `App 2 — $
+{
+v.app2Type
+}
+` : "Applicator 2"}
                         value={fmtNum(calc.app2Lbs, 1) + " lbs"}
                         testId="output-app2-batches"
                         highlight={calc.app2Lbs > 0}
@@ -21275,7 +34597,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       />
                     ) : (
                       <BatchMadeRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
+                        label={v.app2Type ? `App 2 — $
+{
+v.app2Type
+}
+` : "Applicator 2"}
                         totalBatches={calc.app2Batches}
                         made={app2Made}
                         onIncrement={() => setApp2Made(n => n + 1)}
@@ -21291,8 +34617,20 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     <StatRow
                       label={
                         v.pep1Type
-                          ? `Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1Type}`
-                          : `Pep Applicator ${v.pep1Combined === true ? "1 & 2" : "1"}`
+                          ? `Pep $
+{
+v.pep1Combined === true ? "1 & 2" : "1"
+}
+ — $
+{
+v.pep1Type
+}
+`
+                          : `Pep Applicator $
+{
+v.pep1Combined === true ? "1 & 2" : "1"
+}
+`
                       }
                       value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
                       testId="output-pep1-batches"
@@ -21300,7 +34638,15 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     />
                     {(v.pep1TypeB ?? "").trim() && (
                       <StatRow
-                        label={`Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1TypeB}`}
+                        label={`Pep $
+{
+v.pep1Combined === true ? "1 & 2" : "1"
+}
+ — $
+{
+v.pep1TypeB
+}
+`}
                         value={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? fmtNum(calc.pep1LbsB, 2) + " lbs" : fmtNum(calc.pep1BatchesB, 2) + " batches"}
                         testId="output-pep1b-batches"
                         highlight={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? calc.pep1LbsB > 0 : calc.pep1BatchesB > 0}
@@ -21310,14 +34656,22 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       <>
                         <div className="border-t border-border/60" aria-hidden="true" />
                         <StatRow
-                          label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
+                          label={v.pep2Type ? `Pep 2 — $
+{
+v.pep2Type
+}
+` : "Pep Applicator 2"}
                           value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
                           testId="output-pep2-batches"
                           highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
                         />
                         {(v.pep2TypeB ?? "").trim() && (
                           <StatRow
-                            label={`Pep 2 — ${v.pep2TypeB}`}
+                            label={`Pep 2 — $
+{
+v.pep2TypeB
+}
+`}
                             value={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? fmtNum(calc.pep2LbsB, 2) + " lbs" : fmtNum(calc.pep2BatchesB, 2) + " batches"}
                             testId="output-pep2b-batches"
                             highlight={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? calc.pep2LbsB > 0 : calc.pep2BatchesB > 0}
@@ -21329,7 +34683,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     {v.app3Type.trim() && (v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0) && (
                       v.app3Type.trim().toLowerCase().includes("mix") ? (
                         <StatRow
-                          label={`App 3 — ${v.app3Type}`}
+                          label={`App 3 — $
+{
+v.app3Type
+}
+`}
                           value={fmtNum(calc.app3Lbs, 1) + " lbs"}
                           testId="output-app3-batches"
                           highlight={calc.app3Lbs > 0}
@@ -21337,7 +34695,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                         />
                       ) : (
                         <BatchMadeRow
-                          label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                          label={v.app3Type ? `App 3 — $
+{
+v.app3Type
+}
+` : "Applicator 3"}
                           totalBatches={calc.app3Batches}
                           made={app3Made}
                           onIncrement={() => setApp3Made(n => n + 1)}
@@ -21352,7 +34714,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                     {v.app4Type.trim() && (v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0) && (
                       v.app4Type.trim().toLowerCase().includes("mix") ? (
                         <StatRow
-                          label={`App 4 — ${v.app4Type}`}
+                          label={`App 4 — $
+{
+v.app4Type
+}
+`}
                           value={fmtNum(calc.app4Lbs, 1) + " lbs"}
                           testId="output-app4-batches"
                           highlight={calc.app4Lbs > 0}
@@ -21360,7 +34726,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                         />
                       ) : (
                         <BatchMadeRow
-                          label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                          label={v.app4Type ? `App 4 — $
+{
+v.app4Type
+}
+` : "Applicator 4"}
                           totalBatches={calc.app4Batches}
                           made={app4Made}
                           onIncrement={() => setApp4Made(n => n + 1)}
@@ -21391,7 +34761,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                   return (
                     <ReadOnlyRecipeCard
                       key={i}
-                      title={`${t} Recipe`}
+                      title={`$
+{
+t
+}
+ Recipe`}
                       subtitle={app.name?.trim() || undefined}
                       recipe={app.recipe ?? []}
                       accent={isMix ? "bg-emerald-500/70" : "bg-amber-500/70"}
@@ -21506,7 +34880,15 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>Prep elapsed:</span>
                   <span className="font-mono font-semibold tabular-nums text-foreground">
-                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
+                    {(() => { const s = Math.max(0, Math.floor(prepElapsedSec)); return `$
+{
+Math.floor(s / 60)
+}
+:$
+{
+String(s % 60).padStart(2, "0")
+}
+`; })()}
                   </span>
                 </div>
                 {showPrepBatchDue && (
@@ -21631,8 +35013,16 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                     : spinLeft === null
                                       ? "counts while running"
                                       : onLowStage
-                                        ? `low speed · ${fmtMS(stageLeft ?? 0)} to high`
-                                        : `high speed · ${fmtMS(stageLeft ?? 0)} left`}
+                                        ? `low speed · $
+{
+fmtMS(stageLeft ?? 0)
+}
+ to high`
+                                        : `high speed · $
+{
+fmtMS(stageLeft ?? 0)
+}
+ left`}
                               </p>
                             </div>
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
@@ -21649,11 +35039,39 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           </div>
                           {measured ? (
                             <>
-                              <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold ${keepsUp ? "text-emerald-400" : "text-amber-400"}`}>
+                              <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold $
+{
+keepsUp ? "text-emerald-400" : "text-amber-400"
+}
+`}>
                                 <CheckCircle2 className="w-3 h-3 shrink-0" />
                                 {keepsUp
-                                  ? `Keeping up: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(keepUpMargin)} spare)`
-                                  : `Falling behind: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(-keepUpMargin)} short)`}
+                                  ? `Keeping up: a fresh batch every $
+{
+fmtMS(supplySec)
+}
+, line eats one every $
+{
+fmtMS(lineBatchSec)
+}
+ ($
+{
+fmtMS(keepUpMargin)
+}
+ spare)`
+                                  : `Falling behind: a fresh batch every $
+{
+fmtMS(supplySec)
+}
+, line eats one every $
+{
+fmtMS(lineBatchSec)
+}
+ ($
+{
+fmtMS(-keepUpMargin)
+}
+ short)`}
                               </div>
                               <p className="text-[10px] text-muted-foreground mt-1">
                                 Start prepping the next batch every{" "}
@@ -21675,7 +35093,15 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           </p>
                           <p className="text-[9px] text-muted-foreground font-mono truncate">
                             {spinTotalSec > 0 || safeHopper > 0
-                              ? `spin ${fmtMS(spinTotalSec)} + hopper ${fmtMS(safeHopper)}`
+                              ? `spin $
+{
+fmtMS(spinTotalSec)
+}
+ + hopper $
+{
+fmtMS(safeHopper)
+}
+`
                               : "time your mixer & hopper for live timers"}
                           </p>
                         </div>
@@ -21925,18 +35351,34 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           };
                           const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
                           return (
-                            <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"}`}>
+                            <div className={`mt-2 rounded-lg border px-4 py-3 $
+{
+packOnPace ? "border-border/50 bg-card/60" : "border-amber-600/30 bg-amber-950/10"
+}
+`}>
                               <div className="flex items-center justify-between mb-2">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                                   Packaging station — quick check (no tab switch){caseAutoActive ? " · Auto" : ""}
                                 </p>
                                 {hasCps && expectedTotal !== null && (
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border $
+{
+
                                     packOnPace
                                       ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
                                       : "text-amber-400 border-amber-500/30 bg-amber-950/20"
-                                  }`}>
-                                    {packOnPace ? "On pace" : `Behind ${packGapCases} case${packGapCases !== 1 ? "s" : ""}`}
+                                  
+}
+`}>
+                                    {packOnPace ? "On pace" : `Behind $
+{
+packGapCases
+}
+ case$
+{
+packGapCases !== 1 ? "s" : ""
+}
+`}
                                   </span>
                                 )}
                               </div>
@@ -22017,7 +35459,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 {doughSubTab === "dough" && nextRunPrepActive && (() => {
                   const nextRunMeta = dayState.runs[dayState.currentIndex + 1];
                   const nextRunName = nextRunMeta
-                    ? [nextRunMeta.brand, nextRunMeta.flavor].filter(Boolean).join(" – ") || `Run ${dayState.currentIndex + 2}`
+                    ? [nextRunMeta.brand, nextRunMeta.flavor].filter(Boolean).join(" – ") || `Run $
+{
+dayState.currentIndex + 2
+}
+`
                     : "";
                   return (
                     <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-950/30 overflow-hidden">
@@ -22060,20 +35506,40 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     ? Math.min(spinSecCard, Math.max(0, (dueMs - nowTime.getTime()) / 1000))
                     : null;
                   return (
-                    <div className={`mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/60"}`}>
+                    <div className={`mb-4 rounded-xl border overflow-hidden $
+{
+showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/60"
+}
+`}>
                       <div className="px-4 py-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
+                          <Timer className={`w-5 h-5 shrink-0 $
+{
+showBatchDue ? "text-orange-400" : "text-amber-500"
+}
+`} />
                           <div className="min-w-0">
-                            <p className={`text-sm font-bold ${showBatchDue ? "text-orange-400" : "text-foreground"}`}>
+                            <p className={`text-sm font-bold $
+{
+showBatchDue ? "text-orange-400" : "text-foreground"
+}
+`}>
                               {showBatchDue ? "Dough station — start next batch now" : "Dough station — next batch due"}
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                              {showBatchDue ? `Time per batch: ${fmtTime(calc.timePerBatchSec)}` : "Countdown to the next mixer batch at current pace"}
+                              {showBatchDue ? `Time per batch: $
+{
+fmtTime(calc.timePerBatchSec)
+}
+` : "Countdown to the next mixer batch at current pace"}
                             </p>
                           </div>
                         </div>
-                        <span className={`text-xl font-black font-mono tabular-nums shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} data-testid="text-next-batch-countdown">
+                        <span className={`text-xl font-black font-mono tabular-nums shrink-0 $
+{
+showBatchDue ? "text-orange-400" : "text-amber-500"
+}
+`} data-testid="text-next-batch-countdown">
                           {secLeft !== null ? fmtMS(secLeft) : "—:—"}
                         </span>
                       </div>
@@ -22121,10 +35587,30 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     const [h, m] = hhmm.split(":").map(Number);
                     const ampm = h >= 12 ? "PM" : "AM";
                     const h12 = h % 12 || 12;
-                    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+                    return `$
+{
+h12
+}
+:$
+{
+String(m).padStart(2, "0")
+}
+ $
+{
+ampm
+}
+`;
                   };
                   const nowLabel = to12hr(
-                    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
+                    `$
+{
+String(nowTime.getHours()).padStart(2, "0")
+}
+:$
+{
+String(nowTime.getMinutes()).padStart(2, "0")
+}
+`
                   );
                   return (
                     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mt-0">
@@ -22157,7 +35643,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
                             <p className="text-xl font-mono font-bold text-amber-400">
-                              {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
+                              {Math.floor(minutesAvailable / 60) > 0 && `$
+{
+Math.floor(minutesAvailable / 60)
+}
+h `}{Math.round(minutesAvailable % 60)}m
                             </p>
                             <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
                           </div>
@@ -22181,8 +35671,24 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         {hasOnHand && (
                           <p className="text-[10px] text-muted-foreground mt-2">
                             {[
-                              onHandBatches > 0 && `${onHandBatches} batch${onHandBatches !== 1 ? "es" : ""} ready`,
-                              onHandTrays > 0 && `${onHandTrays} tray${onHandTrays !== 1 ? "s" : ""} on line`,
+                              onHandBatches > 0 && `$
+{
+onHandBatches
+}
+ batch$
+{
+onHandBatches !== 1 ? "es" : ""
+}
+ ready`,
+                              onHandTrays > 0 && `$
+{
+onHandTrays
+}
+ tray$
+{
+onHandTrays !== 1 ? "s" : ""
+}
+ on line`,
                             ].filter(Boolean).join(" · ")} already on hand — subtracted from totals
                           </p>
                         )}
@@ -22211,10 +35717,30 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     const [h, m] = hhmm.split(":").map(Number);
                     const ampm = h >= 12 ? "PM" : "AM";
                     const h12 = h % 12 || 12;
-                    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+                    return `$
+{
+h12
+}
+:$
+{
+String(m).padStart(2, "0")
+}
+ $
+{
+ampm
+}
+`;
                   };
                   const nowLabel = to12hr(
-                    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
+                    `$
+{
+String(nowTime.getHours()).padStart(2, "0")
+}
+:$
+{
+String(nowTime.getMinutes()).padStart(2, "0")
+}
+`
                   );
                   return (
                     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mt-0">
@@ -22246,7 +35772,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
                             <p className="text-xl font-mono font-bold text-amber-400">
-                              {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
+                              {Math.floor(minutesAvailable / 60) > 0 && `$
+{
+Math.floor(minutesAvailable / 60)
+}
+h `}{Math.round(minutesAvailable % 60)}m
                             </p>
                             <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
                           </div>
@@ -22270,7 +35800,15 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         {hasAlreadyOpen && (
                           <p className="text-[10px] text-muted-foreground mt-2">
                             {stacksAlreadyOpen} stack{stacksAlreadyOpen !== 1 ? "s" : ""} already open — subtracted from totals
-                            {moreCasesNeeded > 0 && ` · open ${moreCasesNeeded} more case${moreCasesNeeded !== 1 ? "s" : ""}`}
+                            {moreCasesNeeded > 0 && ` · open $
+{
+moreCasesNeeded
+}
+ more case$
+{
+moreCasesNeeded !== 1 ? "s" : ""
+}
+`}
                           </p>
                         )}
                       </CardContent>
@@ -22357,7 +35895,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                     ingredientOptions={unifiedIngredientUniverse}
                     onAddIngredient={addDoughIngredient}
                     onRemoveIngredient={removeDoughIngredient}
-                    onSetIngredient={(idx: any, val: any) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onSetIngredient={(idx: any, val: any) => form.setValue(`doughRecipe.$
+{
+idx
+}
+.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
                     onRemove={removeDough}
                     onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
@@ -22445,8 +35987,16 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                             {doughVariantPick.variants.map((variant: any) => (
                               <option key={variant.label} value={variant.label}>
                                 {variant.label}
-                                {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
-                                {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                                {(variant.weightOz ?? 0) > 0 ? ` — $
+{
+variant.weightOz
+}
+ oz` : ""}
+                                {(variant.perTray ?? 0) > 0 ? ` / $
+{
+variant.perTray
+}
+ per tray` : ""}
                               </option>
                             ))}
                           </select>
@@ -22458,7 +36008,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                               size="sm"
                               variant="outline"
                               className="h-7 px-2 text-[11px]"
-                              data-testid={`button-dough-variant-${variant.label}`}
+                              data-testid={`button-dough-variant-$
+{
+variant.label
+}
+`}
                               onClick={() => {
                                 // Blank-fill only — same invariant as the auto path.
                                 if ((variant.weightOz ?? 0) > 0 && !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0)) form.setValue("targetDoughballWeight", variant.weightOz!, { shouldDirty: true });
@@ -22467,8 +36021,16 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                               }}
                             >
                               {variant.label}
-                              {(variant.weightOz ?? 0) > 0 ? ` — ${variant.weightOz} oz` : ""}
-                              {(variant.perTray ?? 0) > 0 ? ` / ${variant.perTray} per tray` : ""}
+                              {(variant.weightOz ?? 0) > 0 ? ` — $
+{
+variant.weightOz
+}
+ oz` : ""}
+                              {(variant.perTray ?? 0) > 0 ? ` / $
+{
+variant.perTray
+}
+ per tray` : ""}
                             </Button>
                           ))
                         )}
@@ -22494,7 +36056,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
                           Sauce & Applicator Weights
-                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${sauceWeightsOpen ? "rotate-180" : ""}`} />
+                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 $
+{
+sauceWeightsOpen ? "rotate-180" : ""
+}
+`} />
                         </CardTitle>
                       </CardHeader>
                     </button>
@@ -22536,7 +36102,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           ingredientOptions={unifiedIngredientUniverse}
                           onAddIngredient={addFrontlineIngredient}
                           onRemoveIngredient={removeFrontlineIngredient}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onSetIngredient={(idx: any, val: any) => form.setValue(`frontlineRecipe.$
+{
+idx
+}
+.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
                           onRemove={removeFrontline}
                           recipeName={v.frontlineRecipeName ?? ""}
@@ -22635,7 +36205,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           fieldPrefix="app1CheeseRecipe"
                           register={form.register}
                           ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onSetIngredient={(idx: any, val: any) => form.setValue(`app1CheeseRecipe.$
+{
+idx
+}
+.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese1}
                           recipeName={v.app1CheeseRecipeName ?? ""}
@@ -22711,7 +36285,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           fieldPrefix="app2CheeseRecipe"
                           register={form.register}
                           ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onSetIngredient={(idx: any, val: any) => form.setValue(`app2CheeseRecipe.$
+{
+idx
+}
+.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese2}
                           recipeName={v.app2CheeseRecipeName ?? ""}
@@ -22966,7 +36544,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           fieldPrefix="app3CheeseRecipe"
                           register={form.register}
                           ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onSetIngredient={(idx: any, val: any) => form.setValue(`app3CheeseRecipe.$
+{
+idx
+}
+.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese3}
                           recipeName={v.app3CheeseRecipeName ?? ""}
@@ -23042,7 +36624,11 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           fieldPrefix="app4CheeseRecipe"
                           register={form.register}
                           ingredientOptions={unifiedIngredientUniverse}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onSetIngredient={(idx: any, val: any) => form.setValue(`app4CheeseRecipe.$
+{
+idx
+}
+.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese4}
                           recipeName={v.app4CheeseRecipeName ?? ""}
@@ -23131,7 +36717,27 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                               onClick={() => {
                                 const now = new Date();
                                 const pad = (n: number) => String(n).padStart(2, "0");
-                                const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                                const local = `$
+{
+now.getFullYear()
+}
+-$
+{
+pad(now.getMonth()+1)
+}
+-$
+{
+pad(now.getDate())
+}
+T$
+{
+pad(now.getHours())
+}
+:$
+{
+pad(now.getMinutes())
+}
+`;
                                 setManualStopType("stop");
                                 setManualStopReason("");
                                 setManualStopNotes("");
@@ -23155,7 +36761,19 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                           <div key={group.run.id}>
                           <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/30 border-y border-border/20">
                             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
-                              {(`${group.run.brand ?? ""}${group.run.flavor ? ` – ${group.run.flavor}` : ""}`.trim()) || `Run ${group.idx + 1}`}
+                              {(`$
+{
+group.run.brand ?? ""
+}
+$
+{
+group.run.flavor ? ` – ${group.run.flavor}` : ""
+}
+`.trim()) || `Run $
+{
+group.idx + 1
+}
+`}
                             </span>
                             {group.idx === dayState.currentIndex && (
                               <span className="text-[10px] font-semibold uppercase tracking-wider text-primary shrink-0">Current</span>
@@ -23169,16 +36787,32 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                             const isActive = !stop.endedAt;
                             const noReason = !stop.reason.trim();
                             return (
-                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${isActive && !isPause ? "bg-orange-950/20" : isActive && isPause ? "bg-blue-950/20" : ""}`}>
+                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm $
+{
+isActive && !isPause ? "bg-orange-950/20" : isActive && isPause ? "bg-blue-950/20" : ""
+}
+`}>
                                 <div className="mt-0.5 shrink-0">
                                   {isPause
-                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400/50"}`} />
-                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-400 animate-pulse" : "text-orange-400/50"}`} />
+                                    ? <PauseCircle className={`w-3.5 h-3.5 $
+{
+isActive ? "text-blue-400 animate-pulse" : "text-blue-400/50"
+}
+`} />
+                                    : <OctagonX className={`w-3.5 h-3.5 $
+{
+isActive ? "text-orange-400 animate-pulse" : "text-orange-400/50"
+}
+`} />
                                   }
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400/70" : isManual ? "text-violet-400/70" : "text-orange-400/70"}`}>
+                                    <span className={`text-[10px] font-semibold uppercase tracking-wider $
+{
+isPause ? "text-blue-400/70" : isManual ? "text-violet-400/70" : "text-orange-400/70"
+}
+`}>
                                       {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
                                     </span>
                                     {noReason ? (
@@ -23195,10 +36829,18 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                                     {stop.notes && <span className="text-xs text-muted-foreground">— {stop.notes}</span>}
                                   </div>
                                   <div className="text-[10px] text-muted-foreground mt-0.5">
-                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
+                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → $
+{
+fmtClock(stop.endedAt)
+}
+` : " (ongoing)"}
                                   </div>
                                 </div>
-                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"}`}>
+                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 $
+{
+isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"
+}
+`}>
                                   {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
                                 </span>
                                 <button
@@ -23317,19 +36959,39 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                         </div>
                         <div className="px-5 py-4">
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Downtime</div>
-                          <div className={`text-2xl font-black tabular-nums ${todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"}`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
+                          <div className={`text-2xl font-black tabular-nums $
+{
+todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"
+}
+`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
                         </div>
                         <div className="px-5 py-4">
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's PPM</div>
-                          <div className={`text-2xl font-black tabular-nums ${benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          <div className={`text-2xl font-black tabular-nums $
+{
+benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"
+}
+`}>
                             {todayPpm !== null ? todayPpm : "—"}
                           </div>
                           {histBenchmarkPpm !== null && (
                             <div className="text-[10px] text-muted-foreground mt-0.5">
                               avg {histBenchmarkPpm} PPM
                               {benchDiff !== null && (
-                                <span className={`ml-1 font-semibold ${benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                  {benchDiff >= 0 ? `▲ +${benchDiff}` : `▼ ${benchDiff}`}
+                                <span className={`ml-1 font-semibold $
+{
+benchDiff >= 0 ? "text-emerald-400" : "text-red-400"
+}
+`}>
+                                  {benchDiff >= 0 ? `▲ +$
+{
+benchDiff
+}
+` : `▼ $
+{
+benchDiff
+}
+`}
                                 </span>
                               )}
                             </div>
@@ -23372,22 +37034,78 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     const frontlineItems: { label: string; value: string }[] = [];
                     // Dough row first
                     if (doughBatches > 0) {
-                      frontlineItems.push({ label: `Dough — ${doughName}`, value: `${fmtNum(doughBatches, 2)} batches` });
+                      frontlineItems.push({ label: `Dough — $
+{
+doughName
+}
+`, value: `$
+{
+fmtNum(doughBatches, 2)
+}
+ batches` });
                     }
                     if (s.sauceBatches > 0) {
                       const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                      frontlineItems.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+                      frontlineItems.push({ label: "Sauce", value: bd ? `$
+{
+fmtNum(s.sauceBatches, 2)
+}
+ batches · $
+{
+bd.totalBarrels
+}
+ barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
                     }
-                    if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
-                    if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
+                    if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — $
+{
+s.app1Type
+}
+`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
+                    if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — $
+{
+s.app2Type
+}
+`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
                     // Pep applicators sit between App 2 and App 3 (physical line order).
                     const pepCombinedLbl = vals.pep1Combined === true ? "1 & 2" : "1";
-                    if (s.pep1Type) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-                    if (s.pep1TypeB) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep1TypeB) ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
-                    if (vals.pep1Combined !== true && s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
-                    if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
-                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
-                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
+                    if (s.pep1Type) frontlineItems.push({ label: `Pep $
+{
+pepCombinedLbl
+}
+ — $
+{
+s.pep1Type
+}
+`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
+                    if (s.pep1TypeB) frontlineItems.push({ label: `Pep $
+{
+pepCombinedLbl
+}
+ — $
+{
+s.pep1TypeB
+}
+`, value: DEFAULT_PEP_TYPES.includes(s.pep1TypeB) ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
+                    if (vals.pep1Combined !== true && s.pep2Type) frontlineItems.push({ label: `Pep 2 — $
+{
+s.pep2Type
+}
+`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+                    if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — $
+{
+s.pep2TypeB
+}
+`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
+                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — $
+{
+s.app3Type
+}
+`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
+                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — $
+{
+s.app4Type
+}
+`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
 
                     // ── Packaging for the detail modal ──
 
@@ -23398,7 +37116,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     return (
 
                       <Card
-                        className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"}`}
+                        className={`border-border/50 shadow-md $
+{
+!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""
+}
+ $
+{
+isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/60"
+}
+`}
                         onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
                       >
                         <CardHeader className="pb-2 pt-4 px-5">
@@ -23411,7 +37137,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                             </span>
                           )}
                         </div>
-                            <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${isCurrent ? "bg-primary/20 text-primary" : isFinished ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                            <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full $
+{
+isCurrent ? "bg-primary/20 text-primary" : isFinished ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"
+}
+`}>
                               {isCurrent ? "Current" : isFinished ? "Finished" : "Upcoming"}
                             </span>
                           </div>
@@ -23473,8 +37203,16 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                     className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
                                   />
                                   {caseDelta !== null && (
-                                    <span className={`text-xs font-semibold tabular-nums shrink-0 ${caseDelta >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
-                                      {caseDelta >= 0 ? `+${caseDelta}` : caseDelta}
+                                    <span className={`text-xs font-semibold tabular-nums shrink-0 $
+{
+caseDelta >= 0 ? "text-emerald-400" : "text-amber-400"
+}
+`}>
+                                      {caseDelta >= 0 ? `+$
+{
+caseDelta
+}
+` : caseDelta}
                                     </span>
                                   )}
                                 </div>
@@ -23531,7 +37269,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                             const ahead = diffSec < 0;
                             const absDiff = Math.abs(diffSec);
                             return (
-                              <div className={`flex items-center justify-between rounded-lg px-4 py-2 border ${ahead ? "bg-emerald-950/30 border-emerald-700/30" : "bg-amber-950/30 border-amber-700/30"}`}>
+                              <div className={`flex items-center justify-between rounded-lg px-4 py-2 border $
+{
+ahead ? "bg-emerald-950/30 border-emerald-700/30" : "bg-amber-950/30 border-amber-700/30"
+}
+`}>
                                 <div className="space-y-0.5">
                                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Time Comparison</div>
                                   <div className="flex gap-3 text-xs">
@@ -23539,8 +37281,20 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                     <span className="text-muted-foreground">Expected: <span className="text-foreground font-medium">{fmtTime(s.estimatedTimeSec)}</span></span>
                                   </div>
                                 </div>
-                                <div className={`text-right text-sm font-bold ${ahead ? "text-emerald-400" : "text-amber-400"}`}>
-                                  {ahead ? `−${fmtTime(absDiff)}` : `+${fmtTime(absDiff)}`}
+                                <div className={`text-right text-sm font-bold $
+{
+ahead ? "text-emerald-400" : "text-amber-400"
+}
+`}>
+                                  {ahead ? `−$
+{
+fmtTime(absDiff)
+}
+` : `+$
+{
+fmtTime(absDiff)
+}
+`}
                                   <div className="text-[10px] font-normal">{ahead ? "ahead" : "over"}</div>
                                 </div>
                               </div>
@@ -23614,7 +37368,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                   const shopMap = new Map<string, ShopItem>();
                   function shopAdd(name: string, qty: number, unit: string) {
                     if (!name || qty <= 0) return;
-                    const key = `${name}__${unit}`;
+                    const key = `$
+{
+name
+}
+__$
+{
+unit
+}
+`;
                     const existing = shopMap.get(key);
                     if (existing) existing.totalQty += qty;
                     else shopMap.set(key, { name, totalQty: qty, unit });
@@ -23648,10 +37410,26 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                       if (row.ingredient && row.lbs > 0) shopAdd(row.ingredient, row.lbs, "lbs");
                     }
                     // Pep
-                    if (s.pep1Type && s.pep1Lbs > 0) shopAdd(`Pep — ${s.pep1Type}`, s.pep1Lbs, "lbs");
-                    if (s.pep1TypeB && s.pep1LbsB > 0) shopAdd(`Pep — ${s.pep1TypeB}`, s.pep1LbsB, "lbs");
-                    if (s.pep2Type && s.pep2Lbs > 0) shopAdd(`Pep — ${s.pep2Type}`, s.pep2Lbs, "lbs");
-                    if (s.pep2TypeB && s.pep2LbsB > 0) shopAdd(`Pep — ${s.pep2TypeB}`, s.pep2LbsB, "lbs");
+                    if (s.pep1Type && s.pep1Lbs > 0) shopAdd(`Pep — $
+{
+s.pep1Type
+}
+`, s.pep1Lbs, "lbs");
+                    if (s.pep1TypeB && s.pep1LbsB > 0) shopAdd(`Pep — $
+{
+s.pep1TypeB
+}
+`, s.pep1LbsB, "lbs");
+                    if (s.pep2Type && s.pep2Lbs > 0) shopAdd(`Pep — $
+{
+s.pep2Type
+}
+`, s.pep2Lbs, "lbs");
+                    if (s.pep2TypeB && s.pep2LbsB > 0) shopAdd(`Pep — $
+{
+s.pep2TypeB
+}
+`, s.pep2LbsB, "lbs");
                   }
                   const shopList = [...shopMap.values()].sort((a: any, b: any) => a.name.localeCompare(b.name));
 
@@ -23662,28 +37440,100 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                         <button
                           type="button"
                           onClick={() => {
-                            const lines: string[] = [`Production Run Summary — ${todayStr()}`, ""];
+                            const lines: string[] = [`Production Run Summary — $
+{
+todayStr()
+}
+`, ""];
                             for (const run of dayState.runs) {
                               const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
                               const s = computeSummaryStats(vals);
-                              lines.push(`${runLabel(run)} — ${fmtComma(s.totalCases)} cases / ${fmtComma(s.totalPizzas)} pizzas`);
-                              if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
+                              lines.push(`$
+{
+runLabel(run)
+}
+ — $
+{
+fmtComma(s.totalCases)
+}
+ cases / $
+{
+fmtComma(s.totalPizzas)
+}
+ pizzas`);
+                              if (run.startedAt) lines.push(`  Started: $
+{
+fmtClock(run.startedAt)
+}
+$
+{
+run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""
+}
+`);
                               if (s.sauceBatches > 0) {
                                 const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
                                 lines.push(bd
-                                  ? `  Sauce: ${fmtNum(s.sauceBatches, 2)} batches (${bd.batchesPerBarrel}/barrel) → ${bd.totalBarrels} barrels`
-                                  : `  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
+                                  ? `  Sauce: $
+{
+fmtNum(s.sauceBatches, 2)
+}
+ batches ($
+{
+bd.batchesPerBarrel
+}
+/barrel) → $
+{
+bd.totalBarrels
+}
+ barrels`
+                                  : `  Sauce: $
+{
+fmtNum(s.sauceBatches, 2)
+}
+ barrels`);
                               }
-                              if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
-                              if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
-                              if (s.pep1TypeB && s.pep1LbsB > 0) lines.push(`  Pep: ${fmtNum(s.pep1LbsB, 1)} lbs`);
-                              if (s.pep2Type && s.pep2Lbs > 0) lines.push(`  Pep: ${fmtNum(s.pep2Lbs, 1)} lbs`);
-                              if (s.pep2TypeB && s.pep2LbsB > 0) lines.push(`  Pep: ${fmtNum(s.pep2LbsB, 1)} lbs`);
-                              if (run.notes) lines.push(`  Notes: ${run.notes}`);
+                              if (s.app1Type) lines.push(`  $
+{
+s.app1Type
+}
+: $
+{
+fmtNum(s.app1Lbs, 1)
+}
+ lbs`);
+                              if (s.pep1Type) lines.push(`  Pep: $
+{
+fmtNum(s.pep1Lbs, 1)
+}
+ lbs`);
+                              if (s.pep1TypeB && s.pep1LbsB > 0) lines.push(`  Pep: $
+{
+fmtNum(s.pep1LbsB, 1)
+}
+ lbs`);
+                              if (s.pep2Type && s.pep2Lbs > 0) lines.push(`  Pep: $
+{
+fmtNum(s.pep2Lbs, 1)
+}
+ lbs`);
+                              if (s.pep2TypeB && s.pep2LbsB > 0) lines.push(`  Pep: $
+{
+fmtNum(s.pep2LbsB, 1)
+}
+ lbs`);
+                              if (run.notes) lines.push(`  Notes: $
+{
+run.notes
+}
+`);
                               lines.push("");
                             }
                             if (dayState.shiftNotes?.trim()) {
-                              lines.push(`Shift Notes: ${dayState.shiftNotes.trim()}`);
+                              lines.push(`Shift Notes: $
+{
+dayState.shiftNotes.trim()
+}
+`);
                             }
                             const text = lines.join("\n");
                             const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
@@ -23750,7 +37600,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                               <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Pizzas</span>
                             </div>
                             <div className="flex flex-col items-center">
-                              <span className={`text-2xl font-bold tabular-nums ${dayActualCases > 0 ? (dayActualCases >= dayTotalCases ? "text-emerald-400" : "text-amber-400") : "text-muted-foreground"}`}>
+                              <span className={`text-2xl font-bold tabular-nums $
+{
+dayActualCases > 0 ? (dayActualCases >= dayTotalCases ? "text-emerald-400" : "text-amber-400") : "text-muted-foreground"
+}
+`}>
                                 {dayActualCases > 0 ? fmtComma(dayActualCases) : "—"}
                               </span>
                               <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Cases (actual)</span>
@@ -23787,12 +37641,24 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                 <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Gap / Down</div>
                               </div>
                               <div>
-                                <div className={`text-lg font-bold tabular-nums ${utilPct >= 80 ? "text-emerald-400" : utilPct >= 60 ? "text-amber-400" : "text-red-400"}`}>{utilPct}%</div>
+                                <div className={`text-lg font-bold tabular-nums $
+{
+utilPct >= 80 ? "text-emerald-400" : utilPct >= 60 ? "text-amber-400" : "text-red-400"
+}
+`}>{utilPct}%</div>
                                 <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Utilization</div>
                               </div>
                             </div>
                             <div className="mt-3 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                              <div className={`h-full rounded-full transition-all duration-500 ${utilPct >= 80 ? "bg-emerald-500" : utilPct >= 60 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${utilPct}%` }} />
+                              <div className={`h-full rounded-full transition-all duration-500 $
+{
+utilPct >= 80 ? "bg-emerald-500" : utilPct >= 60 ? "bg-amber-500" : "bg-red-500"
+}
+`} style={{ width: `$
+{
+utilPct
+}
+%` }} />
                             </div>
                           </div>
                         );
@@ -23807,7 +37673,15 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                           </div>
                           <div className="space-y-1.5">
                             {shopList.map((item: any) => (
-                              <div key={`${item.name}__${item.unit}`} className="flex justify-between text-sm">
+                              <div key={`$
+{
+item.name
+}
+__$
+{
+item.unit
+}
+`} className="flex justify-between text-sm">
                                 <span className="text-foreground/80">{item.name}</span>
                                 <span className="font-semibold tabular-nums">{fmtNum(item.totalQty, 1)} {item.unit}</span>
                               </div>
@@ -23848,12 +37722,20 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                     <button
                                       type="button"
                                       onClick={() => updateRunMeta(run.id, { gapType: "switchover" })}
-                                      className={`px-2 py-1 transition-colors ${gapType === "switchover" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-muted/40"}`}
+                                      className={`px-2 py-1 transition-colors $
+{
+gapType === "switchover" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-muted/40"
+}
+`}
                                     >Switchover</button>
                                     <button
                                       type="button"
                                       onClick={() => updateRunMeta(run.id, { gapType: "break" })}
-                                      className={`px-2 py-1 border-l border-border/40 transition-colors ${gapType === "break" ? "bg-amber-500/20 text-amber-400" : "text-muted-foreground hover:bg-muted/40"}`}
+                                      className={`px-2 py-1 border-l border-border/40 transition-colors $
+{
+gapType === "break" ? "bg-amber-500/20 text-amber-400" : "text-muted-foreground hover:bg-muted/40"
+}
+`}
                                     >Break</button>
                                   </div>
                                   {/* Gap time */}
@@ -23941,7 +37823,11 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                   >
                                     <Download className="w-3 h-3" /> CSV
                                   </button>
-                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expandedHistoryDay === day.date ? "rotate-180" : ""}`} />
+                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform $
+{
+expandedHistoryDay === day.date ? "rotate-180" : ""
+}
+`} />
                                 </div>
                               </button>
                               {expandedHistoryDay === day.date && (
@@ -24072,8 +37958,24 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                       lbs: sumOz > 0 ? (Number(r.lbs) / sumOz) * lbs : 0,
                     })).filter((r: any) => r.lbs > 0);
                     appBlocks.push({
-                      key: `${prefix}__${type}`,
-                      label: `${prefix} — ${type}`,
+                      key: `$
+{
+prefix
+}
+__$
+{
+type
+}
+`,
+                      label: `$
+{
+prefix
+}
+ — $
+{
+type
+}
+`,
                       value: fmtNum(lbs, 1) + " lbs",
                       recipeName: blendName || undefined,
                       ingredientRows: ingRows.length > 0 ? ingRows : undefined,
@@ -24086,23 +37988,95 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                       .filter((r: any) => (r.ingredient ?? "").trim() && r.lbs > 0)
                       .map((r: any) => ({ ingredient: (r.ingredient as string).trim(), lbs: r.lbs }));
                     appBlocks.push({
-                      key: `${prefix}__${type}`,
-                      label: `${prefix} — ${type}`,
+                      key: `$
+{
+prefix
+}
+__$
+{
+type
+}
+`,
+                      label: `$
+{
+prefix
+}
+ — $
+{
+type
+}
+`,
                       value: fmtNum(batches, 2) + " batches",
                       recipeName: blendName || undefined,
                       ingredientRows: ingRows.length > 0 ? ingRows : undefined,
                     });
                   } else if (!isMix && !isCheese && batches > 0) {
-                    appBlocks.push({ key: `${prefix}__${type}`, label: `${prefix} — ${type}`, value: fmtNum(batches, 2) + " batches" });
+                    appBlocks.push({ key: `$
+{
+prefix
+}
+__$
+{
+type
+}
+`, label: `$
+{
+prefix
+}
+ — $
+{
+type
+}
+`, value: fmtNum(batches, 2) + " batches" });
                   }
                 };
                 addAppBlock(ds.app1Type, ds.app1Lbs, ds.app1Batches, "App 1", dv.app1CheeseRecipeName, dv.app1CheeseRecipe);
                 addAppBlock(ds.app2Type, ds.app2Lbs, ds.app2Batches, "App 2", dv.app2CheeseRecipeName, dv.app2CheeseRecipe);
                 const pepCL = dv.pep1Combined === true ? "1 & 2" : "1";
-                if (ds.pep1Type && ds.pep1Lbs > 0) appBlocks.push({ key: `pep1__${ds.pep1Type}`, label: `Pep ${pepCL} — ${ds.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1Type) ? fmtNum(ds.pep1Lbs, 2) + " lbs" : fmtNum(ds.pep1Batches, 2) + " batches" });
-                if (ds.pep1TypeB && ds.pep1LbsB > 0) appBlocks.push({ key: `pep1b__${ds.pep1TypeB}`, label: `Pep ${pepCL} — ${ds.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep1TypeB) ? fmtNum(ds.pep1LbsB, 2) + " lbs" : fmtNum(ds.pep1BatchesB, 2) + " batches" });
-                if (dv.pep1Combined !== true && ds.pep2Type && ds.pep2Lbs > 0) appBlocks.push({ key: `pep2__${ds.pep2Type}`, label: `Pep 2 — ${ds.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2Type) ? fmtNum(ds.pep2Lbs, 2) + " lbs" : fmtNum(ds.pep2Batches, 2) + " batches" });
-                if (dv.pep1Combined !== true && ds.pep2TypeB && ds.pep2LbsB > 0) appBlocks.push({ key: `pep2b__${ds.pep2TypeB}`, label: `Pep 2 — ${ds.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(ds.pep2TypeB) ? fmtNum(ds.pep2LbsB, 2) + " lbs" : fmtNum(ds.pep2BatchesB, 2) + " batches" });
+                if (ds.pep1Type && ds.pep1Lbs > 0) appBlocks.push({ key: `pep1__$
+{
+ds.pep1Type
+}
+`, label: `Pep $
+{
+pepCL
+}
+ — $
+{
+ds.pep1Type
+}
+`, value: DEFAULT_PEP_TYPES.includes(ds.pep1Type) ? fmtNum(ds.pep1Lbs, 2) + " lbs" : fmtNum(ds.pep1Batches, 2) + " batches" });
+                if (ds.pep1TypeB && ds.pep1LbsB > 0) appBlocks.push({ key: `pep1b__$
+{
+ds.pep1TypeB
+}
+`, label: `Pep $
+{
+pepCL
+}
+ — $
+{
+ds.pep1TypeB
+}
+`, value: DEFAULT_PEP_TYPES.includes(ds.pep1TypeB) ? fmtNum(ds.pep1LbsB, 2) + " lbs" : fmtNum(ds.pep1BatchesB, 2) + " batches" });
+                if (dv.pep1Combined !== true && ds.pep2Type && ds.pep2Lbs > 0) appBlocks.push({ key: `pep2__$
+{
+ds.pep2Type
+}
+`, label: `Pep 2 — $
+{
+ds.pep2Type
+}
+`, value: DEFAULT_PEP_TYPES.includes(ds.pep2Type) ? fmtNum(ds.pep2Lbs, 2) + " lbs" : fmtNum(ds.pep2Batches, 2) + " batches" });
+                if (dv.pep1Combined !== true && ds.pep2TypeB && ds.pep2LbsB > 0) appBlocks.push({ key: `pep2b__$
+{
+ds.pep2TypeB
+}
+`, label: `Pep 2 — $
+{
+ds.pep2TypeB
+}
+`, value: DEFAULT_PEP_TYPES.includes(ds.pep2TypeB) ? fmtNum(ds.pep2LbsB, 2) + " lbs" : fmtNum(ds.pep2BatchesB, 2) + " batches" });
                 addAppBlock(ds.app3Type, ds.app3Lbs, ds.app3Batches, "App 3", dv.app3CheeseRecipeName, dv.app3CheeseRecipe);
                 addAppBlock(ds.app4Type, ds.app4Lbs, ds.app4Batches, "App 4", dv.app4CheeseRecipeName, dv.app4CheeseRecipe);
                 if (appBlocks.length === 0) return null;
