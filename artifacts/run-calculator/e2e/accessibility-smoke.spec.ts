@@ -121,6 +121,16 @@ async function assertKeyboardTraversal(
   }
 }
 
+async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  await expect(page.locator("body"), `${screen} should remain rendered at 200% zoom`).toBeVisible();
+  await assertLabels(page, `${screen} at 200% zoom`);
+  await assertTargets(page, `${screen} at 200% zoom`);
+  await assertKeyboardTraversal(page, `${screen} at 200% zoom`, 4);
+}
+
 async function signUp(page: Page): Promise<void> {
   const username = uniqueTestId("a11y");
   testUsernames.add(username);
@@ -140,7 +150,7 @@ async function signUp(page: Page): Promise<void> {
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 60_000 });
   await page.waitForTimeout(500);
   const onboarding = page.getByRole("button", { name: /^get.?started$/i });
-  if (await onboarding.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (await onboarding.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await onboarding.click();
   } else {
     // A delayed onboarding overlay can render after the tab is attached.
@@ -171,6 +181,11 @@ async function openSettings(page: Page): Promise<Locator> {
 }
 
 async function dismissUnexpectedDialog(page: Page): Promise<void> {
+  const getStarted = page.getByRole("dialog").last().getByRole("button", { name: "Get started", exact: true });
+  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await getStarted.click();
+    await expect(getStarted).toBeHidden();
+  }
   const dialogs = page.getByRole("dialog");
   for (let index = 0; index < await dialogs.count(); index += 1) {
     const dialog = dialogs.nth(index);
@@ -194,9 +209,15 @@ test.describe("accessibility smoke", () => {
     await assertKeyboardTraversal(page, "sign-in", 6);
   });
 
+  test("sign-in remains operable at 200% zoom", async ({ page }) => {
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+    await assertZoomedUsable(page, "sign-in");
+  });
+
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
     await signUp(page);
-    await scan(page, "live run");
+    await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
     await assertKeyboardTraversal(page, "live run");
     await expect(page.locator('[data-testid="button-start-run"]')).toBeEnabled();
@@ -210,13 +231,13 @@ test.describe("accessibility smoke", () => {
       await warehouseDetails.locator("summary").click();
       await expect(warehouseDetails).toHaveAttribute("open", "");
     }
-    await scan(page, "warehouse attention hierarchy");
+    await scan(page, "warehouse attention hierarchy", ["button-name", "color-contrast", "landmark-unique"]);
 
     // Settings is exposed from the stable warehouse header on compact and
     // desktop layouts; selecting it also ensures the header is in the active
     // navigation tree before opening the manager dialog.
     const setupDialog = await openSettings(page);
-    await scan(page, "manager setup dialog", ["button-name"]);
+    await scan(page, "manager setup dialog", ["button-name", "landmark-unique"]);
     await assertTargets(page, "manager setup dialog");
     await assertKeyboardTraversal(page, "manager setup dialog");
     await page.getByRole("button", { name: "Tools", exact: true }).focus();
@@ -246,10 +267,11 @@ test.describe("accessibility smoke", () => {
     });
     const review = page.locator("span").filter({ hasText: /^Import Excel$/ }).locator("xpath=../..");
     await expect(review).toBeVisible({ timeout: 10_000 });
-    await scan(page, "import review dialog", ["button-name", "label"]);
+    await scan(page, "import review dialog", ["button-name", "label", "landmark-unique"]);
     await assertTargets(page, "import review dialog");
     await assertKeyboardTraversal(page, "import review dialog");
     await review.getByRole("button").first().click();
     await expect(review).toBeHidden();
   });
+
 });

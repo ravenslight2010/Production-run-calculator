@@ -32,5 +32,9 @@ export default defineConfig({
       name: "a11y-phone",
       use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: true },
     },
+    {
+      name: "a11y-tablet",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
+    },
   ],
 });

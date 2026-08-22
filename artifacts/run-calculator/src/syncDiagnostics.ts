@@ -1,4 +1,5 @@
 import { attentionStateForSeverity, nextActionForAttention, type AttentionState } from "./attentionStates";
+import {
 
 export type SyncDiagnosticKind =
   | "connected"

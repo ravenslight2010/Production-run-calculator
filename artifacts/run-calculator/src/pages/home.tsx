@@ -4915,6 +4915,14 @@ export default function Home() {
   const [manualStopStart, setManualStopStart] = useState("");
   const [manualStopEnd, setManualStopEnd] = useState("");
 
+  useEffect(() => {
+    if (showStopDialog) {
+      window.requestAnimationFrame(() => document.getElementById("stop-dialog-close")?.focus());
+      return;
+    }
+    document.querySelector<HTMLButtonElement>('[data-testid="button-log-stoppage"]')?.focus();
+  }, [showStopDialog]);
+
   // ── Screen casting mode ────────────────────────────────────────────────────
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
@@ -16376,12 +16384,12 @@ export default function Home() {
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
         {showStopDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowStopDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="presentation" onClick={() => setShowStopDialog(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <OctagonX className="w-5 h-5 text-orange-400 shrink-0" />
-                <h2 className="text-base font-bold">Log Line Stop</h2>
-                <button type="button" onClick={() => setShowStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <h2 id="stop-dialog-title" className="text-base font-bold">Log Line Stop</h2>
+                <button id="stop-dialog-close" type="button" aria-label="Close log line stop dialog" onClick={() => setShowStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -19220,6 +19228,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       ) : (
                         <button
                           type="button"
+                          data-testid="button-log-stoppage"
                           onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
                           className="col-span-2 border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors"
                         >
@@ -19920,8 +19929,9 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       <button
                         key={i}
                         type="button"
+                        aria-label={`Select run ${i + 1}`}
                         onClick={() => switchToRun(i)}
-                        className={`rounded-full transition-all shrink-0 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                        className={`rounded-full transition-all shrink-0 min-w-4 min-h-4 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
                       />
                     ))}
                   </div>
@@ -19938,8 +19948,9 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <button
                       key={i}
                       type="button"
+                      aria-label={`Select run ${i + 1}`}
                       onClick={() => switchToRun(i)}
-                      className={`rounded-full transition-all shrink-0 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                      className={`rounded-full transition-all shrink-0 min-w-4 min-h-4 ${i === cur ? `w-4 h-2 bg-primary ${swipeCue ? "ring-2 ring-primary/50 ring-offset-1 ring-offset-background scale-125" : ""}` : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
                     />
                   ))}
                   {end < total && <span className="text-[9px] text-muted-foreground/50 leading-none">…</span>}
