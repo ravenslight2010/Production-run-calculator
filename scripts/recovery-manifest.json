@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "description": "Focused evidence inventory for selective recovery from a checkpoint.",
+  "entries": [
+    {
+      "id": "import-history",
+      "feature": "Saved import history can be reopened",
+      "files": [
+        "artifacts/api-server/src/routes/importHistory.ts",
+        "artifacts/run-calculator/src/importHistory.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/api-server/src/routes/index.ts",
+          "contains": "router.use(importHistoryRouter)"
+        },
+        {
+          "file": "artifacts/run-calculator/src/pages/home.tsx",
+          "contains": "importHistory"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "lib/api-spec/openapi.yaml",
+          "contains": "/import-history"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/run-calculator/src/historyBlankRunFilter.test.ts",
+          "contains": "describe("
+        },
+        {
+          "file": "artifacts/run-calculator/src/importerCommitAudit.test.ts",
+          "contains": "describe("
+        }
+      ]
+    },
+    {
+      "id": "profile-data-health-repair",
+      "feature": "Profile data-health repairs are guarded and undoable",
+      "files": [
+        "artifacts/api-server/src/routes/profileDataHealth.ts",
+        "lib/db/src/schema/dataHeals.ts"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/api-server/src/routes/index.ts",
+          "contains": "router.use(profileDataHealthRouter)"
+        },
+        {
+          "file": "artifacts/run-calculator/src/components/DataHealthWorkspace.tsx",
+          "contains": "fetchDataHealthWorkspace"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "lib/api-spec/openapi.yaml",
+          "contains": "/profile-data/health-check/batches/{batchId}/undo"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/api-server/src/lib/profileNameLinkHeal.integration.test.ts",
+          "contains": "repair"
+        }
+      ]
+    },
+    {
+      "id": "operational-handoff",
+      "feature": "Managers can review a date-scoped operational handoff",
+      "files": [
+        "artifacts/api-server/src/routes/operationalReports.ts",
+        "artifacts/run-calculator/src/pages/home.tsx"
+      ],
+      "wiring": [
+        {
+          "file": "artifacts/api-server/src/routes/index.ts",
+          "contains": "router.use(operationalReportsRouter)"
+        },
+        {
+          "file": "artifacts/run-calculator/src/shiftHandoff.ts",
+          "contains": "/api/reports/handoff"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "lib/api-spec/openapi.yaml",
+          "contains": "/reports/handoff"
+        }
+      ],
+      "tests": [
+        {
+          "file": "artifacts/api-server/src/lib/routeScan.test.ts",
+          "contains": "sub-router"
+        }
+      ],
+      "intentionalDifference": "The current handoff keeps source-unavailable notes and a broader scoped digest instead of matching the checkpoint implementation byte-for-byte."
+    },
+    {
+      "id": "recovery-contract-freshness",
+      "feature": "Recovered API behavior has checked-in generated contracts",
+      "files": [
+        "lib/api-spec/openapi.yaml",
+        "lib/api-client-react/src/generated",
+        "lib/api-zod/src/generated"
+      ],
+      "wiring": [
+        {
+          "file": "lib/api-spec/check-generated.sh",
+          "contains": "Generated API client output is stale"
+        }
+      ],
+      "contracts": [
+        {
+          "file": "lib/api-client-react/src/generated/api.ts",
+          "contains": "undoProfileDataHealthRepairBatch"
+        },
+        {
+          "file": "lib/api-zod/src/generated/types/profileDataHealthReport.ts",
+          "contains": "ProfileDataHealthRepair"
+        }
+      ],
+      "tests": [
+        {
+          "file": "lib/api-spec/check-generated.sh",
+          "contains": "diff -ru"
+        }
+      ]
+    }
+  ]
+}
