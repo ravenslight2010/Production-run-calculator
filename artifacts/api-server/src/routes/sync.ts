@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { createHash } from "node:crypto";
 import {
   db,
   dailySyncTable,
@@ -55,6 +56,36 @@ const router: IRouter = Router();
 
 type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string };
 const clients = new Set<SseClient>();
+const SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
+
+/** Stable identity for a canonical JSON snapshot (object key order independent). */
+export function syncSnapshotId(data: unknown): string {
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, child]) => [key, stable(child)]),
+      );
+    }
+    return value;
+  };
+  return createHash("sha256").update(JSON.stringify(stable(data))).digest("hex");
+}
+
+function requestedSnapshot(req: Request): string | undefined {
+  const value = req.query.snapshot;
+  return typeof value === "string" && SNAPSHOT_ID_RE.test(value) ? value : undefined;
+}
+
+function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
+  const snapshotId = syncSnapshotId(data);
+  if (requested !== snapshotId) return false;
+  res.setHeader("X-Sync-Snapshot", snapshotId);
+  res.json({ unchanged: true, snapshotId });
+  return true;
+}
 
 function todayStr(): string {
   const d = new Date();
@@ -108,6 +139,14 @@ async function getResetEpoch(scope: Scope): Promise<number> {
     .from(dataResetTable)
     .where(eq(dataResetTable.scope, scope));
   return row?.epoch ?? 0;
+}
+
+async function currentSnapshotId(date: string, scope: Scope): Promise<string | null> {
+  const [row] = await db
+    .select({ data: dailySyncTable.data })
+    .from(dailySyncTable)
+    .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+  return row ? syncSnapshotId(row.data) : null;
 }
 
 // Postgres unique-violation is SQLSTATE 23505. Drizzle wraps driver errors, so
@@ -403,7 +442,10 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
     .select()
     .from(dailySyncTable)
     .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, currentScope())));
-  res.json(row?.data ?? null);
+  const data = row?.data ?? null;
+  if (unchangedResponse(res, data, requestedSnapshot(req))) return;
+  if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
+  res.json(data);
 });
 
 // A client pushes the reset epoch it last honored as `?epoch=`. If a data reset
@@ -434,7 +476,11 @@ router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<vo
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
-  const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
+  const { senderId = "", payload, snapshotId: requestedId } = req.body as {
+    senderId?: string;
+    payload: unknown;
+    snapshotId?: unknown;
+  };
   const today = clientToday(req);
     const scope = currentScope();
 
@@ -446,11 +492,19 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  const existingSnapshot = typeof requestedId === "string" && await currentSnapshotId(today, scope);
+  if (existingSnapshot && requestedId === existingSnapshot) {
+    res.json({ ok: true, unchanged: true, snapshotId: existingSnapshot });
+    return;
+  }
   const merged = await upsertProtected(today, scope, sanitized, today, req.ip);
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   broadcast(merged, senderId, scope, today);
-  res.json({ ok: true, data: merged });
+  const snapshotId = syncSnapshotId(merged);
+  res.json(requestedId === snapshotId
+    ? { ok: true, unchanged: true, snapshotId }
+    : { ok: true, data: merged, snapshotId });
 });
 
 router.get("/sync/events", async (req: Request, res: Response): Promise<void> => {
@@ -470,7 +524,16 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // Always send a first frame, including when no row exists. The web client uses
   // this acknowledgement as its sync baseline and must not upload local state
   // before it has either applied the row or learned that the row is absent.
-  res.write(`data: ${JSON.stringify({ data: row?.data ?? null, senderId: null, initial: true })}\n\n`);
+  const data = row?.data ?? null;
+  const snapshotId = data ? syncSnapshotId(data) : undefined;
+  const requested = requestedSnapshot(req);
+  res.write(`data: ${JSON.stringify({
+    ...(requested && requested === snapshotId
+      ? { unchanged: true, snapshotId }
+      : { data, snapshotId }),
+    senderId: null,
+    initial: true,
+  })}\n\n`);
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
@@ -533,13 +596,20 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
     .select()
     .from(dailySyncTable)
     .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, currentScope())));
-  res.json(row?.data ?? null);
+  const data = row?.data ?? null;
+  if (unchangedResponse(res, data, requestedSnapshot(req))) return;
+  if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
+  res.json(data);
 });
 
 router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
-  const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
+  const { senderId = "", payload, snapshotId: requestedId } = req.body as {
+    senderId?: string;
+    payload: unknown;
+    snapshotId?: unknown;
+  };
     const scope = currentScope();
 
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
@@ -550,13 +620,23 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
+  const existingSnapshot = typeof requestedId === "string" && await currentSnapshotId(date, scope);
+  if (existingSnapshot && requestedId === existingSnapshot) {
+    res.json({ ok: true, unchanged: true, snapshotId: existingSnapshot });
+    return;
+  }
   const merged = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (date === clientToday(req)) {
     broadcast(merged, senderId, scope, date);
   }
-  res.json({ ok: true, data: merged });
+  const snapshotId = syncSnapshotId(merged);
+  if (requestedId === snapshotId) {
+    res.json({ ok: true, unchanged: true, snapshotId });
+  } else {
+    res.json({ ok: true, data: merged, snapshotId });
+  }
 });
 
 router.delete("/sync/:date", requireCapability("manage-factory-settings"), async (req: Request<{ date: string }>, res: Response): Promise<void> => {

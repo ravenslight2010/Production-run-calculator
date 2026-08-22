@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeSyncWriteResponse } from "./syncWriteResponse";
+import { consumeSyncWriteResponse, isUnchangedSyncResponse } from "./syncWriteResponse";
 
 describe("consumeSyncWriteResponse", () => {
   it("immediately self-applies the server canonical payload on a successful write", async () => {
@@ -47,6 +47,23 @@ describe("consumeSyncWriteResponse", () => {
       expect.objectContaining({ stale: true, epoch: 7 }),
     );
     expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
+  it("recognizes a valid unchanged response without applying a canonical payload", async () => {
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({ ok: true, unchanged: true, snapshotId: "a".repeat(64) }), { status: 200 }),
+      { applyCanonical },
+    );
+    expect(result.stale).toBe(false);
+    expect(isUnchangedSyncResponse(result.body)).toBe(true);
+    expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
+  it("does not treat malformed unchanged responses as a successful snapshot", () => {
+    expect(isUnchangedSyncResponse({ unchanged: true })).toBe(false);
+    expect(isUnchangedSyncResponse({ unchanged: true, snapshotId: "not-a-hash" })).toBe(true);
+    expect(isUnchangedSyncResponse(null)).toBe(false);
   });
 
   it("does not apply data from an unsuccessful response", async () => {

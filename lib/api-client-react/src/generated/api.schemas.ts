@@ -9,6 +9,32 @@ export interface HealthStatus {
   status: string;
 }
 
+export type SyncPayloadDayState = { [key: string]: unknown };
+
+export type SyncPayloadRunValues = { [key: string]: unknown };
+
+/**
+ * Existing canonical day-state payload; additional fields are preserved for forward compatibility.
+ */
+export interface SyncPayload {
+  dayState: SyncPayloadDayState;
+  runValues: SyncPayloadRunValues;
+  [key: string]: unknown;
+ }
+
+export interface SyncUnchangedResponse {
+  unchanged: true;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+}
+
+export interface SyncWriteRequest {
+  senderId?: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId?: string;
+  payload: SyncPayload;
+}
+
 export type ProductionRunInputs = { [key: string]: unknown };
 
 export interface ProductionRun {
@@ -3818,6 +3844,10 @@ export interface ManagerActionItemUpdate {
   resolutionNote?: string;
 }
 
+export type ClientTodayParameter = string;
+
+export type SyncSnapshotParameter = string;
+
 export type CheckUsernameAvailableParams = {
 /**
  * @minLength 1
@@ -3938,5 +3968,31 @@ export type ListIncidentAssignees200Item = {
 
 export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
+};
+
+export type GetSyncTodayParams = {
+today?: ClientTodayParameter;
+/**
+ * @pattern ^[a-f0-9]{64}$
+ */
+snapshot?: SyncSnapshotParameter;
+};
+
+export type PutSyncTodayParams = {
+today?: ClientTodayParameter;
+/**
+ * @minimum 0
+ */
+epoch?: number;
+};
+
+export type PutSyncToday200 = {
+  ok?: boolean;
+  data?: SyncPayload;
+  unchanged?: boolean;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId?: string;
+  stale?: boolean;
+  epoch?: number;
 };
 

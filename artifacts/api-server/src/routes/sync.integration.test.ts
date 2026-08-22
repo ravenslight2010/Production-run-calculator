@@ -235,6 +235,82 @@ describe("/sync/today — client-local-date keying", () => {
   });
 });
 
+describe("/sync snapshot conditionals", () => {
+  const DATE = "2030-08-22";
+  const payload = {
+    dayState: { runs: [{ id: "snapshot-run", brand: "Acme", flavor: "Pep" }] },
+    runValues: { "snapshot-run": { casesNeeded: 12 } },
+    runValuesUpdatedAt: { "snapshot-run": 1 },
+  };
+
+  it("returns a lightweight unchanged response for a matching PUT snapshot", async () => {
+    const first = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+    const firstBody = await first.json() as { data: unknown; snapshotId: string };
+    expect(firstBody.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const unchanged = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload, snapshotId: firstBody.snapshotId }),
+    });
+    const body = await unchanged.json() as { unchanged?: boolean; data?: unknown; snapshotId?: string };
+    expect(body).toMatchObject({ unchanged: true, snapshotId: firstBody.snapshotId });
+    expect(body.data).toBeUndefined();
+  });
+
+  it("returns the full changed snapshot and supports conditional GET", async () => {
+    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+    const full = await fetch(`${baseUrl}/api/sync/${DATE}`, { headers: authHeaders() });
+    const snapshot = full.headers.get("X-Sync-Snapshot");
+    expect(snapshot).toMatch(/^[a-f0-9]{64}$/);
+    const unchanged = await fetch(`${baseUrl}/api/sync/${DATE}?snapshot=${snapshot}`, { headers: authHeaders() });
+    expect(await unchanged.json()).toMatchObject({ unchanged: true, snapshotId: snapshot });
+
+    const changed = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "c1",
+        payload: {
+          ...payload,
+          dayState: {
+            ...payload.dayState,
+            runs: [...payload.dayState.runs, { id: "snapshot-run-2", brand: "Acme", flavor: "Cheese" }],
+          },
+          runValues: {
+            ...payload.runValues,
+            "snapshot-run-2": { casesNeeded: 13 },
+          },
+          runValuesUpdatedAt: { ...payload.runValuesUpdatedAt, "snapshot-run-2": 2 },
+        },
+      }),
+    });
+    const changedBody = await changed.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> }; snapshotId?: string };
+    expect(changedBody.data?.runValues?.["snapshot-run-2"]?.casesNeeded).toBe(13);
+    expect(changedBody.snapshotId).not.toBe(snapshot);
+  });
+
+  it("ignores malformed snapshot identities and keeps legacy full responses", async () => {
+    await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+    const res = await fetch(`${baseUrl}/api/sync/${DATE}?snapshot=malformed`, { headers: authHeaders() });
+    const body = await res.json() as { dayState?: unknown; unchanged?: boolean };
+    expect(body.dayState).toBeDefined();
+    expect(body.unchanged).toBeUndefined();
+  });
+});
+
 describe("/sync — per-run protective merge (data-loss guard)", () => {
   // The server is now a per-run last-writer-wins register keyed on each run's
   // edit stamp (runValuesUpdatedAt), not a blind blob overwrite. An empty run

@@ -6999,6 +6999,10 @@ export default function Home() {
   // otherwise a second open tab keeps overwriting another tab's live edits.
   // Mirrors the mobile app's lastSyncSigRef gate (web/mobile parity).
   const lastSyncSigRef = useRef<string>("");
+  // Server identity of the last canonical day snapshot. It is deliberately
+  // separate from the local payload signature: only the server can account for
+  // protective merges and canonical normalization.
+  const syncSnapshotIdRef = useRef<string>("");
   // History is independently persisted and merged by date. Keep it on the
   // first/change payload for recovery, but omit the unchanged cold section
   // from ordinary live updates.
@@ -7880,7 +7884,11 @@ export default function Home() {
   // SSE connection — receives updates from other clients
   useEffect(() => {
     syncBaselineGateRef.current.beginConnection();
-    const es = new EventSource(`/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`);
+    const snapshot = syncSnapshotIdRef.current;
+    const esUrl = snapshot
+      ? `/api/sync/events?clientId=${clientId.current}&today=${todayStr()}&snapshot=${snapshot}`
+      : `/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`;
+    const es = new EventSource(esUrl);
     es.onopen = () => {
       setSyncConnected(true);
       recordSyncEvent("connected", "Live sync connection opened");
@@ -7893,6 +7901,8 @@ export default function Home() {
       try {
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
+          unchanged?: boolean;
+          snapshotId?: string;
           reset?: boolean;
           resetEpoch?: number;
           initial?: boolean;
@@ -7904,7 +7914,11 @@ export default function Home() {
           if (applyResetWipe(msg.resetEpoch)) window.location.reload();
           return;
         }
-        if (msg.data) {
+         if (msg.unchanged) {
+           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
+         } else if (msg.data) {
+           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
             initialSnapshot: msg.initial === true,
@@ -8002,9 +8016,19 @@ export default function Home() {
             }
           }
 
-          const res = await fetch(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" });
+           const snapshot = syncSnapshotIdRef.current;
+           const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
+           const res = await fetch(snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-          const payload = await res.json() as SyncPayload | null;
+           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string } | null;
+           if (body && "unchanged" in body && body.unchanged === true) {
+             if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
+             reconciled = true;
+             return true;
+           }
+           const payload = body as SyncPayload | null;
+           const responseSnapshot = res.headers.get("X-Sync-Snapshot");
+           if (responseSnapshot) syncSnapshotIdRef.current = responseSnapshot;
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
           if (payload) {
@@ -8412,7 +8436,7 @@ export default function Home() {
     applyToLiveDay: boolean,
     shouldConsume?: () => boolean,
   ): Promise<{ body: unknown; stale: boolean }> {
-    return consumeSyncWriteResponse<SyncPayload>(res, {
+    const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
       onStale: (body) => {
         handleStaleSyncWrite(body);
@@ -8421,6 +8445,9 @@ export default function Home() {
         ? (canonical) => applySyncCallbackRef.current(canonical)
         : undefined,
     });
+    const snapshot = result.body?.snapshotId;
+    if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
+    return result;
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
@@ -8429,7 +8456,7 @@ export default function Home() {
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: clientId.current, payload }),
+        body: JSON.stringify({ senderId: clientId.current, payload, snapshotId: syncSnapshotIdRef.current || undefined }),
       },
     );
     await consumeCanonicalSyncWriteResponse(res, true);
@@ -8469,7 +8496,7 @@ export default function Home() {
     fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ senderId: clientId.current, payload }),
+      body: JSON.stringify({ senderId: clientId.current, payload, snapshotId: syncSnapshotIdRef.current || undefined }),
       signal: controller.signal,
     }).then(async (res) => {
       if (generation !== syncPushGenerationRef.current) return;

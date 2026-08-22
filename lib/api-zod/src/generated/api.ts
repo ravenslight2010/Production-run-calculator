@@ -4770,3 +4770,66 @@ export const DeleteStaffMemberParams = zod.object({
 })
 
 
+/**
+ * @summary Read the client-local current-day sync snapshot
+ */
+export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const GetSyncTodayQueryParams = zod.object({
+  "today": zod.date().optional(),
+  "snapshot": zod.coerce.string().regex(getSyncTodayQuerySnapshotRegExp).optional()
+})
+
+export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const GetSyncTodayResponse = zod.union([zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.object({
+  "unchanged": zod.boolean(),
+  "snapshotId": zod.string().regex(getSyncTodayResponseTwoSnapshotIdRegExp)
+})])
+
+
+/**
+ * @summary Merge the client-local current-day sync snapshot
+ */
+export const putSyncTodayQueryEpochMin = 0;
+
+
+
+export const PutSyncTodayQueryParams = zod.object({
+  "today": zod.date().optional(),
+  "epoch": zod.coerce.number().min(putSyncTodayQueryEpochMin).optional()
+})
+
+export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const PutSyncTodayBody = zod.object({
+  "senderId": zod.string().optional(),
+  "snapshotId": zod.string().regex(putSyncTodayBodySnapshotIdRegExp).optional(),
+  "payload": zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.')
+})
+
+export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const PutSyncTodayResponse = zod.object({
+  "ok": zod.boolean().optional(),
+  "data": zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).optional().describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
+  "unchanged": zod.boolean().optional(),
+  "snapshotId": zod.string().regex(putSyncTodayResponseSnapshotIdRegExp).optional(),
+  "stale": zod.boolean().optional(),
+  "epoch": zod.number().optional()
+})
+
+

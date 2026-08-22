@@ -73,6 +73,7 @@ import type {
   FreezerPullItemList,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
+  GetSyncTodayParams,
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
@@ -136,6 +137,8 @@ import type {
   ProductionSheetPhotoInput,
   ProductionSheetPhotoResult,
   ProfileDataHealthApplyResult,
+  PutSyncToday200,
+  PutSyncTodayParams,
   QualityCheckPhotoInput,
   QualityCheckRecord,
   QualityCheckRecordInput,
@@ -194,6 +197,9 @@ import type {
   SummaryInput,
   SummaryResult,
   SupervisorPin,
+  SyncPayload,
+  SyncUnchangedResponse,
+  SyncWriteRequest,
   TransferInput,
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
@@ -12839,5 +12845,168 @@ export const useDeleteStaffMember = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteStaffMemberMutationOptions(options));
+    }
+
+export const getGetSyncTodayUrl = (params?: GetSyncTodayParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/today?${stringifiedParams}` : `/api/sync/today`
+}
+
+/**
+ * @summary Read the client-local current-day sync snapshot
+ */
+export const getSyncToday = async (params?: GetSyncTodayParams, options?: RequestInit): Promise<SyncPayload | SyncUnchangedResponse> => {
+
+  return customFetch<SyncPayload | SyncUnchangedResponse>(getGetSyncTodayUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSyncTodayQueryKey = (params?: GetSyncTodayParams,) => {
+    return [
+    `/api/sync/today`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSyncTodayQueryOptions = <TData = Awaited<ReturnType<typeof getSyncToday>>, TError = ErrorType<unknown>>(params?: GetSyncTodayParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSyncTodayQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSyncToday>>> = ({ signal }) => getSyncToday(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSyncTodayQueryResult = NonNullable<Awaited<ReturnType<typeof getSyncToday>>>
+export type GetSyncTodayQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the client-local current-day sync snapshot
+ */
+
+export function useGetSyncToday<TData = Awaited<ReturnType<typeof getSyncToday>>, TError = ErrorType<unknown>>(
+ params?: GetSyncTodayParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSyncToday>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSyncTodayQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPutSyncTodayUrl = (params?: PutSyncTodayParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/today?${stringifiedParams}` : `/api/sync/today`
+}
+
+/**
+ * @summary Merge the client-local current-day sync snapshot
+ */
+export const putSyncToday = async (syncWriteRequest: SyncWriteRequest,
+    params?: PutSyncTodayParams, options?: RequestInit): Promise<PutSyncToday200> => {
+
+  return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      syncWriteRequest,)
+  }
+);}
+
+
+
+
+export const getPutSyncTodayMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,{data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,{data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}, TContext> => {
+
+const mutationKey = ['putSyncToday'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putSyncToday>>, {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  putSyncToday(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutSyncTodayMutationResult = NonNullable<Awaited<ReturnType<typeof putSyncToday>>>
+    export type PutSyncTodayMutationBody = BodyType<SyncWriteRequest>
+    export type PutSyncTodayMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Merge the client-local current-day sync snapshot
+ */
+export const usePutSyncToday = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,{data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof putSyncToday>>,
+        TError,
+        {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams},
+        TContext
+      > => {
+      return useMutation(getPutSyncTodayMutationOptions(options));
     }
 

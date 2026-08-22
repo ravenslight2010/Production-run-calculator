@@ -2,6 +2,8 @@ export interface SyncWriteResponseBody<T> {
   data?: T;
   stale?: boolean;
   epoch?: number;
+  unchanged?: boolean;
+  snapshotId?: string;
 }
 
 interface ConsumeSyncWriteResponseOptions<T> {
@@ -31,4 +33,8 @@ export async function consumeSyncWriteResponse<T>(
   }
 
   return { body, stale };
+}
+
+export function isUnchangedSyncResponse(body: SyncWriteResponseBody<unknown> | null): boolean {
+  return body?.unchanged === true && typeof body.snapshotId === "string";
 }

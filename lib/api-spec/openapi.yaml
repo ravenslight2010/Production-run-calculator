@@ -37,6 +37,8 @@ tags:
     description: Facility-wide supervisor PIN setting
   - name: dieTypes
     description: Factory-wide die-type master list
+  - name: sync
+    description: Client-date-scoped live day-state synchronization
 paths:
   /healthz:
     get:
@@ -4041,7 +4043,66 @@ paths:
         "404":
           description: User not found
 
+  /sync/today:
+    get:
+      operationId: getSyncToday
+      tags: [sync]
+      summary: Read the client-local current-day sync snapshot
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - $ref: "#/components/parameters/SyncSnapshot"
+      responses:
+        "200":
+          description: Full canonical snapshot, or a lightweight unchanged response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SyncPayload"
+                  - $ref: "#/components/schemas/SyncUnchangedResponse"
+    put:
+      operationId: putSyncToday
+      tags: [sync]
+      summary: Merge the client-local current-day sync snapshot
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: epoch
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncWriteRequest"
+      responses:
+        "200":
+          description: Canonical merge, unchanged acknowledgement, or stale reset rejection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data: { $ref: "#/components/schemas/SyncPayload" }
+                  unchanged: { type: boolean }
+                  snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+                  stale: { type: boolean }
+                  epoch: { type: integer }
+
 components:
+  parameters:
+    ClientToday:
+      name: today
+      in: query
+      required: false
+      schema: { type: string, format: date }
+    SyncSnapshot:
+      name: snapshot
+      in: query
+      required: false
+      schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
     HealthStatus:
       type: object
@@ -4050,6 +4111,30 @@ components:
           type: string
       required:
         - status
+
+    SyncPayload:
+      type: object
+      description: Existing canonical day-state payload; additional fields are preserved for forward compatibility.
+      required: [dayState, runValues]
+      properties:
+        dayState: { type: object, additionalProperties: true }
+        runValues: { type: object, additionalProperties: true }
+      additionalProperties: true
+
+    SyncUnchangedResponse:
+      type: object
+      required: [unchanged, snapshotId]
+      properties:
+        unchanged: { type: boolean, const: true }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+
+    SyncWriteRequest:
+      type: object
+      required: [payload]
+      properties:
+        senderId: { type: string }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        payload: { $ref: "#/components/schemas/SyncPayload" }
 
     ProductionRun:
       type: object

@@ -144,5 +144,4 @@
 - [Mix-plan E2E setup](mix-plan-e2e-setup.md) — localStorage-seeded live runs can be replaced before Mix Plan renders; baseline pull tests may fail before exercising their assertions.
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
-- [Sync retry storm prevention](sync-retry-storms.md) — live-sync retries are single-flight, bounded, jittered, newest-payload-wins, and canceled across foreground generations.
-- [Strict profile acknowledgement](strict-profile-ack.md) — explicit profile-save boundaries must drain coalesced follow-up flights before judging the queue empty.
+- [Sync snapshot identity](sync-snapshot-identity.md) — only the server’s stable hash of protected canonical state may authorize an unchanged response; legacy reads stay full payloads.
