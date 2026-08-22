@@ -15021,6 +15021,15 @@ export default function Home() {
 
               {/* ─── WAREHOUSE ─── */}
               <TabsContent value="warehouse">
+                <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="warehouse-attention-header">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                    <h2 className="text-sm font-bold">Warehouse attention</h2>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Pulls, counts, and stock alerts are shown first. Run-by-run staging details are below.
+                  </p>
+                </div>
                 {/* Pull Out Freezer: for each upcoming scheduled run within an
                     item's days-early window whose recipe uses a tagged
                     freezer-pull ingredient, show what to pull now, grouped by
@@ -15247,13 +15256,15 @@ export default function Home() {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);
                   if (activeRuns.length === 0) return null;
                   return (
-                    <Card className="bg-card/60 border-border/50 shadow-md mb-4">
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <ListChecks className="w-4 h-4" /> What Each Run Needs
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4 space-y-3">
+                    <details className="group mb-4 rounded-xl border border-border/50 bg-card/60 shadow-md" data-testid="warehouse-run-details">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 select-none">
+                        <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          <ListChecks className="h-4 w-4 shrink-0" /> What Each Run Needs
+                          <span className="normal-case tracking-normal text-xs font-normal">({activeRuns.length} active)</span>
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                      </summary>
+                      <div className="border-t border-border/40 px-4 pb-4 pt-4 space-y-3">
                         {activeRuns.map((r) => {
                           const vals = loadRunValues(r.id);
                           const s = computeSummaryStats(vals);
@@ -15311,8 +15322,8 @@ export default function Home() {
                             </div>
                           );
                         })}
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </details>
                   );
                 })()}
                 <Card className="bg-card/60 border-border/50 shadow-md mb-4">
@@ -15913,6 +15924,16 @@ export default function Home() {
               <TabsContent value="summary">
                 {isManager && (
                   <div className="max-w-3xl mx-auto mb-4">
+                    <div className="mb-3 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2" data-testid="summary-tools-header">
+                      <BarChart2 className="h-4 w-4 text-primary" />
+                      <div>
+                        <h2 className="text-sm font-bold">Operations desk</h2>
+                        <p className="text-xs text-muted-foreground">Manager follow-up and shift context</p>
+                      </div>
+                    </div>
+                    <div className="mb-3" data-testid="summary-priority-actions">
+                      <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
+                    </div>
                     <ShiftHandoffDigest
                       onOpenSource={(source) => {
                         if (source === "incidents") { setActiveTab("incidents"); return; }
@@ -15922,46 +15943,55 @@ export default function Home() {
                         setShowManageDialog(true);
                       }}
                     />
-                    <div className="mt-3">
-                    <OperationalReportPanel
-                      onOpenQuality={(range: OperationalReportDetailRange) => {
-                        setActiveTab("quality");
-                      }}
-                      onOpenIncidents={(range: OperationalReportDetailRange) => {
-                        setActiveTab("incidents");
-                      }}
-                      buildInput={(scope, date) =>
-                        scope === "week"
-                          ? buildWeekSummaryInput({
-                              date,
-                              nowMs: Date.now(),
-                              history: [
-                                ...history,
-                                {
-                                  date: todayStr(),
+                    <details className="group mt-3 rounded-xl border border-border/50 bg-card/40" data-testid="summary-report-details">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 select-none">
+                        <span className="flex items-center gap-2 text-sm font-semibold">
+                          <BarChart2 className="h-4 w-4 text-muted-foreground" /> Reports and trends
+                          <span className="text-xs font-normal text-muted-foreground">Generate or export a report</span>
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                      </summary>
+                      <div className="border-t border-border/40 p-3">
+                        <OperationalReportPanel
+                          onOpenQuality={(range: OperationalReportDetailRange) => {
+                            setActiveTab("quality");
+                          }}
+                          onOpenIncidents={(range: OperationalReportDetailRange) => {
+                            setActiveTab("incidents");
+                          }}
+                          buildInput={(scope, date) =>
+                            scope === "week"
+                              ? buildWeekSummaryInput({
+                                  date,
+                                  nowMs: Date.now(),
+                                  history: [
+                                    ...history,
+                                    {
+                                      date: todayStr(),
+                                      runs: dayState.runs,
+                                      runValues: Object.fromEntries(
+                                        dayState.runs.map((run) => [
+                                          run.id,
+                                          run.id === currentRunId
+                                            ? form.getValues()
+                                            : loadRunValues(run.id),
+                                        ]),
+                                      ),
+                                    },
+                                  ],
+                                  runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                                })
+                              : buildDaySummaryInput({
+                                  date,
+                                  nowMs: Date.now(),
                                   runs: dayState.runs,
-                                  runValues: Object.fromEntries(
-                                    dayState.runs.map((run) => [
-                                      run.id,
-                                      run.id === currentRunId
-                                        ? form.getValues()
-                                        : loadRunValues(run.id),
-                                    ]),
-                                  ),
-                                },
-                              ],
-                              runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                            })
-                          : buildDaySummaryInput({
-                              date,
-                              nowMs: Date.now(),
-                              runs: dayState.runs,
-                              runValues: (run) =>
-                                run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
-                            })
-                      }
-                    />
-                    </div>
+                                  runValues: (run) =>
+                                    run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                                })
+                          }
+                        />
+                      </div>
+                    </details>
                   </div>
                 )}
                 <LiveSummaryTabContent />
@@ -23315,11 +23345,6 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
   return (
     <>
-                {isManager && (
-                  <div className="max-w-3xl mx-auto mb-4">
-                    <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
-                  </div>
-                )}
                 {/* Shift notes */}
                 <div className="mb-4">
                   <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>

@@ -202,10 +202,19 @@ test.describe("accessibility smoke", () => {
     await expect(page.locator('[data-testid="button-start-run"]')).toBeEnabled();
     await dismissUnexpectedDialog(page);
 
+    await page.getByTestId("tab-warehouse").click();
+    await expect(page.getByTestId("warehouse-attention-header")).toBeVisible();
+    const warehouseDetails = page.getByTestId("warehouse-run-details");
+    if (await warehouseDetails.count()) {
+      await expect(warehouseDetails).not.toHaveAttribute("open", "");
+      await warehouseDetails.locator("summary").click();
+      await expect(warehouseDetails).toHaveAttribute("open", "");
+    }
+    await scan(page, "warehouse attention hierarchy");
+
     // Settings is exposed from the stable warehouse header on compact and
     // desktop layouts; selecting it also ensures the header is in the active
     // navigation tree before opening the manager dialog.
-    await page.getByTestId("tab-warehouse").click();
     const setupDialog = await openSettings(page);
     await scan(page, "manager setup dialog", ["button-name"]);
     await assertTargets(page, "manager setup dialog");

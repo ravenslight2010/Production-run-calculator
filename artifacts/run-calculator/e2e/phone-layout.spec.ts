@@ -519,6 +519,13 @@ test.describe("phone layout smoke", () => {
       await expect(
         page.locator('[data-testid="tab-warehouse"]'),
       ).toHaveAttribute("data-state", "active");
+      await expect(page.getByTestId("warehouse-attention-header")).toBeVisible();
+      const warehouseDetails = page.getByTestId("warehouse-run-details");
+      if (await warehouseDetails.count()) {
+        await expect(warehouseDetails).not.toHaveAttribute("open", "");
+        await warehouseDetails.locator("summary").click();
+        await expect(warehouseDetails).toHaveAttribute("open", "");
+      }
       await assertPhoneLayout(page, "long-content warehouse surface");
 
       const moreButton = page.getByRole("button", { name: "More" });
