@@ -376,6 +376,7 @@ import IncidentsTab from "../components/IncidentsTab";
 import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
 import OperationalReportPanel from "../components/OperationalReportPanel";
+import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import { useGetStartedOverview } from "@workspace/onboarding";
@@ -15871,6 +15872,16 @@ export default function Home() {
               <TabsContent value="summary">
                 {isManager && (
                   <div className="max-w-3xl mx-auto mb-4">
+                    <ShiftHandoffDigest
+                      onOpenSource={(source) => {
+                        if (source === "incidents") { setActiveTab("incidents"); return; }
+                        if (source === "quality") { setActiveTab("quality"); return; }
+                        if (source === "inventory") { setActiveTab("warehouse"); return; }
+                        setManageCategory("audit");
+                        setShowManageDialog(true);
+                      }}
+                    />
+                    <div className="mt-3">
                     <OperationalReportPanel
                       buildInput={(scope, date) =>
                         scope === "week"
@@ -15903,6 +15914,7 @@ export default function Home() {
                             })
                       }
                     />
+                    </div>
                   </div>
                 )}
                 <LiveSummaryTabContent />

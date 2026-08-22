@@ -1238,6 +1238,35 @@ paths:
         "403":
           description: Manager capability required
 
+  /reports/handoff:
+    get:
+      operationId: getShiftHandoffDigest
+      tags: [audit]
+      summary: Read a manager-facing daily shift handoff digest
+      description: >-
+        Collects unresolved incidents, quality exceptions, inventory risk and
+        historical adjustments, sync conflicts, and pending data-health findings
+        for one facility and production date. Source history that cannot be
+        read is reported as unavailable rather than as zero.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Shift handoff digest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShiftHandoffDigest"
+        "400":
+          description: Invalid production date
+        "403":
+          description: Manager capability required
+
   /ai/forecast-accuracy:
     post:
       operationId: aiForecastAccuracy
@@ -6563,6 +6592,50 @@ components:
               properties:
                 flaggedItems: { type: integer }
             note: { type: string }
+
+    ShiftHandoffItem:
+      type: object
+      required: [id, source, severity, status, title, detail, affectedRun, affectedProduct, occurredAt, sourcePath, historical]
+      properties:
+        id: { type: string }
+        source: { type: string, enum: [incidents, quality, inventory, sync, data-health] }
+        severity: { type: string, enum: [urgent, high, medium, low, info] }
+        status: { type: string, enum: [open, reviewed, resolved, historical, current] }
+        title: { type: string }
+        detail: { type: string }
+        affectedRun: { type: string, nullable: true }
+        affectedProduct: { type: string, nullable: true }
+        occurredAt: { type: string, format: date-time, nullable: true }
+        sourcePath: { type: string }
+        historical: { type: boolean }
+
+    ShiftHandoffSource:
+      type: object
+      required: [availability, itemCount]
+      properties:
+        availability: { type: string, enum: [available, unavailable] }
+        note: { type: string }
+        itemCount: { type: integer }
+
+    ShiftHandoffDigest:
+      type: object
+      required: [scope, date, generatedAt, items, sources]
+      properties:
+        scope: { type: string }
+        date: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ShiftHandoffItem" }
+        sources:
+          type: object
+          required: [incidents, quality, inventory, sync, data-health]
+          properties:
+            incidents: { $ref: "#/components/schemas/ShiftHandoffSource" }
+            quality: { $ref: "#/components/schemas/ShiftHandoffSource" }
+            inventory: { $ref: "#/components/schemas/ShiftHandoffSource" }
+            sync: { $ref: "#/components/schemas/ShiftHandoffSource" }
+            data-health: { $ref: "#/components/schemas/ShiftHandoffSource" }
 
     IncidentClustersInput:
       type: object

@@ -1501,6 +1501,61 @@ export const ExportOperationalReportResponse = zod.object({
 
 
 /**
+ * Collects unresolved incidents, quality exceptions, inventory risk and historical adjustments, sync conflicts, and pending data-health findings for one facility and production date. Source history that cannot be read is reported as unavailable rather than as zero.
+ * @summary Read a manager-facing daily shift handoff digest
+ */
+export const GetShiftHandoffDigestQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const GetShiftHandoffDigestResponse = zod.object({
+  "scope": zod.string(),
+  "date": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['incidents', 'quality', 'inventory', 'sync', 'data-health']),
+  "severity": zod.enum(['urgent', 'high', 'medium', 'low', 'info']),
+  "status": zod.enum(['open', 'reviewed', 'resolved', 'historical', 'current']),
+  "title": zod.string(),
+  "detail": zod.string(),
+  "affectedRun": zod.string().nullable(),
+  "affectedProduct": zod.string().nullable(),
+  "occurredAt": zod.coerce.date().nullable(),
+  "sourcePath": zod.string(),
+  "historical": zod.boolean()
+})),
+  "sources": zod.object({
+  "incidents": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "note": zod.string().optional(),
+  "itemCount": zod.number()
+}),
+  "quality": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "note": zod.string().optional(),
+  "itemCount": zod.number()
+}),
+  "inventory": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "note": zod.string().optional(),
+  "itemCount": zod.number()
+}),
+  "sync": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "note": zod.string().optional(),
+  "itemCount": zod.number()
+}),
+  "data-health": zod.object({
+  "availability": zod.enum(['available', 'unavailable']),
+  "note": zod.string().optional(),
+  "itemCount": zod.number()
+})
+})
+})
+
+
+/**
  * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
  * @summary Review how accurate past forecasts were vs. what actually ran; read-only
  */

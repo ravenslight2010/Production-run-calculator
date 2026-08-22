@@ -72,6 +72,7 @@ import type {
   ForgotPasswordRequest,
   FreezerPullItemList,
   GetProfileNameLinkCleanupAudit200,
+  GetShiftHandoffDigestParams,
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
@@ -179,6 +180,7 @@ import type {
   ScheduleOptimizeResponse,
   SetFloorMode,
   SetNotificationPrefs,
+  ShiftHandoffDigest,
   SignUpCredentials,
   SpecImportAliasList,
   SpecReconcileInput,
@@ -3866,6 +3868,91 @@ export const useExportOperationalReport = <TError = ErrorType<void>,
       > => {
       return useMutation(getExportOperationalReportMutationOptions(options));
     }
+
+export const getGetShiftHandoffDigestUrl = (params: GetShiftHandoffDigestParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/reports/handoff?${stringifiedParams}` : `/api/reports/handoff`
+}
+
+/**
+ * Collects unresolved incidents, quality exceptions, inventory risk and historical adjustments, sync conflicts, and pending data-health findings for one facility and production date. Source history that cannot be read is reported as unavailable rather than as zero.
+ * @summary Read a manager-facing daily shift handoff digest
+ */
+export const getShiftHandoffDigest = async (params: GetShiftHandoffDigestParams, options?: RequestInit): Promise<ShiftHandoffDigest> => {
+
+  return customFetch<ShiftHandoffDigest>(getGetShiftHandoffDigestUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetShiftHandoffDigestQueryKey = (params?: GetShiftHandoffDigestParams,) => {
+    return [
+    `/api/reports/handoff`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetShiftHandoffDigestQueryOptions = <TData = Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError = ErrorType<void>>(params: GetShiftHandoffDigestParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetShiftHandoffDigestQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getShiftHandoffDigest>>> = ({ signal }) => getShiftHandoffDigest(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetShiftHandoffDigestQueryResult = NonNullable<Awaited<ReturnType<typeof getShiftHandoffDigest>>>
+export type GetShiftHandoffDigestQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read a manager-facing daily shift handoff digest
+ */
+
+export function useGetShiftHandoffDigest<TData = Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError = ErrorType<void>>(
+ params: GetShiftHandoffDigestParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getShiftHandoffDigest>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetShiftHandoffDigestQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getAiForecastAccuracyUrl = () => {
 

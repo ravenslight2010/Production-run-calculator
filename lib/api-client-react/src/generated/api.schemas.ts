@@ -1685,6 +1685,83 @@ export interface OperationalReport {
   inventory: OperationalReportInventory;
 }
 
+export type ShiftHandoffItemSource = typeof ShiftHandoffItemSource[keyof typeof ShiftHandoffItemSource];
+
+
+export const ShiftHandoffItemSource = {
+  incidents: 'incidents',
+  quality: 'quality',
+  inventory: 'inventory',
+  sync: 'sync',
+  'data-health': 'data-health',
+} as const;
+
+export type ShiftHandoffItemSeverity = typeof ShiftHandoffItemSeverity[keyof typeof ShiftHandoffItemSeverity];
+
+
+export const ShiftHandoffItemSeverity = {
+  urgent: 'urgent',
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  info: 'info',
+} as const;
+
+export type ShiftHandoffItemStatus = typeof ShiftHandoffItemStatus[keyof typeof ShiftHandoffItemStatus];
+
+
+export const ShiftHandoffItemStatus = {
+  open: 'open',
+  reviewed: 'reviewed',
+  resolved: 'resolved',
+  historical: 'historical',
+  current: 'current',
+} as const;
+
+export interface ShiftHandoffItem {
+  id: string;
+  source: ShiftHandoffItemSource;
+  severity: ShiftHandoffItemSeverity;
+  status: ShiftHandoffItemStatus;
+  title: string;
+  detail: string;
+  affectedRun: string | null;
+  affectedProduct: string | null;
+  occurredAt: string | null;
+  sourcePath: string;
+  historical: boolean;
+}
+
+export type ShiftHandoffSourceAvailability = typeof ShiftHandoffSourceAvailability[keyof typeof ShiftHandoffSourceAvailability];
+
+
+export const ShiftHandoffSourceAvailability = {
+  available: 'available',
+  unavailable: 'unavailable',
+} as const;
+
+export interface ShiftHandoffSource {
+  availability: ShiftHandoffSourceAvailability;
+  note?: string;
+  itemCount: number;
+}
+
+export type ShiftHandoffDigestSources = {
+  incidents: ShiftHandoffSource;
+  quality: ShiftHandoffSource;
+  inventory: ShiftHandoffSource;
+  sync: ShiftHandoffSource;
+  'data-health': ShiftHandoffSource;
+};
+
+export interface ShiftHandoffDigest {
+  scope: string;
+  date: string;
+  generatedAt: string;
+  items: ShiftHandoffItem[];
+  sources: ShiftHandoffDigestSources;
+}
+
 /**
  * No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.
  */
@@ -3678,6 +3755,10 @@ export const ListQualityChecksStatus = {
   warn: 'warn',
   fail: 'fail',
 } as const;
+
+export type GetShiftHandoffDigestParams = {
+date: string;
+};
 
 export type ListMergeAliasesParams = {
 /**
