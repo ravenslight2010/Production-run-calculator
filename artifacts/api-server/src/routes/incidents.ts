@@ -274,22 +274,8 @@ router.post(
 );
 
 // GET /incidents — manager-only review list (newest first).
-router.get("/incidents", requireCapability("review-incidents"), async (req, res): Promise<void> => {
-  const from = typeof req.query.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)
-    ? Date.parse(`${req.query.from}T00:00:00.000Z`)
-    : null;
-  const to = typeof req.query.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
-    ? Date.parse(`${req.query.to}T23:59:59.999Z`)
-    : null;
-  const incidents = await listIncidents();
-  res.json(
-    from === null && to === null
-      ? incidents
-      : incidents.filter((incident) => {
-          const createdAt = Date.parse(incident.createdAt);
-          return (from === null || createdAt >= from) && (to === null || createdAt <= to);
-        }),
-  );
+router.get("/incidents", requireCapability("review-incidents"), async (_req, res): Promise<void> => {
+  res.json(await listIncidents());
 });
 
 // GET /incidents/unreviewed-count — manager nav badge. Declared before the

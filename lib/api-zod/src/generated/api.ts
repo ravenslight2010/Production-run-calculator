@@ -1426,7 +1426,7 @@ export const AiSummaryResponse = zod.object({
 
 
 /**
- * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
+ * Deterministically aggregates the supplied production run facts and enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
 export const exportOperationalReportBodyRunsMax = 600;
@@ -1493,17 +1493,7 @@ export const ExportOperationalReportResponse = zod.object({
   "inventory": zod.object({
   "availability": zod.enum(['available', 'unavailable']),
   "value": zod.object({
-  "flaggedItems": zod.number().optional(),
-  "historical": zod.object({
-  "availability": zod.enum(['available', 'unavailable']),
-  "value": zod.object({
-  "totalEvents": zod.number().optional(),
-  "consumptionEvents": zod.number().optional(),
-  "wasteEvents": zod.number().optional(),
-  "adjustmentEvents": zod.number().optional()
-}).nullable(),
-  "note": zod.string().optional()
-}).optional().describe('Date-scoped inventory ledger events; separate from the current snapshot.')
+  "flaggedItems": zod.number().optional()
 }).nullable(),
   "note": zod.string().optional()
 })

@@ -551,14 +551,10 @@ export const recordQualityCheck = (body: QualityCheckRecordBody) =>
 export const fetchQualityChecks = (filter?: {
   productType?: QualityProductType;
   status?: QualityStatus;
-  from?: string;
-  to?: string;
 }) => {
   const params = new URLSearchParams();
   if (filter?.productType) params.set("productType", filter.productType);
   if (filter?.status) params.set("status", filter.status);
-  if (filter?.from) params.set("from", filter.from);
-  if (filter?.to) params.set("to", filter.to);
   const qs = params.toString();
   return api<QualityCheckRecord[]>(`/inventory/quality-checks${qs ? `?${qs}` : ""}`);
 };
@@ -1126,13 +1122,7 @@ export const reportIncident = (body: ReportIncidentBody) =>
   });
 
 // Manager-only review endpoints.
-export const fetchIncidents = (filter?: { from?: string; to?: string }) => {
-  const params = new URLSearchParams();
-  if (filter?.from) params.set("from", filter.from);
-  if (filter?.to) params.set("to", filter.to);
-  const qs = params.toString();
-  return api<Incident[]>(`/incidents${qs ? `?${qs}` : ""}`);
-};
+export const fetchIncidents = () => api<Incident[]>("/incidents");
 export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
 export const fetchActionableIncidentCount = () => api<{ count: number }>("/incidents/actionable-count");

@@ -1218,8 +1218,7 @@ paths:
       description: >-
         Deterministically aggregates the supplied production run facts and
         enriches them with date-filtered quality and incident records plus a
-        clearly labeled current inventory snapshot plus date-scoped inventory
-        ledger events. No AI is required and
+        clearly labeled current inventory snapshot. No AI is required and
         source statistics are authoritative.
       requestBody:
         required: true
@@ -6563,21 +6562,6 @@ components:
               nullable: true
               properties:
                 flaggedItems: { type: integer }
-                historical:
-                  type: object
-                  required: [availability, value]
-                  description: Date-scoped inventory ledger events; separate from the current snapshot.
-                  properties:
-                    availability: { type: string, enum: [available, unavailable] }
-                    value:
-                      type: object
-                      nullable: true
-                      properties:
-                        totalEvents: { type: integer }
-                        consumptionEvents: { type: integer }
-                        wasteEvents: { type: integer }
-                        adjustmentEvents: { type: integer }
-                    note: { type: string }
             note: { type: string }
 
     IncidentClustersInput:

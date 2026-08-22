@@ -1663,34 +1663,8 @@ export const OperationalReportInventoryAvailability = {
   unavailable: 'unavailable',
 } as const;
 
-export type OperationalReportInventoryValueHistoricalAvailability = typeof OperationalReportInventoryValueHistoricalAvailability[keyof typeof OperationalReportInventoryValueHistoricalAvailability];
-
-
-export const OperationalReportInventoryValueHistoricalAvailability = {
-  available: 'available',
-  unavailable: 'unavailable',
-} as const;
-
-export type OperationalReportInventoryValueHistoricalValue = {
-  totalEvents?: number;
-  consumptionEvents?: number;
-  wasteEvents?: number;
-  adjustmentEvents?: number;
-} | null;
-
-/**
- * Date-scoped inventory ledger events; separate from the current snapshot.
- */
-export type OperationalReportInventoryValueHistorical = {
-  availability: OperationalReportInventoryValueHistoricalAvailability;
-  value: OperationalReportInventoryValueHistoricalValue;
-  note?: string;
-};
-
 export type OperationalReportInventoryValue = {
   flaggedItems?: number;
-  /** Date-scoped inventory ledger events; separate from the current snapshot. */
-  historical?: OperationalReportInventoryValueHistorical;
 } | null;
 
 export type OperationalReportInventory = {

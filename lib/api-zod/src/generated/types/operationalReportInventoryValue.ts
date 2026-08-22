@@ -5,10 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { OperationalReportInventoryValueHistorical } from './operationalReportInventoryValueHistorical';
 
 export type OperationalReportInventoryValue = {
   flaggedItems?: number;
-  /** Date-scoped inventory ledger events; separate from the current snapshot. */
-  historical?: OperationalReportInventoryValueHistorical;
 } | null;

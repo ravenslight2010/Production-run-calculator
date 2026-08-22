@@ -43,7 +43,6 @@ import operationalReportsRouter from "./operationalReports";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
 import importHistoryRouter from "./importHistory";
-import actionItemsRouter from "./actionItems";
 
 const router: IRouter = Router();
 
@@ -81,7 +80,6 @@ router.use(savedSpecSheetsRouter);
 router.use(savedShippingGuidesRouter);
 router.use(savedPremixSheetsRouter);
 router.use(importHistoryRouter);
-router.use(actionItemsRouter);
 router.use(mergeAliasesRouter);
 router.use(deniedMergesRouter);
 router.use(mergedAwayRouter);

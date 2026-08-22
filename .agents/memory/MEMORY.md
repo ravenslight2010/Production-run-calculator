@@ -14,7 +14,6 @@
 - [Autosave edit attribution](autosave-edit-attribution.md) + [profile clobber](profile-clobber-blank-form.md) — autosave must never stamp an all-default run (empty-over-populated clobbers peers) nor zero a profile before it loads (saveProfile guard + seed self-heal).
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
-- [Home navigation history](home-navigation-history.md) — back transitions consume history without recording the reverse move; a reload starts with an empty in-memory back stack.
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
@@ -145,5 +144,3 @@
 - [Mix-plan E2E setup](mix-plan-e2e-setup.md) — localStorage-seeded live runs can be replaced before Mix Plan renders; baseline pull tests may fail before exercising their assertions.
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
-- [Offline browser test events](offline-browser-test-events.md) — headless Chromium may suppress offline fetches before Playwright emits requestfailed; use deterministic route aborts for wake-retry tests.
-- [Reversible data-health repairs](reversible-data-health-repairs.md) — manager repairs need immutable scoped before/after records and stamp/value-guarded undo.

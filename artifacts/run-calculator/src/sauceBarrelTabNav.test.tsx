@@ -41,14 +41,12 @@ import {
 interface BarrelCounterProps {
   runId: string;
   elapsedSec?: number;
-  paused?: boolean;
   runStatus?: "running" | "ended" | "pending";
 }
 
 function BarrelCounter({
   runId,
   elapsedSec = 0,
-  paused = false,
   runStatus = "running",
 }: BarrelCounterProps) {
   // ── Same lazy-initialiser pattern as the production component ──────────────
@@ -60,9 +58,6 @@ function BarrelCounter({
   );
   const [showQuickCheck, setShowQuickCheckRaw] = useState(
     () => getSauceBarrelEntry(runId).showQuickCheck,
-  );
-  const [lastBarrelNetSec, setLastBarrelNetSec] = useState(
-    () => getSauceBarrelEntry(runId).lastBarrelNetSec,
   );
   const lastBarrelNetSecRef = useRef<number>(
     getSauceBarrelEntry(runId).lastBarrelNetSec,
@@ -102,7 +97,6 @@ function BarrelCounter({
   const writeLastBarrel = useCallback(
     (sec: number) => {
       lastBarrelNetSecRef.current = sec;
-      setLastBarrelNetSec(sec);
       getSauceBarrelEntry(runId).lastBarrelNetSec = sec;
     },
     [runId],
@@ -122,20 +116,20 @@ function BarrelCounter({
     [runId],
   );
 
-  // ── prevRunIdRef guard — production-faithful lifecycle ─────────────────────
-  // Same-run remounts preserve state; a run change hydrates that run's entry.
+  // ── prevRunIdRef guard — production-faithful reset lifecycle ────────────────
+  // Same pattern as the production component: skips reset on same-run remounts,
+  // resets only when the run ID genuinely changes.
   const prevRunIdRef = useRef<string>(runId);
   useReactEffect(() => {
-    if (prevRunIdRef.current === runId) return; // same run — tab navigation
+    if (prevRunIdRef.current === runId) return; // same run — tab navigation, skip reset
     prevRunIdRef.current = runId;
-    const entry = getSauceBarrelEntry(runId);
-    setBarrelsMadeRaw(entry.barrelsMade);
-    lastBarrelNetSecRef.current = entry.lastBarrelNetSec;
-    setLastBarrelNetSec(entry.lastBarrelNetSec);
-    setShowBarrelDueRaw(entry.showBarrelDue);
-    barrelDueKeyRef.current = entry.barrelDueKey;
-    quickCheckKeyRef.current = entry.quickCheckKey;
-    setShowQuickCheckRaw(entry.showQuickCheck);
+    resetSauceBarrelEntry(runId);
+    setBarrelsMadeRaw(0);
+    lastBarrelNetSecRef.current = 0;
+    setShowBarrelDueRaw(false);
+    barrelDueKeyRef.current = "";
+    quickCheckKeyRef.current = "";
+    setShowQuickCheckRaw(false);
   }, [runId]);
 
   // ── Ended-run terminal clear ───────────────────────────────────────────────
@@ -172,8 +166,7 @@ function BarrelCounter({
   return (
     <div>
       <span data-testid="count">{barrelsMade}</span>
-      <span data-testid="anchor">{lastBarrelNetSec}</span>
-      <span data-testid="elapsed">{paused ? 0 : Math.max(0, elapsedSec - lastBarrelNetSec)}</span>
+      <span data-testid="anchor">{lastBarrelNetSecRef.current}</span>
       <span data-testid="due-key">{barrelDueKeyRef.current}</span>
       <span data-testid="qc-key">{quickCheckKeyRef.current}</span>
       {showBarrelDue && <span data-testid="alert">alert</span>}
@@ -307,10 +300,10 @@ describe("sauce barrel — tab navigation persistence (same-run remount)", () =>
   });
 });
 
-// ── Suite 2: genuine run-ID change hydrates that run's state ──────────────────
+// ── Suite 2: genuine run-ID change resets state ───────────────────────────────
 
-describe("sauce barrel — genuine run-ID change hydrates per-run state", () => {
-  it("new run ID (while component stays mounted) starts fresh when unseen", () => {
+describe("sauce barrel — genuine run-ID change resets state", () => {
+  it("new run ID (while component stays mounted) resets to zero", () => {
     // Mount with run-A, consume a barrel.
     const { getByTestId, rerender } = render(
       <BarrelCounter runId="run-A" elapsedSec={20} />,
@@ -318,30 +311,28 @@ describe("sauce barrel — genuine run-ID change hydrates per-run state", () => 
     fireEvent.click(getByTestId("consume"));
     expect(getByTestId("count").textContent).toBe("1");
 
-    // Re-render with an unseen run ID — effect should hydrate its empty entry.
+    // Re-render with a different run ID — effect should reset.
     rerender(<BarrelCounter runId="run-B" elapsedSec={0} />);
     expect(getByTestId("count").textContent).toBe("0"); // reset ✓
     expect(getByTestId("anchor").textContent).toBe("0"); // anchor reset ✓
     expect(getByTestId("due-key").textContent).toBe(""); // latch cleared ✓
   });
 
-  it("switching runs preserves each run's independent anchor", () => {
+  it("new-run state does not pollute the old run's store entry", () => {
     resetSauceBarrelEntry("run-A");
     const { getByTestId, rerender } = render(
       <BarrelCounter runId="run-A" elapsedSec={30} />,
     );
-    fireEvent.click(getByTestId("consume")); // run-A anchor=30
+    fireEvent.click(getByTestId("consume")); // run-A: barrelsMade=1
     rerender(<BarrelCounter runId="run-B" elapsedSec={0} />);
-    fireEvent.click(getByTestId("consume")); // run-B anchor=0
+    fireEvent.click(getByTestId("consume")); // run-B: barrelsMade=1
 
-    rerender(<BarrelCounter runId="run-A" elapsedSec={35} />);
+    // run-A store entry should still have barrelsMade=1 (not clobbered by run-B).
     const entryA = getSauceBarrelEntry("run-A");
-    expect(entryA.lastBarrelNetSec).toBe(30);
-    expect(getByTestId("anchor").textContent).toBe("30");
-    expect(getByTestId("elapsed").textContent).toBe("5");
+    expect(entryA.barrelsMade).toBe(1);
   });
 
-  it("new-run remount (unmount run-A, mount run-B) starts fresh when unseen", () => {
+  it("new-run remount (unmount run-A, mount run-B) starts from zero", () => {
     const { getByTestId, unmount } = render(
       <BarrelCounter runId="run-A" elapsedSec={20} />,
     );
@@ -352,38 +343,6 @@ describe("sauce barrel — genuine run-ID change hydrates per-run state", () => 
     const { getByTestId: g2 } = render(<BarrelCounter runId="run-B" />);
     expect(g2("count").textContent).toBe("0");
     expect(g2("anchor").textContent).toBe("0");
-  });
-});
-
-describe("sauce barrel — reload and pause/wake lifecycle", () => {
-  it("reload restores a consumed barrel anchor and starts its elapsed time at zero", () => {
-    const { getByTestId, unmount } = render(
-      <BarrelCounter runId="r1" elapsedSec={42} />,
-    );
-    fireEvent.click(getByTestId("consume"));
-    expect(getByTestId("elapsed").textContent).toBe("0");
-    unmount();
-
-    const { getByTestId: reloaded } = render(
-      <BarrelCounter runId="r1" elapsedSec={42} />,
-    );
-    expect(reloaded("anchor").textContent).toBe("42");
-    expect(reloaded("elapsed").textContent).toBe("0");
-    expect(getSauceBarrelEntry("r1").lastBarrelNetSec).toBe(42);
-  });
-
-  it("pause and wake keep rendered elapsed time aligned with the persisted anchor", () => {
-    const { getByTestId, rerender } = render(
-      <BarrelCounter runId="r1" elapsedSec={18} />,
-    );
-    fireEvent.click(getByTestId("consume")); // anchor=18
-    rerender(<BarrelCounter runId="r1" elapsedSec={18} paused />);
-    expect(getByTestId("elapsed").textContent).toBe("0");
-    expect(getSauceBarrelEntry("r1").lastBarrelNetSec).toBe(18);
-
-    rerender(<BarrelCounter runId="r1" elapsedSec={23} />);
-    expect(getByTestId("elapsed").textContent).toBe("5");
-    expect(getSauceBarrelEntry("r1").lastBarrelNetSec).toBe(18);
   });
 });
 

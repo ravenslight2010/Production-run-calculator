@@ -53,7 +53,6 @@ _Replace the heading above with the project's name, and this line with one sente
 
 - **Fix all errors immediately.** Any TypeScript, test, or build error encountered during any task — whether directly related to the current work or not — must be fixed before moving on. Do not let errors accumulate.
 - **Web-only product:** The maintained application is `artifacts/run-calculator`, and it must remain usable in responsive desktop, phone, and tablet browsers.
-- **Task scope discipline:** Start with one task per product change. Include normal regression coverage in that task. Create a follow-up only for a concrete production risk or a genuinely separate capability that cannot reasonably fit the original task. Combine related verification gaps, check for existing duplicates before proposing anything, and do not create more than one follow-up per task unless the user explicitly asks for a broader breakdown.
 
 ## Gotchas
 

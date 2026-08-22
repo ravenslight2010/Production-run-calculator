@@ -29,7 +29,6 @@ import {
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
-import type { HistoryDateRange } from "./QualityHistoryTab";
 
 const SEVERITY_STYLE: Record<IncidentCluster["severity"], string> = {
   high: "bg-red-500/15 text-red-400",
@@ -337,7 +336,7 @@ function IncidentRow({ incident, assignees }: { incident: Incident; assignees: A
 
 // Manager-only review queue of reported issues and auto-captured crashes, each
 // with its stored AI diagnosis + workaround. Operators never see this tab.
-export default function IncidentsTab({ dateRange }: { dateRange?: HistoryDateRange }) {
+export default function IncidentsTab() {
   const { hasCapability, isLoading: roleLoading } = useMe();
   const canReview = hasCapability("review-incidents");
   const isIdle = useIdle();
@@ -348,8 +347,8 @@ export default function IncidentsTab({ dateRange }: { dateRange?: HistoryDateRan
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { data, isLoading, error } = useQuery({
-    queryKey: ["incidents", dateRange?.start, dateRange?.end],
-    queryFn: () => fetchIncidents({ from: dateRange?.start, to: dateRange?.end }),
+    queryKey: ["incidents"],
+    queryFn: fetchIncidents,
     enabled: canReview,
     refetchInterval: pollingReady ? (isIdle ? 120_000 : 20_000) : false,
   });
@@ -399,11 +398,6 @@ export default function IncidentsTab({ dateRange }: { dateRange?: HistoryDateRan
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {dateRange && (
-          <p className="rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs text-primary">
-            Showing the {dateRange.scope} report period: {dateRange.start} – {dateRange.end}
-          </p>
-        )}
         {hasIncidents && <ClustersPanel disabled={isLoading} />}
         {hasIncidents && (
           <div className="space-y-2 pb-1">

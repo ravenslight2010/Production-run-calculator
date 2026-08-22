@@ -1,4 +1,4 @@
-import { index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 // One-time server-side data heals. Each heal is a targeted, code-shipped data
 // correction that must run EXACTLY ONCE per database (dev and production each
@@ -20,26 +20,3 @@ export const dataHealsTable = pgTable("data_heals", {
 });
 
 export type DataHeal = typeof dataHealsTable.$inferSelect;
-
-// Durable, bounded history for manager-triggered deterministic repairs. The
-// records JSON contains only the fields changed by the repair, never the full
-// profile payload, so this remains useful for undo without becoming a second
-// copy of sensitive master data.
-export const dataHealthRepairBatchesTable = pgTable(
-  "data_health_repair_batches",
-  {
-    id: text("id").primaryKey(),
-    scope: text("scope").notNull().default("live"),
-    actor: text("actor").notNull(),
-    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
-    undoneAt: timestamp("undone_at", { withTimezone: true }),
-    status: text("status").notNull().default("applied"),
-    records: jsonb("records").notNull().default([]),
-    summary: jsonb("summary").notNull().default({}),
-  },
-  (t) => ({
-    scopeAppliedIdx: index("data_health_repair_batches_scope_applied_idx").on(t.scope, t.appliedAt),
-  }),
-);
-
-export type DataHealthRepairBatch = typeof dataHealthRepairBatchesTable.$inferSelect;

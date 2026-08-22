@@ -46,7 +46,6 @@ export function useHomeNavigation() {
   const [activeTab, setActiveTab] = useState<HomeTab>(loadInitialTab);
   const tabHistoryRef = useRef<HomeTab[]>([]);
   const prevTabRef = useRef<HomeTab>(activeTab);
-  const skipHistoryRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -58,22 +57,10 @@ export function useHomeNavigation() {
 
   useEffect(() => {
     if (activeTab === prevTabRef.current) return;
-    if (skipHistoryRef.current) {
-      skipHistoryRef.current = false;
-      prevTabRef.current = activeTab;
-      return;
-    }
     tabHistoryRef.current.push(prevTabRef.current);
     if (tabHistoryRef.current.length > 20) tabHistoryRef.current.shift();
     prevTabRef.current = activeTab;
   }, [activeTab]);
 
-  function goBack(): void {
-    const previousTab = tabHistoryRef.current.pop();
-    if (!previousTab) return;
-    skipHistoryRef.current = true;
-    setActiveTab(previousTab);
-  }
-
-  return { activeTab, setActiveTab, goBack, tabHistoryRef };
+  return { activeTab, setActiveTab, tabHistoryRef };
 }

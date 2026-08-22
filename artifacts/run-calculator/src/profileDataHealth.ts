@@ -13,16 +13,6 @@ export type ProfileDataHealthFinding = {
   message: string;
 };
 
-export type ProfileDataHealthRepair = {
-  id: string;
-  profileKey: string;
-  recipeKind: "dough" | "sauce";
-  fingerprint: string;
-  fields: string[];
-  previousValues: Record<string, unknown>;
-  nextValues: Record<string, unknown>;
-};
-
 export type DataHealthFinding = {
   id: string;
   category: "profile-links" | "recipe-records" | "import-review" | "cleanup-history";
@@ -40,7 +30,7 @@ export type DataHealthFinding = {
 
 export type DataHealthWorkspace = {
   findings: DataHealthFinding[];
-  safeRepairs: ProfileDataHealthRepair[];
+  safeRepairs: unknown[];
   summary: Record<string, number>;
   cleanupHistory: {
     appliedAt: string | null;
@@ -51,20 +41,11 @@ export type DataHealthWorkspace = {
       removedStubs: { dough: number; sauce: number; cheese: number; mix: number };
     };
   } | null;
-  repairBatches: Array<{
-    id: string;
-    scope: string;
-    actor: string;
-    appliedAt: string;
-    undoneAt: string | null;
-    status: string;
-    summary: { applied: number; skipped: number; failed: number; repairedRuns: number };
-  }>;
 };
 
 export type ProfileDataHealthReport = {
   findings: ProfileDataHealthFinding[];
-  safeRepairs: ProfileDataHealthRepair[];
+  safeRepairs: unknown[];
   summary: Record<string, number>;
 };
 
@@ -72,24 +53,13 @@ export type ProfileDataHealthApplyResult = {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: unknown[];
-  batchId: string | null;
   summary: { repairedProfiles: number; repairedRuns: number };
-  outcome?: { applied: number; skipped: number; failed: number; repairedRuns: number };
 };
 
 export async function fetchProfileDataHealth(): Promise<ProfileDataHealthReport> {
   const res = await fetch("/api/profile-data/health-check", { headers: { "x-client-id": inventoryClientId() } });
   if (!res.ok) throw new Error(`Failed to check profile data health: ${res.status}`);
   return ((await res.json()) as { report: ProfileDataHealthReport }).report;
-}
-
-export async function undoProfileDataHealthRepair(batchId: string): Promise<{ batchId: string; summary: { applied: number; skipped: number; failed: number; repairedRuns: number } }> {
-  const res = await fetch(`/api/profile-data/health-check/batches/${encodeURIComponent(batchId)}/undo`, {
-    method: "POST",
-    headers: { "x-client-id": inventoryClientId() },
-  });
-  if (!res.ok) throw new Error(`Failed to undo profile data repairs: ${res.status}`);
-  return await res.json();
 }
 
 export async function fetchDataHealthWorkspace(): Promise<DataHealthWorkspace> {

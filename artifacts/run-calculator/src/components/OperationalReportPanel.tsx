@@ -5,11 +5,6 @@ import type { SummaryInput } from "../aiSummary";
 import { useMe } from "../useRole";
 
 type Props = { buildInput: (scope: "day" | "week", date: string) => SummaryInput };
-export type OperationalReportDetailRange = {
-  start: string;
-  end: string;
-  scope: "day" | "week";
-};
 
 function fmtDate(value: string): string {
   const d = new Date(`${value}T12:00:00`);
@@ -42,14 +37,7 @@ function reportText(report: OperationalReport): string {
   return lines.join("\n");
 }
 
-export default function OperationalReportPanel({
-  buildInput,
-  onOpenQuality,
-  onOpenIncidents,
-}: Props & {
-  onOpenQuality?: (range: OperationalReportDetailRange) => void;
-  onOpenIncidents?: (range: OperationalReportDetailRange) => void;
-}) {
+export default function OperationalReportPanel({ buildInput }: Props) {
   const { hasCapability } = useMe();
   const allowed = hasCapability("review-incidents");
   const [scope, setScope] = useState<"day" | "week">("day");
@@ -134,30 +122,8 @@ export default function OperationalReportPanel({
           </div>
           {report.production.unfinishedRuns.length > 0 && <p className="text-sm text-amber-400">Unfinished: {report.production.unfinishedRuns.join(", ")}</p>}
           <div className="grid sm:grid-cols-3 gap-2 text-xs">
-            <div>
-              <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
-              {report.quality.availability === "available" && onOpenQuality && (
-                <button
-                  type="button"
-                  className="mt-1 font-semibold text-primary hover:underline"
-                  onClick={() => onOpenQuality({ start: report.periodStart, end: report.periodEnd, scope: report.scope })}
-                >
-                  Open quality details
-                </button>
-              )}
-            </div>
-            <div>
-              <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
-              {report.incidents.availability === "available" && onOpenIncidents && (
-                <button
-                  type="button"
-                  className="mt-1 font-semibold text-primary hover:underline"
-                  onClick={() => onOpenIncidents({ start: report.periodStart, end: report.periodEnd, scope: report.scope })}
-                >
-                  Open incident details
-                </button>
-              )}
-            </div>
+            <p>Quality: {report.quality.value?.issues ?? "Unavailable"} issue(s)</p>
+            <p>Incidents: {report.incidents.value?.total ?? "Unavailable"} ({report.incidents.value?.unresolved ?? "—"} unresolved)</p>
             <p>Inventory flags: {report.inventory.value?.flaggedItems ?? "Unavailable"}</p>
           </div>
           <p className="text-[11px] text-muted-foreground">{report.inventory.note}</p>

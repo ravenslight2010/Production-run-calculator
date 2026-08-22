@@ -1901,23 +1901,4 @@ describe("useClock — status transition interval cleanup", () => {
     });
     expect(result.current.getTime()).toBe(T0 + 1_000 + PENDING_CLOCK_MS);
   });
-
-  it("unmounting the clock clears its interval and ignores later wake events", () => {
-    cleanup();
-
-    const { unmount } = renderHook(() => useClock("running"));
-
-    expect(vi.getTimerCount()).toBe(1);
-
-    unmount();
-
-    expect(vi.getTimerCount()).toBe(0);
-
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    expect(vi.getTimerCount()).toBe(0);
-  });
 });

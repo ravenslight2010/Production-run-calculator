@@ -1,10 +1,9 @@
 import { Router, type Request, type Response } from "express";
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import {
   auditLogsTable,
   brandProfilesTable,
   dataHealsTable,
-  dataHealthRepairBatchesTable,
   dailySyncTable,
   db,
   doughRecipesTable,
@@ -38,7 +37,6 @@ export type ProfileDataHealthRepair = {
   recipeKind: RecipeKind;
   fingerprint: string;
   fields: string[];
-  previousValues: JsonRecord;
   nextValues: JsonRecord;
 };
 
@@ -76,38 +74,6 @@ export type DataHealthWorkspace = {
       removedStubs: { dough: number; sauce: number; cheese: number; mix: number };
     };
   } | null;
-  repairBatches: DataHealthRepairBatchSummary[];
-};
-
-type RepairBatchRecord = {
-  profileKey: string;
-  brand: string;
-  flavor: string;
-  recipeKind: RecipeKind;
-  fields: string[];
-  beforeValues: JsonRecord;
-  afterValues: JsonRecord;
-  beforeStamp: number;
-  afterStamp: number;
-  runs: Array<{
-    runId: string;
-    date: string;
-    fields: string[];
-    beforeValues: JsonRecord;
-    afterValues: JsonRecord;
-    beforeStamp: number;
-    afterStamp: number;
-  }>;
-};
-
-type DataHealthRepairBatchSummary = {
-  id: string;
-  scope: string;
-  actor: string;
-  appliedAt: Date;
-  undoneAt: Date | null;
-  status: string;
-  summary: { applied: number; skipped: number; failed: number; repairedRuns: number };
 };
 
 const router = Router();
@@ -218,43 +184,19 @@ export async function profileDataHealthReport(executor: HealthExecutor): Promise
       if (!currentName && expectedName && expectedRecipe) {
         const nextValues = { ...values, [fields.name]: expectedRecipe.name, [fields.rows]: expectedRecipe.components };
         finding = { ...base, status: "missing-link", repairable: true, message: `Restore the saved ${kind} recipe link.` };
-        repair = {
-          id,
-          profileKey: profile.key,
-          recipeKind: kind,
-          fingerprint,
-          fields: [fields.name, fields.rows],
-          previousValues: Object.fromEntries([fields.name, fields.rows].map((field) => [field, values[field]])),
-          nextValues,
-        };
+        repair = { id, profileKey: profile.key, recipeKind: kind, fingerprint, fields: [fields.name, fields.rows], nextValues };
       } else if (currentName && !currentRecipe) {
         if (expectedName && expectedRecipe) {
           const nextValues = { ...values, [fields.name]: expectedRecipe.name, [fields.rows]: expectedRecipe.components };
           finding = { ...base, status: "missing-recipe", repairable: true, message: `Replace the missing ${kind} recipe with the exact saved-sheet link.` };
-          repair = {
-            id,
-            profileKey: profile.key,
-            recipeKind: kind,
-            fingerprint,
-            fields: [fields.name, fields.rows],
-            previousValues: Object.fromEntries([fields.name, fields.rows].map((field) => [field, values[field]])),
-            nextValues,
-          };
+          repair = { id, profileKey: profile.key, recipeKind: kind, fingerprint, fields: [fields.name, fields.rows], nextValues };
         } else {
           finding = { ...base, status: "missing-recipe", repairable: false, message: `The linked ${kind} recipe is not in the current recipe pool.` };
         }
       } else if (currentRecipe && currentRows.length === 0 && currentRecipe.components.length > 0) {
         const nextValues = { ...values, [fields.rows]: currentRecipe.components };
         finding = { ...base, status: "missing-rows", repairable: true, message: `Hydrate the empty ${kind} recipe rows from the linked recipe.` };
-        repair = {
-          id,
-          profileKey: profile.key,
-          recipeKind: kind,
-          fingerprint,
-          fields: [fields.rows],
-          previousValues: { [fields.rows]: values[fields.rows] },
-          nextValues,
-        };
+        repair = { id, profileKey: profile.key, recipeKind: kind, fingerprint, fields: [fields.rows], nextValues };
       } else if (currentRecipe && expectedName && nameKey(currentName) !== nameKey(expectedName)) {
         finding = { ...base, status: "saved-spec-mismatch", repairable: false, message: `The saved sheet names a different ${kind} recipe; review before changing it.` };
       }
@@ -293,7 +235,6 @@ function workspaceFinding(finding: ProfileDataHealthFinding): DataHealthFinding 
 }
 
 export async function dataHealthWorkspace(executor: HealthExecutor): Promise<DataHealthWorkspace> {
-  const scope = currentScope();
   const report = await profileDataHealthReport(executor);
   const [marker] = await executor
     .select({
@@ -346,38 +287,7 @@ export async function dataHealthWorkspace(executor: HealthExecutor): Promise<Dat
     errors: findings.filter((item) => item.severity === "error").length,
     warnings: findings.filter((item) => item.severity === "warning").length,
   };
-  const repairBatches = await executor
-    .select({
-      id: dataHealthRepairBatchesTable.id,
-      scope: dataHealthRepairBatchesTable.scope,
-      actor: dataHealthRepairBatchesTable.actor,
-      appliedAt: dataHealthRepairBatchesTable.appliedAt,
-      undoneAt: dataHealthRepairBatchesTable.undoneAt,
-      status: dataHealthRepairBatchesTable.status,
-      summary: dataHealthRepairBatchesTable.summary,
-    })
-    .from(dataHealthRepairBatchesTable)
-    .where(eq(dataHealthRepairBatchesTable.scope, scope))
-    .orderBy(desc(dataHealthRepairBatchesTable.appliedAt))
-    .limit(10);
-  return {
-    findings,
-    safeRepairs: report.safeRepairs,
-    summary,
-    cleanupHistory,
-    repairBatches: repairBatches.map((batch) => {
-      const result = record(batch.summary);
-      return {
-        ...batch,
-        summary: {
-          applied: Number(result.applied) || 0,
-          skipped: Number(result.skipped) || 0,
-          failed: Number(result.failed) || 0,
-          repairedRuns: Number(result.repairedRuns) || 0,
-        },
-      };
-    }),
-  };
+  return { findings, safeRepairs: report.safeRepairs, summary, cleanupHistory };
 }
 
 function repairStillMatches(values: JsonRecord, updatedAtMs: number | null, repair: ProfileDataHealthRepair): boolean {
@@ -412,46 +322,24 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
     const result = await db.transaction(async (tx) => {
       const before = await profileDataHealthReport(tx);
       const repairedByProfile = new Map<string, { values: JsonRecord; fields: string[] }>();
-      const batchRecords = new Map<string, RepairBatchRecord>();
       const applied: ProfileDataHealthRepair[] = [];
-      let skipped = 0;
-      let failed = 0;
       const now = Date.now();
 
       for (const repair of before.safeRepairs) {
         const [profile] = await tx.select().from(brandProfilesTable).where(
           and(eq(brandProfilesTable.key, repair.profileKey), eq(brandProfilesTable.scope, scope)),
         ).for("update");
-         if (!profile) { skipped++; continue; }
+        if (!profile) continue;
         const values = record(profile.values);
-         if (!repairStillMatches(values, profile.updatedAtMs, repair)) { skipped++; continue; }
+        if (!repairStillMatches(values, profile.updatedAtMs, repair)) continue;
         const stamp = Math.max(profile.updatedAtMs ?? 0, now) + 1;
-          const existing = repairedByProfile.get(profile.key);
-          const existingBatch = batchRecords.get(profile.key);
-         const changedFields = existing ? [...new Set([...existing.fields, ...repair.fields])] : repair.fields;
-          const beforeValues = existing
-            ? record(existingBatch?.beforeValues)
-           : Object.fromEntries(repair.fields.map((field) => [field, values[field]]));
-         const afterValues = Object.fromEntries(changedFields.map((field) => [field, repair.nextValues[field]]));
         await tx.update(brandProfilesTable)
           .set({ values: repair.nextValues, updatedAtMs: stamp })
           .where(and(eq(brandProfilesTable.key, profile.key), eq(brandProfilesTable.scope, scope)));
         repairedByProfile.set(
           `${profileKey(profile.brand, profile.flavor)}`,
-           { values: { ...(existing?.values ?? values), ...repair.nextValues }, fields: changedFields },
+          { values: repair.nextValues, fields: repair.fields },
         );
-         batchRecords.set(profile.key, {
-           profileKey: profile.key,
-           brand: profile.brand,
-           flavor: profile.flavor,
-           recipeKind: repair.recipeKind,
-           fields: changedFields,
-           beforeValues,
-           afterValues,
-            beforeStamp: existingBatch?.beforeStamp ?? (profile.updatedAtMs ?? 0),
-           afterStamp: stamp,
-           runs: batchRecords.get(profile.key)?.runs ?? [],
-         });
         applied.push(repair);
       }
 
@@ -477,23 +365,10 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
             const runValues = record(nextValues[id]);
             if (!changedProfile || Object.keys(runValues).length === 0) continue;
             const nextRunValues = { ...runValues };
-             const beforeRunValues = Object.fromEntries(changedProfile.fields.map((field) => [field, runValues[field]]));
-             for (const field of changedProfile.fields) nextRunValues[field] = changedProfile.values[field];
+            for (const field of changedProfile.fields) nextRunValues[field] = changedProfile.values[field];
             nextValues[id] = nextRunValues;
             const oldStamp = Number(nextStamps[id]);
-            const beforeStamp = Number.isFinite(oldStamp) ? oldStamp : 0;
-            const afterStamp = Math.max(beforeStamp, now) + 1;
-            nextStamps[id] = afterStamp;
-            const batchRecord = [...batchRecords.values()].find((item) => profileKey(item.brand, item.flavor) === profileKey(run.brand, run.flavor));
-            batchRecord?.runs.push({
-              runId: id,
-              date: day.date,
-              fields: changedProfile.fields,
-              beforeValues: beforeRunValues,
-              afterValues: Object.fromEntries(changedProfile.fields.map((field) => [field, nextRunValues[field]])),
-              beforeStamp,
-              afterStamp,
-            });
+            nextStamps[id] = Math.max(Number.isFinite(oldStamp) ? oldStamp : 0, now) + 1;
             repairedRuns++;
             changed = true;
           }
@@ -505,17 +380,7 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
         }
       }
 
-       const batchId = `profile-data-health:${now}:${Math.random().toString(36).slice(2, 10)}`;
-       if (applied.length > 0) {
-         const batchSummary = { applied: applied.length, skipped, failed, repairedRuns };
-         await tx.insert(dataHealthRepairBatchesTable).values({
-           id: batchId,
-           scope,
-           actor: req.userId ?? "unknown",
-           status: "applied",
-           records: [...batchRecords.values()],
-           summary: batchSummary,
-         });
+      if (applied.length > 0) {
         await tx.insert(auditLogsTable).values({
           scope,
           actor: req.userId ?? "unknown",
@@ -524,107 +389,17 @@ router.post("/profile-data/health-check/apply", requireCapability("manage-staff"
           changes: {
             profiles: applied.map((repair) => ({ profileKey: repair.profileKey, recipeKind: repair.recipeKind, fields: repair.fields })),
             repairedRuns,
-             batchId,
-             applied: applied.length,
-             skipped,
-             failed,
           },
           ipAddress: req.ip,
           userAgent: req.get("user-agent") ?? undefined,
         });
       }
-       const oldBatches = await tx.select({ id: dataHealthRepairBatchesTable.id })
-         .from(dataHealthRepairBatchesTable)
-         .where(eq(dataHealthRepairBatchesTable.scope, scope))
-         .orderBy(desc(dataHealthRepairBatchesTable.appliedAt))
-         .limit(100);
-       if (oldBatches.length > 20) {
-         await tx.delete(dataHealthRepairBatchesTable).where(inArray(dataHealthRepairBatchesTable.id, oldBatches.slice(20).map((item) => item.id)));
-       }
-       return {
-         before,
-         after: await profileDataHealthReport(tx),
-         applied,
-         batchId: applied.length > 0 ? batchId : null,
-         summary: { repairedProfiles: applied.length, repairedRuns },
-         outcome: { applied: applied.length, skipped, failed, repairedRuns },
-       };
+      return { before, after: await profileDataHealthReport(tx), applied, summary: { repairedProfiles: applied.length, repairedRuns } };
     });
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "failed to apply profile data health repairs");
     res.status(500).json({ error: "Failed to apply profile data health repairs" });
-  }
-});
-
-router.post("/profile-data/health-check/batches/:batchId/undo", requireCapability("manage-staff"), async (req: Request, res: Response) => {
-  try {
-    const scope = currentScope();
-    const result = await db.transaction(async (tx) => {
-      const [batch] = await tx.select().from(dataHealthRepairBatchesTable).where(
-          and(eq(dataHealthRepairBatchesTable.id, String(req.params.batchId)), eq(dataHealthRepairBatchesTable.scope, scope)),
-      ).for("update");
-      if (!batch) return { status: 404 as const, body: { error: "Repair batch not found" } };
-      if (batch.status !== "applied") return { status: 409 as const, body: { error: "Repair batch is no longer eligible for undo" } };
-      const records = Array.isArray(batch.records) ? batch.records as RepairBatchRecord[] : [];
-      let applied = 0;
-      let skipped = 0;
-      let failed = 0;
-      let repairedRuns = 0;
-      for (const item of records) {
-        const [profile] = await tx.select().from(brandProfilesTable).where(
-          and(eq(brandProfilesTable.key, item.profileKey), eq(brandProfilesTable.scope, scope)),
-        ).for("update");
-        if (!profile || profile.updatedAtMs !== item.afterStamp) { skipped++; continue; }
-        const current = record(profile.values);
-        const matches = item.fields.every((field) => JSON.stringify(current[field]) === JSON.stringify(item.afterValues[field]));
-        if (!matches) { skipped++; continue; }
-        const restore = { ...current, ...item.beforeValues };
-        const stamp = Math.max(profile.updatedAtMs ?? 0, Date.now()) + 1;
-        await tx.update(brandProfilesTable).set({ values: restore, updatedAtMs: stamp }).where(
-          and(eq(brandProfilesTable.key, item.profileKey), eq(brandProfilesTable.scope, scope)),
-        );
-        applied++;
-        for (const run of item.runs) {
-          const [day] = await tx.select().from(dailySyncTable).where(
-            and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, run.date)),
-          ).for("update");
-          const data = record(day?.data);
-          const dayState = record(data.dayState);
-          const foundRun = (Array.isArray(dayState.runs) ? dayState.runs : []).map(record).find((entry) => entry.id === run.runId);
-          if (!day || !foundRun || foundRun.startedAt != null || foundRun.endedAt != null) { skipped++; continue; }
-          const values = record(record(data.runValues)[run.runId]);
-          const stamps = record(data.runValuesUpdatedAt);
-          if (Number(stamps[run.runId]) !== run.afterStamp || !run.fields.every((field) => JSON.stringify(values[field]) === JSON.stringify(run.afterValues[field]))) {
-            skipped++;
-            continue;
-          }
-          const nextValues = { ...record(data.runValues), [run.runId]: { ...values, ...run.beforeValues } };
-          const nextStamps = { ...stamps, [run.runId]: Math.max(Number(stamps[run.runId]) || 0, Date.now()) + 1 };
-          await tx.update(dailySyncTable).set({ data: { ...data, runValues: nextValues, runValuesUpdatedAt: nextStamps }, updatedAt: new Date() }).where(
-            and(eq(dailySyncTable.scope, scope), eq(dailySyncTable.date, run.date)),
-          );
-          repairedRuns++;
-        }
-      }
-      if (applied === 0 && skipped === 0) failed++;
-      const summary = { applied, skipped, failed, repairedRuns };
-      await tx.update(dataHealthRepairBatchesTable).set({ status: "undone", undoneAt: new Date(), summary }).where(eq(dataHealthRepairBatchesTable.id, batch.id));
-      await tx.insert(auditLogsTable).values({
-        scope,
-        actor: req.userId ?? "unknown",
-        action: "profile_data_health_repair_undo",
-        resource: "brand_profiles",
-        changes: { batchId: batch.id, ...summary },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") ?? undefined,
-      });
-      return { status: 200 as const, body: { batchId: batch.id, summary } };
-    });
-    res.status(result.status).json(result.body);
-  } catch (err) {
-    req.log.error({ err }, "failed to undo profile data health repairs");
-    res.status(500).json({ error: "Failed to undo profile data health repairs" });
   }
 });
 
