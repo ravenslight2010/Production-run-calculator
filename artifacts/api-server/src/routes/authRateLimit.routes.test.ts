@@ -80,6 +80,8 @@ vi.mock("../lib/auth", () => ({
 }));
 
 vi.mock("../lib/sandbox", () => ({
+  SANDBOX_USERNAME: "test",
+  SANDBOX_PASSWORD: "test",
   sandboxAllowed: vi.fn(() => false),
 }));
 

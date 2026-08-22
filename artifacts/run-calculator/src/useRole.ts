@@ -1,15 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-import {
-  fetchMe,
-  type Capability,
-  type Role,
-  type StaffMember,
-} from "./inventoryShared";
+import { useAuth } from "./useAuth";
+import type { Capability, Role, StaffMember } from "./inventoryShared";
 
-// Current signed-in user's identity, role, and capabilities, fetched from /me.
-// The server creates the row on first sight, so this also bootstraps the first
-// user as manager. While loading we return no capabilities so callers default to
-// the most restrictive view rather than briefly flashing privileged controls.
+// Current signed-in user's identity, role, and capabilities. AuthProvider owns
+// the one ["me"] request; keeping role consumers on that context prevents a
+// second query function from racing an authoritative sign-in response.
 export function useMe(): {
   me: StaffMember | null;
   role: Role | null;
@@ -21,16 +15,12 @@ export function useMe(): {
   isManager: boolean;
   isLoading: boolean;
 } {
-  const { data, isLoading } = useQuery({
-    queryKey: ["me"],
-    queryFn: fetchMe,
-    staleTime: 60_000,
-  });
-  const role = data?.role ?? null;
-  const capabilities = data?.capabilities ?? [];
+  const { me, isLoading } = useAuth();
+  const role = me?.role ?? null;
+  const capabilities = me?.capabilities ?? [];
   const hasCapability = (cap: Capability): boolean => capabilities.includes(cap);
   return {
-    me: data ?? null,
+    me,
     role,
     capabilities,
     hasCapability,

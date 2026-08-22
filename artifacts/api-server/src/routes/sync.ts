@@ -141,14 +141,6 @@ async function getResetEpoch(scope: Scope): Promise<number> {
   return row?.epoch ?? 0;
 }
 
-async function currentSnapshotId(date: string, scope: Scope): Promise<string | null> {
-  const [row] = await db
-    .select({ data: dailySyncTable.data })
-    .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-  return row ? syncSnapshotId(row.data) : null;
-}
-
 // Postgres unique-violation is SQLSTATE 23505. Drizzle wraps driver errors, so
 // the original pg error (carrying `.code`) is reachable via the `.cause` chain
 // rather than the top-level error — walk it.
@@ -492,11 +484,6 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const existingSnapshot = typeof requestedId === "string" && await currentSnapshotId(today, scope);
-  if (existingSnapshot && requestedId === existingSnapshot) {
-    res.json({ ok: true, unchanged: true, snapshotId: existingSnapshot });
-    return;
-  }
   const merged = await upsertProtected(today, scope, sanitized, today, req.ip);
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
@@ -620,11 +607,6 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
-  const existingSnapshot = typeof requestedId === "string" && await currentSnapshotId(date, scope);
-  if (existingSnapshot && requestedId === existingSnapshot) {
-    res.json({ ok: true, unchanged: true, snapshotId: existingSnapshot });
-    return;
-  }
   const merged = await upsertProtected(date, scope, sanitized, clientToday(req), req.ip);
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.

@@ -63,4 +63,28 @@ describe("ManagerAttentionDialog", () => {
     await userEvent.click(screen.getByTestId("manager-attention-action-password-resets"));
     expect(onResolve).toHaveBeenCalledWith("password-resets");
   });
+
+  it("closes the attention surface immediately when capability access is removed", () => {
+    const { rerender } = render(
+      <ManagerAttentionDialog
+        open
+        onOpenChange={() => {}}
+        items={buildManagerAttentionItems(fullInput)}
+        onResolve={() => {}}
+        authorized
+      />,
+    );
+    expect(screen.getByText("Manager attention")).toBeTruthy();
+
+    rerender(
+      <ManagerAttentionDialog
+        open
+        onOpenChange={() => {}}
+        items={buildManagerAttentionItems(fullInput)}
+        onResolve={() => {}}
+        authorized={false}
+      />,
+    );
+    expect(screen.queryByText("Manager attention")).toBeNull();
+  });
 });

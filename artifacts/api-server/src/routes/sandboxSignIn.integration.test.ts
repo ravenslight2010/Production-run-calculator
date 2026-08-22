@@ -46,14 +46,13 @@ let originalNodeEnv: string | undefined;
 let server: Server;
 let baseUrl: string;
 
-// The real sandbox account uses SANDBOX_PASSWORD = "test" (4 chars), which is
-// intentionally shorter than the sign-in Zod minimum (6 chars). That means
-// production can't even parse its credentials — defense-in-depth. For the
-// integration test we need to reach the actual sandbox-flag guard in the
-// handler, so we create a *separate* sandbox-flagged user with a valid-length
-// password. The guard being tested is: user.sandbox && !sandboxAllowed() → 401.
+// Keep a separate valid-length sandbox user too. It verifies that the
+// production gate applies to every sandbox account, not only the public
+// development shortcut.
 const SANDBOX_GATE_USERNAME = "sandboxflaggeduser";
 const SANDBOX_GATE_PASSWORD = "sandboxpw123"; // >= 6 chars, passes Zod
+const SANDBOX_SHORTCUT_USERNAME = "test";
+const SANDBOX_SHORTCUT_PASSWORD = "test";
 const REGULAR_USERNAME = "regularstaff";
 const REGULAR_PASSWORD = "securepassword99";
 
@@ -145,11 +144,14 @@ beforeEach(async () => {
   );
   await seedRoles();
 
-  // Insert a sandbox-flagged user with a password long enough to pass Zod
-  // validation (>= 6 chars), so we can reach the actual sandbox guard in
-  // the sign-in handler. The real sandbox account uses "test" (4 chars) which
-  // Zod rejects before the handler — that is defense-in-depth, not the guard
-  // being tested here.
+  // Insert sandbox users for both the exact public shortcut and the ordinary
+  // valid-length path so the suite covers their shared production gate.
+  await db.insert(usersTable).values({
+    id: newUserId(),
+    username: SANDBOX_SHORTCUT_USERNAME,
+    passwordHash: hashPassword(SANDBOX_SHORTCUT_PASSWORD),
+    sandbox: true,
+  });
   await db.insert(usersTable).values({
     id: newUserId(),
     username: SANDBOX_GATE_USERNAME,
@@ -175,6 +177,18 @@ async function signIn(body: Record<string, string>): Promise<Response> {
 }
 
 describe("sandbox account is blocked in production", () => {
+  it("rejects the public test/test shortcut with 401 in production", async () => {
+    process.env.NODE_ENV = "production";
+    const res = await signIn({
+      username: SANDBOX_SHORTCUT_USERNAME,
+      password: SANDBOX_SHORTCUT_PASSWORD,
+    });
+    expect(res.status).toBe(401);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "Invalid username or password.",
+    });
+  });
+
   it("rejects the sandbox-flagged user with 401 when NODE_ENV is 'production'", async () => {
     process.env.NODE_ENV = "production";
     const res = await signIn({ username: SANDBOX_GATE_USERNAME, password: SANDBOX_GATE_PASSWORD });
@@ -195,6 +209,18 @@ describe("sandbox account is blocked in production", () => {
 });
 
 describe("sandbox account is accepted outside production", () => {
+  it("allows the public test/test shortcut in a non-production environment", async () => {
+    process.env.NODE_ENV = "test";
+    const res = await signIn({
+      username: SANDBOX_SHORTCUT_USERNAME,
+      password: SANDBOX_SHORTCUT_PASSWORD,
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { token: string }).toMatchObject({
+      token: expect.any(String),
+    });
+  });
+
   it("allows the sandbox-flagged user to sign in when NODE_ENV is 'test' (non-production)", async () => {
     process.env.NODE_ENV = "test";
     const res = await signIn({ username: SANDBOX_GATE_USERNAME, password: SANDBOX_GATE_PASSWORD });

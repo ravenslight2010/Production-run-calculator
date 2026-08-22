@@ -14,7 +14,11 @@ import {
   signToken,
   verifyPassword,
 } from "../lib/auth";
-import { sandboxAllowed } from "../lib/sandbox";
+import {
+  SANDBOX_PASSWORD,
+  SANDBOX_USERNAME,
+  sandboxAllowed,
+} from "../lib/sandbox";
 import {
   createUser,
   findUserByUsername,
@@ -150,7 +154,17 @@ router.get("/auth/username-available", authRateLimit, async (req, res): Promise<
 
 // Sign in with username + password.
 router.post("/auth/sign-in", authRateLimit, async (req, res): Promise<void> => {
-  const parsed = SignInBody.safeParse(req.body);
+  // The development-only sandbox shortcut deliberately uses "test"/"test".
+  // Its public four-character password predates the normal six-character
+  // staff-password policy, so admit this exact pair through validation and
+  // retain the existing sandbox flag/production gate below. All other sign-in
+  // attempts still use the generated contract unchanged.
+  const isSandboxShortcut =
+    req.body?.username === SANDBOX_USERNAME &&
+    req.body?.password === SANDBOX_PASSWORD;
+  const parsed = isSandboxShortcut
+    ? { success: true as const, data: { username: SANDBOX_USERNAME, password: SANDBOX_PASSWORD } }
+    : SignInBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;

@@ -7,6 +7,7 @@ import {
   LifeBuoy,
   Settings2,
 } from "lucide-react";
+import { memo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -118,17 +119,23 @@ function AttentionIcon({ kind }: { kind: ManagerAttentionKind }) {
   }
 }
 
-export default function ManagerAttentionDialog({
+const ManagerAttentionDialog = memo(function ManagerAttentionDialog({
   open,
   onOpenChange,
   items,
   onResolve,
+  authorized = true,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: ReadonlyArray<ManagerAttentionItem>;
   onResolve: (kind: ManagerAttentionKind) => void;
+  authorized?: boolean;
 }) {
+  // Keep the dialog out of the tree immediately when capabilities disappear.
+  // This prevents a stale open state from exposing manager work during an auth
+  // transition while leaving the parent hook order unchanged.
+  if (!authorized) return null;
   const total = managerAttentionCount(items);
 
   return (
@@ -187,4 +194,8 @@ export default function ManagerAttentionDialog({
       </DialogContent>
     </Dialog>
   );
-}
+});
+
+ManagerAttentionDialog.displayName = "ManagerAttentionDialog";
+
+export default ManagerAttentionDialog;

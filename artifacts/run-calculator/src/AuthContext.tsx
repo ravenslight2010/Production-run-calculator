@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changePasswordRequest,
@@ -6,6 +6,7 @@ import {
   markOnboardingSeenRequest,
   markTourCompletedRequest,
   setFloorModeRequest,
+  setAuthRequestEpoch,
   setNotificationPrefsRequest,
   setUnauthorizedHandler,
   signInRequest,
@@ -29,13 +30,32 @@ import { AuthContext } from "./useAuth";
 // signed-out state (not an error), so we swallow it and treat it as "no user".
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
+  const authEpochRef = useRef(0);
+
+  const advanceAuthEpoch = useCallback(() => {
+    const next = authEpochRef.current + 1;
+    authEpochRef.current = next;
+    setAuthRequestEpoch(next);
+    return next;
+  }, []);
 
   const { data, isLoading } = useQuery({
     queryKey: ["me"],
-    queryFn: async (): Promise<StaffMember | null> => {
+    queryFn: async ({ signal }): Promise<StaffMember | null> => {
+      const requestEpoch = authEpochRef.current;
       try {
-        return await fetchMe();
+        const user = await fetchMe(signal);
+        // A request that began under a previous session transition is no
+        // longer allowed to become the identity source. The current cache is
+        // authoritative (and may already contain the sign-in response).
+        if (requestEpoch !== authEpochRef.current) {
+          return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
+        }
+        return user;
       } catch (err) {
+        if (requestEpoch !== authEpochRef.current) {
+          return qc.getQueryData<StaffMember | null>(["me"]) ?? null;
+        }
         if (err instanceof InventoryApiError && err.status === 401) return null;
         throw err;
       }
@@ -54,7 +74,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // can clobber — the value we just set, which would bounce the user back to the
   // login screen (or, on sign-out, strand them in the authenticated shell).
   const resetCacheTo = useCallback(
-    (identity: StaffMember | null) => {
+    async (identity: StaffMember | null) => {
+      // Stop the mounted identity observer from letting an older /me request
+      // write over the response from sign-in/sign-out. The request also
+      // carries the epoch guard above for fetch implementations that do not
+      // honor AbortSignal.
+      await qc.cancelQueries({ queryKey: ["me"], exact: true });
       qc.setQueryData(["me"], identity);
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
@@ -63,42 +88,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     async (username: string, password: string) => {
+      const transitionEpoch = advanceAuthEpoch();
       const { user } = await signInRequest(username, password);
-      resetCacheTo(user);
+      if (transitionEpoch !== authEpochRef.current) return;
+      await resetCacheTo(user);
     },
-    [resetCacheTo],
+    [advanceAuthEpoch, resetCacheTo],
   );
 
   const signUp = useCallback(
     async (username: string, password: string, accessCode: string) => {
+      const transitionEpoch = advanceAuthEpoch();
       const { user } = await signUpRequest(username, password, accessCode);
-      resetCacheTo(user);
+      if (transitionEpoch !== authEpochRef.current) return;
+      await resetCacheTo(user);
     },
-    [resetCacheTo],
+    [advanceAuthEpoch, resetCacheTo],
   );
 
   // Sign in as the seeded sandbox account. Credentials are intentionally the
   // well-known "test"/"test" pair — this is a non-production demo shortcut.
   const signInAsTest = useCallback(async () => {
+    const transitionEpoch = advanceAuthEpoch();
     const { user } = await signInRequest("test", "test");
-    resetCacheTo(user);
-  }, [resetCacheTo]);
+    if (transitionEpoch !== authEpochRef.current) return;
+    await resetCacheTo(user);
+  }, [advanceAuthEpoch, resetCacheTo]);
 
   const signOut = useCallback(async () => {
+    const transitionEpoch = advanceAuthEpoch();
     try {
       await signOutRequest();
     } finally {
-      resetCacheTo(null);
+      if (transitionEpoch === authEpochRef.current) await resetCacheTo(null);
     }
-  }, [resetCacheTo]);
+  }, [advanceAuthEpoch, resetCacheTo]);
 
   // Flip the app to the signed-out UI immediately. We set ["me"] to null rather
   // than clearing the whole cache so we don't disturb any in-flight request
   // (e.g. the daily-reset rollover's own sync push) — the next sign-in clears
   // the cache to prevent cross-user leakage.
   const forceSignedOut = useCallback(() => {
+    advanceAuthEpoch();
     qc.setQueryData(["me"], null);
-  }, [qc]);
+  }, [advanceAuthEpoch, qc]);
 
   const revalidate = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["me"] });
@@ -114,7 +147,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // session is actually still valid. /me is a session-probe path, so its own 401
   // can't re-enter this handler (no loop).
   useEffect(() => {
-    setUnauthorizedHandler(() => {
+    setAuthRequestEpoch(authEpochRef.current);
+    setUnauthorizedHandler((requestEpoch) => {
+      // Ignore 401s from requests that started before the latest auth
+      // transition. A current-epoch 401 still re-probes /me and can sign the
+      // user out when the server session has genuinely expired.
+      if (requestEpoch !== authEpochRef.current) return;
       void qc.invalidateQueries({ queryKey: ["me"] });
     });
     return () => setUnauthorizedHandler(null);
@@ -126,10 +164,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // user would be logged out by their own password change.
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
+      const transitionEpoch = advanceAuthEpoch();
       const { user } = await changePasswordRequest(currentPassword, newPassword);
-      resetCacheTo(user);
+      if (transitionEpoch !== authEpochRef.current) return;
+      await resetCacheTo(user);
     },
-    [resetCacheTo],
+    [advanceAuthEpoch, resetCacheTo],
   );
 
   // Persist the "Get Started" dismissal server-side, then write the updated

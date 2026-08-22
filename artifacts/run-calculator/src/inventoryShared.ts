@@ -291,6 +291,7 @@ export async function postEventStream<T>(
   failMessage: string,
   extraHeaders?: Record<string, string>,
 ): Promise<T> {
+  const requestEpoch = authRequestEpoch;
   const res = await fetchWithDiagnostics(`/api${path}`, {
     method: "POST",
     headers: {
@@ -302,7 +303,7 @@ export async function postEventStream<T>(
     body: JSON.stringify(body),
   });
   if (!res.ok || !res.body) {
-    if (res.status === 401) onUnauthorized?.();
+    if (res.status === 401) onUnauthorized?.(requestEpoch);
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
@@ -366,16 +367,27 @@ export async function postEventStream<T>(
 // AuthContext registers a handler here so any such 401 routes the user back to
 // the login screen. Sign-in/up failures and the signed-out /me probe are not
 // session expiries, so those paths are excluded by the caller below.
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(fn: (() => void) | null): void {
+let onUnauthorized: ((requestEpoch: number) => void) | null = null;
+let authRequestEpoch = 0;
+
+// AuthProvider advances this whenever ownership of the browser session changes.
+// API requests capture the epoch at start so a late 401 from work that began
+// before sign-in cannot invalidate the newly-authoritative identity.
+export function setAuthRequestEpoch(epoch: number): void {
+  authRequestEpoch = epoch;
+}
+
+export function setUnauthorizedHandler(
+  fn: ((requestEpoch: number) => void) | null,
+): void {
   onUnauthorized = fn;
 }
 
 // For callers that use raw fetch (e.g. the sync/import paths in home.tsx) and
 // therefore bypass api()'s automatic 401 handling: lets them route a detected
 // session expiry through the same back-to-login flow instead of failing silently.
-export function reportUnauthorized(): void {
-  onUnauthorized?.();
+export function reportUnauthorized(requestEpoch = authRequestEpoch): void {
+  onUnauthorized?.(requestEpoch);
 }
 
 function isSessionProbePath(path: string): boolean {
@@ -383,6 +395,7 @@ function isSessionProbePath(path: string): boolean {
 }
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
+  const requestEpoch = authRequestEpoch;
   const res = await fetchWithDiagnostics(`/api${path}`, {
     ...opts,
     headers: {
@@ -392,7 +405,9 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    if (res.status === 401 && !isSessionProbePath(path)) onUnauthorized?.();
+    if (res.status === 401 && !isSessionProbePath(path)) {
+      onUnauthorized?.(requestEpoch);
+    }
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))
@@ -797,7 +812,8 @@ export type StaffMember = {
   // reset-and-reload flow as the manual "Reset sandbox" button.
   sandboxStale: boolean;
 };
-export const fetchMe = () => api<StaffMember>("/me");
+export const fetchMe = (signal?: AbortSignal) =>
+  api<StaffMember>("/me", signal ? { signal } : undefined);
 // Mark the first-login "Get Started" overview as seen. Returns the updated
 // StaffMember so the caller can refresh its cached identity.
 export const markOnboardingSeenRequest = () =>

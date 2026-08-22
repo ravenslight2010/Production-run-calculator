@@ -2,6 +2,7 @@ import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState,
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
+import { SingleFlightSyncQueue } from "../syncPushQueue";
 import GlanceOverlay from "../components/GlanceOverlay";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
@@ -6981,8 +6982,9 @@ export default function Home() {
   const syncPushGenerationRef = useRef(0);
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncPushInFlightRef = useRef(false);
-  const queuedSyncPayloadRef = useRef<{ payload: SyncPayload; sig?: string } | null>(null);
+  const syncPushQueueRef = useRef(
+    new SingleFlightSyncQueue<{ payload: SyncPayload; sig?: string }>(),
+  );
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
   const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
@@ -7965,8 +7967,7 @@ export default function Home() {
         clearTimeout(syncRetryTimerRef.current);
         syncRetryTimerRef.current = null;
       }
-      syncPushInFlightRef.current = false;
-      queuedSyncPayloadRef.current = null;
+      syncPushQueueRef.current.reset();
       es.close();
     };
   }, []);
@@ -7990,8 +7991,7 @@ export default function Home() {
         syncRetryTimerRef.current = null;
       }
       setSyncRetryWaiting(false);
-      syncPushInFlightRef.current = false;
-      queuedSyncPayloadRef.current = null;
+      syncPushQueueRef.current.reset();
       for (const controller of syncPushAbortControllersRef.current) controller.abort();
       syncPushAbortControllersRef.current.clear();
       if (pushTimerRef.current) {
@@ -8474,11 +8474,12 @@ export default function Home() {
     // A local edit, focus event, and online event can all arrive while a
     // request is retrying. Keep only the newest payload; never start a second
     // retry chain for the same tab.
-    if (syncPushInFlightRef.current && !internalRetry) {
-      queuedSyncPayloadRef.current = { payload, sig };
+    if (!syncPushQueueRef.current.begin({ payload, sig }, internalRetry)) {
+      // Retain the newest local intent for the manual Retry action if the
+      // active request later ends in an authorization/stale/exhausted failure.
+      latestSyncPayloadRef.current = payload;
       return;
     }
-    syncPushInFlightRef.current = true;
     latestSyncPayloadRef.current = payload;
     recordSyncEvent("push", retriesLeft < 3 ? "Retrying retained change" : "Sending local change to server", undefined, currentRunId);
     // Guard the retry path too: buildSyncPayload stamps the payload with the
@@ -8487,7 +8488,18 @@ export default function Home() {
     // /api/sync/today row — the same leak schedulePush guards. If the payload's
     // build-date is no longer today, drop it (the rollover will push the fresh
     // day instead).
-    if (payload.dayState.date && payload.dayState.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
+    if (payload.dayState.date && payload.dayState.date !== todayStr()) {
+      const queued = syncPushQueueRef.current.finish({ drainQueued: true });
+      setSyncRetryWaiting(false);
+      if (queued) {
+        doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current);
+      } else {
+        latestSyncPayloadRef.current = null;
+        pushAcknowledgedRef.current = true;
+        setSyncPendingCount(0);
+      }
+      return;
+    }
     // Key the live row by the CLIENT's local date (?today=). The server is UTC, so
     // without this a client behind UTC writes the live day into its local
     // "tomorrow" row — clobbering a scheduled day (and its case counts).
@@ -8508,7 +8520,7 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
         recordSyncEvent("failure", "Sync needs attention before this change can be shared", String(res.status), currentRunId);
-        syncPushInFlightRef.current = false;
+        syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
         return;
       }
@@ -8527,7 +8539,8 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
         recordSyncEvent("stale", "Server rejected the write after a reset; local change is retained", "reset-stale");
-        syncPushInFlightRef.current = false;
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        setSyncRetryWaiting(false);
         return;
       }
       setSyncPushFailed(false);
@@ -8540,10 +8553,8 @@ export default function Home() {
       if (payload.history !== undefined) {
         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
       }
-      syncPushInFlightRef.current = false;
       setSyncRetryWaiting(false);
-      const queued = queuedSyncPayloadRef.current;
-      queuedSyncPayloadRef.current = null;
+      const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       if (queued) doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current);
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
@@ -8555,8 +8566,7 @@ export default function Home() {
         syncRetryTimerRef.current = setTimeout(() => {
           syncRetryTimerRef.current = null;
           setSyncRetryWaiting(false);
-          const queued = queuedSyncPayloadRef.current;
-          queuedSyncPayloadRef.current = null;
+          const queued = syncPushQueueRef.current.takeQueued();
           doFetch(
             queued?.payload ?? payload,
             retriesLeft - 1,
@@ -8573,7 +8583,7 @@ export default function Home() {
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
         recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network");
-        syncPushInFlightRef.current = false;
+        syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
       }
     }).finally(() => {
@@ -8700,8 +8710,7 @@ export default function Home() {
       syncRetryTimerRef.current = null;
     }
     setSyncRetryWaiting(false);
-    syncPushInFlightRef.current = false;
-    queuedSyncPayloadRef.current = null;
+    syncPushQueueRef.current.reset();
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
   }
@@ -13281,6 +13290,7 @@ export default function Home() {
         onOpenChange={setShowManagerAttention}
         items={managerAttentionItems}
         onResolve={resolveManagerAttention}
+        authorized={canViewManagerAttention}
       />
 
       {/* ── Floor Mode overlay ──────────────────────────────────────────── */}

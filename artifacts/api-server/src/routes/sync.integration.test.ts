@@ -262,6 +262,40 @@ describe("/sync snapshot conditionals", () => {
     expect(body.data).toBeUndefined();
   });
 
+  it("persists a changed explicit-date PUT even when it carries the prior snapshot ID", async () => {
+    const scheduledDate = "2030-08-23";
+    const first = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+    const firstBody = await first.json() as { snapshotId: string };
+
+    const changed = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "c1",
+        snapshotId: firstBody.snapshotId,
+        payload: {
+          ...payload,
+          dayState: {
+            ...payload.dayState,
+            runs: [...payload.dayState.runs, { id: "scheduled-snapshot-run", brand: "Acme", flavor: "Cheese" }],
+          },
+          runValues: {
+            ...payload.runValues,
+            "scheduled-snapshot-run": { casesNeeded: 14 },
+          },
+          runValuesUpdatedAt: { ...payload.runValuesUpdatedAt, "scheduled-snapshot-run": 2 },
+        },
+      }),
+    });
+
+    const body = await changed.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> } };
+    expect(body.data?.runValues?.["scheduled-snapshot-run"]?.casesNeeded).toBe(14);
+  });
+
   it("returns the full changed snapshot and supports conditional GET", async () => {
     await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
       method: "PUT",
@@ -291,11 +325,15 @@ describe("/sync snapshot conditionals", () => {
           },
           runValuesUpdatedAt: { ...payload.runValuesUpdatedAt, "snapshot-run-2": 2 },
         },
+        snapshotId: snapshot,
       }),
     });
     const changedBody = await changed.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> }; snapshotId?: string };
     expect(changedBody.data?.runValues?.["snapshot-run-2"]?.casesNeeded).toBe(13);
     expect(changedBody.snapshotId).not.toBe(snapshot);
+    const persisted = await fetch(`${baseUrl}/api/sync/${DATE}`, { headers: authHeaders() });
+    const persistedBody = await persisted.json() as { runValues?: Record<string, { casesNeeded?: number }> };
+    expect(persistedBody.runValues?.["snapshot-run-2"]?.casesNeeded).toBe(13);
   });
 
   it("ignores malformed snapshot identities and keeps legacy full responses", async () => {
