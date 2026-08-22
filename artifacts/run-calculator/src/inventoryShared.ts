@@ -2,6 +2,7 @@ import type { FormValues } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { withSubstitutions } from "./substitutionState";
 import { WEB_BUILD_ID } from "./buildIdentity";
+import { fetchWithDiagnostics } from "./performanceDiagnostics";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -290,7 +291,7 @@ export async function postEventStream<T>(
   failMessage: string,
   extraHeaders?: Record<string, string>,
 ): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetchWithDiagnostics(`/api${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -382,7 +383,7 @@ function isSessionProbePath(path: string): boolean {
 }
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetchWithDiagnostics(`/api${path}`, {
     ...opts,
     headers: {
       "Content-Type": "application/json",

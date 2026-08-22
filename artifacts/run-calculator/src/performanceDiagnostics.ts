@@ -10,6 +10,15 @@ export type PerformanceDiagnostic = {
 
 const entries: PerformanceDiagnostic[] = [];
 
+function safePath(url: string): string {
+  try {
+    const origin = typeof window === "undefined" ? "http://calculator.local" : window.location.origin;
+    return new URL(url, origin).pathname;
+  } catch {
+    return url.split("?")[0]?.split("#")[0] || "/unknown";
+  }
+}
+
 function remember(entry: PerformanceDiagnostic): void {
   entries.push(entry);
   if (entries.length > MAX_ENTRIES) entries.splice(0, entries.length - MAX_ENTRIES);
@@ -58,6 +67,36 @@ export function getPerformanceDiagnostics(): readonly PerformanceDiagnostic[] {
 
 export function clearPerformanceDiagnostics(): void {
   entries.length = 0;
+}
+
+/**
+ * Fetch an API request while recording only bounded, privacy-safe diagnostics.
+ * The URL is reduced to its pathname and neither request nor response data is
+ * logged or retained. This is the non-timeout counterpart to fetchWithTimeout.
+ */
+export async function fetchWithDiagnostics(
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const startedAt = typeof performance === "undefined" ? null : performance.now();
+  const path = safePath(url);
+  try {
+    const response = await fetch(url, init);
+    if (startedAt !== null && typeof performance !== "undefined") {
+      recordPerformance(`api:${path}:${response.status}`, performance.now() - startedAt, "api");
+    }
+    return response;
+  } catch (err) {
+    if (startedAt !== null && typeof performance !== "undefined") {
+      const name = (err as { name?: unknown } | null)?.name;
+      recordPerformance(
+        `api-failure:${path}:${name === "TimeoutError" || name === "AbortError" ? "timeout" : "network"}`,
+        performance.now() - startedAt,
+        "api",
+      );
+    }
+    throw err;
+  }
 }
 
 export const PERFORMANCE_BUDGETS = {

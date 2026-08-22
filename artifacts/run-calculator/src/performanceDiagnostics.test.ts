@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearPerformanceDiagnostics,
+  fetchWithDiagnostics,
   getPerformanceDiagnostics,
   PERFORMANCE_BUDGETS,
   recordPerformance,
@@ -36,5 +37,31 @@ describe("calculator performance diagnostics", () => {
     recordPerformance("bad", Number.NaN, "load");
     recordPerformance("negative", -1, "navigation");
     expect(getPerformanceDiagnostics()).toEqual([]);
+  });
+
+  it("records API status without retaining query strings or payloads", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+
+    await fetchWithDiagnostics("/api/inventory/items?customer=private-data", {
+      method: "POST",
+      body: JSON.stringify({ customer: "private-data" }),
+    });
+
+    expect(getPerformanceDiagnostics()).toEqual([
+      expect.objectContaining({ name: "api:/api/inventory/items:200", kind: "api" }),
+    ]);
+    expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
+  });
+
+  it("records a sanitized network failure category and rethrows the original error", async () => {
+    const failure = new TypeError("network failure");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
+
+    await expect(fetchWithDiagnostics("/api/items?secret=private-data")).rejects.toBe(failure);
+
+    expect(getPerformanceDiagnostics()).toEqual([
+      expect.objectContaining({ name: "api-failure:/api/items:network", kind: "api" }),
+    ]);
+    expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
   });
 });

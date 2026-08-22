@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WEB_BUILD_ID } from "./buildIdentity";
 import { reportIncident } from "./inventoryShared";
+import { clearPerformanceDiagnostics, getPerformanceDiagnostics } from "./performanceDiagnostics";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearPerformanceDiagnostics();
 });
 
 describe("incident build identity", () => {
@@ -35,5 +37,8 @@ describe("incident build identity", () => {
       appVersion: WEB_BUILD_ID,
       source: "user_report",
     });
+    expect(getPerformanceDiagnostics()).toEqual([
+      expect.objectContaining({ name: "api:/api/incidents:200", kind: "api" }),
+    ]);
   });
 });

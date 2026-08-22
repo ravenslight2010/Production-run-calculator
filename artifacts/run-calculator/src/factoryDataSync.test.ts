@@ -7,6 +7,7 @@ import {
   resetFactoryDataSyncForTests,
 } from "./factoryDataSync";
 import { SHIFT_START_TIME_KEY } from "./types";
+import { clearPerformanceDiagnostics, getPerformanceDiagnostics } from "./performanceDiagnostics";
 
 const QUEUE_KEY = "run-calc-fkv-queue-v1";
 
@@ -22,6 +23,7 @@ describe("factory data durable write queue", () => {
   beforeEach(() => {
     localStorage.clear();
     resetFactoryDataSyncForTests();
+    clearPerformanceDiagnostics();
   });
 
   afterEach(() => {
@@ -54,6 +56,22 @@ describe("factory data durable write queue", () => {
       value: "08:15",
     }));
     expect(localStorage.getItem(QUEUE_KEY)).toBe("[]");
+    expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
+      "api:/api/factory-data:503",
+      "api:/api/factory-data:200",
+    ]);
+  });
+
+  it("records a sanitized failure when the factory-data read cannot reach the server", async () => {
+    const failure = new TypeError("network failure");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw failure; }));
+
+    const { fetchFactoryData } = await import("./factoryDataSync");
+    await expect(fetchFactoryData()).rejects.toBe(failure);
+
+    expect(getPerformanceDiagnostics().map((entry) => entry.name)).toEqual([
+      "api-failure:/api/factory-data:network",
+    ]);
   });
 
   it("coalesces a newer edit behind an in-flight request without dropping it", async () => {

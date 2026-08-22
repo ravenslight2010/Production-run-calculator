@@ -20,6 +20,7 @@
 // keeps working fully offline.
 
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithDiagnostics } from "./performanceDiagnostics";
 import {
   BRANDS_KEY,
   BRAND_FLAVORS_KEY,
@@ -267,7 +268,7 @@ export type FactoryDataMap = Record<string, FactoryDataEntry>;
 
 /** GET /api/factory-data — returns the full keyed map. */
 export async function fetchFactoryData(): Promise<FactoryDataMap> {
-  const res = await fetch("/api/factory-data", {
+  const res = await fetchWithDiagnostics("/api/factory-data", {
     headers: { "x-client-id": inventoryClientId() },
   });
   if (!res.ok) throw new Error(`fetchFactoryData failed (${res.status})`);
@@ -294,7 +295,7 @@ export function flushFactoryQueue(): Promise<void> {
       while (true) {
         const op = readQueue()[0];
         if (!op) return;
-        const res = await fetch("/api/factory-data", {
+        const res = await fetchWithDiagnostics("/api/factory-data", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -595,7 +596,7 @@ export async function runTemplatesMigration(): Promise<void> {
     if (localStorage.getItem(TEMPLATES_MIGRATION_MARKER)) return;
 
     // Check if the server already has templates.
-    const res = await fetch("/api/run-templates");
+    const res = await fetchWithDiagnostics("/api/run-templates");
     if (!res.ok) return; // Don't mark; retry on next load.
 
     const body = (await res.json()) as { templates?: unknown[] };
@@ -623,7 +624,7 @@ export async function runTemplatesMigration(): Promise<void> {
     }
 
     if (localTemplates.length > 0) {
-      const pushRes = await fetch("/api/run-templates", {
+      const pushRes = await fetchWithDiagnostics("/api/run-templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templates: localTemplates }),
