@@ -3239,7 +3239,7 @@ export function CheesePickCard({
   // its components drive the shares (explicit sharePct first, then ozPerPizza,
   // then lbs proportions — @workspace/cheese-recipes)
 ;
- otherwise fall back to
+  // otherwise fall back to
   // the hydrated rows' lbs proportions (@workspace/inventory-math).
   const namedPool = (poolComponents ?? []).filter(c => c.ingredient.trim());
   const perPizzaOz =
@@ -4619,7 +4619,7 @@ function ReadOnlyRecipeCard(
   // Batch-size scaler: shows the recipe weights at a different batch size.
   // "4" is the base recipe (1×)
 ;
- other sizes scale the displayed weights.
+  // other sizes scale the displayed weights.
   const SCALE_OPTIONS: 
 {
  label: string
@@ -6180,7 +6180,7 @@ export default function Home() {
 
         // Best-effort
 ;
- if the re-copy fails we leave the stale data in place and
+        // if the re-copy fails we leave the stale data in place and
         // let the NEXT app load (or a manual reset) try again — never mid-session.
       
 }
@@ -6460,7 +6460,7 @@ export default function Home() {
   // Applicator-type pickers pin the two generic types (Cheese, Mix) to the top
   // so the most-used picks never require scrolling
 ;
- the rest stay alphabetical.
+  // the rest stay alphabetical.
   // Display-only reorder — the stored list stays sorted alphabetically.
   const ingredientTypeOptions = useMemo(() => 
 {
@@ -6736,7 +6736,7 @@ export default function Home() {
   // The 6 local option lists above stay the immediate, offline-first source of
   // truth for these UI handlers (nothing above changed)
 ;
- these best-effort
+  // these best-effort
   // calls additionally keep the server catalog in step so it stays populated
   // and authoritative — every recipe row resolves its display name through it
   // (see the hydration effect above), so a rename/merge/delete here is what
@@ -7177,7 +7177,7 @@ export default function Home() {
 
     // Packaging settings are server-only (no localStorage copy)
 ;
- keep whatever
+    // keep whatever
     // the startup fetch already put into module/React state.
     const _pkg = getPackagingSettings()
 ;
@@ -7603,7 +7603,7 @@ export default function Home() {
   // against the current run + the day's sequence. "flexible" rules warn inline
   // (alongside the allergen advisory)
 ;
- "strict" rules block starting the run.
+  // "strict" rules block starting the run.
   const 
 {
  rules: productionRules 
@@ -7692,7 +7692,7 @@ export default function Home() {
   // when returning to a run. A strict violation with a checklist blocks Start
   // until every step is checked
 ;
- a strict violation without one blocks outright.
+  // a strict violation without one blocks outright.
   const [checklistAcks, setChecklistAcks] = useState<Record<string, boolean>>(
 {
 }
@@ -7831,7 +7831,7 @@ export default function Home() {
   // to all signed-in users for reads). These used to live in this device's local
   // storage, so they never followed the facility
 ;
- the server is now the source
+  // the server is now the source
   // of truth, with localStorage kept only as an offline fallback / migration
   // seed.
   const 
@@ -8426,7 +8426,7 @@ export default function Home() {
   // several variants and none auto-matched (weight left blank). The operator
   // picks one
 ;
- blank-fill only, same invariant as the auto path.
+  // blank-fill only, same invariant as the auto path.
   const [doughVariantPick, setDoughVariantPick] = useState<
 {
  recipeName: string
@@ -8696,7 +8696,7 @@ export default function Home() {
   // all signed-in users like the other learned stores). Mixes and cheese
   // recipes carry their batch weight from their recipe rows
 ;
- plain ingredients
+  // plain ingredients
   // only have the typed "Batch Weight (lbs)" field — once someone enters it,
   // the weight follows the ingredient: picking that ingredient again (on any
   // device) auto-fills the remembered weight.
@@ -8852,7 +8852,7 @@ export default function Home() {
 
         // Only brand__flavor blobs
 ;
- bookkeeping keys (e.g. "-cleanup-v1") lack "__".
+        // bookkeeping keys (e.g. "-cleanup-v1") lack "__".
         if (suffix.includes("__") && !seenSuffixes.has(suffix)) 
 {
 
@@ -8952,7 +8952,7 @@ export default function Home() {
 
           // Profile writes are manager-only
 ;
- non-managers still get the
+          // non-managers still get the
           // in-memory heal (open-form update below) but never persist it.
           return canManageProfiles && saveProfile(
             brand,
@@ -9267,7 +9267,7 @@ export default function Home() {
 
         // Profile writes are manager-only
 ;
- non-managers still get the
+        // non-managers still get the
         // in-memory heal (open-form update below) but never persist it.
         const saved = canManageProfiles && saveProfile(brand, flavor, updated)
 ;
@@ -9352,7 +9352,7 @@ export default function Home() {
 
   // Manager-set per-die line-setting overrides (server master-data)
 ;
- the run
+  // the run
   // form's die pre-fill resolves through these first, then the built-in map.
   const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
 
@@ -10055,7 +10055,7 @@ export default function Home() {
   // are pushed into the server Mixes pool so the run form's Mix card can
   // hydrate them. Manager-only (server enforces manage-inventory)
 ;
- the queue
+  // the queue
   // survives failures and retries on the next mount/session.
   const pendingMixPushRef = useRef(false)
 ;
@@ -10622,7 +10622,7 @@ dieType:string
   // Checked suggestion groups for batch apply, keyed by target+sources (stable
   // across list re-renders
 ;
- stale keys from removed suggestions are harmless
+  // stale keys from removed suggestions are harmless
   // because counts intersect against the live list).
   const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set())
 ;
@@ -11282,7 +11282,7 @@ dieType:string
   // via the shared near-duplicate matcher (ambiguity-guarded — no single safe
   // match ⇒ no suggestion). Suggestions only PRE-FILL the merge pair
 ;
- the user
+  // the user
   // confirms each one through the normal merge flow, never auto-applied.
   const staleCleanupSuggestions = useMemo(() => 
 {
@@ -11312,10 +11312,10 @@ dieType:string
   // tabs. "ingredients" intentionally keeps scanning the cross-category
   // mergeFullUniverse (unchanged prior behavior)
 ;
- every recipe-name tab scans
+  // every recipe-name tab scans
   // just its own recipe-name list (mergeUniverse, already scoped)
 ;
- Brand/Flavor
+  // Brand/Flavor
   // scans brands or one brand's flavors depending on the active sub-mode.
   const mergeSuggestScope = useMemo((): {
     category: MergeSuggestCategory;
@@ -11761,7 +11761,7 @@ dieType:string
   // felt broken ("where did the import buttons go?"). Now the scan runs without
   // navigating
 ;
- if duplicates are found, a toast offers a "Review" button that
+  // if duplicates are found, a toast offers a "Review" button that
   // jumps to the Merge screen with the results already loaded. The effect
   // re-runs only when the request counter is bumped, so by then the merge
   // universe reflects the new lists.
@@ -12057,7 +12057,7 @@ target, source
 
       // Non-fatal: the suggestion is already hidden for this session
 ;
- it may
+      // it may
       // reappear on a later scan if the deny didn't persist.
     }
   }
@@ -12238,7 +12238,7 @@ target, source
   // the target. Mirrors renameBrand's surface coverage (master lists + open
   // runs)
 ;
- brands carry no inventory, so nothing is folded there. State writes
+  // brands carry no inventory, so nothing is folded there. State writes
   // are synchronous to localStorage so the caller's immediate sync push ships the
   // merged data.
   function mergeBrands(sources: string[], target: string) {
@@ -12585,7 +12585,7 @@ target, source
 
         // Non-fatal: the merge itself already succeeded
 ;
- learning is additive.
+        // learning is additive.
       
 }
 
@@ -12699,7 +12699,7 @@ n
             // slot was just re-pointed to the target by applyRecipeNameMerge.
             // The name fields were already rewritten
 ;
- without this the profiles
+            // without this the profiles
             // keep the old recipe's ingredient rows under the new name.
             if (targetRow) {
               const tRows = normalizeRecipeRowsForCompare(targetRow.components);
@@ -12896,7 +12896,7 @@ n
 
         // Non-fatal: the local merge already succeeded
 ;
- server pool cleanup is
+        // server pool cleanup is
         // best-effort (the delete endpoints are manager-gated).
       
 }
@@ -13565,7 +13565,7 @@ dieType:string
   // future date. Web schedule pool is future days only — the live "today" runs are
   // never a move source or target (mobile allows today
 ;
- see schedule-move memory).
+  // see schedule-move memory).
   // Target is written before the source is trimmed/deleted, so a partial network
   // failure can only leave a duplicate (visible, user-fixable) — never lose runs.
   async function performScheduleMove(fromDate: string, sel: "all" | 
@@ -13818,7 +13818,7 @@ ingredient: string
   // The first server snapshot must switch the run list and bind the live form as
   // one handoff. The fence rises immediately before that identity change
 ;
- local
+  // local
   // offline edits remain available before a connection establishes a baseline.
   const formHandoffRef = useRef(false)
 ;
@@ -13933,7 +13933,7 @@ ingredient: string
   // Poll the server on a cadence for at most one timely, dismissible nudge.
   // Manager-only
 ;
- runs even on an idle day so an expiring-stock heads-up can
+  // runs even on an idle day so an expiring-stock heads-up can
   // surface before any run begins (the server gates behind-plan/break nudges to
   // an active day and skips the AI call when idle with no at-risk stock). The
   // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
@@ -14220,7 +14220,7 @@ ingredient: string
             // once from the schedule. A peer without the schedule carries
             // casesNeeded=0
 ;
- if they make any real edit their newer stamp wins
+            // if they make any real edit their newer stamp wins
             // the LWW check above, but we must NOT let their 0 wipe our target.
             const remoteVals = vals as FormValues
 ;
@@ -14410,7 +14410,7 @@ ingredient: string
                 // can't clobber it back to unstarted. Absent/equal stamps keep the
                 // old remote-wins behavior
 ;
- a kept-local run triggers the
+                // a kept-local run triggers the
                 // rejectedStale re-push below so peers converge on ours.
                 // Use overlayRunMetaStamps so the LWW comparison sees the
                 // STORED (localStorage) metaUpdatedAt stamps, not the React
@@ -14510,7 +14510,7 @@ ingredient: string
           // on the next SSE receive or reconnect. Find the current run in the
           // merged list by ID and use its new position
 ;
- fall back to clamping
+          // fall back to clamping
           // only when the run was deleted (tombstoned) or filtered out.
           const foundIdx = currentLocalId
             ? newRuns.findIndex(r => r.id === currentLocalId)
@@ -14559,7 +14559,7 @@ ingredient: string
           // A legacy/omitted remote payload (no prepPhase key) must still clear the prior
           // day's prepStartedAt
 ;
- falling back to prev would resurrect it into the new shift.
+          // falling back to prev would resurrect it into the new shift.
           const remotePrepPhase = (payload.dayState as Record<string, unknown>).prepPhase
 ;
 
@@ -14590,7 +14590,7 @@ ingredient: string
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s)
 ;
- a fresh object every time reset open-menu scroll.
+          // a fresh object every time reset open-menu scroll.
           if (JSON.stringify(newDs) === JSON.stringify(prev)) 
 {
 
@@ -15157,7 +15157,7 @@ ingredient: string
   // local copies of profiles deleted remotely. The poll keeps long-lived tabs
   // converged
 ;
- queued pushes retry on each pass, so offline edits are safe.
+  // queued pushes retry on each pass, so offline edits are safe.
   // Best-effort — a fetch failure changes nothing locally.
   useEffect(() => 
 {
@@ -15256,7 +15256,7 @@ ingredient: string
       // EventSource can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me
 ;
- if the session is gone we land on login.
+      // if the session is gone we land on login.
       revalidate()
 ;
 
@@ -15508,7 +15508,7 @@ ingredient: string
             // Factory data is independent of the live row. A failed factory
             // pull leaves the local cache and durable queue intact
 ;
- the next
+            // the next
             // foreground/reconnect attempt will retry it.
           
 }
@@ -16131,7 +16131,7 @@ ingredient: string
     // Run once on mount too. loadDayState() only resets the in-memory view when
     // the stored date is stale
 ;
- it does NOT archive, stamp resetAt, push the new
+    // it does NOT archive, stamp resetAt, push the new
     // boundary, or sign out. Without this immediate call, the rollover (and its
     // signOut) only fires up to 60s later via the interval — by which
     // time another device's pushed resetAt may have already 401-bounced us to
@@ -16374,7 +16374,7 @@ ok:true, stale:true
       // vanished" loss). Never push an all-default current-run form over a
       // populated stored value
 ;
- fall back to the durable localStorage copy.
+      // fall back to the durable localStorage copy.
       // Mirrors the autosave [v] effect's guard, applied at the push boundary
       // so it covers EVERY push path, not just direct edits.
       const value =
@@ -19784,7 +19784,7 @@ target.name
   // Persist skid/case progress for a SPECIFIC (non-active) draining run. The
   // active run writes through the live form + autosave effect
 ;
- a just-ended run
+  // a just-ended run
   // still draining its freezer is written here through the EXISTING per-run
   // saveRunValues path (no new write surface), pushed to sync, and a bump forces
   // an immediate re-render of the draining panel. Manual logging only — we never
@@ -20473,7 +20473,7 @@ target.name
       // Tombstone profiles the manager marked as removed from the workbook.
       // Done after commit so the new profiles are written first
 ;
- deletion is
+      // deletion is
       // local-only (same tombstone path as manual brand/flavor deletion in the
       // UI). Each deleteProfileEntry call is synchronous and best-effort.
       if (profilesToRemove.length > 0) 
@@ -20631,7 +20631,7 @@ target.name
       // computed or pushed anymore (stored tags on existing pool rows are inert).
       // Best-effort, manager-only server-side
 ;
- never blocks the committed import.
+      // never blocks the committed import.
       if (importedRecipes && canManageInventory) 
 {
 
@@ -21103,7 +21103,7 @@ target.name
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms
 ;
- re-importing updates existing mixes by id.
+  // re-importing updates existing mixes by id.
   async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) 
 {
 
@@ -22270,7 +22270,7 @@ target.name
   // Accepted runs get the new target through the SAME write paths as any
   // manual edit (form for the current run, saveRunValues otherwise)
 ;
- runs
+  // runs
   // marked Keep are untouched.
   function applyCaseUpdateChoices() 
 {
@@ -23012,7 +23012,7 @@ target.name
   // etc.) are NOT listed as deps because all the state they close over IS
   // already listed
 ;
- when those state values are unchanged the closures
+  // when those state values are unchanged the closures
   // behave identically to fresh ones.  setState dispatches and refs are
   // stable by React contract and also omitted.
   // eslint-disable-next-line react-hooks/exhaustive-deps
