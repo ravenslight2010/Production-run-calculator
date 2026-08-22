@@ -226,6 +226,28 @@ describe("inventory auto-deduct against a real database", () => {
     expect(claims.filter((c) => c.runId === "run-dupe-real")).toHaveLength(1);
   });
 
+  it("allows only one concurrent finalization of the same run", async () => {
+    const itemId = await makeItem("ingredient:Concurrent Sauce:lbs");
+    await addLot(itemId, 10);
+    const lines = [{ itemKey: "ingredient:Concurrent Sauce:lbs", qty: 4 }];
+
+    // These calls use separate transaction connections, like two devices
+    // completing/refreshing the same run at the same time.
+    const results = await Promise.all([
+      consumeRun("run-concurrent-same", lines),
+      consumeRun("run-concurrent-same", lines),
+    ]);
+
+    expect(results.sort((a, b) => Number(b.applied) - Number(a.applied))).toEqual([
+      { applied: true, consumed: 1 },
+      { applied: false, consumed: 0 },
+    ]);
+    expect(await onHand(itemId)).toBe(6);
+    expect(await consumeLedgerCount(itemId)).toBe(1);
+    const claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.filter((claim) => claim.runId === "run-concurrent-same")).toHaveLength(1);
+  });
+
   it("claims the marker even for a zero-consume run, blocking a later re-consume", async () => {
     // No matching item exists yet, so nothing is drawn down, but the run is
     // still claimed.
@@ -1129,6 +1151,39 @@ describe("POST /api/inventory/consume — server-side authorization of client-su
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ applied: true, consumed: 1 });
     expect(await onHand(itemId)).toBe(98);
+  });
+
+  it("is safe when two devices retry the same finalization concurrently", async () => {
+    const itemId = await makeItem("ingredient:Dough:batches");
+    await addLot(itemId, 100);
+    await seedDaySyncRun("run-two-devices", MINIMAL_RUN_VALS);
+
+    const request = () =>
+      fetch(`${baseUrl}/api/inventory/consume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: "run-two-devices",
+          // The server derives the authoritative amount from day-state; this
+          // mirrors an old tab and a refreshed tab sending their own payloads.
+          lines: [{ itemKey: "ingredient:Dough:batches", qty: 2 }],
+        }),
+      });
+
+    const responses = await Promise.all([request(), request()]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const results = (await Promise.all(responses.map((response) => response.json()))) as Array<{
+      applied: boolean;
+      consumed: number;
+    }>;
+    expect(results.sort((a, b) => Number(b.applied) - Number(a.applied))).toEqual([
+      { applied: true, consumed: 1 },
+      { applied: false, consumed: 0 },
+    ]);
+    expect(await onHand(itemId)).toBe(98);
+    expect(await consumeLedgerCount(itemId)).toBe(1);
+    const claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.filter((claim) => claim.runId === "run-two-devices")).toHaveLength(1);
   });
 });
 
