@@ -262,6 +262,67 @@ describe("persisted push queue", () => {
     expect(readQueue()).toEqual([]);
   });
 
+  it("strict import acknowledgement waits for a forced follow-up behind an in-flight save", async () => {
+    setLocalBlobs(KEY, { doughRecipeName: "V1" });
+
+    const releases: Array<() => void> = [];
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        await new Promise<void>((resolve) => releases.push(resolve));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items:
+              method === "POST" && init?.body
+                ? (JSON.parse(String(init.body)) as { items: ServerItem[] }).items
+                : [],
+          }),
+        };
+      },
+    );
+
+    markProfileEdited(KEY);
+    await settle();
+    expect(postCalls()).toHaveLength(1);
+
+    setLocalBlobs(KEY, { doughRecipeName: "Imported" });
+    markProfileForceEdited(KEY);
+    const strict = flushProfileQueueStrict();
+
+    releases.shift()?.();
+    await settle();
+    // The first flight has settled, but the strict boundary must still await
+    // the coalesced forced flight before resolving.
+    expect(postCalls()).toHaveLength(2);
+    const followUp = postCalls()[1].body as { items: Array<ServerItem & { force?: boolean }> };
+    expect(followUp.items[0].force).toBe(true);
+    expect(followUp.items[0].values).toEqual({ doughRecipeName: "Imported" });
+    releases.shift()?.();
+
+    await strict;
+    expect(readQueue()).toEqual([]);
+  });
+
+  it("strict import acknowledgement drains multiple forced profiles", async () => {
+    const secondKey = canonicalProfileKey("Acme", "Cheese");
+    setLocalBlobs(KEY, { doughRecipeName: "Imported 1" });
+    setLocalBlobs(secondKey, { doughRecipeName: "Imported 2" });
+
+    markProfileForceEdited(KEY);
+    markProfileForceEdited(secondKey);
+    await flushProfileQueueStrict();
+    await settle();
+
+    const sentKeys = new Set(
+      postCalls().flatMap((call) => (call.body as { items: ServerItem[] }).items.map((item) => item.key)),
+    );
+    expect(sentKeys).toEqual(new Set([KEY, secondKey]));
+    expect(readQueue()).toEqual([]);
+  });
+
   it("adopts the server's advanced stamp after a forced save so the next edit still wins", async () => {
     setLocalBlobs(KEY, { doughRecipeName: "Imported" });
 

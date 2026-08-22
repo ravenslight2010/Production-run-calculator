@@ -369,11 +369,16 @@ export function flushProfileQueue(): Promise<void> {
  * (or a later background flush) can finish the exact same forced write.
  */
 export async function flushProfileQueueStrict(): Promise<void> {
-  await flushProfileQueue();
-  if (lastFlushError) throw lastFlushError;
-  const pending = readQueue();
-  if (pending.length > 0) {
-    throw new Error("Profile changes are still waiting to be saved. Check your connection and retry.");
+  // A background kick can enqueue a follow-up flush while the flight we just
+  // awaited is finishing. Awaiting only that first promise can therefore
+  // observe the queue in the small window between its completion and the
+  // follow-up kick, making a healthy import report a misleading pending-save
+  // error. Keep draining until the coalesced work has settled.
+  for (;;) {
+    await flushProfileQueue();
+    if (lastFlushError) throw lastFlushError;
+    if (flushInFlight || flushAgain) continue;
+    if (readQueue().length === 0) return;
   }
 }
 
