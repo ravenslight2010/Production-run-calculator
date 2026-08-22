@@ -26,7 +26,19 @@ type Candidate = {
   sourceType: string;
   sourceId: string;
   sourcePath: string;
+  attentionState?: "blocker" | "review" | "stale" | "info";
+  nextAction?: string;
 };
+
+function attentionStateFor(severity: string): Candidate["attentionState"] {
+  if (severity === "urgent" || severity === "error") return "blocker";
+  if (severity === "info") return "info";
+  return "review";
+}
+
+function nextActionFor(state: Candidate["attentionState"]): string {
+  return state === "blocker" ? "Act now" : state === "review" ? "Review and decide" : state === "stale" ? "Recover or close" : "Monitor";
+}
 
 function clean(value: unknown, max: number): string {
   return String(value ?? "").trim().slice(0, max);
@@ -63,6 +75,8 @@ async function candidates(): Promise<Candidate[]> {
       ? (item.context as Record<string, unknown>).description : "", 500) || item.screen,
     sourceType: "incident", sourceId: item.id,
     sourcePath: `#incidents/${encodeURIComponent(item.id)}`,
+    attentionState: attentionStateFor(item.priority === "urgent" ? "urgent" : item.priority === "high" ? "error" : "warning"),
+    nextAction: nextActionFor(attentionStateFor(item.priority === "urgent" ? "urgent" : item.priority === "high" ? "error" : "warning")),
   });
   for (const item of imports) out.push({
     dedupKey: `import:${item.id}`, category: "import",
@@ -70,11 +84,15 @@ async function candidates(): Promise<Candidate[]> {
     title: `${item.importType === "spec" ? "Spec" : "Premix"} import needs review`,
     description: `${item.sourceLabel}${item.customerScope ? ` · ${item.customerScope}` : ""}`,
     sourceType: "import", sourceId: String(item.id), sourcePath: "#import-history",
+    attentionState: attentionStateFor(item.status === "failed" ? "error" : "warning"),
+    nextAction: item.status === "failed" ? "Retry or correct import" : "Review import details",
   });
   for (const item of health.findings.filter((finding) => finding.severity !== "info")) out.push({
     dedupKey: `data-health:${item.id}`, category: "data-health", severity: item.severity,
     title: "Data health finding", description: item.message,
     sourceType: "data-health", sourceId: item.id, sourcePath: "#data-health",
+    attentionState: attentionStateFor(item.severity),
+    nextAction: "Review finding",
   });
   for (const item of conflicts) out.push({
     dedupKey: `sync:${item.id}`, category: "sync",
@@ -82,6 +100,8 @@ async function candidates(): Promise<Candidate[]> {
     title: "Sync conflict needs review",
     description: `${item.conflictCount} conflicting field${item.conflictCount === 1 ? "" : "s"} on ${item.date}`,
     sourceType: "sync", sourceId: String(item.id), sourcePath: "#sync-diagnostics",
+    attentionState: attentionStateFor(item.conflictCount > 5 ? "error" : "warning"),
+    nextAction: "Review and reconcile",
   });
   for (const item of rules.filter((rule) => (rule.checklist?.length ?? 0) > 0)) out.push({
     dedupKey: `production-rule:${item.id}`, category: "production-rule", severity: "warning",

@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useState } from "react";
 import type { SyncDiagnostic } from "../syncDiagnostics";
+import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, type AttentionState } from "../attentionStates";
 
 export type SyncStatus = "connected" | "syncing" | "retrying" | "synchronized" | "delayed" | "failed";
 
@@ -37,6 +38,7 @@ export default function SyncStatusPopover(props: Props) {
   const delayed = props.status === "delayed";
   const Icon = failed ? AlertTriangle : !props.connected ? WifiOff : props.status === "syncing" || props.status === "retrying" ? Loader2 : props.status === "synchronized" ? CheckCircle2 : delayed ? Clock3 : Wifi;
   const color = failed ? "text-red-400" : delayed || props.status === "retrying" ? "text-amber-400" : props.status === "synchronized" ? "text-emerald-400" : "text-muted-foreground";
+  const attentionState: AttentionState = failed ? "blocker" : delayed || props.status === "retrying" || props.pendingCount > 0 ? "review" : "info";
 
   return (
     <div className="relative">
@@ -52,7 +54,7 @@ export default function SyncStatusPopover(props: Props) {
         <div className="absolute right-0 top-9 z-50 w-80 rounded-md border border-border bg-background p-3 text-xs shadow-xl">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className={`font-semibold ${color}`}>{labels[props.status]}</p>
+               <div className="flex items-center gap-2"><p className={`font-semibold ${color}`}>{labels[props.status]}</p><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[attentionState]}`}>{ATTENTION_STATE_LABEL[attentionState]}</span></div>
               <p className="mt-1 text-muted-foreground">
                 {failed || delayed || props.status === "retrying"
                   ? "Your local change is retained on this device. It is not shared until the server acknowledges it."
@@ -61,7 +63,8 @@ export default function SyncStatusPopover(props: Props) {
             </div>
             <span className={`h-2 w-2 rounded-full ${failed ? "bg-red-500" : delayed || props.status === "retrying" ? "bg-amber-400" : "bg-emerald-500"}`} />
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 rounded bg-muted/30 p-2">
+           <div className="mt-3 grid grid-cols-2 gap-2 rounded bg-muted/30 p-2">
+             <span>Next action</span><strong className="text-right">{failed ? "Retry latest retained change" : attentionState === "review" ? "Retry and confirm acknowledgment" : "Monitor"}</strong>
             <span>Production date</span><strong className="text-right">{props.date}</strong>
             <span>Last acknowledgment</span><strong className="text-right">{time(props.lastAcknowledgedAt)}</strong>
             <span>Pending writes</span><strong className="text-right">{props.pendingCount}</strong>

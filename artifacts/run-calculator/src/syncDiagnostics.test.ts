@@ -51,6 +51,8 @@ describe("sync diagnostics", () => {
     expect(report.responseCategories).toEqual({ network: 1, "200": 1 });
     expect(report.affectedRunIds).toEqual(["run-a"]);
     expect(report.events).toHaveLength(2);
+    expect(report.attentionState).toBe("blocker");
+    expect(report.nextAction).toBe("Retry latest retained change");
   });
 
   it("records complete and partial wire measurements and summarizes them", () => {

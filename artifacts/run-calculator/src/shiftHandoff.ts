@@ -1,4 +1,5 @@
 import { inventoryClientId } from "./inventoryShared";
+import type { AttentionState } from "./attentionStates";
 
 export type HandoffSeverity = "urgent" | "high" | "medium" | "low" | "info";
 export type HandoffStatus = "open" | "reviewed" | "resolved" | "historical" | "current";
@@ -16,6 +17,8 @@ export type HandoffItem = {
   occurredAt: string | null;
   sourcePath: string;
   historical: boolean;
+  attentionState?: AttentionState;
+  nextAction?: string;
 };
 
 export type ShiftHandoffDigest = {

@@ -52,6 +52,8 @@ export type SyncDiagnosticReport = {
   lastAcknowledgedAt: string | null;
   pendingCount: number;
   failedCount: number;
+  attentionState: AttentionState;
+  nextAction: string;
   responseCategories: Record<string, number>;
   affectedRunIds: string[];
   measurements: SyncDiagnosticMeasurement[];
@@ -179,6 +181,16 @@ export function buildSyncDiagnosticReport(input: {
     lastAcknowledgedAt: input.lastAcknowledgedAt ? new Date(input.lastAcknowledgedAt).toISOString() : null,
     pendingCount: input.pendingCount,
     failedCount: input.failedCount,
+    attentionState: input.failedCount > 0
+      ? "blocker"
+      : input.pendingCount > 0 || input.status === "delayed" || input.status === "retrying"
+        ? "review"
+        : input.status === "failed" ? attentionStateForSeverity("error") : "info",
+    nextAction: input.failedCount > 0
+      ? "Retry latest retained change"
+      : input.pendingCount > 0 || input.status === "delayed" || input.status === "retrying"
+        ? "Retry and confirm acknowledgment"
+        : nextActionForAttention("info", "current"),
     responseCategories,
     affectedRunIds: [...new Set(events.map((event) => event.runId).filter((runId): runId is string => Boolean(runId)))],
     measurements,

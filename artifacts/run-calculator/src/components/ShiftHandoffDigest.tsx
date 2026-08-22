@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMe } from "../useRole";
 import { fetchShiftHandoff, type HandoffItem, type HandoffSeverity, type ShiftHandoffDigest } from "../shiftHandoff";
+import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, attentionStateForSeverity, nextActionForAttention, type AttentionState } from "../attentionStates";
 
 const severityClass: Record<HandoffSeverity, string> = {
   urgent: "bg-red-500/15 text-red-400",
@@ -28,7 +29,7 @@ function handoffText(digest: ShiftHandoffDigest): string {
     lines.push(`${sourceLabels[source].toUpperCase()} — ${state.availability === "available" ? `${state.itemCount} item(s)` : "UNAVAILABLE"}`);
     if (state.note) lines.push(`  ${state.note}`);
     for (const item of digest.items.filter((entry) => entry.source === source)) {
-      lines.push(`  [${item.severity.toUpperCase()} / ${item.status}] ${item.title}`, `    ${item.detail}`);
+       lines.push(`  [${(item.attentionState ?? attentionStateForSeverity(item.severity, item.status)).toUpperCase()} / ${item.status}] ${item.title}`, `    ${item.detail}`, `    Next action: ${item.nextAction ?? nextActionForAttention(item.attentionState ?? attentionStateForSeverity(item.severity, item.status), item.status)}`);
       if (item.affectedRun || item.affectedProduct) lines.push(`    Affected: ${[item.affectedRun && `run ${item.affectedRun}`, item.affectedProduct].filter(Boolean).join(" · ")}`);
     }
     lines.push("");
@@ -71,8 +72,8 @@ export default function ShiftHandoffDigest({ onOpenSource }: { onOpenSource?: (s
       {digest && <div className="space-y-3 border-t border-border/60 pt-3">
         <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold">{(["urgent", "high", "medium", "low", "info"] as HandoffSeverity[]).map((severity) => <span key={severity} className={`rounded px-2 py-0.5 ${severityClass[severity]}`}>{severity}: {digest.items.filter((item) => item.severity === severity).length}</span>)}</div>
         {digest.items.length === 0 ? <p className="rounded border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-500">No unresolved handoff items for this date.</p> : <div className="space-y-2">{digest.items.map((item) => <div key={item.id} className="rounded border border-border bg-background/50 p-3">
-          <div className="flex flex-wrap items-start gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${severityClass[item.severity]}`}>{item.severity}</span><span className="text-sm font-semibold">{item.title}</span><span className="text-[10px] rounded bg-muted px-1.5 py-0.5 uppercase">{item.status}</span><span className="ml-auto text-[11px] text-muted-foreground">{item.historical ? "Historical event" : item.status === "current" ? "Current snapshot" : "Needs attention"}</span></div>
-          <p className="mt-1 text-xs text-muted-foreground">{sourceLabels[item.source]} · {fmtWhen(item.occurredAt)}</p><p className="mt-1 text-sm">{item.detail}</p>
+          <div className="flex flex-wrap items-start gap-2">{(() => { const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState; return <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${ATTENTION_STATE_CLASS[state]}`}>{ATTENTION_STATE_LABEL[state]}</span>; })()}<span className="text-sm font-semibold">{item.title}</span><span className="text-[10px] rounded bg-muted px-1.5 py-0.5 uppercase">{item.status}</span><span className="ml-auto text-[11px] text-muted-foreground">{item.historical ? "Historical event" : item.status === "current" ? "Current snapshot" : "Needs attention"}</span></div>
+           <p className="mt-1 text-xs text-muted-foreground">{sourceLabels[item.source]} · {fmtWhen(item.occurredAt)}</p><p className="mt-1 text-sm">{item.detail}</p><p className="mt-1 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(item.attentionState ?? attentionStateForSeverity(item.severity, item.status), item.status)}</p>
           {(item.affectedRun || item.affectedProduct) && <p className="mt-1 text-xs text-muted-foreground">Affected: {[item.affectedRun && `Run ${item.affectedRun}`, item.affectedProduct].filter(Boolean).join(" · ")}</p>}
           <button type="button" className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline" onClick={() => onOpenSource?.(item.source)}><ExternalLink className="h-3 w-3" /> Open {sourceLabels[item.source]}</button>
         </div>)}</div>}

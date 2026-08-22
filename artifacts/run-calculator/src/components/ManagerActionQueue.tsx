@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { useMe } from "../useRole";
 import { fetchActionQueue, updateActionItem, type ActionItem } from "../actionQueue";
 import { fetchIncidentAssignees } from "../inventoryShared";
+import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, attentionStateForSeverity, nextActionForAttention, type AttentionState } from "../attentionStates";
 
-const rank: Record<string, number> = { urgent: 0, error: 1, warning: 2, info: 3 };
+const rank: Record<string, number> = { blocker: 0, review: 1, stale: 2, info: 3 };
 const labels: Record<string, string> = { "data-health": "Data health", "production-rule": "Production rules", sync: "Sync", incident: "Incident", import: "Import", report: "Report" };
 const age = (value: string) => {
   const days = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 86400000));
@@ -30,7 +31,11 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
   });
   const items = useMemo(() => (query.data?.items ?? []).filter((item) =>
     (filter === "all" || item.status === filter) && (category === "all" || item.category === category),
-  ).sort((a, b) => rank[a.severity] - rank[b.severity] || Date.parse(a.createdAt) - Date.parse(b.createdAt)), [query.data?.items, filter, category]);
+  ).sort((a, b) => {
+    const aState = a.attentionState ?? attentionStateForSeverity(a.severity, a.status);
+    const bState = b.attentionState ?? attentionStateForSeverity(b.severity, b.status);
+    return rank[aState] - rank[bState] || Date.parse(a.createdAt) - Date.parse(b.createdAt);
+  }), [query.data?.items, filter, category]);
   if (!roleLoading && !canView) return <Card><CardContent className="py-8 flex items-center justify-center gap-2 text-sm text-muted-foreground"><Lock className="h-4 w-4" /> Manager action queue is restricted to managers.</CardContent></Card>;
   return <Card data-testid="manager-action-queue">
     <CardHeader className="pb-3"><div className="flex items-center justify-between gap-2">
@@ -51,7 +56,7 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
         items.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">{filter === "open" ? "No open actions. The facility is caught up." : "No actions match these filters."}</p> :
         <div className="space-y-2">{items.map((item) => <div key={item.id} className="rounded-md border border-border bg-background p-3">
           <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span><span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase">{item.severity}</span><span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category]}</span></div>
+            <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span>{(() => { const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState; return <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[state]}`} data-testid={`attention-state-${item.id}`}>{ATTENTION_STATE_LABEL[state]}</span>; })()}<span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category]}</span></div>
             <p className="mt-1 text-xs text-muted-foreground">{item.description} · {age(item.createdAt)} · {item.assigneeName ?? "Unassigned"}</p>
           </div><a className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline" href={item.sourcePath} onClick={() => onNavigate?.(item.sourceType === "incident" ? "incidents" : item.sourceType === "sync" ? "summary" : "setup")}>Open source <ExternalLink className="h-3 w-3" /></a></div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -64,6 +69,7 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
             </select>
             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setNoteFor(noteFor === item.id ? null : item.id)}>Add note</Button>
           </div>
+           <p className="mt-2 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(item.attentionState ?? attentionStateForSeverity(item.severity, item.status), item.status)}</p>
           {noteFor === item.id && <div className="mt-2 flex gap-2"><input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => setNote(e.target.value)} /><Button size="sm" className="h-7 text-xs" disabled={!note.trim() || mutation.isPending} onClick={() => mutation.mutate({ item, input: { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) } })}>Save</Button></div>}
           {item.deferReason && <p className="mt-1 text-xs text-amber-600">Deferred: {item.deferReason}</p>}{item.resolutionNote && <p className="mt-1 text-xs text-muted-foreground">Note: {item.resolutionNote}</p>}
         </div>)}</div>}

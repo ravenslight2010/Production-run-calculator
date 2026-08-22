@@ -1,9 +1,12 @@
 import { inventoryClientId } from "./inventoryShared";
+import type { AttentionState } from "./attentionStates";
 
 export type ActionItem = {
   id: number; scope: string; dedupKey: string;
   category: "incident" | "import" | "data-health" | "sync" | "production-rule" | "report";
   severity: "info" | "warning" | "error" | "urgent";
+  attentionState?: AttentionState;
+  nextAction?: string;
   title: string; description: string; sourceType: string; sourceId: string; sourcePath: string;
   status: "open" | "in_progress" | "deferred" | "resolved";
   assigneeId: string | null; assigneeName: string | null; deferReason: string | null; resolutionNote: string | null;

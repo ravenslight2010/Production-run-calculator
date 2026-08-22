@@ -53,6 +53,7 @@ type HandoffItem = {
   id: string; source: HandoffSource; severity: HandoffSeverity; status: HandoffStatus;
   title: string; detail: string; affectedRun: string | null; affectedProduct: string | null;
   occurredAt: string | null; sourcePath: string; historical: boolean;
+  attentionState: "blocker" | "review" | "stale" | "info"; nextAction: string;
 };
 type ShiftHandoffDigest = {
   scope: string; date: string; generatedAt: string; items: HandoffItem[];
@@ -66,6 +67,10 @@ const safeDate = (value: Date | string | null | undefined): string | null => {
 };
 const inventorySeverity = (qty: number, threshold: number): HandoffSeverity =>
   qty <= 0 ? "urgent" : threshold > 0 && qty <= threshold ? "high" : "medium";
+const handoffAttention = (severity: HandoffSeverity, status: HandoffStatus): HandoffItem["attentionState"] =>
+  status === "historical" ? "stale" : severity === "urgent" || severity === "high" ? "blocker" : severity === "info" ? "info" : "review";
+const handoffNextAction = (state: HandoffItem["attentionState"], status: HandoffStatus): string =>
+  status === "historical" ? "Review when convenient" : state === "blocker" ? "Act now" : state === "review" ? "Review and decide" : "Monitor";
 
 router.get("/reports/handoff", requireCapability("review-incidents"), async (req, res): Promise<void> => {
   const parsed = HandoffQuery.safeParse(req.query);
@@ -99,13 +104,16 @@ router.get("/reports/handoff", requireCapability("review-incidents"), async (req
     sources.incidents = { availability: "available", itemCount: open.length };
     for (const row of open) {
       const context = row.context && typeof row.context === "object" ? row.context as Record<string, unknown> : {};
-      items.push({ id: `incident:${row.id}`, source: "incidents", severity: row.priority === "urgent" ? "urgent" : row.priority === "high" ? "high" : row.priority === "low" ? "low" : "medium", status: row.workflowState === "resolved" ? "resolved" : row.status === "reviewed" ? "reviewed" : "open", title: row.source === "auto_crash" ? "Auto-captured crash" : "Reported issue", detail: String(context.description ?? context.errorMessage ?? row.diagnosis ?? "Incident requires manager review."), affectedRun: typeof context.runId === "string" ? context.runId : null, affectedProduct: typeof context.product === "string" ? context.product : null, occurredAt: safeDate(row.createdAt), sourcePath: "incidents", historical: false });
+      const status = row.workflowState === "resolved" ? "resolved" : row.status === "reviewed" ? "reviewed" : "open";
+      const severity = row.priority === "urgent" ? "urgent" : row.priority === "high" ? "high" : row.priority === "low" ? "low" : "medium";
+      const state = handoffAttention(severity, status);
+      items.push({ id: `incident:${row.id}`, source: "incidents", severity, status, title: row.source === "auto_crash" ? "Auto-captured crash" : "Reported issue", detail: String(context.description ?? context.errorMessage ?? row.diagnosis ?? "Incident requires manager review."), affectedRun: typeof context.runId === "string" ? context.runId : null, affectedProduct: typeof context.product === "string" ? context.product : null, occurredAt: safeDate(row.createdAt), sourcePath: "incidents", historical: false, attentionState: state, nextAction: handoffNextAction(state, status) });
     }
   }
   if (quality) {
     const exceptions = quality.filter((row) => row.status === "warn" || row.status === "fail");
     sources.quality = { availability: "available", itemCount: exceptions.length };
-    for (const row of exceptions) items.push({ id: `quality:${row.id}`, source: "quality", severity: row.status === "fail" ? "high" : "medium", status: "historical", title: `${row.productType} quality exception`, detail: row.summary || `${Array.isArray(row.issues) ? row.issues.length : 0} issue(s) recorded.`, affectedRun: null, affectedProduct: row.productType, occurredAt: safeDate(row.createdAt), sourcePath: "quality", historical: true });
+     for (const row of exceptions) { const state = handoffAttention(row.status === "fail" ? "high" : "medium", "historical"); items.push({ id: `quality:${row.id}`, source: "quality", severity: row.status === "fail" ? "high" : "medium", status: "historical", title: `${row.productType} quality exception`, detail: row.summary || `${Array.isArray(row.issues) ? row.issues.length : 0} issue(s) recorded.`, affectedRun: null, affectedProduct: row.productType, occurredAt: safeDate(row.createdAt), sourcePath: "quality", historical: true, attentionState: state, nextAction: handoffNextAction(state, "historical") }); }
   }
   if (inventory) {
     const [inventoryItems, lots, ledger] = inventory;
@@ -114,17 +122,17 @@ router.get("/reports/handoff", requireCapability("review-incidents"), async (req
     const risk = inventoryItems.filter((item) => item.reorderThreshold > 0 && (onHand.get(item.id) ?? 0) <= item.reorderThreshold);
     const waste = ledger.filter((row) => row.type === "adjust" && row.qtyDelta < 0);
     sources.inventory = { availability: "available", itemCount: risk.length + waste.length };
-    for (const item of risk) items.push({ id: `inventory-risk:${item.id}`, source: "inventory", severity: inventorySeverity(onHand.get(item.id) ?? 0, item.reorderThreshold), status: "current", title: `${item.name} is at or below reorder level`, detail: `${onHand.get(item.id) ?? 0} ${item.unit} on hand; reorder level is ${item.reorderThreshold} ${item.unit}.`, affectedRun: null, affectedProduct: item.name, occurredAt: safeDate(item.updatedAt), sourcePath: "inventory", historical: false });
-    for (const row of waste) { const item = inventoryItems.find((candidate) => candidate.id === row.itemId); items.push({ id: `inventory-ledger:${row.id}`, source: "inventory", severity: "medium", status: "historical", title: `${item?.name ?? "Inventory item"} adjustment`, detail: `${Math.abs(row.qtyDelta)} ${item?.unit ?? "units"} removed${row.note ? ` — ${row.note}` : ""}.`, affectedRun: row.runId, affectedProduct: item?.name ?? null, occurredAt: safeDate(row.createdAt), sourcePath: "inventory", historical: true }); }
+     for (const item of risk) { const severity = inventorySeverity(onHand.get(item.id) ?? 0, item.reorderThreshold); const state = handoffAttention(severity, "current"); items.push({ id: `inventory-risk:${item.id}`, source: "inventory", severity, status: "current", title: `${item.name} is at or below reorder level`, detail: `${onHand.get(item.id) ?? 0} ${item.unit} on hand; reorder level is ${item.reorderThreshold} ${item.unit}.`, affectedRun: null, affectedProduct: item.name, occurredAt: safeDate(item.updatedAt), sourcePath: "inventory", historical: false, attentionState: state, nextAction: handoffNextAction(state, "current") }); }
+     for (const row of waste) { const item = inventoryItems.find((candidate) => candidate.id === row.itemId); const state = handoffAttention("medium", "historical"); items.push({ id: `inventory-ledger:${row.id}`, source: "inventory", severity: "medium", status: "historical", title: `${item?.name ?? "Inventory item"} adjustment`, detail: `${Math.abs(row.qtyDelta)} ${item?.unit ?? "units"} removed${row.note ? ` — ${row.note}` : ""}.`, affectedRun: row.runId, affectedProduct: item?.name ?? null, occurredAt: safeDate(row.createdAt), sourcePath: "inventory", historical: true, attentionState: state, nextAction: handoffNextAction(state, "historical") }); }
   }
   if (sync) {
     sources.sync = { availability: "available", itemCount: sync.length };
-    for (const row of sync) items.push({ id: `sync:${row.id}`, source: "sync", severity: row.conflictCount > 3 ? "high" : "medium", status: "historical", title: "Sync conflict recorded", detail: `${row.conflictCount} conflict${row.conflictCount === 1 ? "" : "s"} resolved by ${row.resolution}.`, affectedRun: null, affectedProduct: null, occurredAt: safeDate(row.createdAt), sourcePath: "sync", historical: true });
+     for (const row of sync) { const state = handoffAttention(row.conflictCount > 3 ? "high" : "medium", "historical"); items.push({ id: `sync:${row.id}`, source: "sync", severity: row.conflictCount > 3 ? "high" : "medium", status: "historical", title: "Sync conflict recorded", detail: `${row.conflictCount} conflict${row.conflictCount === 1 ? "" : "s"} resolved by ${row.resolution}.`, affectedRun: null, affectedProduct: null, occurredAt: safeDate(row.createdAt), sourcePath: "sync", historical: true, attentionState: state, nextAction: handoffNextAction(state, "historical") }); }
   }
   if (health) {
     const pending = health.findings.filter((finding) => finding.repairability === "review" || finding.severity !== "info");
     sources["data-health"] = { availability: "available", itemCount: pending.length };
-    for (const finding of pending) items.push({ id: `data-health:${finding.id}`, source: "data-health", severity: finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info", status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false });
+     for (const finding of pending) { const severity = finding.severity === "error" ? "high" : finding.severity === "warning" ? "medium" : "info"; const state = handoffAttention(severity, "open"); items.push({ id: `data-health:${finding.id}`, source: "data-health", severity, status: "open", title: `${finding.brand || "Unbranded"} — ${finding.recipe}`, detail: finding.message, affectedRun: null, affectedProduct: [finding.brand, finding.flavor].filter(Boolean).join(" / ") || null, occurredAt: null, sourcePath: "data-health", historical: false, attentionState: state, nextAction: handoffNextAction(state, "open") }); }
   }
   const severityOrder: Record<HandoffSeverity, number> = { urgent: 0, high: 1, medium: 2, low: 3, info: 4 };
   items.sort((a, b) =>
