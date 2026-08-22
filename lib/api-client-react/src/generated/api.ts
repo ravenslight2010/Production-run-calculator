@@ -99,6 +99,8 @@ import type {
   ListInventoryLedgerParams,
   ListMergeAliasesParams,
   ListQualityChecksParams,
+  ManagerActionItemUpdate,
+  ManagerActionQueue,
   MarkCycleCountCountedInput,
   MatchImportInput,
   MatchImportResult,
@@ -197,6 +199,7 @@ import type {
   UpdateInventoryItemInput,
   UpdateInventoryLocationInput,
   UpdateInventorySettingsInput,
+  UpdateManagerActionItem200,
   UpdateProactiveAlertSettingsInput,
   UpdateRunSuggestionInput,
   UsernameAvailability,
@@ -11524,6 +11527,155 @@ export const useResolveIncident = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getResolveIncidentMutationOptions(options));
+    }
+
+export const getListManagerActionQueueUrl = () => {
+
+
+
+
+  return `/api/manager-action-queue`
+}
+
+/**
+ * @summary List the facility-scoped manager action queue
+ */
+export const listManagerActionQueue = async ( options?: RequestInit): Promise<ManagerActionQueue> => {
+
+  return customFetch<ManagerActionQueue>(getListManagerActionQueueUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListManagerActionQueueQueryKey = () => {
+    return [
+    `/api/manager-action-queue`
+    ] as const;
+    }
+
+
+export const getListManagerActionQueueQueryOptions = <TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListManagerActionQueueQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listManagerActionQueue>>> = ({ signal }) => listManagerActionQueue({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListManagerActionQueueQueryResult = NonNullable<Awaited<ReturnType<typeof listManagerActionQueue>>>
+export type ListManagerActionQueueQueryError = ErrorType<void>
+
+
+/**
+ * @summary List the facility-scoped manager action queue
+ */
+
+export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListManagerActionQueueQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateManagerActionItemUrl = (id: number,) => {
+
+
+
+
+  return `/api/manager-action-queue/${id}`
+}
+
+/**
+ * @summary Update a manager action item with optimistic version checking
+ */
+export const updateManagerActionItem = async (id: number,
+    managerActionItemUpdate: ManagerActionItemUpdate, options?: RequestInit): Promise<UpdateManagerActionItem200> => {
+
+  return customFetch<UpdateManagerActionItem200>(getUpdateManagerActionItemUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      managerActionItemUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateManagerActionItemMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateManagerActionItem>>, TError,{id: number;data: BodyType<ManagerActionItemUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateManagerActionItem>>, TError,{id: number;data: BodyType<ManagerActionItemUpdate>}, TContext> => {
+
+const mutationKey = ['updateManagerActionItem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateManagerActionItem>>, {id: number;data: BodyType<ManagerActionItemUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateManagerActionItem(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateManagerActionItemMutationResult = NonNullable<Awaited<ReturnType<typeof updateManagerActionItem>>>
+    export type UpdateManagerActionItemMutationBody = BodyType<ManagerActionItemUpdate>
+    export type UpdateManagerActionItemMutationError = ErrorType<void>
+
+    /**
+ * @summary Update a manager action item with optimistic version checking
+ */
+export const useUpdateManagerActionItem = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateManagerActionItem>>, TError,{id: number;data: BodyType<ManagerActionItemUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateManagerActionItem>>,
+        TError,
+        {id: number;data: BodyType<ManagerActionItemUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateManagerActionItemMutationOptions(options));
     }
 
 export const getUpdateIncidentWorkflowUrl = (id: string,) => {

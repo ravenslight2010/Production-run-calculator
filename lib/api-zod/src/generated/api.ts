@@ -4388,6 +4388,79 @@ export const ResolveIncidentResponse = zod.object({
 
 
 /**
+ * @summary List the facility-scoped manager action queue
+ */
+export const ListManagerActionQueueResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number(),
+  "scope": zod.string(),
+  "dedupKey": zod.string(),
+  "category": zod.enum(['incident', 'import', 'data-health', 'sync', 'production-rule', 'report']),
+  "severity": zod.enum(['info', 'warning', 'error', 'urgent']),
+  "title": zod.string(),
+  "description": zod.string(),
+  "sourceType": zod.string(),
+  "sourceId": zod.string(),
+  "sourcePath": zod.string(),
+  "status": zod.enum(['open', 'in_progress', 'deferred', 'resolved']),
+  "assigneeId": zod.string().nullish(),
+  "assigneeName": zod.string().nullish(),
+  "deferReason": zod.string().nullish(),
+  "resolutionNote": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "version": zod.number()
+})),
+  "counts": zod.record(zod.string(), zod.number())
+})
+
+
+/**
+ * @summary Update a manager action item with optimistic version checking
+ */
+export const UpdateManagerActionItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const updateManagerActionItemBodyDeferReasonMax = 2000;
+
+export const updateManagerActionItemBodyResolutionNoteMax = 2000;
+
+
+
+export const UpdateManagerActionItemBody = zod.object({
+  "version": zod.number(),
+  "status": zod.enum(['open', 'in_progress', 'deferred', 'resolved']).optional(),
+  "assigneeId": zod.string().nullish(),
+  "deferReason": zod.string().max(updateManagerActionItemBodyDeferReasonMax).optional(),
+  "resolutionNote": zod.string().max(updateManagerActionItemBodyResolutionNoteMax).optional()
+})
+
+export const UpdateManagerActionItemResponse = zod.object({
+  "item": zod.object({
+  "id": zod.number(),
+  "scope": zod.string(),
+  "dedupKey": zod.string(),
+  "category": zod.enum(['incident', 'import', 'data-health', 'sync', 'production-rule', 'report']),
+  "severity": zod.enum(['info', 'warning', 'error', 'urgent']),
+  "title": zod.string(),
+  "description": zod.string(),
+  "sourceType": zod.string(),
+  "sourceId": zod.string(),
+  "sourcePath": zod.string(),
+  "status": zod.enum(['open', 'in_progress', 'deferred', 'resolved']),
+  "assigneeId": zod.string().nullish(),
+  "assigneeName": zod.string().nullish(),
+  "deferReason": zod.string().nullish(),
+  "resolutionNote": zod.string().nullish(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "version": zod.number()
+})
+})
+
+
+/**
  * @summary Update incident ownership, priority, state, or add a note
  */
 export const UpdateIncidentWorkflowParams = zod.object({

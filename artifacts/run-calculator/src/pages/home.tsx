@@ -376,6 +376,7 @@ import IncidentsTab from "../components/IncidentsTab";
 import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
 import OperationalReportPanel from "../components/OperationalReportPanel";
+import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
@@ -14664,6 +14665,11 @@ export default function Home() {
                   </DropdownMenuItem>
                 )}
                 {isManager && (
+                  <DropdownMenuItem onClick={() => setActiveTab("summary")}>
+                    <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
+                  </DropdownMenuItem>
+                )}
+                {isManager && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
                     <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
                   </DropdownMenuItem>
@@ -23263,10 +23269,16 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
     switchToRun, updateRunMeta, v,
   } = hx;
 
+  const { isManager } = useMe();
   const { calc, liveFreezerMin } = useLiveRun();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
   return (
     <>
+                {isManager && (
+                  <div className="max-w-3xl mx-auto mb-4">
+                    <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
+                  </div>
+                )}
                 {/* Shift notes */}
                 <div className="mb-4">
                   <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>

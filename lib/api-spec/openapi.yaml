@@ -3664,6 +3664,50 @@ paths:
         "404":
           description: No incident with that id
 
+  /manager-action-queue:
+    get:
+      operationId: listManagerActionQueue
+      tags: [audit]
+      summary: List the facility-scoped manager action queue
+      responses:
+        "200":
+          description: Current action items and status counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagerActionQueue"
+        "403": { description: Manager capability required }
+
+  /manager-action-queue/{id}:
+    patch:
+      operationId: updateManagerActionItem
+      tags: [audit]
+      summary: Update a manager action item with optimistic version checking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagerActionItemUpdate"
+      responses:
+        "200":
+          description: Updated action item
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item]
+                properties:
+                  item: { $ref: "#/components/schemas/ManagerActionItem" }
+        "400": { description: Invalid update }
+        "403": { description: Manager capability required }
+        "409": { description: Version conflict }
+
   /incidents/{id}/workflow:
     patch:
       operationId: updateIncidentWorkflow
@@ -9834,3 +9878,48 @@ components:
       properties:
         count:
           type: integer
+
+    ManagerActionItem:
+      type: object
+      required: [id, scope, dedupKey, category, severity, title, description, sourceType, sourceId, sourcePath, status, createdAt, updatedAt, version]
+      properties:
+        id: { type: integer }
+        scope: { type: string }
+        dedupKey: { type: string }
+        category: { type: string, enum: [incident, import, data-health, sync, production-rule, report] }
+        severity: { type: string, enum: [info, warning, error, urgent] }
+        title: { type: string }
+        description: { type: string }
+        sourceType: { type: string }
+        sourceId: { type: string }
+        sourcePath: { type: string }
+        status: { type: string, enum: [open, in_progress, deferred, resolved] }
+        assigneeId: { type: [string, "null"] }
+        assigneeName: { type: [string, "null"] }
+        deferReason: { type: [string, "null"] }
+        resolutionNote: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer }
+
+    ManagerActionQueue:
+      type: object
+      required: [items, counts]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ManagerActionItem" }
+        counts:
+          type: object
+          additionalProperties: { type: integer }
+
+    ManagerActionItemUpdate:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer }
+        status: { type: string, enum: [open, in_progress, deferred, resolved] }
+        assigneeId: { type: [string, "null"] }
+        deferReason: { type: string, maxLength: 2000 }
+        resolutionNote: { type: string, maxLength: 2000 }

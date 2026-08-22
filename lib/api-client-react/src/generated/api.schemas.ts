@@ -3715,6 +3715,91 @@ export interface UnreviewedIncidentCount {
   count: number;
 }
 
+export type ManagerActionItemCategory = typeof ManagerActionItemCategory[keyof typeof ManagerActionItemCategory];
+
+
+export const ManagerActionItemCategory = {
+  incident: 'incident',
+  import: 'import',
+  'data-health': 'data-health',
+  sync: 'sync',
+  'production-rule': 'production-rule',
+  report: 'report',
+} as const;
+
+export type ManagerActionItemSeverity = typeof ManagerActionItemSeverity[keyof typeof ManagerActionItemSeverity];
+
+
+export const ManagerActionItemSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+  urgent: 'urgent',
+} as const;
+
+export type ManagerActionItemStatus = typeof ManagerActionItemStatus[keyof typeof ManagerActionItemStatus];
+
+
+export const ManagerActionItemStatus = {
+  open: 'open',
+  in_progress: 'in_progress',
+  deferred: 'deferred',
+  resolved: 'resolved',
+} as const;
+
+export interface ManagerActionItem {
+  id: number;
+  scope: string;
+  dedupKey: string;
+  category: ManagerActionItemCategory;
+  severity: ManagerActionItemSeverity;
+  title: string;
+  description: string;
+  sourceType: string;
+  sourceId: string;
+  sourcePath: string;
+  status: ManagerActionItemStatus;
+  /** @nullable */
+  assigneeId?: string | null;
+  /** @nullable */
+  assigneeName?: string | null;
+  /** @nullable */
+  deferReason?: string | null;
+  /** @nullable */
+  resolutionNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export type ManagerActionQueueCounts = {[key: string]: number};
+
+export interface ManagerActionQueue {
+  items: ManagerActionItem[];
+  counts: ManagerActionQueueCounts;
+}
+
+export type ManagerActionItemUpdateStatus = typeof ManagerActionItemUpdateStatus[keyof typeof ManagerActionItemUpdateStatus];
+
+
+export const ManagerActionItemUpdateStatus = {
+  open: 'open',
+  in_progress: 'in_progress',
+  deferred: 'deferred',
+  resolved: 'resolved',
+} as const;
+
+export interface ManagerActionItemUpdate {
+  version: number;
+  status?: ManagerActionItemUpdateStatus;
+  /** @nullable */
+  assigneeId?: string | null;
+  /** @maxLength 2000 */
+  deferReason?: string;
+  /** @maxLength 2000 */
+  resolutionNote?: string;
+}
+
 export type CheckUsernameAvailableParams = {
 /**
  * @minLength 1
@@ -3831,5 +3916,9 @@ export type ListIncidentAssignees200Item = {
   userId: string;
   name: string;
   role: string;
+};
+
+export type UpdateManagerActionItem200 = {
+  item: ManagerActionItem;
 };
 
