@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildSyncDiagnosticReport, clearSyncDiagnostics, loadSyncDiagnostics, recordSyncDiagnostic } from "./syncDiagnostics";
+import {
+  buildSyncDiagnosticReport,
+  clearSyncDiagnostics,
+  loadSyncDiagnostics,
+  loadSyncMeasurements,
+  recordSyncDiagnostic,
+  recordSyncMeasurement,
+} from "./syncDiagnostics";
 
 describe("sync diagnostics", () => {
   beforeEach(() => localStorage.clear());
@@ -44,5 +51,28 @@ describe("sync diagnostics", () => {
     expect(report.responseCategories).toEqual({ network: 1, "200": 1 });
     expect(report.affectedRunIds).toEqual(["run-a"]);
     expect(report.events).toHaveLength(2);
+  });
+
+  it("records complete and partial wire measurements and summarizes them", () => {
+    recordSyncMeasurement("2026-08-21", {
+      path: "complete", requestBytes: 1000, responseBytes: 3000,
+      latencyMs: 40, mergeMs: 4, retries: 1, converged: true,
+    });
+    recordSyncMeasurement("2026-08-21", {
+      path: "partial", requestBytes: 250, responseBytes: 3000,
+      latencyMs: 20, mergeMs: 3, retries: 0, converged: true,
+    });
+    expect(loadSyncMeasurements("2026-08-21")).toHaveLength(2);
+    const report = buildSyncDiagnosticReport({
+      date: "2026-08-21", status: "healthy", lastAcknowledgedAt: null,
+      pendingCount: 0, failedCount: 0, diagnostics: [],
+      measurements: loadSyncMeasurements("2026-08-21"),
+    });
+    expect(report.measurementSummary).toEqual([
+      expect.objectContaining({ path: "complete", requestBytes: 1000, retries: 1, convergedSamples: 1 }),
+      expect.objectContaining({ path: "partial", requestBytes: 250, retries: 0, convergedSamples: 1 }),
+    ]);
+    clearSyncDiagnostics("2026-08-21");
+    expect(loadSyncMeasurements("2026-08-21")).toEqual([]);
   });
 });

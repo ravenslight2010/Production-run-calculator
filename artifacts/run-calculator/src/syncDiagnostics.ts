@@ -19,6 +19,29 @@ export type SyncDiagnostic = {
   response?: string;
 };
 
+export type SyncMeasurementPath = "complete" | "partial";
+
+export type SyncDiagnosticMeasurement = {
+  path: SyncMeasurementPath;
+  requestBytes: number;
+  responseBytes: number;
+  latencyMs: number;
+  mergeMs: number;
+  retries: number;
+  converged: boolean;
+};
+
+export type SyncMeasurementSummary = {
+  path: SyncMeasurementPath;
+  samples: number;
+  requestBytes: number;
+  responseBytes: number;
+  averageLatencyMs: number;
+  averageMergeMs: number;
+  retries: number;
+  convergedSamples: number;
+};
+
 export type SyncDiagnosticReport = {
   reportType: "sync-diagnostic-history";
   label: "Sync diagnostic history";
@@ -31,13 +54,20 @@ export type SyncDiagnosticReport = {
   failedCount: number;
   responseCategories: Record<string, number>;
   affectedRunIds: string[];
+  measurements: SyncDiagnosticMeasurement[];
+  measurementSummary: SyncMeasurementSummary[];
   events: SyncDiagnostic[];
 };
 
 const MAX_EVENTS = 20;
+const MAX_MEASUREMENTS = 50;
 
 function key(date: string): string {
   return `run-calc-sync-diagnostics:${date}`;
+}
+
+function measurementKey(date: string): string {
+  return `run-calc-sync-measurements:${date}`;
 }
 
 export function loadSyncDiagnostics(date: string): SyncDiagnostic[] {
@@ -66,7 +96,61 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
 }
 
 export function clearSyncDiagnostics(date: string): void {
-  try { localStorage.removeItem(key(date)); } catch {}
+  try {
+    localStorage.removeItem(key(date));
+    localStorage.removeItem(measurementKey(date));
+  } catch {}
+}
+
+export function loadSyncMeasurements(date: string): SyncDiagnosticMeasurement[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(measurementKey(date)) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is SyncDiagnosticMeasurement =>
+      item && typeof item === "object" &&
+      (item.path === "complete" || item.path === "partial") &&
+      Number.isFinite(item.requestBytes) && item.requestBytes >= 0 &&
+      Number.isFinite(item.responseBytes) && item.responseBytes >= 0 &&
+      Number.isFinite(item.latencyMs) && item.latencyMs >= 0 &&
+      Number.isFinite(item.mergeMs) && item.mergeMs >= 0 &&
+      Number.isInteger(item.retries) && item.retries >= 0 &&
+      typeof item.converged === "boolean",
+    ).slice(-MAX_MEASUREMENTS);
+  } catch {
+    return [];
+  }
+}
+
+export function recordSyncMeasurement(
+  date: string,
+  measurement: SyncDiagnosticMeasurement,
+): SyncDiagnosticMeasurement {
+  try {
+    const measurements = [...loadSyncMeasurements(date), measurement].slice(-MAX_MEASUREMENTS);
+    localStorage.setItem(measurementKey(date), JSON.stringify(measurements));
+  } catch {
+    // Diagnostics must never interfere with production persistence.
+  }
+  return measurement;
+}
+
+function summarizeMeasurements(
+  measurements: SyncDiagnosticMeasurement[],
+): SyncMeasurementSummary[] {
+  return (["complete", "partial"] as const).flatMap((path) => {
+    const samples = measurements.filter((measurement) => measurement.path === path);
+    if (samples.length === 0) return [];
+    return [{
+      path,
+      samples: samples.length,
+      requestBytes: samples.reduce((total, sample) => total + sample.requestBytes, 0),
+      responseBytes: samples.reduce((total, sample) => total + sample.responseBytes, 0),
+      averageLatencyMs: samples.reduce((total, sample) => total + sample.latencyMs, 0) / samples.length,
+      averageMergeMs: samples.reduce((total, sample) => total + sample.mergeMs, 0) / samples.length,
+      retries: samples.reduce((total, sample) => total + sample.retries, 0),
+      convergedSamples: samples.filter((sample) => sample.converged).length,
+    }];
+  });
 }
 
 export function buildSyncDiagnosticReport(input: {
@@ -76,9 +160,11 @@ export function buildSyncDiagnosticReport(input: {
   pendingCount: number;
   failedCount: number;
   diagnostics: SyncDiagnostic[];
+  measurements?: SyncDiagnosticMeasurement[];
   exportedAt?: number;
 }): SyncDiagnosticReport {
   const events = input.diagnostics.filter((event) => event.date === input.date);
+  const measurements = input.measurements ?? [];
   const responseCategories: Record<string, number> = {};
   for (const event of events) {
     if (event.response) responseCategories[event.response] = (responseCategories[event.response] ?? 0) + 1;
@@ -95,6 +181,8 @@ export function buildSyncDiagnosticReport(input: {
     failedCount: input.failedCount,
     responseCategories,
     affectedRunIds: [...new Set(events.map((event) => event.runId).filter((runId): runId is string => Boolean(runId)))],
+    measurements,
+    measurementSummary: summarizeMeasurements(measurements),
     events,
   };
 }

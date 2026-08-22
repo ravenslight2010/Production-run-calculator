@@ -6,6 +6,12 @@ small, repeatable simulation of three browser clients against the real sync
 router. It creates a disposable Postgres database, so it is safe to run without
 deleting live-day data.
 
+The focused sync integration suite also includes a large-day wire benchmark:
+`artifacts/api-server/src/routes/sync.integration.test.ts`. It sends the same
+representative 32-run production day through the complete (pre-optimization)
+and partial (optimized) PUT paths and prints comparable request bytes, response
+bytes, latency, merge time, retries, and convergence.
+
 ## Run it
 
 From the repository root:
@@ -14,6 +20,23 @@ From the repository root:
 pnpm --filter @workspace/api-server exec vitest run \
   src/routes/sync.convergence.integration.test.ts
 ```
+
+Run the large-day comparison with:
+
+```sh
+pnpm --filter @workspace/api-server exec vitest run \
+  src/routes/sync.integration.test.ts
+```
+
+Look for the `[sync large-day benchmark]` object in the test output. `complete`
+is the baseline where every run value is sent; `partial` sends only the changed
+run against the returned `snapshotId`. Byte counts are UTF-8 wire payload
+lengths, `latencyMs` is the PUT wall-clock time, `mergeMs` is response parsing
+and canonical-state adoption time, and `retries` counts additional attempts.
+`converged` is true only when the returned canonical snapshot matches the
+complete fixture. Compare the `requestSavingsPercent` and
+`responseSavingsPercent` fields over repeated runs; server load can make
+latencies noisier than the deterministic byte savings.
 
 The test requires the same development `DATABASE_URL` used by the other API
 integration suites. The database is created, schema-pushed, used, and dropped

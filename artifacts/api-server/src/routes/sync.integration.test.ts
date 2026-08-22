@@ -417,6 +417,180 @@ describe("/sync partial payload contract", () => {
   });
 });
 
+describe("/sync large-day complete versus partial measurements", () => {
+  const DATE = "2030-08-25";
+  type JsonRecord = Record<string, unknown>;
+
+  function largeDayFixture(): JsonRecord {
+    const runs = Array.from({ length: 32 }, (_, index) => ({
+      id: `large-day-run-${index + 1}`,
+      brand: index % 2 === 0 ? "Acme" : "Northstar",
+      flavor: ["Pepperoni", "Cheese", "Supreme", "Veggie"][index % 4],
+      startedAt: 1_000 + index,
+      metaUpdatedAt: 1_000 + index,
+    }));
+    const runValues: Record<string, JsonRecord> = {};
+    const runValuesUpdatedAt: Record<string, number> = {};
+    const packagingProgress: Record<string, JsonRecord> = {};
+    for (const [index, run] of runs.entries()) {
+      runValues[run.id] = {
+        casesNeeded: 240 + index * 12,
+        casesPerSkid: 48,
+        skidsCompleted: index % 3,
+        casesOnCurrentSkid: 12 + index,
+        doughRecipeName: index % 2 === 0 ? "Standard" : "Thin",
+        doughRecipe: [
+          { ingredient: "Flour", lbs: 42 + index },
+          { ingredient: "Water", lbs: 18 + index / 2 },
+          { ingredient: "Yeast", lbs: 1.25 },
+        ],
+        frontlineRecipe: [
+          { ingredient: "Tomato Sauce", lbs: 8 + index / 4 },
+          { ingredient: "Salt", lbs: 0.4 },
+        ],
+        app1CheeseRecipe: [
+          { ingredient: "Mozzarella", lbs: 12 + index / 3 },
+          { ingredient: "Provolone", lbs: 2 },
+        ],
+        notes: `Representative setup and operator notes for production run ${index + 1}.`,
+      };
+      runValuesUpdatedAt[run.id] = 1_000 + index;
+      packagingProgress[run.id] = {
+        skidsCompleted: index % 3,
+        casesOnCurrentSkid: 12 + index,
+        correctionGeneration: 0,
+        updatedAt: 1_000 + index,
+        manualOverrideUntil: 0,
+      };
+    }
+    return {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: DATE,
+        resetAt: 1_000,
+        runs,
+        shiftNotes: "Large-day benchmark fixture",
+        runToTime: Object.fromEntries(runs.map((run) => [run.id, 18])),
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+        prepPhase: {
+          prepStartedAt: null,
+          prepBatchesDough: 0,
+          prepBatchesSauce: 0,
+          prepCarriedOver: false,
+        },
+      },
+      runValues,
+      runValuesUpdatedAt,
+      packagingProgress,
+      history: Array.from({ length: 24 }, (_, index) => ({
+        at: 2_000 + index,
+        message: `History event ${index + 1}`,
+      })),
+    };
+  }
+
+  async function measuredPut(payload: JsonRecord, senderId: string) {
+    const body = JSON.stringify({ senderId, payload });
+    const requestBytes = Buffer.byteLength(body);
+    const started = performance.now();
+    const response = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body,
+    });
+    const responseText = await response.text();
+    const responseBytes = Buffer.byteLength(responseText);
+    const responseReadAt = performance.now();
+    const parsed = JSON.parse(responseText) as { data?: JsonRecord; snapshotId?: string };
+    // Keep parse plus canonical adoption as a separately visible phase. The
+    // test does the same clone a browser performs before storing the response.
+    const canonical = parsed.data ? JSON.parse(JSON.stringify(parsed.data)) as JsonRecord : undefined;
+    const mergeMs = performance.now() - responseReadAt;
+    return {
+      response,
+      parsed,
+      canonical,
+      requestBytes,
+      responseBytes,
+      latencyMs: responseReadAt - started,
+      mergeMs,
+    };
+  }
+
+  it("compares complete and one-run partial writes on a representative large day", async () => {
+    const completeFixture = largeDayFixture();
+    const baseline = await measuredPut(completeFixture, "large-day-complete");
+    expect(baseline.response.status).toBe(200);
+    expect(baseline.parsed.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const changedRunId = "large-day-run-17";
+    // The server records a write-time stamp when it accepts the complete
+    // baseline, so the changed run must carry a genuinely newer edit stamp.
+    const changedRunStamp = Date.now() + 1_000;
+    const partialFixture: JsonRecord = {
+      ...completeFixture,
+      completeness: "partial",
+      baseSnapshotId: baseline.parsed.snapshotId,
+      runValues: {
+        [changedRunId]: {
+          ...(completeFixture.runValues as Record<string, JsonRecord>)[changedRunId],
+          casesOnCurrentSkid: 99,
+        },
+      },
+      runValuesUpdatedAt: { [changedRunId]: changedRunStamp },
+      packagingProgress: {
+        [changedRunId]: {
+          ...(completeFixture.packagingProgress as Record<string, JsonRecord>)[changedRunId],
+          casesOnCurrentSkid: 99,
+          updatedAt: changedRunStamp,
+        },
+      },
+    };
+    const optimized = await measuredPut(partialFixture, "large-day-partial");
+    expect(optimized.response.status).toBe(200);
+    expect(optimized.canonical?.runValues).toMatchObject({
+      [changedRunId]: { casesOnCurrentSkid: 99 },
+    });
+
+    const completeCanonical = baseline.canonical;
+    const optimizedCanonical = optimized.canonical;
+    expect(optimizedCanonical?.dayState).toEqual(completeCanonical?.dayState);
+    expect(Object.keys(optimizedCanonical?.runValues as object)).toHaveLength(32);
+    expect(
+      JSON.stringify(optimizedCanonical?.runValues) === JSON.stringify(completeCanonical?.runValues),
+    ).toBe(false);
+    const requestSavingsPercent = ((baseline.requestBytes - optimized.requestBytes) / baseline.requestBytes) * 100;
+    const responseSavingsPercent = ((baseline.responseBytes - optimized.responseBytes) / baseline.responseBytes) * 100;
+    const report = {
+      fixture: { runs: 32, changedRuns: 1 },
+      complete: {
+        requestBytes: baseline.requestBytes,
+        responseBytes: baseline.responseBytes,
+        latencyMs: Number(baseline.latencyMs.toFixed(2)),
+        mergeMs: Number(baseline.mergeMs.toFixed(2)),
+        retries: 0,
+        converged: true,
+      },
+      partial: {
+        requestBytes: optimized.requestBytes,
+        responseBytes: optimized.responseBytes,
+        latencyMs: Number(optimized.latencyMs.toFixed(2)),
+        mergeMs: Number(optimized.mergeMs.toFixed(2)),
+        retries: 0,
+        converged: true,
+      },
+      requestSavingsPercent: Number(requestSavingsPercent.toFixed(2)),
+      responseSavingsPercent: Number(responseSavingsPercent.toFixed(2)),
+    };
+    console.info("[sync large-day benchmark]", report);
+    expect(optimized.requestBytes).toBeLessThan(baseline.requestBytes);
+    expect(requestSavingsPercent).toBeGreaterThan(50);
+  }, 30_000);
+});
+
 describe("/sync — per-run protective merge (data-loss guard)", () => {
   // The server is now a per-run last-writer-wins register keyed on each run's
   // edit stamp (runValuesUpdatedAt), not a blind blob overwrite. An empty run
