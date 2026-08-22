@@ -792,6 +792,7 @@ import OperationalReportPanel,
 ;
 
 import ManagerActionQueue from "../components/ManagerActionQueue"
+import ShiftHandoffDigest from "../components/ShiftHandoffDigest"
 ;
 
 import ReportIssueDialog from "../components/ReportIssueDialog"
@@ -1761,8 +1762,7 @@ function buildNeedRows(vals: FormValues):
   
 }
 
-  return 
-{
+  return {
  dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] 
 }
 ;
@@ -21740,6 +21740,29 @@ target.name
   
 }
 
+  // Excel upload triggered from within the Schedule editor: extracts rows into
+  // the in-memory editor (scoped to the day being planned) instead of writing
+  // to the server directly, so the user reviews then hits "Save Schedule".
+  async function handleScheduleImportFile(e: React.ChangeEvent<HTMLInputElement>) 
+{
+
+    const file = e.target.files?.[0]
+;
+
+    e.target.value = ""
+;
+
+    if (!file) return
+;
+
+    try 
+{
+
+      const buf = await file.arrayBuffer()
+;
+
+      const parsed = parseRunWorkbook(buf)
+;
 
   // Excel upload triggered from within the Schedule editor: extracts rows into
   // the in-memory editor (scoped to the day being planned) instead of writing
@@ -26302,6 +26325,16 @@ mergeCategory === "brandflavor"
                 )}
                 {isManager && (
                   <div className="max-w-3xl mx-auto mb-4">
+                    <ShiftHandoffDigest
+                      onOpenSource={(source) => {
+                        if (source === "incidents") { setActiveTab("incidents"); return; }
+                        if (source === "quality") { setActiveTab("quality"); return; }
+                        if (source === "inventory") { setActiveTab("warehouse"); return; }
+                        setManageCategory("audit");
+                        setShowManageDialog(true);
+                      }}
+                    />
+                    <div className="mt-3">
                     <OperationalReportPanel
                       onOpenQuality={(range) => {
                         setReportDetailRange(range);
@@ -26342,6 +26375,7 @@ mergeCategory === "brandflavor"
                             })
                       }
                     />
+                    </div>
                   </div>
                 )}
                 <LiveSummaryTabContent />
