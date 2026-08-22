@@ -1,4 +1,9 @@
-import { attentionStateForSeverity, nextActionForAttention, type AttentionState } from "./attentionStates";
+
+import {
+  attentionStateForSeverity,
+  nextActionForAttention,
+  type AttentionState,
+} from "./attentionStates";
 
 export type SyncDiagnosticKind =
   | "connected"
@@ -10,13 +15,6 @@ export type SyncDiagnosticKind =
   | "stale"
   | "failure"
   | "reset";
-
-import {
-  attentionStateForSeverity,
-  nextActionForAttention,
-  type AttentionState,
-} from "./attentionStates";
-
 export type SyncDiagnostic = {
   id: string;
   kind: SyncDiagnosticKind;

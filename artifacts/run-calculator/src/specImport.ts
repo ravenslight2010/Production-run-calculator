@@ -90,6 +90,7 @@ import {
   importProfileIsTombstoned,
   recipeNameIsTombstoned,
   applySpecImport,
+  loadCurrentFormulaRecipes,
   isNameDeleted,
   flavorNamespace,
   type SpecImportServerPoolRecipe,
@@ -135,6 +136,11 @@ import {
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
 import type { ReviewVerdict } from "@workspace/ai-review";
+import {
+  classifyFormulaChanges,
+  type FormulaChange,
+  type FormulaRecipe,
+} from "@workspace/formula-guard";
 
 export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
 
@@ -172,6 +178,8 @@ export type SpecImportPrepared = {
    * AI involved.
    */
   discrepancies: Discrepancy[];
+  /** Ingredient-level formula changes, with batch/per-pizza semantics retained. */
+  formulaChanges?: FormulaChange[];
   /**
    * Factory ingredient-merge history captured during preparation. The review
    * dialog reuses it when edited rows are reconciled synchronously, so a current
@@ -1205,6 +1213,36 @@ export function buildDiscrepancies(
   }
 }
 
+/** Build the import safety diff against the current local master-data pools. */
+export function buildFormulaChanges(
+  parsed: ParsedSpecImport,
+  ingredientMergeAliases?: ReadonlyArray<ImportMergeAlias>,
+): FormulaChange[] {
+  try {
+    const aliases: ImportMergeAliasMap = { ingredient: ingredientMergeAliases ?? [] };
+    const incoming: FormulaRecipe[] = parsed.recipes.map((recipe) => ({
+      kind: recipe.forcedCategory === "mix" ? "mix" : recipe.kind,
+      unit: recipe.forcedCategory === "mix" ? "perPizza" as const : "batch" as const,
+      name: recipe.name,
+      rows: (recipe.rows ?? []).map((row) => ({
+        ingredient: resolveImportName(row.ingredient, "ingredient", aliases),
+        amount: Number(row.lbs),
+      })),
+    }));
+    return classifyFormulaChanges(
+      loadCurrentFormulaRecipes().map((recipe) => ({
+        ...recipe,
+        rows: recipe.rows.map((row) => ({
+          ingredient: resolveImportName(row.ingredient, "ingredient", { ingredient: ingredientMergeAliases ?? [] }),
+          amount: row.amount,
+        })),
+      })),
+      incoming,
+    ).changes;
+  } catch {
+    return [];
+  }
+}
 /** Append a "rows dropped" advisory to a parse note when a workbook was too big. */
 function appendDroppedNote(note: string | undefined, droppedRows: number): string | undefined {
   if (droppedRows <= 0) return note;
@@ -1440,6 +1478,7 @@ async function buildReusedPrepared(
     newAliases: [],
     flagged: [],
     discrepancies,
+    formulaChanges: buildFormulaChanges(working, ingredientMergeAliases),
     ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
@@ -1771,6 +1810,7 @@ export async function prepareSpecImport(
     newAliases,
     flagged,
     discrepancies,
+    formulaChanges: buildFormulaChanges(parsed, ingredientMergeAliases),
     ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
@@ -2012,6 +2052,7 @@ export async function prepareSpecImportMulti(
     newAliases,
     flagged,
     discrepancies,
+    formulaChanges: buildFormulaChanges(parsed, ingredientMergeAliases),
     ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,

@@ -1294,6 +1294,27 @@ export default function SpecImportDialog({
                 </div>
               )}
 
+              {step === 2 && (prepared.formulaChanges?.length ?? 0) > 0 && (
+                <div
+                  className="rounded-md border border-border bg-muted/40 p-3 text-sm"
+                  data-testid="spec-formula-change-summary"
+                >
+                  <div className="font-medium text-foreground">Formula changes detected</div>
+                  <div className="mt-1 text-muted-foreground">
+                    {(["added", "removed", "renamed", "quantity-changed"] as const)
+                      .map((type) => {
+                        const count = (prepared.formulaChanges ?? []).filter((change) => change.type === type).length;
+                        return count > 0
+                          ? `${count} ${type === "quantity-changed" ? "quantity changed" : type}`
+                          : "";
+                      })
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {" "}— batch and per-pizza quantities are evaluated separately.
+                  </div>
+                </div>
+              )}
+
               {step === 2 && prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
                   <div className="flex items-center gap-2 text-amber-600">

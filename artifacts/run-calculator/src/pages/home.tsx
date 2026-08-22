@@ -11605,11 +11605,19 @@ export default function Home() {
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
+    // Capture the pre-import local state so the existing undo trail can restore
+    // a workbook replacement when a manager decides it was not intended.
+    const importRollbackBefore = captureMasterDataSnapshot();
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
+      recordMasterDataChange(
+        "merge",
+        `Recipe formula import: ${(toCommit.sourceNames ?? []).join(", ") || "spec sheet"}`,
+        importRollbackBefore,
+      );
       let specSnapshotId: number | null = null;
       try {
         const saved = await fetchSavedSpecSheets();

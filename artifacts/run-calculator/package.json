@@ -109,6 +109,7 @@
     "@workspace/day-summary": "workspace:*",
     "@workspace/downtime-trends": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
+    "@workspace/formula-guard": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/ingredient-catalog": "workspace:*",
     "@workspace/inventory-math": "workspace:*",

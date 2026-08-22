@@ -94,6 +94,7 @@ import {
 } from "./ingredients";
 import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, specImportRecipeHasUsablePoolData, countUsableRecipeRows, type ImportMergeAliasMap, type SpecAliasKind } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
+import type { FormulaRecipe } from "@workspace/formula-guard";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -114,6 +115,41 @@ export function loadList(key: string, fallback: string[]): string[] {
     if (raw) return JSON.parse(raw) as string[];
   } catch {}
   return fallback;
+}
+
+/** Current local formula pool with explicit units for import safety checks. */
+export function loadCurrentFormulaRecipes(): FormulaRecipe[] {
+  const out: FormulaRecipe[] = [];
+  const add = (
+    kind: FormulaRecipe["kind"],
+    unit: FormulaRecipe["unit"],
+    entries: Record<string, RecipeRow[]>,
+    names?: ReadonlyArray<string>,
+  ) => {
+    const allowed = names ? new Set(names.map((name) => name.trim().toLowerCase())) : null;
+    for (const [name, rows] of Object.entries(entries)) {
+      if (allowed && !allowed.has(name.trim().toLowerCase())) continue;
+      out.push({
+        kind,
+        unit,
+        name,
+        rows: (rows ?? []).map((row) => ({ ingredient: row.ingredient, amount: Number(row.lbs) })),
+      });
+    }
+  };
+  try {
+    const dough = loadDoughRecipePresets();
+    add("dough", "batch", Object.fromEntries(
+      Object.entries(dough).map(([name, preset]) => [name, preset.rows ?? []]),
+    ));
+    add("sauce", "batch", loadFrontlineRecipePresets());
+    const cheese = loadCheeseRecipePresets();
+    add("cheese", "batch", cheese, loadList(CHEESE_RECIPE_NAMES_KEY, []));
+    add("mix", "perPizza", cheese, loadList(MIX_RECIPE_NAMES_KEY, []));
+  } catch {
+    // Import review remains usable if local storage is unavailable.
+  }
+  return out;
 }
 
 // ── Factory KV write-through hook ────────────────────────────────────────────
