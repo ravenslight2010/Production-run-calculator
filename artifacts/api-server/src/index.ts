@@ -4,6 +4,7 @@ import { seedRoles } from "./lib/roles";
 import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent } from "./lib/observability";
+import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 
 const rawPort = process.env["PORT"];
 
@@ -52,6 +53,28 @@ async function startServer(): Promise<void> {
         logger.error({ err }, "Failed to seed sandbox user");
       });
     }
+
+    // Keep a persisted, read-only snapshot available even when nobody has
+    // opened the manager dashboard. Each environment is scanned separately;
+    // sandbox data never appears in the live report.
+    const intervalMs = Math.max(60_000, Number(process.env.MASTER_DATA_HEALTH_SCAN_INTERVAL_MS ?? 6 * 60 * 60 * 1000));
+    const scanScopes = sandboxAllowed() ? ["live", "sandbox"] : ["live"];
+    const scan = () => Promise.all(scanScopes.map(async (scope) => {
+      try {
+        const report = await runMasterDataHealthScan(scope);
+        logger.info({
+          event: "master_data_health_scan",
+          environment: report.environment,
+          outcome: "success",
+          safeCounts: { findings: report.findings.length, errors: report.summary.error, warnings: report.summary.warning },
+        }, "master-data health scan completed");
+      } catch (err) {
+        logger.error({ err, scope }, "master-data health scan failed");
+      }
+    }));
+    void scan();
+    const timer = setInterval(() => { void scan(); }, intervalMs);
+    timer.unref();
   });
 
   server.once("error", (err: NodeJS.ErrnoException) => {
