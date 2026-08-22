@@ -2501,6 +2501,22 @@ export function partitionTombstonedParse(
 export type RecipeApplyIssue = "missing-name" | "no-rows";
 
 /**
+ * Count recipe rows that can actually land as ingredient data. A parser can
+ * return rows with a label but no amount (or a blank label); those rows are
+ * not evidence of a recipe and must not be allowed to replace a populated
+ * recipe with an empty one.
+ */
+export function countUsableRecipeRows(
+  rows: ReadonlyArray<RecipeRow> | null | undefined,
+): number {
+  return (rows ?? []).filter((row) => {
+    const ingredient = (row.ingredient ?? "").trim();
+    const amount = Number(row.lbs);
+    return ingredient.length > 0 && Number.isFinite(amount) && amount > 0;
+  }).length;
+}
+
+/**
  * The reason a recipe would silently vanish at apply time, or null if it will
  * apply. `applySpecImport` skips recipes with a blank name or no rows; the review
  * screen uses this to flag them "needs attention" so nothing disappears quietly.
@@ -2508,7 +2524,7 @@ export type RecipeApplyIssue = "missing-name" | "no-rows";
  */
 export function recipeApplyIssue(r: ParsedRecipe): RecipeApplyIssue | null {
   if (!r.name || !r.name.trim()) return "missing-name";
-  if (!r.rows || r.rows.length === 0) return "no-rows";
+  if (countUsableRecipeRows(r.rows) === 0) return "no-rows";
   return null;
 }
 
@@ -2641,7 +2657,7 @@ export function updateRecipePoolComponents<
     if (!rows) return rec;
     const components = rows
       .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: r.lbs ?? 0 }))
-      .filter((c) => c.ingredient);
+      .filter((c) => c.ingredient && Number.isFinite(Number(c.lbs)) && Number(c.lbs) > 0);
     if (components.length === 0) return rec;
     const same =
       rec.components.length === components.length &&

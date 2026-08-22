@@ -2647,6 +2647,12 @@ describe("recipeApplyIssue / profileApplyIssue", () => {
       "missing-name",
     );
     expect(recipeApplyIssue({ kind: "sauce", name: "S", rows: [] })).toBe("no-rows");
+    expect(recipeApplyIssue({ kind: "sauce", name: "S", rows: [{ ingredient: "T", lbs: 0 }] })).toBe(
+      "no-rows",
+    );
+    expect(recipeApplyIssue({ kind: "sauce", name: "S", rows: [{ ingredient: " ", lbs: 4 }] })).toBe(
+      "no-rows",
+    );
     expect(recipeApplyIssue({ kind: "sauce", name: "S", rows: [{ ingredient: "T", lbs: 1 }] })).toBeNull();
   });
   it("flags missing brand then missing flavor", () => {

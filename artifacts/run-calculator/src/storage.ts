@@ -92,7 +92,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, specImportRecipeHasUsablePoolData, type ImportMergeAliasMap, type SpecAliasKind } from "@workspace/spec-import";
+import { mirrorSingleCheeseAcrossApplicators, assignApplicatorSlots, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, resolveImportName, specImportNameMatchKey, specImportBrandMatchKey, specImportNamedRecipeNamesEqual, findSpecImportNamedRecipeFamilyMatch, cleanSpecCheeseRecipeName, specImportRecipeHasUsablePoolData, countUsableRecipeRows, type ImportMergeAliasMap, type SpecAliasKind } from "@workspace/spec-import";
 import { matchDoughballVariant, normalizeDoughballVariants } from "@workspace/named-recipes";
 import type {
   ParsedSpecImport,
@@ -3984,7 +3984,10 @@ export function applySpecImport(
     // library or register the name/ingredients from this import.
     if (r.referenceOnly) continue;
     const name = r.name.trim();
-    if (!name || r.rows.length === 0) continue;
+    // A parser can preserve a row label while losing its amount. Treat that
+    // as an incomplete recipe, not as valid source data that should create or
+    // replace a local preset.
+    if (!name || countUsableRecipeRows(r.rows) === 0) continue;
     const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
     // Detect ingredient RENAMES vs the previously stored preset of the same
     // recipe: positional compare, same row count, same lbs — only then is a

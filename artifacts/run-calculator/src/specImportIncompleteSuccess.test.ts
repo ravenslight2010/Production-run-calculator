@@ -136,7 +136,21 @@ describe("commitSpecImport completeness", () => {
       },
     ]);
     saveNamedSpy.mockReset();
-    saveNamedSpy.mockResolvedValue([]);
+  saveNamedSpy.mockResolvedValue([
+    {
+      id: "dough-1",
+      name: "Classic Dough",
+      components: [{ ingredient: "Flour", lbs: 100 }],
+    },
+    {
+      id: "sauce-1",
+      name: "House Marinara",
+      components: [
+        { ingredient: "Crushed Tomato", lbs: 20 },
+        { ingredient: "Pull Garlic", lbs: 1.5 },
+      ],
+    },
+  ]);
   });
 
   it("passes the complete profile-linked recipe payload through the normal commit", async () => {
@@ -172,5 +186,12 @@ describe("commitSpecImport completeness", () => {
     await expect(commitSpecImport(prepared())).rejects.toThrow(
       "Save sauce recipes failed (503)",
     );
+  });
+
+  it("rejects when the server acknowledges fewer normalized components", async () => {
+    saveNamedSpy.mockResolvedValueOnce([
+      { id: "sauce-1", name: "House Marinara", components: [{ ingredient: "Crushed Tomato", lbs: 20 }] },
+    ]);
+    await expect(commitSpecImport(prepared())).rejects.toThrow("Import incomplete");
   });
 });

@@ -55,6 +55,11 @@ describe("updateRecipePoolComponents", () => {
     ]);
     expect(blank.updated).toBe(0);
     expect(blank.next[0]).toBe(pool[0]);
+    const zero = updateRecipePoolComponents(pool, [
+      { name: "Aldo's Cheese Mix", rows: [{ ingredient: "Mozzarella", lbs: 0 }] },
+    ]);
+    expect(zero.updated).toBe(0);
+    expect(zero.next[0]).toBe(pool[0]);
   });
 
   it("skips (updated=0, same object) when components already equal the rows", () => {

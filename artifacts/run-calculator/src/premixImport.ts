@@ -321,6 +321,10 @@ export async function commitPremixImport(
   extraAliases: ReadonlyArray<SpecImportAlias> = [],
   mixesToRemove: ReadonlyArray<string> = [],
 ): Promise<PremixCommitResult> {
+  // The review may be assembled by an older client or by a caller other than
+  // the current dialog. Re-apply the boundary guard here so an empty normalized
+  // mix cannot reach the server and replace populated data.
+  mixesToApply = mixesToApply.filter((mix) => (mix.components?.length ?? 0) > 0);
   // Nothing to apply at all — no mixes, no pull-note reminders, no removals.
   if (mixesToApply.length === 0 && freezerPulls.length === 0 && mixesToRemove.length === 0)
     return { freezerPullCount: 0 };

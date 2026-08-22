@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
   recipeApplyIssue,
+  countUsableRecipeRows,
   profileApplyIssue,
   buildSpecRenameMaps,
   remapRecipeForRenames,
@@ -1811,6 +1812,24 @@ function RecipeRow({
           {!linked && rowsPreview && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Read: {rowsPreview}
+            </div>
+          )}
+          {!linked && !item.orig.referenceOnly && (
+            <div
+              className="mt-1.5 text-xs text-muted-foreground"
+              data-testid={`spec-recipe-counts-${item.key}`}
+            >
+              Components: source {item.orig.rows?.length ?? 0} · normalized{" "}
+              {countUsableRecipeRows(item.orig.rows)} · landed pending
+            </div>
+          )}
+          {linked && !item.orig.referenceOnly && (
+            <div
+              className="mt-1.5 text-xs text-muted-foreground"
+              data-testid={`spec-recipe-counts-${item.key}`}
+            >
+              Components: source {item.orig.rows?.length ?? 0} · normalized{" "}
+              {countUsableRecipeRows(item.orig.rows)} · landed in “{linked}”
             </div>
           )}
 

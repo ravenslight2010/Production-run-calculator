@@ -254,14 +254,19 @@ export async function commitCheeseImport(
   newAliases: ReadonlyArray<SpecImportAlias> = [],
   recipesToRemove: ReadonlyArray<string> = [],
 ): Promise<CheeseCommitResult> {
+  // Commit is a second trust boundary: never write a name-only/empty recipe
+  // that could replace a populated server recipe during a re-import.
+  const recipesWithComponents = recipesToApply.filter(
+    (recipe) => (recipe.components?.length ?? 0) > 0,
+  );
   if (recipesToApply.length === 0 && recipesToRemove.length === 0) return { count: 0, saved: [] };
   const existing = await fetchCheeseRecipes();
   const removeSet = new Set(recipesToRemove);
   const afterRemoval = recipesToRemove.length > 0
     ? existing.filter((r) => !removeSet.has(r.id))
     : existing;
-  const merged = recipesToApply.length > 0
-    ? mergeCheeseRecipes(afterRemoval, recipesToApply)
+  const merged = recipesWithComponents.length > 0
+    ? mergeCheeseRecipes(afterRemoval, recipesWithComponents)
     : afterRemoval;
   const saved = await saveCheeseRecipes(merged);
   // Remember the review's manual "use existing recipe" picks as blend-name
@@ -347,5 +352,5 @@ export async function commitCheeseImport(
       );
     }
   }
-  return { count: recipesToApply.length, saved };
+  return { count: recipesWithComponents.length, saved };
 }

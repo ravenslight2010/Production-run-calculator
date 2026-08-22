@@ -55,6 +55,7 @@ import {
   splitGridsForPrompt,
   summarizeSpecImport,
   updateRecipePoolComponents,
+  countUsableRecipeRows,
   type CanonicalResult,
   type ExtraNameMatches,
   type NameMatch,
@@ -136,6 +137,26 @@ import {
 import type { ReviewVerdict } from "@workspace/ai-review";
 
 export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
+
+function assertNamedRecipeWriteLanded(
+  saved: ReadonlyArray<{ name: string; components?: ReadonlyArray<{ ingredient: string; lbs: number }> }>,
+  updates: ReadonlyArray<{ name: string; rows: ReadonlyArray<{ ingredient: string; lbs: number }> }>,
+): void {
+  // Keep compatibility with test/offline adapters that do not return the
+  // server's full-pool acknowledgement. The production client always returns
+  // an array, so real writes remain verified below.
+  if (!Array.isArray(saved)) return;
+  for (const update of updates) {
+    const landed = saved.find(
+      (recipe) => recipe.name.trim().toLowerCase() === update.name.trim().toLowerCase(),
+    );
+    if (!landed || countUsableRecipeRows(landed.components) < countUsableRecipeRows(update.rows)) {
+      throw new Error(
+        `Import incomplete: recipe "${update.name}" landed with fewer components than the normalized source.`,
+      );
+    }
+  }
+}
 
 export type SpecImportPrepared = {
   /** Canonicalized, ready-to-apply parse result. */
@@ -1260,7 +1281,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "29";
+export const SPEC_PARSE_VERSION = "30";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -2502,7 +2523,7 @@ export async function commitSpecImport(
     const drafts = collectSpecImportCheeseRecipes(scopedParsed, userMixNamesLower);
     const candidates = drafts
       .map((d) => specCheeseDraftToRecipe(d))
-      .filter((r): r is CheeseRecipe => r != null);
+      .filter((r): r is CheeseRecipe => r != null && r.components.length > 0);
     if (drafts.length) {
       const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
       const { merged, added, updated } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
@@ -2538,7 +2559,8 @@ export async function commitSpecImport(
     try {
       const upd = updateRecipePoolComponents(pool, updates);
       if (upd.updated > 0) {
-        await saveNamedRecipes(kind, upd.next);
+        const saved = await saveNamedRecipes(kind, upd.next);
+        assertNamedRecipeWriteLanded(saved, updates);
         recipesUpdated += upd.updated;
       }
     } catch (error) {
