@@ -1,4 +1,4 @@
-import { createContext, memo, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
@@ -126,6 +126,7 @@ import {
   archiveDayToHistory,
   loadRunValues,
   saveRunValues,
+  subscribeRunValuesWrites,
   loadRunValuesUpdated,
   saveRunValuesUpdated,
   markRunValuesUpdated,
@@ -440,7 +441,13 @@ import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
-import { recordPerformance } from "../performanceDiagnostics";
+import { recordMemorySample, recordPerformance } from "../performanceDiagnostics";
+import {
+  buildActiveRunIds,
+  buildPersistedRunValues,
+  buildRunSummarySnapshot,
+  overlayCurrentRunValues,
+} from "../homePerformance";
 import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
@@ -647,6 +654,15 @@ applyMixCheeseOverlapDedupeIfNeeded();
 // inside Home instead of at module init (see the profile-heal effect there).
 
 type NeedRow = { label: string; value: string; sub?: string; area?: WarehouseArea };
+
+function recordHomeCommit(
+  _id: string,
+  phase: "mount" | "update" | "nested-update",
+  actualDuration: number,
+): void {
+  recordPerformance(`home-commit:${phase}`, actualDuration, "render");
+  if (phase === "mount") recordPerformance("initial-load", actualDuration, "load");
+}
 
 function buildNeedRows(vals: FormValues): {
   dough: NeedRow[];
@@ -2800,15 +2816,6 @@ const GroupedPanel = ({
 // (imported at top of file)
 
 export default function Home() {
-  const initialRenderStartedAtRef = useRef(
-    typeof performance === "undefined" ? null : performance.now(),
-  );
-  useEffect(() => {
-    const startedAt = initialRenderStartedAtRef.current;
-    if (startedAt === null || typeof performance === "undefined") return;
-    recordPerformance("initial-load", performance.now() - startedAt, "load");
-    initialRenderStartedAtRef.current = null;
-  }, []);
   const {
     signOut,
     forceSignedOut,
@@ -2927,10 +2934,18 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
   const [sauceWeightsOpen, setSauceWeightsOpen] = useState(false);
-  // Bumped on each write to a non-active draining run so the Packaging
-  // "Finishing — Freezer Draining" panel re-renders immediately (its values are
-  // read from persisted run storage, not the live form).
-  const [, setDrainBump] = useState(0);
+  // Bumped on each write to a non-active run so cached day snapshots refresh.
+  // Active-form writes already flow through `v`; ignoring those avoids a
+  // production-scale storage scan on every keystroke/autosave.
+  const [runValuesRevision, setRunValuesRevision] = useState(0);
+  useEffect(
+    () => subscribeRunValuesWrites((runId) => {
+      if (runId !== currentRunIdRef.current) {
+        setRunValuesRevision((revision) => revision + 1);
+      }
+    }),
+    [],
+  );
 
   // ── Historical PPM benchmark (average of finished runs across all days) ───
   const histBenchmarkPpm = useMemo(() => {
@@ -3762,6 +3777,11 @@ export default function Home() {
   // Navigation owns only tab persistence/history. Run selection and lifecycle
   // transitions remain in Home's day-state coordinator.
   const { activeTab, setActiveTab, goBack } = useHomeNavigation();
+  useEffect(() => {
+    recordMemorySample("home:mount");
+    const interval = window.setInterval(() => recordMemorySample("home:interval"), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -11207,8 +11227,8 @@ export default function Home() {
   // Persist skid/case progress for a SPECIFIC (non-active) draining run. The
   // active run writes through the live form + autosave effect; a just-ended run
   // still draining its freezer is written here through the EXISTING per-run
-  // saveRunValues path (no new write surface), pushed to sync, and a bump forces
-  // an immediate re-render of the draining panel. Manual logging only — we never
+  // saveRunValues path (no new write surface), pushed to sync, and its shared
+  // write notification refreshes cached views. Manual logging only — we never
   // auto-track a non-active ended run. Mirrored on mobile (replit.md parity).
   function updateDrainingRunValues(
     id: string,
@@ -11239,7 +11259,6 @@ export default function Home() {
     markRunValuesUpdated(id, now);
     lastLocalEditRef.current = now;
     schedulePush(dayStateRef.current, 0);
-    setDrainBump((b) => b + 1);
   }
 
   function flashSaved() {
@@ -13008,6 +13027,186 @@ export default function Home() {
     [history, dayState.runs],
   );
 
+  // ── Production-scale derived snapshots ───────────────────────────────────
+  // Persisted run values are independent of the active form. Keep them in a
+  // day snapshot so typing into the current run does not scan localStorage for
+  // every other run on every keystroke. The drain bump covers edits to an
+  // inactive run that are intentionally written outside the active form. Every
+  // saveRunValues call advances the shared revision, including sync adoption
+  // and recipe application paths that do not change the day-state array.
+  const persistedRunValues = useMemo(
+    () => {
+      const startedAt = typeof performance === "undefined" ? null : performance.now();
+      const values = buildPersistedRunValues(dayState.runs, loadRunValues);
+      if (startedAt !== null && typeof performance !== "undefined") {
+        recordPerformance("run-values-storage-scan", performance.now() - startedAt, "storage");
+      }
+      return values;
+    },
+    [dayState.runs, runValuesRevision],
+  );
+  const runValuesById = useMemo(
+    () => overlayCurrentRunValues(persistedRunValues, currentRunId, v),
+    [persistedRunValues, currentRunId, v],
+  );
+  const needsWarehouseSnapshot = activeTab === "warehouse" || screenMode === "warehouse";
+  const needsInventorySnapshot = activeTab === "inventory";
+  const needsSummarySnapshot = activeTab === "summary" || screenMode === "summary";
+  const persistedRunSummaryStats = useMemo(
+    () => needsSummarySnapshot
+      ? buildRunSummarySnapshot(dayState.runs, persistedRunValues, computeSummaryStats)
+      : new Map(),
+    [needsSummarySnapshot, dayState.runs, persistedRunValues],
+  );
+  const runSummaryStatsById = useMemo(
+    () => {
+      if (!needsSummarySnapshot) return new Map();
+      const summaries = new Map(persistedRunSummaryStats);
+      if (currentRunId) summaries.set(currentRunId, computeSummaryStats(v));
+      return summaries;
+    },
+    [needsSummarySnapshot, persistedRunSummaryStats, currentRunId, v],
+  );
+  const activeRunIds = useMemo(() => buildActiveRunIds(dayState.runs), [dayState.runs]);
+  const activeRuns = useMemo(
+    () => {
+      const ids = new Set(activeRunIds);
+      return dayState.runs.filter((run) => ids.has(run.id));
+    },
+    [dayState.runs, activeRunIds],
+  );
+  const activeRunValues = useMemo(
+    () => needsWarehouseSnapshot
+      ? activeRunIds.map((id) => runValuesById.get(id)).filter((values): values is FormValues => !!values)
+      : [],
+    [needsWarehouseSnapshot, activeRunIds, runValuesById],
+  );
+  const activeWarehouseRows = useMemo(
+    () => needsWarehouseSnapshot ? aggregateNeedRows(activeRunValues, {
+      warehouse: true,
+      mixComponentsByName: serverMixComponentsByName,
+    }) : [],
+    [needsWarehouseSnapshot, activeRunValues, serverMixComponentsByName],
+  );
+  const activePackagingRows = useMemo(
+    () => needsWarehouseSnapshot ? aggregatePackagingNeeds(activeRunValues) : [],
+    [needsWarehouseSnapshot, activeRunValues],
+  );
+  const activeRunNeedDetails = useMemo(
+    () => needsWarehouseSnapshot ? new Map(activeRuns.map((run) => {
+      const values = runValuesById.get(run.id) ?? DEFAULT_VALUES;
+      return {
+        id: run.id,
+        summary: runSummaryStatsById.get(run.id) ?? computeSummaryStats(values),
+        rows: [
+          ...aggregateNeedRows([values], {
+            warehouse: true,
+            mixComponentsByName: serverMixComponentsByName,
+          }),
+          ...aggregatePackagingNeeds([values]),
+        ],
+      };
+    }).map((detail) => [detail.id, detail] as const)) : new Map(),
+    [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById, serverMixComponentsByName],
+  );
+  const scheduledWarehouseRuns = useMemo(
+    () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
+      (day.runs ?? [])
+        .filter((run) => run.brand)
+        .map((run) => {
+          const profile = loadProfile(run.brand, run.flavor);
+          const values: FormValues = {
+            ...(profile ?? DEFAULT_VALUES),
+            casesNeeded: run.casesNeeded,
+            ...(run.dieType ? { dieType: run.dieType } : {}),
+          };
+          const needRows = [
+            ...aggregateNeedRows([values], {
+              warehouse: true,
+              mixComponentsByName: serverMixComponentsByName,
+            }),
+            ...aggregatePackagingNeeds([values]),
+          ];
+          return {
+            date: day.date,
+            brand: run.brand,
+            flavor: run.flavor,
+            ingredients: needRows.map((row) => ({
+              name: row.label,
+              quantity: row.value,
+              unit: row.sub ?? "",
+            })),
+          };
+        }),
+    ) : [],
+    [needsWarehouseSnapshot, scheduledDays, serverMixComponentsByName],
+  );
+  const freezerPullPlan = useMemo(
+    () => needsWarehouseSnapshot ? buildFreezerPullPlan({
+      runs: scheduledWarehouseRuns,
+      freezerItems: freezerPullItems,
+      today: todayStr(),
+    }) : [],
+    [needsWarehouseSnapshot, scheduledWarehouseRuns, freezerPullItems],
+  );
+  const scheduledValues = useMemo(
+    () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
+      (day.runs ?? [])
+        .filter((run) => run.brand)
+        .map((run) => ({
+          ...((loadProfile(run.brand, run.flavor) ?? DEFAULT_VALUES)),
+          casesNeeded: run.casesNeeded,
+          ...(run.dieType ? { dieType: run.dieType } : {}),
+        } as FormValues)),
+    ) : [],
+    [needsWarehouseSnapshot, scheduledDays],
+  );
+  const todayScheduledValues = useMemo(() => {
+    if (!needsWarehouseSnapshot) return [];
+    const todayKey = todayStr();
+    return scheduledDays
+      .filter((day) => day.date === todayKey)
+      .flatMap((day) =>
+        (day.runs ?? [])
+          .filter((run) => run.brand)
+          .map((run) => ({
+            ...((loadProfile(run.brand, run.flavor) ?? DEFAULT_VALUES)),
+            casesNeeded: run.casesNeeded,
+            ...(run.dieType ? { dieType: run.dieType } : {}),
+          } as FormValues)),
+      );
+  }, [needsWarehouseSnapshot, scheduledDays]);
+  const inventoryRunValues = useMemo(
+    () => needsInventorySnapshot
+      ? dayState.runs.map((run) => runValuesById.get(run.id) ?? DEFAULT_VALUES)
+      : [],
+    [needsInventorySnapshot, dayState.runs, runValuesById],
+  );
+  const inventoryCandidates = useMemo(
+    () => needsInventorySnapshot ? deriveCandidateItems(inventoryRunValues) : [],
+    [needsInventorySnapshot, inventoryRunValues],
+  );
+  const inventorySubstitutionOptions = useMemo(() => {
+    if (!needsInventorySnapshot) return [];
+    const options = new Set<string>(inventoryCandidates.map((candidate) => candidate.name));
+    for (const values of inventoryRunValues) {
+      const recipes = [
+        values.doughRecipe, values.frontlineRecipe,
+        values.app1CheeseRecipe, values.app2CheeseRecipe,
+        values.app3CheeseRecipe, values.app4CheeseRecipe,
+      ];
+      for (const rows of recipes) {
+        for (const row of rows ?? []) if (row?.ingredient) options.add(row.ingredient);
+      }
+      for (const type of [
+        values.app1Type, values.app2Type, values.app3Type, values.app4Type,
+        values.pep1Type, values.pep2Type,
+      ]) {
+        if (type) options.add(type);
+      }
+    }
+    return [...options].sort();
+  }, [needsInventorySnapshot, inventoryCandidates, inventoryRunValues]);
 
   // ── Context value for extracted sub-components ──────────────────────────
   // Wrapped in useMemo so the object reference only changes when reactive
@@ -13018,7 +13217,7 @@ export default function Home() {
   // stable by React contract and also omitted.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const homeCtxValue = useMemo(() => ({
-    RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activeStopId, activeTab, addBrand,
+    RECIPE_CATEGORY_LABELS, ackKey, activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, addBrand,
     addCheeseIngredient, addCheeseRecipeName, addDieType, addDoughIngredient, addDoughRecipeName, addFlavor,
     addFrontlineIngredient, addFrontlineRecipeName, addIngredientType, addManualStop, addMixIngredient, addMixRecipeName,
     addPepType, addRun, addRunWithIdentity, addSubstitution, allMixRecipeOptions, allergenWarnings,
@@ -13079,7 +13278,7 @@ export default function Home() {
     renameDoughRecipeName, renameFlavor, renameFrontlineIngredient, renameFrontlineRecipeName, renameIngredientType, renameMixIngredient,
     renameMixRecipeName, renamePepType, replaceCheese1, replaceCheese2, replaceCheese3, replaceCheese4,
     replaceDough, replaceFrontline, resetFieldArrays, resetMergeForm, resolvedPin,
-    resumeRun, revalidate, role, ruleViolations, runStatus, runToTime,
+    resumeRun, revalidate, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
     scheduleEditorLoadedRunIdsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
@@ -13091,7 +13290,7 @@ export default function Home() {
     setCheeseImportError, setCheeseImportLoading, setCheeseImportPrepared, setCheeseImportProgress, setCheeseIngredients, setCheeseRecipeNames,
     setCircles, setConfirmDeleteBrand, setConfirmDeleteFlavor, setConfirmDeleteStopId, setConfirmRemoveBlanks, setConfirmRemoveRun,
     setCopiedSummary, setDayState, setDieTypes, setDoughIngredients, setDoughRecipeNames, setDoughSubTab,
-    setDoughVariantPick, setDrainBump, setEditingStop, setExpandedHistoryDay, setExpandedScheduleDay, setExportSelection,
+    setDoughVariantPick, setEditingStop, setExpandedHistoryDay, setExpandedScheduleDay, setExportSelection,
     setExporting, setFlavorInput, setFloorDimmed, setFrontlineIngredients, setFrontlineRecipeNames, setGripSheets,
     setHistory, setImportDefaultDate, setImportIntoEditor, setImportProgress, setImportResult, setIngredientTypes,
     setIsFullscreen, setIsOnline, setManageBrandFilter, setManageCategory, setManageInput, setManualStopEnd,
@@ -13135,7 +13334,7 @@ export default function Home() {
     // setState dispatches (set*), refs (*Ref), plain-function callbacks, and
     // constants are intentionally omitted: they are either stable by React
     // contract or their correctness is guaranteed by the state deps below.
-    activeCasts, activeStopId, activeTab, allergenWarnings, allMixRecipeOptions,
+    activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
     batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brandInput, brands,
     canApproveResets, canEditRules, canManageInventory, canManageStaff,
     caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
@@ -13173,7 +13372,7 @@ export default function Home() {
     premixImportApplying, premixImportError, premixImportLoading,
     premixImportPrepared, premixImportProgress, proactiveAlert, productionRules,
     promotingRecipeKind, resolvedPin, pauseDecisionRunId, role, ruleViolations,
-    runStatus, runToTime, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
+    runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
     scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
     scheduleMove, scheduleMoveDate, scheduleMoving, scheduleSaving,
@@ -13223,7 +13422,7 @@ export default function Home() {
     () => homeCtxValueRef.current,
     [
       // ── Production / run state ──
-      activeCasts, activeStopId, activeTab, allergenWarnings, allMixRecipeOptions,
+      activeCasts, activePackagingRows, activeStopId, activeTab, activeWarehouseRows, allergenWarnings, allMixRecipeOptions,
       batchWeightsLoaded, blankRunIds, blockingViolations, brandFlavors, brands,
       canApproveResets, canEditRules, canManageInventory, canManageStaff,
       caseUpdateAccepted, caseUpdatePrompt, castSupported, changeHistory,
@@ -13244,7 +13443,7 @@ export default function Home() {
       me, mixIngredients, mixMakeDay, mixNameBrandTags, mixRecipeNames, mixes,
       newReasonInput, nextRunDieType,
       pep1ShowB, pep2ShowB, pepTypes, proactiveAlert, productionRules,
-      promotingRecipeKind, role, ruleViolations, runStatus, runToTime,
+      promotingRecipeKind, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
       saucePoolDrift, sauceRecipesList, sauceWeightsOpen, scheduledDays,
       screenMode, serverCheeseByName, serverCheeseNames, serverCheeseRowsByName,
       serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
@@ -15177,40 +15376,7 @@ export default function Home() {
                     each via its profile -> FormValues -> need rows, exactly like
                     the schedule editor / per-run breakdown. */}
                 {(() => {
-                  const runs = scheduledDays.flatMap((day) =>
-                    (day.runs ?? [])
-                      .filter((r) => r.brand)
-                      .map((r) => {
-                        const profile = loadProfile(r.brand, r.flavor);
-                        const vals: FormValues = {
-                          ...(profile ?? DEFAULT_VALUES),
-                          casesNeeded: r.casesNeeded,
-                          ...(r.dieType ? { dieType: r.dieType } : {}),
-                        };
-                        const needRows: NeedRow[] = [
-                          ...aggregateNeedRows([vals], {
-                            warehouse: true,
-                            mixComponentsByName: serverMixComponentsByName,
-                          }),
-                          ...aggregatePackagingNeeds([vals]),
-                        ];
-                        return {
-                          date: day.date,
-                          brand: r.brand,
-                          flavor: r.flavor,
-                          ingredients: needRows.map((row) => ({
-                            name: row.label,
-                            quantity: row.value,
-                            unit: row.sub ?? "",
-                          })),
-                        };
-                      }),
-                  );
-                  const plan = buildFreezerPullPlan({
-                    runs,
-                    freezerItems: freezerPullItems,
-                    today: todayStr(),
-                  });
+                  const plan = freezerPullPlan;
                   if (plan.length === 0) return null;
                   return (
                     <div className="space-y-3 mb-4">
@@ -15314,53 +15480,17 @@ export default function Home() {
                     runs carry no recipe rows, so resolve each via its profile ->
                     FormValues (same pattern as the freezer-pull / per-run blocks)
                     and feed them as the demand basis. Advisory only. */}
-                {(() => {
-                  const scheduledValsList: FormValues[] = scheduledDays.flatMap((day) =>
-                    (day.runs ?? [])
-                      .filter((r) => r.brand)
-                      .map((r) => {
-                        const profile = loadProfile(r.brand, r.flavor);
-                        return {
-                          ...(profile ?? DEFAULT_VALUES),
-                          casesNeeded: r.casesNeeded,
-                          ...(r.dieType ? { dieType: r.dieType } : {}),
-                        } as FormValues;
-                      }),
-                  );
-                  return <ReorderCard scheduledValsList={scheduledValsList} />;
-                })()}
+                <ReorderCard scheduledValsList={scheduledValues} />
                 {/* Use First: stock lots expiring within the configured window
                     (plus any already past), ordered first-expired-first-out, with
                     the lots used by today's runs surfaced to the top. Today's runs
                     = active runs + runs scheduled for today, resolved to their
                     FormValues. Deterministic counterpart to the AI waste insight;
                     advisory only. */}
+                <UseFirstCard todayValsList={[...activeRunValues, ...todayScheduledValues]} />
                 {(() => {
-                  const activeVals: FormValues[] = dayState.runs
-                    .filter((r) => !r.endedAt)
-                    .map((r) => loadRunValues(r.id));
-                  const todayKey = todayStr();
-                  const todayScheduledVals: FormValues[] = scheduledDays
-                    .filter((d) => d.date === todayKey)
-                    .flatMap((d) =>
-                      (d.runs ?? [])
-                        .filter((r) => r.brand)
-                        .map((r) => {
-                          const profile = loadProfile(r.brand, r.flavor);
-                          return {
-                            ...(profile ?? DEFAULT_VALUES),
-                            casesNeeded: r.casesNeeded,
-                            ...(r.dieType ? { dieType: r.dieType } : {}),
-                          } as FormValues;
-                        }),
-                    );
-                  return <UseFirstCard todayValsList={[...activeVals, ...todayScheduledVals]} />;
-                })()}
-                {(() => {
-                  const activeRuns = dayState.runs.filter(r => !r.endedAt);
-                  const valsList = activeRuns.map(r => loadRunValues(r.id));
-                  const agg = aggregateNeedRows(valsList, { warehouse: true });
-                  const pkg = aggregatePackagingNeeds(valsList);
+                  const agg = activeWarehouseRows;
+                  const pkg = activePackagingRows;
                   return (
                     <>
                       <Card className="bg-card/60 border-border/50 shadow-md mb-4">
@@ -15393,7 +15523,6 @@ export default function Home() {
                     run instead of reading off one combined total. Reuses the
                     same need/packaging math as the roll-up above. */}
                 {(() => {
-                  const activeRuns = dayState.runs.filter(r => !r.endedAt);
                   if (activeRuns.length === 0) return null;
                   return (
                     <details className="group mb-4 rounded-xl border border-border/50 bg-card/60 shadow-md" data-testid="warehouse-run-details">
@@ -15406,12 +15535,13 @@ export default function Home() {
                       </summary>
                       <div className="border-t border-border/40 px-4 pb-4 pt-4 space-y-3">
                         {activeRuns.map((r) => {
-                          const vals = loadRunValues(r.id);
-                          const s = computeSummaryStats(vals);
-                          const rows = [...aggregateNeedRows([vals], { warehouse: true }), ...aggregatePackagingNeeds([vals])];
+                          const detail = activeRunNeedDetails.get(r.id);
+                          const vals = runValuesById.get(r.id) ?? DEFAULT_VALUES;
+                          const s = detail?.summary ?? computeSummaryStats(vals);
+                          const rows = detail?.rows ?? [];
                           const estSec = s.estimatedTimeSec;
                           const staged = dayState.stagedItems ?? {};
-                          const stagedCount = rows.filter(row => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;
+                          const stagedCount = rows.filter((row: NeedRow) => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;
                           return (
                             <div key={r.id} className="rounded-md border border-border/40 bg-muted/10 p-3" data-testid={`warehouse-run-${r.id}`}>
                               <div className="flex items-baseline justify-between gap-2 mb-1.5">
@@ -15503,33 +15633,16 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="inventory">
-                {(() => {
-                  const valsList = dayState.runs.map(r => r.id === currentRunId ? form.getValues() : loadRunValues(r.id));
-                  const candidates = deriveCandidateItems(valsList);
-                  // Suggestions for the substitution pickers: consumption-key names
-                  // (cheese/pep types, Dough, Sauce, packaging) plus every recipe-row
-                  // ingredient and non-empty type value across today's runs, so staff
-                  // can target a recipe ingredient (e.g. Flour) too. Free text allowed.
-                  const optSet = new Set<string>(candidates.map(c => c.name));
-                  for (const v of valsList) {
-                    const recipes = [
-                      v.doughRecipe, v.frontlineRecipe,
-                      v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe,
-                    ];
-                    for (const rows of recipes) for (const r of rows ?? []) if (r?.ingredient) optSet.add(r.ingredient);
-                    for (const t of [v.app1Type, v.app2Type, v.app3Type, v.app4Type, v.pep1Type, v.pep2Type]) if (t) optSet.add(t);
-                  }
-                  return <InventoryTab
-                    candidates={candidates}
-                    runValsList={valsList}
-                    substitutions={dayState.substitutions ?? []}
-                    substitutionLog={dayState.substitutionLog ?? []}
-                    substitutionOptions={[...optSet].sort()}
-                    onAddSubstitution={addSubstitution}
-                    onRemoveSubstitution={removeSubstitution}
-                    onClearSubstitutions={clearSubstitutions}
-                  />;
-                })()}
+                <InventoryTab
+                  candidates={inventoryCandidates}
+                  runValsList={inventoryRunValues}
+                  substitutions={dayState.substitutions ?? []}
+                  substitutionLog={dayState.substitutionLog ?? []}
+                  substitutionOptions={inventorySubstitutionOptions}
+                  onAddSubstitution={addSubstitution}
+                  onRemoveSubstitution={removeSubstitution}
+                  onClearSubstitutions={clearSubstitutions}
+                />
               </TabsContent>
 
               {/* ─── MIX PLAN ─── */}
@@ -17507,9 +17620,10 @@ export default function Home() {
   );
 
   return (
-    <HomeCtx.Provider value={homeCtxValue}>
-      <HomeTabCtx.Provider value={homeTabCtxValue}>
-      <LiveRunProvider
+    <Profiler id="home" onRender={recordHomeCommit}>
+      <HomeCtx.Provider value={homeCtxValue}>
+        <HomeTabCtx.Provider value={homeTabCtxValue}>
+        <LiveRunProvider
         v={v}
         ve={ve}
         runStatus={runStatus}
@@ -17534,9 +17648,10 @@ export default function Home() {
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
         {screenMode ? <ScreenModeView /> : mainContent}
-      </LiveRunProvider>
-      </HomeTabCtx.Provider>
-    </HomeCtx.Provider>
+        </LiveRunProvider>
+        </HomeTabCtx.Provider>
+      </HomeCtx.Provider>
+    </Profiler>
   );
 }
 
@@ -17548,7 +17663,8 @@ export default function Home() {
 
 function ScreenModeView() {
   const {
-    currentRun, dayState, doughSubTab, nextRunDieType, runStatus,
+    activePackagingRows, activeWarehouseRows, currentRun, dayState, doughSubTab, nextRunDieType, runStatus,
+    runSummaryStatsById, runValuesById,
     scheduledDays, screenMode, v, ve,
   } = useHomeTabCtx();
 
@@ -18091,10 +18207,9 @@ function ScreenModeView() {
 
   if (screenMode === "warehouse") {
     const activeRuns = dayState.runs.filter((r: any) => !r.endedAt);
-    const valsList = activeRuns.map((r: any) => loadRunValues(r.id));
     const warehouseRows = [
-      ...aggregateNeedRows(valsList, { warehouse: true }),
-      ...aggregatePackagingNeeds(valsList),
+      ...activeWarehouseRows,
+      ...activePackagingRows,
     ];
     const warehouseGroups = groupWarehouseNeedRows(warehouseRows);
     return (
@@ -18154,7 +18269,13 @@ function ScreenModeView() {
 
   if (screenMode === "summary") {
     const finished = dayState.runs.filter((r: any) => !!r.endedAt);
-    const totalCases = finished.reduce((s: any, r: any) => s + (computeSummaryStats(loadRunValues(r.id)).totalCases), 0);
+    const totalCases = finished.reduce(
+      (sum: number, run: RunMeta) => sum + (
+        runSummaryStatsById.get(run.id)?.totalCases ??
+        computeSummaryStats(runValuesById.get(run.id) ?? DEFAULT_VALUES).totalCases
+      ),
+      0,
+    );
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
         <div className="flex items-center justify-between">
@@ -18166,8 +18287,8 @@ function ScreenModeView() {
         </div>
         <div className="grid grid-cols-2 gap-4 flex-1">
           {dayState.runs.map((run: any, i: any) => {
-            const vals = i === dayState.currentIndex ? v : loadRunValues(run.id);
-            const s = computeSummaryStats(vals);
+            const vals = runValuesById.get(run.id) ?? DEFAULT_VALUES;
+            const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
             const isCurr = i === dayState.currentIndex;
             const isDone = !!run.endedAt;
             return (
@@ -23476,6 +23597,7 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
     copiedSummary, currentRun, dayState, expandedHistoryDay,
     exportCSV, exportExcel, exportHistoryCSV, exportQuickBooks,
     histBenchmarkPpm, history, isSupervisor, printSummary,
+    runSummaryStatsById, runValuesById,
     setActiveTab, setCopiedSummary, setDayState, setExpandedHistoryDay,
     switchToRun, updateRunMeta, v,
   } = hx;
@@ -23576,8 +23698,8 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                   const upcomingRuns = dayState.runs.filter((r: any, i: any) => !r.endedAt && i !== dayState.currentIndex);
 
                   function SummaryCard({ run, isCurrent, readOnly, runVals, onShowDetail }: { run: RunMeta; isCurrent?: boolean; readOnly?: boolean; runVals?: FormValues; onShowDetail: () => void }) {
-                    const vals = runVals ?? (isCurrent ? v : loadRunValues(run.id));
-                    const s = computeSummaryStats(vals);
+                    const vals = runVals ?? runValuesById.get(run.id) ?? DEFAULT_VALUES;
+                    const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
                     const isFinished = !!run.endedAt;
                     const actualDurationSec = run.startedAt && run.endedAt
                       ? (run.endedAt - run.startedAt) / 1000
@@ -23825,10 +23947,10 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                   }
 
                   // ── Day Totals ──────────────────────────────────────────
-                  const allRunStats = dayState.runs.map((run: any) => {
-                    const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
-                    return computeSummaryStats(vals);
-                  });
+                  const allRunStats = dayState.runs.map((run: any) =>
+                    runSummaryStatsById.get(run.id) ??
+                    computeSummaryStats(runValuesById.get(run.id) ?? DEFAULT_VALUES),
+                  );
                   const dayTotalCases = allRunStats.reduce((sum: any, s: any) => sum + s.totalCases, 0);
                   const dayTotalPizzas = allRunStats.reduce((sum: any, s: any) => sum + s.totalPizzas, 0);
                   const dayActualCases = dayState.runs.reduce((sum: any, r: any) => sum + (r.actualCases ?? 0), 0);
@@ -23845,8 +23967,8 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     else shopMap.set(key, { name, totalQty: qty, unit });
                   }
                   for (const run of dayState.runs) {
-                    const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
-                    const s = computeSummaryStats(vals);
+                    const vals = runValuesById.get(run.id) ?? DEFAULT_VALUES;
+                    const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
                     // Dough batches needed (calc inline from vals, same logic as Ingredient Needs)
                     const totalPizzas = s.totalPizzas;
                     const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc: number, r: { lbs: number }) => acc + Number(r.lbs ?? 0), 0);

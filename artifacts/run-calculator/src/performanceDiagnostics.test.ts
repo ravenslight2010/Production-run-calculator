@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearPerformanceDiagnostics,
   fetchWithDiagnostics,
+  getMemoryDiagnostics,
   getPerformanceDiagnostics,
   PERFORMANCE_BUDGETS,
+  recordMemorySample,
   recordPerformance,
 } from "./performanceDiagnostics";
 
@@ -31,6 +33,13 @@ describe("calculator performance diagnostics", () => {
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls[0]?.[1]).toMatchObject({ name: "initial-load", budgetMs: 1500 });
     expect(warn.mock.calls[1]?.[1]).toMatchObject({ name: "tab:warehouse", budgetMs: 250 });
+  });
+
+  it("applies calculation and storage budgets", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recordPerformance("live-calculation", PERFORMANCE_BUDGETS.calculationMs + 1, "calculation");
+    recordPerformance("run-values-storage-scan", PERFORMANCE_BUDGETS.storageScanMs + 1, "storage");
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
   it("ignores invalid durations instead of polluting diagnostics", () => {
@@ -63,5 +72,20 @@ describe("calculator performance diagnostics", () => {
       expect.objectContaining({ name: "api-failure:/api/items:network", kind: "api" }),
     ]);
     expect(JSON.stringify(getPerformanceDiagnostics())).not.toContain("private-data");
+  });
+
+  it("records bounded heap samples only when the browser exposes heap metrics", () => {
+    Object.defineProperty(performance, "memory", {
+      configurable: true,
+      value: { usedJSHeapSize: 1_024, totalJSHeapSize: 2_048 },
+    });
+    for (let index = 0; index < 45; index += 1) recordMemorySample(`sample:${index}`);
+
+    expect(getMemoryDiagnostics()).toHaveLength(40);
+    expect(getMemoryDiagnostics()[0]).toEqual({
+      name: "sample:5",
+      usedHeapBytes: 1_024,
+      totalHeapBytes: 2_048,
+    });
   });
 });

@@ -1550,6 +1550,24 @@ export function loadRunValues(id: string): FormValues {
 
 export function saveRunValues(id: string, values: FormValues): void {
   try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("run-calculator:run-values-written", { detail: { id } }));
+  }
+}
+
+/**
+ * Subscribe to every local run-value write. This makes consumers that cache
+ * multiple run records correct for writes made outside the active form
+ * (autosave, sync adoption, recipe application, and draining-run updates).
+ */
+export function subscribeRunValuesWrites(listener: (runId: string) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const eventName = "run-calculator:run-values-written";
+  const handleWrite = (event: Event) => listener(
+    (event as CustomEvent<{ id?: unknown }>).detail?.id as string,
+  );
+  window.addEventListener(eventName, handleWrite);
+  return () => window.removeEventListener(eventName, handleWrite);
 }
 
 // Per-run monotonic edit timestamps (run id -> ms of last local edit). Synced via

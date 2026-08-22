@@ -10,7 +10,7 @@
     "pretypecheck": "pnpm --filter @workspace/spec-import exec tsc -b",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:performance": "vitest run src/performanceDiagnostics.test.ts src/warehouseGrouping.test.ts",
+    "test:performance": "vitest run src/performanceDiagnostics.test.ts src/homePerformance.test.ts src/warehouseGrouping.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.smoke.config.ts",
     "test:e2e:sync-convergence": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.sync-convergence.config.ts",

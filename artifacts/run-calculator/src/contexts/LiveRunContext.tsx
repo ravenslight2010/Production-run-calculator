@@ -23,6 +23,7 @@ import { detectStallFromDelta } from "@workspace/downtime-trends";
 import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
+import { recordPerformance } from "../performanceDiagnostics";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -196,6 +197,7 @@ export function LiveRunProvider({
 
   // ── Core production calc ─────────────────────────────────────────────────
   const calc = useMemo((): Calc => {
+    const calcStartedAt = typeof performance === "undefined" ? null : performance.now();
     const ppm =
       Math.round(
         (doughSubTab === "crusts"
@@ -383,7 +385,7 @@ export function LiveRunProvider({
       }
     }
 
-    return {
+    const result = {
       ppm, traysPerSkid, traysPerBatch, batchesPerSkid, casesOnLine, casesInFreezer,
       casesLeftToRun, casesLeftToOpen, stacksNeededTotal, casesForTiming, batchesNeeded,
       traysNeeded, buffer, doughShortCases, doughDepletionSec, casesOnLastSkid,
@@ -396,6 +398,10 @@ export function LiveRunProvider({
       casesCompleted, paceStatus, paceDelta, catchUpPpm,
       perTray, perBatch, sauceEffBarrel,
     };
+    if (calcStartedAt !== null && typeof performance !== "undefined") {
+      recordPerformance("live-calculation", performance.now() - calcStartedAt, "calculation");
+    }
+    return result;
   }, [v, ve, liveFreezerMin, currentRun, nowTime, doughSubTab]);
 
   const currentRunDowntimeMs = useMemo(

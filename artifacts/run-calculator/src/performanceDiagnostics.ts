@@ -1,14 +1,21 @@
 const MAX_ENTRIES = 40;
 const SLOW_TRANSITION_MS = 250;
 const SLOW_LOAD_MS = 1500;
+const SLOW_CALCULATION_MS = 16;
 
 export type PerformanceDiagnostic = {
   name: string;
   durationMs: number;
-  kind: "load" | "navigation" | "api";
+  kind: "load" | "navigation" | "render" | "calculation" | "storage" | "api";
 };
 
 const entries: PerformanceDiagnostic[] = [];
+export type MemoryDiagnostic = {
+  name: string;
+  usedHeapBytes: number;
+  totalHeapBytes: number;
+};
+const memoryEntries: MemoryDiagnostic[] = [];
 
 function safePath(url: string): string {
   try {
@@ -27,7 +34,13 @@ function remember(entry: PerformanceDiagnostic): void {
   }
   const budget = entry.kind === "load"
     ? SLOW_LOAD_MS
-    : entry.kind === "api" ? 1000 : SLOW_TRANSITION_MS;
+    : entry.kind === "api"
+      ? 1000
+      : entry.kind === "calculation"
+        ? SLOW_CALCULATION_MS
+        : entry.kind === "render"
+          ? SLOW_TRANSITION_MS
+          : entry.kind === "storage" ? 100 : SLOW_TRANSITION_MS;
   if (entry.durationMs > budget && typeof console !== "undefined") {
     console.warn(`[calculator-performance] ${entry.kind} exceeded budget`, {
       name: entry.name,
@@ -67,6 +80,40 @@ export function getPerformanceDiagnostics(): readonly PerformanceDiagnostic[] {
 
 export function clearPerformanceDiagnostics(): void {
   entries.length = 0;
+  memoryEntries.length = 0;
+}
+
+/**
+ * Samples the browser heap when the engine exposes the non-standard
+ * performance.memory API (Chromium). The sample contains no application data
+ * and is intentionally a no-op in browsers that do not expose heap metrics.
+ */
+export function recordMemorySample(name: string): void {
+  if (typeof performance === "undefined") return;
+  const memory = (performance as Performance & {
+    memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number };
+  }).memory;
+  const usedHeapBytes = memory?.usedJSHeapSize;
+  const totalHeapBytes = memory?.totalJSHeapSize;
+  if (
+    !Number.isFinite(usedHeapBytes) ||
+    !Number.isFinite(totalHeapBytes) ||
+    usedHeapBytes! < 0 ||
+    totalHeapBytes! < 0
+  ) return;
+  memoryEntries.push({ name, usedHeapBytes: usedHeapBytes!, totalHeapBytes: totalHeapBytes! });
+  if (memoryEntries.length > MAX_ENTRIES) {
+    memoryEntries.splice(0, memoryEntries.length - MAX_ENTRIES);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("calculator-memory", {
+      detail: memoryEntries[memoryEntries.length - 1],
+    }));
+  }
+}
+
+export function getMemoryDiagnostics(): readonly MemoryDiagnostic[] {
+  return memoryEntries.slice();
 }
 
 /**
@@ -102,5 +149,8 @@ export async function fetchWithDiagnostics(
 export const PERFORMANCE_BUDGETS = {
   initialLoadMs: SLOW_LOAD_MS,
   tabTransitionMs: SLOW_TRANSITION_MS,
+  renderMs: SLOW_TRANSITION_MS,
+  calculationMs: SLOW_CALCULATION_MS,
+  storageScanMs: 100,
   apiRequestMs: 1000,
 } as const;
