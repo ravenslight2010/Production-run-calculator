@@ -4943,19 +4943,24 @@ export default function Home() {
   };
 
   const exportSyncDiagnostics = () => {
+    // The app can remain mounted while the local calendar date changes. Read
+    // the date and its persisted events at export time instead of relying on
+    // the values captured during the previous render.
+    const reportDate = todayStr();
+    const reportDiagnostics = loadSyncDiagnostics(reportDate);
     const report = buildSyncDiagnosticReport({
-      date: syncDate,
+      date: reportDate,
       status: syncStatus,
       lastAcknowledgedAt,
       pendingCount: syncPendingCount,
       failedCount: syncFailedCount,
-      diagnostics: syncDiagnostics,
+      diagnostics: reportDiagnostics,
     });
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `sync-diagnostic-history-${syncDate}.json`;
+    anchor.download = `sync-diagnostic-history-${reportDate}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   };

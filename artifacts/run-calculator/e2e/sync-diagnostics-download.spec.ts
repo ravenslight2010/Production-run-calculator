@@ -21,6 +21,42 @@ function uid(): string {
   return `e2e_sync_diag_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+async function mockDateNow(page: Page, fakeMs: number): Promise<void> {
+  await page.evaluate((ms) => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__e2eFakeMs = ms;
+    if (w.__e2eDateProxyInstalled) return;
+    w.__e2eDateProxyInstalled = true;
+    const OriginalDate = window.Date;
+    w.__e2eOriginalDate = OriginalDate;
+    window.Date = new Proxy(OriginalDate, {
+      construct(target, args) {
+        return args.length === 0
+          ? new target(w.__e2eFakeMs as number)
+          : Reflect.construct(target, args);
+      },
+      apply(target, _this, args) {
+        return args.length === 0
+          ? new target(w.__e2eFakeMs as number).toString()
+          : Reflect.apply(target, target, args);
+      },
+      get(target, property, receiver) {
+        if (property === "now") return () => w.__e2eFakeMs as number;
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as unknown as typeof Date;
+  }, fakeMs);
+}
+
+async function localDate(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const date = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  });
+}
+
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase();
 });
@@ -190,4 +226,84 @@ test("filters older local sync diagnostics from the downloaded report", async ({
   for (const event of report.events) {
     expect(event.date).toBe(dates.current);
   }
+});
+
+test("keeps the diagnostic report on the active date across local midnight", async ({ page }) => {
+  const username = uid();
+  testUsernames.add(username);
+  await signUp(page, username);
+
+  const beforeMidnight = new Date("2030-06-14T23:59:50").getTime();
+  const afterMidnight = new Date("2030-06-15T00:00:10").getTime();
+  await mockDateNow(page, beforeMidnight);
+  const dates: { prior: string; current: string } = {
+    prior: await localDate(page),
+    current: "",
+  };
+  const current = new Date(afterMidnight);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  dates.current = `${current.getFullYear()}-${pad(current.getMonth() + 1)}-${pad(current.getDate())}`;
+  const seededEvents = {
+    prior: {
+      id: "e2e-midnight-prior-event",
+      kind: "failure",
+      at: beforeMidnight,
+      date: dates.prior,
+      message: "Event from the completed production date",
+    },
+    current: {
+      id: "e2e-midnight-current-event",
+      kind: "ack",
+      at: afterMidnight,
+      date: dates.current,
+      message: "Event from the active production date",
+    },
+  };
+
+  await page.evaluate(({ dates, seededEvents }) => {
+    localStorage.setItem(
+      `run-calc-sync-diagnostics:${dates.prior}`,
+      JSON.stringify([seededEvents.prior]),
+    );
+    localStorage.setItem(
+      `run-calc-sync-diagnostics:${dates.current}`,
+      JSON.stringify([seededEvents.current]),
+    );
+  }, { dates, seededEvents });
+
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
+      writes.push(request.url());
+    }
+  });
+  await mockDateNow(page, afterMidnight);
+
+  const syncStatus = page.locator('button[title^="Sync:"]');
+  await expect(syncStatus).toBeVisible();
+  await syncStatus.click();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download sync diagnostics" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(
+    `sync-diagnostic-history-${dates.current}.json`,
+  );
+
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  const report = JSON.parse(await readFile(downloadPath as string, "utf8"));
+  expect(report.productionDate).toBe(dates.current);
+  expect(report.events).toEqual([
+    expect.objectContaining({
+      id: seededEvents.current.id,
+      date: dates.current,
+      message: seededEvents.current.message,
+    }),
+  ]);
+  expect(report.events).not.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: seededEvents.prior.id }),
+    ]),
+  );
+  expect(writes).toEqual([]);
 });
