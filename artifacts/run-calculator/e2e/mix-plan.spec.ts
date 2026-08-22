@@ -2344,6 +2344,110 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   });
 
   /**
+   * Test (k3): A failed first save can be retried successfully, and the
+   * retried value remains visible after Mix Plan hydrates again from the
+   * server.
+   */
+  test("retried already-made amount survives a later Mix Plan reload", async ({
+    page,
+  }) => {
+    const suffix = uid();
+    const username = `user_${suffix}`;
+    const mixId = `reg-retry-reload-${suffix}`;
+    const mixName = `RegRetryReloadMix ${suffix}`;
+    const component = `RegRetryReloadComp_${suffix}`;
+    const brand = `RegRetryReloadBrand_${suffix}`;
+    const today = todayStr();
+    const alreadyMade = 50;
+    const totalLbs = (2 * 100 * 8 / 16) * 1.15 + 20;
+    const remainingLbs = totalLbs - alreadyMade;
+    let postAttempts = 0;
+
+    try {
+      await dbCreateMix(db, {
+        id: mixId,
+        name: mixName,
+        brand,
+        isPrep: false,
+        component,
+        perPizza: 2,
+        batchSize: 10,
+        amountAlreadyMade: 0,
+      });
+
+      await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.waitForTimeout(1_000);
+
+      await page.route("**/api/mixes", async (route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        postAttempts += 1;
+        if (postAttempts === 1) {
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "forced e2e failure" }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.locator('[data-testid="tab-run"]').click();
+      const brandInput = page.locator('input[placeholder="Brand…"]').first();
+      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
+      await brandInput.click();
+      await page.waitForTimeout(200);
+      await brandInput.fill(brand);
+      await brandInput.press("Enter");
+      await page.waitForTimeout(800);
+
+      await goToMixes(page);
+      const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await todayCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const input = todayCard.locator('input[type="number"]').first();
+      await input.fill(String(alreadyMade));
+      await input.blur();
+
+      await expect(page.getByText("Couldn't save already made amount", { exact: true }))
+        .toBeVisible({ timeout: 5_000 });
+      await expect(input).toHaveValue(String(alreadyMade));
+      expect(postAttempts).toBe(1);
+
+      await input.focus();
+      await input.blur();
+      await expect(input).toHaveValue(String(alreadyMade));
+      expect(postAttempts).toBe(2);
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+      await page.getByRole("button", { name: /^get.?started$/i })
+        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await page.waitForTimeout(1_000);
+
+      await goToMixes(page);
+      const reloadedCard = page.locator(`[data-testid="mix-plan-${today}"]`);
+      await reloadedCard.waitFor({ state: "visible", timeout: 8_000 });
+      await expect(reloadedCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
+
+      const savedInput = reloadedCard.locator('input[type="number"]').first();
+      await savedInput.waitFor({ state: "visible", timeout: 5_000 });
+      await expect(savedInput).toHaveValue(String(alreadyMade), { timeout: 5_000 });
+      await expect(
+        reloadedCard.getByText(`need ${remainingLbs.toFixed(2)} lbs`, { exact: false }),
+      ).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await page.unroute("**/api/mixes").catch(() => {});
+      await db.query("DELETE FROM mixes WHERE id = $1", [mixId]).catch(() => {});
+      await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
+    }
+  });
+
+  /**
    * Test (l): Prep mix with daysEarly=1 appears on the run day AND one day
    * early, but is absent two days before (outside the window).
    *
