@@ -1576,6 +1576,38 @@ describe("applyDoughCustomerAssignmentsToVariants", () => {
     expect(v.customers).toContainEqual({ brand: "Lowe's", flavor: "Californian" });
   });
 
+  it("does not assign broad base customers across multiple generic variants", () => {
+    // The source names these weights but never says which customer gets which
+    // one. Treating both as catch-alls would make customer matching ambiguous.
+    const variants: DoughballVariant[] = [
+      { label: `11" CRB`, weightOz: 8.5, perTray: 24 },
+      { label: `12" CRB`, weightOz: 10.5, perTray: 20 },
+    ];
+    expect(applyDoughCustomerAssignmentsToVariants(variants, assignments, variants)).toBe(variants);
+  });
+
+  it("keeps a singleton family fallback independent of other imported families", () => {
+    // Callers must pass the current family, not every dough family in a batch.
+    // An unrelated generic variant cannot make this family's sole variant
+    // ambiguous.
+    const family: DoughballVariant[] = [{ label: "Brand Dough 14.2 oz", weightOz: 14.2 }];
+    const unrelated: DoughballVariant[] = [{ label: `11" CRB`, weightOz: 8.5 }];
+    const result = applyDoughCustomerAssignmentsToVariants(family, assignments, family);
+    expect(result[0].customers).toContainEqual({ brand: "Hannaford", flavor: "Five Cheese" });
+    expect(unrelated[0].customers).toBeUndefined();
+  });
+
+  it("does not share a non-base assignment across ambiguous generic siblings", () => {
+    const variants: DoughballVariant[] = [
+      { label: "Ultra Thin CRB 11", weightOz: 8.5, perTray: 24 },
+      { label: "Ultra Thin CRB 12", weightOz: 10.5, perTray: 20 },
+    ];
+    const ultraThin = [
+      { brand: "Basha's", qualifierKey: "ultra thin", flavors: ["Cheese"] },
+    ];
+    expect(applyDoughCustomerAssignmentsToVariants(variants, ultraThin, variants)).toBe(variants);
+  });
+
   it("does not apply generic-pool fallback when pool has branded base variants", () => {
     // Pool has named brands → strict only, no cross-brand bleed via fallback.
     const variants: DoughballVariant[] = [

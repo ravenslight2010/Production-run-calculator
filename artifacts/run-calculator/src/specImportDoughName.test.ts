@@ -249,6 +249,44 @@ describe("later dough recipe import re-links by name", () => {
     expect(plain?.doughballsPerTray).toBe(22);
   });
 
+  it("skips an exact zero-value CRB stub and relinks only to a data-backed family recipe", () => {
+    const pool = {
+      dough: [
+        {
+          name: `11" CRB Recipe`,
+          components: [{ ingredient: "Flour", lbs: 0 }],
+          doughballWeightOz: 0,
+          doughballsPerTray: 0,
+        },
+        {
+          name: "CRB Dough",
+          components: DOUGH_ROWS,
+          doughballVariants: [
+            { label: `11" CRB Recipe`, weightOz: 10, perTray: 24 },
+          ],
+        },
+      ],
+    };
+    applySpecImport({
+      profiles: [
+        {
+          brand: "Basha's Ultra Thin",
+          flavor: "Cheese",
+          dieType: `11" Round`,
+          doughName: `11" CRB Recipe`,
+          applicators: [{ type: "Cheese", ozPerPizza: 3 }],
+          pepperonis: [],
+        },
+      ],
+      recipes: [],
+    } as unknown as ParsedSpecImport, undefined, pool);
+    const profile = loadProfile("Basha's Ultra Thin", "Cheese");
+    expect(profile?.doughRecipeName).toBe("CRB Dough");
+    expect(profile?.doughRecipe).toEqual(DOUGH_ROWS);
+    expect(profile?.targetDoughballWeight).toBe(10);
+    expect(profile?.doughballsPerTray).toBe(24);
+  });
+
   it("multiple same-named collapsed variants: name-relinked profiles get NO ambiguous doughball numbers", () => {
     saveBrandFlavors({
       ...loadBrandFlavors(),

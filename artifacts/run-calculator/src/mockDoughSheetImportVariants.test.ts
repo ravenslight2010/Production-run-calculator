@@ -147,28 +147,23 @@ function tagVariantCustomers(
     const familyVariants = result.get(dName);
     if (!familyVariants) continue;
 
-    // The FIXED logic: weight-first, first-match fallback.
+    // The production logic: a stored weight must identify exactly one FULL
+    // family variant (including any yield-table rows); no stored weight is
+    // usable only for a single-variant family.
     const profileWeight = Number(profile.targetDoughballWeight ?? 0);
-    const importedRecipe =
-      (profileWeight > 0
-        ? linkedRecipes.find(
-            (r) =>
-              r.kind === "dough" &&
-              r.name.trim().toLowerCase() === dName &&
-              !!r.variantLabel &&
-              Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
+    const candidates =
+      profileWeight > 0
+        ? familyVariants.filter(
+            (variant) =>
+              Math.abs(Number(variant.weightOz ?? 0) - profileWeight) <= 0.1,
           )
-        : undefined) ??
-      linkedRecipes.find(
-        (r) =>
-          r.kind === "dough" && r.name.trim().toLowerCase() === dName && !!r.variantLabel,
-      );
-    if (!importedRecipe?.variantLabel) continue;
-
-    const variantLabel = importedRecipe.variantLabel.trim();
-    const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
+        : familyVariants.length === 1
+          ? [familyVariants[0]!]
+          : [];
+    if (candidates.length !== 1) continue;
+    const variant = candidates[0]!;
+    const idx = familyVariants.indexOf(variant);
     if (idx < 0) continue;
-    const variant = familyVariants[idx]!;
     const already = (variant.customers ?? []).some(
       (c) =>
         c.brand.trim().toLowerCase() === profile.brand.trim().toLowerCase() &&
@@ -283,16 +278,35 @@ describe("variant customer tagging — weight-based match (bug fix)", () => {
     expect(v11.customers?.map((c) => c.brand)).toEqual(["FloatBrand"]);
   });
 
-  it("falls back to first-listed variant when the profile has no stored weight", () => {
-    // A profile with no weight gets the first variant as before — the bug only
-    // manifests when there IS a known weight that should pick a specific variant.
+  it("does not tag an AI row when a yield-table sibling has the same weight", () => {
+    const variants = buildVariants();
+    variants.get(FAMILY.toLowerCase())!.push({
+      label: `11" CRB Table Row`,
+      weightOz: 10,
+      perTray: 20,
+    });
+    const tagged = tagVariantCustomers(linkedRecipes, variants, [
+      { brand: "AmbiguousBrand", flavor: "Cheese", doughRecipeName: FAMILY, targetDoughballWeight: 10 },
+    ]);
+    expect(
+      tagged.get(FAMILY.toLowerCase())!.every(
+        (variant) => !variant.customers?.some((customer) => customer.brand === "AmbiguousBrand"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not infer a customer assignment when the profile has no stored weight", () => {
+    // A profile with no weight has no source evidence for one of the several
+    // variants, so it must stay unassigned rather than landing on the first row.
     const profiles: ProfileLike[] = [
       { brand: "NoBrand", flavor: "Cheese", doughRecipeName: FAMILY, targetDoughballWeight: 0 },
     ];
     const tagged = tagVariantCustomers(linkedRecipes, buildVariants(), profiles);
-    const v11 = tagged.get(FAMILY.toLowerCase())!.find((v) => v.label === `11" CRB Recipe`)!;
-    // Falls back to first-listed — acceptable since no weight info is available.
-    expect(v11.customers?.map((c) => c.brand)).toEqual(["NoBrand"]);
+    expect(
+      tagged.get(FAMILY.toLowerCase())!.every(
+        (variant) => !variant.customers?.some((customer) => customer.brand === "NoBrand"),
+      ),
+    ).toBe(true);
   });
 });
 

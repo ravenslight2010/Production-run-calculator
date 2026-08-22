@@ -11752,40 +11752,24 @@ export default function Home() {
           if (!dName) continue;
           const familyVariants = doughVariants.get(dName);
           if (!familyVariants) continue;
-          // Find which variant this import linked to this family recipe.
-          // When the family has multiple same-named variants (one per customer
-          // weight tier), prefer the one whose doughball oz matches the
-          // profile's stored weight so each profile tags ITS OWN variant
-          // rather than always tagging whichever happens to be listed first.
+          // Match against the COMPLETE family (AI + yield-table variants).
+          // A profile's stored weight is source evidence only when it identifies
+          // exactly one current family variant; duplicate weights, including a
+          // table-only sibling the AI omitted, must remain unassigned.
           const profileWeight = Number(savedProfile?.targetDoughballWeight ?? 0);
-          // Only fall through to the unweighted find when there is exactly
-          // one variant in the full (AI + table-merged) pool — with multiple
-          // variants and no stored weight we cannot know which one is correct,
-          // so we skip rather than guess.
-          const familyVariantCount = familyVariants.length;
-          const importedRecipe =
-            (profileWeight > 0
-              ? appliedParsed.recipes.find(
-                  (r) =>
-                    r.kind === "dough" &&
-                    r.name.trim().toLowerCase() === dName &&
-                    !!r.variantLabel &&
-                    Math.abs(Number(r.doughballOz ?? 0) - profileWeight) <= 0.1,
+          const candidates =
+            profileWeight > 0
+              ? familyVariants.filter(
+                  (variant) =>
+                    Math.abs(Number(variant.weightOz ?? 0) - profileWeight) <= 0.1,
                 )
-              : undefined) ??
-            (familyVariantCount <= 1
-              ? appliedParsed.recipes.find(
-                  (r) =>
-                    r.kind === "dough" &&
-                    r.name.trim().toLowerCase() === dName &&
-                    !!r.variantLabel,
-                )
-              : undefined);
-          if (!importedRecipe?.variantLabel) continue;
-          const variantLabel = importedRecipe.variantLabel.trim();
-          const idx = familyVariants.findIndex((vv) => vv.label.trim() === variantLabel);
+              : familyVariants.length === 1
+                ? [familyVariants[0]!]
+                : [];
+          if (candidates.length !== 1) continue;
+          const variant = candidates[0]!;
+          const idx = familyVariants.indexOf(variant);
           if (idx < 0) continue;
-          const variant = familyVariants[idx];
           const existingCustomers = variant.customers ?? [];
           const already = existingCustomers.some(
             (c) =>
@@ -11810,11 +11794,10 @@ export default function Home() {
         // applyDoughCustomerAssignmentsToVariants resolves the full pool.
         if (specImportPrepared?.doughCustomerAssignments?.length) {
           for (const [recipeName, variants] of doughVariants) {
-            const allVariants = [...doughVariants.values()].flat();
             const enriched = applyDoughCustomerAssignmentsToVariants(
               variants,
               specImportPrepared.doughCustomerAssignments,
-              allVariants,
+              variants,
             );
             if (enriched !== variants) doughVariants.set(recipeName, enriched);
           }
@@ -11828,11 +11811,10 @@ export default function Home() {
         for (const [recipeName, variants] of doughVariants) {
           const staticAssignments = SPEC_STATIC_CUSTOMER_ASSIGNMENTS.get(recipeName);
           if (!staticAssignments?.length) continue;
-          const allVariants = [...doughVariants.values()].flat();
           const enriched = applyDoughCustomerAssignmentsToVariants(
             variants,
             staticAssignments,
-            allVariants,
+            variants,
           );
           if (enriched !== variants) doughVariants.set(recipeName, enriched);
         }

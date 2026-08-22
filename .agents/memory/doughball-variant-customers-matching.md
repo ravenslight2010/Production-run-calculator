@@ -70,6 +70,16 @@ When a profile has no `dieType` but a SPECIFIC FLAVOR that is NOT listed in the 
 
 ## Sharp edges
 
+- Customer tagging must evaluate the complete current family, including
+  yield-table variants merged beside AI rows; duplicate matching weights are
+  ambiguous. Generic fallback counts variants within that family, never across
+  all imported families.
+  **Why:** A flattened import-wide universe can suppress valid singleton
+  fallbacks, while checking only AI rows can choose a row when a table sibling
+  has the same weight.
+  **How to apply:** Keep family grouping intact through both assignment
+  enrichment and profile-weight tagging; require exactly one candidate.
+
 - `unionVariantCustomers(base, incoming)` is directional — `incoming` is the NEW set, `base` is what already exists. When you want to PRESERVE existing and optional-ADD incoming, you must not use this helper with incoming=existing; write the filter manually.
 - Profiles for Lucia's Craft are localStorage-only (no rows in `brand_profiles` DB table) — server heals that operate on `brand_profiles` never touched them. The customers fix + import override is the only path to correct wrong weights on these profiles.
 - Other label-named variants (Hannaford, Lowe's, Nob Hill Craft) still have no customers arrays — they rely on the die-number fallback. Add customers for those too if those brands start showing wrong weights.

@@ -910,9 +910,11 @@ export function parseDoughCustomerSection(rows: string[][]): DoughCustomerAssign
  * Matching rules (qualifier must agree, then brand):
  * 1. Base-qualifier (key=""): brand name must appear in the variant label.
  * 2. Non-base qualifier — strict: brand name appears in the variant label.
- * 3. Non-base qualifier — fallback: brand has NO dedicated variant for this
- *    qualifier in the pool (e.g. "Lucia's Craft Ultra Thin" shares "Basha's
- *    Ultra Thin" because there's no "Lucia's Craft" ultra-thin variant label).
+ * 3. Shared fallback: brand has NO dedicated variant for this qualifier AND
+ *    exactly one variant exists in that qualifier tier (e.g. "Lucia's Craft
+ *    Ultra Thin" shares "Basha's Ultra Thin" because there is only one
+ *    ultra-thin variant). Multiple generic variants are ambiguous and receive
+ *    no inferred customer assignment.
  */
 function assignmentsForVariant(
   variantLabel: string,
@@ -939,10 +941,12 @@ function assignmentsForVariant(
   // Pre-compute once: is the base-qualifier portion of the pool "branded"?
   // A pool is branded when at least one base-qualifier variant's label contains
   // a base assignment's brand (e.g. a "Hannaford" or "Costco" variant). When
-  // the pool is NOT branded — all base variants have generic labels like
-  // "Brand Dough 14.2 oz" — every base assignment should apply to every base
-  // variant (the generic catch-all fallback).
+  // the pool is NOT branded and has exactly ONE base variant — a generic label
+  // like "Brand Dough 14.2 oz" — every base assignment can safely apply to
+  // that sole catch-all. Multiple generic base variants have no source evidence
+  // connecting customers to weights, so they must remain unassigned.
   let basePoolIsBranded: boolean | undefined;
+  let baseVariantCount: number | undefined;
   function checkBasePoolBranded(): boolean {
     if (basePoolIsBranded !== undefined) return basePoolIsBranded;
     const baseAssignmentBrands = assignments
@@ -953,6 +957,14 @@ function assignmentsForVariant(
       return baseAssignmentBrands.some((b) => labelContainsBrand(v.label, b));
     });
     return basePoolIsBranded;
+  }
+  function countVariantsForQualifier(qualifierKey: string): number {
+    if (qualifierKey === "" && baseVariantCount !== undefined) return baseVariantCount;
+    const count = allVariants.filter(
+      (v) => doughVariantQualifierKey(v.label) === qualifierKey,
+    ).length;
+    if (qualifierKey === "") baseVariantCount = count;
+    return count;
   }
 
   return assignments.filter((a) => {
@@ -967,23 +979,26 @@ function assignmentsForVariant(
 
     if (a.qualifierKey === "") {
       // Base-qualifier fallback: if the pool has NO branded base variant (all
-      // labels are generic, like "Brand Dough 14.2 oz"), treat every base
-      // variant as a catch-all and assign every base entry to it.
-      return !checkBasePoolBranded();
+      // labels are generic, like "Brand Dough 14.2 oz") AND exactly one base
+      // variant exists, treat it as a catch-all. With multiple generic
+      // variants, assigning every customer to every weight would manufacture
+      // ambiguous source evidence on every re-import.
+      return !checkBasePoolBranded() && countVariantsForQualifier("") === 1;
     }
 
     // Non-base fallback: brand has no label with this qualifier in the full
-    // variant pool (shared variant — brand uses another brand's named variant,
-    // e.g. "Lucia's Craft Ultra Thin" shares "Basha's Ultra Thin"). Uses the
-    // same brand-in-label check (raw + stripped) so a label like "Lucia's 7''
-    // Morning Melts" is recognised as a dedicated variant for "Lucia's Morning
-    // Melts" and the fallback does NOT fire onto sibling variants.
+    // variant pool AND the qualifier tier has exactly one variant (shared
+    // variant — brand uses another brand's named variant, e.g. "Lucia's Craft
+    // Ultra Thin" shares "Basha's Ultra Thin"). Uses the same brand-in-label
+    // check (raw + stripped) so a label like "Lucia's 7'' Morning Melts" is
+    // recognised as a dedicated variant for "Lucia's Morning Melts" and the
+    // fallback does NOT fire onto sibling variants.
     const brandHasDedicated = allVariants.some(
       (v) =>
         doughVariantQualifierKey(v.label) === a.qualifierKey &&
         labelContainsBrand(v.label, brandLow),
     );
-    return !brandHasDedicated;
+    return !brandHasDedicated && countVariantsForQualifier(a.qualifierKey) === 1;
   });
 }
 

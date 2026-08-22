@@ -3798,6 +3798,26 @@ export function applySpecImport(
     name: string,
   ): SpecImportServerPoolRecipe | undefined =>
     poolFor(kind).find((r) => specImportNamedRecipeNamesEqual(r.name, name));
+  // A same-name all-zero dough stub is not source evidence. Earlier imports
+  // could leave an empty per-size recipe (for example, `11" CRB`) beside the
+  // real family recipe. Do not let that exact-name stub block a deterministic
+  // family link to a recipe with a formula or doughball data.
+  const doughPoolEntryHasEvidence = (entry: SpecImportServerPoolRecipe): boolean => {
+    if ((entry.components ?? []).some((row) => {
+      const amount = Number(row.lbs ?? 0);
+      return Boolean(row.ingredient?.trim()) && Number.isFinite(amount) && amount > 0;
+    })) {
+      return true;
+    }
+    if (Number(entry.doughballWeightOz ?? 0) > 0 || Number(entry.doughballsPerTray ?? 0) > 0) {
+      return true;
+    }
+    return Array.isArray(entry.doughballVariants) && entry.doughballVariants.some((variant) => {
+      if (!variant || typeof variant !== "object") return false;
+      const raw = variant as { weightOz?: unknown; perTray?: unknown };
+      return Number(raw.weightOz ?? 0) > 0 || Number(raw.perTray ?? 0) > 0;
+    });
+  };
   // Snap a spec-named dough/sauce onto the EXISTING pool spelling: exact
   // (loose-equal) match first, then the family match ("11\" CRB recipe" →
   // "CRB Dough"). Registering the raw spec name while suppression
@@ -3821,14 +3841,32 @@ export function applySpecImport(
     const t = name.trim();
     if (!t) return t;
     const exact = poolEntryFor(kind, t);
-    if (exact) return exact.name;
+    if (exact && (kind !== "dough" || doughPoolEntryHasEvidence(exact))) return exact.name;
     if (importedRecipeKeys[kind].has(specImportNameMatchKey(t))) return t;
+    // Once an exact dough name is proven to be an empty stub, remove it from
+    // the family-match universe. Otherwise the matcher can return that same
+    // exact stub again instead of considering the data-backed family recipe.
+    const familyCandidates =
+      kind === "dough"
+        ? poolFor(kind)
+            .filter(doughPoolEntryHasEvidence)
+            .map((entry) => entry.name)
+        : poolFor(kind).map((entry) => entry.name);
     const family = findSpecImportNamedRecipeFamilyMatch(
       kind,
       t,
-      poolFor(kind).map((r) => r.name),
+      familyCandidates,
     );
-    return family ?? t;
+    if (!family) return t;
+    const familyEntry = poolEntryFor(kind, family);
+    // A stale exact-name dough stub may only be relinked when the family match
+    // itself is backed by deterministic source data. This avoids guessing while
+    // still repairing profiles such as an Ultra Thin product linked to a blank
+    // 11-inch CRB placeholder.
+    if (kind === "dough" && (!familyEntry || !doughPoolEntryHasEvidence(familyEntry))) {
+      return t;
+    }
+    return familyEntry?.name ?? family;
   };
 
   // ── Canonicalize parsed profile brands onto EXISTING brand spellings ──
