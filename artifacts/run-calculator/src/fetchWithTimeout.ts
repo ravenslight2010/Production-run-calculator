@@ -12,6 +12,8 @@
 // engines surface plain "AbortError". Both are mapped to a plain-language
 // message that tells the user what actually happened and what to do.
 
+import { recordPerformance } from "./performanceDiagnostics";
+
 export const IMPORT_WAKE_HINT =
   "The server didn't respond in time. If the app sat idle for a while it may just be waking up — wait a moment and try the import again.";
 
@@ -20,9 +22,30 @@ export async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
+  const startedAt = typeof performance === "undefined" ? null : performance.now();
+  const safePath = (() => {
+    try {
+      const origin = typeof window === "undefined" ? "http://calculator.local" : window.location.origin;
+      return new URL(url, origin).pathname;
+    } catch {
+      return url.split("?")[0]?.split("#")[0] || "/unknown";
+    }
+  })();
   try {
-    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    if (startedAt !== null && typeof performance !== "undefined") {
+      recordPerformance(`api:${safePath}:${response.status}`, performance.now() - startedAt, "api");
+    }
+    return response;
   } catch (err) {
+    if (startedAt !== null && typeof performance !== "undefined") {
+      const name = (err as { name?: unknown } | null)?.name;
+      recordPerformance(
+        `api-failure:${safePath}:${name === "TimeoutError" || name === "AbortError" ? "timeout" : "network"}`,
+        performance.now() - startedAt,
+        "api",
+      );
+    }
     // Match by name, not `instanceof DOMException` — abort reasons can come
     // from a different realm (worker, test env, some engines) where instanceof
     // fails even though the error IS a timeout/abort.

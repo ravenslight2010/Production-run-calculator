@@ -21,10 +21,15 @@ export type WarehouseNeedGroup = {
 export function groupWarehouseNeedRows(
   rows: readonly WarehouseNeedRow[],
 ): WarehouseNeedGroup[] {
-  return WAREHOUSE_AREAS
-    .map((area) => ({
-      area,
-      rows: rows.filter((row) => row.area === area),
-    }))
-    .filter((group) => group.rows.length > 0);
+  const grouped = new Map<WarehouseArea, WarehouseNeedRow[]>();
+  for (const row of rows) {
+    if (!row.area) continue;
+    const areaRows = grouped.get(row.area);
+    if (areaRows) areaRows.push(row);
+    else grouped.set(row.area, [row]);
+  }
+  return WAREHOUSE_AREAS.flatMap((area) => {
+    const areaRows = grouped.get(area);
+    return areaRows?.length ? [{ area, rows: areaRows }] : [];
+  });
 }

@@ -439,6 +439,7 @@ import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
 import { detectAppSlotConflicts } from "@workspace/setup-math-check";
+import { recordPerformance } from "../performanceDiagnostics";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
 import { suggestedDoughStaging } from "../hooks/useAutoTrack";
@@ -722,7 +723,7 @@ function NeedsList({ rows }: { rows: NeedRow[] }) {
   );
 }
 
-function WarehouseNeedsList({ rows }: { rows: NeedRow[] }) {
+const WarehouseNeedsList = memo(function WarehouseNeedsList({ rows }: { rows: NeedRow[] }) {
   const groups = groupWarehouseNeedRows(rows);
   if (groups.length === 0) {
     return <p className="text-xs text-muted-foreground italic">No data</p>;
@@ -739,7 +740,7 @@ function WarehouseNeedsList({ rows }: { rows: NeedRow[] }) {
       ))}
     </div>
   );
-}
+});
 
 // opts.warehouse tailors the rows for warehouse staff: sauce rows are omitted
 // (pulling sauce is the sauce maker's job, not warehouse) and Cheese/Mix
@@ -2797,6 +2798,15 @@ const GroupedPanel = ({
 // (imported at top of file)
 
 export default function Home() {
+  const initialRenderStartedAtRef = useRef(
+    typeof performance === "undefined" ? null : performance.now(),
+  );
+  useEffect(() => {
+    const startedAt = initialRenderStartedAtRef.current;
+    if (startedAt === null || typeof performance === "undefined") return;
+    recordPerformance("initial-load", performance.now() - startedAt, "load");
+    initialRenderStartedAtRef.current = null;
+  }, []);
   const {
     signOut,
     forceSignedOut,

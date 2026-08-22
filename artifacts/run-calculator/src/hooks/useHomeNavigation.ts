@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { recordPerformance } from "../performanceDiagnostics";
 
 export const ACTIVE_TAB_STORAGE_KEY = "run-calc-active-tab";
 
@@ -44,9 +45,27 @@ function loadInitialTab(): HomeTab {
  */
 export function useHomeNavigation() {
   const [activeTab, setActiveTab] = useState<HomeTab>(loadInitialTab);
+  const activeTabRef = useRef(activeTab);
   const tabHistoryRef = useRef<HomeTab[]>([]);
   const prevTabRef = useRef<HomeTab>(activeTab);
   const skipHistoryRef = useRef(false);
+  const navigationStartedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof performance === "undefined") return;
+    const startedAt = navigationStartedAtRef.current;
+    if (startedAt !== null) {
+      recordPerformance(`tab:${activeTab}`, performance.now() - startedAt, "navigation");
+      navigationStartedAtRef.current = null;
+    }
+  }, [activeTab]);
+
+  const selectTab = useCallback((tab: HomeTab) => {
+    if (tab === activeTabRef.current) return;
+    navigationStartedAtRef.current = typeof performance === "undefined" ? null : performance.now();
+    activeTabRef.current = tab;
+    setActiveTab(tab);
+  }, []);
 
   useEffect(() => {
     try {
@@ -72,8 +91,8 @@ export function useHomeNavigation() {
     const previousTab = tabHistoryRef.current.pop();
     if (!previousTab) return;
     skipHistoryRef.current = true;
-    setActiveTab(previousTab);
+    selectTab(previousTab);
   }
 
-  return { activeTab, setActiveTab, goBack, tabHistoryRef };
+  return { activeTab, setActiveTab: selectTab, goBack, tabHistoryRef };
 }

@@ -23,4 +23,17 @@ describe("groupWarehouseNeedRows", () => {
 
     expect(groupWarehouseNeedRows(rows)).toEqual([{ area: "Sauce", rows }]);
   });
+
+  it("groups a large warehouse dataset in one linear pass", () => {
+    const rows = Array.from({ length: 20_000 }, (_, index) => ({
+      label: `Ingredient ${index}`,
+      value: String(index),
+      area: (["Dough", "Sauce", "Frontline", "Packaging"] as const)[index % 4],
+    }));
+    const start = performance.now();
+    const groups = groupWarehouseNeedRows(rows);
+    const durationMs = performance.now() - start;
+    expect(groups.reduce((total, group) => total + group.rows.length, 0)).toBe(rows.length);
+    expect(durationMs).toBeLessThan(100);
+  });
 });
