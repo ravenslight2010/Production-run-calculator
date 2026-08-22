@@ -584,5 +584,25 @@ describe("profile data health check", () => {
     const data = day.data as Record<string, any>;
     expect(data.runValues.future).toMatchObject({ frontlineRecipeName: "Red Hot Pizza Sauce" });
     expect(data.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+
+    const workspaceResponse = await fetch(`${baseUrl}/api/profile-data/health-workspace`, {
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    const workspace = await workspaceResponse.json() as { workspace: { repairBatches: Array<{ id: string; status: string }> } };
+    expect(workspace.workspace.repairBatches).toHaveLength(1);
+    expect(workspace.workspace.repairBatches[0]?.status).toBe("applied");
+    const undone = await fetch(`${baseUrl}/api/profile-data/health-check/batches/${encodeURIComponent(workspace.workspace.repairBatches[0]!.id)}/undo`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${signToken(manager)}` },
+    });
+    expect(undone.status).toBe(200);
+    const undoBody = await undone.json() as { summary: { applied: number; skipped: number } };
+    expect(undoBody.summary).toMatchObject({ applied: 1, skipped: 0 });
+    const [restoredProfile] = await db.select().from(brandProfilesTable);
+    expect(restoredProfile.values).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce", frontlineRecipe: [] });
+    const [restoredDay] = await db.select().from(dailySyncTable);
+    const restoredData = restoredDay.data as Record<string, any>;
+    expect(restoredData.runValues.future).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
+    expect(restoredData.runValues.started).toMatchObject({ frontlineRecipeName: "Mystic Pizza Sauce" });
   });
 });

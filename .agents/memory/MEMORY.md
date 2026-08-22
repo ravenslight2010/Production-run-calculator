@@ -146,3 +146,4 @@
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
 - [Offline browser test events](offline-browser-test-events.md) — headless Chromium may suppress offline fetches before Playwright emits requestfailed; use deterministic route aborts for wake-retry tests.
+- [Reversible data-health repairs](reversible-data-health-repairs.md) — manager repairs need immutable scoped before/after records and stamp/value-guarded undo.
