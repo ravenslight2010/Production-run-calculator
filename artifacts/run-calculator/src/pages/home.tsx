@@ -478,6 +478,7 @@ import {
 } from "@workspace/production-rules";
 import { saveProductionRules, deleteProductionRules } from "../productionRules";
 import { useMe } from "../useRole";
+import { getImportAccess } from "../importAccess";
 import {
   Factory,
   Layers,
@@ -3913,9 +3914,26 @@ export default function Home() {
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
+  const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
   const canReviewIncidents = hasCapability("review-incidents");
   const canManageFactorySettings = hasCapability("manage-factory-settings");
+  // Keep import/export controls aligned to their server-authorized commit paths,
+  // rather than relying on the broad manage-staff-derived `isManager` alias.
+  const {
+    canImportSpec,
+    canImportPremixOrCheese,
+    canImportProfileGuide,
+    canExportSpec,
+  } = getImportAccess(
+    new Set(
+      [
+        canUseAiTools && "use-ai-tools",
+        canManageProfiles && "manage-profiles",
+        canManageInventory && "manage-inventory",
+      ].filter(Boolean) as string[],
+    ),
+  );
 
   // One-time pool-aware applicator-slot heal (v2 of the mix-slot cleanup).
   // Must wait for the server cheese/mix pools — the v1 pass ran at boot without
@@ -11512,6 +11530,14 @@ export default function Home() {
     noteBreadcrumb(files.length > 0 ? `spec import: ${files.length} file(s) selected` : "spec import: picker canceled");
     if (files.length === 0) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
+    if (!canImportSpec) {
+      toast({
+        title: "Import access required",
+        description: "Spec imports require AI, profile, and inventory permissions.",
+        variant: "destructive",
+      });
+      return;
+    }
     // Generation guard: parsing is slow (AI call), and a user importing files
     // back-to-back can close the dialog and pick the next file while the old
     // parse is still in flight. Without this guard the OLD promise resolves
@@ -11579,12 +11605,13 @@ export default function Home() {
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
   ) {
     if (!specImportPrepared) return;
-    // Explicit capability guard (not just the manager-only UI gating): profile
-    // writes require manage-profiles, and the commit force-pushes profiles.
-    if (!canManageProfiles) {
+    // The commit spans profile and inventory master-data writes after an AI
+    // parse. Re-check the same complete predicate used by the picker in case
+    // permissions changed while the review dialog was open.
+    if (!canImportSpec) {
       toast({
-        title: "Only managers can apply a spec import",
-        description: "Applying a spec import rewrites setup profiles, which requires the manage-profiles permission.",
+        title: "Import access required",
+        description: "Spec imports require AI, profile, and inventory permissions.",
         variant: "destructive",
       });
       return;
@@ -12070,6 +12097,14 @@ export default function Home() {
     mixesToRemove: string[] = [],
   ) {
     if (!premixImportPrepared) return;
+    if (!canImportPremixOrCheese) {
+      toast({
+        title: "Inventory access required",
+        description: "Importing premix sheets changes shared mix and freezer-pull settings.",
+        variant: "destructive",
+      });
+      return;
+    }
     setPremixImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     try {
@@ -12201,6 +12236,14 @@ export default function Home() {
   }
 
   function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[]) {
+    if (!canImportProfileGuide) {
+      toast({
+        title: "Profile access required",
+        description: "Importing a shipping guide changes saved setup profiles.",
+        variant: "destructive",
+      });
+      return;
+    }
     setShippingImportApplying(true);
     try {
       const result = commitShippingImport(rows);
@@ -12310,6 +12353,14 @@ export default function Home() {
   }
 
   function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[]) {
+    if (!canImportProfileGuide) {
+      toast({
+        title: "Profile access required",
+        description: "Importing a sauce guide changes saved setup profiles.",
+        variant: "destructive",
+      });
+      return;
+    }
     setSauceGuideImportApplying(true);
     try {
       const result = commitSauceGuideImport(rows);
@@ -12372,6 +12423,14 @@ export default function Home() {
   }
 
   function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[]) {
+    if (!canImportProfileGuide) {
+      toast({
+        title: "Profile access required",
+        description: "Importing a dough guide changes saved setup profiles.",
+        variant: "destructive",
+      });
+      return;
+    }
     setDoughGuideImportApplying(true);
     try {
       const result = commitDoughGuideImport(rows);
@@ -12469,6 +12528,14 @@ export default function Home() {
     recipesToRemove: string[] = [],
   ) {
     if (!cheeseImportPrepared) return;
+    if (!canImportPremixOrCheese) {
+      toast({
+        title: "Inventory access required",
+        description: "Importing cheese recipes changes shared inventory master data.",
+        variant: "destructive",
+      });
+      return;
+    }
     setCheeseImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     try {
@@ -14723,7 +14790,7 @@ export default function Home() {
                 {manageCategory === "import" && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
-                    {isManager && (
+                    {canImportSpec && (
                       <div className="rounded-md border border-border bg-muted/40 p-3 space-y-1.5">
                         <p className="text-xs font-semibold text-foreground">Best import order</p>
                         <p className="text-[11px] text-muted-foreground">Import the pizza spec sheet <span className="font-medium text-foreground">first</span> — it sets the master names for every pizza, ingredient, and weight. Then import the rest, ending with cheese &amp; premix, so their shorthand names get matched back to the spec instead of creating duplicates:</p>
@@ -14738,27 +14805,27 @@ export default function Home() {
                         <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">Import one customer&apos;s spec sheet at a time. Importing several customers&apos; sheets in one go can mix up their look-alike recipe names (e.g. two different &quot;Spinach Cheese Mix&quot; blends) — and a wrong match confirmed once gets remembered for future imports.</p>
                       </div>
                     )}
-                    {isManager && (
+                    {canImportSpec && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Spec Sheet
                       </button>
                     )}
-                    {isManager && (
+                    {canImportProfileGuide && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Shipping Guide clicked (picker opening)"); shippingImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
                         data-testid="button-import-shipping-guide">
                         <Upload className="w-4 h-4" /> Import Shipping &amp; Palletizing Guide
                       </button>
                     )}
-                    {isManager && (
+                    {canImportProfileGuide && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Sauce Guide clicked"); sauceGuideImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
                         data-testid="button-import-sauce-guide">
                         <Upload className="w-4 h-4" /> Import Sauce Guide
                       </button>
                     )}
-                    {isManager && (
+                    {canImportProfileGuide && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Dough Recipe Guide clicked"); doughGuideImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
                         data-testid="button-import-dough-guide">
@@ -14770,7 +14837,7 @@ export default function Home() {
                       <Upload className="w-4 h-4" /> Import Excel
                     </button>
 
-                    {isManager && (
+                    {canExportSpec && (
                       <div className="pt-3 mt-1 border-t border-border space-y-2">
                         <p className="text-xs text-muted-foreground">Export spec sheets &amp; recipes to an Excel workbook. Choose what to include — the file re-imports through the spec/premix importers.</p>
                         <div className="grid grid-cols-2 gap-2">
@@ -14892,7 +14959,7 @@ export default function Home() {
                 {/* Mix Recipes (pre-blended mix definitions) */}
                 {manageCategory === "mixes" && canManageInventory && (
                   <div className="space-y-3">
-                    {isManager && (
+                    {canImportPremixOrCheese && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Premix Sheet clicked (picker opening)"); premixImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Premix Sheet
@@ -14911,7 +14978,7 @@ export default function Home() {
                 {/* Cheese recipes (factory-wide cheese blends, server master-data) */}
                 {manageCategory === "cheeseRecipes" && canManageInventory && (
                   <div className="space-y-3">
-                    {isManager && (
+                    {canImportPremixOrCheese && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Cheese Sheet clicked (picker opening)"); cheeseImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Cheese Mix Recipe Specs
@@ -16846,7 +16913,7 @@ export default function Home() {
           className="hidden"
           onChange={handleImportFile}
         />
-        {isManager && (
+        {canImportSpec && (
           <input
             ref={specImportInputRef}
             type="file"
@@ -16856,7 +16923,7 @@ export default function Home() {
             onChange={handleSpecImportFile}
           />
         )}
-        {isManager && (
+        {canImportPremixOrCheese && (
           <input
             ref={premixImportInputRef}
             type="file"
@@ -16866,7 +16933,7 @@ export default function Home() {
             onChange={handlePremixImportFile}
           />
         )}
-        {isManager && (
+        {canImportPremixOrCheese && (
           <input
             ref={cheeseImportInputRef}
             type="file"
@@ -16876,7 +16943,7 @@ export default function Home() {
             onChange={handleCheeseImportFile}
           />
         )}
-        {isManager && (
+        {canImportProfileGuide && (
           <input
             ref={shippingImportInputRef}
             type="file"
@@ -16885,7 +16952,7 @@ export default function Home() {
             onChange={handleShippingImportFile}
           />
         )}
-        {isManager && (
+        {canImportProfileGuide && (
           <input
             ref={sauceGuideImportInputRef}
             type="file"
@@ -16894,7 +16961,7 @@ export default function Home() {
             onChange={handleSauceGuideImportFile}
           />
         )}
-        {isManager && (
+        {canImportProfileGuide && (
           <input
             ref={doughGuideImportInputRef}
             type="file"

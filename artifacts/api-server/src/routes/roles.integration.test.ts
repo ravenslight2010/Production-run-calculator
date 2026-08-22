@@ -503,6 +503,245 @@ const ROUTES: GatedRoute[] = [
     path: () => `/api/users/${OPERATOR}`,
     okStatus: 204,
   },
+  // --- manage-profiles / imports / exports ---
+  {
+    name: "GET /import-history",
+    capability: "manage-profiles",
+    method: "GET",
+    path: () => "/api/import-history",
+    okStatus: 200,
+  },
+  {
+    name: "POST /import-history",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/import-history",
+    body: { importType: "spec", sourceLabel: "coverage.xlsx", status: "complete" },
+    okStatus: 201,
+  },
+  {
+    name: "POST /brand-profiles",
+    capability: "manage-profiles",
+    method: "POST",
+    path: () => "/api/brand-profiles",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "PATCH /brand-profiles/:key/clear-slot",
+    capability: "manage-profiles",
+    method: "PATCH",
+    path: () => "/api/brand-profiles/missing/clear-slot",
+    body: { slot: "app3" },
+    // A valid request reaches the handler; no seeded profile exists to clear.
+    okStatus: 404,
+  },
+  {
+    name: "DELETE /brand-profiles",
+    capability: "manage-profiles",
+    method: "DELETE",
+    path: () => "/api/brand-profiles",
+    body: { keys: [] },
+    okStatus: 200,
+  },
+  // --- named recipes and inventory master data ---
+  {
+    name: "POST /dough-recipes",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/dough-recipes",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /dough-recipes",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/dough-recipes",
+    body: { ids: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /sauce-recipes",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/sauce-recipes",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /sauce-recipes",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/sauce-recipes",
+    body: { ids: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /cheese-recipes",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/cheese-recipes",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /cheese-recipes",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/cheese-recipes",
+    body: { ids: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /ingredients",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/ingredients",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /ingredients",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/ingredients",
+    body: { ids: [] },
+    okStatus: 200,
+  },
+  {
+    name: "POST /ingredients/merge",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/ingredients/merge",
+    body: { targetId: "missing-target", sourceIds: ["missing-source"] },
+    // The request reached the handler; the merge payload is rejected because
+    // neither side exists in the intentionally empty fixture.
+    okStatus: 400,
+  },
+  {
+    name: "POST /die-line-defaults",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/die-line-defaults",
+    body: { entries: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /die-line-defaults",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/die-line-defaults",
+    body: { names: [] },
+    okStatus: 200,
+  },
+  // --- factory settings, diagnostics, sync reset, and action queue ---
+  {
+    name: "GET /factory-data",
+    capability: "manage-factory-settings",
+    method: "GET",
+    path: () => "/api/factory-data",
+    okStatus: 200,
+  },
+  {
+    name: "PUT /factory-data",
+    capability: "manage-factory-settings",
+    method: "PUT",
+    path: () => "/api/factory-data",
+    body: { key: "capability-coverage", value: true },
+    okStatus: 200,
+  },
+  {
+    name: "GET /sync/conflict-stats",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/sync/conflict-stats",
+    okStatus: 200,
+  },
+  {
+    name: "POST /sync/reset",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/sync/reset",
+    body: { confirm: true },
+    okStatus: 200,
+  },
+  {
+    name: "POST /sync/purge-all",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/sync/purge-all",
+    body: { confirm: true },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /sync/:date",
+    capability: "manage-factory-settings",
+    method: "DELETE",
+    path: () => "/api/sync/2099-01-01",
+    okStatus: 200,
+  },
+  {
+    name: "GET /manager-action-queue",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/manager-action-queue",
+    okStatus: 200,
+  },
+  {
+    name: "PATCH /manager-action-queue/:id",
+    capability: "manage-staff",
+    method: "PATCH",
+    path: () => "/api/manager-action-queue/missing",
+    body: { status: "resolved" },
+    // The route validates an action id before looking it up.
+    okStatus: 400,
+  },
+  {
+    name: "GET /profile-data/health-check",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/profile-data/health-check",
+    okStatus: 200,
+  },
+  {
+    name: "GET /profile-data/health-workspace",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/profile-data/health-workspace",
+    okStatus: 200,
+  },
+  {
+    name: "POST /profile-data/health-check/apply",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/profile-data/health-check/apply",
+    okStatus: 200,
+  },
+  {
+    name: "POST /profile-data/health-check/batches/:batchId/undo",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/profile-data/health-check/batches/missing/undo",
+    okStatus: 404,
+  },
+  {
+    name: "GET /ai-memory/health-check",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/ai-memory/health-check",
+    okStatus: 200,
+  },
+  // AI diagnostics/tools deliberately use a cheap request that does not require
+  // an external model call; it still proves the capability guard runs first.
+  {
+    name: "PUT /ai/proactive-settings",
+    capability: "use-ai-tools",
+    method: "PUT",
+    path: () => "/api/ai/proactive-settings",
+    body: { enabled: false, pollSeconds: 60, cooldownSeconds: 300 },
+    okStatus: 200,
+  },
 ];
 
 const USER_BY_ROLE: Record<string, string> = {
@@ -526,10 +765,11 @@ describe("capability-based access control", () => {
     }
   });
 
-  // For every seeded role, each gated route is allowed iff the role holds the
-  // route's capability — otherwise it must 403. This exhaustively verifies the
-  // capability map drives access (e.g. inventory CRUD works for the inventory
-  // role, AI tools for the QC roles, production rules for supervisors).
+  // For every seeded role, each protected operation in this cross-capability
+  // matrix is allowed iff the role holds the route's capability — otherwise it
+  // must 403. This verifies the capability map drives access (e.g. inventory
+  // CRUD works for the inventory role, AI tools for the QC roles, production
+  // rules for supervisors).
   for (const [roleName, caps] of Object.entries(ROLE_CAPS)) {
     const user = USER_BY_ROLE[roleName];
     describe(`${roleName}`, () => {

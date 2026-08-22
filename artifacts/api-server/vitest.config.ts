@@ -12,5 +12,11 @@ export default defineConfig({
     // observed work without turning a real lock problem into a long stall.
     hookTimeout: 120_000,
     testTimeout: 30_000,
+    // The integration files each create and migrate a temporary database.
+    // Running the whole suite at the machine's default worker count saturates
+    // Postgres and makes unrelated beforeAll hooks time out. A small bounded
+    // pool keeps the suite parallel while leaving connections for migrations.
+    minWorkers: 1,
+    maxWorkers: 2,
   },
 });
