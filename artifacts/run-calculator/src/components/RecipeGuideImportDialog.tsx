@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import type { SauceGuideCandidate, DoughGuideCandidate } from "@workspace/recipe-guide-import";
 import type { SauceGuideImportPrepared, DoughGuideImportPrepared } from "@/recipeGuideImport";
+import { loadProfile } from "@/storage";
 
 /**
  * Returns true when a candidate has no confident match on EITHER side (brand
@@ -119,6 +120,7 @@ type SauceProps = {
   applying: boolean;
   onConfirm: (
     rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[],
+    acknowledged: boolean,
   ) => void;
 };
 
@@ -129,6 +131,7 @@ export function SauceGuideImportDialog({
   const [brandPicks, setBrandPicks] = useState<Record<string, string>>({});
   const [recipePicks, setRecipePicks] = useState<Record<string, string>>({});
   const [flavorPicks, setFlavorPicks] = useState<Record<string, Set<string>>>({});
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     if (prepared) {
@@ -140,6 +143,7 @@ export function SauceGuideImportDialog({
         ),
       );
       setFlavorPicks({});
+      setAcknowledged(false);
     } else {
       setSelected(new Set());
       setBrandPicks({});
@@ -200,8 +204,15 @@ export function SauceGuideImportDialog({
         wasNullRecipe: c.matchedRecipeName === null,
       };
     });
+  const requiresAcknowledgement = applyRows.some((row) => {
+    const targets = row.flavors.length ? row.flavors : ["", ...(flavorsByBrand[row.brand] ?? [])];
+    return targets.some((flavor) => {
+      const profile = loadProfile(row.brand, flavor) as Record<string, unknown> | null;
+      return profile?.frontlineRecipeName && profile.frontlineRecipeName !== row.recipeName;
+    });
+  });
 
-  const confirm = () => onConfirm(applyRows);
+  const confirm = () => { if (!requiresAcknowledgement || acknowledged) onConfirm(applyRows, true); };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
@@ -328,6 +339,12 @@ export function SauceGuideImportDialog({
         </div>
 
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
+          {applyRows.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-amber-700">
+              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              I reviewed the changes; existing profile assignments may be replaced.
+            </label>
+          )}
           <span className="text-xs text-muted-foreground">
             {prepared ? `${applyRows.length} of ${candidates.length} row${candidates.length === 1 ? "" : "s"} will apply` : ""}
           </span>
@@ -337,7 +354,7 @@ export function SauceGuideImportDialog({
             </button>
             <button
               type="button"
-              disabled={applying || loading || !!error || applyRows.length === 0}
+              disabled={applying || loading || !!error || applyRows.length === 0 || (requiresAcknowledgement && !acknowledged)}
               onClick={confirm}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -362,6 +379,7 @@ type DoughProps = {
   applying: boolean;
   onConfirm: (
     rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[],
+    acknowledged: boolean,
   ) => void;
 };
 
@@ -372,6 +390,7 @@ export function DoughGuideImportDialog({
   const [brandPicks, setBrandPicks] = useState<Record<string, string>>({});
   const [recipePicks, setRecipePicks] = useState<Record<string, string>>({});
   const [flavorPicks, setFlavorPicks] = useState<Record<string, Set<string>>>({});
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     if (prepared) {
@@ -383,6 +402,7 @@ export function DoughGuideImportDialog({
         ),
       );
       setFlavorPicks({});
+      setAcknowledged(false);
     } else {
       setSelected(new Set());
       setBrandPicks({});
@@ -442,8 +462,15 @@ export function DoughGuideImportDialog({
         wasNullRecipe: c.matchedDoughRecipeName === null,
       };
     });
+  const requiresAcknowledgement = applyRows.some((row) => {
+    const targets = row.flavors.length ? row.flavors : ["", ...(flavorsByBrand[row.brand] ?? [])];
+    return targets.some((flavor) => {
+      const profile = loadProfile(row.brand, flavor) as Record<string, unknown> | null;
+      return profile?.doughRecipeName && profile.doughRecipeName !== row.doughRecipeName;
+    });
+  });
 
-  const confirm = () => onConfirm(applyRows);
+  const confirm = () => { if (!requiresAcknowledgement || acknowledged) onConfirm(applyRows, true); };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
@@ -563,6 +590,12 @@ export function DoughGuideImportDialog({
         </div>
 
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
+          {applyRows.length > 0 && (
+            <label className="flex items-center gap-2 text-xs text-amber-700">
+              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              I reviewed the changes; existing profile assignments may be replaced.
+            </label>
+          )}
           <span className="text-xs text-muted-foreground">
             {prepared ? `${applyRows.length} of ${candidates.length} row${candidates.length === 1 ? "" : "s"} will apply` : ""}
           </span>
@@ -572,7 +605,7 @@ export function DoughGuideImportDialog({
             </button>
             <button
               type="button"
-              disabled={applying || loading || !!error || applyRows.length === 0}
+              disabled={applying || loading || !!error || applyRows.length === 0 || (requiresAcknowledgement && !acknowledged)}
               onClick={confirm}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >

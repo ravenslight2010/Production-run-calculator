@@ -78,9 +78,11 @@ import {
   resolveImportName,
 } from "@workspace/spec-import";
 import {
+  buildImportReview,
   reconcileSpecWithRecipes,
   toReconcileRecipes,
   type Discrepancy,
+  type ImportReview,
   type ReconcileRecipe,
 } from "@workspace/spec-reconcile";
 import {
@@ -126,7 +128,7 @@ import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
-import { parseDoughCustomerSection, parseDoughVariantTable, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
+import { parseDoughCustomerSection, parseDoughVariantTable, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, applyMixPerPizza, applyNewMixComponents, detectNewMixComponents, fillSpecMixTags, type Mix, type MixComponent } from "@workspace/mixes";
 import {
@@ -143,6 +145,24 @@ import {
 } from "@workspace/formula-guard";
 
 export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
+
+export class ImportReviewReconfirmationError extends Error {
+  constructor(readonly importReview: ImportReview) {
+    super("The live recipe library changed this import's review. Please review the updated changes and confirm again.");
+    this.name = "ImportReviewReconfirmationError";
+  }
+}
+
+export function importReviewSignature(review: ImportReview): string {
+  return JSON.stringify({
+    changes: review.changes.map(({ kind, entity, before, after, requiresConfirmation, message }) => ({
+      kind, entity, before, after, requiresConfirmation: !!requiresConfirmation, message,
+    })),
+    counts: review.counts,
+    requiresExplicitConfirmation: review.requiresExplicitConfirmation,
+    confirmationReasons: review.confirmationReasons,
+  });
+}
 
 function assertNamedRecipeWriteLanded(
   saved: ReadonlyArray<{ name: string; components?: ReadonlyArray<{ ingredient: string; lbs: number }> }>,
@@ -180,6 +200,11 @@ export type SpecImportPrepared = {
   discrepancies: Discrepancy[];
   /** Ingredient-level formula changes, with batch/per-pizza semantics retained. */
   formulaChanges?: FormulaChange[];
+  /** Complete deterministic manifest of the additions/removals this import can make. */
+  importReview: ImportReview;
+  destructiveChangesAcknowledged?: boolean;
+  destructiveReviewSignature?: string;
+  profilesMarkedForRemoval?: Array<{ brand: string; flavor: string }>;
   /**
    * Factory ingredient-merge history captured during preparation. The review
    * dialog reuses it when edited rows are reconciled synchronously, so a current
@@ -1213,6 +1238,62 @@ export function buildDiscrepancies(
   }
 }
 
+function allDoughCustomerAssignments(parsed: ParsedSpecImport, workbook: DoughCustomerAssignment[]): DoughCustomerAssignment[] {
+  const staticAssignments = parsed.recipes.flatMap((recipe) =>
+    recipe.kind === "dough"
+      ? [...(SPEC_STATIC_CUSTOMER_ASSIGNMENTS.get(recipe.name.trim().toLowerCase()) ?? [])]
+      : [],
+  );
+  return [...workbook, ...staticAssignments];
+}
+
+export function buildSpecImportReview(
+  parsed: ParsedSpecImport,
+  removedProfiles: Array<{ brand: string; flavor: string }> = [],
+  customerAssignments: DoughCustomerAssignment[] = [],
+  currentRecipes: ReconcileRecipe[] = loadCurrentReconcileRecipes(),
+): ImportReview {
+  const review = buildImportReview({
+    incomingRecipes: toReconcileRecipes(parsed.recipes),
+    currentRecipes,
+    removedProfiles,
+    customerMappings: allDoughCustomerAssignments(parsed, customerAssignments).map((assignment) => ({
+      brand: assignment.brand,
+      qualifier: assignment.qualifierKey,
+      flavors: assignment.flavors,
+    })),
+    familyCollapses: parsed.recipes
+      .filter((recipe) => recipe.kind === "dough" && !!recipe.variantLabel && recipe.variantLabel !== recipe.name)
+      .map((recipe) => ({ family: recipe.name, variant: recipe.variantLabel! })),
+  });
+  // Mixes use per-pizza quantities and live outside the recipe-pool reconcile
+  // contract. Surface formula-guard changes here so a spec-wins mix update
+  // participates in the same signed acknowledgement as every other import.
+  const mixFormulaChanges = buildFormulaChanges(parsed)
+    .filter((change) => change.kind === "mix" && change.requiresConfirmation)
+    .map((change) => ({
+      kind: change.type === "removed" ? ("removed" as const) : ("quantity-changed" as const),
+      entity: `mix "${change.recipeName}"`,
+      before: change.previousAmount == null ? undefined : `${change.ingredient ?? "formula"}: ${change.previousAmount} oz/pizza`,
+      after: change.nextAmount == null ? undefined : `${change.ingredient ?? "formula"}: ${change.nextAmount} oz/pizza`,
+      requiresConfirmation: true,
+      message: change.type === "removed"
+        ? `Removes "${change.ingredient ?? "a component"}" from mix "${change.recipeName}".`
+        : `Changes "${change.ingredient ?? "a component"}" in mix "${change.recipeName}" using per-pizza quantities.`,
+    }));
+  if (!mixFormulaChanges.length) return review;
+  const changes = [...review.changes, ...mixFormulaChanges];
+  const counts = { ...review.counts };
+  for (const change of mixFormulaChanges) counts[change.kind] += 1;
+  return {
+    ...review,
+    changes,
+    counts,
+    requiresExplicitConfirmation: true,
+    confirmationReasons: [...review.confirmationReasons, ...mixFormulaChanges.map((change) => change.message)],
+  };
+}
+
 /** Build the import safety diff against the current local master-data pools. */
 export function buildFormulaChanges(
   parsed: ParsedSpecImport,
@@ -1479,6 +1560,7 @@ async function buildReusedPrepared(
     flagged: [],
     discrepancies,
     formulaChanges: buildFormulaChanges(working, ingredientMergeAliases),
+    importReview: buildSpecImportReview(working),
     ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
@@ -1799,6 +1881,7 @@ export async function prepareSpecImport(
   const profilesRemovedFromWorkbook = name
     ? await computeProfilesRemovedFromWorkbook([name], aliases, parsed.profiles)
     : [];
+  const importReview = buildSpecImportReview(parsed, profilesRemovedFromWorkbook, doughCustomerAssignments);
 
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
@@ -1811,6 +1894,7 @@ export async function prepareSpecImport(
     flagged,
     discrepancies,
     formulaChanges: buildFormulaChanges(parsed, ingredientMergeAliases),
+    importReview,
     ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
@@ -2041,6 +2125,7 @@ export async function prepareSpecImportMulti(
     (names?.length ?? 0) > 0
       ? await computeProfilesRemovedFromWorkbook(names ?? [], aliases, parsed.profiles)
       : [];
+  const importReview = buildSpecImportReview(parsed, profilesRemovedFromWorkbook, allCustomerAssignments);
 
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
@@ -2053,6 +2138,7 @@ export async function prepareSpecImportMulti(
     flagged,
     discrepancies,
     formulaChanges: buildFormulaChanges(parsed, ingredientMergeAliases),
+    importReview,
     ...(ingredientMergeAliases ? { ingredientMergeAliases } : {}),
     skipped,
     brands: known.brands,
@@ -2123,6 +2209,7 @@ export async function commitSpecImport(
    * the collapse only happens here.
    */
   appliedParsed: ParsedSpecImport;
+  finalImportReview: ImportReview;
   /**
    * True when the learned-alias POST failed after the import itself applied:
    * the user's renames / "use existing" picks were NOT remembered, so the next
@@ -2331,6 +2418,21 @@ export async function commitSpecImport(
         return changed ? { ...r, rows } : r;
       }),
     };
+  }
+
+  const finalImportReview = buildSpecImportReview(
+    applyParsed,
+    prepared.profilesMarkedForRemoval ?? [],
+    prepared.doughCustomerAssignments ?? [],
+  );
+  if (
+    prepared.destructiveReviewSignature !== undefined &&
+    prepared.destructiveReviewSignature !== importReviewSignature(finalImportReview)
+  ) {
+    throw new ImportReviewReconfirmationError(finalImportReview);
+  }
+  if (finalImportReview.requiresExplicitConfirmation && !prepared.destructiveChangesAcknowledged) {
+    throw new ImportReviewReconfirmationError(finalImportReview);
   }
 
   const applyOut: { nameCorrections?: SpecImportNameCorrection[] } = {};
@@ -2674,5 +2776,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, aliasSaveFailed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed };
 }

@@ -59,6 +59,62 @@ export type SpecReconcileInput = {
   lbsTolerance?: number;
 };
 
+/**
+ * A deterministic, manager-facing change manifest for an incoming workbook.
+ * Unlike reconciliation (which answers whether a current recipe matches a
+ * source), this describes the concrete writes an import would make.
+ */
+export type ImportReviewChangeKind =
+  | "added"
+  | "removed"
+  | "quantity-changed"
+  | "formula-cleared"
+  | "family-collapsed"
+  | "variant-loss"
+  | "customer-remapped";
+
+export type ImportReviewChange = {
+  kind: ImportReviewChangeKind;
+  entity: string;
+  message: string;
+  before?: string;
+  after?: string;
+  /** Must be explicitly acknowledged before this import can be applied. */
+  requiresConfirmation?: boolean;
+};
+
+export type ImportReview = {
+  changes: ImportReviewChange[];
+  counts: Record<ImportReviewChangeKind, number>;
+  requiresExplicitConfirmation: boolean;
+  confirmationReasons: string[];
+};
+
+export type ImportReviewCustomerMapping = {
+  brand: string;
+  qualifier?: string;
+  flavors: string[];
+};
+
+export type BuildImportReviewInput = {
+  incomingRecipes: ReconcileRecipe[];
+  currentRecipes: ReconcileRecipe[];
+  /** Profiles deliberately selected for deletion after a re-import. */
+  removedProfiles?: ReadonlyArray<{ brand: string; flavor: string }>;
+  /**
+   * Explicit dough customer mappings extracted from a workbook. Empty flavor
+   * means "all flavors" and is intentionally treated as broad, never hidden.
+   */
+  customerMappings?: ReadonlyArray<ImportReviewCustomerMapping>;
+  /**
+   * Family-collapse and variant coverage information from the canonicalized
+   * parse. Both are optional so callers can use this for premix-style imports.
+   */
+  familyCollapses?: ReadonlyArray<{ family: string; variant: string }>;
+  missingVariants?: ReadonlyArray<{ family: string; variant: string }>;
+  largeChangeThreshold?: number;
+};
+
 const KINDS: ReadonlySet<string> = new Set<ReconcileKind>(["dough", "sauce", "cheese"]);
 
 function recipeKey(kind: string, name: string): string {
@@ -89,6 +145,171 @@ function aggregateRows(rows: ReadonlyArray<ReconcileRow>): Map<string, Reconcile
     else out.set(key, { ingredient, lbs });
   }
   return out;
+}
+
+/**
+ * Build a precise, bounded-risk manifest for an import. This function is pure
+ * so the same result can be used in the web review, import history, and a
+ * future server-side commit boundary.
+ */
+export function buildImportReview(input: BuildImportReviewInput): ImportReview {
+  const changes: ImportReviewChange[] = [];
+  const currentByKey = new Map<string, ReconcileRecipe>();
+  for (const recipe of input.currentRecipes) {
+    currentByKey.set(recipeKey(recipe.kind, recipe.name), recipe);
+  }
+
+  for (const incoming of input.incomingRecipes) {
+    const current = currentByKey.get(recipeKey(incoming.kind, incoming.name));
+    const label = `${incoming.kind} recipe "${incoming.name}"`;
+    if (!current) {
+      changes.push({ kind: "added", entity: label, message: `Adds ${label}.` });
+      continue;
+    }
+
+    const before = aggregateRows(current.rows);
+    const after = aggregateRows(incoming.rows);
+    if (before.size > 0 && after.size === 0) {
+      changes.push({
+        kind: "formula-cleared",
+        entity: label,
+        before: `${before.size} ingredient rows`,
+        after: "no ingredient rows",
+        requiresConfirmation: true,
+        message: `Would clear the nonempty formula for ${label}.`,
+      });
+      continue;
+    }
+
+    for (const [key, oldRow] of before) {
+      const nextRow = after.get(key);
+      if (!nextRow) {
+        changes.push({
+          kind: "removed",
+          entity: label,
+          before: `${oldRow.ingredient}: ${fmtLbs(oldRow.lbs)} lbs`,
+          requiresConfirmation: true,
+          message: `Removes "${oldRow.ingredient}" from ${label}.`,
+        });
+      } else if (Math.abs(oldRow.lbs - nextRow.lbs) > 0.001) {
+        const relativeChange = oldRow.lbs === 0
+          ? (nextRow.lbs === 0 ? 0 : 1)
+          : Math.abs(nextRow.lbs - oldRow.lbs) / Math.abs(oldRow.lbs);
+        changes.push({
+          kind: "quantity-changed",
+          entity: label,
+          before: `${oldRow.ingredient}: ${fmtLbs(oldRow.lbs)} lbs`,
+          after: `${nextRow.ingredient}: ${fmtLbs(nextRow.lbs)} lbs`,
+          requiresConfirmation: relativeChange >= 0.25,
+          message: `Changes "${oldRow.ingredient}" in ${label} from ${fmtLbs(oldRow.lbs)} to ${fmtLbs(nextRow.lbs)} lbs.`,
+        });
+      }
+    }
+    for (const [key, newRow] of after) {
+      if (before.has(key)) continue;
+      changes.push({
+        kind: "added",
+        entity: label,
+        after: `${newRow.ingredient}: ${fmtLbs(newRow.lbs)} lbs`,
+        message: `Adds "${newRow.ingredient}" to ${label}.`,
+      });
+    }
+  }
+
+  for (const profile of input.removedProfiles ?? []) {
+    const name = `${profile.brand} ${profile.flavor}`.trim();
+    if (!name) continue;
+    changes.push({
+      kind: "removed",
+      entity: `profile "${name}"`,
+      requiresConfirmation: true,
+      message: `Removes profile "${name}" because it is no longer in the workbook.`,
+    });
+  }
+
+  for (const collapse of input.familyCollapses ?? []) {
+    if (!collapse.family || !collapse.variant || collapse.family === collapse.variant) continue;
+    changes.push({
+      kind: "family-collapsed",
+      entity: `dough family "${collapse.family}"`,
+      before: collapse.variant,
+      after: collapse.family,
+      message: `Stores variant "${collapse.variant}" under dough family "${collapse.family}".`,
+    });
+  }
+
+  for (const missing of input.missingVariants ?? []) {
+    if (!missing.family || !missing.variant) continue;
+    changes.push({
+      kind: "variant-loss",
+      entity: `dough family "${missing.family}"`,
+      before: missing.variant,
+      requiresConfirmation: true,
+      message: `The prior variant "${missing.variant}" is not present for dough family "${missing.family}".`,
+    });
+  }
+
+  const mappingTargets = new Map<string, Set<string>>();
+  for (const mapping of input.customerMappings ?? []) {
+    const brand = mapping.brand.trim();
+    if (!brand) continue;
+    const qualifier = (mapping.qualifier ?? "").trim() || "base";
+    const flavors = mapping.flavors.length ? mapping.flavors : [""];
+    for (const flavor of flavors) {
+      const normalizedFlavor = flavor.trim();
+      const mappingKey = `${brand.toLowerCase()}\u0000${normalizedFlavor.toLowerCase()}`;
+      const qualifiers = mappingTargets.get(mappingKey) ?? new Set<string>();
+      qualifiers.add(qualifier);
+      mappingTargets.set(mappingKey, qualifiers);
+      const broad = !normalizedFlavor;
+      changes.push({
+        kind: "customer-remapped",
+        entity: `customer "${brand}${normalizedFlavor ? ` · ${normalizedFlavor}` : " · all flavors"}"`,
+        after: qualifier,
+        requiresConfirmation: broad,
+        message: broad
+          ? `Maps every flavor of "${brand}" to the ${qualifier} dough variant.`
+          : `Maps "${brand} · ${normalizedFlavor}" to the ${qualifier} dough variant.`,
+      });
+    }
+  }
+  for (const [key, qualifiers] of mappingTargets) {
+    if (qualifiers.size < 2) continue;
+    const [brand, flavor] = key.split("\u0000");
+    changes.push({
+      kind: "customer-remapped",
+      entity: `customer "${brand}${flavor ? ` · ${flavor}` : " · all flavors"}"`,
+      after: [...qualifiers].join(", "),
+      requiresConfirmation: true,
+      message: `Customer "${brand}${flavor ? ` · ${flavor}` : " · all flavors"}" maps to multiple dough variants and is ambiguous.`,
+    });
+  }
+
+  const counts = {
+    added: 0,
+    removed: 0,
+    "quantity-changed": 0,
+    "formula-cleared": 0,
+    "family-collapsed": 0,
+    "variant-loss": 0,
+    "customer-remapped": 0,
+  } satisfies Record<ImportReviewChangeKind, number>;
+  for (const change of changes) counts[change.kind] += 1;
+
+  const destructiveCount =
+    counts.removed + counts["quantity-changed"] + counts["formula-cleared"] + counts["variant-loss"];
+  const threshold = input.largeChangeThreshold ?? 8;
+  const explicit = changes.filter((change) => change.requiresConfirmation);
+  const reasons = explicit.map((change) => change.message);
+  if (destructiveCount >= threshold && !reasons.some((reason) => reason.startsWith("This import changes"))) {
+    reasons.push(`This import changes ${destructiveCount} existing formula rows or profiles.`);
+  }
+  return {
+    changes,
+    counts,
+    requiresExplicitConfirmation: explicit.length > 0 || destructiveCount >= threshold,
+    confirmationReasons: reasons,
+  };
 }
 
 /**

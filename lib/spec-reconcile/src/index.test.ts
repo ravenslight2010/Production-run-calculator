@@ -7,6 +7,7 @@ import {
   reconcileSpecProfiles,
   toReconcileProfiles,
   formatProfileDiscrepanciesForPrompt,
+  buildImportReview,
   type ReconcileRecipe,
   type ReconcileProfile,
 } from "./index";
@@ -115,6 +116,95 @@ describe("reconcileSpecWithRecipes", () => {
     });
     expect(out).toHaveLength(1);
     expect(out[0].type).toBe("missing-recipe");
+  });
+});
+
+describe("buildImportReview", () => {
+  it("surfaces added, removed, and quantity-changed ingredient rows", () => {
+    const review = buildImportReview({
+      currentRecipes: [dough("Standard", [["Flour", 50], ["Sugar", 2]])],
+      incomingRecipes: [dough("Standard", [["Flour", 48], ["Salt", 1]])],
+    });
+    expect(review.counts).toMatchObject({
+      added: 1,
+      removed: 1,
+      "quantity-changed": 1,
+    });
+    expect(review.requiresExplicitConfirmation).toBe(true);
+    expect(review.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "removed", requiresConfirmation: true }),
+    ]));
+  });
+
+  it("requires confirmation for a material single-row quantity change but not a small adjustment", () => {
+    const large = buildImportReview({
+      currentRecipes: [dough("Standard", [["Flour", 50]])],
+      incomingRecipes: [dough("Standard", [["Flour", 65]])],
+    });
+    const small = buildImportReview({
+      currentRecipes: [dough("Standard", [["Flour", 50]])],
+      incomingRecipes: [dough("Standard", [["Flour", 55]])],
+    });
+    expect(large.requiresExplicitConfirmation).toBe(true);
+    expect(large.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "quantity-changed", requiresConfirmation: true }),
+    ]));
+    expect(small.requiresExplicitConfirmation).toBe(false);
+  });
+
+  it("requires confirmation before clearing a nonempty formula", () => {
+    const review = buildImportReview({
+      currentRecipes: [dough("Standard", [["Flour", 50]])],
+      incomingRecipes: [dough("Standard", [])],
+    });
+    expect(review.counts["formula-cleared"]).toBe(1);
+    expect(review.requiresExplicitConfirmation).toBe(true);
+    expect(review.changes[0]).toMatchObject({
+      kind: "formula-cleared",
+      requiresConfirmation: true,
+    });
+  });
+
+  it("requires confirmation for broad and ambiguous customer mappings", () => {
+    const review = buildImportReview({
+      currentRecipes: [],
+      incomingRecipes: [],
+      customerMappings: [
+        { brand: "Acme", qualifier: "thin", flavors: [""] },
+        { brand: "Acme", qualifier: "thick", flavors: [""] },
+      ],
+    });
+    expect(review.counts["customer-remapped"]).toBe(3);
+    expect(review.requiresExplicitConfirmation).toBe(true);
+    expect(review.changes.some((change) => change.message.includes("ambiguous"))).toBe(true);
+  });
+
+  it("requires confirmation when a large set of profiles is removed", () => {
+    const review = buildImportReview({
+      currentRecipes: [],
+      incomingRecipes: [],
+      removedProfiles: Array.from({ length: 8 }, (_, i) => ({
+        brand: "Acme",
+        flavor: `Flavor ${i}`,
+      })),
+    });
+    expect(review.counts.removed).toBe(8);
+    expect(review.requiresExplicitConfirmation).toBe(true);
+  });
+
+  it("requires confirmation for a single selected profile deletion", () => {
+    const review = buildImportReview({
+      currentRecipes: [],
+      incomingRecipes: [],
+      removedProfiles: [{ brand: "Acme", flavor: "Thin" }],
+    });
+    expect(review.requiresExplicitConfirmation).toBe(true);
+    expect(review.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        entity: 'profile "Acme Thin"',
+        requiresConfirmation: true,
+      }),
+    ]));
   });
 });
 

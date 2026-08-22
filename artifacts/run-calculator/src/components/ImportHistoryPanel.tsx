@@ -81,6 +81,18 @@ export default function ImportHistoryPanel({
                     {s.unresolved?.length ? <p><b>Unresolved:</b> {s.unresolved.join(" ")}</p> : null}
                     {s.skipped?.length ? <p><b>Skipped:</b> {s.skipped.join(" ")}</p> : null}
                     {s.followUp?.length ? <p className="text-amber-700"><b>Follow-up:</b> {s.followUp.join(" ")}</p> : null}
+                    {s.changes?.length ? (
+                      <div>
+                        <p><b>Reviewed changes:</b></p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                          {s.changes.map((change, index) => (
+                            <li key={`${change.kind}-${change.entity}-${index}`}>
+                              <span className="font-medium">{change.kind.replace("-", " ")}:</span> {change.message}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     {item.snapshotId != null && onReopen && (item.importType === "spec" || item.importType === "premix") ? (
                       <Button
                         type="button"
@@ -88,10 +100,10 @@ export default function ImportHistoryPanel({
                         variant="outline"
                         onClick={() => onReopen({ importType: item.importType === "spec" ? "spec" : "premix", snapshotId: item.snapshotId! })}
                       >
-                        Reopen saved review
+                        Reopen saved review / scoped repair
                       </Button>
                     ) : (
-                      <p className="text-muted-foreground">This record keeps the committed changes. No saved review snapshot is available.</p>
+                      <p className="text-muted-foreground">This record keeps the committed changes, but no saved source snapshot is available for scoped repair.</p>
                     )}
                   </div>}
                 </div>

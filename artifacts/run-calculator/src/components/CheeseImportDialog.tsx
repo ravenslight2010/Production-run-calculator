@@ -32,6 +32,7 @@ type Props = {
     recipesToApply: CheeseRecipe[],
     newAliases: SpecImportAlias[],
     recipesToRemove: string[],
+    destructiveChangesAcknowledged: boolean,
   ) => void;
 };
 
@@ -73,9 +74,11 @@ export default function CheeseImportDialog({
   // merged-away one starts UNCHECKED with an explanatory note instead of
   // tripping the generic duplicate-target block.
   const [mergedAwayKeys, setMergedAwayKeys] = useState<Set<string>>(new Set());
+  const [destructiveChangesConfirmed, setDestructiveChangesConfirmed] = useState(false);
 
   useEffect(() => {
     if (prepared) {
+      setDestructiveChangesConfirmed(false);
       // Detect the merge-re-import case: an alias-linked row whose link target
       // is also claimed by another candidate's exact-id update.
       const exactIds = new Set(
@@ -109,6 +112,7 @@ export default function CheeseImportDialog({
       setRedirects(new Map());
       setRenames(new Map());
     } else {
+      setDestructiveChangesConfirmed(false);
       setItems([]);
       setSelected(new Set());
       setRemovedRecipes(new Set());
@@ -192,6 +196,14 @@ export default function CheeseImportDialog({
   // last-write-wins merge and silently drop one row's data — block Apply until
   // the manager changes one of the picks.
   const included = items.filter((it) => selected.has(it.key));
+  const destructiveChanges = [
+    ...included.map((it) => it.candidate.status === "update"
+      ? `Replaces the formula for "${resolveItem(it).name}".`
+      : null,
+    ).filter((message): message is string => !!message),
+    ...[...removedRecipes].map((id) => `Removes "${poolById.get(id)?.name ?? id}".`),
+  ];
+  const requiresDestructiveConfirmation = destructiveChanges.length > 0;
   const finalIdCounts = new Map<string, number>();
   for (const it of included) {
     const id = resolveItem(it).id;
@@ -224,7 +236,7 @@ export default function CheeseImportDialog({
   }
 
   const confirm = () => {
-    if (duplicateTargets.length > 0 || renameCollisions.length > 0) return;
+    if (duplicateTargets.length > 0 || renameCollisions.length > 0 || (requiresDestructiveConfirmation && !destructiveChangesConfirmed)) return;
     const newAliases: SpecImportAlias[] = [];
     const seen = new Set<string>();
     // Write BOTH a brand-scoped alias (context = the sheet's customer, so the
@@ -260,7 +272,7 @@ export default function CheeseImportDialog({
       const rename = renameOf(it);
       if (rename) addAlias(it.candidate.recipe.name.trim(), rename, brand);
     }
-    onConfirm(included.map(resolveItem), newAliases, [...removedRecipes]);
+    onConfirm(included.map(resolveItem), newAliases, [...removedRecipes], destructiveChangesConfirmed);
   };
 
   return (
@@ -598,6 +610,12 @@ export default function CheeseImportDialog({
                   </ul>
                 </div>
               )}
+              {requiresDestructiveConfirmation && (
+                <label className="flex cursor-pointer items-start gap-2 rounded border border-amber-400/60 bg-amber-500/10 p-3 text-xs text-amber-900" data-testid="cheese-import-destructive-confirmation">
+                  <input type="checkbox" checked={destructiveChangesConfirmed} onChange={(event) => setDestructiveChangesConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-amber-600" />
+                  <span><b>Review required.</b> {destructiveChanges.slice(0, 3).join(" ")} I want to apply these shared recipe changes.</span>
+                </label>
+              )}
 
               {duplicateTargets.length > 0 && (
                 <div
@@ -683,7 +701,8 @@ export default function CheeseImportDialog({
               nothing ||
               selectedCount === 0 ||
               duplicateTargets.length > 0 ||
-              renameCollisions.length > 0
+               renameCollisions.length > 0 ||
+               (requiresDestructiveConfirmation && !destructiveChangesConfirmed)
             }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >

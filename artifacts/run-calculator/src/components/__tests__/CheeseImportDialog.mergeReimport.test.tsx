@@ -67,9 +67,12 @@ describe("CheeseImportDialog merge re-import guidance", () => {
     expect(oldRow.checked).toBe(false);
     expect(survivorRow.checked).toBe(true);
     expect(screen.getByTestId("cheese-merged-away-cheese:old-blend")).toBeTruthy();
-    // No duplicate-target block, so Apply is available immediately.
+    // No duplicate-target block, but the surviving row replaces a shared
+    // recipe, so acknowledgement is required before Apply becomes available.
     expect(screen.queryByTestId("cheese-duplicate-target-warning")).toBeNull();
     const apply = screen.getByRole("button", { name: /Apply/ });
+    expect((apply as HTMLButtonElement).disabled).toBe(true);
+    (screen.getByTestId("cheese-import-destructive-confirmation").querySelector("input") as HTMLInputElement).click();
     expect((apply as HTMLButtonElement).disabled).toBe(false);
   });
 

@@ -12,6 +12,8 @@ export type ImportHistorySummary = {
   unresolved?: string[];
   skipped?: string[];
   followUp?: string[];
+  /** Bounded deterministic manifest retained with the import's saved snapshot. */
+  changes?: Array<{ kind: string; entity: string; message: string }>;
   snapshotId?: number | null;
 };
 

@@ -239,6 +239,13 @@ export type RecipeGuideCommitResult = {
   rowsSkippedBothUnmatched: number;
 };
 
+export class RecipeGuideImportConfirmationRequiredError extends Error {
+  constructor() {
+    super("Review confirmation is required before applying guide changes.");
+    this.name = "RecipeGuideImportConfirmationRequiredError";
+  }
+}
+
 export type SauceGuideCommitRow = {
   brand: string;
   flavors?: readonly string[];
@@ -283,7 +290,9 @@ export type DoughGuideCommitRow = {
  */
 export function commitSauceGuideImport(
   rows: ReadonlyArray<SauceGuideCommitRow>,
+  acknowledged = true,
 ): RecipeGuideCommitResult {
+  if (!acknowledged) throw new RecipeGuideImportConfirmationRequiredError();
   const flavorsByBrand = loadBrandFlavors();
   let rowsApplied = 0;
   let profilesUpdated = 0;
@@ -318,7 +327,9 @@ export function commitSauceGuideImport(
  */
 export function commitDoughGuideImport(
   rows: ReadonlyArray<DoughGuideCommitRow>,
+  acknowledged = true,
 ): RecipeGuideCommitResult {
+  if (!acknowledged) throw new RecipeGuideImportConfirmationRequiredError();
   const flavorsByBrand = loadBrandFlavors();
   let rowsApplied = 0;
   let profilesUpdated = 0;

@@ -20,6 +20,7 @@ type ImportHistorySummary = {
   unresolved?: string[];
   skipped?: string[];
   followUp?: string[];
+  changes?: Array<{ kind: string; entity: string; message: string }>;
   snapshotId?: number | null;
 };
 
@@ -48,6 +49,16 @@ function sanitizeSummary(raw: unknown): ImportHistorySummary {
     }
     return out;
   };
+  const changes = (Array.isArray(o.changes) ? o.changes : [])
+    .slice(0, 100)
+    .flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const change = value as Record<string, unknown>;
+      const kind = String(change.kind ?? "").trim().slice(0, 60);
+      const entity = String(change.entity ?? "").trim().slice(0, MAX_TEXT);
+      const message = String(change.message ?? "").trim().slice(0, MAX_TEXT);
+      return kind && entity && message ? [{ kind, entity, message }] : [];
+    });
   return {
     phases,
     counts,
@@ -60,6 +71,7 @@ function sanitizeSummary(raw: unknown): ImportHistorySummary {
     unresolved: cleanList(o.unresolved),
     skipped: cleanList(o.skipped),
     followUp: cleanList(o.followUp),
+    ...(changes.length ? { changes } : {}),
     snapshotId: Number.isInteger(o.snapshotId) ? Number(o.snapshotId) : null,
   };
 }

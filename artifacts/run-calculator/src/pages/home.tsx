@@ -567,7 +567,7 @@ import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
-import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
+import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, ImportReviewReconfirmationError, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
@@ -11603,6 +11603,8 @@ export default function Home() {
     profilesToRemove: Array<{brand: string; flavor: string}> = [],
     forceUpdateProfileKeys: ReadonlySet<string> = new Set(),
     acceptedNewMixIngredientNames: ReadonlySet<string> = new Set(),
+    destructiveChangesAcknowledged = false,
+    destructiveReviewSignature?: string,
   ) {
     if (!specImportPrepared) return;
     // The commit spans profile and inventory master-data writes after an AI
@@ -11627,6 +11629,9 @@ export default function Home() {
       ...specImportPrepared,
       parsed: editedParsed,
       newAliases: mergeSpecAliases(specImportPrepared.newAliases, learnedRenames),
+      destructiveChangesAcknowledged,
+      destructiveReviewSignature,
+      profilesMarkedForRemoval: profilesToRemove,
     };
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
@@ -11636,7 +11641,7 @@ export default function Home() {
     // a workbook replacement when a manager decides it was not intended.
     const importRollbackBefore = captureMasterDataSnapshot();
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
@@ -11689,6 +11694,20 @@ export default function Home() {
           warnings: [aliasSaveFailed ? "Learned mappings were not saved and may need review again." : "", toCommit.note ?? ""].filter(Boolean),
           unresolved: toCommit.skipped?.profiles?.map((p) => `${p.brand} ${p.flavor}`) ?? [],
           skipped: toCommit.skipped?.recipes?.map((r) => r.name) ?? [],
+          changes: [
+            ...finalImportReview.changes.map(({ kind, entity, message }) => ({ kind, entity, message })),
+            ...learnedRenames
+              .filter((rename) => {
+                const from = rename.externalName.trim().toLowerCase();
+                const to = rename.canonicalName.trim().toLowerCase();
+                return from && to && from !== to;
+              })
+              .map((rename) => ({
+                kind: "renamed",
+                entity: rename.kind,
+                message: `Renames "${rename.externalName.trim()}" to "${rename.canonicalName.trim()}".`,
+              })),
+          ],
           followUp: aliasSaveFailed ? ["Reopen the saved import review and confirm the name mappings again."] : [],
           snapshotId: specSnapshotId,
         },
@@ -12011,6 +12030,23 @@ export default function Home() {
           autoLinkedNote,
       });
     } catch (err) {
+      if (err instanceof ImportReviewReconfirmationError) {
+        // Nothing has been written: relinking/pruning changed the authoritative
+        // diff, so replace the stale dialog manifest and reset its checkbox.
+        setSpecImportPrepared((current) =>
+          current
+            ? {
+                ...current,
+                importReview: err.importReview,
+                destructiveChangesAcknowledged: false,
+                destructiveReviewSignature: undefined,
+              }
+            : current,
+        );
+        setSpecImportError(null);
+        toast({ title: "Import review updated", description: err.message, variant: "destructive" });
+        return;
+      }
       void recordImportHistory({
         importType: "spec",
         sourceKey: deriveSourceKey(specImportPrepared?.sourceNames ?? []),
@@ -12095,6 +12131,7 @@ export default function Home() {
     freezerPulls: PremixFreezerPull[],
     newAliases: SpecImportAlias[],
     mixesToRemove: string[] = [],
+    destructiveChangesAcknowledged = false,
   ) {
     if (!premixImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -12103,6 +12140,15 @@ export default function Home() {
         description: "Importing premix sheets changes shared mix and freezer-pull settings.",
         variant: "destructive",
       });
+      return;
+    }
+    const destructive = mixesToRemove.length > 0 || mixesToApply.some((mix) =>
+      premixImportPrepared.existingMixes.some((current) =>
+        current.id === mix.id && JSON.stringify(current.components ?? []) !== JSON.stringify(mix.components ?? []),
+      ),
+    );
+    if (destructive && !destructiveChangesAcknowledged) {
+      toast({ title: "Review required", description: "Confirm the shared mix formula changes before applying this import.", variant: "destructive" });
       return;
     }
     setPremixImportApplying(true);
@@ -12235,7 +12281,7 @@ export default function Home() {
     }
   }
 
-  function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[]) {
+  function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -12244,9 +12290,13 @@ export default function Home() {
       });
       return;
     }
+    if (!acknowledged) {
+      setShippingImportError("Please acknowledge the reviewed changes before applying.");
+      return;
+    }
     setShippingImportApplying(true);
     try {
-      const result = commitShippingImport(rows);
+      const result = commitShippingImport(rows, acknowledged);
       const shippingSkipped = rows.filter((row) => !row.brand.trim() || Object.keys(row.patch).length === 0).length;
       void recordImportHistory({
         importType: "shipping",
@@ -12352,7 +12402,7 @@ export default function Home() {
     }
   }
 
-  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[]) {
+  function handleSauceGuideImportConfirm(rows: { brand: string; flavors: string[]; recipeName: string; ozPerPizza: number; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -12361,9 +12411,13 @@ export default function Home() {
       });
       return;
     }
+    if (!acknowledged) {
+      setSauceGuideImportError("Please acknowledge the reviewed changes before applying.");
+      return;
+    }
     setSauceGuideImportApplying(true);
     try {
-      const result = commitSauceGuideImport(rows);
+      const result = commitSauceGuideImport(rows, acknowledged);
       void recordImportHistory({
         importType: "sauce",
         sourceLabel: "Sauce recipe guide",
@@ -12422,7 +12476,7 @@ export default function Home() {
     }
   }
 
-  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[]) {
+  function handleDoughGuideImportConfirm(rows: { brand: string; flavors: string[]; doughRecipeName: string; wasNullBrand: boolean; wasNullRecipe: boolean }[], acknowledged = false) {
     if (!canImportProfileGuide) {
       toast({
         title: "Profile access required",
@@ -12431,9 +12485,13 @@ export default function Home() {
       });
       return;
     }
+    if (!acknowledged) {
+      setDoughGuideImportError("Please acknowledge the reviewed changes before applying.");
+      return;
+    }
     setDoughGuideImportApplying(true);
     try {
-      const result = commitDoughGuideImport(rows);
+      const result = commitDoughGuideImport(rows, acknowledged);
       void recordImportHistory({
         importType: "dough",
         sourceLabel: "Dough recipe guide",
@@ -12526,6 +12584,7 @@ export default function Home() {
     recipesToApply: CheeseRecipe[],
     newAliases: SpecImportAlias[],
     recipesToRemove: string[] = [],
+    destructiveChangesAcknowledged = false,
   ) {
     if (!cheeseImportPrepared) return;
     if (!canImportPremixOrCheese) {
@@ -12534,6 +12593,15 @@ export default function Home() {
         description: "Importing cheese recipes changes shared inventory master data.",
         variant: "destructive",
       });
+      return;
+    }
+    const destructive = recipesToRemove.length > 0 || recipesToApply.some((recipe) =>
+      cheeseImportPrepared.candidates.some((candidate) =>
+        candidate.status === "update" && candidate.recipe.id === recipe.id,
+      ),
+    );
+    if (destructive && !destructiveChangesAcknowledged) {
+      toast({ title: "Review required", description: "Confirm the shared cheese recipe changes before applying this import.", variant: "destructive" });
       return;
     }
     setCheeseImportApplying(true);

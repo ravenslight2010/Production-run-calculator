@@ -13,6 +13,7 @@ import SpecImportDialog from "../SpecImportDialog";
 // recipes, die types, diff) and its deterministic re-target on Back → edit → Next.
 vi.mock("@/specImport", () => ({
   buildDiscrepancies: () => [],
+  importReviewSignature: () => "review-signature",
 }));
 vi.mock("@/storage", () => ({
   profileExistsForImport: () => false,
@@ -43,6 +44,20 @@ function makePrepared(
     newAliases: [],
     flagged: [],
     discrepancies: [],
+    importReview: {
+      changes: [],
+      counts: {
+        added: 0,
+        removed: 0,
+        "quantity-changed": 0,
+        "formula-cleared": 0,
+        "family-collapsed": 0,
+        "variant-loss": 0,
+        "customer-remapped": 0,
+      },
+      requiresExplicitConfirmation: false,
+      confirmationReasons: [],
+    },
     skipped: { profiles: [], recipes: [] },
     brands: [],
     flavorsByBrand: {},
@@ -68,6 +83,34 @@ function renderDialog(
 }
 
 describe("SpecImportDialog two-step wizard", () => {
+  it("requires explicit acknowledgement for a single destructive formula removal", () => {
+    const prepared = makePrepared([{ brand: "A", flavor: "X" }]);
+    prepared.importReview = {
+      ...prepared.importReview,
+      changes: [{
+        kind: "removed",
+        entity: 'dough "Standard"',
+        message: 'Removes "Sugar" from dough "Standard".',
+        requiresConfirmation: true,
+      }],
+      counts: { ...prepared.importReview.counts, removed: 1 },
+      requiresExplicitConfirmation: true,
+      confirmationReasons: ['Removes "Sugar" from dough "Standard".'],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(prepared, onConfirm);
+    fireEvent.click(screen.getByText("Next"));
+
+    const apply = screen.getByText(/^Apply/).closest("button") as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("spec-import-destructive-confirmation"));
+    expect(apply.disabled).toBe(false);
+    fireEvent.click(apply);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), expect.anything(), expect.anything(), true, "review-signature",
+    );
+  });
+
   it("shows only product name confirmation in step 1, hiding recipes and the diff", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",

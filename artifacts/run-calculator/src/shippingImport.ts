@@ -59,6 +59,13 @@ export type ShippingCommitResult = {
   profilesUpdated: number;
 };
 
+export class ShippingImportConfirmationRequiredError extends Error {
+  constructor() {
+    super("Review confirmation is required before applying shipping changes.");
+    this.name = "ShippingImportConfirmationRequiredError";
+  }
+}
+
 /**
  * Apply the reviewed rows. Flavor targeting per row:
  * - `flavors` empty/absent → apply to the WHOLE brand (brand-level ""
@@ -69,7 +76,9 @@ export type ShippingCommitResult = {
  */
 export function commitShippingImport(
   rows: ReadonlyArray<{ brand: string; flavors?: readonly string[]; patch: ShippingPatch }>,
+  acknowledged = true,
 ): ShippingCommitResult {
+  if (!acknowledged) throw new ShippingImportConfirmationRequiredError();
   const flavorsByBrand = loadBrandFlavors();
   let rowsApplied = 0;
   let profilesUpdated = 0;

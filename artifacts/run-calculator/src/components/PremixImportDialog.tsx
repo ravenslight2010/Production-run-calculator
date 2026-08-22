@@ -30,6 +30,7 @@ type Props = {
     freezerPulls: PremixFreezerPull[],
     newAliases: SpecImportAlias[],
     mixesToRemove: string[],
+    destructiveChangesAcknowledged: boolean,
   ) => void;
 };
 
@@ -72,6 +73,7 @@ export default function PremixImportDialog({
   // the same saved mix, so the merged-away one starts UNCHECKED with an
   // explanatory note instead of tripping the generic duplicate-target block.
   const [mergedAwayKeys, setMergedAwayKeys] = useState<Set<string>>(new Set());
+  const [destructiveChangesConfirmed, setDestructiveChangesConfirmed] = useState(false);
 
   const existing = useMemo(
     () => new Set(prepared?.existingIds ?? []),
@@ -89,6 +91,7 @@ export default function PremixImportDialog({
   // ORIGINAL parsed ids so freezer-pull notes and selection survive.
   useEffect(() => {
     if (prepared) {
+      setDestructiveChangesConfirmed(false);
       const existsById = (id: string) => prepared.existingIds.includes(id);
       const nextRedirects = new Map<string, string>();
       // Detect the merge-re-import case: a suggested-redirect row whose target
@@ -121,6 +124,7 @@ export default function PremixImportDialog({
       );
       setRedirects(nextRedirects);
     } else {
+      setDestructiveChangesConfirmed(false);
       setItems([]);
       setSelected(new Set());
       setRemovedMixes(new Set());
@@ -204,6 +208,16 @@ export default function PremixImportDialog({
   };
 
   const includedItems = items.filter((it) => selected.has(it.key));
+  const destructiveChanges = [
+    ...includedItems.map((it) => {
+      const current = existingMixById.get(it.candidate.mix.id);
+      return current && JSON.stringify(current.components ?? []) !== JSON.stringify(it.candidate.mix.components ?? [])
+        ? `Replaces the formula for "${current.name}".`
+        : null;
+    }).filter((message): message is string => !!message),
+    ...[...removedMixes].map((id) => `Removes "${existingMixById.get(id)?.name ?? id}".`),
+  ];
+  const requiresDestructiveConfirmation = destructiveChanges.length > 0;
 
   // Count how many included items resolve to each target mix id.
   const finalIdCounts = new Map<string, number>();
@@ -228,7 +242,7 @@ export default function PremixImportDialog({
     );
 
   const confirm = () => {
-    if (duplicateTargets.length > 0) return;
+    if (duplicateTargets.length > 0 || (requiresDestructiveConfirmation && !destructiveChangesConfirmed)) return;
     const included = includedItems;
     // When multiple candidates redirect to the same PREP mix (e.g. several
     // customer-specific blocks for the same ingredient), merge their components
@@ -292,7 +306,7 @@ export default function PremixImportDialog({
       }
     }
     // Prep-only blocks contribute their pull notes unconditionally.
-    onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases, [...removedMixes]);
+    onConfirm(mixes, [...includedPulls, ...orphanPulls], newAliases, [...removedMixes], destructiveChangesConfirmed);
   };
 
   return (
@@ -740,6 +754,12 @@ export default function PremixImportDialog({
                   No premix blocks were found in this workbook. Try a different file.
                 </div>
               )}
+              {requiresDestructiveConfirmation && (
+                <label className="flex cursor-pointer items-start gap-2 rounded border border-amber-400/60 bg-amber-500/10 p-3 text-xs text-amber-900" data-testid="premix-import-destructive-confirmation">
+                  <input type="checkbox" checked={destructiveChangesConfirmed} onChange={(event) => setDestructiveChangesConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-amber-600" />
+                  <span><b>Review required.</b> {destructiveChanges.slice(0, 3).join(" ")} I want to apply these shared mix changes.</span>
+                </label>
+              )}
             </>
           )}
         </div>
@@ -763,7 +783,8 @@ export default function PremixImportDialog({
               !prepared ||
               nothing ||
               !canApply ||
-              duplicateTargets.length > 0
+               duplicateTargets.length > 0 ||
+               (requiresDestructiveConfirmation && !destructiveChangesConfirmed)
             }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >

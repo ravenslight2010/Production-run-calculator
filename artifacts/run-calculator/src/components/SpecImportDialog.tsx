@@ -24,7 +24,7 @@ import {
   type SpecImportAlias,
 } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
-import { buildDiscrepancies } from "@/specImport";
+import { buildDiscrepancies, importReviewSignature } from "@/specImport";
 import {
   profileExistsForImport,
   recipeExistsForImport,
@@ -69,6 +69,8 @@ type Props = {
     profilesToRemove: Array<{brand: string; flavor: string}>,
     forceUpdateProfileKeys: ReadonlySet<string>,
     acceptedNewMixIngredientNames: ReadonlySet<string>,
+    destructiveChangesAcknowledged: boolean,
+    destructiveReviewSignature?: string,
   ) => void;
 };
 
@@ -406,6 +408,7 @@ export default function SpecImportDialog({
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
   const [removedProfiles, setRemovedProfiles] = useState<RemovedProfileItem[]>([]);
+  const [destructiveChangesConfirmed, setDestructiveChangesConfirmed] = useState(false);
   // Two-step review: step 1 confirms product brand/flavor names only; step 2
   // reviews everything else (recipes, die types, the diff, notes, mappings).
   const [step, setStep] = useState<1 | 2>(1);
@@ -434,12 +437,14 @@ export default function SpecImportDialog({
         })),
       );
       setAcceptedNewMixNames(new Set());
+      setDestructiveChangesConfirmed(false);
       setStep(1);
     } else {
       setProfiles([]);
       setRecipes([]);
       setRemovedProfiles([]);
       setAcceptedNewMixNames(new Set());
+      setDestructiveChangesConfirmed(false);
       setStep(1);
     }
   }, [prepared]);
@@ -875,6 +880,8 @@ export default function SpecImportDialog({
     // Reference-only recipes reuse an existing recipe as-is, so name/rows issues
     // don't apply — their rows come from the saved library, not the sheet.
     edited.recipes.filter((r) => !r.referenceOnly && recipeApplyIssue(r)).length;
+  const importReview = prepared?.importReview;
+  const requiresDestructiveConfirmation = importReview?.requiresExplicitConfirmation ?? false;
 
   return (
     <div
@@ -1314,6 +1321,29 @@ export default function SpecImportDialog({
                   </div>
                 </div>
               )}
+              {step === 2 && importReview?.changes.length ? (
+                <section className="space-y-2 rounded-md border border-border bg-muted/30 p-3" data-testid="spec-import-change-review">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-foreground">Changes this import will make</h3>
+                    <span className="text-xs text-muted-foreground">
+                      {Object.entries(importReview.counts).filter(([, count]) => count > 0).map(([kind, count]) => `${count} ${kind.replace("-", " ")}`).join(" · ")}
+                    </span>
+                  </div>
+                  <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-foreground">
+                    {importReview.changes.slice(0, 30).map((change, index) => (
+                      <li key={`${change.kind}-${change.entity}-${index}`} className={change.requiresConfirmation ? "text-amber-800" : ""}>
+                        <span className="font-medium">{change.kind.replace("-", " ")}:</span> {change.message}
+                      </li>
+                    ))}
+                  </ul>
+                  {requiresDestructiveConfirmation ? (
+                    <label className="flex cursor-pointer items-start gap-2 rounded border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-900">
+                      <input type="checkbox" checked={destructiveChangesConfirmed} onChange={(event) => setDestructiveChangesConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-amber-600" data-testid="spec-import-destructive-confirmation" />
+                      <span>I reviewed these large or ambiguous changes and want to apply them.</span>
+                    </label>
+                  ) : null}
+                </section>
+              ) : null}
 
               {step === 2 && prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
@@ -1384,6 +1414,8 @@ export default function SpecImportDialog({
                   .map((p) => `${p.brand.trim().toLowerCase()}\u0000${p.flavor.trim().toLowerCase()}`),
               ),
               acceptedNewMixNames,
+              destructiveChangesConfirmed,
+              importReview ? importReviewSignature(importReview) : undefined,
             )}
               disabled={
                 loading ||
@@ -1391,7 +1423,8 @@ export default function SpecImportDialog({
                 !!error ||
                 !prepared ||
                 ((nothingParsed || includedCount === 0) && !anyRemovalsChecked) ||
-                attentionCount > 0
+                attentionCount > 0 ||
+                (requiresDestructiveConfirmation && !destructiveChangesConfirmed)
               }
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >

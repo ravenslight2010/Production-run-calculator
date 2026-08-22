@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { describeShippingPatch, type ShippingCandidate, type ShippingPatch } from "@workspace/shipping-import";
 import type { ShippingImportPrepared } from "@/shippingImport";
+import { loadProfile } from "@/storage";
 
 type Props = {
   open: boolean;
@@ -14,7 +15,7 @@ type Props = {
    * Confirm with the reviewed rows (brand picked, include/exclude applied).
    * `flavors` empty = apply to the whole brand; otherwise only those flavors.
    */
-  onConfirm: (rows: { brand: string; flavors: string[]; patch: ShippingPatch }[]) => void;
+  onConfirm: (rows: { brand: string; flavors: string[]; patch: ShippingPatch }[], acknowledged: boolean) => void;
 };
 
 // Review screen for the Shipping & Palletizing Guide importer. Each guide row
@@ -36,6 +37,7 @@ export default function ShippingImportDialog({
   const [brandPicks, setBrandPicks] = useState<Record<string, string>>({});
   // Per-row flavor targets. Missing/empty set = "All flavors" (whole brand).
   const [flavorPicks, setFlavorPicks] = useState<Record<string, Set<string>>>({});
+  const [acknowledged, setAcknowledged] = useState(false);
 
   // Reset review state whenever a fresh prepared result arrives: rows with a
   // matched brand start included; unmatched rows start excluded until the
@@ -47,10 +49,12 @@ export default function ShippingImportDialog({
         Object.fromEntries(prepared.candidates.map((c) => [c.id, c.brand ?? ""])),
       );
       setFlavorPicks({});
+      setAcknowledged(false);
     } else {
       setSelected(new Set());
       setBrandPicks({});
       setFlavorPicks({});
+      setAcknowledged(false);
     }
   }, [prepared]);
 
@@ -110,9 +114,18 @@ export default function ShippingImportDialog({
       flavors: Array.from(flavorPicks[c.id] ?? []),
       patch: c.patch,
     }));
+  const requiresAcknowledgement = applyRows.some((row) => {
+    const targets = row.flavors.length ? row.flavors : ["", ...(flavorsByBrand[row.brand] ?? [])];
+    return targets.some((flavor) => {
+      const profile = loadProfile(row.brand, flavor) as Record<string, unknown> | null;
+      return Object.entries(row.patch).some(([key, value]) =>
+        profile?.[key] != null && profile[key] !== "" && profile[key] !== value,
+      );
+    });
+  });
 
   const confirm = () => {
-    if (applyRows.length > 0) onConfirm(applyRows);
+    if (applyRows.length > 0 && (!requiresAcknowledgement || acknowledged)) onConfirm(applyRows, true);
   };
 
   return (
@@ -228,13 +241,19 @@ export default function ShippingImportDialog({
           <span className="text-xs text-muted-foreground">
             {prepared ? `${applyRows.length} of ${candidates.length} row${candidates.length === 1 ? "" : "s"} will apply` : ""}
           </span>
+          {requiresAcknowledgement && (
+            <label className="flex items-center gap-2 text-xs text-amber-700">
+              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              I reviewed the changes; existing profile settings may be replaced.
+            </label>
+          )}
           <div className="flex items-center gap-2">
             <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-muted" data-testid="button-shipping-import-cancel">
               Cancel
             </button>
             <button
               type="button"
-              disabled={applying || loading || !!error || applyRows.length === 0}
+              disabled={applying || loading || !!error || applyRows.length === 0 || (requiresAcknowledgement && !acknowledged)}
               onClick={confirm}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="button-shipping-import-confirm"
