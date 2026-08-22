@@ -145,3 +145,4 @@
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
 - [Sync snapshot identity](sync-snapshot-identity.md) — only the server’s stable hash of protected canonical state may authorize an unchanged response; legacy reads stay full payloads.
+- [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.

@@ -79,6 +79,17 @@ function requestedSnapshot(req: Request): string | undefined {
   return typeof value === "string" && SNAPSHOT_ID_RE.test(value) ? value : undefined;
 }
 
+function isPartialSyncPayload(payload: unknown): payload is Record<string, unknown> {
+  return !!payload && typeof payload === "object" && !Array.isArray(payload) &&
+    (payload as Record<string, unknown>).completeness === "partial";
+}
+
+function isValidPartialContract(payload: Record<string, unknown>): boolean {
+  return payload.syncVersion === 1 &&
+    typeof payload.baseSnapshotId === "string" &&
+    SNAPSHOT_ID_RE.test(payload.baseSnapshotId);
+}
+
 function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
   const snapshotId = syncSnapshotId(data);
   if (requested !== snapshotId) return false;
@@ -481,6 +492,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+  if (isPartialSyncPayload(sanitized) && !isValidPartialContract(sanitized)) {
+    res.status(400).json({ error: "partial payload requires syncVersion=1 and baseSnapshotId" }); return;
+  }
 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
@@ -604,6 +618,9 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+  if (isPartialSyncPayload(sanitized) && !isValidPartialContract(sanitized)) {
+    res.status(400).json({ error: "partial payload requires syncVersion=1 and baseSnapshotId" }); return;
+  }
 
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }

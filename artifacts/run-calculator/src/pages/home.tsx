@@ -7005,6 +7005,9 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
+  // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
+  // blobs. A complete server response refreshes this baseline.
+  const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
   // History is independently persisted and merged by date. Keep it on the
   // first/change payload for recovery, but omit the unchanged cold section
   // from ordinary live updates.
@@ -7921,6 +7924,7 @@ export default function Home() {
            if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
          } else if (msg.data) {
            if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
             initialSnapshot: msg.initial === true,
@@ -8029,6 +8033,9 @@ export default function Home() {
            const payload = body as SyncPayload | null;
            const responseSnapshot = res.headers.get("X-Sync-Snapshot");
            if (responseSnapshot) syncSnapshotIdRef.current = responseSnapshot;
+           if (payload) {
+             canonicalRunValuesUpdatedAtRef.current = { ...(payload.runValuesUpdatedAt ?? {}) };
+           }
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
           if (payload) {
@@ -8447,6 +8454,10 @@ export default function Home() {
     });
     const snapshot = result.body?.snapshotId;
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
+    if (result.body?.data && typeof result.body.data === "object") {
+      const canonical = result.body.data as SyncPayload;
+      canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
+    }
     return result;
   }
 
@@ -8600,6 +8611,9 @@ export default function Home() {
     const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = {};
     const storedPackagingProgress = loadPackagingProgress();
     const pushRuns: RunMeta[] = [];
+    const canSendPartial = Boolean(syncSnapshotIdRef.current);
+    const baselineStamps = canonicalRunValuesUpdatedAtRef.current;
+    const localStamps = loadRunValuesUpdated();
     for (const run of ds.runs) {
       // The current run is normally pushed from the LIVE form so an in-progress
       // edit is shared immediately. But the form is transiently all-default
@@ -8632,7 +8646,18 @@ export default function Home() {
       if (isPristineSeedRun(run)) continue;
       const { seeded: _seeded, ...meta } = run;
       pushRuns.push(meta);
-      runValues[run.id] = value;
+      // Once a canonical snapshot exists, omit unchanged runs. Their complete
+      // recipe/setup values remain on the server and protectRunValues treats
+      // omitted run IDs as unchanged. Keep the current form if autosave has
+      // not stamped a keystroke yet.
+      const currentFormChanged = run.id === curId && !deepEqual(value, loadRunValues(run.id));
+      if (
+        !canSendPartial ||
+        localStamps[run.id] !== baselineStamps[run.id] ||
+        currentFormChanged
+      ) {
+        runValues[run.id] = value;
+      }
       if (storedPackagingProgress[run.id]) {
         packagingProgress[run.id] = storedPackagingProgress[run.id];
       }
@@ -8640,8 +8665,10 @@ export default function Home() {
     // Drop edit stamps for runs excluded above so a stray stamp can't pair with
     // an absent value server-side (benign, but keeps the row clean).
     const runValuesUpdatedAt = { ...loadRunValuesUpdated() };
-    for (const run of ds.runs) {
-      if (!(run.id in runValues)) delete runValuesUpdatedAt[run.id];
+    if (!canSendPartial) {
+      for (const run of ds.runs) {
+        if (!(run.id in runValues)) delete runValuesUpdatedAt[run.id];
+      }
     }
     // Brand+flavor profiles are NOT in the sync payload anymore — they live in
     // their own stamped factory-wide server pool (see profileServerSync.ts).
@@ -8652,6 +8679,9 @@ export default function Home() {
     const history = loadHistory();
     const historySig = JSON.stringify(history);
     return {
+      syncVersion: 1,
+      completeness: canSendPartial ? "partial" : "complete",
+      ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
       dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
       runValues,
       runValuesUpdatedAt,

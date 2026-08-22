@@ -349,6 +349,74 @@ describe("/sync snapshot conditionals", () => {
   });
 });
 
+describe("/sync partial payload contract", () => {
+  const DATE = "2030-08-24";
+
+  it("preserves omitted unchanged run values while returning a complete canonical snapshot", async () => {
+    const complete = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        runs: [
+          { id: "partial-r1", brand: "Acme", flavor: "Pep" },
+          { id: "partial-r2", brand: "Acme", flavor: "Cheese" },
+        ],
+      },
+      runValues: {
+        "partial-r1": { casesNeeded: 12 },
+        "partial-r2": { casesNeeded: 24, doughRecipeName: "Large", doughRecipe: [{ ingredient: "Flour", lbs: 10 }] },
+      },
+      runValuesUpdatedAt: { "partial-r1": 1, "partial-r2": 1 },
+    };
+    const first = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "complete-client", payload: complete }),
+    });
+    const firstBody = await first.json() as { data: typeof complete; snapshotId: string };
+    expect(firstBody.data.runValues["partial-r2"].doughRecipeName).toBe("Large");
+
+    const partial = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "hot-client",
+        payload: {
+          syncVersion: 1,
+          completeness: "partial",
+          baseSnapshotId: firstBody.snapshotId,
+          dayState: complete.dayState,
+          runValues: { "partial-r1": { casesNeeded: 18 } },
+          runValuesUpdatedAt: { "partial-r1": 2 },
+        },
+      }),
+    });
+    expect(partial.status).toBe(200);
+    const partialBody = await partial.json() as { data: typeof complete; snapshotId: string };
+    expect(partialBody.data.runValues["partial-r1"].casesNeeded).toBe(18);
+    expect(partialBody.data.runValues["partial-r2"].doughRecipeName).toBe("Large");
+    expect(partialBody.data.runValues["partial-r2"].doughRecipe).toEqual([{ ingredient: "Flour", lbs: 10 }]);
+    expect(partialBody.snapshotId).not.toBe(firstBody.snapshotId);
+  });
+
+  it("rejects a partial payload without its versioned canonical dependency", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "invalid-client",
+        payload: {
+          completeness: "partial",
+          dayState: { runs: [] },
+          runValues: {},
+        },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("partial payload") });
+  });
+});
+
 describe("/sync — per-run protective merge (data-loss guard)", () => {
   // The server is now a per-run last-writer-wins register keyed on each run's
   // edit stamp (runValuesUpdatedAt), not a blind blob overwrite. An empty run

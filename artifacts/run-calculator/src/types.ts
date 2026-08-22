@@ -398,6 +398,12 @@ export type DayState = {
 };
 
 export type SyncPayload = {
+  // Versioned wire contract. Complete snapshots are required for recovery and
+  // first adoption. Partial snapshots may omit unchanged runValues; the server
+  // preserves omitted values through its per-run LWW merge.
+  syncVersion?: 1;
+  completeness?: "complete" | "partial";
+  baseSnapshotId?: string;
   dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a

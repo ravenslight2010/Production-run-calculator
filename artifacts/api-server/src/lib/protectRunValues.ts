@@ -883,6 +883,7 @@ const MAX_AGGREGATE_BYTES = 512 * 1024;
 // types.ts / payloadTypes.ts). Any key NOT in this set is stripped before the
 // payload reaches upsertProtected or the DB.
 const KNOWN_TOP_LEVEL_KEYS = new Set<string>([
+  "syncVersion", "completeness", "baseSnapshotId",
   "dayState",
   "runValues",
   "runValuesUpdatedAt",
