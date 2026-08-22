@@ -172,7 +172,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm run check:clean-start"
+args = "CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
