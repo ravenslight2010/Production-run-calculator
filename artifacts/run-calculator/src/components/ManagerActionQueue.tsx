@@ -67,7 +67,10 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
           {noteFor === item.id && <div className="mt-2 flex gap-2"><input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => setNote(e.target.value)} /><Button size="sm" className="h-7 text-xs" disabled={!note.trim() || mutation.isPending} onClick={() => mutation.mutate({ item, input: { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) } })}>Save</Button></div>}
           {item.deferReason && <p className="mt-1 text-xs text-amber-600">Deferred: {item.deferReason}</p>}{item.resolutionNote && <p className="mt-1 text-xs text-muted-foreground">Note: {item.resolutionNote}</p>}
         </div>)}</div>}
-      {mutation.isError && <p className="text-xs text-destructive">{mutation.error instanceof Error ? mutation.error.message : "This item changed. Refresh and try again."}</p>}
+      {mutation.isError && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <span>{mutation.error instanceof Error ? mutation.error.message : "This item changed. Refresh and try again."}</span>
+        <Button size="sm" variant="outline" className="h-7 border-destructive/40 text-xs text-destructive" onClick={() => { mutation.reset(); void query.refetch(); }}>Refresh queue</Button>
+      </div>}
     </CardContent>
   </Card>;
 }
