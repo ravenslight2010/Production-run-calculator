@@ -32,12 +32,9 @@ async function startServer(): Promise<void> {
     logger.error({ err }, "Failed to run data heals");
   });
 
-  app.listen(port, (err) => {
-    if (err) {
-      logger.error({ err }, "Error listening on port");
-      process.exit(1);
-    }
+  const server = app.listen(port);
 
+  server.once("listening", () => {
     logger.info({ port }, "Server listening");
 
     // Ensure the seeded sandbox account exists with a known password + manager
@@ -51,6 +48,43 @@ async function startServer(): Promise<void> {
       });
     }
   });
+
+  server.once("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error(
+        { err, port },
+        `Port ${port} is already in use. Stop the existing API workflow or choose a different PORT before starting another API server.`,
+      );
+    } else {
+      logger.error({ err, port }, "API server could not listen on its port");
+    }
+    process.exit(1);
+  });
+
+  let shuttingDown = false;
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, "Stopping API server");
+
+    const forceExit = setTimeout(() => {
+      logger.error({ signal }, "API server did not stop within 5 seconds");
+      process.exit(1);
+    }, 5_000);
+    forceExit.unref();
+
+    server.close((err) => {
+      clearTimeout(forceExit);
+      if (err) {
+        logger.error({ err }, "API server shutdown failed");
+        process.exit(1);
+      }
+      process.exit(0);
+    });
+  };
+
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 startServer().catch((err) => {

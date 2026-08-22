@@ -4,12 +4,16 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const rootDir = new URL("../../", import.meta.url).pathname;
 const apiPort = parsePort(
-  process.env.CLEAN_START_API_PORT ?? "5000",
+  process.env.CLEAN_START_API_PORT ?? "8080",
   "CLEAN_START_API_PORT",
 );
 const webPort = parsePort(
-  process.env.CLEAN_START_WEB_PORT ?? "5173",
+  process.env.CLEAN_START_WEB_PORT ?? "26038",
   "CLEAN_START_WEB_PORT",
+);
+const mockupPort = parsePort(
+  process.env.CLEAN_START_MOCKUP_PORT ?? "8081",
+  "CLEAN_START_MOCKUP_PORT",
 );
 const startupTimeoutMs = parseDuration(
   process.env.CLEAN_START_TIMEOUT_MS ?? "90000",
@@ -52,7 +56,7 @@ function appendOutput(process: ManagedProcess, chunk: Buffer | string): void {
   process.output = `${process.output}${chunk.toString()}`.slice(-outputLimit);
 }
 
-function commandFor(name: "api" | "web"): {
+function commandFor(name: "api" | "web" | "mockup"): {
   args: string[];
   env: NodeJS.ProcessEnv;
 } {
@@ -62,13 +66,24 @@ function commandFor(name: "api" | "web"): {
       env: { ...process.env, NODE_ENV: "development", PORT: String(apiPort) },
     };
   }
+  if (name === "mockup") {
+    return {
+      args: ["--filter", "@workspace/mockup-sandbox", "run", "dev"],
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        PORT: String(mockupPort),
+        BASE_PATH: "/__mockup",
+      },
+    };
+  }
   return {
     args: ["--filter", "@workspace/run-calculator", "run", "dev"],
     env: { ...process.env, NODE_ENV: "development", PORT: String(webPort) },
   };
 }
 
-function startManaged(name: "api" | "web"): ManagedProcess {
+function startManaged(name: "api" | "web" | "mockup"): ManagedProcess {
   const command = commandFor(name);
   const managed: ManagedProcess = {
     name,
@@ -155,7 +170,10 @@ async function fetchExpect(
   let lastError = "no response";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
+      const remainingMs = Math.max(1, deadline - Date.now());
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(Math.min(5_000, remainingMs)),
+      });
       const body = await response.text();
       const failure = assertion(response, body);
       if (!failure) return;
@@ -214,12 +232,13 @@ function formatFailure(error: unknown): string {
 
 async function main(): Promise<void> {
   console.log(
-    `Clean-start smoke: API 127.0.0.1:${apiPort}, web 127.0.0.1:${webPort}, timeout ${startupTimeoutMs}ms`,
+    `Clean-start smoke: API 127.0.0.1:${apiPort}, web 127.0.0.1:${webPort}, mockup 127.0.0.1:${mockupPort}, timeout ${startupTimeoutMs}ms`,
   );
 
   for (const [name, port] of [
     ["api", apiPort],
     ["web", webPort],
+    ["mockup", mockupPort],
   ] as const) {
     if (!(await isPortAvailable(port))) {
       throw new Error(
@@ -264,6 +283,24 @@ async function main(): Promise<void> {
   });
   console.log(
     `PASS web: port ${webPort} open and / returns the initial HTML document`,
+  );
+
+  const mockup = startManaged("mockup");
+  await waitForPort(mockup, mockupPort);
+  await fetchExpect(
+    mockup,
+    `http://127.0.0.1:${mockupPort}/__mockup/`,
+    (response, body) => {
+      if (response.status !== 200)
+        return `expected HTTP 200, received ${response.status}`;
+      if (!body.includes("<html") && !body.includes("<!doctype")) {
+        return "response did not contain an HTML document";
+      }
+      return undefined;
+    },
+  );
+  console.log(
+    `PASS mockup: port ${mockupPort} open and /__mockup/ returns the initial HTML document`,
   );
 }
 

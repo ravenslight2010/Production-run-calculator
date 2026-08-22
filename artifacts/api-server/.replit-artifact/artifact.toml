@@ -1,5 +1,5 @@
 kind = "api"
-previewPath = "/api" # TODO - should be excluded from preview in the first place
+previewPath = "/api/healthz"
 title = "API Server"
 version = "1.0.0"
 id = "3B4_FFSkEVBkAeYMFRJ2e"
@@ -11,6 +11,9 @@ paths = ["/api"]
 
 [services.development]
 run = "pnpm --filter @workspace/api-server run dev"
+
+[services.env]
+PORT = "8080"
 
 [services.production]
 

@@ -84,7 +84,6 @@
 - [Cheese server master-data](cheese-server-master-data.md) + [catch-all flavors](cheese-catch-all-flavors.md) + [mirror applicators](cheese-mirror-applicators.md) + [link-to-existing](cheese-import-link-to-existing.md) — server pool (per-BATCH lbs, NOT in Mixes), pick-only cards; "All Varieties"=EMPTY flavors; one-to-one link guard.
 - [Merges skip server master-data](merge-server-master-data-repoint.md) — merges/renames must re-point server pools AND learn spec-import aliases, or re-imports resurrect old brand/flavor names.
 - [Dough/Sauce server master-data](dough-sauce-server-master-data.md) — dough & sauce now server pools (@workspace/named-recipes, own tables, name-keyed); sauce==frontline; migration + spec-import push differ web vs mobile by design.
-- [Dual API workflows](dual-api-workflows.md) — browser hits the artifact API workflow (8080), not the 5000 duplicate; after pkill restart BOTH and verify via public domain, not localhost.
 - [Setup Profiles editor](setup-profiles-editor.md) — standalone brand/flavor setup editor via saveProfile/loadProfile, never touches run state; "Recipe Setup Needed" routes here not run-jump; web+mobile parity.
 - [Server ingredient catalog](ingredient-catalog.md) — factory-wide ingredients table w/ stable ids, recipe rows get optional ingredientId; hybrid alongside existing local lists; array-identity gotcha in hydration.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
