@@ -52,6 +52,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { requireIsolatedTestDatabase } from "./isolation";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -143,6 +144,15 @@ async function seedLiveRunBeforeAppLoad(
       pizzasPerCase: seed.pizzasPerCase,
       casesPerLayer: seed.casesPerLayer,
     }));
+    const updated = (() => {
+      try {
+        return JSON.parse(localStorage.getItem("run-calc-runvalues-updated") ?? "{}");
+      } catch {
+        return {};
+      }
+    })();
+    updated[seed.runId] = Date.now() + 60_000;
+    localStorage.setItem("run-calc-runvalues-updated", JSON.stringify(updated));
   }, opts);
 }
 
@@ -203,6 +213,7 @@ function todayStr(): string {
 let db: Client;
 
 test.beforeAll(async () => {
+  requireIsolatedTestDatabase("Mix Plan E2E");
   db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
 });
@@ -2286,7 +2297,17 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         amountAlreadyMade: 0,
       });
 
+      await seedLiveRunBeforeAppLoad(page, {
+        runId: `reg-retry-save-run-${suffix}`,
+        brand,
+        ingredient: component,
+        runOz: 2,
+        casesNeeded: 100,
+        pizzasPerCase: 8,
+        casesPerLayer: 0,
+      });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(1_000);
 
       await page.route("**/api/mixes", async (route) => {
@@ -2305,15 +2326,6 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         }
         await route.continue();
       });
-
-      await page.locator('[data-testid="tab-run"]').click();
-      const brandInput = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput.click();
-      await page.waitForTimeout(200);
-      await brandInput.fill(brand);
-      await brandInput.press("Enter");
-      await page.waitForTimeout(800);
 
       await goToMixes(page);
       const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
@@ -2375,7 +2387,17 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         amountAlreadyMade: 0,
       });
 
+      await seedLiveRunBeforeAppLoad(page, {
+        runId: `reg-retry-reload-run-${suffix}`,
+        brand,
+        ingredient: component,
+        runOz: 2,
+        casesNeeded: 100,
+        pizzasPerCase: 8,
+        casesPerLayer: 0,
+      });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(1_000);
 
       await page.route("**/api/mixes", async (route) => {
@@ -2395,15 +2417,6 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         await route.continue();
       });
 
-      await page.locator('[data-testid="tab-run"]').click();
-      const brandInput = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput.click();
-      await page.waitForTimeout(200);
-      await brandInput.fill(brand);
-      await brandInput.press("Enter");
-      await page.waitForTimeout(800);
-
       await goToMixes(page);
       const todayCard = page.locator(`[data-testid="mix-plan-${today}"]`);
       await todayCard.waitFor({ state: "visible", timeout: 8_000 });
@@ -2422,6 +2435,14 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await input.blur();
       await expect(input).toHaveValue(String(alreadyMade));
       expect(postAttempts).toBe(2);
+
+      await expect.poll(
+        async () => Number((await db.query(
+          "SELECT amount_already_made FROM mixes WHERE id = $1",
+          [mixId],
+        )).rows[0]?.amount_already_made ?? 0),
+        { timeout: 5_000 },
+      ).toBe(alreadyMade);
 
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
@@ -3813,34 +3834,17 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         amountAlreadyMade: 0,
       });
 
+      await seedLiveRunBeforeAppLoad(page, {
+        runId: `batch-live-run-${suffix}`,
+        brand,
+        ingredient: component,
+        runOz: PER_PIZZA_OZ,
+        casesNeeded: CASES_NEEDED,
+        pizzasPerCase: PIZZAS_PER_CASE,
+        casesPerLayer: 0,
+      });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-
-      // Inject brand + run data via localStorage so the regular mix card appears.
-      await page.evaluate(
-        ({ brand, casesNeeded, pizzasPerCase }) => {
-          const DAY_KEY = "run-calc-day";
-          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
-          const rawDay = localStorage.getItem(DAY_KEY);
-          if (!rawDay) return;
-          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
-          if (!day.runs || day.runs.length === 0) return;
-          day.runs[0].brand = brand;
-          localStorage.setItem(DAY_KEY, JSON.stringify(day));
-          const runId = day.runs[0].id;
-          const existing = (() => {
-            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
-          })();
-          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
-            ...existing,
-            casesNeeded,
-            pizzasPerCase,
-            casesPerLayer: 0,
-          }));
-        },
-        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
-      );
-
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
         .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
@@ -3854,7 +3858,10 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await expect(todayCard.getByText(mixName, { exact: false })).toBeVisible({ timeout: 5_000 });
 
       // The innermost div containing the mix name is the mix card itself.
-      const mixCard = todayCard.locator("div", { has: page.getByText(mixName, { exact: true }) }).last();
+      // The plan card contains both the summary and the editable amount. Keep
+      // the locator at the card level: the innermost name-matching div can be
+      // the component summary and omit the sibling "Already made" input.
+      const mixCard = todayCard;
 
       // ── Step 1: initial batch count (amountAlreadyMade = 0) ──────────────────
       // batches = 135.00 / 10 = 13.50
@@ -4117,33 +4124,18 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         amountAlreadyMade: 0,
       });
 
+      await seedLiveRunBeforeAppLoad(page, {
+        runId: `reg-pull-live-run-${suffix}`,
+        brand,
+        ingredient: component1,
+        runOz: COMPONENT_1_PER_PIZZA_OZ,
+        casesNeeded: CASES_NEEDED,
+        pizzasPerCase: PIZZAS_PER_CASE,
+        casesPerLayer: 0,
+      });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-
-      // Inject the brand + pizza counts into localStorage so the run produces
-      // a non-zero pizza count for the mix plan. For regular mixes the match
-      // is brand/flavor only — no ingredient name is needed.
-      await page.evaluate(
-        ({ brand, casesNeeded, pizzasPerCase }) => {
-          const DAY_KEY = "run-calc-day";
-          const RUN_KEY = (id: string) => `run-calc-run-${id}`;
-          const rawDay = localStorage.getItem(DAY_KEY);
-          if (!rawDay) return;
-          const day = JSON.parse(rawDay) as { runs?: Array<{ id: string; brand?: string }> };
-          if (!day.runs || day.runs.length === 0) return;
-          day.runs[0].brand = brand;
-          localStorage.setItem(DAY_KEY, JSON.stringify(day));
-          const runId = day.runs[0].id;
-          const existing = (() => {
-            try { return JSON.parse(localStorage.getItem(RUN_KEY(runId)) ?? "{}"); } catch { return {}; }
-          })();
-          localStorage.setItem(RUN_KEY(runId), JSON.stringify({
-            ...existing, casesNeeded, pizzasPerCase, casesPerLayer: 0,
-          }));
-        },
-        { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
-      );
-
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await makeTestUserManager(username);
+      await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
         .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
