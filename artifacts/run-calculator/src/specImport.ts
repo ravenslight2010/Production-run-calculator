@@ -617,7 +617,9 @@ async function parseWorkbookCore(
   grids: SheetGrid[],
   known: ReturnType<typeof loadSpecImportKnown>,
   aliases: SpecImportAlias[],
+  signal?: AbortSignal,
 ): Promise<ParseCore> {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   // Cheap pre-AI guard: the xlsx reader does NOT throw on garbage bytes (a
   // renamed PDF/image "reads" as one junk sheet), so reject empty or
   // binary-junk grids BEFORE burning an AI parse call. In the multi-file path
@@ -657,24 +659,32 @@ async function parseWorkbookCore(
   // pacing.  The pacer sleeps before each call when PARSE_PACE_SAFE_MAX calls
   // have already been issued in the current window, leaving headroom for one
   // automatic retry per chunk.
-  const pace = makeParseCallPacer();
+  const pace = makeParseCallPacer({ signal });
 
   const rawList: ParsedSpecImport[] = [];
   const flagged: SpecFlaggedItem[] = [];
   for (const chunk of chunks) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
     const workbookText = gridsToPromptText(chunk);
     if (!workbookText.trim()) continue;
     await pace();
     let ai: Awaited<ReturnType<typeof requestParseSpecSheet>>;
     try {
-      ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
+      ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases }, signal);
     } catch (err) {
       if (err instanceof ParseSpecRateLimitError) {
         // Unexpected 429 despite pacing (e.g. concurrent imports by the same
         // user).  Wait out the full window and retry once with a clean slate.
-        await new Promise<void>((r) => setTimeout(r, PARSE_RATE_WINDOW_MS));
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, PARSE_RATE_WINDOW_MS);
+          const onAbort = () => {
+            clearTimeout(timer);
+            reject(signal?.reason ?? new DOMException("Import cancelled", "AbortError"));
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+        });
         await pace();
-        ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
+        ai = await requestParseSpecSheet({ workbookText, known: knownInput, aliases }, signal);
       } else {
         throw err;
       }
@@ -1660,7 +1670,9 @@ function parseDoughVariantTableFromGrids(grids: SheetGrid[]): DoughVariantTableE
 export async function prepareSpecImport(
   data: ArrayBuffer,
   name?: string,
+  signal?: AbortSignal,
 ): Promise<SpecImportPrepared> {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
 
@@ -1693,7 +1705,7 @@ export async function prepareSpecImport(
     };
   }
   const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows } =
-    await parseWorkbookCore(grids, known, aliases);
+    await parseWorkbookCore(grids, known, aliases, signal);
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
   const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(
@@ -1790,6 +1802,7 @@ export async function prepareSpecImportMulti(
   buffers: ArrayBuffer[],
   onProgress?: (done: number, total: number) => void,
   names?: string[],
+  signal?: AbortSignal,
 ): Promise<SpecImportPrepared> {
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
@@ -1831,6 +1844,7 @@ export async function prepareSpecImportMulti(
   const allVariantsFromTable: DoughVariantTableEntry[] = [];
 
   for (let i = 0; i < buffers.length; i++) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
     // Name each file so a failure can say WHICH file was skipped (fall back to a
     // positional label when the caller didn't pass filenames).
     const label = names?.[i]?.trim() || `File ${i + 1}`;
@@ -1866,7 +1880,7 @@ export async function prepareSpecImportMulti(
           allVariantsFromTable.push(v);
         }
       }
-      const core = await parseWorkbookCore(grids, known, aliases);
+      const core = await parseWorkbookCore(grids, known, aliases, signal);
       parsedList.push(core.parsed);
       parsedLabels.push(label);
       allResolved.push(...core.resolved);

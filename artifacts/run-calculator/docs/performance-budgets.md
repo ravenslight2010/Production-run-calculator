@@ -11,6 +11,10 @@ through the privacy-safe `calculator-performance` event:
 | Live calculation | 16 ms |
 | Persisted run-value storage scan | 100 ms |
 | Timed API request | 1,000 ms |
+| Workbook parse | 120,000 ms |
+| Review open after parse | 2,000 ms |
+| Import commit | 10,000 ms |
+| Workbook export | 10,000 ms |
 
 The timing records contain only an operation name, duration, and kind. The
 in-memory diagnostic ring retains the latest 40 records and never stores
@@ -31,4 +35,5 @@ grouping boundary. The large-day benchmark constructs persisted/current/summariz
 snapshots for 250 runs and protects against reintroducing storage scans while an
 operator edits the active run. Browser-level load, render, calculation, storage,
 and navigation measurements are available to Playwright or a host page by
-listening for `calculator-performance`; heap samples use `calculator-memory`.
+listening for `calculator-performance`; import parse, review-open, commit, and
+export timings use `import-*` names. Heap samples use `calculator-memory`.

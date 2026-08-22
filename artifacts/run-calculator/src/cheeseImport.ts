@@ -114,6 +114,7 @@ export async function prepareCheeseImport(
   buffers: ArrayBuffer[],
   onProgress?: (done: number, total: number) => void,
   names?: string[],
+  signal?: AbortSignal,
 ): Promise<CheeseImportPrepared> {
   const existing = await fetchCheeseRecipes();
   // Learned blend-name aliases (best-effort): a "use existing recipe" pick the
@@ -131,8 +132,11 @@ export async function prepareCheeseImport(
   const errors: string[] = [];
   const failedNames: string[] = [];
   for (let i = 0; i < buffers.length; i++) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
     const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
       const grids = await readWorkbookGrids(buffers[i]);
       // Cheap junk-file guard (a renamed PDF/image "reads" as one junk sheet).
       const sanity = gridSanityIssue(grids);

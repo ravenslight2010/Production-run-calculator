@@ -27,7 +27,7 @@ export type MatchPremixResult = {
   note?: string;
 };
 
-export async function requestMatchPremix(input: MatchPremixInput): Promise<MatchPremixResult> {
+export async function requestMatchPremix(input: MatchPremixInput, signal?: AbortSignal): Promise<MatchPremixResult> {
   // Bounded wait so a cold-starting deployment can't hang the import's loading
   // dialog forever; callers fall back to fuzzy matching on any failure.
   const res = await fetchWithTimeout(
@@ -39,6 +39,7 @@ export async function requestMatchPremix(input: MatchPremixInput): Promise<Match
         "x-client-id": inventoryClientId(),
       },
       body: JSON.stringify(input),
+      signal,
     },
     120_000,
   );

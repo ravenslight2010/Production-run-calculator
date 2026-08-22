@@ -11487,6 +11487,9 @@ export default function Home() {
   const specImportGenRef = useRef(0);
   const premixImportGenRef = useRef(0);
   const cheeseImportGenRef = useRef(0);
+  const specImportAbortRef = useRef<AbortController | null>(null);
+  const premixImportAbortRef = useRef<AbortController | null>(null);
+  const cheeseImportAbortRef = useRef<AbortController | null>(null);
   const shippingImportGenRef = useRef(0);
   const shippingImportFileNameRef = useRef<string>("");
   const sauceGuideImportGenRef = useRef(0);
@@ -11500,6 +11503,7 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `spec import: ${files.length} file(s) selected` : "spec import: picker canceled");
     if (files.length === 0) return;
+    const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard: parsing is slow (AI call), and a user importing files
     // back-to-back can close the dialog and pick the next file while the old
     // parse is still in flight. Without this guard the OLD promise resolves
@@ -11507,6 +11511,9 @@ export default function Home() {
     // flags flipping off early). Any state write below is a no-op once a
     // newer pick (or dialog close) bumped the generation.
     const gen = ++specImportGenRef.current;
+    specImportAbortRef.current?.abort();
+    const abortController = new AbortController();
+    specImportAbortRef.current = abortController;
     setSpecImportPrepared(null);
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -11524,15 +11531,21 @@ export default function Home() {
       }
       const prepared =
         buffers.length === 1
-          ? await prepareSpecImport(buffers[0], files[0]?.name)
+          ? await prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
           : await prepareSpecImportMulti(
               buffers,
               (done, total) => {
                 if (gen === specImportGenRef.current) setSpecImportProgress({ done, total });
               },
               files.map((f) => f.name),
+              abortController.signal,
             );
       if (gen !== specImportGenRef.current) return;
+      if (parseStartedAt !== null && typeof performance !== "undefined") {
+        recordPerformance("import-spec-parse", performance.now() - parseStartedAt, "api");
+        recordPerformance("import-spec-review-open", 0, "render");
+        recordMemorySample("import-spec-review-open");
+      }
       // Remember which file(s) this came from so each distinct spec sheet keeps
       // its own two most recent versions (per-file retention, newest = default).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
@@ -11569,6 +11582,7 @@ export default function Home() {
       return;
     }
     setSpecImportApplying(true);
+    const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Apply exactly what the user kept/corrected in the review — not the raw
     // parse. Everything else on `prepared` (source names for the snapshot) is
     // preserved. The user's step-1 brand/flavor renames are folded into the
@@ -11586,6 +11600,8 @@ export default function Home() {
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, aliasSaveFailed } =
         await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+      if (commitStartedAt !== null && typeof performance !== "undefined")
+        recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       let specSnapshotId: number | null = null;
       try {
         const saved = await fetchSavedSpecSheets();
@@ -11961,9 +11977,13 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
+    const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
     const gen = ++premixImportGenRef.current;
+    premixImportAbortRef.current?.abort();
+    const abortController = new AbortController();
+    premixImportAbortRef.current = abortController;
     setPremixImportPrepared(null);
     setPremixImportError(null);
     setPremixImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -11983,8 +12003,14 @@ export default function Home() {
             setPremixImportProgress(total > 1 ? { done, total } : null);
         },
         files.map((f) => f.name),
+        abortController.signal,
       );
       if (gen !== premixImportGenRef.current) return;
+      if (parseStartedAt !== null && typeof performance !== "undefined") {
+        recordPerformance("import-premix-parse", performance.now() - parseStartedAt, "api");
+        recordPerformance("import-premix-review-open", 0, "render");
+        recordMemorySample("import-premix-review-open");
+      }
       // Remember which file(s) this came from so each distinct premix workbook
       // keeps its own two most recent versions (per-file retention).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
@@ -12010,6 +12036,7 @@ export default function Home() {
   ) {
     if (!premixImportPrepared) return;
     setPremixImportApplying(true);
+    const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     try {
       const result = await commitPremixImport(
         premixImportPrepared,
@@ -12018,6 +12045,8 @@ export default function Home() {
         newAliases,
         mixesToRemove,
       );
+      if (commitStartedAt !== null && typeof performance !== "undefined")
+        recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
       let premixSnapshotId: number | null = null;
       try {
         const saved = await fetchSavedPremixSheets();
@@ -12290,9 +12319,13 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
     if (files.length === 0) return;
+    const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     // Generation guard — see handleSpecImportFile: a still-running older
     // prepare must never clobber a newer pick's state.
     const gen = ++cheeseImportGenRef.current;
+    cheeseImportAbortRef.current?.abort();
+    const abortController = new AbortController();
+    cheeseImportAbortRef.current = abortController;
     setCheeseImportPrepared(null);
     setCheeseImportError(null);
     setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -12310,8 +12343,14 @@ export default function Home() {
             setCheeseImportProgress(total > 1 ? { done, total } : null);
         },
         files.map((f) => f.name),
+        abortController.signal,
       );
       if (gen !== cheeseImportGenRef.current) return;
+      if (parseStartedAt !== null && typeof performance !== "undefined") {
+        recordPerformance("import-cheese-parse", performance.now() - parseStartedAt, "api");
+        recordPerformance("import-cheese-review-open", 0, "render");
+        recordMemorySample("import-cheese-review-open");
+      }
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setCheeseImportPrepared(prepared);
     } catch (err) {
@@ -12334,8 +12373,11 @@ export default function Home() {
   ) {
     if (!cheeseImportPrepared) return;
     setCheeseImportApplying(true);
+    const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     try {
       const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+      if (commitStartedAt !== null && typeof performance !== "undefined")
+        recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       // Refresh the shared cheese-recipes query so imported recipes appear
       // immediately in the manager list and the run "Cheese" pickers.
       void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
@@ -14600,8 +14642,11 @@ export default function Home() {
                           disabled={exporting || !Object.values(exportSelection).some(Boolean)}
                           onClick={async () => {
                             setExporting(true);
+                            const exportStartedAt = typeof performance === "undefined" ? null : performance.now();
                             try {
                               const res = await exportSpecRecipes(exportSelection, todayStr());
+                              if (exportStartedAt !== null && typeof performance !== "undefined")
+                                recordPerformance("import-spec-export", performance.now() - exportStartedAt, "storage");
                               if (res.specSheets === 0 && res.mixSheets === 0) {
                                 toast({ title: "Nothing to export", description: "The selected data is empty. Add spec profiles, recipes, or mixes first." });
                               } else {
@@ -16749,6 +16794,8 @@ export default function Home() {
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.
             specImportGenRef.current++;
+            specImportAbortRef.current?.abort();
+            specImportAbortRef.current = null;
             // Closing while the file is still being read cancels the import —
             // say so, otherwise it looks like the import just never happened.
             if (specImportLoading) {
@@ -16777,6 +16824,8 @@ export default function Home() {
           open={showPremixImport}
           onClose={() => {
             premixImportGenRef.current++;
+            premixImportAbortRef.current?.abort();
+            premixImportAbortRef.current = null;
             if (premixImportLoading) {
               toast({
                 title: "Import canceled",
@@ -16859,6 +16908,8 @@ export default function Home() {
           open={showCheeseImport}
           onClose={() => {
             cheeseImportGenRef.current++;
+            cheeseImportAbortRef.current?.abort();
+            cheeseImportAbortRef.current = null;
             if (cheeseImportLoading) {
               toast({
                 title: "Import canceled",

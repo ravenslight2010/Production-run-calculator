@@ -41,20 +41,33 @@ export function makeParseCallPacer(opts?: {
   windowMs?: number;
   maxCalls?: number;
   now?: () => number;
+  signal?: AbortSignal;
 }): () => Promise<void> {
   const windowMs = opts?.windowMs ?? PARSE_RATE_WINDOW_MS;
   const maxCalls = opts?.maxCalls ?? PARSE_PACE_SAFE_MAX;
   const getNow = opts?.now ?? (() => Date.now());
+  const signal = opts?.signal;
   const timestamps: number[] = [];
 
   return async function pace(): Promise<void> {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
     const now = getNow();
     const cutoff = now - windowMs;
     while (timestamps.length && timestamps[0] < cutoff) timestamps.shift();
     if (timestamps.length >= maxCalls) {
       // Sleep until the oldest call exits the window (+ 100 ms buffer).
       const waitMs = timestamps[0] + windowMs - now + 100;
-      if (waitMs > 0) await new Promise<void>((r) => setTimeout(r, waitMs));
+      if (waitMs > 0) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, waitMs);
+          const onAbort = () => {
+            clearTimeout(timer);
+            reject(signal?.reason ?? new DOMException("Import cancelled", "AbortError"));
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+      if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
       const newCutoff = getNow() - windowMs;
       while (timestamps.length && timestamps[0] < newCutoff) timestamps.shift();
     }
@@ -108,6 +121,7 @@ export type ParseSpecSheetResult = Omit<ParsedSpecImport, "profiles" | "recipes"
 
 export async function requestParseSpecSheet(
   input: ParseSpecSheetInput,
+  signal?: AbortSignal,
 ): Promise<ParseSpecSheetResult> {
   // Generous bound — the AI parse legitimately runs 30-60s — but finite, so a
   // request that hangs at the platform edge (cold-starting deployment) surfaces
@@ -121,6 +135,7 @@ export async function requestParseSpecSheet(
         "x-client-id": inventoryClientId(),
       },
       body: JSON.stringify(input),
+      signal,
     },
     180_000,
   );

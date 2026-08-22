@@ -151,6 +151,7 @@ export async function preparePremixImport(
   buffers: ArrayBuffer[],
   onProgress?: (done: number, total: number) => void,
   names?: string[],
+  signal?: AbortSignal,
 ): Promise<PremixImportPrepared> {
   const { known, aliases, existing } = await loadPremixContext();
 
@@ -158,10 +159,13 @@ export async function preparePremixImport(
   const errors: string[] = [];
   const failedNames: string[] = [];
   for (let i = 0; i < buffers.length; i++) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
     // Name each file so a failure can say WHICH file was skipped (fall back to a
     // positional label when the caller didn't pass filenames).
     const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
       const grids = await readWorkbookGrids(buffers[i]);
       // Cheap junk-file guard: the xlsx reader does NOT throw on garbage bytes
       // (a renamed PDF/image "reads" as one junk sheet), so reject empty or
@@ -209,7 +213,7 @@ export async function preparePremixImport(
         unmatchedNames: unresolvedNames,
         brands: known.brands,
         brandFlavors: known.flavorsByBrand,
-      });
+      }, signal);
       const matched = applyPremixMatches(groundedMixes, res.matches, unresolvedNames);
       // Only accept AI matches for mixes that were actually unresolved — a
       // tab-keyed match must not overwrite a sibling block on the same tab

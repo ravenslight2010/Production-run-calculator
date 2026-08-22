@@ -11,6 +11,12 @@ export type SyncDiagnosticKind =
   | "failure"
   | "reset";
 
+import {
+  attentionStateForSeverity,
+  nextActionForAttention,
+  type AttentionState,
+} from "./attentionStates";
+
 export type SyncDiagnostic = {
   id: string;
   kind: SyncDiagnosticKind;

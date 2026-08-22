@@ -2,6 +2,12 @@ const MAX_ENTRIES = 40;
 const SLOW_TRANSITION_MS = 250;
 const SLOW_LOAD_MS = 1500;
 const SLOW_CALCULATION_MS = 16;
+export const IMPORT_PERFORMANCE_BUDGETS = {
+  parseMs: 120_000,
+  reviewOpenMs: 2_000,
+  commitMs: 10_000,
+  exportMs: 10_000,
+} as const;
 
 export type PerformanceDiagnostic = {
   name: string;
@@ -32,7 +38,14 @@ function remember(entry: PerformanceDiagnostic): void {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("calculator-performance", { detail: entry }));
   }
-  const budget = entry.kind === "load"
+  const importBudget = entry.name.startsWith("import-")
+    ? entry.name.endsWith("-parse") ? IMPORT_PERFORMANCE_BUDGETS.parseMs
+      : entry.name.endsWith("-review-open") ? IMPORT_PERFORMANCE_BUDGETS.reviewOpenMs
+        : entry.name.endsWith("-commit") ? IMPORT_PERFORMANCE_BUDGETS.commitMs
+          : entry.name.endsWith("-export") ? IMPORT_PERFORMANCE_BUDGETS.exportMs
+            : undefined
+    : undefined;
+  const budget = importBudget ?? (entry.kind === "load"
     ? SLOW_LOAD_MS
     : entry.kind === "api"
       ? 1000
@@ -40,7 +53,7 @@ function remember(entry: PerformanceDiagnostic): void {
         ? SLOW_CALCULATION_MS
         : entry.kind === "render"
           ? SLOW_TRANSITION_MS
-          : entry.kind === "storage" ? 100 : SLOW_TRANSITION_MS;
+        : entry.kind === "storage" ? 100 : SLOW_TRANSITION_MS);
   if (entry.durationMs > budget && typeof console !== "undefined") {
     console.warn(`[calculator-performance] ${entry.kind} exceeded budget`, {
       name: entry.name,

@@ -22,16 +22,26 @@ export async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
+  const timeoutController = new AbortController();
+  const callerSignal = init.signal;
+  const abort = () => timeoutController.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abort();
+  else callerSignal?.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
   try {
-    return await fetchWithDiagnostics(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    return await fetchWithDiagnostics(url, { ...init, signal: timeoutController.signal });
   } catch (err) {
     // Match by name, not `instanceof DOMException` — abort reasons can come
     // from a different realm (worker, test env, some engines) where instanceof
     // fails even though the error IS a timeout/abort.
     const name = (err as { name?: unknown } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") {
+      if (callerSignal?.aborted) throw err;
       throw new Error(IMPORT_WAKE_HINT);
     }
     throw err;
+  } finally {
+    clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", abort);
   }
 }
