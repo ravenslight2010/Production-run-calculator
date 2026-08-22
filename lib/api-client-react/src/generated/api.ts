@@ -12840,3 +12840,4 @@ export const useDeleteStaffMember = <TError = ErrorType<void>,
       > => {
       return useMutation(getDeleteStaffMemberMutationOptions(options));
     }
+
