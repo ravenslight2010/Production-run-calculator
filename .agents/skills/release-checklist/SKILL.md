@@ -74,6 +74,7 @@ Run the configured test workflows relevant to the diff. The normal repository
 workflow names and commands are:
 
 ```sh
+pnpm run audit:recovery
 pnpm --filter @workspace/api-server run test
 pnpm --filter @workspace/run-calculator run test
 pnpm --filter @workspace/production-rules run test
@@ -85,6 +86,13 @@ pnpm --filter @workspace/corpus-harness run test
 pnpm --filter @workspace/scripts run check-model-bump
 pnpm --filter @workspace/scripts run check-operational-skill-evidence
 ```
+
+The recovery evidence audit is a required, read-only gate before risky merges
+and releases. It exits nonzero for `MISSING` evidence and prints the missing
+file, wiring, contract, or test with an actionable reason. `DIFFERENT` entries
+are intentional current-implementation differences recorded in
+`scripts/recovery-manifest.json`; they remain visible in the output but do not
+block validation.
 
 Use the package workflow that owns the changed code; do not claim the entire
 suite passed from a single unrelated package. The API test workflow is also the

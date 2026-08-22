@@ -44,6 +44,8 @@ async function run() {
     result = await auditManifest(root, manifest());
     assert.equal(result[0].status, "missing");
     assert.match(result[0].missing[0], /contract/);
+    assert.match(formatAudit(result), /MISSING fixture/);
+    assert.match(formatAudit(result), /contract: contracts\/openapi\.yaml/);
     assert.equal(summarizeAudit(result).missing, 1);
 
     result = await auditManifest(root, manifest("The current implementation intentionally uses a different contract."));

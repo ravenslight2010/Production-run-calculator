@@ -8,7 +8,7 @@
     "check:api-generated": "pnpm --filter @workspace/api-spec run check-generated && tsc --build --force ./lib/api-client-react/tsconfig.json ./lib/api-zod/tsconfig.json",
     "audit:recovery": "pnpm --filter @workspace/scripts run audit:recovery",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "devDependencies": {
