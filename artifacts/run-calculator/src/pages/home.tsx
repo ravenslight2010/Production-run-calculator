@@ -1875,9 +1875,10 @@ function aggregateNeedRows(
     const cleanedLabel = label.trim();
     if (!cleanedLabel || !Number.isFinite(num) || num <= 0) return;
     // A freezer-pull item matches case-insensitively. Keep ingredient rows
-    // coalesced by that same key so one scheduled run never shows a component
-    // twice when it appears in multiple recipe sources.
-    const key = `${cleanedLabel.toLowerCase()}__${unit}`;
+    // coalesced within the same pull area so one scheduled run never shows a
+    // component twice from the same source, while Dough/Sauce/Frontline remain
+    // distinct when they happen to use the same ingredient.
+    const key = `${area}__${cleanedLabel.toLowerCase()}__${unit}`;
     const ex = map.get(key);
     if (ex) ex.num += num;
     else map.set(key, { label: cleanedLabel, num, unit, area, order: order++ });
@@ -2051,7 +2052,7 @@ function aggregateNeedRows(
       if (isMix && a.lbs > 0) 
 {
 
-        add(label, a.lbs, "lbs")
+        add(label, a.lbs, "lbs", "Frontline")
 ;
 
         // Mix library components are per-pizza ounces, not per-recipe-batch
@@ -2063,7 +2064,7 @@ function aggregateNeedRows(
             const ingredient = component.ingredient.trim();
             const perPizzaOz = Number(component.perPizza);
             if (ingredient && perPizzaOz > 0) {
-              add(ingredient, (perPizzaOz * s.totalPizzas) / OZ_PER_LB, "lbs");
+              add(ingredient, (perPizzaOz * s.totalPizzas) / OZ_PER_LB, "lbs", "Frontline");
             }
           }
         }
@@ -2071,7 +2072,7 @@ function aggregateNeedRows(
         // managers can tag individual mix names (e.g. "Italian Blend") in the
         // freezer-pull config instead of just the generic "Mix" type.
         if (!opts?.warehouse && blendName && blendName.toLowerCase() !== lower) {
-          add(blendName, a.lbs, "lbs");
+          add(blendName, a.lbs, "lbs", "Frontline");
         }
       } else if (!isMix && isCheese && opts?.warehouse && a.batches > 0) {
         // Warehouse: expand cheese applicators to per-ingredient lbs using the
@@ -2079,43 +2080,43 @@ function aggregateNeedRows(
         const pull = computeCheesePull(a.recipe, a.batches);
         const expandedRows = pull.rows.filter(r => r.ingredient && r.lbs > 0);
         if (expandedRows.length > 0) {
-          for (const r of expandedRows) add(r.ingredient, r.lbs, "lbs");
+          for (const r of expandedRows) add(r.ingredient, r.lbs, "lbs", "Frontline");
         } else {
           // No recipe rows — fall back to batch count so display degrades gracefully.
-          add(label, a.batches, "batches");
+          add(label, a.batches, "batches", "Frontline");
         }
       } else if (!isMix && !isCheese && a.batches > 0) {
-        add(label, a.batches, "batches");
+        add(label, a.batches, "batches", "Frontline");
       } else if (!isMix && !isCheese && a.lbs > 0) {
         // No batch size configured for this applicator type — show lbs so
         // warehouse pullers still know how much to pull (e.g. Hamburger, Beef).
-        add(label, a.lbs, "lbs");
+        add(label, a.lbs, "lbs", "Frontline");
       }
     };
     for (const a of appsFront) addApp(a);
     if (s.pep1Type && s.pep1Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-      if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs");
-      else if (s.pep1Batches > 0) add(s.pep1Type, s.pep1Batches, "batches");
-      else add(s.pep1Type, s.pep1Lbs, "lbs"); // no batch size configured — show lbs so warehouse pullers know what to pull
+      if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs", "Frontline");
+      else if (s.pep1Batches > 0) add(s.pep1Type, s.pep1Batches, "batches", "Frontline");
+      else add(s.pep1Type, s.pep1Lbs, "lbs", "Frontline"); // no batch size configured — show lbs so warehouse pullers know what to pull
     }
     if (s.pep1TypeB && s.pep1LbsB > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
-      if (isPepStd) add(s.pep1TypeB, s.pep1LbsB, "lbs");
-      else if (s.pep1BatchesB > 0) add(s.pep1TypeB, s.pep1BatchesB, "batches");
-      else add(s.pep1TypeB, s.pep1LbsB, "lbs");
+      if (isPepStd) add(s.pep1TypeB, s.pep1LbsB, "lbs", "Frontline");
+      else if (s.pep1BatchesB > 0) add(s.pep1TypeB, s.pep1BatchesB, "batches", "Frontline");
+      else add(s.pep1TypeB, s.pep1LbsB, "lbs", "Frontline");
     }
     if (s.pep2Type && s.pep2Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-      if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs");
-      else if (s.pep2Batches > 0) add(s.pep2Type, s.pep2Batches, "batches");
-      else add(s.pep2Type, s.pep2Lbs, "lbs");
+      if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs", "Frontline");
+      else if (s.pep2Batches > 0) add(s.pep2Type, s.pep2Batches, "batches", "Frontline");
+      else add(s.pep2Type, s.pep2Lbs, "lbs", "Frontline");
     }
     if (s.pep2TypeB && s.pep2LbsB > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
-      if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs");
-      else if (s.pep2BatchesB > 0) add(s.pep2TypeB, s.pep2BatchesB, "batches");
-      else add(s.pep2TypeB, s.pep2LbsB, "lbs");
+      if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs", "Frontline");
+      else if (s.pep2BatchesB > 0) add(s.pep2TypeB, s.pep2BatchesB, "batches", "Frontline");
+      else add(s.pep2TypeB, s.pep2LbsB, "lbs", "Frontline");
     }
     for (const a of appsBack) addApp(a);
   }
@@ -2125,6 +2126,7 @@ function aggregateNeedRows(
       label: val.label,
       value: fmtNum(val.num, val.unit === "batches" ? 2 : 1),
       sub: val.unit,
+      area: val.area,
     }));
 }
 
@@ -2300,7 +2302,7 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[]
 )
 ;
 
-  return rows
+  return rows.map((row) => ({ ...row, area: "Packaging" }))
 ;
 
 }
@@ -25671,7 +25673,7 @@ mergeCategory === "brandflavor"
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="px-4 pb-4">
-                          <NeedsList rows={agg} />
+                          <GroupedNeedsList rows={agg} />
                         </CardContent>
                       </Card>
                       {pkg.length > 0 && (
@@ -25708,6 +25710,7 @@ mergeCategory === "brandflavor"
                           const vals = loadRunValues(r.id);
                           const s = computeSummaryStats(vals);
                           const rows = [...aggregateNeedRows([vals], { warehouse: true }), ...aggregatePackagingNeeds([vals])];
+                          const groupedRows = groupNeedRows(rows);
                           const estSec = s.estimatedTimeSec;
                           const staged = dayState.stagedItems ?? {};
                           const stagedCount = rows.filter(row => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;
@@ -25722,31 +25725,43 @@ mergeCategory === "brandflavor"
                               {rows.length === 0 ? (
                                 <p className="text-xs text-muted-foreground italic">No materials configured yet.</p>
                               ) : (
-                                <div className="space-y-1">
-                                  {rows.map((row) => {
-                                    const rowKey = `${row.label}__${row.sub ?? ""}`;
-                                    const checked = !!staged[`${r.id}::${rowKey}`];
-                                    return (
-                                      <button
-                                        key={rowKey}
-                                        type="button"
-                                        onClick={() => toggleStagedItem(r.id, rowKey)}
-                                        aria-pressed={checked}
-                                        data-testid={`stage-${r.id}-${rowKey}`}
-                                        className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-muted/40 transition-colors"
+                                <div className="space-y-3">
+                                  {groupedRows.map(({ area, rows: areaRows }) => (
+                                    <section key={area} aria-labelledby={`warehouse-${r.id}-${area.toLowerCase()}`}>
+                                      <h3
+                                        id={`warehouse-${r.id}-${area.toLowerCase()}`}
+                                        className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5"
                                       >
-                                        {checked ? (
-                                          <CheckSquare className="w-4 h-4 shrink-0 text-primary" />
-                                        ) : (
-                                          <Square className="w-4 h-4 shrink-0 text-muted-foreground/60" />
-                                        )}
-                                        <span className={`flex-1 truncate ${checked ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>{row.label}</span>
-                                        <span className={`font-bold tabular-nums whitespace-nowrap ${checked ? "text-muted-foreground" : "text-foreground"}`}>
-                                          {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
+                                        {area}
+                                      </h3>
+                                      <div className="space-y-1">
+                                        {areaRows.map((row) => {
+                                          const rowKey = `${row.label}__${row.sub ?? ""}`;
+                                          const checked = !!staged[`${r.id}::${rowKey}`];
+                                          return (
+                                            <button
+                                              key={rowKey}
+                                              type="button"
+                                              onClick={() => toggleStagedItem(r.id, rowKey)}
+                                              aria-pressed={checked}
+                                              data-testid={`stage-${r.id}-${rowKey}`}
+                                              className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-muted/40 transition-colors"
+                                            >
+                                              {checked ? (
+                                                <CheckSquare className="w-4 h-4 shrink-0 text-primary" />
+                                              ) : (
+                                                <Square className="w-4 h-4 shrink-0 text-muted-foreground/60" />
+                                              )}
+                                              <span className={`flex-1 truncate ${checked ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>{row.label}</span>
+                                              <span className={`font-bold tabular-nums whitespace-nowrap ${checked ? "text-muted-foreground" : "text-foreground"}`}>
+                                                {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
+                                              </span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </section>
+                                  ))}
                                 </div>
                               )}
                             </div>
