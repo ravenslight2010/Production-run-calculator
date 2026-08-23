@@ -411,7 +411,11 @@ import {
   buildReorderDemandByKey,
   type MergeInventoryLine,
 } from "../inventoryShared";
-import { applySubstitutions, computeSummaryStats as computeSummaryStatsShared } from "@workspace/inventory-math";
+import {
+  applyRecipeSubstitutions,
+  applySubstitutions,
+  computeSummaryStats as computeSummaryStatsShared,
+} from "@workspace/inventory-math";
 import {
   buildMergeMap,
   countMergeReferences,
@@ -1295,6 +1299,7 @@ export function CheesePickCard({
   batches,
   ozPerPizza,
   recipe,
+  substitutions,
   recipeName,
   recipeNameOptions,
   shredderSetting,
@@ -1310,6 +1315,8 @@ export function CheesePickCard({
   // The applicator's set Oz/Pizza for this blend. Drives the per-ingredient
   // "Oz / Pizza" column so its total lines up with what the operator entered.
   ozPerPizza: number;
+  /** Today's temporary ingredient overlays. These affect display only here; the saved recipe stays untouched. */
+  substitutions?: IngredientSubstitution[];
   recipe: RecipeRow[];
   // The picked recipe's components from the server cheese pool, when known.
   // Carries each ingredient's blend share (sharePct / ozPerPizza / lbs
@@ -1330,11 +1337,16 @@ export function CheesePickCard({
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
 }) {
-  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  // A temporary substitution must be visible anywhere floor staff read the
+  // blend. Apply it to this display copy rather than the form's saved rows, so
+  // clearing tomorrow's overlay restores the original master recipe exactly.
+  const effectiveRecipe = applyRecipeSubstitutions(recipe, substitutions);
+  const displayRecipe = effectiveRecipe.rows;
+  const totalLbsPerBatch = displayRecipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   // Scale each component up to the pounds to pull/mix for this run, using the
   // run's existing batch count so these numbers can never drift from the batch
   // and total-lbs figures on the card. Shared with mobile via @workspace/inventory-math.
-  const pull = computeCheesePull(recipe, batches);
+  const pull = computeCheesePull(displayRecipe, batches);
   // Per-pizza ounces of each component: the applicator's target Oz/Pizza split
   // across ingredients by each one's SHARE of the blend, so the column total
   // equals the operator's set Oz/Pizza. When the server pool recipe is known
@@ -1343,9 +1355,9 @@ export function CheesePickCard({
   // the hydrated rows' lbs proportions (@workspace/inventory-math).
   const namedPool = (poolComponents ?? []).filter(c => c.ingredient.trim());
   const perPizzaOz =
-    namedPool.length > 0 && namedPool.length === recipe.length
+    !effectiveRecipe.changed && namedPool.length > 0 && namedPool.length === displayRecipe.length
       ? cheesePerFlavorComponentOz(namedPool, ozPerPizza)
-      : computeCheesePerPizzaOz(recipe, ozPerPizza);
+      : computeCheesePerPizzaOz(displayRecipe, ozPerPizza);
   // Always include the currently-picked name so a recipe assigned to another
   // brand/flavor (or since disabled) still shows instead of silently clearing.
   const options =
@@ -1371,6 +1383,14 @@ export function CheesePickCard({
   const showMissingWarning = recipeName.trim() !== "" && !!recipeMissing;
   const body = (
     <>
+      {effectiveRecipe.changed && (
+        <div
+          className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+          data-testid="temporary-cheese-recipe-overlay"
+        >
+          Today&apos;s temporary substitution is reflected below. The saved cheese recipe is unchanged.
+        </div>
+      )}
       {showMissingWarning && (
         <div className="flex items-start gap-2 mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -1389,7 +1409,7 @@ export function CheesePickCard({
           )}
         </div>
       )}
-      {recipe.length === 0 ? (
+      {displayRecipe.length === 0 ? (
         showMissingWarning ? null : (
           <p className="text-xs text-muted-foreground mb-1">
             {recipeName.trim()
@@ -1406,7 +1426,7 @@ export function CheesePickCard({
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Pull<span className="hidden sm:inline"> / Run</span></span>
           </div>
           <div className="space-y-1.5">
-            {recipe.map((row, idx) => {
+            {displayRecipe.map((row, idx) => {
               const rowLbs = Number(row.lbs ?? 0);
               return (
                 <div key={idx} className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 items-center">
@@ -1437,7 +1457,7 @@ export function CheesePickCard({
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: displayRecipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
         {body}
       </>
@@ -1452,7 +1472,7 @@ export function CheesePickCard({
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
-          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
+          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: displayRecipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">{body}</CardContent>
@@ -22991,7 +23011,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
     addIngredientType, addPepType, appendCheese1, appendCheese2,
     appendCheese3, appendCheese4, appendDough, appendFrontline,
     applyLearnedBatchLbs, canManageInventory, cheese1Fields, cheese2Fields,
-    cheese3Fields, cheese4Fields, cheeseNameBrandTags, cheeseNamesForRun,
+    cheese3Fields, cheese4Fields, cheeseNameBrandTags, cheeseNamesForRun, dayState,
     currentRun, doughFields, doughPoolDrift, doughRecipeNameOptions,
     doughVariantPick, form, frontlineFields, frontlineRecipeNameOptions,
     ingredientTypeOptions, isSupervisor, mixNameBrandTags, pep1ShowB,
@@ -23274,6 +23294,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           batches={calc.app1Batches}
                           ozPerPizza={v.app1OzPerPizza}
                           recipe={v.app1CheeseRecipe ?? []}
+                          substitutions={dayState.substitutions ?? []}
                           recipeName={v.app1CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
                           optionLabels={cheeseNameBrandTags}
@@ -23350,6 +23371,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           batches={calc.app2Batches}
                           ozPerPizza={v.app2OzPerPizza}
                           recipe={v.app2CheeseRecipe ?? []}
+                          substitutions={dayState.substitutions ?? []}
                           recipeName={v.app2CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
                           optionLabels={cheeseNameBrandTags}
@@ -23605,6 +23627,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           batches={calc.app3Batches}
                           ozPerPizza={v.app3OzPerPizza}
                           recipe={v.app3CheeseRecipe ?? []}
+                          substitutions={dayState.substitutions ?? []}
                           recipeName={v.app3CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
                           optionLabels={cheeseNameBrandTags}
@@ -23681,6 +23704,7 @@ const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabContent() {
                           batches={calc.app4Batches}
                           ozPerPizza={v.app4OzPerPizza}
                           recipe={v.app4CheeseRecipe ?? []}
+                          substitutions={dayState.substitutions ?? []}
                           recipeName={v.app4CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
                           optionLabels={cheeseNameBrandTags}

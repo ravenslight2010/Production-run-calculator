@@ -68,6 +68,37 @@ describe("CheesePickCard — missing-cheese warning render", () => {
     expect(screen.queryByText(/No matching cheese recipe found/i)).toBeNull();
   });
 
+  it("shows an added temporary ingredient while preserving the saved blend", () => {
+    render(
+      <CheesePickCard
+        label="Cheese"
+        batches={1}
+        recipe={[
+          { ingredient: "Whole Mozzarella", lbs: 0.2 },
+          { ingredient: "Provolone", lbs: 0.1 },
+          { ingredient: "Cow's Romano", lbs: 0 },
+        ]}
+        substitutions={[{
+          id: "skim-mozz-today",
+          action: "add",
+          ingredient: "Whole Mozzarella",
+          substitute: "Skim Mozzarella",
+          amount: 20,
+        }]}
+        recipeName="Corner Booth Pepperoni Cheese Blend"
+        recipeNameOptions={["Corner Booth Pepperoni Cheese Blend"]}
+        shredderSetting=""
+        cellulose=""
+        onRecipeNameChange={noop}
+      />,
+    );
+
+    expect(screen.getByTestId("temporary-cheese-recipe-overlay")).toBeTruthy();
+    expect(screen.getByText("Skim Mozzarella")).toBeTruthy();
+    expect(screen.getAllByText("20.0")).toHaveLength(2);
+    expect(screen.getAllByText("20.3 lbs")).toHaveLength(2);
+  });
+
   it("shows the original 'no ingredients yet' hint (and NO warning) for a real recipe with zero rows", () => {
     render(
       <CheesePickCard
