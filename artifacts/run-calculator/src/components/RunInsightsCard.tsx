@@ -8,8 +8,7 @@ import {
   updateRunSuggestion,
   type RunSuggestion,
 } from "@/runInsights";
-
-export const RUN_SUGGESTIONS_QUERY_KEY = ["run-suggestions"] as const;
+import { RUN_SUGGESTIONS_QUERY_KEY } from "@/runInsightsQuery";
 
 // Manager-only "Run Insights" card (Setup tab). Shows ONE pending suggestion
 // at a time — a deterministic, pattern-based recommendation to adjust a

@@ -459,7 +459,8 @@ import { suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
-import { useLiveRun, LiveRunProvider, calcRef } from "../contexts/LiveRunContext";
+import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
+import { calcRef } from "../liveRunCalc";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";

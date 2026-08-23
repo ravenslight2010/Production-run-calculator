@@ -24,6 +24,7 @@ import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
 import { recordPerformance } from "../performanceDiagnostics";
+import { calcRef } from "../liveRunCalc";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -122,11 +123,10 @@ export interface LiveRunContextValue {
   paceAlertMsg: string;
 }
 
-// ── Module-level calc ref (readable by Home without subscribing to context) ──
-// ISOLATION INVARIANT: components that do not call useLiveRun() must NOT
-// re-render when nowTime changes. calcRef lets Home read the latest calc value
-// without subscribing. Regression test: contexts/__tests__/LiveRunContext.clock-isolation.test.tsx
-export const calcRef: { current: Calc | null } = { current: null };
+// Module-level calcRef is kept as a compatibility export for existing callers.
+// The owning implementation lives in ../liveRunCalc so this provider module
+// only exposes component-facing context behavior.
+export { calcRef } from "../liveRunCalc";
 
 // ── Provider props ───────────────────────────────────────────────────────────
 export interface LiveRunProviderProps {
