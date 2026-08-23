@@ -15375,9 +15375,10 @@ export default function Home() {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  title={
+                  title="More"
+                  aria-label={
                     managerAttentionTotal > 0
-                      ? `${managerAttentionTotal} manager action${managerAttentionTotal === 1 ? "" : "s"} need attention`
+                      ? `More — ${managerAttentionTotal} manager action${managerAttentionTotal === 1 ? "" : "s"} need attention`
                       : "More"
                   }
                   className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
