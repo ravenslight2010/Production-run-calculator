@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { suggestMerges } from "./mergeSuggest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { clearMergeSuggestionCache, isCurrentMergeSuggestionRequest, suggestMerges } from "./mergeSuggest";
 import {
   collectDeniedPairs,
   collectMergeAliases,
@@ -335,5 +335,87 @@ describe("suggestMerges — conflicting descriptor guard (cured vs natural)", ()
         (s.target === "Bashas'" && s.sources.includes("Bashas")),
     );
     expect(paired).toBe(true);
+  });
+});
+
+describe("suggestMerges request lifecycle", () => {
+  let aiCalls = 0;
+
+  beforeEach(() => {
+    clearMergeSuggestionCache();
+    aiCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const json = (body: unknown) =>
+        Promise.resolve({ ok: true, status: 200, json: async () => body }) as Promise<Response>;
+      if (url.includes("/api/merge-aliases")) return json({ aliases: [] });
+      if (url.includes("/api/denied-merges")) return json({ denied: [] });
+      if (!url.includes("/api/ai/suggest-merges")) return json({});
+      aiCalls++;
+      if (init?.signal?.aborted) {
+        return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      }
+      return json({ suggestions: [{ target: "Pepperoni", sources: ["Peperoni"] }] });
+    }));
+  });
+
+  it("rejects a stale response when a newer request has started", () => {
+    const controller = new AbortController();
+    expect(isCurrentMergeSuggestionRequest(1, 2, controller.signal)).toBe(false);
+    expect(isCurrentMergeSuggestionRequest(2, 2, controller.signal)).toBe(true);
+    controller.abort();
+    expect(isCurrentMergeSuggestionRequest(2, 2, controller.signal)).toBe(false);
+  });
+
+  afterEach(() => {
+    clearMergeSuggestionCache();
+    vi.unstubAllGlobals();
+  });
+
+  it("reuses results for the same master-data version and refresh bypasses cache", async () => {
+    const first = await suggestMerges(["Pepperoni", "Peperoni"]);
+    const second = await suggestMerges(["pePPeroni", " peperoni "]);
+    expect(second).toEqual(first);
+    expect(aiCalls).toBe(1);
+
+    await suggestMerges(["Pepperoni", "Peperoni"], undefined, undefined, undefined, { forceRefresh: true });
+    expect(aiCalls).toBe(2);
+  });
+
+  it("propagates caller cancellation instead of converting it to a fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/merge-aliases")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ aliases: [] }) });
+      if (url.includes("/api/denied-merges")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ denied: [] }) });
+      return new Promise((_, reject) => {
+        if (init?.signal?.aborted) {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          return;
+        }
+        init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      });
+    }));
+    const controller = new AbortController();
+    const pending = suggestMerges(["Pepperoni", "Peperoni"], undefined, undefined, undefined, { signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("returns a retryable fallback when the AI request exceeds the bounded timeout", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/merge-aliases")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ aliases: [] }) });
+      if (url.includes("/api/denied-merges")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ denied: [] }) });
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("timed out"), { name: "AbortError" })));
+      });
+    }));
+    const pending = suggestMerges(["Pepperoni", "Peperoni"]);
+    await vi.advanceTimersByTimeAsync(25_000);
+    const result = await pending;
+    expect(result.usedAi).toBe(false);
+    expect(result.error).toContain("server didn't respond in time");
   });
 });

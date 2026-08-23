@@ -50,14 +50,14 @@ function scopeParams(category?: MergeSuggestCategory, brand?: string): string {
 export async function fetchMergeAliases(
   category?: MergeSuggestCategory,
   brand?: string,
+  signal?: AbortSignal,
 ): Promise<MergeAlias[]> {
-  // Bounded wait: this runs inside the post-import background merge scan. If
-  // the deployment is cold-starting the request can hang at the platform edge;
-  // suggestMerges treats a failure as "no learned aliases" and continues, so a
-  // timeout keeps the scan (and its "possible duplicates" toast) alive.
+  // Bounded wait: if the deployment is cold-starting, the request can hang at
+  // the platform edge; suggestMerges treats a failure as "no learned aliases"
+  // and continues, so the merge review stays retryable.
   const res = await fetchWithTimeout(
     `/api/merge-aliases${scopeParams(category, brand)}`,
-    { headers: { "x-client-id": inventoryClientId() } },
+    { headers: { "x-client-id": inventoryClientId() }, signal },
     15_000,
   );
   if (!res.ok) throw new Error(`List merge aliases failed (${res.status})`);
@@ -94,12 +94,13 @@ export async function saveMergeAliases(
 export async function fetchDeniedMerges(
   category?: MergeSuggestCategory,
   brand?: string,
+  signal?: AbortSignal,
 ): Promise<DeniedMerge[]> {
   // Bounded wait — same cold-start rationale as fetchMergeAliases; a failure
   // just means denied pairs aren't filtered this scan.
   const res = await fetchWithTimeout(
     `/api/denied-merges${scopeParams(category, brand)}`,
-    { headers: { "x-client-id": inventoryClientId() } },
+    { headers: { "x-client-id": inventoryClientId() }, signal },
     15_000,
   );
   if (!res.ok) throw new Error(`List denied merges failed (${res.status})`);
@@ -193,6 +194,7 @@ async function requestAiSuggestMerges(
   aliases: MergeAlias[],
   category?: MergeSuggestCategory,
   brand?: string,
+  signal?: AbortSignal,
 ): Promise<ReviewedMergeSuggestion[]> {
   // Bounded wait so a cold-starting deployment can't hang the post-import
   // merge scan forever; suggestMerges falls back to look-alike/remembered
@@ -205,6 +207,7 @@ async function requestAiSuggestMerges(
         "Content-Type": "application/json",
         "x-client-id": inventoryClientId(),
       },
+      signal,
       body: JSON.stringify({
         names,
         aliases,
@@ -212,7 +215,7 @@ async function requestAiSuggestMerges(
         ...(category === "flavor" && brand ? { brand } : {}),
       }),
     },
-    120_000,
+    25_000,
   );
   if (!res.ok) {
     let detail = "";
@@ -233,6 +236,35 @@ export type MergeSuggestResult = {
   error?: string;
 };
 
+const MERGE_SUGGESTION_CACHE_TTL_MS = 5 * 60_000;
+const mergeSuggestionCache = new Map<string, { expiresAt: number; result: MergeSuggestResult }>();
+
+function mergeSuggestionCacheKey(
+  names: string[],
+  category?: MergeSuggestCategory,
+  brand?: string,
+): string {
+  return JSON.stringify([
+    category ?? "ingredient",
+    category === "flavor" ? brand?.trim().toLowerCase() ?? "" : "",
+    [...new Set(names.map((name) => name.trim().toLowerCase()).filter(Boolean))].sort(),
+  ]);
+}
+
+/** Test/support hook for invalidating cached suggestions after master-data changes. */
+export function clearMergeSuggestionCache(): void {
+  mergeSuggestionCache.clear();
+}
+
+/** Prevents an older response from updating UI after a newer scan starts. */
+export function isCurrentMergeSuggestionRequest(
+  generation: number,
+  currentGeneration: number,
+  signal?: AbortSignal,
+): boolean {
+  return generation === currentGeneration && !signal?.aborted;
+}
+
 /**
  * Fetch learned aliases, ask the AI to cluster duplicates, and fold the AI
  * groups together with remembered (alias-derived) ones. If the AI call fails
@@ -244,7 +276,14 @@ export async function suggestMerges(
   category?: MergeSuggestCategory,
   brand?: string,
   knownBrands?: string[],
+  options?: { signal?: AbortSignal; forceRefresh?: boolean },
 ): Promise<MergeSuggestResult> {
+  const cacheKey = mergeSuggestionCacheKey(names, category, brand);
+  if (!options?.forceRefresh) {
+    const cached = mergeSuggestionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+    if (cached) mergeSuggestionCache.delete(cacheKey);
+  }
   // Cross-brand guard: names embedding DIFFERENT known brands ("Lowes …" vs
   // "Bashas …") are never the same thing. Skipped on the Brand tab, where the
   // names ARE brands and every legitimate typo-merge would be blocked.
@@ -252,7 +291,7 @@ export async function suggestMerges(
     category === "brand" ? list : filterCrossBrandSuggestions(list, knownBrands ?? []);
   let aliases: MergeAlias[] = [];
   try {
-    aliases = await fetchMergeAliases(category, brand);
+    aliases = await fetchMergeAliases(category, brand, options?.signal);
   } catch {
     aliases = [];
   }
@@ -260,7 +299,7 @@ export async function suggestMerges(
   // showing — AI or remembered-only — so an ignored pair never comes back.
   let denied: DeniedMerge[] = [];
   try {
-    denied = await fetchDeniedMerges(category, brand);
+    denied = await fetchDeniedMerges(category, brand, options?.signal);
   } catch {
     denied = [];
   }
@@ -272,7 +311,7 @@ export async function suggestMerges(
     nearDupSuggestions(names),
   );
   try {
-    const ai = await requestAiSuggestMerges(names, aliases, category, brand);
+    const ai = await requestAiSuggestMerges(names, aliases, category, brand, options?.signal);
     // mergeSuggestionLists rebuilds group objects (dropping the reviewer verdict),
     // so re-attach each AI group's verdict to the merged result by target name.
     const reviewByTarget = new Map<string, ReviewVerdict>();
@@ -285,19 +324,23 @@ export async function suggestMerges(
     });
     // Conflicting-descriptor guard (e.g. "cured" vs "natural" are different
     // products): stripped from every shown suggestion, AI or baseline.
-    return {
+    const result = {
       suggestions: dropCrossBrand(
         filterConflictingSuggestions(filterDeniedSuggestions(merged, denied)),
       ),
       usedAi: true,
     };
+    mergeSuggestionCache.set(cacheKey, { expiresAt: Date.now() + MERGE_SUGGESTION_CACHE_TTL_MS, result });
+    return result;
   } catch (e) {
-    return {
+    if (options?.signal?.aborted) throw e;
+    const result = {
       suggestions: dropCrossBrand(
         filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
       ),
       usedAi: false,
       error: e instanceof Error ? e.message : "AI suggestions unavailable",
     };
+    return result;
   }
 }

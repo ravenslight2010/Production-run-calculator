@@ -440,7 +440,7 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
+import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, isCurrentMergeSuggestionRequest, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 import { AppSlotMathBadge } from "../components/AppSlotMathBadge";
@@ -626,7 +626,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
-import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -5086,9 +5085,10 @@ export default function Home() {
   // because counts intersect against the live list).
   const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
   const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
-  // Bumped after a recipe/spec import so an effect can auto-run the merge check
-  // (imported recipe ingredients can duplicate standalone individual ones).
-  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
+  const mergeSuggestRequestRef = useRef<{ generation: number; controller: AbortController | null }>({
+    generation: 0,
+    controller: null,
+  });
   // Bumped after a spec sheet import so SpecReconcilePanel auto-runs the
   // cross-reference against the newly saved sheet.
   const [specReconcileSignal, setSpecReconcileSignal] = useState(0);
@@ -5719,7 +5719,7 @@ export default function Home() {
   // "previously merged" aliases. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges(fromImport = false): Promise<number> {
+  async function handleSuggestMerges(fromImport = false, forceRefresh = false): Promise<number> {
     if (!fromImport) setMergeFromImport(false);
     // The import-triggered auto-scan always lands on (and scans) the
     // Ingredients tab — read from the closured `mergeFullUniverse` directly
@@ -5729,6 +5729,11 @@ export default function Home() {
     const scope = fromImport
       ? { category: "ingredient" as const, universe: mergeFullUniverse }
       : mergeSuggestScope;
+    const request = mergeSuggestRequestRef.current;
+    request.controller?.abort();
+    const controller = new AbortController();
+    request.controller = controller;
+    const generation = ++request.generation;
     setMergeSuggestBusy(true);
     setMergeSuggestError("");
     setMergeSuggestNote("");
@@ -5742,7 +5747,9 @@ export default function Home() {
         // pairing names that mention DIFFERENT brands ("Lowes …" vs "Bashas …")
         // is dropped no matter what the AI said.
         brands,
+        { signal: controller.signal, forceRefresh },
       );
+      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return 0;
       setMergeSuggestions(suggestions);
       setMergeSuggestSelected(new Set());
       if (!usedAi && error) {
@@ -5755,51 +5762,31 @@ export default function Home() {
       }
       return suggestions.length;
     } catch (e) {
+      if (!isCurrentMergeSuggestionRequest(generation, request.generation, controller.signal)) return 0;
       setMergeSuggestions([]);
       setMergeSuggestSelected(new Set());
       setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
       return 0;
     } finally {
-      setMergeSuggestBusy(false);
+      if (isCurrentMergeSuggestionRequest(generation, request.generation)) {
+        request.controller = null;
+        setMergeSuggestBusy(false);
+      }
     }
   }
 
-  // After a spec/recipe import that added recipes, auto-run the merge check in
-  // the BACKGROUND: imported cheese/mix recipe ingredients can duplicate
-  // standalone individual ingredients. This used to yank the user straight to
-  // the Merge screen after EVERY import — importing several sheets back-to-back
-  // felt broken ("where did the import buttons go?"). Now the scan runs without
-  // navigating; if duplicates are found, a toast offers a "Review" button that
-  // jumps to the Merge screen with the results already loaded. The effect
-  // re-runs only when the request counter is bumped, so by then the merge
-  // universe reflects the new lists.
+  // Suggestions are deliberately lazy: opening the merge review is the only
+  // automatic trigger. Imports must not start an expensive AI request behind
+  // the manager's back, and leaving the surface cancels any active request.
   useEffect(() => {
-    if (mergeCheckRequest === 0) return;
-    // Pre-select the Ingredients tab (where the cross-category suggestions
-    // show) so the results match the screen when the user does come look.
-    setMergeCategory("ingredients");
-    setMergeFromImport(true);
-    void handleSuggestMerges(true).then((count) => {
-      if (count <= 0) return;
-      toast({
-        title: "Possible duplicate ingredients",
-        description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
-        action: (
-          <ToastAction
-            altText="Review duplicates"
-            onClick={() => {
-              setActiveTab("setup");
-              setManageCategory("merge");
-              setMergeCategory("ingredients");
-            }}
-          >
-            Review
-          </ToastAction>
-        ),
-      });
-    });
+    if (manageCategory === "merge") {
+      void handleSuggestMerges();
+    } else {
+      mergeSuggestRequestRef.current.controller?.abort();
+    }
+    // The request snapshots the current merge scope when the surface opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCheckRequest]);
+  }, [manageCategory]);
 
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
@@ -6587,6 +6574,7 @@ export default function Home() {
   // nothing leaks across categories.
   function switchMergeCategory(cat: MergeCategory) {
     if (cat === mergeCategory) return;
+    mergeSuggestRequestRef.current.controller?.abort();
     setMergeCategory(cat);
     resetMergeForm();
     setMergeSuggestions([]);
@@ -12010,7 +11998,6 @@ export default function Home() {
       setSpecImportPrepared(null);
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
       // have re-rendered. Never blocks or fails the already-committed import.
-      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
@@ -13596,7 +13583,7 @@ export default function Home() {
     makeSubLogEntry, manageBrandFilter, manageCategory, manageInput, manualStopEnd, manualStopNotes,
     manualStopReason, manualStopStart, manualStopType, markCountedMutation, markOnboardingSeen, markTourCompleted,
     me, mergeBatchBusy, mergeBfBrand, mergeBfMode, mergeBrands, mergeBusy,
-    mergeCatalogEntries, mergeCategory, mergeCheckRequest, mergeConfirming, mergeError, mergeFlavors,
+    mergeCatalogEntries, mergeCategory, mergeConfirming, mergeError, mergeFlavors,
     mergeFormRef, mergeFromImport, mergeFullUniverse, mergeMap, mergePoolLabel, mergePreviewCount,
     mergeSources, mergeStaleCi, mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected, mergeSuggestions, mergeTarget,
@@ -13636,7 +13623,7 @@ export default function Home() {
     setHistory, setImportDefaultDate, setImportIntoEditor, setImportProgress, setImportResult, setIngredientTypes,
     setIsFullscreen, setIsOnline, setManageBrandFilter, setManageCategory, setManageInput, setManualStopEnd,
     setManualStopNotes, setManualStopReason, setManualStopStart, setManualStopType, setMergeBatchBusy, setMergeBfBrand,
-    setMergeBfMode, setMergeBusy, setMergeCategory, setMergeCheckRequest, setMergeConfirming, setMergeError,
+    setMergeBfMode, setMergeBusy, setMergeCategory, setMergeConfirming, setMergeError,
     setMergeFromImport, setMergeSources, setMergeSuggestBusy, setMergeSuggestError, setMergeSuggestNote, setMergeSuggestRan,
     setMergeSuggestSelected, setMergeSuggestions, setMergeTarget, setMergedAwayTomb, setMgIngInput, setMgNamesInput,
     setMgPresetRows, setMgSelectedPreset, setMgStandaloneInput, setMixIngredients, setMixMakeDay, setMixRecipeNames,
@@ -13700,7 +13687,7 @@ export default function Home() {
     manageBrandFilter, manageCategory, manageInput,
     manualStopEnd, manualStopNotes, manualStopReason, manualStopStart, manualStopType,
     me, mergeBatchBusy, mergeBfBrand, mergeBfMode, mergeBusy, mergeCategory,
-    mergeCheckRequest, mergeConfirming, mergeError, mergeFromImport, mergeFullUniverse,
+    mergeConfirming, mergeError, mergeFromImport, mergeFullUniverse,
     mergeMap, mergePoolLabel, mergePreviewCount, mergeSources, mergeStaleCi,
     mergeStaleNames, mergeSuggestBusy, mergeSuggestError, mergeSuggestKey,
     mergeSuggestNote, mergeSuggestRan, mergeSuggestScope, mergeSuggestSelected,
@@ -14482,7 +14469,7 @@ export default function Home() {
                           <button
                             type="button"
                             disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
-                            onClick={() => handleSuggestMerges()}
+                            onClick={() => handleSuggestMerges(false, true)}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
                           >{mergeSuggestBusy ? "Scanning…" : "Scan for duplicates"}</button>
                         </div>
