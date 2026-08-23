@@ -9,6 +9,11 @@ export const IMPORT_PERFORMANCE_BUDGETS = {
   exportMs: 10_000,
 } as const;
 
+/** Reviewed budget for the first visit to the deferred staff-management surface. */
+export const MANAGEMENT_PERFORMANCE_BUDGETS = {
+  staffFirstVisitMs: 350,
+} as const;
+
 export type PerformanceDiagnostic = {
   name: string;
   durationMs: number;
@@ -45,7 +50,10 @@ function remember(entry: PerformanceDiagnostic): void {
           : entry.name.endsWith("-export") ? IMPORT_PERFORMANCE_BUDGETS.exportMs
             : undefined
     : undefined;
-  const budget = importBudget ?? (entry.kind === "load"
+  const managementBudget = entry.name === "management:staff-first-visit"
+    ? MANAGEMENT_PERFORMANCE_BUDGETS.staffFirstVisitMs
+    : undefined;
+  const budget = importBudget ?? managementBudget ?? (entry.kind === "load"
     ? SLOW_LOAD_MS
     : entry.kind === "api"
       ? 1000

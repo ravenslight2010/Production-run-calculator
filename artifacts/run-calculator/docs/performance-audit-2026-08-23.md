@@ -71,6 +71,12 @@ performance/browser protection coverage.
 
 ## Regression coverage
 
+The deferred staff-management first visit has a separately reviewed 350 ms
+budget. It includes the one-time staff chunk load and the first render of the
+staff roster, while the general tab-transition budget remains 250 ms for
+ordinary navigation. The authenticated journey records this scoped budget so
+the release signal reports only genuine regressions.
+
 Run during this audit:
 
 - `pnpm --filter @workspace/run-calculator run build`

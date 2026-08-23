@@ -9,7 +9,10 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
-import { PERFORMANCE_BUDGETS } from "../src/performanceDiagnostics";
+import {
+  MANAGEMENT_PERFORMANCE_BUDGETS,
+  PERFORMANCE_BUDGETS,
+} from "../src/performanceDiagnostics";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -198,7 +201,7 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
     "browser:navigation-to-dom-content-loaded": PERFORMANCE_BUDGETS.initialLoadMs,
     "browser:navigation-to-load": PERFORMANCE_BUDGETS.initialLoadMs,
     "management:staff-chunk-load": PERFORMANCE_BUDGETS.initialLoadMs,
-    "management:staff-first-visit": PERFORMANCE_BUDGETS.tabTransitionMs,
+    "management:staff-first-visit": MANAGEMENT_PERFORMANCE_BUDGETS.staffFirstVisitMs,
   };
   const measured = diagnostics.filter((entry) => entry.name in budgetByName);
   const overBudget = measured.filter((entry) => entry.durationMs > budgetByName[entry.name]!);

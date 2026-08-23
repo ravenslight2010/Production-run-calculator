@@ -82,6 +82,7 @@ function dynamicMask(page: Page) {
     page.locator('[data-testid*="timer"]'),
     page.locator('[data-testid*="clock"]'),
     page.locator('[data-testid*="timestamp"]'),
+    page.locator('[data-testid="elapsed-card-value"]'),
     page.locator('input[type="date"]'),
   ];
 }
@@ -111,6 +112,15 @@ test.describe("intentional visual regression baselines", () => {
     page,
   }) => {
     await signUp(page, phoneUsername);
+    const startRun = page.getByRole("button", { name: /start run/i });
+    if (await startRun.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await startRun.click();
+    }
+    await page.getByRole("button", { name: /pause run/i }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
     await expect(page).toHaveScreenshot("live-run-desktop.png", {
       fullPage: false,
