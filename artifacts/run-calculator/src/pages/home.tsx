@@ -1,4 +1,4 @@
-import { createContext, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
@@ -347,10 +347,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
-import AssistantTab from "../components/AssistantTab";
-import SpecReconcilePanel from "../components/SpecReconcilePanel";
 import MixReconcilePanel from "../components/MixReconcilePanel";
-import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, type ImportHistoryReopenRequest } from "../importHistory";
 import MixAssistChat from "../components/MixAssistChat";
 import {
@@ -647,6 +644,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const LazyDeferredManagementAiSurface = lazy(() => {
+  const startedAt = typeof performance === "undefined" ? null : performance.now();
+  return import("../components/DeferredManagementAiSurface").then((module) => {
+    if (startedAt !== null && typeof performance !== "undefined") {
+      recordPerformance("management:ai-review-chunk-load", performance.now() - startedAt, "load");
+    }
+    return module;
+  });
+});
+
 // Data resets are now server-driven (a manager runs POST /api/sync/reset, which
 // bumps a per-scope epoch). The local wipe is applied reactively when this device
 // sees a newer epoch — on boot via GET /api/sync/reset-epoch and live over SSE —
@@ -16360,133 +16368,122 @@ export default function Home() {
                 </div>
                 </>} />
 
-              <ManagementDepartment ai={<>
-                <AssistantTab
-                  buildInput={() =>
-                    buildOptimizeInput({
-                      date: todayStr(),
-                      nowMs: Date.now(),
-                      runToTime,
-                      runs: dayState.runs,
-                      runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
-                      history,
-                      scheduledDays: scheduledDays.map((d) => ({
-                        date: d.date,
-                        runs: (d.runs ?? []).map((r) => ({
-                          brand: r.brand,
-                          flavor: r.flavor,
-                          casesNeeded: r.casesNeeded,
-                          dieType: r.dieType,
-                        })),
-                      })),
-                    })
-                  }
-                  buildRecipeContext={() =>
-                    buildRecipeAssistContext(
-                      form.getValues(),
-                      [...cheeseIngredients, ...doughIngredients, ...frontlineIngredients],
-                      {
-                        brand: currentRun?.brand,
-                        flavor: currentRun?.flavor,
-                        casesNeeded: v.casesNeeded,
-                        pizzasPerCase: v.pizzasPerCase,
-                        doughballWeightOz: v.targetDoughballWeight,
-                      },
-                    )
-                  }
-                  onApplyRecipeSuggestion={applyRecipeSuggestion}
-                  recipeApplyTargets={dayState.runs.map((r, i) => ({
-                    id: r.id,
-                    label: `Run ${i + 1} · ${runLabel(r)}`,
-                  }))}
-                  recipeDefaultTargetId={currentRunId}
-                  onApplyAction={applyOptimizeAction}
-                  onApplyVoiceCommand={applyVoiceCommand}
-                  buildSummary={(scope) =>
-                    scope === "week"
-                      ? buildWeekSummaryInput({
+              <ManagementDepartment ai={
+                <LazyDeferredManagementAiSurface
+                    assistant={{
+                      buildInput: () =>
+                        buildOptimizeInput({
                           date: todayStr(),
                           nowMs: Date.now(),
+                          runToTime,
+                          runs: dayState.runs,
+                          runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
                           history,
-                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                        })
-                      : buildDaySummaryInput({
+                          scheduledDays: scheduledDays.map((d) => ({
+                            date: d.date,
+                            runs: (d.runs ?? []).map((r) => ({
+                              brand: r.brand,
+                              flavor: r.flavor,
+                              casesNeeded: r.casesNeeded,
+                              dieType: r.dieType,
+                            })),
+                          })),
+                        }),
+                      buildRecipeContext: () =>
+                        buildRecipeAssistContext(
+                          form.getValues(),
+                          [...cheeseIngredients, ...doughIngredients, ...frontlineIngredients],
+                          {
+                            brand: currentRun?.brand,
+                            flavor: currentRun?.flavor,
+                            casesNeeded: v.casesNeeded,
+                            pizzasPerCase: v.pizzasPerCase,
+                            doughballWeightOz: v.targetDoughballWeight,
+                          },
+                        ),
+                      onApplyRecipeSuggestion: applyRecipeSuggestion,
+                      recipeApplyTargets: dayState.runs.map((r, i) => ({
+                        id: r.id,
+                        label: `Run ${i + 1} · ${runLabel(r)}`,
+                      })),
+                      recipeDefaultTargetId: currentRunId,
+                      onApplyAction: applyOptimizeAction,
+                      onApplyVoiceCommand: applyVoiceCommand,
+                      buildSummary: (scope) =>
+                        scope === "week"
+                          ? buildWeekSummaryInput({
+                              date: todayStr(),
+                              nowMs: Date.now(),
+                              history,
+                              runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                            })
+                          : buildDaySummaryInput({
+                              date: todayStr(),
+                              nowMs: Date.now(),
+                              runs: dayState.runs,
+                              runValues: (run) =>
+                                run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                            }),
+                      buildAnomaly: () =>
+                        buildAnomalyInput({
                           date: todayStr(),
                           nowMs: Date.now(),
                           runs: dayState.runs,
                           runValues: (run) =>
                             run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
-                        })
-                  }
-                  buildAnomaly={() =>
-                    buildAnomalyInput({
-                      date: todayStr(),
-                      nowMs: Date.now(),
-                      runs: dayState.runs,
-                      runValues: (run) =>
-                        run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
-                      history,
-                      runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                    })
-                  }
-                  buildSchedule={() =>
-                    buildScheduleInput({
-                      nowMs: Date.now(),
-                      runs: dayState.runs,
-                      runValues: (run) =>
-                        run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
-                    })
-                  }
-                  onApplySchedule={applyScheduleOrder}
-                  buildForecast={(targetDate, horizonDays) =>
-                    buildForecastInput({
-                      targetDate: targetDate || tomorrowStr(),
-                      horizonDays,
-                      nowMs: Date.now(),
-                      history,
-                      runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                      scheduledDays: scheduledDays.map((d) => ({
-                        date: d.date,
-                        runs: (d.runs ?? []).map((r) => ({
-                          brand: r.brand,
-                          flavor: r.flavor,
-                          casesNeeded: r.casesNeeded,
-                          dieType: r.dieType,
-                        })),
-                      })),
-                    })
-                  }
-                  onApplyForecast={applyForecast}
-                  buildAccuracy={() =>
-                    buildForecastAccuracyInput({
-                      nowMs: Date.now(),
-                      history,
-                      runValuesForHistory: (day, run) => day.runValues?.[run.id],
-                    })
-                  }
-                />
-                <div className="mt-3">
-                  <SpecReconcilePanel
-                    autoCheckSignal={specReconcileSignal}
-                    canManageProfiles={hasCapability("manage-profiles")}
-                    reopenRequest={importReopenRequest}
-                  />
-                </div>
-                {hasCapability("manage-profiles") && (
-                  <div className="mt-3">
-                    <ImportHistoryPanel
-                      refreshSignal={sheetListSignal}
-                      onReopen={(request) => {
+                          history,
+                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                        }),
+                      buildSchedule: () =>
+                        buildScheduleInput({
+                          nowMs: Date.now(),
+                          runs: dayState.runs,
+                          runValues: (run) =>
+                            run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                        }),
+                      onApplySchedule: applyScheduleOrder,
+                      buildForecast: (targetDate, horizonDays) =>
+                        buildForecastInput({
+                          targetDate: targetDate || tomorrowStr(),
+                          horizonDays,
+                          nowMs: Date.now(),
+                          history,
+                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                          scheduledDays: scheduledDays.map((d) => ({
+                            date: d.date,
+                            runs: (d.runs ?? []).map((r) => ({
+                              brand: r.brand,
+                              flavor: r.flavor,
+                              casesNeeded: r.casesNeeded,
+                              dieType: r.dieType,
+                            })),
+                          })),
+                        }),
+                      onApplyForecast: applyForecast,
+                      buildAccuracy: () =>
+                        buildForecastAccuracyInput({
+                          nowMs: Date.now(),
+                          history,
+                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                        }),
+                    }}
+                    specReconcile={{
+                      autoCheckSignal: specReconcileSignal,
+                      canManageProfiles: hasCapability("manage-profiles"),
+                      reopenRequest: importReopenRequest,
+                    }}
+                    importHistory={hasCapability("manage-profiles") ? {
+                      refreshSignal: sheetListSignal,
+                      onReopen: (request) => {
                         setImportReopenRequest((previous) => ({
                           ...request,
                           requestId: (previous?.requestId ?? 0) + 1,
                         }));
                         setActiveTab(request.importType === "premix" ? "mixes" : "summary");
-                      }}
-                    />
-                  </div>
-                )}
-                </>} />
+                      },
+                    } : undefined}
+                  />
+              } />
 
               <TabsContent value="incidents">
                 <QcIncidentsSurface />

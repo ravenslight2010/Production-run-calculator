@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 import { DepartmentBoundary } from "./DepartmentBoundary";
+import { useDepartmentContext } from "./DepartmentContracts";
 import { TabsContent } from "@/components/ui/tabs";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { recordPerformance } from "../performanceDiagnostics";
@@ -51,12 +52,19 @@ export function ManagementDepartment({
   staff,
   children,
 }: ManagementDepartmentProps) {
+  const { activeTab } = useDepartmentContext();
   return (
     <DepartmentBoundary name="management">
       {children}
-      {setup && <TabsContent value="setup">{setup}</TabsContent>}
-      {ai && <TabsContent value="ai">{ai}</TabsContent>}
-      {staff && <TabsContent value="staff"><DeferredStaffManagementSurface /></TabsContent>}
+      {setup && activeTab === "setup" && <TabsContent value="setup">{setup}</TabsContent>}
+      {ai && activeTab === "ai" && (
+        <TabsContent value="ai">
+          <ErrorBoundary>
+            <Suspense fallback={<ManagementTabFallback />}>{ai}</Suspense>
+          </ErrorBoundary>
+        </TabsContent>
+      )}
+      {staff && activeTab === "staff" && <TabsContent value="staff"><DeferredStaffManagementSurface /></TabsContent>}
     </DepartmentBoundary>
   );
 }
