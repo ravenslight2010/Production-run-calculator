@@ -281,7 +281,6 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import { groupWarehouseNeedRows, type WarehouseArea } from "../warehouseGrouping";
-import RolesManager from "../components/RolesManager";
 import FactoryResetCard from "../components/FactoryResetCard";
 import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
@@ -345,7 +344,6 @@ import {
 import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "../cycleCount";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import StaffRolesCard from "../components/StaffRolesCard";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
@@ -461,6 +459,7 @@ import { calcRef } from "../liveRunCalc";
 import { HomeStationTabs } from "../components/HomeStationTabs";
 import {
   DepartmentProvider,
+  DeferredStaffManagementSurface,
   ManagementDepartment,
   ProductionLineDepartment,
   QcDowntimeSurface,
@@ -15126,8 +15125,7 @@ export default function Home() {
                 {/* Staff (roster + roles) */}
                 {manageCategory === "staff" && (canManageStaff || canApproveResets) && (
                   <div className="space-y-4">
-                    <StaffRolesCard />
-                    <RolesManager />
+                    <DeferredStaffManagementSurface />
                     {canManageStaff && <FactoryResetCard />}
                   </div>
                 )}
@@ -16498,16 +16496,7 @@ export default function Home() {
                 <QcQualitySurface />
               </TabsContent>
 
-              <ManagementDepartment staff={<>
-                <div className="space-y-4 pb-24">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Users className="w-5 h-5 text-primary" />
-                    <h2 className="text-lg font-bold">Staff Roster</h2>
-                  </div>
-                  <StaffRolesCard />
-                  <RolesManager />
-                </div>
-                </>} />
+              <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">

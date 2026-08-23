@@ -15,4 +15,4 @@ export { DepartmentBoundary, DepartmentNavLink, DEPARTMENT_TABS } from "./Depart
 export { ProductionLineDepartment } from "./ProductionLineDepartment";
 export { WarehouseInventoryDepartment } from "./WarehouseInventoryDepartment";
 export { QcDepartment, QcDowntimeSurface, QcIncidentsSurface, QcQualitySurface } from "./QcDepartment";
-export { ManagementDepartment } from "./ManagementDepartment";
+export { DeferredStaffManagementSurface, ManagementDepartment } from "./ManagementDepartment";
