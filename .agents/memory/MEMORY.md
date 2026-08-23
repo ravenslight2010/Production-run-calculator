@@ -95,6 +95,7 @@
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time profile reconciliation in @workspace/profile-cleanup; "has real data" gates must exclude dough or dough-only profiles ghost.
 - [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
+- [Calculator module boundaries](home-splitting-boundaries.md) — eventual home.tsx split follows production line, warehouse/inventory, QC, and management tools.
 - [Import gen guards](import-gen-guard.md) — slow import prepares need per-kind generation refs (stale parse clobbers next import); post-import merge scan is background + toast, never force-navigates.
 - [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — every sync write sends epoch= and parses {stale:true} (200 ≠ persisted); guard fails closed once a scope was reset; clamp needs small future-skew allowance.
 - [Sync integration reset isolation](sync-integration-reset-isolation.md) — whole-scope reset endpoints must stay out of shared multi-device fixtures; use the dedicated reset suite to avoid cross-test row deletion.
