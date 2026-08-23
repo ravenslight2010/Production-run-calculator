@@ -1,4 +1,4 @@
-import { createContext, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
@@ -374,9 +374,6 @@ import {
   type BatchWeightPropagationProfile,
 } from "../ingredientBatchWeights";
 import FillMissingPanel from "../components/FillMissingPanel";
-import IncidentsTab from "../components/IncidentsTab";
-import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
-import QualityHistoryTab from "../components/QualityHistoryTab";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "../components/OperationalReportPanel";
 import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
@@ -462,6 +459,7 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { HomeStationTabs } from "../components/HomeStationTabs";
+import ErrorBoundary from "../components/ErrorBoundary";
 import {
   DepartmentProvider,
   ManagementDepartment,
@@ -470,6 +468,18 @@ import {
   WarehouseInventoryDepartment,
   type DepartmentAppContext,
 } from "../departments";
+
+const LazyIncidentsTab = lazy(() => import("../components/IncidentsTab"));
+const LazyDowntimeTrendsTab = lazy(() => import("../components/DowntimeTrendsTab"));
+const LazyQualityHistoryTab = lazy(() => import("../components/QualityHistoryTab"));
+
+function QcTabFallback() {
+  return (
+    <div className="flex items-center justify-center py-10 text-muted-foreground" role="status">
+      Loading quality tools…
+    </div>
+  );
+}
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
 import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
@@ -16480,15 +16490,35 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="incidents">
-                <QcDepartment><IncidentsTab /></QcDepartment>
+                <QcDepartment>
+                  <ErrorBoundary>
+                    <Suspense fallback={<QcTabFallback />}>
+                      <LazyIncidentsTab />
+                    </Suspense>
+                  </ErrorBoundary>
+                </QcDepartment>
               </TabsContent>
 
               <TabsContent value="downtime">
-                <QcDepartment>{isManager && <DowntimeTrendsTab days={downtimeDays} />}</QcDepartment>
+                <QcDepartment>
+                  {isManager && (
+                    <ErrorBoundary>
+                      <Suspense fallback={<QcTabFallback />}>
+                        <LazyDowntimeTrendsTab days={downtimeDays} />
+                      </Suspense>
+                    </ErrorBoundary>
+                  )}
+                </QcDepartment>
               </TabsContent>
 
               <TabsContent value="quality">
-                <QcDepartment><QualityHistoryTab /></QcDepartment>
+                <QcDepartment>
+                  <ErrorBoundary>
+                    <Suspense fallback={<QcTabFallback />}>
+                      <LazyQualityHistoryTab />
+                    </Suspense>
+                  </ErrorBoundary>
+                </QcDepartment>
               </TabsContent>
 
               <TabsContent value="staff">
