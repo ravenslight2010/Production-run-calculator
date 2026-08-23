@@ -1,4 +1,5 @@
 - [Auto-track stale-delta catch-up](autotrack-stale-delta.md) — long pause or SSE form-reset leaves lastExpectedCasesRef ahead; first tick applies full catch-up on top of 0 (e.g. 524→54); fix: formResetSkippedRef one-skip guard + schedulePush 2000ms→600ms.
+- [Department browser evidence](department-browser-evidence.md) — responsive operational journeys should assert stable semantic state rather than layout-specific text nodes.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Cross-run autosave contamination](cross-run-autosave-contamination.md) — autosave useEffect([v]) reads run ID from dayStateRef (latest ref) but v can lag; lastFormRunIdRef guards prevent wrong product's data landing in another run's slot/profile.
 - [Doughball variant customers matching](doughball-variant-customers-matching.md) — customers arrays on CRB Dough variants were empty; pKey root weight overrode variant match; specific-flavor must beat catch-all; customers-match may override wrong stored weight.

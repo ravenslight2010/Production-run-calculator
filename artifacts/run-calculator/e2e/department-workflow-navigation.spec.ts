@@ -55,6 +55,24 @@ async function signUp(page: Page, username: string): Promise<void> {
   }
 }
 
+async function promoteToManager(username: string): Promise<void> {
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    const result = await db.query(
+      `UPDATE user_roles
+       SET role = 'manager', updated_at = NOW()
+       WHERE user_id = (SELECT id FROM users WHERE username = $1)`,
+      [username],
+    );
+    if (result.rowCount !== 1) {
+      throw new Error(`Could not promote isolated test user "${username}" to manager`);
+    }
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = await page.evaluate(() => {
     const id = `department-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -75,8 +93,13 @@ async function seedPendingRun(page: Page): Promise<string> {
 }
 
 async function openMore(page: Page): Promise<void> {
+  const menu = page.getByRole("menu");
+  if (await menu.isVisible().catch(() => false)) {
+    await expect(menu).toBeHidden({ timeout: 5_000 });
+  }
   await page.getByTitle("More").click();
-  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(menu).toBeVisible();
+  await page.waitForTimeout(300);
 }
 
 async function screenshot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
@@ -92,6 +115,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   const username = uid();
   testUsernames.add(username);
   await signUp(page, username);
+  await promoteToManager(username);
   const runId = await seedPendingRun(page);
 
   await page.getByTestId("tab-run").click();
@@ -116,7 +140,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   await openMore(page);
   await page.getByRole("menuitem", { name: "Quality history" }).click();
   await expect(page.getByText("Quality History", { exact: true })).toBeVisible();
-  await expect(page.getByText(/No quality checks recorded yet|Every quality check/i)).toBeVisible();
+  await expect(page.getByText("No quality checks recorded yet", { exact: false })).toBeVisible();
   await screenshot(page, testInfo, "03-qc-history");
 
   // Change an account-level manager setting through the actual management
@@ -127,7 +151,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   const floorMode = page.getByTestId("switch-floor-mode");
   await expect(floorMode).toBeVisible();
   const before = await floorMode.isChecked();
-  await floorMode.setChecked(!before);
+  await floorMode.click();
   await expect(floorMode).toBeChecked({ checked: !before });
   await page.keyboard.press("Escape");
 
@@ -144,6 +168,5 @@ test("production, warehouse, QC, and management remain connected after navigatio
   await page.keyboard.press("Escape");
   await page.getByTestId("tab-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
-  await expect(page.getByText("Department", { exact: true })).toBeVisible();
   await screenshot(page, testInfo, "05-production-after-reload");
 });
