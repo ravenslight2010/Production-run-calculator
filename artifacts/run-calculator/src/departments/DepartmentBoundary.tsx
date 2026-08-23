@@ -5,10 +5,10 @@ import { useDepartmentContext } from "./DepartmentContracts";
 export type DepartmentName = "production-line" | "warehouse-inventory" | "qc" | "management";
 
 export const DEPARTMENT_TABS: Record<DepartmentName, readonly HomeTab[]> = {
-  "production-line": ["run", "dough", "sauce", "frontline", "packaging", "stoppages"],
+  "production-line": ["run", "dough", "sauce", "frontline", "packaging", "stoppages", "summary"],
   "warehouse-inventory": ["warehouse", "inventory", "mixes"],
   qc: ["incidents", "downtime", "quality"],
-  management: ["ai", "setup", "staff", "summary"],
+  management: ["ai", "setup", "staff"],
 };
 
 /**

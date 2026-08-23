@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { Tabs } from "@/components/ui/tabs";
 import {
   DepartmentProvider,
   ManagementDepartment,
@@ -51,5 +52,25 @@ describe("department composition boundaries", () => {
 
     expect(screen.getByText("line").closest("[data-department]")?.getAttribute("data-department-active")).toBe("false");
     expect(screen.getByText("qc").closest("[data-department]")?.getAttribute("data-department-active")).toBe("true");
+  });
+  it("composes named department slots inside the shared provider", () => {
+    document.body.innerHTML = "";
+    render(
+      <DepartmentProvider value={{ ...context, activeTab: "summary" }}>
+        <Tabs defaultValue="summary">
+          <ProductionLineDepartment
+            run={<span>run surface</span>}
+            summary={<span>summary surface</span>}
+          />
+          <WarehouseInventoryDepartment inventory={<span>inventory surface</span>} />
+          <ManagementDepartment ai={<span>ai surface</span>} />
+        </Tabs>
+      </DepartmentProvider>,
+    );
+
+    expect(screen.getByText("summary surface").closest("[data-department]")?.getAttribute("data-department")).toBe("production-line");
+    expect(screen.getByText("summary surface").closest("[data-department]")?.getAttribute("data-department-active")).toBe("true");
+    expect(screen.getByLabelText("warehouse-inventory department")).not.toBeNull();
+    expect(screen.getByLabelText("management department")).not.toBeNull();
   });
 });
