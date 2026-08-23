@@ -17,7 +17,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { CheesePickCard } from "./pages/home";
+import { CheesePickCard, ReadOnlyRecipeCard } from "./pages/home";
 
 afterEach(cleanup);
 
@@ -97,6 +97,32 @@ describe("CheesePickCard — missing-cheese warning render", () => {
     expect(screen.getByText("Skim Mozzarella")).toBeTruthy();
     expect(screen.getAllByText("20.0")).toHaveLength(2);
     expect(screen.getAllByText("20.3 lbs")).toHaveLength(2);
+  });
+
+  it("shows an added temporary ingredient in the live read-only cheese recipe card", () => {
+    render(
+      <ReadOnlyRecipeCard
+        title="Cheese Recipe"
+        subtitle="Corner Booth Pepperoni Cheese Blend"
+        recipe={[
+          { ingredient: "Whole Mozzarella", lbs: 0.2 },
+          { ingredient: "Provolone", lbs: 0.1 },
+          { ingredient: "Cow's Romano", lbs: 0 },
+        ]}
+        substitutions={[{
+          id: "skim-mozz-live-card",
+          action: "add",
+          ingredient: "Whole Mozzarella",
+          substitute: "Skim Mozzarella",
+          amount: 20,
+        }]}
+        accent="bg-amber-500/70"
+      />,
+    );
+
+    expect(screen.getByTestId("temporary-read-only-recipe-overlay")).toBeTruthy();
+    expect(screen.getByText("Skim Mozzarella")).toBeTruthy();
+    expect(screen.getByText("20.3 lbs")).toBeTruthy();
   });
 
   it("shows the original 'no ingredients yet' hint (and NO warning) for a real recipe with zero rows", () => {

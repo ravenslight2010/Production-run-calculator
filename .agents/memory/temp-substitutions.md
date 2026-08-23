@@ -38,6 +38,17 @@ and accepted wholesale from a remote day (authoritative whole-day overlay).
 "Substitute" prefill shortcut. One active substitution per affected ingredient
 (case-insensitive replace on add).
 
+Read-only recipe cards must render an **effective display copy** with the day's
+overlay applied, not merely show the substitution badge. The saved recipe remains
+the original.
+
+**Why:** a badge plus unchanged rows makes staff believe an added/swap ingredient
+was ignored even when planning and inventory consumption already use it.
+
+**How to apply:** every recipe-display surface must derive displayed rows, totals,
+pulls, and print/share output from the same overlay used by material math; never
+write that display copy back to the form or master recipe.
+
 ## Activity log
 A read-only timestamped trail of substitution adds/clears (`SubstitutionLogEntry`)
 lives in the SAME synced day-state as the active overlay and MUST clear at every

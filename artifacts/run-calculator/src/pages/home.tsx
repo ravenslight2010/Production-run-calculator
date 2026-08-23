@@ -1905,20 +1905,24 @@ export function FrontlineRecipeCard({
   );
 }
 
-function ReadOnlyRecipeCard({
+export function ReadOnlyRecipeCard({
   title,
   subtitle,
   recipe,
+  substitutions,
   accent,
   scalable = false,
 }: {
   title: string;
   subtitle?: string;
   recipe: RecipeRow[];
+  /** Today's temporary overlay; applied only to the display copy. */
+  substitutions?: IngredientSubstitution[];
   accent: string;
   scalable?: boolean;
 }) {
-  const rows = (recipe ?? []).filter(
+  const effectiveRecipe = applyRecipeSubstitutions(recipe, substitutions);
+  const rows = effectiveRecipe.rows.filter(
     r => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
   );
   const total = rows.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
@@ -1945,6 +1949,14 @@ function ReadOnlyRecipeCard({
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
+        {effectiveRecipe.changed && (
+          <div
+            className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid="temporary-read-only-recipe-overlay"
+          >
+            Today&apos;s temporary substitution is reflected below. The saved recipe is unchanged.
+          </div>
+        )}
         {rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">No recipe configured. Add ingredients in Setup.</p>
         ) : (
@@ -21861,6 +21873,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         title="Sauce Recipe"
         subtitle={v.frontlineRecipeName?.trim() || undefined}
         recipe={v.frontlineRecipe ?? []}
+        substitutions={dayState.substitutions ?? []}
         accent="bg-red-500/70"
       />
     </>
@@ -21869,7 +21882,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
 
 const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId } = hx;
+  const { v, runStatus, currentRunId, dayState } = hx;
   const { calc } = useLiveRun();
 
   const [app1Made, setApp1Made] = useState(0);
@@ -22069,7 +22082,10 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                   const lower = t.toLowerCase();
                   const isMix = lower.includes("mix");
                   if (lower !== "cheese" && !isMix) return null;
-                  const rows = (app.recipe ?? []).filter(
+                  const rows = applyRecipeSubstitutions(
+                    app.recipe ?? [],
+                    dayState.substitutions ?? [],
+                  ).rows.filter(
                     (r: any) => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
                   );
                   if (rows.length === 0) return null;
@@ -22079,6 +22095,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                       title={`${t} Recipe`}
                       subtitle={app.name?.trim() || undefined}
                       recipe={app.recipe ?? []}
+                      substitutions={dayState.substitutions ?? []}
                       accent={isMix ? "bg-emerald-500/70" : "bg-amber-500/70"}
                     />
                   );
@@ -22996,6 +23013,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   title="Dough Recipe"
                   subtitle={v.doughRecipeName?.trim() || undefined}
                   recipe={v.doughRecipe ?? []}
+                  substitutions={dayState.substitutions ?? []}
                   accent="bg-orange-500/70"
                   scalable
                 />
