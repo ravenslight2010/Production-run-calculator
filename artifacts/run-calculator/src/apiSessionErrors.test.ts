@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./performanceDiagnostics", () => ({
   fetchWithDiagnostics: mocks.fetchWithDiagnostics,
+  recordBrowserLoadTimings: vi.fn(),
 }));
 
 import {

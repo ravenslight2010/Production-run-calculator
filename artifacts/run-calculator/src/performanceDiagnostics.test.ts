@@ -5,6 +5,7 @@ import {
   getMemoryDiagnostics,
   getPerformanceDiagnostics,
   PERFORMANCE_BUDGETS,
+  recordBrowserLoadTimings,
   recordMemorySample,
   recordPerformance,
 } from "./performanceDiagnostics";
@@ -33,6 +34,31 @@ describe("calculator performance diagnostics", () => {
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls[0]?.[1]).toMatchObject({ name: "initial-load", budgetMs: 1500 });
     expect(warn.mock.calls[1]?.[1]).toMatchObject({ name: "tab:warehouse", budgetMs: 250 });
+  });
+
+  it("records browser navigation milestones without retaining page data", () => {
+    vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+      {
+        startTime: 0,
+        domContentLoadedEventEnd: 125,
+        loadEventEnd: 240,
+      } as PerformanceNavigationTiming,
+    ]);
+
+    recordBrowserLoadTimings();
+
+    expect(getPerformanceDiagnostics()).toEqual([
+      {
+        name: "browser:navigation-to-dom-content-loaded",
+        durationMs: 125,
+        kind: "load",
+      },
+      {
+        name: "browser:navigation-to-load",
+        durationMs: 240,
+        kind: "load",
+      },
+    ]);
   });
 
   it("applies calculation and storage budgets", () => {

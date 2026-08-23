@@ -55,7 +55,9 @@ export function useHomeNavigation() {
     if (typeof performance === "undefined") return;
     const startedAt = navigationStartedAtRef.current;
     if (startedAt !== null) {
-      recordPerformance(`tab:${activeTab}`, performance.now() - startedAt, "navigation");
+      const durationMs = performance.now() - startedAt;
+      recordPerformance(`tab:${activeTab}`, durationMs, "navigation");
+      recordPerformance(`tab-render:${activeTab}`, durationMs, "render");
       navigationStartedAtRef.current = null;
     }
   }, [activeTab]);

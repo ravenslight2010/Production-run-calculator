@@ -12,7 +12,7 @@ export const IMPORT_PERFORMANCE_BUDGETS = {
 export type PerformanceDiagnostic = {
   name: string;
   durationMs: number;
-  kind: "load" | "navigation" | "render" | "calculation" | "storage" | "api";
+  kind: "load" | "navigation" | "render" | "calculation" | "storage" | "api" | "hmr";
 };
 
 const entries: PerformanceDiagnostic[] = [];
@@ -49,6 +49,8 @@ function remember(entry: PerformanceDiagnostic): void {
     ? SLOW_LOAD_MS
     : entry.kind === "api"
       ? 1000
+      : entry.kind === "hmr"
+        ? SLOW_LOAD_MS
       : entry.kind === "calculation"
         ? SLOW_CALCULATION_MS
         : entry.kind === "render"
@@ -94,6 +96,65 @@ export function getPerformanceDiagnostics(): readonly PerformanceDiagnostic[] {
 export function clearPerformanceDiagnostics(): void {
   entries.length = 0;
   memoryEntries.length = 0;
+}
+
+/**
+ * Records browser-level navigation milestones once the document has finished
+ * loading. React commit timings are useful for the calculator itself, but
+ * these milestones capture the full page cost (HTML, scripts, styles, and
+ * application boot) without retaining URLs or resource details.
+ */
+export function recordBrowserLoadTimings(): void {
+  if (typeof performance === "undefined") return;
+  const navigation = performance
+    .getEntriesByType("navigation")
+    .at(-1) as PerformanceNavigationTiming | undefined;
+  if (!navigation) return;
+
+  if (Number.isFinite(navigation.domContentLoadedEventEnd) && navigation.domContentLoadedEventEnd > 0) {
+    recordPerformance(
+      "browser:navigation-to-dom-content-loaded",
+      navigation.domContentLoadedEventEnd - navigation.startTime,
+      "load",
+    );
+  }
+  if (Number.isFinite(navigation.loadEventEnd) && navigation.loadEventEnd > 0) {
+    recordPerformance(
+      "browser:navigation-to-load",
+      navigation.loadEventEnd - navigation.startTime,
+      "load",
+    );
+  }
+}
+
+/**
+ * Installs dev-only Vite HMR timing diagnostics. HMR events are intentionally
+ * summarized to one duration; module names and update payloads are not
+ * retained, since they can contain customer-specific source paths.
+ */
+export function installBrowserPerformanceDiagnostics(): void {
+  if (typeof window === "undefined") return;
+
+  const recordWhenLoaded = () => recordBrowserLoadTimings();
+  if (document.readyState === "complete") {
+    queueMicrotask(recordWhenLoaded);
+  } else {
+    // `loadEventEnd` is finalized only after all load listeners have run.
+    // Defer one task so the navigation entry includes both requested load
+    // milestones rather than recording a zero/incomplete load-event value.
+    window.addEventListener("load", () => window.setTimeout(recordWhenLoaded, 0), { once: true });
+  }
+
+  if (!import.meta.hot) return;
+  let updateStartedAt: number | null = null;
+  import.meta.hot.on("vite:beforeUpdate", () => {
+    updateStartedAt = typeof performance === "undefined" ? null : performance.now();
+  });
+  import.meta.hot.on("vite:afterUpdate", () => {
+    if (updateStartedAt === null || typeof performance === "undefined") return;
+    recordPerformance("hmr:update", performance.now() - updateStartedAt, "hmr");
+    updateStartedAt = null;
+  });
 }
 
 /**
