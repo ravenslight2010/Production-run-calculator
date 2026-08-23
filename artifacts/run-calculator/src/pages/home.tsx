@@ -462,6 +462,14 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { HomeStationTabs } from "../components/HomeStationTabs";
+import {
+  DepartmentProvider,
+  ManagementDepartment,
+  ProductionLineDepartment,
+  QcDepartment,
+  WarehouseInventoryDepartment,
+  type DepartmentAppContext,
+} from "../departments";
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
 import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
@@ -13790,6 +13798,28 @@ export default function Home() {
     ]
   );
 
+  // Department modules consume this stable, deliberately small contract.
+  // Home still owns all state, persistence, sync, and live-run coordination.
+  const departmentContext = useMemo<DepartmentAppContext>(() => ({
+    activeTab,
+    navigate: setActiveTab,
+    currentRunId,
+    currentRun,
+    dayState,
+    formValues: v,
+    requestRefresh: (scope) => {
+      if (scope === "inventory") {
+        void cycleCountQc.invalidateQueries({ queryKey: ["inventory"] });
+      } else if (scope === "master-data") {
+        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+        void cycleCountQc.invalidateQueries({ queryKey: ["brand-profiles"] });
+      } else {
+        void cycleCountQc.invalidateQueries({ queryKey: ["scheduled"] });
+      }
+    },
+  }), [activeTab, currentRunId, currentRun, dayState, v, setActiveTab, cycleCountQc]);
+
   const mainContent = (
     <div
       className="min-h-screen bg-background text-foreground p-4 md:p-6 pb-20 font-sans"
@@ -15488,11 +15518,12 @@ export default function Home() {
             <HomeStationTabs activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as HomeTab)}>
               {/* ─── RUN ─── */}
               <TabsContent value="run" className="max-w-[620px] mx-auto">
-                <LiveRunTabContent />
+                <ProductionLineDepartment><LiveRunTabContent /></ProductionLineDepartment>
               </TabsContent>
 
               {/* ─── SETUP ─── */}
               <TabsContent value="setup">
+                <ManagementDepartment>
                 <div className="mb-4 flex items-center gap-2" data-testid="setup-header">
                   <Settings className="w-5 h-5 text-primary" />
                   <h2 className="text-lg font-bold">Setup</h2>
@@ -15672,25 +15703,27 @@ export default function Home() {
                     })}
                   </div>
                 </details>
+                </ManagementDepartment>
               </TabsContent>
 
               {/* ─── PACKAGING ─── */}
               <TabsContent value="packaging">
-                <LivePackagingTabContent />
+                <ProductionLineDepartment><LivePackagingTabContent /></ProductionLineDepartment>
               </TabsContent>
 
               {/* ─── SAUCE ─── */}
               <TabsContent value="sauce">
-                <LiveSauceTabContent />
+                <ProductionLineDepartment><LiveSauceTabContent /></ProductionLineDepartment>
               </TabsContent>
 
               {/* ─── FRONTLINE ─── */}
               <TabsContent value="frontline">
-                <LiveFrontlineTabContent />
+                <ProductionLineDepartment><LiveFrontlineTabContent /></ProductionLineDepartment>
               </TabsContent>
 
               {/* ─── WAREHOUSE ─── */}
               <TabsContent value="warehouse">
+                <WarehouseInventoryDepartment>
                 <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="warehouse-attention-header">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
@@ -15961,10 +15994,12 @@ export default function Home() {
                     )}
                   </CardContent>
                 </Card>
+                </WarehouseInventoryDepartment>
               </TabsContent>
 
               <TabsContent value="inventory">
-                <InventoryTab
+                <WarehouseInventoryDepartment>
+                  <InventoryTab
                   candidates={inventoryCandidates}
                   runValsList={inventoryRunValues}
                   substitutions={dayState.substitutions ?? []}
@@ -15973,11 +16008,13 @@ export default function Home() {
                   onAddSubstitution={addSubstitution}
                   onRemoveSubstitution={removeSubstitution}
                   onClearSubstitutions={clearSubstitutions}
-                />
+                  />
+                </WarehouseInventoryDepartment>
               </TabsContent>
 
               {/* ─── MIX PLAN ─── */}
               <TabsContent value="mixes">
+                <WarehouseInventoryDepartment>
                 {/* Pre-blended mixes made ahead for a product. Pick a make-day;
                     for every scheduled run within a matching mix's days-early
                     window, show per-product cards with cases/pizzas, batches to
@@ -16309,9 +16346,11 @@ export default function Home() {
                     );
                   })()}
                 </div>
+                </WarehouseInventoryDepartment>
               </TabsContent>
 
               <TabsContent value="ai">
+                <ManagementDepartment>
                 <AssistantTab
                   buildInput={() =>
                     buildOptimizeInput({
@@ -16437,21 +16476,23 @@ export default function Home() {
                     />
                   </div>
                 )}
+                </ManagementDepartment>
               </TabsContent>
 
               <TabsContent value="incidents">
-                <IncidentsTab />
+                <QcDepartment><IncidentsTab /></QcDepartment>
               </TabsContent>
 
               <TabsContent value="downtime">
-                {isManager && <DowntimeTrendsTab days={downtimeDays} />}
+                <QcDepartment>{isManager && <DowntimeTrendsTab days={downtimeDays} />}</QcDepartment>
               </TabsContent>
 
               <TabsContent value="quality">
-                <QualityHistoryTab />
+                <QcDepartment><QualityHistoryTab /></QcDepartment>
               </TabsContent>
 
               <TabsContent value="staff">
+                <ManagementDepartment>
                 <div className="space-y-4 pb-24">
                   <div className="flex items-center gap-2 mb-2">
                     <Users className="w-5 h-5 text-primary" />
@@ -16460,6 +16501,7 @@ export default function Home() {
                   <StaffRolesCard />
                   <RolesManager />
                 </div>
+                </ManagementDepartment>
               </TabsContent>
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
@@ -16491,21 +16533,22 @@ export default function Home() {
 
               {/* ─── DOUGH ─── */}
               <TabsContent value="dough">
-                <LiveDoughTabContent />
+                <ProductionLineDepartment><LiveDoughTabContent /></ProductionLineDepartment>
               </TabsContent>
 
               {/* ─── SETUP (recipe editors) ─── */}
               <TabsContent value="setup">
-                <LiveSetupRecipesTabContent />
+                <ManagementDepartment><LiveSetupRecipesTabContent /></ManagementDepartment>
               </TabsContent>
 
               {/* ─── STOPPAGES ─── */}
               <TabsContent value="stoppages">
-                <LiveStoppagesTabContent />
+                <ProductionLineDepartment><LiveStoppagesTabContent /></ProductionLineDepartment>
               </TabsContent>
 
               {/* ─── SUMMARY ─── */}
               <TabsContent value="summary">
+                <ManagementDepartment>
                 {isManager && (
                   <div className="max-w-3xl mx-auto mb-4">
                     <div className="mb-3 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2" data-testid="summary-tools-header">
@@ -16579,6 +16622,7 @@ export default function Home() {
                   </div>
                 )}
                 <LiveSummaryTabContent />
+                </ManagementDepartment>
               </TabsContent>
 
             </HomeStationTabs>
@@ -17960,6 +18004,7 @@ export default function Home() {
     <Profiler id="home" onRender={recordHomeCommit}>
       <HomeCtx.Provider value={homeCtxValue}>
         <HomeTabCtx.Provider value={homeTabCtxValue}>
+        <DepartmentProvider value={departmentContext}>
         <LiveRunProvider
         v={v}
         ve={ve}
@@ -17986,6 +18031,7 @@ export default function Home() {
         <LiveRunHandoffGuard />
         {screenMode ? <ScreenModeView /> : mainContent}
         </LiveRunProvider>
+        </DepartmentProvider>
         </HomeTabCtx.Provider>
       </HomeCtx.Provider>
     </Profiler>
