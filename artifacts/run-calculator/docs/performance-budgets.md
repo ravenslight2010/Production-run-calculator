@@ -41,6 +41,21 @@ export timings use `import-*` names. Heap samples use `calculator-memory`.
 
 ## Startup deferral measurement
 
+## Workbook startup split evidence
+
+The full workbook workflow is loaded through `loadWorkbookWorkflow` only when
+an operator opens or exports a workbook. The production build measured before
+the split at 2,446.33 kB minified / 681.57 kB gzip for the main JavaScript
+chunk; after the split it measured 2,442.21 kB / 679.40 kB gzip, with an
+additional 8.78 kB run-workbook chunk (3.59 kB gzip). The build completed in
+9.57 s after the change (7.55 s in the recorded baseline; build time is not a
+startup budget).
+
+Import regression coverage remains in `runExcel.test.ts`, the spec-import
+tests, and cancellation coverage. Browser verification must confirm the
+unauthenticated shell starts without loading the workbook chunk and that the
+existing import review flow still opens after the chunk is requested.
+
 The calculator records these additional browser-level signals:
 
 - `browser:navigation-to-dom-content-loaded` and

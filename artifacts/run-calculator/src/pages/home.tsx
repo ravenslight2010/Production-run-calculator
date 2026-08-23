@@ -561,22 +561,14 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
-import * as XLSX from "xlsx";
-import {
-  buildRunExportRow,
-  buildRunWorkbook,
-  buildQuickBooksCsv,
-  parseRunWorkbook,
-  filterImportFromDate,
-  skipAlreadyRanRuns,
-  type ImportParseResult,
-} from "@/utils/runExcel";
+import type { ImportParseResult } from "@/utils/runExcel";
+import { loadWorkbookWorkflow } from "@/workbookWorkflow";
 import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
-import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, ImportReviewReconfirmationError, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
-import { exportSpecRecipes, type ExportSelection } from "@/specExport";
+import type { SpecImportPrepared } from "@/specImport";
+import type { ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import ShippingImportDialog from "@/components/ShippingImportDialog";
@@ -11479,21 +11471,23 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const { XLSX, runExcel } = await loadWorkbookWorkflow();
     const rows = dayState.runs.map((run) => {
       const vals = run.id === currentRunId ? v : loadRunValues(run.id);
-      return buildRunExportRow(todayStr(), runLabel(run), run, vals);
+      return runExcel.buildRunExportRow(todayStr(), runLabel(run), run, vals);
     });
-    const wb = buildRunWorkbook(rows);
+    const wb = runExcel.buildRunWorkbook(rows);
     XLSX.writeFile(wb, `production-run-${todayStr()}.xlsx`);
   }
 
-  function exportQuickBooks() {
+  async function exportQuickBooks() {
     const runs = dayState.runs.map((run) => {
       const vals = run.id === currentRunId ? v : loadRunValues(run.id);
       return { label: runLabel(run), brand: run.brand, flavor: run.flavor, vals, actualCases: run.actualCases };
     });
-    const csv = buildQuickBooksCsv(todayStr(), runs);
+    const { runExcel } = await loadWorkbookWorkflow();
+    const csv = runExcel.buildQuickBooksCsv(todayStr(), runs);
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -11507,10 +11501,11 @@ export default function Home() {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
-      const parsed = parseRunWorkbook(buf);
+      const { runExcel } = await loadWorkbookWorkflow();
+      const parsed = runExcel.parseRunWorkbook(buf);
       // Multi-sheet schedule planner: keep only runs dated today-or-later (the
       // user's chosen behavior) and route to the multi-date override commit.
-      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed;
+      const result = parsed.multiDay ? runExcel.filterImportFromDate(parsed, todayStr()) : parsed;
       setImportIntoEditor(false);
       setImportDefaultDate(todayStr());
       setImportResult(result);
@@ -11543,10 +11538,10 @@ export default function Home() {
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
   async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_SPEC_IMPORT_FILES);
+    const selectedFiles = Array.from(e.target.files ?? []);
     e.target.value = "";
-    noteBreadcrumb(files.length > 0 ? `spec import: ${files.length} file(s) selected` : "spec import: picker canceled");
-    if (files.length === 0) return;
+    noteBreadcrumb(selectedFiles.length > 0 ? `spec import: ${selectedFiles.length} file(s) selected` : "spec import: picker canceled");
+    if (selectedFiles.length === 0) return;
     const parseStartedAt = typeof performance === "undefined" ? null : performance.now();
     if (!canImportSpec) {
       toast({
@@ -11556,6 +11551,7 @@ export default function Home() {
       });
       return;
     }
+    const files = selectedFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
     // Generation guard: parsing is slow (AI call), and a user importing files
     // back-to-back can close the dialog and pick the next file while the old
     // parse is still in flight. Without this guard the OLD promise resolves
@@ -11583,8 +11579,8 @@ export default function Home() {
       }
       const prepared =
         buffers.length === 1
-          ? await prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
-          : await prepareSpecImportMulti(
+          ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
+          : await (await loadWorkbookWorkflow()).specImport.prepareSpecImportMulti(
               buffers,
               (done, total) => {
                 if (gen === specImportGenRef.current) setSpecImportProgress({ done, total });
@@ -11660,7 +11656,7 @@ export default function Home() {
     const importRollbackBefore = captureMasterDataSnapshot();
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed } =
-        await commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -12047,14 +12043,17 @@ export default function Home() {
           autoLinkedNote,
       });
     } catch (err) {
-      if (err instanceof ImportReviewReconfirmationError) {
+      if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
+        const reconfirmation = err as Error & {
+          importReview: NonNullable<SpecImportPrepared["importReview"]>;
+        };
         // Nothing has been written: relinking/pruning changed the authoritative
         // diff, so replace the stale dialog manifest and reset its checkbox.
         setSpecImportPrepared((current) =>
           current
             ? {
                 ...current,
-                importReview: err.importReview,
+                importReview: reconfirmation.importReview,
                 destructiveChangesAcknowledged: false,
                 destructiveReviewSignature: undefined,
               }
@@ -12676,11 +12675,12 @@ export default function Home() {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
-      const parsed = parseRunWorkbook(buf);
+      const { runExcel } = await loadWorkbookWorkflow();
+      const parsed = runExcel.parseRunWorkbook(buf);
       // A multi-sheet planner spans many days, so it can't load into the single
       // open editor day — route it to the multi-date override commit instead
       // (today-or-later only), exactly like the toolbar import.
-      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed;
+      const result = parsed.multiDay ? runExcel.filterImportFromDate(parsed, todayStr()) : parsed;
       setImportIntoEditor(!parsed.multiDay);
       setImportDefaultDate(scheduleEditorDate || todayStr());
       setImportResult(result);
@@ -12818,6 +12818,7 @@ export default function Home() {
   // runs and any imported run already started/ended are preserved (so an
   // in-progress day isn't wiped). Only dates present in the file are touched.
   async function commitMultiDayImport(payload: ImportCommit) {
+    const { runExcel } = await loadWorkbookWorkflow();
     for (const b of payload.createBrands) addBrand(b);
     for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
     const byDate = payload.byDate ?? [];
@@ -12863,7 +12864,7 @@ export default function Home() {
         const alreadyRan = existingRuns
           .filter(r => r.startedAt || r.endedAt)
           .map(r => ({ brand: r.brand ?? "", flavor: r.flavor ?? "", id: r.id, inProgress: !!r.startedAt && !r.endedAt }));
-        const skipRes = skipAlreadyRanRuns(dayRuns, alreadyRan);
+        const skipRes = runExcel.skipAlreadyRanRuns(dayRuns, alreadyRan);
         dayRuns = skipRes.rows;
         skippedToday += skipRes.skipped;
         // A skipped row can still carry news: the re-issued schedule may list a
@@ -14998,7 +14999,7 @@ export default function Home() {
                             setExporting(true);
                             const exportStartedAt = typeof performance === "undefined" ? null : performance.now();
                             try {
-                              const res = await exportSpecRecipes(exportSelection, todayStr());
+                              const res = await (await loadWorkbookWorkflow()).specExport.exportSpecRecipes(exportSelection, todayStr());
                               if (exportStartedAt !== null && typeof performance !== "undefined")
                                 recordPerformance("import-spec-export", performance.now() - exportStartedAt, "storage");
                               if (res.specSheets === 0 && res.mixSheets === 0) {
