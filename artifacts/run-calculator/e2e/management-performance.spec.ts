@@ -9,6 +9,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
+import { PERFORMANCE_BUDGETS } from "../src/performanceDiagnostics";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -19,6 +20,21 @@ type CapturedDiagnostic = {
   durationMs: number;
   kind: string;
 };
+
+type ApiEvidence = {
+  method: string;
+  path: string;
+  status: number;
+  durationMs: number;
+};
+
+function safePath(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url.split("?")[0]?.split("#")[0] || "/unknown";
+  }
+}
 
 async function signUp(page: Page, username: string): Promise<void> {
   await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
@@ -64,7 +80,7 @@ async function signIn(page: Page, username: string): Promise<void> {
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: /sign.?in|log.?in/i }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await page.keyboard.press("Escape");
 }
@@ -114,17 +130,44 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   const username = uniqueTestId("e2e_management_performance");
   testUsernames.add(username);
   const staffChunkRequests: string[] = [];
+  const apiEvidence: ApiEvidence[] = [];
+  const apiStartedAt = new Map<string, number>();
+  const consoleOutput: Array<{ type: string; text: string }> = [];
 
   page.on("request", (request) => {
     if (request.url().includes("StaffManagementSurface")) staffChunkRequests.push(request.url().split("?")[0]);
+    if (request.url().includes("/api/")) {
+      apiStartedAt.set(`${request.method()}:${request.url()}`, performance.now());
+    }
+  });
+  page.on("response", (response) => {
+    if (!response.url().includes("/api/")) return;
+    const key = `${response.request().method()}:${response.url()}`;
+    const startedAt = apiStartedAt.get(key);
+    if (startedAt === undefined) return;
+    apiStartedAt.delete(key);
+    apiEvidence.push({
+      method: response.request().method(),
+      path: safePath(response.url()),
+      status: response.status(),
+      durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+    });
+  });
+  page.on("console", (message) => {
+    // Keep the evidence useful without retaining request payloads or URLs.
+    consoleOutput.push({
+      type: message.type(),
+      text: message.text().replace(/https?:\/\/\S+/g, "[url]").slice(0, 300),
+    });
   });
 
   await signUp(page, username);
   await promoteToManager(username);
   await signIn(page, username);
 
-  // Signing in again after granting the role ensures the browser fixture has
-  // the same authenticated capability state as a normal manager visit.
+  // A full reload after role promotion is the measured clean authenticated
+  // production visit, rather than the sign-in transition itself.
+  await page.reload({ waitUntil: "load" });
   await page.waitForLoadState("load");
   await expect.poll(() => capturedDiagnostics(page)).toEqual(
     expect.arrayContaining([
@@ -151,6 +194,14 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   ]);
 
   const diagnostics = await capturedDiagnostics(page);
+  const budgetByName: Record<string, number> = {
+    "browser:navigation-to-dom-content-loaded": PERFORMANCE_BUDGETS.initialLoadMs,
+    "browser:navigation-to-load": PERFORMANCE_BUDGETS.initialLoadMs,
+    "management:staff-chunk-load": PERFORMANCE_BUDGETS.initialLoadMs,
+    "management:staff-first-visit": PERFORMANCE_BUDGETS.tabTransitionMs,
+  };
+  const measured = diagnostics.filter((entry) => entry.name in budgetByName);
+  const overBudget = measured.filter((entry) => entry.durationMs > budgetByName[entry.name]!);
   const report = diagnostics
     .filter((entry) =>
       entry.name === "browser:navigation-to-dom-content-loaded" ||
@@ -163,9 +214,41 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
       kind,
       durationMs: Math.round(durationMs * 100) / 100,
     }));
+  const evidence = {
+    diagnostics: report,
+    budgets: budgetByName,
+    staffChunkRequests: staffChunkRequests.length,
+    apiRequests: apiEvidence,
+    console: consoleOutput,
+    environment: {
+      baseURL: new URL(testInfo.project.use.baseURL ?? "http://unknown").origin,
+      browser: testInfo.project.name,
+      setup: "isolated account and facility created; manager role authorized",
+    },
+    classification: overBudget.length === 0 ? "pass" : "application-regression",
+  };
+  await testInfo.attach("calculator-authenticated-startup.png", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
   await testInfo.attach("calculator-performance-diagnostics.json", {
-    body: JSON.stringify({ diagnostics: report, staffChunkRequests: staffChunkRequests.length }, null, 2),
+    body: JSON.stringify(evidence, null, 2),
     contentType: "application/json",
   });
-  console.log("calculator performance diagnostics", JSON.stringify(report));
+  expect(
+    overBudget,
+    `application performance regression (isolated setup completed): ${JSON.stringify(
+      overBudget.map((entry) => ({
+        name: entry.name,
+        durationMs: Math.round(entry.durationMs),
+        budgetMs: budgetByName[entry.name],
+      })),
+    )}`,
+  ).toEqual([]);
+  console.log("calculator performance diagnostics", JSON.stringify({
+    diagnostics: report,
+    budgets: budgetByName,
+    apiRequests: apiEvidence.length,
+    consoleMessages: consoleOutput.length,
+  }));
 });

@@ -8,6 +8,7 @@
 | `playwright.phone.config.ts` | isolated account, non-destructive | no global setup; each account name is unique and created accounts are removed in `afterAll` |
 | `playwright.a11y.config.ts` | isolated sandbox, non-destructive | no global setup; axe scans public and sandbox-authenticated screens without deleting live-day data |
 | `playwright.visual.config.ts` | isolated account, non-destructive | no global setup; the visual suite creates unique accounts and removes them in `afterAll` |
+| `playwright.management-performance.config.ts` | isolated account, non-destructive | authenticated startup and deferred staff-management budgets; created accounts are removed in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
 
@@ -46,6 +47,14 @@ global setup:
 pnpm --filter @workspace/run-calculator run test:pwa-handoff
 pnpm --filter @workspace/run-calculator run test:e2e:phone
 pnpm --filter @workspace/run-calculator run test:e2e:a11y
+```
+
+Run the authenticated startup budget guard separately from the destructive
+main config:
+
+```sh
+E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
+  pnpm --filter @workspace/run-calculator run test:e2e:management-performance
 ```
 
 Run the recurring cross-device smoke matrix before release checks. It is a
