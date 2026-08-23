@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchCheeseRecipes } from "../cheeseRecipes";
+import { fetchMasterDataBootstrap } from "../masterData";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { useIdle } from "./useIdle";
 
@@ -28,7 +28,7 @@ export function useCheeseRecipes(): {
 
   const { data, isLoading } = useQuery({
     queryKey: ["cheeseRecipes"],
-    queryFn: fetchCheeseRecipes,
+    queryFn: () => fetchMasterDataBootstrap().then((data) => data.cheeseRecipes),
     staleTime: 30_000,
     refetchInterval: pollingReady ? (isIdle ? 300_000 : 60_000) : false,
   });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchMixes } from "../mixes";
+import { fetchMasterDataBootstrap } from "../masterData";
 import type { Mix } from "@workspace/mixes";
 import { useIdle } from "./useIdle";
 
@@ -28,7 +28,7 @@ export function useMixes(): {
 
   const { data, isLoading } = useQuery({
     queryKey: ["mixes"],
-    queryFn: fetchMixes,
+    queryFn: () => fetchMasterDataBootstrap().then((data) => data.mixes),
     staleTime: 30_000,
     refetchInterval: pollingReady ? (isIdle ? 300_000 : 60_000) : false,
   });

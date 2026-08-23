@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchNamedRecipes, type NamedRecipeKind } from "../namedRecipes";
+import { type NamedRecipeKind } from "../namedRecipes";
+import { fetchMasterDataBootstrap } from "../masterData";
 import type { NamedRecipe } from "@workspace/named-recipes";
 import { useIdle } from "./useIdle";
 
@@ -28,7 +29,8 @@ export function useNamedRecipes(kind: NamedRecipeKind): {
 
   const { data, isLoading } = useQuery({
     queryKey: [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
-    queryFn: () => fetchNamedRecipes(kind),
+    queryFn: () => fetchMasterDataBootstrap().then((data) =>
+      kind === "dough" ? data.doughRecipes : data.sauceRecipes),
     staleTime: 30_000,
     refetchInterval: pollingReady ? (isIdle ? 300_000 : 60_000) : false,
   });

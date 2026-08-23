@@ -18,7 +18,7 @@ import {
 } from "@workspace/ingredient-catalog";
 import { inventoryClientId } from "./inventoryShared";
 
-function normalizeIngredients(items: unknown): Ingredient[] {
+export function normalizeIngredients(items: unknown): Ingredient[] {
   if (!Array.isArray(items)) return [];
   const out: Ingredient[] = [];
   for (const raw of items) {

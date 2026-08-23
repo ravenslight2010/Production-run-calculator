@@ -55,13 +55,15 @@ async function startServer(): Promise<void> {
     }
 
     // Keep a persisted, read-only snapshot available even when nobody has
-    // opened the manager dashboard. Each environment is scanned separately;
-    // sandbox data never appears in the live report.
+    // opened the manager dashboard. This is deliberately deferred until after
+    // startup and uses the existing snapshot when it is fresh; a full scan
+    // must not compete with the calculator's first requests.
     const intervalMs = Math.max(60_000, Number(process.env.MASTER_DATA_HEALTH_SCAN_INTERVAL_MS ?? 6 * 60 * 60 * 1000));
+    const startupDelayMs = Math.max(1_000, Number(process.env.MASTER_DATA_HEALTH_STARTUP_DELAY_MS ?? 10_000));
     const scanScopes = sandboxAllowed() ? ["live", "sandbox"] : ["live"];
     const scan = () => Promise.all(scanScopes.map(async (scope) => {
       try {
-        const report = await runMasterDataHealthScan(scope);
+        const report = await runMasterDataHealthScan(scope, { maxAgeMs: intervalMs });
         logger.info({
           event: "master_data_health_scan",
           environment: report.environment,
@@ -72,7 +74,8 @@ async function startServer(): Promise<void> {
         logger.error({ err, scope }, "master-data health scan failed");
       }
     }));
-    void scan();
+    const startupTimer = setTimeout(() => { void scan(); }, startupDelayMs);
+    startupTimer.unref();
     const timer = setInterval(() => { void scan(); }, intervalMs);
     timer.unref();
   });

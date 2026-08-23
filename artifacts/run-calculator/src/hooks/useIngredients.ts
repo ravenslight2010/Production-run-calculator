@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchIngredients } from "../ingredients";
+import { fetchMasterDataBootstrap } from "../masterData";
 import type { Ingredient } from "@workspace/ingredient-catalog";
 import { useIdle } from "./useIdle";
 
@@ -29,7 +29,7 @@ export function useIngredients(): {
 
   const { data, isLoading } = useQuery({
     queryKey: ["ingredients"],
-    queryFn: fetchIngredients,
+    queryFn: () => fetchMasterDataBootstrap().then((data) => data.ingredients),
     staleTime: 30_000,
     refetchInterval: pollingReady ? (isIdle ? 300_000 : 60_000) : false,
   });

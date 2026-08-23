@@ -45,6 +45,7 @@ import { noStoreMiddleware } from "../lib/cacheControl";
 import importHistoryRouter from "./importHistory";
 import actionItemsRouter from "./actionItems";
 import masterDataHealthRouter from "./masterDataHealth";
+import masterDataBootstrapRouter from "./masterDataBootstrap";
 
 const router: IRouter = Router();
 
@@ -84,6 +85,7 @@ router.use(savedPremixSheetsRouter);
 router.use(importHistoryRouter);
 router.use(actionItemsRouter);
 router.use(masterDataHealthRouter);
+router.use(masterDataBootstrapRouter);
 router.use(mergeAliasesRouter);
 router.use(deniedMergesRouter);
 router.use(mergedAwayRouter);

@@ -1,4 +1,4 @@
-import { and, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import {
   db,
   brandProfilesTable,
@@ -150,7 +150,18 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
   return { scanId: scanId(scope, at), scope, environment, scannedAt: at.toISOString(), findings: out, groups, summary, repairs };
 }
 
-export async function runMasterDataHealthScan(scope: string): Promise<MasterDataHealthReport> {
+export async function runMasterDataHealthScan(
+  scope: string,
+  options: { maxAgeMs?: number } = {},
+): Promise<MasterDataHealthReport> {
+  if (options.maxAgeMs !== undefined) {
+    const [latest] = await db.select().from(masterDataHealthScansTable)
+      .where(eq(masterDataHealthScansTable.scope, scope))
+      .orderBy(desc(masterDataHealthScansTable.completedAt)).limit(1);
+    if (latest?.completedAt && Date.now() - latest.completedAt.getTime() < options.maxAgeMs) {
+      return latest.report as MasterDataHealthReport;
+    }
+  }
   const startedAt = new Date();
   const report = await buildMasterDataHealthReport(db, scope, startedAt);
   await db.insert(masterDataHealthScansTable).values({
