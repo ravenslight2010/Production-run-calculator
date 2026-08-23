@@ -12,3 +12,31 @@ uri = "file://attached_assets/source-library/AUDIT-REPORT-2026-07-18.md"
 type = "text"
 title = "Full Audit: Source Workbooks vs Live App (July 18, 2026)"
 logical_id = "02479868-aa9d-4c6e-9a4c-ab91938fdedd"
+
+[[outputs]]
+id = "Kz9dak9UvWDclWhZKO2rZ"
+uri = "file://artifacts/run-calculator/test-results/department-workflow-naviga-a1e94--connected-after-navigation-desktop-chromium/01-production-running.png"
+type = "image"
+title = "Department journey — production before handoff"
+description = "Authenticated manager fixture with the unique Department / Navigation run active before cross-department navigation."
+logical_id = "7ba4bb60-9fa4-4c05-a010-298ad71e2165"
+content_hash = "sha256:d1262d94944cb229ead2e540d5b9ff2b4830d3c8c27d2cab1d920aabed41d144"
+size = 112086
+mtime_ms = 1787519362768
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/7ba4bb60-9fa4-4c05-a010-298ad71e2165/27f39f1d-fd31-4932-b2bf-e63e81f17b44"
+storage_version_token = "1787519390966166"
+content_type = "image/png"
+
+[[outputs]]
+id = "xltBpCTlvtWsV9SG37kI2"
+uri = "file://artifacts/run-calculator/test-results/department-workflow-naviga-a1e94--connected-after-navigation-desktop-chromium/05-production-after-reload.png"
+type = "image"
+title = "Department journey — production after reload"
+description = "The same active Department / Navigation run remains selected with PAUSE RUN visible after returning from Management and reloading."
+logical_id = "98edc87f-d2e2-49d1-ab2b-b5723ad09b68"
+content_hash = "sha256:24e52e076c486cb349460d42c89eb2ec0c4d27ce5ebb1abb2944c7646eaf6af5"
+size = 100624
+mtime_ms = 1787519367532
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/98edc87f-d2e2-49d1-ab2b-b5723ad09b68/e7a22236-dc66-4c9b-8846-b4ce583d09aa"
+storage_version_token = "1787519391560894"
+content_type = "image/png"
