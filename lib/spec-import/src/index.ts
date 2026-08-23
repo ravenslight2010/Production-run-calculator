@@ -1135,6 +1135,47 @@ export function specImportDoughFormulasConflict(
   return false;
 }
 
+/**
+ * A fully identical formula is strong enough evidence to safely collapse two
+ * dough-family names at commit time. Unlike the conflict check above, this
+ * compares the complete normalized ingredient-and-pound lists, not only the
+ * ingredient set. Empty / all-zero rows are intentionally not "identical":
+ * those are handled as import stubs below.
+ */
+function specImportDoughFormulasIdentical(
+  a?: ReadonlyArray<{ ingredient?: string | null; lbs?: number | string | null }>,
+  b?: ReadonlyArray<{ ingredient?: string | null; lbs?: number | string | null }>,
+): boolean {
+  const normalized = (
+    rows?: ReadonlyArray<{ ingredient?: string | null; lbs?: number | string | null }>,
+  ) =>
+    (rows ?? [])
+      .map((row) => ({
+        ingredient: specImportNameMatchKey(String(row.ingredient ?? "")),
+        lbs: Number(row.lbs ?? 0),
+      }))
+      .filter((row) => row.ingredient && row.lbs > 0)
+      .sort((left, right) =>
+        left.ingredient === right.ingredient
+          ? left.lbs - right.lbs
+          : left.ingredient.localeCompare(right.ingredient),
+      );
+  const left = normalized(a);
+  const right = normalized(b);
+  return left.length > 0 && JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** An all-zero imported recipe is a name-only placeholder, never a formula. */
+function specImportDoughRecipeIsStub(
+  rows?: ReadonlyArray<{ ingredient?: string | null; lbs?: number | string | null }>,
+): boolean {
+  return !(rows ?? []).some(
+    (row) =>
+      Boolean(specImportNameMatchKey(String(row.ingredient ?? ""))) &&
+      Number(row.lbs ?? 0) > 0,
+  );
+}
+
 // Generic sauce words carrying no identity of their own for family matching.
 // ("pizza" is already dropped by the loose key's filler set, listed for
 // clarity.) Deliberately NOT reused for dough — the two lists differ.
@@ -1393,7 +1434,7 @@ export function linkSpecImportNamedRecipesToExisting(
      */
     existingRecipes?: ReadonlyArray<{
       name: string;
-      rows?: ReadonlyArray<{ ingredient?: string | null }>;
+      rows?: ReadonlyArray<{ ingredient?: string | null; lbs?: number | string | null }>;
     }>;
     /**
      * Collector for beyond-exact matches (word reorder, single typo, family
@@ -1420,6 +1461,13 @@ export function linkSpecImportNamedRecipesToExisting(
      * import stub, so this cannot overwrite a manager-entered formula.
      */
     autoApplyEmptyFamily?: boolean;
+    /**
+     * Allow the commit-time backstop to apply a family match when the import is
+     * only an all-zero placeholder, or when both complete formulas are
+     * identical. This removes harmless name forks such as "CRB Recipe" beside
+     * "CRB Dough" while preserving the review path for a different formula.
+     */
+    autoApplyCompatibleFamily?: boolean;
     /**
      * When `autoApplyNearExact` is true, this accumulator is incremented for
      * each near-exact rename that was applied automatically. Lets callers
@@ -1537,7 +1585,14 @@ export function linkSpecImportNamedRecipesToExisting(
           poolRowsByKey.get(familyCand.trim().toLowerCase()) ??
           poolRowsByKey.get(specImportNameMatchKey(familyCand)) ??
           [];
-        if (opts?.autoApplyEmptyFamily && familyRows.length === 0) {
+        const canAutoApplyCompatibleFamily =
+          opts?.autoApplyCompatibleFamily &&
+          (specImportDoughRecipeIsStub(r.rows) ||
+            specImportDoughFormulasIdentical(r.rows, familyRows));
+        if (
+          (opts?.autoApplyEmptyFamily && familyRows.length === 0) ||
+          canAutoApplyCompatibleFamily
+        ) {
           changed = true;
           if (kind === "dough" && !r.variantLabel) {
             return { ...r, name: familyCand, variantLabel: name };

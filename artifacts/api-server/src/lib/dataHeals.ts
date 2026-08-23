@@ -84,6 +84,158 @@ const CHEESE_POISON_HEAL_ID = "cheese-import-poison-cleanup-v1";
 // landed "CRB Recipe" pool row. Repair only that proven stub; a non-empty row
 // is manager-entered data and must remain untouched.
 const CRB_INGREDIENT_HEAL_ID = "crb-ingredient-conversion-v1";
+const CRB_FAMILY_CONSOLIDATION_HEAL_ID = "crb-dough-family-consolidation-v1";
+// Only rewrite current and future day-state rows; past production history stays intact.
+const CRB_FAMILY_CONSOLIDATION_FROM_DATE = "2026-08-22";
+
+function crbComponentsMatch(
+  left: ReadonlyArray<{ ingredient?: string; lbs?: number }> | null | undefined,
+  right: ReadonlyArray<{ ingredient?: string; lbs?: number }> | null | undefined,
+): boolean {
+  const normalize = (rows: ReadonlyArray<{ ingredient?: string; lbs?: number }> | null | undefined) =>
+    (rows ?? [])
+      .map((row) => ({
+        ingredient: String(row.ingredient ?? "").trim().toLowerCase(),
+        lbs: Number(row.lbs ?? 0),
+      }))
+      .filter((row) => row.ingredient && row.lbs > 0)
+      .sort((a, b) => a.ingredient.localeCompare(b.ingredient) || a.lbs - b.lbs);
+  const a = normalize(left);
+  const b = normalize(right);
+  return a.length > 0 && JSON.stringify(a) === JSON.stringify(b);
+}
+
+async function runCrbDoughFamilyConsolidation(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: CRB_FAMILY_CONSOLIDATION_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const recipes = await tx
+      .select()
+      .from(doughRecipesTable)
+      .where(
+        and(
+          eq(doughRecipesTable.scope, "live"),
+          sql`lower(${doughRecipesTable.name}) in ('crb dough', 'crb recipe')`,
+        ),
+      )
+      .for("update");
+    const canonical = recipes.find((row) => row.name.trim().toLowerCase() === "crb dough");
+    const duplicate = recipes.find((row) => row.name.trim().toLowerCase() === "crb recipe");
+    const provenDuplicate =
+      canonical &&
+      duplicate &&
+      Array.isArray(canonical.doughballVariants) &&
+      canonical.doughballVariants.length > 0 &&
+      (!Array.isArray(duplicate.doughballVariants) || duplicate.doughballVariants.length === 0) &&
+      crbComponentsMatch(canonical.components, duplicate.components);
+    let repointedProfiles = 0;
+    let repointedDays = 0;
+    let deleted = 0;
+
+    if (provenDuplicate) {
+      const profiles = await tx
+        .select()
+        .from(brandProfilesTable)
+        .where(eq(brandProfilesTable.scope, "live"))
+        .for("update");
+      for (const profile of profiles) {
+        const values = { ...(profile.values ?? {}) } as Record<string, unknown>;
+        if (String(values.doughRecipeName ?? "").trim().toLowerCase() !== "crb recipe") {
+          continue;
+        }
+        values.doughRecipeName = canonical.name;
+        await tx
+          .update(brandProfilesTable)
+          .set({
+            values,
+            updatedAtMs: Math.max((profile.updatedAtMs ?? 0) + 1, Date.now()),
+          })
+          .where(
+            and(
+              eq(brandProfilesTable.key, profile.key),
+              eq(brandProfilesTable.scope, profile.scope),
+            ),
+          );
+        repointedProfiles++;
+      }
+
+      const days = await tx
+        .select()
+        .from(dailySyncTable)
+        .where(
+          and(
+            eq(dailySyncTable.scope, "live"),
+            gte(dailySyncTable.date, CRB_FAMILY_CONSOLIDATION_FROM_DATE),
+          ),
+        )
+        .for("update");
+      for (const day of days) {
+        const data = { ...((day.data ?? {}) as Record<string, unknown>) };
+        const runValues = data.runValues as Record<string, Record<string, unknown>> | undefined;
+        if (!runValues || typeof runValues !== "object") continue;
+        const stamps =
+          data.runValuesUpdatedAt && typeof data.runValuesUpdatedAt === "object"
+            ? { ...(data.runValuesUpdatedAt as Record<string, unknown>) }
+            : {};
+        let changed = false;
+        for (const [runId, values] of Object.entries(runValues)) {
+          if (
+            !values ||
+            typeof values !== "object" ||
+            String(values.doughRecipeName ?? "").trim().toLowerCase() !== "crb recipe"
+          ) {
+            continue;
+          }
+          values.doughRecipeName = canonical.name;
+          const stamp = Math.max(
+            Number(stamps[runId] ?? values.valuesUpdatedAtMs ?? 0) + 1,
+            Date.now(),
+          );
+          values.valuesUpdatedAtMs = stamp;
+          stamps[runId] = stamp;
+          changed = true;
+        }
+        if (!changed) continue;
+        data.runValuesUpdatedAt = stamps;
+        await tx
+          .update(dailySyncTable)
+          .set({ data, updatedAt: new Date() })
+          .where(and(eq(dailySyncTable.date, day.date), eq(dailySyncTable.scope, day.scope)));
+        repointedDays++;
+      }
+
+      await tx.insert(specImportAliasesTable).values({
+        scope: "live",
+        kind: "recipeName",
+        externalName: duplicate.name,
+        canonicalName: canonical.name,
+        context: "dough",
+      });
+      await tx
+        .delete(doughRecipesTable)
+        .where(and(eq(doughRecipesTable.id, duplicate.id), eq(doughRecipesTable.scope, duplicate.scope)));
+      deleted = 1;
+    }
+
+    const result = {
+      scanned: recipes.length,
+      provenDuplicate: Boolean(provenDuplicate),
+      repointedProfiles,
+      repointedDays,
+      deleted,
+    };
+    await tx
+      .update(dataHealsTable)
+      .set({ result })
+      .where(eq(dataHealsTable.id, CRB_FAMILY_CONSOLIDATION_HEAL_ID));
+    logger.info({ heal: CRB_FAMILY_CONSOLIDATION_HEAL_ID, ...result }, "Data heal applied");
+  });
+}
 
 async function runCrbIngredientHeal(): Promise<void> {
   await db.transaction(async (tx) => {
@@ -3482,6 +3634,7 @@ async function runHistoricalHealResultBackfill(): Promise<void> {
 export async function runDataHeals(): Promise<void> {
   await runHistoricalHealResultBackfill();
   await runCrbIngredientHeal();
+  await runCrbDoughFamilyConsolidation();
   await runCheesePoisonCleanup();
   await runSpecAliasHygienePurge();
   await runCheeseDuplicateNamePurge();

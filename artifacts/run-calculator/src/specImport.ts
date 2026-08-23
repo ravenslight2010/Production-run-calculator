@@ -2292,6 +2292,7 @@ export async function commitSpecImport(
               })),
               autoApplyNearExact: true,
               autoApplyEmptyFamily: true,
+              autoApplyCompatibleFamily: true,
               autoLinkedOut,
               autoLinkedRenames: kindRenames,
             }

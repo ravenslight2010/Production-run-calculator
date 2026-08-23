@@ -172,6 +172,55 @@ describe("linkSpecImportNamedRecipesToExisting dough family fallback", () => {
     });
   });
 
+  it("commit-links a compatible family placeholder or identical formula", () => {
+    const placeholder = {
+      ...base,
+      recipes: [{ kind: "dough", name: "CRB Recipe", rows: [] }],
+    } as unknown as ParsedSpecImport;
+    const linkedPlaceholder = linkSpecImportNamedRecipesToExisting(
+      placeholder,
+      "dough",
+      ["CRB Dough"],
+      {
+        existingRecipes: [{ name: "CRB Dough", rows: [{ ingredient: "Flour", lbs: 200 }] }],
+        autoApplyCompatibleFamily: true,
+      },
+    );
+    expect(linkedPlaceholder.recipes?.[0]?.name).toBe("CRB Dough");
+    expect(linkedPlaceholder.recipes?.[0]?.variantLabel).toBe("CRB Recipe");
+
+    const formula = {
+      ...base,
+      recipes: [
+        {
+          kind: "dough",
+          name: "CRB Recipe",
+          rows: [
+            { ingredient: "Flour", lbs: 200 },
+            { ingredient: "Water", lbs: 120 },
+          ],
+        },
+      ],
+    } as unknown as ParsedSpecImport;
+    const linkedFormula = linkSpecImportNamedRecipesToExisting(
+      formula,
+      "dough",
+      ["CRB Dough"],
+      {
+        existingRecipes: [{
+          name: "CRB Dough",
+          rows: [
+            { ingredient: "Water", lbs: 120 },
+            { ingredient: "Flour", lbs: 200 },
+          ],
+        }],
+        autoApplyCompatibleFamily: true,
+      },
+    );
+    expect(linkedFormula.recipes?.[0]?.name).toBe("CRB Dough");
+    expect(linkedFormula.recipes?.[0]?.variantLabel).toBe("CRB Recipe");
+  });
+
   it("no longer auto-anchors sibling collapse through a family fold — the fold is a SUGGESTION", () => {
     // The anchor here ("Costco CRB" → "CRB Dough") is itself a beyond-exact
     // family fold, so it no longer applies silently: every sheet name stays
