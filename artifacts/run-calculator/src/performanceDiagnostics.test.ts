@@ -6,6 +6,7 @@ import {
   getPerformanceDiagnostics,
   PERFORMANCE_BUDGETS,
   recordBrowserLoadTimings,
+  recordDeferredStartup,
   recordMemorySample,
   recordPerformance,
 } from "./performanceDiagnostics";
@@ -72,6 +73,17 @@ describe("calculator performance diagnostics", () => {
     recordPerformance("bad", Number.NaN, "load");
     recordPerformance("negative", -1, "navigation");
     expect(getPerformanceDiagnostics()).toEqual([]);
+  });
+
+  it("distinguishes intentionally deferred startup work from failed requests", () => {
+    recordDeferredStartup("cycle-count-schedules");
+    expect(getPerformanceDiagnostics()).toEqual([
+      {
+        name: "startup-deferred:cycle-count-schedules",
+        durationMs: 0,
+        kind: "deferred",
+      },
+    ]);
   });
 
   it("records API status without retaining query strings or payloads", async () => {

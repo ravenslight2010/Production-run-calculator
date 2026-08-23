@@ -12,7 +12,7 @@ export const IMPORT_PERFORMANCE_BUDGETS = {
 export type PerformanceDiagnostic = {
   name: string;
   durationMs: number;
-  kind: "load" | "navigation" | "render" | "calculation" | "storage" | "api" | "hmr";
+  kind: "load" | "navigation" | "render" | "calculation" | "storage" | "api" | "hmr" | "deferred";
 };
 
 const entries: PerformanceDiagnostic[] = [];
@@ -228,3 +228,12 @@ export const PERFORMANCE_BUDGETS = {
   storageScanMs: 100,
   apiRequestMs: 1000,
 } as const;
+
+/**
+ * Records an intentional startup deferral without pretending it was a failed
+ * request. This lets performance tooling distinguish less startup work from a
+ * missing operational refresh.
+ */
+export function recordDeferredStartup(name: string): void {
+  recordPerformance(`startup-deferred:${name}`, 0, "deferred");
+}

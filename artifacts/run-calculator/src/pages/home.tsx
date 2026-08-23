@@ -3817,7 +3817,9 @@ export default function Home() {
   const unreviewedIncidentCount = useUnreviewedIncidentCount();
   // Factory-wide freezer-pull items (open to all signed-in users) — drives the
   // Warehouse "Pull Out Freezer" notices.
-  const { items: freezerPullItems } = useFreezerPullItems();
+  const { items: freezerPullItems } = useFreezerPullItems(
+    activeTab === "warehouse" || new URLSearchParams(window.location.search).get("screen") === "warehouse",
+  );
   // Facility-wide run templates + supervisor PIN (server-side master-data, open
   // to all signed-in users for reads). These used to live in this device's local
   // storage, so they never followed the facility; the server is now the source
@@ -4225,7 +4227,9 @@ export default function Home() {
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
   // Warehouse "Time to Count" card. Marking a section counted is open to any
   // signed-in user (floor staff perform the counts).
-  const { schedules: cycleCountSchedules } = useCycleCountSchedules();
+  const { schedules: cycleCountSchedules } = useCycleCountSchedules(
+    activeTab === "warehouse" || new URLSearchParams(window.location.search).get("screen") === "warehouse",
+  );
   const cycleCountQc = useQueryClient();
   // Template create/delete — call the API then update the React Query cache
   // directly so the UI updates without waiting for the next background refetch.
