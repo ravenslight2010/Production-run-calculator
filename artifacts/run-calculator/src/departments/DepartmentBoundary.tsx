@@ -4,6 +4,13 @@ import { useDepartmentContext } from "./DepartmentContracts";
 
 export type DepartmentName = "production-line" | "warehouse-inventory" | "qc" | "management";
 
+export const DEPARTMENT_TABS: Record<DepartmentName, readonly HomeTab[]> = {
+  "production-line": ["run", "dough", "sauce", "frontline", "packaging", "stoppages"],
+  "warehouse-inventory": ["warehouse", "inventory", "mixes"],
+  qc: ["incidents", "downtime", "quality"],
+  management: ["ai", "setup", "staff", "summary"],
+};
+
 /**
  * Stable composition boundary for a department's existing surfaces.
  *
@@ -19,8 +26,13 @@ export function DepartmentBoundary({
   children: ReactNode;
 }) {
   const { activeTab } = useDepartmentContext();
+  const ownsActiveTab = DEPARTMENT_TABS[name].includes(activeTab);
   return (
-    <section data-department={name} data-department-active={activeTab}>
+    <section
+      data-department={name}
+      data-department-active={ownsActiveTab ? "true" : "false"}
+      aria-label={`${name} department`}
+    >
       {children}
     </section>
   );

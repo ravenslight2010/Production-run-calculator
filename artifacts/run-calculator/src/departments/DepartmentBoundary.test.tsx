@@ -15,6 +15,11 @@ const context = {
   currentRunId: "run-1",
   dayState: { runs: [], currentIndex: 0 },
   formValues: {},
+  identity: { isManager: false },
+  permissions: { canManageProfiles: false, canManageInventory: false, canManageStaff: false },
+  live: { runStatus: "pending", isOnline: true },
+  masterData: { brands: [], doughRecipeNames: [], frontlineRecipeNames: [], mixRecipeNames: [] },
+  notifications: { pendingResetCount: 0, unreviewedIncidentCount: 0 },
   requestRefresh: vi.fn(),
 } as unknown as DepartmentAppContext;
 
@@ -33,5 +38,18 @@ describe("department composition boundaries", () => {
     expect(screen.getByText("warehouse").closest("[data-department]")?.getAttribute("data-department")).toBe("warehouse-inventory");
     expect(screen.getByText("qc").closest("[data-department]")?.getAttribute("data-department")).toBe("qc");
     expect(screen.getByText("management").closest("[data-department]")?.getAttribute("data-department")).toBe("management");
+  });
+
+  it("marks only the owning department as active", () => {
+    document.body.innerHTML = "";
+    render(
+      <DepartmentProvider value={{ ...context, activeTab: "quality" }}>
+        <ProductionLineDepartment>line</ProductionLineDepartment>
+        <QcDepartment>qc</QcDepartment>
+      </DepartmentProvider>,
+    );
+
+    expect(screen.getByText("line").closest("[data-department]")?.getAttribute("data-department-active")).toBe("false");
+    expect(screen.getByText("qc").closest("[data-department]")?.getAttribute("data-department-active")).toBe("true");
   });
 });

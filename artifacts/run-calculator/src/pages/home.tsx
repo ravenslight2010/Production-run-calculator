@@ -1,4 +1,4 @@
-import { createContext, lazy, memo, Profiler, Suspense, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
+import { createContext, memo, Profiler, useCallback, useEffect, useMemo, useRef, useState, useContext } from "react";
 import { HomeCtx, useHomeCtx } from "../contexts/HomeCtx";
 import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
@@ -459,27 +459,16 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { HomeStationTabs } from "../components/HomeStationTabs";
-import ErrorBoundary from "../components/ErrorBoundary";
 import {
   DepartmentProvider,
   ManagementDepartment,
   ProductionLineDepartment,
-  QcDepartment,
+  QcDowntimeSurface,
+  QcIncidentsSurface,
+  QcQualitySurface,
   WarehouseInventoryDepartment,
   type DepartmentAppContext,
 } from "../departments";
-
-const LazyIncidentsTab = lazy(() => import("../components/IncidentsTab"));
-const LazyDowntimeTrendsTab = lazy(() => import("../components/DowntimeTrendsTab"));
-const LazyQualityHistoryTab = lazy(() => import("../components/QualityHistoryTab"));
-
-function QcTabFallback() {
-  return (
-    <div className="flex items-center justify-center py-10 text-muted-foreground" role="status">
-      Loading quality tools…
-    </div>
-  );
-}
 // showAppNotification is imported from useNotifications to fire sauce push alerts
 import { showAppNotification } from "../hooks/useNotifications";
 import { getSauceBarrelEntry, resetSauceBarrelEntry } from "../sauceBarrelStore";
@@ -13817,6 +13806,29 @@ export default function Home() {
     currentRun,
     dayState,
     formValues: v,
+    identity: {
+      role,
+      isManager,
+    },
+    permissions: {
+      canManageProfiles: hasCapability("manage-profiles"),
+      canManageInventory,
+      canManageStaff,
+    },
+    live: {
+      runStatus,
+      isOnline,
+    },
+    masterData: {
+      brands,
+      doughRecipeNames,
+      frontlineRecipeNames,
+      mixRecipeNames,
+    },
+    notifications: {
+      pendingResetCount,
+      unreviewedIncidentCount,
+    },
     requestRefresh: (scope) => {
       if (scope === "inventory") {
         void cycleCountQc.invalidateQueries({ queryKey: ["inventory"] });
@@ -13828,7 +13840,12 @@ export default function Home() {
         void cycleCountQc.invalidateQueries({ queryKey: ["scheduled"] });
       }
     },
-  }), [activeTab, currentRunId, currentRun, dayState, v, setActiveTab, cycleCountQc]);
+  }), [
+    activeTab, currentRunId, currentRun, dayState, v, setActiveTab, cycleCountQc,
+    role, isManager, canManageInventory, canManageStaff, isOnline,
+    brands, doughRecipeNames, frontlineRecipeNames, mixRecipeNames,
+    pendingResetCount, unreviewedIncidentCount,
+  ]);
 
   const mainContent = (
     <div
@@ -16490,35 +16507,15 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="incidents">
-                <QcDepartment>
-                  <ErrorBoundary>
-                    <Suspense fallback={<QcTabFallback />}>
-                      <LazyIncidentsTab />
-                    </Suspense>
-                  </ErrorBoundary>
-                </QcDepartment>
+                <QcIncidentsSurface />
               </TabsContent>
 
               <TabsContent value="downtime">
-                <QcDepartment>
-                  {isManager && (
-                    <ErrorBoundary>
-                      <Suspense fallback={<QcTabFallback />}>
-                        <LazyDowntimeTrendsTab days={downtimeDays} />
-                      </Suspense>
-                    </ErrorBoundary>
-                  )}
-                </QcDepartment>
+                {isManager && <QcDowntimeSurface days={downtimeDays} />}
               </TabsContent>
 
               <TabsContent value="quality">
-                <QcDepartment>
-                  <ErrorBoundary>
-                    <Suspense fallback={<QcTabFallback />}>
-                      <LazyQualityHistoryTab />
-                    </Suspense>
-                  </ErrorBoundary>
-                </QcDepartment>
+                <QcQualitySurface />
               </TabsContent>
 
               <TabsContent value="staff">
