@@ -19643,6 +19643,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                 type="number"
                 min="0"
                 step="1"
+                data-testid="input-casesNeeded"
                 value={v.casesNeeded === 0 ? "" : v.casesNeeded}
                 onChange={e => form.setValue("casesNeeded", Number(e.target.value) || 0, { shouldDirty: true })}
                 placeholder="0"

@@ -59,8 +59,14 @@ async function signUp(page: Page, username: string): Promise<void> {
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) {
+  try {
+    await getStarted.waitFor({ state: "visible", timeout: 8_000 });
     await getStarted.click();
+    await page.locator('[data-state="open"][aria-hidden="true"]')
+      .waitFor({ state: "detached", timeout: 5_000 });
+    await page.waitForTimeout(300);
+  } catch {
+    // The dialog may already have been dismissed for this account.
   }
 }
 
@@ -227,6 +233,73 @@ test(
       const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
       return Object.values(values ?? {})[0]?.casesNeeded;
     }, { timeout: 15_000 }).toBe(17);
+  },
+);
+
+test(
+  "exhausted sync failure retains the change for a manual retry",
+  async ({ page }: { page: Page }) => {
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await page.getByTestId("tab-run").click();
+    await page.getByTestId("input-casesNeeded").waitFor({ state: "visible", timeout: 20_000 });
+
+    let blocked = true;
+    let syncWriteAttempts = 0;
+    let blockedWrites = 0;
+    await page.route("**/api/sync/today**", async (route) => {
+      const request = route.request();
+      if (request.method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+
+      syncWriteAttempts += 1;
+      if (blocked) {
+        blockedWrites += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary sync outage" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.getByTestId("input-casesNeeded").fill("19");
+
+    // Four failed PUTs means the initial attempt and all three automatic
+    // retries were rejected. The client must stop retrying and expose the
+    // retained local change instead of silently dropping it.
+    await expect
+      .poll(() => blockedWrites, { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(4);
+    await expect(page.getByText(
+      "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
+      { exact: true },
+    )).toBeVisible();
+    const retryButton = page.getByRole("button", { name: "Retry sync", exact: true });
+    await expect(retryButton).toBeVisible();
+
+    // Only the explicit user action is allowed through now. It must retry the
+    // retained payload, clear the terminal failure, and persist the edit.
+    const failedAttemptCount = syncWriteAttempts;
+    blocked = false;
+    await retryButton.click();
+    await expect
+      .poll(() => syncWriteAttempts, { timeout: 10_000 })
+      .toBeGreaterThan(failedAttemptCount);
+    await expect(page.getByText(
+      "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
+      { exact: true },
+    )).toBeHidden();
+    await expect.poll(async () => {
+      const server = await getToday(page);
+      const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
+      return Object.values(values ?? {})[0]?.casesNeeded;
+    }, { timeout: 15_000 }).toBe(19);
   },
 );
 
