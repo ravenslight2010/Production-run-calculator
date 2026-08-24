@@ -8641,6 +8641,12 @@ export default function Home() {
         setSyncRetryWaiting(false);
         return;
       }
+      // Any other non-success response must follow the retry path below.
+      // consumeCanonicalSyncWriteResponse intentionally does not throw for
+      // HTTP errors so callers can safely inspect their response bodies; a
+      // sync write must not be recorded as acknowledged just because the
+      // server returned parseable JSON with a 5xx status.
+      if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
       const { stale } = await consumeCanonicalSyncWriteResponse(
         res,
         true,

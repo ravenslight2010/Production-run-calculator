@@ -623,6 +623,61 @@ test.describe("phone layout smoke", () => {
     }
   });
 
+  test("failed sync keeps the retained-change retry action visible on phone", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signInToSandbox(page);
+
+    let failedWrites = 0;
+    await page.route("**/api/sync/today**", async (route) => {
+      if (route.request().method() === "PUT") {
+        failedWrites += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "controlled sync failure" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.getByTestId("tab-run").click();
+    const editableNumber = page.locator('input[type="number"]:visible').first();
+    await expect(editableNumber).toBeVisible();
+    await editableNumber.fill("1");
+    const syncStatus = page.locator('button[title^="Sync"]');
+    await expect(syncStatus).toBeVisible();
+    await syncStatus.click();
+    const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
+    await expect(popover).toBeVisible();
+
+    await expect.poll(() => failedWrites, { timeout: 20_000 }).toBeGreaterThan(0);
+    await expect(popover.getByText("Sync failed", { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(
+      popover.getByText(
+        "Your local change is retained on this device. It is not shared until the server acknowledges it.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+    const retry = popover.getByRole("button", {
+      name: /retry latest retained change/i,
+    });
+    await expect(retry).toBeVisible();
+    const retryGeometry = await retry.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    });
+    expect(retryGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(retryGeometry.right).toBeLessThanOrEqual(390);
+    expect(retryGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(retryGeometry.bottom).toBeLessThanOrEqual(844);
+  });
+
   test(`manager workflows stay usable in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
     page,
   }) => {
