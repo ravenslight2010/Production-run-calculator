@@ -1,7 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  process.env.PLAYWRIGHT_BASE_URL ??
+  (process.env.REPLIT_DEV_DOMAIN
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : "http://127.0.0.1:5173");
 
 /**
  * Cross-department navigation evidence has no destructive global setup:

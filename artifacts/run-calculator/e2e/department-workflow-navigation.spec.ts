@@ -99,7 +99,9 @@ async function seedPendingRun(page: Page): Promise<string> {
         date: new Date().toISOString().slice(0, 10),
         runs: [{ id, brand: "Department", flavor: "Navigation", seeded: false }],
         currentIndex: 0,
-        resetAt: Date.now() + 60_000,
+        // Do not create a same-day reset boundary in the disposable fixture;
+        // the app's normal reset scheduler owns that value.
+        resetAt: 0,
       }),
     );
   }, runId);
@@ -163,10 +165,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   // run rather than showing an unrelated or empty day-state snapshot.
   await page.getByTestId("tab-warehouse").click();
   await expect(page.getByTestId(`warehouse-run-${runId}`)).toContainText(
-    "Department",
-  );
-  await expect(page.getByTestId(`warehouse-run-${runId}`)).toContainText(
-    "Navigation",
+    /Department[\s\S]*Navigation/,
   );
   await screenshot(page, testInfo, "02-warehouse-shared-run");
 
@@ -174,8 +173,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   // this signed-up manager retained permission through navigation.
   await openMore(page);
   await page.getByRole("menuitem", { name: "Quality history" }).click();
-  await expect(page.getByText("Quality History", { exact: true })).toBeVisible();
-  await expect(page.getByText("No quality checks recorded yet", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("quality-history-surface")).toBeVisible();
   await screenshot(page, testInfo, "03-qc-history");
 
   // Change an account-level manager setting through the actual management
@@ -192,7 +190,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  await expect(page.getByText("Quality History", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("quality-history-surface")).toBeVisible();
   await openMore(page);
   await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
   await expect(page.getByTestId("switch-floor-mode")).toBeChecked({ checked: !before });

@@ -25,3 +25,17 @@ Two related trust boundaries in `artifacts/api-server/src/routes/sync.ts` must s
 
 **How to apply:** establish the server snapshot as a client baseline before background upload and keep destructive intent explicit.
 
+5. **Browser fixtures must not invent a same-day `resetAt` boundary.** A test
+   seed that sets `resetAt` to a near-future value can be persisted by the
+   normal sync path and eventually fence the test session, especially in the
+   slower phone project. Use the app's normal reset scheduler or an unset/zero
+   value unless the test is specifically exercising rollover.
+
+**Why:** the department navigation journey intermittently logged its phone
+   session out before the final navigation checks when its seed used a
+   60-second reset marker.
+
+**How to apply:** keep reset-boundary fixtures separate from pending-run
+   lifecycle fixtures, and give any intentional rollover test its own isolated
+   boundary setup.
+

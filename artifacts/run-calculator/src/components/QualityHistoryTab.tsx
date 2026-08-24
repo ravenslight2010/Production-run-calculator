@@ -173,7 +173,10 @@ export default function QualityHistoryTab() {
   const checks = query.data ?? [];
 
   return (
-    <div className="max-w-2xl mx-auto px-3 py-4 pb-24 space-y-4">
+    <div
+      className="max-w-2xl mx-auto px-3 py-4 pb-24 space-y-4"
+      data-testid="quality-history-surface"
+    >
       <Card className="bg-card/50 border-border/50 shadow-md">
         <CardHeader className="pb-2 pt-4 px-5">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">

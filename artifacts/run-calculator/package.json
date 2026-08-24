@@ -15,6 +15,7 @@
     "test:e2e:management-performance": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.management-performance.config.ts",
     "test:e2e:smoke": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.smoke.config.ts",
     "test:e2e:sync-convergence": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.sync-convergence.config.ts",
+    "test:e2e:department": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.department.config.ts",
     "test:e2e:a11y": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.a11y.config.ts",
     "test:e2e:phone": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.phone.config.ts",
     "test:e2e:visual": "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-$(command -v chromium)} playwright test --config playwright.visual.config.ts",

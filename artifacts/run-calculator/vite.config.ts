@@ -195,6 +195,14 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
+    // Keep local/CI browser journeys same-origin while the API runs separately.
+    // Replit's production proxy provides this routing outside Vite.
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:5000",
+        changeOrigin: true,
+      },
+    },
     fs: {
       strict: true,
     },
