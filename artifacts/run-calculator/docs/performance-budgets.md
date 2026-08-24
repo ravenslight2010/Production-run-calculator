@@ -41,6 +41,12 @@ export timings use `import-*` names. Heap samples use `calculator-memory`.
 
 ## Startup deferral measurement
 
+The signed-out landing page is measured on both a cold navigation and a warm
+reload by the management performance browser check. Both measurements must stay
+at or below the 1,500 ms initial-load budget. The check also requires the
+normal signed-out `GET /api/me` 401 response and verifies that it does not
+produce a console error.
+
 ## Workbook startup split evidence
 
 The full workbook workflow is loaded through `loadWorkbookWorkflow` only when

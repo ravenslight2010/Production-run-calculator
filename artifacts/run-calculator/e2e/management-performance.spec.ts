@@ -97,11 +97,70 @@ async function capturedDiagnostics(page: Page): Promise<CapturedDiagnostic[]> {
   });
 }
 
-test.beforeAll(async () => {
-  requireIsolatedTestDatabase("management performance e2e");
-  if (!SIGNUP_CODE) {
-    throw new Error("STAFF_SIGNUP_CODE must be configured for management performance e2e.");
-  }
+test("keeps signed-out cold and warm startup within the budget", async ({ page }, testInfo: TestInfo) => {
+  await page.addInitScript(() => {
+    (window as Window & { __calculatorPerformance?: CapturedDiagnostic[] }).__calculatorPerformance = [];
+    window.addEventListener("calculator-performance", (event) => {
+      const detail = (event as CustomEvent<CapturedDiagnostic>).detail;
+      if (!detail || typeof detail.name !== "string" || typeof detail.durationMs !== "number") return;
+      (window as Window & { __calculatorPerformance: CapturedDiagnostic[] })
+        .__calculatorPerformance.push({
+          name: detail.name,
+          durationMs: detail.durationMs,
+          kind: detail.kind,
+        });
+    });
+  });
+
+  const apiResponses: Array<{ path: string; status: number }> = [];
+  const consoleErrors: string[] = [];
+  page.on("response", (response) => {
+    if (safePath(response.url()) === "/api/me") {
+      apiResponses.push({ path: "/api/me", status: response.status() });
+    }
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+
+  const measure = async (label: string) => {
+    await page.goto("/", { waitUntil: "load" });
+    await expect(page.getByRole("heading", { name: "Production Run Calculator" })).toBeVisible();
+    const diagnostics = await capturedDiagnostics(page);
+    const load = diagnostics.find((entry) => entry.name === "browser:navigation-to-load");
+    expect(load, `${label} navigation timing should be recorded`).toBeDefined();
+    expect(
+      load!.durationMs,
+      `${label} signed-out startup exceeded ${PERFORMANCE_BUDGETS.initialLoadMs}ms`,
+    ).toBeLessThanOrEqual(PERFORMANCE_BUDGETS.initialLoadMs);
+    return load!;
+  };
+
+  const cold = await measure("cold");
+  const warm = await measure("warm");
+  expect(apiResponses.filter(({ status }) => status === 401).length).toBeGreaterThanOrEqual(2);
+  const expectedSignedOut401Messages = consoleErrors.filter((message) =>
+    /failed to load resource: the server responded with a status of 401/i.test(message),
+  );
+  const unexpectedConsoleErrors = consoleErrors.filter(
+    (message) => !expectedSignedOut401Messages.includes(message),
+  );
+  expect(
+    unexpectedConsoleErrors,
+    "the expected signed-out /api/me 401 must not become an application console error",
+  ).toEqual([]);
+
+  await testInfo.attach("calculator-signed-out-startup.json", {
+    body: JSON.stringify({
+      cold: { name: cold.name, durationMs: cold.durationMs, kind: cold.kind },
+      warm: { name: warm.name, durationMs: warm.durationMs, kind: warm.kind },
+      budgetMs: PERFORMANCE_BUDGETS.initialLoadMs,
+      apiResponses,
+      expectedSignedOut401Messages,
+      consoleErrors,
+    }, null, 2),
+    contentType: "application/json",
+  });
 });
 
 test.afterAll(async () => {
@@ -116,6 +175,10 @@ test.afterAll(async () => {
 });
 
 test("captures authenticated initial load and deferred staff visit budgets", async ({ page }, testInfo: TestInfo) => {
+  requireIsolatedTestDatabase("management performance e2e");
+  if (!SIGNUP_CODE) {
+    throw new Error("STAFF_SIGNUP_CODE must be configured for management performance e2e.");
+  }
   await page.addInitScript(() => {
     (window as Window & { __calculatorPerformance?: CapturedDiagnostic[] }).__calculatorPerformance = [];
     window.addEventListener("calculator-performance", (event) => {

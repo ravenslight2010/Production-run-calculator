@@ -5,6 +5,8 @@ import {
   useEffect,
   useRef,
   useState,
+  lazy,
+  Suspense,
   type ReactNode,
 } from "react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
@@ -17,7 +19,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/useAuth";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
-import Home from "@/pages/home";
 import Landing from "@/pages/landing";
 import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
@@ -27,13 +28,18 @@ import { useRegisterSW } from "virtual:pwa-register/react";
 const queryClient = new QueryClient();
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const LazyHome = lazy(() => import("@/pages/home"));
 
 // "/" renders the calculator for signed-in staff, and a branded welcome with a
 // sign-in CTA for everyone else (no auto-redirect into the sign-in form).
 function HomeGate() {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
-  return isAuthenticated ? <Home /> : <Landing />;
+  return isAuthenticated ? (
+    <Suspense fallback={null}>
+      <LazyHome />
+    </Suspense>
+  ) : <Landing />;
 }
 
 function AppRoutes() {
