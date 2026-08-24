@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
@@ -85,6 +85,7 @@ let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
+let ingredientsTable: DbModule["ingredientsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -150,6 +151,7 @@ beforeAll(async () => {
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
+  ingredientsTable = dbMod.ingredientsTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
   rolesTable = dbMod.rolesTable;
@@ -197,7 +199,7 @@ beforeEach(async () => {
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog (manager/operator builtins + editable starters) so the
   // capability middleware can resolve each user's role to a capability set. Plus
@@ -791,6 +793,93 @@ describe("capability-based access control", () => {
       }
     });
   }
+});
+
+describe("POST /ingredients/merge endpoint behavior", () => {
+  it("lets a manager merge ingredients while preserving both category sets", async () => {
+    await db.insert(ingredientsTable).values([
+      {
+        id: "ingredient-target",
+        scope: "live",
+        name: "Established Flour",
+        categories: ["dough", "general"],
+        enabled: true,
+      },
+      {
+        id: "ingredient-source",
+        scope: "live",
+        name: "Legacy Flour",
+        categories: ["mix", "pep"],
+        enabled: true,
+      },
+    ]);
+
+    const res = await req(MANAGER, "POST", "/api/ingredients/merge", {
+      targetId: "ingredient-target",
+      sourceIds: ["ingredient-source"],
+    });
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      items: Array<{
+        id: string;
+        categories: string[];
+        mergedInto: string | null;
+        enabled: boolean;
+      }>;
+    };
+    const target = body.items.find((item) => item.id === "ingredient-target");
+    const source = body.items.find((item) => item.id === "ingredient-source");
+    expect(target?.categories).toEqual(["dough", "general", "mix", "pep"]);
+    expect(source).toMatchObject({
+      mergedInto: "ingredient-target",
+      enabled: false,
+    });
+
+    const [storedTarget] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "ingredient-target"));
+    const [storedSource] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "ingredient-source"));
+    expect(storedTarget.categories).toEqual(["dough", "general", "mix", "pep"]);
+    expect(storedSource.mergedInto).toBe("ingredient-target");
+    expect(storedSource.enabled).toBe(false);
+  });
+
+  it("rejects an ingredient merge from a user without manage-inventory", async () => {
+    await db.insert(ingredientsTable).values([
+      {
+        id: "ingredient-target",
+        scope: "live",
+        name: "Established Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+      {
+        id: "ingredient-source",
+        scope: "live",
+        name: "Legacy Flour",
+        categories: ["mix"],
+        enabled: true,
+      },
+    ]);
+
+    const res = await req(OPERATOR, "POST", "/api/ingredients/merge", {
+      targetId: "ingredient-target",
+      sourceIds: ["ingredient-source"],
+    });
+    expect(res.status).toBe(403);
+
+    const [source] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "ingredient-source"));
+    expect(source.mergedInto).toBeNull();
+    expect(source.enabled).toBe(true);
+  });
 });
 
 // Freezer-pull config writes are manager-gated (covered in GATED_ROUTES), but the
