@@ -187,3 +187,39 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await secondContext.close();
   }
 });
+
+test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
+  page,
+}, testInfo: TestInfo) => {
+  const username = uniqueTestId("e2e_manager_queue_source");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await signIn(page, username);
+  await openQueue(page);
+
+  const title = `Stale queue item ${fixtureDedupKey}`;
+  const item = page.getByText(title, { exact: true });
+  await expect(item).toBeVisible();
+  await expect(page.getByTestId("manager-action-queue")).toContainText("Sync");
+  await page.screenshot({ path: testInfo.outputPath("queue-source-before.png"), fullPage: true });
+
+  await page.getByRole("link", { name: "Open source" }).click();
+
+  // The source link must select the Summary tab and expose the actual sync
+  // workflow, rather than only updating the URL hash or invoking a callback.
+  await expect(page).toHaveURL(/#sync-diagnostics$/);
+  await expect(page.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("queue-source-sync-workflow.png"), fullPage: true });
+  expect(browserErrors).toEqual([]);
+});
