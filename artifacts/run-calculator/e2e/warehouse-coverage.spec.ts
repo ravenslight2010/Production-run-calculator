@@ -191,13 +191,24 @@ test.beforeAll(async () => {
   await requireIsolatedTestDatabase("warehouse coverage browser check");
 });
 
+
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL) return;
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
-    await cleanupInventory(db);
     await cleanupTestUsers(db, testUsernames);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
+
+test.afterEach(async () => {
+  if (!process.env.DATABASE_URL) return;
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await cleanupInventory(db);
   } finally {
     await db.end().catch(() => {});
   }
@@ -271,6 +282,68 @@ test("shows capped offsite transfer guidance and hides it when onsite stock cove
       fullPage: true,
     });
     expect(browserErrors).toEqual([]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
+
+test("keeps capped offsite transfer guidance readable on a phone", async ({
+  page,
+  request,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const username = uniqueTestId("warehouse_phone_manager");
+  const runId = uniqueTestId("warehouse_phone_run");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await seedInventory(db);
+    await createManager(request, db, username);
+    await signIn(page, username);
+    await seedRun(page, runId);
+    await openInventory(page);
+
+    const coverage = page.getByTestId("warehouse-coverage");
+    const row = coverage
+      .getByText(fixture.ingredientName, { exact: true })
+      .locator("xpath=../..");
+    const guidance = row.getByText(
+      `Can cover 9 lbs from 9 lbs from ${fixture.locationName}.`,
+      { exact: true },
+    );
+
+    await expect(row).toContainText("Short");
+    await expect(guidance).toBeVisible();
+    await expect(guidance).toHaveText(
+      `Can cover 9 lbs from 9 lbs from ${fixture.locationName}.`,
+    );
+
+    const layout = await guidance.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      right: element.getBoundingClientRect().right,
+    }));
+    expect(layout.scrollWidth).toBe(layout.clientWidth);
+    expect(layout.scrollHeight).toBe(layout.clientHeight);
+    expect(layout.right).toBeLessThanOrEqual(390);
+    expect(browserErrors).toEqual([]);
+
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-coverage-phone-guidance.png"),
+      fullPage: true,
+    });
   } finally {
     await db.end().catch(() => {});
   }
