@@ -102,6 +102,7 @@ import SubstitutionsManager from "./SubstitutionsManager";
 import SubstitutionLog from "./SubstitutionLog";
 import ProactiveAlertSettingsCard from "./ProactiveAlertSettingsCard";
 import { BarcodeScanner, CameraFilePicker } from "./CameraFilePicker";
+import PhotoCountCard from "./PhotoCountCard";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -390,6 +391,7 @@ export default function InventoryTab({
 
       {/* Photo stock intake (use-ai-tools: paid AI action) */}
       {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} locations={locations} onCommitted={load} />}
+      {canManageInventory && <PhotoCountCard candidates={matchCandidates} onCommitted={load} />}
 
       {canUseAiTools && <QualityCheckCard />}
 

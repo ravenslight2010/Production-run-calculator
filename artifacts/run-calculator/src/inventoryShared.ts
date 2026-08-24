@@ -462,6 +462,35 @@ export type PhotoGuess = {
   matchedKey: string | null;
   confidence: number;
 };
+
+export type InventoryCountField<T = string | number | null> = {
+  value: T;
+  confidence: number;
+  evidence: number[];
+  conflict?: boolean;
+};
+export type InventoryCountDraft = {
+  productName: InventoryCountField;
+  brand: InventoryCountField;
+  variant: InventoryCountField;
+  barcode: InventoryCountField;
+  packageSize: InventoryCountField;
+  printedWeight: InventoryCountField<number | null>;
+  unitType: InventoryCountField;
+  casePack: InventoryCountField<number | null>;
+  quantity: InventoryCountField<number | null>;
+  context: InventoryCountField;
+  reviewFlags: string[];
+  matchedKey: string | null;
+};
+export type InventoryObservation = {
+  id: number;
+  status: "draft" | "applied" | "cancelled";
+  photos: Array<{ index: number; mimeType: string }>;
+  draft: InventoryCountDraft;
+  createdAt: string;
+  updatedAt: string;
+};
 export type IdentifyPhotoBody = {
   imageBase64: string;
   mimeType?: string;
@@ -493,6 +522,23 @@ export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
     method: "POST",
     body: JSON.stringify(body),
   });
+
+export const createInventoryObservation = (body: {
+  photos: Array<{ imageBase64: string; mimeType: string }>;
+  candidates: CandidateItem[];
+}) => api<InventoryObservation>("/inventory/count-observations", {
+  method: "POST", body: JSON.stringify(body),
+});
+export const fetchInventoryObservation = (id: number) =>
+  api<InventoryObservation>(`/inventory/count-observations/${id}`);
+export const fetchOpenInventoryObservations = () =>
+  api<InventoryObservation[]>("/inventory/count-observations");
+export const applyInventoryObservation = (id: number, draft: unknown) =>
+  api<{ observation: InventoryObservation; item: InventoryItem }>(
+  `/inventory/count-observations/${id}/apply`, { method: "POST", body: JSON.stringify({ draft }) },
+);
+export const cancelInventoryObservation = (id: number) =>
+  api<InventoryObservation>(`/inventory/count-observations/${id}/cancel`, { method: "POST" });
 
 // ── AI quality/defect photo check (read-only) ────────────────────────────────
 export type QualityProductType = "pizza" | "crust" | "other";

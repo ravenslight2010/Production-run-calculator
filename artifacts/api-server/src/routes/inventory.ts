@@ -9,6 +9,8 @@ import {
   inventoryConsumedRunsTable,
   inventoryLocationsTable,
   inventorySettingsTable,
+  inventoryObservationsTable,
+  inventoryProductReferencesTable,
   qualityChecksTable,
   dailySyncTable,
   type InventoryLot,
@@ -70,6 +72,12 @@ import {
 } from "./wasteInsight";
 import { groundPromptWithMemory, recordFacilityKnowledge } from "./aiMemoryContext";
 import {
+  ApplyCountObservationBody,
+  CountObservationBody,
+  buildCountPrompt,
+  sanitizeCountDraft,
+} from "./countObservation";
+import {
   applyRunConsumption,
   planDrawDown,
   sortLotsForConsumption,
@@ -77,6 +85,17 @@ import {
 } from "./inventoryLogic";
 
 const router: IRouter = Router();
+
+function observationResponse(row: typeof inventoryObservationsTable.$inferSelect) {
+  return {
+    id: row.id,
+    status: row.status,
+    photos: row.photos,
+    draft: row.draft,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
 
 const ConsumeSauceBarrelBody = z.object({
   runId: z.string(),
@@ -503,6 +522,145 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
   });
   broadcast(headerSenderId(req), currentScope());
   res.json(await loadItemResponse(item.id));
+});
+
+// ── Photo count observations ────────────────────────────────────────────────
+// Analysis and review are deliberately separate from restock. A cancelled or
+// abandoned observation has no inventory side effects.
+router.post(
+  "/inventory/count-observations",
+  requireCapability("manage-inventory"),
+  rateLimit({
+    windowMs: PHOTO_RATE_WINDOW_MS,
+    max: PHOTO_RATE_MAX,
+    keyGenerator: (req) => `inv-count:${req.userId ?? req.ip ?? "unknown"}`,
+    store: photoRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const parsed = CountObservationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Attach one to three valid photos." });
+      return;
+    }
+    const { photos, candidates } = parsed.data;
+    const candidateLines = candidates.map((c) =>
+      `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`).join("\n");
+    const prompt = buildCountPrompt(candidateLines);
+    const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+      { type: "text", text: prompt.user },
+      ...photos.map((p) => ({ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.imageBase64}` } })),
+    ];
+    const result = await fetchModelJsonWithRetry({
+      label: "inventory-count vision",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 4096,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: prompt.system },
+            { role: "user", content },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "malformed") {
+        res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
+        return;
+      }
+      const failure = aiCallFailureHttp(result, "Could not analyze these photos.");
+      res.status(failure.status).json({ error: failure.error });
+      return;
+    }
+    const draft = sanitizeCountDraft(result.raw, new Set(candidates.map((c) => c.key)));
+    if (!draft) {
+      res.status(422).json({ error: "The photos did not produce a reviewable count. Try a clearer label photo." });
+      return;
+    }
+    if (new Set(photos.map((p) => p.imageBase64)).size !== photos.length) {
+      draft.reviewFlags = [...new Set([...draft.reviewFlags, "Duplicate photo attached"])];
+    }
+    const [row] = await db.insert(inventoryObservationsTable).values({
+      scope: currentScope(),
+      status: "draft",
+      photos: photos.map((p, index) => ({ index, mimeType: p.mimeType })),
+      draft,
+    }).returning();
+    res.status(201).json(observationResponse(row));
+  },
+);
+
+router.get("/inventory/count-observations/:id", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [row] = await db.select().from(inventoryObservationsTable)
+    .where(and(eq(inventoryObservationsTable.id, id), eq(inventoryObservationsTable.scope, currentScope())));
+  if (!row) { res.status(404).json({ error: "Count observation not found" }); return; }
+  res.json(observationResponse(row));
+});
+
+router.get("/inventory/count-observations", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
+  const rows = await db.select().from(inventoryObservationsTable)
+    .where(and(eq(inventoryObservationsTable.scope, currentScope()), eq(inventoryObservationsTable.status, "draft")))
+    .orderBy(desc(inventoryObservationsTable.updatedAt));
+  res.json(rows.map(observationResponse));
+});
+
+router.post("/inventory/count-observations/:id/cancel", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [row] = await db.update(inventoryObservationsTable)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(eq(inventoryObservationsTable.id, id), eq(inventoryObservationsTable.scope, currentScope()), eq(inventoryObservationsTable.status, "draft")))
+    .returning();
+  if (!row) { res.status(404).json({ error: "Draft not found or already closed" }); return; }
+  res.json(observationResponse(row));
+});
+
+router.post("/inventory/count-observations/:id/apply", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = ApplyCountObservationBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Enter a product name, unit, and positive quantity." }); return; }
+  const d = parsed.data.draft;
+  const [observation] = await db.select().from(inventoryObservationsTable)
+    .where(and(eq(inventoryObservationsTable.id, id), eq(inventoryObservationsTable.scope, currentScope()), eq(inventoryObservationsTable.status, "draft")));
+  if (!observation) { res.status(409).json({ error: "This count draft is no longer open." }); return; }
+  const itemKey = d.matchedKey ?? `${d.category}:${d.name}:${d.unitType}`;
+  const result = await db.transaction(async (tx) => {
+    let [item] = await tx.select().from(inventoryItemsTable)
+      .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
+    if (!item) {
+      [item] = await tx.insert(inventoryItemsTable).values({
+        key: itemKey, category: d.category, name: d.name, unit: d.unitType, scope: currentScope(),
+      }).returning();
+    }
+    const onsite = await ensureOnsiteLocation();
+    const [lot] = await tx.insert(inventoryLotsTable).values({
+      itemId: item.id, scope: currentScope(), locationId: onsite.id, lotNumber: "",
+      qtyReceived: d.quantity, qtyRemaining: d.quantity, receivedDate: todayStr(), expirationDate: null,
+    }).returning();
+    await tx.insert(inventoryLedgerTable).values({
+      itemId: item.id, scope: currentScope(), lotId: lot.id, type: "restock",
+      qtyDelta: d.quantity, note: `Photo count #${id} — manager confirmed`,
+    });
+    const [ref] = await tx.select().from(inventoryProductReferencesTable)
+      .where(and(eq(inventoryProductReferencesTable.itemKey, itemKey), eq(inventoryProductReferencesTable.scope, currentScope())));
+    const refValues = {
+      itemKey, scope: currentScope(), productName: d.name,
+      brand: d.brand || null, variant: d.variant || null, barcode: d.barcode || null,
+      packageSize: d.packageSize || null, printedWeight: d.printedWeight ?? null,
+      unitType: d.unitType, casePack: d.casePack ?? null, confidence: 1, updatedAt: new Date(),
+    };
+    if (ref) await tx.update(inventoryProductReferencesTable).set(refValues).where(eq(inventoryProductReferencesTable.id, ref.id));
+    else await tx.insert(inventoryProductReferencesTable).values(refValues);
+    const [closed] = await tx.update(inventoryObservationsTable)
+      .set({ status: "applied", draft: d, updatedAt: new Date(), appliedAt: new Date() })
+      .where(and(eq(inventoryObservationsTable.id, id), eq(inventoryObservationsTable.status, "draft"))).returning();
+    return { item, closed };
+  });
+  broadcast(headerSenderId(req), currentScope());
+  res.json({ observation: observationResponse(result.closed), item: await loadItemResponse(result.item.id) });
 });
 
 // ── Photo stock intake (AI vision) ───────────────────────────────────────────

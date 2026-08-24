@@ -5,6 +5,7 @@ import {
   doublePrecision,
   integer,
   boolean,
+  jsonb,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -128,9 +129,46 @@ export const inventorySettingsTable = pgTable(
   (t) => [uniqueIndex("inventory_settings_scope_idx").on(t.scope)],
 );
 
+// A manager-reviewed photo count. Photos and AI output are retained only as
+// bounded workflow provenance; no inventory is changed until Apply.
+export const inventoryObservationsTable = pgTable("inventory_observations", {
+  id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
+  status: text("status").notNull().default("draft"), // draft | applied | cancelled
+  photos: jsonb("photos").notNull().default([]),
+  draft: jsonb("draft").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+});
+
+// Confirmed packaging/product facts are distinct from count events. A later
+// weaker photo may suggest changes, but never overwrites these trusted facts.
+export const inventoryProductReferencesTable = pgTable(
+  "inventory_product_references",
+  {
+    id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
+    itemKey: text("item_key").notNull(),
+    productName: text("product_name").notNull(),
+    brand: text("brand"),
+    variant: text("variant"),
+    barcode: text("barcode"),
+    packageSize: text("package_size"),
+    printedWeight: doublePrecision("printed_weight"),
+    unitType: text("unit_type"),
+    casePack: integer("case_pack"),
+    confidence: doublePrecision("confidence").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("inventory_product_refs_item_scope_idx").on(t.itemKey, t.scope)],
+);
+
 export type InventoryItem = typeof inventoryItemsTable.$inferSelect;
 export type InventoryLocation = typeof inventoryLocationsTable.$inferSelect;
 export type InventoryLot = typeof inventoryLotsTable.$inferSelect;
 export type InventoryLedgerEntry = typeof inventoryLedgerTable.$inferSelect;
 export type InventoryConsumedRun = typeof inventoryConsumedRunsTable.$inferSelect;
 export type InventorySettings = typeof inventorySettingsTable.$inferSelect;
+export type InventoryObservation = typeof inventoryObservationsTable.$inferSelect;
+export type InventoryProductReference = typeof inventoryProductReferencesTable.$inferSelect;
