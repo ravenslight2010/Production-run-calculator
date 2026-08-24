@@ -135,14 +135,15 @@ async function promoteCurrentPageUserToManager(page: Page): Promise<void> {
  *
  * Values applied:
  *   casesNeeded=200, cycleSpeed=30, crustsPerCycle=2, pizzasPerCase=6,
- *   casesPerSkid=10, freezerTime=5
+ *   casesPerSkid=10, freezerTime=5, doughballsPerTray=2,
+ *   doughBatchYield=4
  *
  * Derived constants:
  *   ppm = 30 × 2 = 60 pizza/min → casePeriod = 6 pizzas / 60 ppm = 6 s/case
  *   At t=15 min: afterTunnel=10 → expectedRaw = floor(600/6) = 100 cases
  *   At t=20 min: afterTunnel=15 → expectedRaw = floor(900/6) = 150 cases
  *
- * After setting values, DOM assertions confirm all six inputs hold the
+ * After setting values, DOM assertions confirm all eight inputs hold the
  * expected numbers before returning.
  */
 async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
@@ -206,6 +207,8 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
       ["input-pizzasPerCase", "6"],
       ["input-casesPerSkid", requestedCasesPerSkid],
       ["input-freezerTime", "5"],
+      ["input-doughballsPerTray", "2"],
+      ["input-doughBatchYield", "4"],
     ];
     for (const [testId, value] of fields) {
       const el = document.querySelector<HTMLInputElement>(
@@ -253,6 +256,8 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
       pizzasPerCase: val("input-pizzasPerCase"),
       casesPerSkid: val("input-casesPerSkid"),
       freezerTime: val("input-freezerTime"),
+      doughballsPerTray: val("input-doughballsPerTray"),
+      doughBatchYield: val("input-doughBatchYield"),
     };
   });
 
@@ -262,6 +267,8 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
   expect(domValues.pizzasPerCase, "pizzasPerCase not set in DOM").toBe("6");
   expect(domValues.casesPerSkid, "casesPerSkid not set in DOM").toBe(casesPerSkid);
   expect(domValues.freezerTime, "freezerTime not set in DOM").toBe("5");
+  expect(domValues.doughballsPerTray, "doughballsPerTray not set in DOM").toBe("2");
+  expect(domValues.doughBatchYield, "doughBatchYield not set in DOM").toBe("4");
 }
 
 // ── clock / visibility helpers ────────────────────────────────────────────────
@@ -455,6 +462,36 @@ async function readDoughCounters(page: Page): Promise<{
       batches: value("batchesReady"),
     };
   });
+}
+
+/** Seed visible dough inventory through the same form events as an operator. */
+async function seedDoughCounters(
+  page: Page,
+  counters: { trays: number; batches: number },
+): Promise<void> {
+  const result = await page.evaluate(({ trays, batches }) => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    const changed: string[] = [];
+    if (!setter) return changed;
+    for (const [name, value] of [
+      ["traysOnLine", String(trays)],
+      ["batchesReady", String(batches)],
+    ] as const) {
+      const input = document.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+      if (!input) continue;
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      changed.push(name);
+    }
+    return changed;
+  }, counters);
+  expect(result, "dough inventory inputs").toEqual(["traysOnLine", "batchesReady"]);
+  await page.waitForTimeout(500);
+  await expect.poll(() => readDoughCounters(page)).toEqual(counters);
 }
 
 // ── shared setup ──────────────────────────────────────────────────────────────
@@ -683,6 +720,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
       await setMachineTimes(page);
+      // Deterministic populated fixture:
+      //   2 doughballs/tray → tray cadence = 2 s at 60 ppm
+      //   4 doughballs/batch and hopper=2 s → quarter-batch cadence = 1 s
+      //   mixer=2 s → batch production cadence = 2 s
+      // Start with both sources present so every write path is observable.
+      await seedDoughCounters(page, { trays: 3, batches: 1 });
       await page.waitForTimeout(400);
 
       // These are the three visible dough stages plus both corresponding
@@ -696,11 +739,14 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       ]) {
         await expect(page.getByText(label, { exact: true })).toBeVisible();
       }
+      await expect(page.getByText("Mixer finishes +1 in", { exact: true })).toBeVisible();
+      await expect(page.getByText("Hopper finishes +1 in", { exact: true })).toBeVisible();
 
       const beforePause = {
         cases: initialCases,
         dough: await readDoughCounters(page),
       };
+      expect(beforePause.dough).toEqual({ trays: 3, batches: 1 });
 
       const pauseButton = page.getByRole("button", { name: /pause.?run/i }).first();
       await pauseButton.click();
@@ -722,9 +768,43 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const resumeButton = page.getByRole("button", { name: /resume.?run/i }).first();
       await resumeButton.click();
       await page.waitForTimeout(300);
+
+      // Resume re-arms the dough schedules from the resume instant. At +1.1 s
+      // only the quarter-batch drain is due: one write, no tray or mixer
+      // production yet. The ten seconds spent paused must not be replayed.
+      await mockDateNow(page, safeBaseMs + 11_100);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await page.waitForTimeout(500);
+      expect(
+        await readDoughCounters(page),
+        "first resumed boundary should drain one quarter batch only",
+      ).toEqual({ trays: 3, batches: 0.75 });
+
+      // At +2.1 s, one tray production and one tray consumption coincide
+      // (net zero), while mixer production adds one batch and the quarter
+      // drain removes another 0.25. This catches duplicate production and
+      // phantom catch-up writes from the hidden interval.
+      await mockDateNow(page, safeBaseMs + 12_100);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await page.waitForTimeout(500);
+      expect(
+        await readDoughCounters(page),
+        "second resumed boundary should pair tray writes and add one mixer batch",
+      ).toEqual({ trays: 3, batches: 1.5 });
+      // Replaying the same visibility event at the same mocked instant must
+      // not duplicate any of the writes just observed.
+      await simulateWake(page);
+      await page.waitForTimeout(300);
+      expect(await readDoughCounters(page), "duplicate wake writes").toEqual({
+        trays: 3,
+        batches: 1.5,
+      });
+
       // The shared setup uses a five-minute freezer/tunnel window. Advance
       // beyond that window plus one six-second case period; the paused ten
-      // seconds must still not be replayed as production.
+      // seconds must still not be replayed as packaging production.
       await mockDateNow(page, safeBaseMs + 5 * 60_000 + 16_500);
       await simulateScreenOff(page);
       await simulateWake(page);
@@ -735,9 +815,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await readCaseTotal(page),
         "resume should write one case period, not replay paused time",
       ).toBe(beforePause.cases + 1);
-      const afterResume = await readDoughCounters(page);
-      expect(afterResume.trays).toBeLessThanOrEqual(beforePause.dough.trays);
-      expect(afterResume.batches).toBeGreaterThanOrEqual(0);
+      // Dough counters are no longer on the Run tab; the exact boundaries
+      // above prove their writes before this final packaging assertion.
     },
   );
 
