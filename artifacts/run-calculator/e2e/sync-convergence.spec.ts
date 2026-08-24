@@ -409,6 +409,83 @@ test(
 );
 
 test(
+  "@real-mobile-browser queued Target Cases edit survives an Android Chrome process restart",
+  async ({ page }: { page: Page }) => {
+    test.setTimeout(180_000);
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await page.getByTestId("tab-run").click();
+    await page.getByTestId("input-casesNeeded").waitFor({ state: "visible", timeout: 20_000 });
+
+    let blocked = true;
+    let blockedWrites = 0;
+    await page.route("**/api/sync/today**", async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      if (blocked) {
+        blockedWrites += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "android-process-restart sync outage" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.getByTestId("input-casesNeeded").fill("18");
+    await expect.poll(() => blockedWrites, { timeout: 10_000 }).toBe(1);
+    await expect.poll(async () => page.evaluate(() => {
+      const raw = localStorage.getItem("run-calc-day");
+      const day = JSON.parse(raw ?? "{}") as { runs?: Array<{ id?: string }> };
+      const runId = day.runs?.[0]?.id;
+      if (!runId) return null;
+      const values = JSON.parse(localStorage.getItem(`run-calc-run-${runId}`) ?? "{}") as {
+        casesNeeded?: number;
+      };
+      return values.casesNeeded;
+    }), { timeout: 10_000 }).toBe(18);
+
+    // A terminated Android Chrome process cannot preserve the in-memory route
+    // or React state, but it does preserve localStorage. Removing the route
+    // and reopening the page gives this journey the same durable boundary in
+    // CI while allowing the real-device project to run it as well.
+    const context = page.context();
+    await page.unroute("**/api/sync/today**");
+    await page.close();
+    const reopened = await context.newPage();
+    try {
+      let reopenedWriteAttempts = 0;
+      await reopened.route("**/api/sync/today**", async (route) => {
+        if (route.request().method() === "PUT") reopenedWriteAttempts += 1;
+        await route.continue();
+      });
+      await reopened.goto("/", { waitUntil: "domcontentloaded" });
+      await reopened.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+
+      // No manual retry is clicked: boot recovery must replay the retained
+      // payload automatically after the process-restart boundary.
+      await expect.poll(() => reopenedWriteAttempts, { timeout: 20_000 }).toBeGreaterThan(0);
+      await expect.poll(async () => {
+        const server = await getToday(reopened);
+        const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
+        return Object.values(values ?? {})[0]?.casesNeeded;
+      }, { timeout: 20_000 }).toBe(18);
+      await expect(reopened.getByText(
+        "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
+        { exact: true },
+      )).toBeHidden();
+    } finally {
+      await reopened.close();
+    }
+  },
+);
+
+test(
   "exhausted sync failure retains the change for a manual retry",
   async ({ page }: { page: Page }) => {
     const username = uid();
