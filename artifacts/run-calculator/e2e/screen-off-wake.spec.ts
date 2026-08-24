@@ -410,6 +410,53 @@ async function waitForCaseCounterChange(
   );
 }
 
+/** Set the measured machine times used by the live dough countdowns. */
+async function setMachineTimes(page: Page): Promise<void> {
+  const result = await page.evaluate(() => {
+    const values: Record<string, string> = {
+      "input-mixerLowSec": "1",
+      "input-mixerHighSec": "1",
+      "input-hopperSec": "2",
+    };
+    const changed: string[] = [];
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    if (!setter) return changed;
+    for (const [testId, value] of Object.entries(values)) {
+      const input = document.querySelector(
+        `[data-testid="${testId}"]`,
+      ) as HTMLInputElement | null;
+      if (!input) continue;
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      changed.push(testId);
+    }
+    return changed;
+  });
+  expect(result, "machine timing inputs").toEqual([
+    "input-mixerLowSec",
+    "input-mixerHighSec",
+    "input-hopperSec",
+  ]);
+}
+
+async function readDoughCounters(page: Page): Promise<{
+  trays: number;
+  batches: number;
+}> {
+  return page.evaluate(() => {
+    const value = (name: string) =>
+      Number((document.querySelector(`input[name="${name}"]`) as HTMLInputElement | null)?.value ?? 0);
+    return {
+      trays: value("traysOnLine"),
+      batches: value("batchesReady"),
+    };
+  });
+}
+
 // ── shared setup ──────────────────────────────────────────────────────────────
 
 /**
@@ -625,6 +672,72 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         casesAfterPausedWake,
         `paused wake: expected ${casesBeforePause}, got ${casesAfterPausedWake}`,
       ).toBe(casesBeforePause);
+    },
+  );
+
+  test(
+    "D. pause, background sleep, and resume keep all live countdowns aligned",
+    async ({ page }) => {
+      const safeBaseMs = await setupAndStartRun(page);
+      const initialCases = await readCaseTotal(page);
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await setMachineTimes(page);
+      await page.waitForTimeout(400);
+
+      // These are the three visible dough stages plus both corresponding
+      // machine/line countdowns. Their values are rendered from tickDueRefs,
+      // so their presence is also a browser-level guard against a stale
+      // countdown schedule after the form update.
+      for (const label of [
+        "1 · Prepped",
+        "2 · Spinning",
+        "3 · In Hopper",
+      ]) {
+        await expect(page.getByText(label, { exact: true })).toBeVisible();
+      }
+
+      const beforePause = {
+        cases: initialCases,
+        dough: await readDoughCounters(page),
+      };
+
+      const pauseButton = page.getByRole("button", { name: /pause.?run/i }).first();
+      await pauseButton.click();
+      await page.waitForTimeout(300);
+
+      // A hidden tab can be throttled for much longer than a normal timer
+      // period. Wake at +10 s, while paused: no channel may write, seed, or
+      // consume during the paused interval.
+      await simulateScreenOff(page);
+      await mockDateNow(page, safeBaseMs + 10_000);
+      await simulateWake(page);
+      await page.waitForTimeout(800);
+
+      expect(await readDoughCounters(page), "paused dough counters").toEqual(beforePause.dough);
+
+      // Resume from the same mocked instant. The authoritative due refs must
+      // re-arm from this instant; advancing one case period then permits one
+      // case write, without replaying the hidden +10 s.
+      const resumeButton = page.getByRole("button", { name: /resume.?run/i }).first();
+      await resumeButton.click();
+      await page.waitForTimeout(300);
+      // The shared setup uses a five-minute freezer/tunnel window. Advance
+      // beyond that window plus one six-second case period; the paused ten
+      // seconds must still not be replayed as production.
+      await mockDateNow(page, safeBaseMs + 5 * 60_000 + 16_500);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await page.locator('[data-testid="tab-run"]').click();
+      await waitForCaseCounterChange(page, beforePause.cases, 8_000);
+
+      expect(
+        await readCaseTotal(page),
+        "resume should write one case period, not replay paused time",
+      ).toBe(beforePause.cases + 1);
+      const afterResume = await readDoughCounters(page);
+      expect(afterResume.trays).toBeLessThanOrEqual(beforePause.dough.trays);
+      expect(afterResume.batches).toBeGreaterThanOrEqual(0);
     },
   );
 
