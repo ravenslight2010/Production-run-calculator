@@ -420,13 +420,22 @@ test(
 
     let blocked = true;
     let blockedWrites = 0;
+    const blockedTargetCases: number[] = [];
     await page.route("**/api/sync/today**", async (route) => {
-      if (route.request().method() !== "PUT") {
+      const request = route.request();
+      if (request.method() !== "PUT") {
         await route.continue();
         return;
       }
       if (blocked) {
         blockedWrites += 1;
+        const body = request.postDataJSON() as {
+          payload?: {
+            runValues?: Record<string, { casesNeeded?: number }>;
+          };
+        } | null;
+        const casesNeeded = Object.values(body?.payload?.runValues ?? {})[0]?.casesNeeded;
+        if (typeof casesNeeded === "number") blockedTargetCases.push(casesNeeded);
         await route.fulfill({
           status: 503,
           contentType: "application/json",
@@ -449,6 +458,24 @@ test(
       };
       return values.casesNeeded;
     }), { timeout: 10_000 }).toBe(18);
+
+    // Queue a second edit while the first one is still unacknowledged. The
+    // durable retry record must collapse to the newest value, not replay the
+    // stale first edit after the Android process-restart boundary.
+    await page.getByTestId("input-casesNeeded").fill("27");
+    await expect.poll(() => blockedTargetCases.includes(27), { timeout: 10_000 }).toBe(true);
+    await expect.poll(async () => page.evaluate(() => {
+      const raw = localStorage.getItem("run-calc-day");
+      const day = JSON.parse(raw ?? "{}") as { runs?: Array<{ id?: string }> };
+      const runId = day.runs?.[0]?.id;
+      if (!runId) return null;
+      const values = JSON.parse(localStorage.getItem(`run-calc-run-${runId}`) ?? "{}") as {
+        casesNeeded?: number;
+      };
+      return values.casesNeeded;
+    }), { timeout: 10_000 }).toBe(27);
+    expect(blockedTargetCases).toContain(18);
+    expect(blockedWrites).toBeGreaterThan(1);
 
     // A terminated Android Chrome process cannot preserve the in-memory route
     // or React state, but it does preserve localStorage. Removing the route
@@ -474,7 +501,7 @@ test(
         const server = await getToday(reopened);
         const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
         return Object.values(values ?? {})[0]?.casesNeeded;
-      }, { timeout: 20_000 }).toBe(18);
+      }, { timeout: 20_000 }).toBe(27);
       await expect(reopened.getByText(
         "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
         { exact: true },
