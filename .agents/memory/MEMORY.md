@@ -101,6 +101,7 @@
 - [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — every sync write sends epoch= and parses {stale:true} (200 ≠ persisted); guard fails closed once a scope was reset; clamp needs small future-skew allowance.
 - [Sync integration reset isolation](sync-integration-reset-isolation.md) — whole-scope reset endpoints must stay out of shared multi-device fixtures; use the dedicated reset suite to avoid cross-test row deletion.
 - [Press-done model](press-done-model.md) — web live surfaces count cased+freezer as made: pressCasesLeft drives time-left, 2-stage switchover alerts, dough auto-stop, next-run pre-seed; planning math unchanged; carry-over removed.
+- [Cases-on-line occupancy](cases-line-occupancy.md) — physical occupancy includes the upstream two-wide segment; keep it separate from freezer WIP, throughput timing, and press-completion gates.
 - [Today-schedule edits via live path](today-schedule-edit-live-path.md) — editing TODAY in the schedule editor must write through the live day-state path (stamps+tombstones), never the raw scheduled PUT, or sync/Start Run reverts the edits.
 - [Notification prefs](notification-prefs.md) — per-user alert toggles: missing key = ON, server MERGES partial maps, key lockstep guarded by test; alert effects latch even while suppressed.
 - [Learned ingredient batch weights](ingredient-batch-weights.md) — typed batch lbs follow the ingredient (server ci-store); learn only UI-visible fields, serialize saves, sauce branch checks rows lbs>0 not array truthiness.

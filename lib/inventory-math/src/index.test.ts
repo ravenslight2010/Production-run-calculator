@@ -12,6 +12,7 @@ import {
   computeReorderList,
   computeUseFirstList,
   computeCasesInFreezer,
+  computeCasesOnLine,
   type IngredientSubstitution,
   type LocationStock,
   type RecipeRow,
@@ -843,5 +844,65 @@ describe("computeCasesInFreezer", () => {
       ],
     };
     expect(computeCasesInFreezer({ ...args, now: endedAt })).toBe(65);
+  });
+});
+
+describe("computeCasesOnLine", () => {
+  const MIN = 60000;
+  const base = {
+    startedAt: 1_000_000,
+    now: 1_000_000,
+    ppm: 36.8,
+    pizzasPerCase: 12,
+    freezerTimeMin: 15,
+  };
+
+  it("adds the two-wide press-to-oven capacity without changing adjusted ppm", () => {
+    // 36.8 × (15 + 1.25) / 12 = 49.766..., displayed as 49 whole cases.
+    expect(computeCasesOnLine({ ...base, now: base.startedAt + 15 * MIN })).toBe(49);
+    expect(base.ppm).toBe(36.8);
+  });
+
+  it("keeps adjusted production timing separate from occupancy capacity", () => {
+    const stats = computeSummaryStats(
+      baseVals({
+        casesNeeded: 50,
+        pizzasPerCase: 12,
+        crustsPerCycle: 1,
+        cycleSpeed: 40,
+        speedAdjustment: 0.92,
+      }) as never,
+      PEP,
+    );
+    expect(stats.estimatedTimeSec).toBeCloseTo((50 * 12 * 60) / 36.8, 8);
+    expect(computeCasesOnLine({ ...base, now: base.startedAt + 15 * MIN })).toBe(49);
+  });
+
+  it("ramps continuously instead of jumping when the parallel segment is added", () => {
+    expect(computeCasesOnLine({ ...base, now: base.startedAt + 30 * 1000 })).toBe(3);
+    expect(computeCasesOnLine({ ...base, now: base.startedAt + 75 * 1000 })).toBe(7);
+    expect(computeCasesOnLine({ ...base, now: base.startedAt + 2 * MIN })).toBe(9);
+  });
+
+  it("freezes occupancy while paused", () => {
+    const pausedAt = base.startedAt + 5 * MIN;
+    expect(computeCasesOnLine({
+      ...base,
+      pausedAt,
+      now: base.startedAt + 60 * MIN,
+    })).toBe(Math.floor((base.ppm * (5 + 1.25)) / base.pizzasPerCase));
+  });
+
+  it("drains the complete line after end without changing freezer WIP semantics", () => {
+    const endedAt = base.startedAt + 60 * MIN;
+    expect(computeCasesOnLine({ ...base, endedAt, now: endedAt })).toBe(49);
+    expect(computeCasesOnLine({ ...base, endedAt, now: endedAt + 15 * MIN })).toBe(3);
+    expect(computeCasesOnLine({ ...base, endedAt, now: endedAt + 16.25 * MIN })).toBe(0);
+  });
+
+  it("uses the actual ramp level when a short run ends", () => {
+    const endedAt = base.startedAt + 2 * MIN;
+    expect(computeCasesOnLine({ ...base, endedAt, now: endedAt })).toBe(9);
+    expect(computeCasesOnLine({ ...base, endedAt, now: endedAt + 2 * MIN })).toBe(3);
   });
 });

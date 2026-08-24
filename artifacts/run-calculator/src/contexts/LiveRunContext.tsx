@@ -15,7 +15,7 @@ import {
   DEFAULT_VALUES,
   DEFAULT_PEP_TYPES,
 } from "../types";
-import { computeCasesInFreezer } from "@workspace/inventory-math";
+import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
 import { useClock } from "../hooks/useClock";
 import { useNotifications } from "../hooks/useNotifications";
 import { useAutoTrack, suggestedDoughStaging } from "../hooks/useAutoTrack";
@@ -218,8 +218,16 @@ export function LiveRunProvider({
     const traysPerBatch = effectiveDoughBatchYield / perTray;
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
-    const freezerTime = liveFreezerMin;
-    const casesOnLine = ppm > 0 ? Math.floor((ppm * freezerTime) / v.pizzasPerCase) : 0;
+    const casesOnLine = computeCasesOnLine({
+      startedAt: currentRun?.startedAt,
+      endedAt: currentRun?.endedAt,
+      pausedAt: currentRun?.pausedAt,
+      stoppages: currentRun?.stoppages,
+      now: nowTime.getTime(),
+      ppm,
+      pizzasPerCase: v.pizzasPerCase,
+      freezerTimeMin: Number(ve.freezerTime),
+    });
 
     const casesInFreezer = computeCasesInFreezer({
       startedAt: currentRun?.startedAt,

@@ -927,6 +927,66 @@ export interface FreezerWipInput {
   freezerTimeMin: number;
 }
 
+/**
+ * Live cases occupying the complete production line.
+ *
+ * The configured freezer/line window represents the single-file portion from
+ * frontline through oven end. Product also occupies a measured 1.25-minute
+ * two-wide segment between press start and oven end. That upstream segment
+ * increases physical capacity, but must not change the rate or any freezer
+ * completion calculation.
+ *
+ * The line is modeled as one FIFO occupancy window for lifecycle purposes:
+ * while running it fills over the total transit time, pauses freeze it at the
+ * pause point, and after end it drains at the same production rate. The
+ * two-wide segment is therefore an occupancy-only addition, not extra output.
+ */
+export const TWO_WIDE_PRESS_TO_OVEN_MIN = 1.25;
+
+export interface LineOccupancyInput extends FreezerWipInput {
+  /** Optional override for the measured two-wide press-to-oven segment. */
+  twoWidePressToOvenMin?: number;
+}
+
+export function computeCasesOnLine(input: LineOccupancyInput): number {
+  const {
+    startedAt,
+    endedAt,
+    pausedAt,
+    now,
+    ppm,
+    pizzasPerCase,
+    freezerTimeMin,
+    twoWidePressToOvenMin = TWO_WIDE_PRESS_TO_OVEN_MIN,
+  } = input;
+  const parallelMin = Number(twoWidePressToOvenMin);
+  const configuredMin = Number(freezerTimeMin);
+  const twoWideMin = Number.isFinite(parallelMin) ? Math.max(0, parallelMin) : 0;
+  if (!startedAt || ppm <= 0 || pizzasPerCase <= 0 || configuredMin + twoWideMin <= 0) return 0;
+
+  // The two physical segments fill in parallel. This deliberately adds their
+  // occupancies rather than replacing the configured window with a longer
+  // timing window: the configured time still describes the existing line.
+  const occupancyMinutesAt = (ref: number): number => {
+    const elapsed = Math.max(0, (ref - startedAt) / 60000);
+    return Math.min(elapsed, configuredMin) + Math.min(elapsed, twoWideMin);
+  };
+
+  if (!endedAt) {
+    return Math.floor((ppm * occupancyMinutesAt(pausedAt ?? now)) / pizzasPerCase);
+  }
+
+  // As in computeCasesInFreezer, closed pauses have already shifted
+  // startedAt. Only a pause still open at end needs subtraction.
+  const openPauseMs = (input.stoppages ?? [])
+    .filter(s => s.type === "pause" && s.startedAt < endedAt && (s.endedAt == null || s.endedAt >= endedAt))
+    .reduce((acc, s) => acc + (endedAt - s.startedAt), 0);
+  const atEndMin = occupancyMinutesAt(endedAt - openPauseMs);
+  const sinceEndMin = Math.max(0, (now - endedAt) / 60000);
+  const remainMin = Math.max(0, atEndMin - sinceEndMin);
+  return Math.floor((ppm * remainMin) / pizzasPerCase);
+}
+
 export function computeCasesInFreezer(input: FreezerWipInput): number {
   const { startedAt, endedAt, pausedAt, now, ppm, pizzasPerCase, freezerTimeMin } = input;
   if (!startedAt || ppm <= 0 || pizzasPerCase <= 0 || freezerTimeMin <= 0) return 0;
