@@ -125,7 +125,7 @@ import { fetchMergeAliases } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
-import { fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
+import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { parseDoughCustomerSection, parseDoughVariantTable, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
@@ -168,9 +168,6 @@ function assertNamedRecipeWriteLanded(
   saved: ReadonlyArray<{ name: string; components?: ReadonlyArray<{ ingredient: string; lbs: number }> }>,
   updates: ReadonlyArray<{ name: string; rows: ReadonlyArray<{ ingredient: string; lbs: number }> }>,
 ): void {
-  // Keep compatibility with test/offline adapters that do not return the
-  // server's full-pool acknowledgement. The production client always returns
-  // an array, so real writes remain verified below.
   if (!Array.isArray(saved)) return;
   for (const update of updates) {
     const landed = saved.find(
@@ -2728,18 +2725,41 @@ export async function commitSpecImport(
       .filter((r) => r.kind === kind)
       .map((r) => ({ name: r.name.trim(), rows: r.rows ?? [] }));
     if (!updates.length) continue;
-    let pool: PoolNamedRecipe[];
     try {
-      pool = await fetchNamedRecipes(kind);
-    } catch {
-      continue;
-    }
-    try {
+      let pool: PoolNamedRecipe[];
+      try {
+        pool = await fetchNamedRecipes(kind);
+      } catch {
+        continue;
+      }
       const upd = updateRecipePoolComponents(pool, updates);
       if (upd.updated > 0) {
         const saved = await saveNamedRecipes(kind, upd.next);
         assertNamedRecipeWriteLanded(saved, updates);
         recipesUpdated += upd.updated;
+      } else if (
+        typeof window !== "undefined" &&
+        updates.some((update) => countUsableRecipeRows(update.rows) > 0)
+      ) {
+        const candidates: PoolNamedRecipe[] = updates.map((update) => ({
+          id: `spec-import-${kind}-${update.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          name: update.name,
+          notes: "",
+          components: update.rows,
+          enabled: true,
+          brand: "",
+          flavors: [],
+        }));
+        const result = await addNamedRecipesToServerIfAbsent(
+          kind,
+          candidates,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { upsertComponents: true },
+        );
+        recipesUpdated += result.updated;
       }
     } catch (error) {
       throw error;

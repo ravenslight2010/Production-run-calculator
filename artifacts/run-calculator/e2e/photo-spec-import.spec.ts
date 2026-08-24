@@ -13,11 +13,15 @@ const PASSWORD = "PhotoSpecImport123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
 
-const RAW_BRAND = "Photo Import Bakery";
-const RAW_FLAVOR = "Three Cheese";
-const EDITED_BRAND = "Photo Import Bakery Reviewed";
-const RAW_RECIPE = "Photo Import Dough";
-const EDITED_RECIPE = "Photo Import Dough Reviewed";
+// Keep each browser invocation isolated from master data left by an earlier
+// local run. Both tests share this fixture so the cancel and apply journeys
+// exercise the same parser output without colliding with prior runs.
+const FIXTURE_SUFFIX = uniqueTestId("fixture");
+const RAW_BRAND = `Photo Import Bakery ${FIXTURE_SUFFIX}`;
+const RAW_FLAVOR = `Three Cheese ${FIXTURE_SUFFIX}`;
+const EDITED_BRAND = `Photo Import Bakery Reviewed ${FIXTURE_SUFFIX}`;
+const RAW_RECIPE = `ZZZ${FIXTURE_SUFFIX}Recipe`;
+const EDITED_RECIPE = `ZZZ${FIXTURE_SUFFIX}RecipeReviewed`;
 
 // A tiny valid PNG is enough to exercise browser image preparation before the
 // intercepted vision request. The source files get distinct names so thumbnail
@@ -170,7 +174,7 @@ test("keeps photographed pages editable and canceling review leaves master data 
         // Keep the deterministic downstream workbook in one grid/chunk. The
         // photo count is exercised by this request; chunk fan-out and pacing
         // belong to the workbook-import tests.
-        workbookText: "Photo Import Bakery\tThree Cheese\tPhoto Import Dough",
+        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
         generatedAt: Date.now(),
         note: "Two photographed pages transcribed for review.",
       }),
@@ -269,4 +273,173 @@ test("keeps photographed pages editable and canceling review leaves master data 
   expect(transcriptionImageCount).toBe(2);
   expect(structuredParseCount).toBeGreaterThanOrEqual(1);
   await expect.poll(() => masterDataSnapshot(page)).toEqual(before);
+});
+
+test("applies photographed review edits to the authenticated profile and recipe pools", async ({
+  page,
+}) => {
+  const username = uniqueTestId("e2e_photo_spec_apply");
+  testUsernames.add(username);
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await signIn(page, username);
+
+  let imageRequestCount = 0;
+  let transcriptionImageCount = 0;
+  let structuredParseCount = 0;
+  let masterDataClientId = "";
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      (request.url().endsWith("/api/brand-profiles") ||
+        request.url().endsWith("/api/dough-recipes"))
+    ) {
+      masterDataClientId = request.headers()["x-client-id"] ?? masterDataClientId;
+    }
+  });
+  await page.route("**/api/ai/parse-spec-images", async (route) => {
+    imageRequestCount += 1;
+    const body = route.request().postDataJSON() as {
+      images?: Array<{ imageBase64?: string; mimeType?: string }>;
+    };
+    transcriptionImageCount = body.images?.length ?? 0;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_RECIPE}`,
+        generatedAt: Date.now(),
+        note: "Two photographed pages transcribed for review.",
+      }),
+    });
+  });
+  await page.route("**/api/ai/parse-spec-sheet", async (route) => {
+    structuredParseCount += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        profiles: [
+          {
+            brand: RAW_BRAND,
+            flavor: RAW_FLAVOR,
+            dieType: "12 inch",
+            pizzasPerCase: 12,
+            applicators: [],
+            pepperonis: [],
+          },
+        ],
+        recipes: [
+          {
+            kind: "dough",
+            name: RAW_RECIPE,
+            rows: [{ ingredient: "Flour", lbs: 50 }],
+          },
+        ],
+        generatedAt: Date.now(),
+      }),
+    });
+  });
+  await page.route("**/api/ai/match-import", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        brandMatches: [],
+        flavorMatches: [],
+        ingredientMatches: [],
+        appTypeMatches: [],
+        pepTypeMatches: [],
+        generatedAt: Date.now(),
+      }),
+    });
+  });
+
+  await openPhotoImport(page);
+  const photoImport = page.getByTestId("spec-photo-import");
+  const uploadInput = photoImport.locator('input[type="file"]').last();
+  await uploadInput.setInputFiles([
+    { name: `${FIXTURE_SUFFIX}-apply-page-one.png`, mimeType: "image/png", buffer: PNG },
+    { name: `${FIXTURE_SUFFIX}-apply-page-two.png`, mimeType: "image/png", buffer: PNG },
+  ]);
+  await expect(photoImport.getByRole("img", { name: "Selected spec page 1" })).toBeVisible();
+  await expect(photoImport.getByRole("img", { name: "Selected spec page 2" })).toBeVisible();
+  await photoImport.getByRole("button", { name: "Read 2 photos", exact: true }).click();
+
+  const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
+  await expect(review).toContainText("Step 1 of 2 — products");
+  await review.getByLabel(`Brand for ${RAW_BRAND} ${RAW_FLAVOR}`).fill(EDITED_BRAND);
+  await review.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(review).toContainText(`${EDITED_BRAND} — ${RAW_FLAVOR}`);
+  await review.getByLabel(`Name for recipe ${RAW_RECIPE}`).fill(EDITED_RECIPE);
+
+  await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
+  // The commit path recomputes the authoritative diff. If another master-data
+  // refresh changes that diff while the dialog is open, the safe behavior is to
+  // reopen step 1 and require the manager to review it again rather than apply
+  // stale decisions. Complete that deliberate re-confirmation when exercised.
+  await expect.poll(async () => {
+    if (!await review.isVisible().catch(() => false)) return "hidden";
+    return (await review.textContent()) ?? "";
+  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
+  if (
+    await review.isVisible().catch(() => false) &&
+    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
+  ) {
+    await review.getByLabel(`Brand for ${RAW_BRAND} ${RAW_FLAVOR}`).fill(EDITED_BRAND);
+    await review.getByRole("button", { name: "Next", exact: true }).click();
+    await review.getByLabel(`Name for recipe ${RAW_RECIPE}`).fill(EDITED_RECIPE);
+    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
+    if (await destructiveConfirmation.isVisible().catch(() => false)) {
+      await destructiveConfirmation.check();
+    }
+    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
+  }
+  await expect(review).toBeHidden({ timeout: 20_000 });
+
+  expect(imageRequestCount).toBe(1);
+  expect(transcriptionImageCount).toBe(2);
+  expect(structuredParseCount).toBeGreaterThanOrEqual(1);
+
+  await expect.poll(async () => {
+    const response = await page.evaluate(async ({ clientId }) => {
+      const headers = clientId ? { "x-client-id": clientId } : undefined;
+      const [profilesResponse, recipesResponse] = await Promise.all([
+        fetch("/api/brand-profiles", { headers }),
+        fetch("/api/dough-recipes", { headers }),
+      ]);
+      if (!profilesResponse.ok || !recipesResponse.ok) {
+        throw new Error(
+          `master-data endpoints returned ${profilesResponse.status}/${recipesResponse.status}`,
+        );
+      }
+      return {
+        profiles: await profilesResponse.json() as {
+          items?: Array<{ brand?: string; flavor?: string }>;
+        },
+        recipes: await recipesResponse.json() as {
+          items?: Array<{ name?: string }>;
+        },
+      };
+    }, { clientId: masterDataClientId });
+    return {
+      profile: response.profiles.items
+        ?.filter(
+          (item) =>
+            item.brand?.toLowerCase() === EDITED_BRAND.toLowerCase() &&
+            item.flavor?.toLowerCase() === RAW_FLAVOR.toLowerCase(),
+        )
+        .map((item) => ({ brand: item.brand, flavor: item.flavor }))[0],
+      recipe: response.recipes.items
+        ?.filter(
+          (item) => item.name?.toLowerCase() === EDITED_RECIPE.toLowerCase(),
+        )
+        .map((item) => ({ name: item.name }))[0],
+    };
+  }, { timeout: 20_000 }).toEqual({
+    profile: {
+      brand: EDITED_BRAND.toLowerCase(),
+      flavor: RAW_FLAVOR.toLowerCase(),
+    },
+    recipe: { name: EDITED_RECIPE },
+  });
 });
