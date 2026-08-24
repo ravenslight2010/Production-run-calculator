@@ -16226,7 +16226,10 @@ export default function Home() {
                                             <MixAlreadyMadeInput
                                               mix={liveMix}
                                               saveMixes={saveMixes}
-                                              onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], saved)}
+                                              onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], (current: typeof mixes | undefined) => {
+                                                const updates = new Map(saved.map((item) => [item.id, item]));
+                                                return current ? current.map((item) => updates.get(item.id) ?? item) : saved;
+                                              })}
                                             />
                                           ) : null;
                                         })()}
@@ -16338,7 +16341,14 @@ export default function Home() {
                                       {(() => {
                                         const liveMix = mixes.find((mx) => mx.id === m.mixId);
                                         return liveMix ? (
-                                          <MixAlreadyMadeInput mix={liveMix} saveMixes={saveMixes} onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], saved)} />
+                                          <MixAlreadyMadeInput
+                                            mix={liveMix}
+                                            saveMixes={saveMixes}
+                                            onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], (current: typeof mixes | undefined) => {
+                                              const updates = new Map(saved.map((item) => [item.id, item]));
+                                              return current ? current.map((item) => updates.get(item.id) ?? item) : saved;
+                                            })}
+                                          />
                                         ) : null;
                                       })()}
                                       <PrepMixMissingAmountsWarning entry={m} />

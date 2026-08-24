@@ -33,8 +33,11 @@ export function MixAlreadyMadeInput({ mix, onSaved, saveMixes }: Props) {
         onBlur={async () => {
           if (val === mix.amountAlreadyMade) return;
           try {
-            const saved = await saveMixes([{ ...mix, amountAlreadyMade: val }]);
-            onSaved(saved);
+            const nextMix = { ...mix, amountAlreadyMade: val };
+            // Update the mounted plan immediately; the network round-trip
+            // should not make the warehouse badge lag behind the input.
+            onSaved([nextMix]);
+            await saveMixes([nextMix]);
           } catch {
             // Keep the local value so the manager can retry without retyping.
             toast({

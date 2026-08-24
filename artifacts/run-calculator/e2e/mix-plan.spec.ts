@@ -87,6 +87,25 @@ async function signUpAndDismissOnboarding(
     .catch(() => {});
 
   await page.waitForTimeout(300);
+
+  // A newly-created account can have the initial run only in React state until
+  // the first form interaction. Direct-fixture tests need a durable local
+  // baseline before they mutate run-calc-day and reload.
+  await page.evaluate((user) => {
+    if (localStorage.getItem("run-calc-day")) return;
+    const runId = `e2e-bootstrap-run-${user}`;
+    localStorage.setItem("run-calc-day", JSON.stringify({
+      runs: [{ id: runId, brand: "", flavor: "", seeded: false }],
+      currentIndex: 0,
+      date: new Date().toISOString().slice(0, 10),
+      resetAt: Date.now() + 60_000,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+      prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
+    }));
+    localStorage.setItem(`run-calc-run-${runId}`, JSON.stringify({}));
+  }, username);
 }
 
 async function goToMixes(page: Page): Promise<void> {
@@ -156,6 +175,45 @@ async function seedLiveRunBeforeAppLoad(
   }, opts);
 }
 
+/**
+ * Direct localStorage fixture edits happen after the app has already written
+ * the authenticated user's blank baseline to the shared day row. Stamp those
+ * edits before reloading so sync LWW keeps the fixture instead of restoring
+ * the blank remote run.
+ */
+async function stampLocalFixtureForReload(page: Page): Promise<void> {
+  const fixture = await page.evaluate(() => {
+    const keys = Object.keys(localStorage).filter((key) =>
+      key === "run-calc-day" ||
+      key === "run-calc-runvalues-updated" ||
+      key.startsWith("run-calc-run-"),
+    );
+    return Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+  });
+  await page.addInitScript((saved) => {
+    // Seed before React/auth/sync boot. Startup may reconcile and clear an
+    // authenticated blank baseline before a normal evaluate() can win.
+    const now = Date.now() + 60_000;
+    try {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value !== null) localStorage.setItem(key, value);
+      }
+      const rawDay = localStorage.getItem("run-calc-day");
+      const day = rawDay
+        ? JSON.parse(rawDay) as { runs?: Array<{ id: string; metaUpdatedAt?: number }> }
+        : {};
+      if (Array.isArray(day.runs)) {
+        day.runs = day.runs.map((run) => ({ ...run, metaUpdatedAt: now }));
+        day.resetAt = now;
+        localStorage.setItem("run-calc-day", JSON.stringify(day));
+        const updated = JSON.parse(localStorage.getItem("run-calc-runvalues-updated") ?? "{}") as Record<string, number>;
+        for (const run of day.runs) updated[run.id] = now;
+        localStorage.setItem("run-calc-runvalues-updated", JSON.stringify(updated));
+      }
+    } catch {}
+  }, fixture);
+}
+
 async function dbCreateMix(
   db: Client,
   opts: {
@@ -212,6 +270,15 @@ function todayStr(): string {
 
 let db: Client;
 
+async function makeTestUserManager(username: string): Promise<void> {
+  await db.query(
+    `UPDATE user_roles
+        SET role = 'manager', updated_at = NOW()
+      WHERE user_id = (SELECT id FROM users WHERE username = $1)`,
+    [username],
+  );
+}
+
 test.beforeAll(async () => {
   requireIsolatedTestDatabase("Mix Plan E2E");
   db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -220,6 +287,16 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await db.end();
+});
+
+test.beforeEach(async () => {
+  // Each browser test signs up a fresh user, but today's live day-state is
+  // factory-scoped and is written back by the app during startup and edits.
+  // Clearing it per test prevents a previous test's runs (including ended
+  // runs) from changing which products qualify for the next test's Mix Plan.
+  // Future scheduled rows are deliberately left alone; tests that create one
+  // snapshot and restore their own date-scoped fixture.
+  await db.query("DELETE FROM daily_sync WHERE date = $1", [todayStr()]);
 });
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -730,6 +807,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand1, brand2, ingredient, oz1: OZ1, oz2: OZ2, cases1: CASES1, cases2: CASES2, ppc: PPC },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -840,6 +918,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -925,6 +1004,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -1016,6 +1096,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -1159,6 +1240,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand1, brand2, ingredient, oz1: OZ1, oz2: OZ2, cases1: CASES1, cases2: CASES2, ppc: PPC },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -1679,6 +1761,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -1782,6 +1865,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -1885,6 +1969,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -1968,6 +2053,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -2091,6 +2177,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand1, brand2, ingredient, oz1: OZ1, oz2: OZ2, cases1: CASES1, cases2: CASES2, ppc: PPC },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
