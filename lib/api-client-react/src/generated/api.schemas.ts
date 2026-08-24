@@ -271,6 +271,27 @@ export interface IdentifyPhotoInput {
   candidates?: PhotoCandidate[];
 }
 
+export type ParseSpecImagesInputImagesItem = {
+  imageBase64: string;
+  mimeType?: string;
+};
+
+export interface ParseSpecImagesInput {
+  /**
+     * JPEG/PNG/WebP page images, sent as base64 without a data URI prefix
+     * @minItems 1
+     * @maxItems 10
+     */
+  images: ParseSpecImagesInputImagesItem[];
+}
+
+export interface ParseSpecImagesResult {
+  /** Bounded workbook-style transcription suitable for the existing spec parser */
+  workbookText: string;
+  generatedAt: number;
+  note?: string;
+}
+
 export type PhotoGuessCategory = typeof PhotoGuessCategory[keyof typeof PhotoGuessCategory];
 
 

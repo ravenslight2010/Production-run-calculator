@@ -125,6 +125,8 @@ import type {
   OperationalReportInput,
   OptimizeInput,
   OptimizeResult,
+  ParseSpecImagesInput,
+  ParseSpecImagesResult,
   ParseSpecSheetInput,
   ParseSpecSheetResult,
   PasswordResetRequest,
@@ -2635,6 +2637,78 @@ export const useProductionSheetPhoto = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getProductionSheetPhotoMutationOptions(options));
+    }
+
+export const getParseSpecImagesUrl = () => {
+
+
+
+
+  return `/api/ai/parse-spec-images`
+}
+
+/**
+ * Transcribes one or more photographed spec-sheet or recipe pages into bounded workbook-style text. The result is advisory and must be sent through the existing spec import review before anything is changed.
+ * @summary Read photographed spec sheets into workbook text (AI vision); read-only
+ */
+export const parseSpecImages = async (parseSpecImagesInput: ParseSpecImagesInput, options?: RequestInit): Promise<ParseSpecImagesResult> => {
+
+  return customFetch<ParseSpecImagesResult>(getParseSpecImagesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      parseSpecImagesInput,)
+  }
+);}
+
+
+
+
+export const getParseSpecImagesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof parseSpecImages>>, TError,{data: BodyType<ParseSpecImagesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof parseSpecImages>>, TError,{data: BodyType<ParseSpecImagesInput>}, TContext> => {
+
+const mutationKey = ['parseSpecImages'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof parseSpecImages>>, {data: BodyType<ParseSpecImagesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  parseSpecImages(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ParseSpecImagesMutationResult = NonNullable<Awaited<ReturnType<typeof parseSpecImages>>>
+    export type ParseSpecImagesMutationBody = BodyType<ParseSpecImagesInput>
+    export type ParseSpecImagesMutationError = ErrorType<void>
+
+    /**
+ * @summary Read photographed spec sheets into workbook text (AI vision); read-only
+ */
+export const useParseSpecImages = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof parseSpecImages>>, TError,{data: BodyType<ParseSpecImagesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof parseSpecImages>>,
+        TError,
+        {data: BodyType<ParseSpecImagesInput>},
+        TContext
+      > => {
+      return useMutation(getParseSpecImagesMutationOptions(options));
     }
 
 export const getVerifyLabelPhotoUrl = () => {

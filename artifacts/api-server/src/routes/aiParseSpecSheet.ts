@@ -1,4 +1,4 @@
-import { AiParseSpecSheetBody } from "@workspace/api-zod";
+import { ParseSpecImagesBody as AiParseSpecImagesSchema, AiParseSpecSheetBody } from "@workspace/api-zod";
 import {
   dropConflictingSpecAliases,
   sanitizeParsedSpecImport,
@@ -12,8 +12,30 @@ import * as z from "zod";
 export const MAX_WORKBOOK_CHARS = 60_000;
 export const MAX_KNOWN_LIST = 4000;
 export const MAX_ALIASES = 4000;
+export const MAX_SPEC_IMAGE_BASE64_CHARS = 7_000_000;
+export const MAX_SPEC_IMAGES = 10;
 
 export type ParseSpecSheetInput = z.infer<typeof AiParseSpecSheetBody>;
+export type ParseSpecImagesInput = z.infer<typeof AiParseSpecImagesSchema>;
+
+export type ParseSpecImagesValidationResult =
+  | { ok: true; data: ParseSpecImagesInput }
+  | { ok: false; status: number; error: string };
+
+export function validateParseSpecImagesBody(body: unknown): ParseSpecImagesValidationResult {
+  const parsed = AiParseSpecImagesSchema.safeParse(body);
+  if (!parsed.success) return { ok: false, status: 400, error: parsed.error.message };
+  if (parsed.data.images.length > MAX_SPEC_IMAGES) {
+    return { ok: false, status: 400, error: `Too many images (max ${MAX_SPEC_IMAGES})` };
+  }
+  if (parsed.data.images.some((image) => image.imageBase64.length < 16)) {
+    return { ok: false, status: 400, error: "Each image must contain image data" };
+  }
+  if (parsed.data.images.some((image) => image.imageBase64.length > MAX_SPEC_IMAGE_BASE64_CHARS)) {
+    return { ok: false, status: 413, error: "One of the images is too large" };
+  }
+  return { ok: true, data: parsed.data };
+}
 
 export type ParseSpecSheetValidationResult =
   | { ok: true; data: ParseSpecSheetInput }

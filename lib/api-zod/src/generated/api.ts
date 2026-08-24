@@ -681,6 +681,28 @@ export const ProductionSheetPhotoResponse = zod.object({
 
 
 /**
+ * Transcribes one or more photographed spec-sheet or recipe pages into bounded workbook-style text. The result is advisory and must be sent through the existing spec import review before anything is changed.
+ * @summary Read photographed spec sheets into workbook text (AI vision); read-only
+ */
+export const parseSpecImagesBodyImagesMax = 10;
+
+
+
+export const ParseSpecImagesBody = zod.object({
+  "images": zod.array(zod.object({
+  "imageBase64": zod.string(),
+  "mimeType": zod.string().optional()
+})).min(1).max(parseSpecImagesBodyImagesMax).describe('JPEG\/PNG\/WebP page images, sent as base64 without a data URI prefix')
+})
+
+export const ParseSpecImagesResponse = zod.object({
+  "workbookText": zod.string().describe('Bounded workbook-style transcription suitable for the existing spec parser'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional()
+})
+
+
+/**
  * Looks at a photo of a finished-product label or pallet placard, reads the visible fields, and compares them against the expected values the client provides (brand, flavor, die size, date, lot code, case count). Returns a per-field match/mismatch breakdown plus an overall verdict. Read-only — never writes anything; a person reviews the result and decides what to do.
  * @summary Verify a finished-product label or pallet placard against expected values (AI vision); read-only
  */

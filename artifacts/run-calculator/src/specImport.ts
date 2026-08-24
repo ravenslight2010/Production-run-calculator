@@ -1410,7 +1410,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "32";
+export const SPEC_PARSE_VERSION = "33";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1910,6 +1910,25 @@ export async function prepareSpecImport(
     ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
     ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
   };
+}
+
+/**
+ * Adapter for photographed pages. The vision endpoint deliberately returns
+ * workbook-style text rather than touching import state; wrapping it in one
+ * in-memory sheet lets the established parser, canonicalization, diff, and
+ * review gate handle photos exactly like an Excel import.
+ */
+export async function prepareSpecImportFromText(
+  workbookText: string,
+  name?: string,
+  signal?: AbortSignal,
+): Promise<SpecImportPrepared> {
+  const rows = workbookText.split(/\r?\n/).map((line) => line.split("\t"));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, "Photographed spec sheets");
+  const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  return prepareSpecImport(bytes, name, signal);
 }
 
 /** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */

@@ -759,6 +759,37 @@ paths:
         "502":
           description: Vision provider error
 
+  /ai/parse-spec-images:
+    post:
+      operationId: parseSpecImages
+      tags: [ai]
+      summary: Read photographed spec sheets into workbook text (AI vision); read-only
+      description: >-
+        Transcribes one or more photographed spec-sheet or recipe pages into
+        bounded workbook-style text. The result is advisory and must be sent
+        through the existing spec import review before anything is changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParseSpecImagesInput"
+      responses:
+        "200":
+          description: Transcribed text for the existing spec parser and review flow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseSpecImagesResult"
+        "400":
+          description: Invalid input
+        "413":
+          description: Image batch too large
+        "429":
+          description: Rate limited
+        "502":
+          description: Vision provider error
+
   /inventory/label-verify:
     post:
       operationId: verifyLabelPhoto
@@ -4626,6 +4657,40 @@ components:
           description: Known inventory + production items to match against
           items:
             $ref: "#/components/schemas/PhotoCandidate"
+
+    ParseSpecImagesInput:
+      type: object
+      required:
+        - images
+      properties:
+        images:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: JPEG/PNG/WebP page images, sent as base64 without a data URI prefix
+          items:
+            type: object
+            required:
+              - imageBase64
+            properties:
+              imageBase64:
+                type: string
+              mimeType:
+                type: string
+
+    ParseSpecImagesResult:
+      type: object
+      required:
+        - workbookText
+        - generatedAt
+      properties:
+        workbookText:
+          type: string
+          description: Bounded workbook-style transcription suitable for the existing spec parser
+        generatedAt:
+          type: number
+        note:
+          type: string
 
     PhotoGuess:
       type: object

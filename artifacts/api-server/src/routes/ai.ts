@@ -55,6 +55,7 @@ import {
   buildParseSpecSheetPrompt,
   sanitizeParseSpecSheet,
   validateParseSpecSheetBody,
+  validateParseSpecImagesBody,
 } from "./aiParseSpecSheet";
 import {
   buildMatchPremixPrompt,
@@ -2149,6 +2150,97 @@ router.post(
       generatedAt: Date.now(),
       ...(parsed.note ? { note: parsed.note } : {}),
       ...(parsed.warnings?.length ? { warnings: parsed.warnings } : {}),
+    });
+  },
+);
+
+router.post(
+  "/ai/parse-spec-images",
+  requireCapability("use-ai-tools"),
+  rateLimit({
+    windowMs: PARSE_SPEC_RATE_WINDOW_MS,
+    max: PARSE_SPEC_RATE_MAX,
+    keyGenerator: (req) => `ai-parse-spec-images:${req.userId ?? req.ip ?? "unknown"}`,
+    store: parseSpecRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateParseSpecImagesBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const { images } = validation.data;
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-parse-spec-images",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 65536,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "You transcribe photographed frozen-pizza spec sheets and recipe pages. " +
+                "Read every visible row and number exactly; do not interpret, summarize, " +
+                "or invent values. Preserve page order and represent each page as a " +
+                "tab-separated workbook-style section. Return only JSON.",
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "Transcribe all of these pages into one bounded workbook-style text. " +
+                    "Use a heading such as [Photo 1] before each page, tab-separated cells " +
+                    "for each row, and keep blank cells blank. Include all labels, headers, " +
+                    "units, recipe ingredients, targets, and handwritten values you can read. " +
+                    'Return exactly {"workbookText":string,"note":string}.',
+                },
+                ...images.map((image) => ({
+                  type: "image_url" as const,
+                  image_url: {
+                    url: `data:${image.mimeType || "image/jpeg"};base64,${image.imageBase64}`,
+                  },
+                })),
+              ],
+            },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "Vision provider error");
+        res.status(failure.status).json({ error: failure.error });
+      } else {
+        res.json({
+          workbookText: "",
+          generatedAt: Date.now(),
+          note: "The photos could not be read. Please retake them with better lighting and focus.",
+        });
+      }
+      return;
+    }
+    const raw = result.raw as { workbookText?: unknown; note?: unknown };
+    const workbookText = typeof raw.workbookText === "string" ? raw.workbookText.trim() : "";
+    if (!workbookText) {
+      res.json({
+        workbookText: "",
+        generatedAt: Date.now(),
+        note: typeof raw.note === "string" ? raw.note : "The photos did not contain readable spec-sheet text.",
+      });
+      return;
+    }
+    // Keep this adapter read-only: the existing workbook parser owns all
+    // canonicalization, review, and eventual writes after explicit confirmation.
+    res.json({
+      workbookText: workbookText.slice(0, 60_000),
+      generatedAt: Date.now(),
+      ...(typeof raw.note === "string" && raw.note.trim() ? { note: raw.note.trim() } : {}),
     });
   },
 );

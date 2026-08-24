@@ -110,6 +110,16 @@ export type ParseSpecSheetInput = {
   aliases?: SpecImportAlias[];
 };
 
+export type ParseSpecImagesInput = {
+  images: Array<{ imageBase64: string; mimeType?: string }>;
+};
+
+export type ParseSpecImagesResult = {
+  workbookText: string;
+  generatedAt: number;
+  note?: string;
+};
+
 export type ReviewedProfile = ParsedProfile & { review?: ReviewVerdict };
 export type ReviewedRecipe = ParsedRecipe & { review?: ReviewVerdict };
 
@@ -148,4 +158,33 @@ export async function requestParseSpecSheet(
     throw new Error(detail || `Parse-spec-sheet request failed (${res.status})`);
   }
   return (await res.json()) as ParseSpecSheetResult;
+}
+
+/** Read photographed pages into the same workbook-text format used downstream. */
+export async function requestParseSpecImages(
+  input: ParseSpecImagesInput,
+  signal?: AbortSignal,
+): Promise<ParseSpecImagesResult> {
+  const res = await fetchWithTimeout(
+    "/api/ai/parse-spec-images",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": inventoryClientId(),
+      },
+      body: JSON.stringify(input),
+      signal,
+    },
+    180_000,
+  );
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {}
+    if (res.status === 429) throw new ParseSpecRateLimitError(detail);
+    throw new Error(detail || `Parse-spec-images request failed (${res.status})`);
+  }
+  return (await res.json()) as ParseSpecImagesResult;
 }

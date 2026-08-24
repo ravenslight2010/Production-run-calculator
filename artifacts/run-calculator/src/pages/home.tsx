@@ -568,8 +568,10 @@ import { loadWorkbookWorkflow } from "@/workbookWorkflow";
 import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
+import { CameraFilePicker } from "@/components/CameraFilePicker";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import type { SpecImportPrepared } from "@/specImport";
+import { requestParseSpecImages } from "@/parseSpecSheet";
 import type { ExportSelection } from "@/specExport";
 import { mergeSpecAliases, cleanSpecNamedRecipeName, findSpecImportNamedRecipeFamilyMatch, specImportNamedRecipeNamesEqual, specImportRecipeHasUsablePoolData, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
@@ -2845,6 +2847,31 @@ const GroupedPanel = ({
 // Extracted to src/contexts/HomeCtx.ts so integration tests can import the
 // real useHomeCtx() hook without pulling in the full home.tsx render tree.
 // (imported at top of file)
+
+async function encodeSpecPhoto(file: File): Promise<{ imageBase64: string; mimeType: string }> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error(`Couldn't read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Couldn't load ${file.name}`));
+    img.src = dataUrl;
+  });
+  const scale = Math.min(1, 1400 / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Your browser could not prepare that photo.");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const encoded = canvas.toDataURL("image/jpeg", 0.65).split(",")[1] ?? "";
+  if (!encoded) throw new Error(`Couldn't prepare ${file.name}`);
+  return { imageBase64: encoded, mimeType: "image/jpeg" };
+}
 
 export default function Home() {
   useAccessibleDialogStack();
@@ -6657,6 +6684,15 @@ export default function Home() {
   const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
   const [specImportProgress, setSpecImportProgress] = useState<{ done: number; total: number } | null>(null);
   const specImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
+  const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
+  const specPhotoPreviews = useMemo(
+    () => specPhotoFiles.map((file) => URL.createObjectURL(file)),
+    [specPhotoFiles],
+  );
+  useEffect(() => () => {
+    for (const url of specPhotoPreviews) URL.revokeObjectURL(url);
+  }, [specPhotoPreviews]);
   const [showPremixImport, setShowPremixImport] = useState(false);
   const [premixImportLoading, setPremixImportLoading] = useState(false);
   const [premixImportApplying, setPremixImportApplying] = useState(false);
@@ -11619,6 +11655,49 @@ export default function Home() {
     }
   }
 
+  async function handleSpecPhotoImport() {
+    if (!canImportSpec || specPhotoFiles.length === 0) return;
+    const files = specPhotoFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
+    const gen = ++specImportGenRef.current;
+    specImportAbortRef.current?.abort();
+    const controller = new AbortController();
+    specImportAbortRef.current = controller;
+    setSpecImportPrepared(null);
+    setSpecImportError(null);
+    setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
+    setSpecImportLoading(true);
+    setShowSpecImport(true);
+    try {
+      const images = [];
+      for (let i = 0; i < files.length; i++) {
+        images.push(await encodeSpecPhoto(files[i]));
+        if (gen === specImportGenRef.current) setSpecImportProgress({ done: i + 1, total: files.length });
+      }
+      const transcription = await requestParseSpecImages({ images }, controller.signal);
+      if (gen !== specImportGenRef.current) return;
+      if (!transcription.workbookText.trim()) throw new Error(transcription.note || "No readable spec-sheet text was found.");
+      const prepared = await (await loadWorkbookWorkflow()).specImport.prepareSpecImportFromText(
+        transcription.workbookText,
+        files.map((file) => file.name).join(", "),
+        controller.signal,
+      );
+      if (gen !== specImportGenRef.current) return;
+      prepared.sourceNames = files.map((file) => file.name).filter(Boolean);
+      if (transcription.note) prepared.note = [prepared.note, transcription.note].filter(Boolean).join(" ");
+      setSpecImportPrepared(prepared);
+      setSpecPhotoFiles([]);
+    } catch (err) {
+      if (gen === specImportGenRef.current) {
+        setSpecImportError(err instanceof Error ? err.message : "Could not read or interpret those photos.");
+      }
+    } finally {
+      if (gen === specImportGenRef.current) {
+        setSpecImportLoading(false);
+        setSpecImportProgress(null);
+      }
+    }
+  }
+
   async function handleSpecImportConfirm(
     editedParsed: ParsedSpecImport,
     learnedRenames: SpecImportAlias[],
@@ -14953,6 +15032,58 @@ export default function Home() {
                       </div>
                     )}
                     {canImportSpec && (
+                      <div className="rounded-md border border-border bg-muted/40 p-3 space-y-2" data-testid="spec-photo-import">
+                        <p className="text-xs font-semibold text-foreground">Photograph spec sheets or recipe pages</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Add one or more clear pages. They will be transcribed and shown in the same two-step review before anything is changed.
+                        </p>
+                        <CameraFilePicker
+                          accept="image/*"
+                          multiple
+                          disabled={specImportLoading}
+                          onFiles={(incoming) => {
+                            setSpecPhotoFiles((current) => {
+                              if (specPhotoReplaceIndex === null) return [...current, ...incoming].slice(0, 10);
+                              const next = [...current];
+                              if (incoming[0]) next[specPhotoReplaceIndex] = incoming[0];
+                              return next;
+                            });
+                            setSpecPhotoReplaceIndex(null);
+                          }}
+                        />
+                        {specPhotoFiles.length > 0 && (
+                          <>
+                            <div className="grid grid-cols-4 gap-2" aria-label="Selected spec-sheet photos">
+                              {specPhotoFiles.map((file, index) => (
+                                <div key={`${file.name}-${index}`} className="space-y-1">
+                                  <img
+                                    src={specPhotoPreviews[index]}
+                                    alt={`Selected spec page ${index + 1}`}
+                                    className="h-16 w-full rounded border border-border object-cover"
+                                  />
+                                  <div className="flex gap-1">
+                                    <button type="button" className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground hover:text-foreground" title={`Retake page ${index + 1}`} onClick={() => setSpecPhotoReplaceIndex(index)}>Retake</button>
+                                    <button type="button" className="text-[10px] text-destructive hover:underline" aria-label={`Remove photo ${index + 1}`} onClick={() => setSpecPhotoFiles((current) => current.filter((_, i) => i !== index))}>Remove</button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {specPhotoReplaceIndex !== null && (
+                              <p className="text-[11px] text-amber-700" role="status">Choose Take photo or Upload photo to replace page {specPhotoReplaceIndex + 1}.</p>
+                            )}
+                            <button
+                              type="button"
+                              disabled={specImportLoading}
+                              onClick={() => void handleSpecPhotoImport()}
+                              className="w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                            >
+                              Read {specPhotoFiles.length} photo{specPhotoFiles.length === 1 ? "" : "s"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {canImportSpec && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Spec Sheet
@@ -17149,6 +17280,8 @@ export default function Home() {
             setSpecImportError(null);
             setSpecImportLoading(false);
             setSpecImportProgress(null);
+            setSpecPhotoFiles([]);
+            setSpecPhotoReplaceIndex(null);
           }}
           loading={specImportLoading}
           progress={specImportProgress}
