@@ -28,13 +28,14 @@ export function DepartmentBoundary({
   const { activeTab } = useDepartmentContext();
   const ownsActiveTab = DEPARTMENT_TABS[name].includes(activeTab);
   return (
-    <section
+    <div
       data-department={name}
       data-department-active={ownsActiveTab ? "true" : "false"}
       aria-label={`${name} department`}
+      aria-hidden={ownsActiveTab ? undefined : true}
     >
       {children}
-    </section>
+    </div>
   );
 }
 

@@ -37,9 +37,10 @@ async function signUpAndDismissOnboarding(page: Page, username: string): Promise
   await page.locator("#accessCode").fill(SIGNUP_CODE);
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
+  const onboarding = page.getByRole("dialog");
+  await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  if (await onboarding.isVisible().catch(() => false)) {
+    await onboarding.getByRole("button", { name: "Close" }).click();
     await page.locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
   }
@@ -77,9 +78,10 @@ async function seedRunningValues(page: Page): Promise<void> {
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
+  const onboarding = page.getByRole("dialog");
+  await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  if (await onboarding.isVisible().catch(() => false)) {
+    await onboarding.getByRole("button", { name: "Close" }).click();
     await page.locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
   }

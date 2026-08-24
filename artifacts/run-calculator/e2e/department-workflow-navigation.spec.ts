@@ -97,7 +97,13 @@ async function seedPendingRun(page: Page): Promise<string> {
       "run-calc-day",
       JSON.stringify({
         date: new Date().toISOString().slice(0, 10),
-        runs: [{ id, brand: "Department", flavor: "Navigation", seeded: false }],
+        runs: [{
+          id,
+          brand: "Department",
+          flavor: "Navigation",
+          casesNeeded: 1,
+          seeded: false,
+        }],
         currentIndex: 0,
         // Do not create a same-day reset boundary in the disposable fixture;
         // the app's normal reset scheduler owns that value.
