@@ -792,6 +792,61 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "preserves cases-on-line occupancy across reload while the freezer drains",
+    async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const safeBaseMs = await setupAndStartRun(page);
+      const occupancy = {
+        ppm: 60,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      };
+      const endedAt = safeBaseMs + 15 * 60_000;
+      const drainAt = endedAt + (occupancy.freezerTimeMin + 1.25) * 60_000;
+
+      // End at a deterministic mocked instant so the persisted lifecycle
+      // timestamp is stable across the reload.
+      await mockDateNow(page, endedAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await page.getByRole("button", { name: /stop.?run/i }).first().click();
+      await page.waitForTimeout(500);
+
+      const drainingAt = endedAt + 3 * 60_000;
+      const expectedDraining = computeCasesOnLine({
+        startedAt: safeBaseMs,
+        endedAt,
+        now: drainingAt,
+        ...occupancy,
+      });
+
+      // A station refresh recreates the page and its clock context. Reinstall
+      // the test clock after reload, then wake the page so the UI renders at
+      // the exact same instant as the shared calculation.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await installHiddenMock(page);
+      await mockDateNow(page, drainingAt);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedDraining);
+
+      // The two-wide press-to-oven segment extends physical occupancy beyond
+      // freezerTime alone; the shared model is empty at the full drain boundary.
+      await mockDateNow(page, drainAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(
+        computeCasesOnLine({
+          startedAt: safeBaseMs,
+          endedAt,
+          now: drainAt,
+          ...occupancy,
+        }),
+      );
+      await expect.poll(() => readCasesOnLine(page)).toBe(0);
+    },
+  );
+
+  test(
     "D. pause, background sleep, and resume keep all live countdowns aligned",
     async ({ page }) => {
       const safeBaseMs = await setupAndStartRun(page);
