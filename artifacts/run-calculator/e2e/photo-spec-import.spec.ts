@@ -22,6 +22,8 @@ const RAW_FLAVOR = `Three Cheese ${FIXTURE_SUFFIX}`;
 const EDITED_BRAND = `Photo Import Bakery Reviewed ${FIXTURE_SUFFIX}`;
 const RAW_RECIPE = `ZZZ${FIXTURE_SUFFIX}Recipe`;
 const EDITED_RECIPE = `ZZZ${FIXTURE_SUFFIX}RecipeReviewed`;
+const RAW_MULTI_DOUGH_RECIPE = `ZZZ${FIXTURE_SUFFIX}MultiDough`;
+const EDITED_MULTI_DOUGH_RECIPE = `ZZZ${FIXTURE_SUFFIX}MultiDoughReviewed`;
 const RAW_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}Sauce`;
 const EDITED_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}SauceReviewed`;
 
@@ -443,6 +445,168 @@ test("applies photographed review edits to the authenticated profile and recipe 
       flavor: RAW_FLAVOR.toLowerCase(),
     },
     recipe: { name: EDITED_RECIPE },
+  });
+});
+
+test("persists every ingredient from a photographed multi-ingredient dough recipe", async ({
+  page,
+}) => {
+  const username = uniqueTestId("e2e_photo_multi_dough");
+  testUsernames.add(username);
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await signIn(page, username);
+
+  let imageRequestCount = 0;
+  let transcriptionImageCount = 0;
+  let structuredParseCount = 0;
+  let doughClientId = "";
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/dough-recipes")
+    ) {
+      doughClientId = request.headers()["x-client-id"] ?? doughClientId;
+    }
+  });
+  await page.route("**/api/ai/parse-spec-images", async (route) => {
+    imageRequestCount += 1;
+    const body = route.request().postDataJSON() as {
+      images?: Array<{ imageBase64?: string; mimeType?: string }>;
+    };
+    transcriptionImageCount = body.images?.length ?? 0;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_MULTI_DOUGH_RECIPE}`,
+        generatedAt: Date.now(),
+        note: "Two photographed dough pages transcribed for review.",
+      }),
+    });
+  });
+  await page.route("**/api/ai/parse-spec-sheet", async (route) => {
+    structuredParseCount += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        profiles: [
+          {
+            brand: RAW_BRAND,
+            flavor: RAW_FLAVOR,
+            dieType: "12 inch",
+            pizzasPerCase: 12,
+            applicators: [],
+            pepperonis: [],
+          },
+        ],
+        recipes: [
+          {
+            kind: "dough",
+            name: RAW_MULTI_DOUGH_RECIPE,
+            rows: [
+              { ingredient: "High Gluten Flour", lbs: 50 },
+              { ingredient: "Water", lbs: 29.5 },
+              { ingredient: "Olive Oil", lbs: 1.25 },
+            ],
+          },
+        ],
+        generatedAt: Date.now(),
+      }),
+    });
+  });
+  await page.route("**/api/ai/match-import", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        brandMatches: [],
+        flavorMatches: [],
+        ingredientMatches: [],
+        appTypeMatches: [],
+        pepTypeMatches: [],
+        generatedAt: Date.now(),
+      }),
+    });
+  });
+
+  await openPhotoImport(page);
+  const photoImport = page.getByTestId("spec-photo-import");
+  const uploadInput = photoImport.locator('input[type="file"]').last();
+  await uploadInput.setInputFiles([
+    { name: `${FIXTURE_SUFFIX}-multi-dough-page-one.png`, mimeType: "image/png", buffer: PNG },
+    { name: `${FIXTURE_SUFFIX}-multi-dough-page-two.png`, mimeType: "image/png", buffer: PNG },
+  ]);
+  await expect(photoImport.getByRole("img", { name: "Selected spec page 1" })).toBeVisible();
+  await expect(photoImport.getByRole("img", { name: "Selected spec page 2" })).toBeVisible();
+  await photoImport.getByRole("button", { name: "Read 2 photos", exact: true }).click();
+
+  const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
+  await expect(review).toContainText("Step 1 of 2 — products");
+  const doughBrandInput = review.locator('input[aria-label^="Brand for "]');
+  await expect(doughBrandInput).toHaveCount(1);
+  await doughBrandInput.fill(EDITED_BRAND);
+  await review.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(review).toContainText(`${EDITED_BRAND} — ${RAW_FLAVOR}`);
+  const doughRecipeInput = review.locator('input[aria-label^="Name for recipe "]');
+  await expect(doughRecipeInput).toHaveCount(1);
+  await doughRecipeInput.fill(EDITED_MULTI_DOUGH_RECIPE);
+
+  await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
+  await expect.poll(async () => {
+    if (!await review.isVisible().catch(() => false)) return "hidden";
+    return (await review.textContent()) ?? "";
+  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
+  if (
+    await review.isVisible().catch(() => false) &&
+    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
+  ) {
+    await doughBrandInput.fill(EDITED_BRAND);
+    await review.getByRole("button", { name: "Next", exact: true }).click();
+    await doughRecipeInput.fill(EDITED_MULTI_DOUGH_RECIPE);
+    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
+    if (await destructiveConfirmation.isVisible().catch(() => false)) {
+      await destructiveConfirmation.check();
+    }
+    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
+  }
+  await expect(review).toBeHidden({ timeout: 20_000 });
+
+  expect(imageRequestCount).toBe(1);
+  expect(transcriptionImageCount).toBe(2);
+  expect(structuredParseCount).toBeGreaterThanOrEqual(1);
+
+  await expect.poll(async () => {
+    const response = await page.evaluate(async ({ clientId }) => {
+      const headers = clientId ? { "x-client-id": clientId } : undefined;
+      const doughResponse = await fetch("/api/dough-recipes", { headers });
+      if (!doughResponse.ok) {
+        throw new Error(`dough recipe endpoint returned ${doughResponse.status}`);
+      }
+      return await doughResponse.json() as {
+        items?: Array<{
+          name?: string;
+          components?: Array<{ ingredient?: string; lbs?: number }>;
+        }>;
+      };
+    }, { clientId: doughClientId });
+    return response.items
+      ?.filter((item) => item.name?.toLowerCase() === EDITED_MULTI_DOUGH_RECIPE.toLowerCase())
+      .map((item) => ({
+        name: item.name,
+        components: item.components?.map((component) => ({
+          ingredient: component.ingredient,
+          lbs: component.lbs,
+        })),
+      }))[0];
+  }, { timeout: 20_000 }).toEqual({
+    name: EDITED_MULTI_DOUGH_RECIPE,
+    components: [
+      { ingredient: "High Gluten Flour", lbs: 50 },
+      // Ingredient master data canonicalizes this name during persistence.
+      { ingredient: "WATER", lbs: 29.5 },
+      { ingredient: "Olive Oil", lbs: 1.25 },
+    ],
   });
 });
 
