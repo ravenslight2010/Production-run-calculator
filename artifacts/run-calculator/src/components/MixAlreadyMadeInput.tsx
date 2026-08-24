@@ -4,7 +4,8 @@ import { toast } from "@/hooks/use-toast";
 
 interface Props {
   mix: Mix;
-  onSaved: (saved: Mix[]) => void;
+  onOptimisticSave: (nextMix: Mix) => void;
+  onSaveAcknowledged: (optimisticMix: Mix, saved: Mix[]) => void;
   saveMixes: (mixes: Mix[]) => Promise<Mix[]>;
 }
 
@@ -13,7 +14,12 @@ interface Props {
  * Controlled with local state so it stays consistent during and after saves.
  * Syncs from the server mix record whenever it changes externally.
  */
-export function MixAlreadyMadeInput({ mix, onSaved, saveMixes }: Props) {
+export function MixAlreadyMadeInput({
+  mix,
+  onOptimisticSave,
+  onSaveAcknowledged,
+  saveMixes,
+}: Props) {
   const [val, setVal] = useState(mix.amountAlreadyMade);
 
   // Sync if the mix record is updated externally (e.g. another save path)
@@ -36,8 +42,9 @@ export function MixAlreadyMadeInput({ mix, onSaved, saveMixes }: Props) {
             const nextMix = { ...mix, amountAlreadyMade: val };
             // Update the mounted plan immediately; the network round-trip
             // should not make the warehouse badge lag behind the input.
-            onSaved([nextMix]);
-            await saveMixes([nextMix]);
+            onOptimisticSave(nextMix);
+            const saved = await saveMixes([nextMix]);
+            onSaveAcknowledged(nextMix, saved);
           } catch {
             // Keep the local value so the manager can retry without retyping.
             toast({

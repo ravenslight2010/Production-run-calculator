@@ -315,6 +315,7 @@ import { updateSupervisorPin } from "../supervisorPinApi";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
+import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
 import { useIngredients } from "../hooks/useIngredients";
 import {
   saveIngredients as saveIngredientsRemote,
@@ -4231,6 +4232,11 @@ export default function Home() {
     activeTab === "warehouse" || new URLSearchParams(window.location.search).get("screen") === "warehouse",
   );
   const cycleCountQc = useQueryClient();
+  const {
+    mixPlanItems,
+    saveOptimistically: saveMixAlreadyMadeOptimistically,
+    acknowledgeSave: acknowledgeMixAlreadyMadeSave,
+  } = useOptimisticMixUpdates(mixes, cycleCountQc);
   // Template create/delete — call the API then update the React Query cache
   // directly so the UI updates without waiting for the next background refetch.
   async function saveServerTemplate(tpl: import("../types").RunTemplate): Promise<void> {
@@ -16150,7 +16156,7 @@ export default function Home() {
                           }),
                       ),
                     ];
-                    const plan = buildMixPlan({ runs, mixes, today: mixMakeDay });
+                    const plan = buildMixPlan({ runs, mixes: mixPlanItems, today: mixMakeDay });
                     if (plan.length === 0) {
                       return (
                         <p className="text-sm text-muted-foreground px-1" data-testid="mix-plan-empty">
@@ -16221,15 +16227,13 @@ export default function Home() {
                                         </div>
                                         {/* Already made — controlled component so state stays stable during saves */}
                                         {(() => {
-                                          const liveMix = mixes.find((mx) => mx.id === m.mixId);
+                                          const liveMix = mixPlanItems.find((mx) => mx.id === m.mixId);
                                           return liveMix ? (
                                             <MixAlreadyMadeInput
                                               mix={liveMix}
                                               saveMixes={saveMixes}
-                                              onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], (current: typeof mixes | undefined) => {
-                                                const updates = new Map(saved.map((item) => [item.id, item]));
-                                                return current ? current.map((item) => updates.get(item.id) ?? item) : saved;
-                                              })}
+                                              onOptimisticSave={saveMixAlreadyMadeOptimistically}
+                                              onSaveAcknowledged={acknowledgeMixAlreadyMadeSave}
                                             />
                                           ) : null;
                                         })()}
@@ -16339,15 +16343,13 @@ export default function Home() {
                                         </div>
                                       )}
                                       {(() => {
-                                        const liveMix = mixes.find((mx) => mx.id === m.mixId);
+                                        const liveMix = mixPlanItems.find((mx) => mx.id === m.mixId);
                                         return liveMix ? (
                                           <MixAlreadyMadeInput
                                             mix={liveMix}
                                             saveMixes={saveMixes}
-                                            onSaved={(saved) => cycleCountQc.setQueryData(["mixes"], (current: typeof mixes | undefined) => {
-                                              const updates = new Map(saved.map((item) => [item.id, item]));
-                                              return current ? current.map((item) => updates.get(item.id) ?? item) : saved;
-                                            })}
+                                            onOptimisticSave={saveMixAlreadyMadeOptimistically}
+                                            onSaveAcknowledged={acknowledgeMixAlreadyMadeSave}
                                           />
                                         ) : null;
                                       })()}

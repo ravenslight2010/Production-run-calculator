@@ -43,6 +43,21 @@ export async function saveMixes(items: Mix[]): Promise<Mix[]> {
   return normalizeMixes(data.items);
 }
 
+/**
+ * Apply a partial mix update without throwing away the rest of the cached pool.
+ *
+ * Mix Plan's inline "already made" editor sends one mix optimistically while
+ * the server write is in flight. It can only update records that are already
+ * in the cache; a one-item save must never recreate a concurrently deleted
+ * mix or replace the complete factory-wide list.
+ */
+export function mergeMixUpdates(current: Mix[] | undefined, updates: Mix[]): Mix[] {
+  if (!current) return updates;
+
+  const updatesById = new Map(updates.map((item) => [item.id, item]));
+  return current.map((item) => updatesById.get(item.id) ?? item);
+}
+
 export async function deleteMixes(ids: string[]): Promise<Mix[]> {
   const res = await fetch("/api/mixes", {
     method: "DELETE",
