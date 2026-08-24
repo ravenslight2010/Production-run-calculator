@@ -390,11 +390,32 @@ async function assertMobileViewportAndSafeArea(
 }
 
 async function dismissOnboardingIfPresent(page: Page): Promise<void> {
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await getStarted.click();
-    await page.waitForTimeout(250);
+  const welcome = page.getByRole("dialog", {
+    name: /welcome to production run calculator/i,
+  });
+
+  // The overview is mounted from an effect after the authenticated home page
+  // is ready. Waiting for the dialog (rather than checking once) prevents a
+  // late overlay from intercepting the first Run-tab interaction on phones.
+  if (
+    !(await welcome
+      .waitFor({ state: "visible", timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false))
+  ) {
+    return;
   }
+
+  const seen = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/me/onboarding-seen") &&
+      response.request().method() === "POST",
+  );
+  await welcome
+    .getByRole("button", { name: "Get started", exact: true })
+    .click();
+  await expect((await seen).status()).toBe(200);
+  await expect(welcome).toBeHidden({ timeout: 10_000 });
 }
 
 async function signInToSandbox(page: Page): Promise<void> {
