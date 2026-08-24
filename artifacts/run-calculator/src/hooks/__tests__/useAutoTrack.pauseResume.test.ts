@@ -177,9 +177,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
       rerender(props("running", tResume + 2));
     });
 
-    const traysDroppedOnResume = traysBeforeResume - store.traysOnLine;
-    expect(traysDroppedOnResume).toBe(1);
-    expect(store.traysOnLine).toBe(3);
+    // Resume arms the full tray period; it must not fire early.
+    expect(traysBeforeResume - store.traysOnLine).toBe(0);
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -444,9 +443,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
 
     // Dough-timer pause must be cleared by resumeDoughTimers.
     expect(result.current.isDoughTimerPaused).toBe(false);
-    const traysDropped = traysBeforeResume - store.traysOnLine;
-    expect(traysDropped).toBe(1);
-    expect(store.traysOnLine).toBe(3);
+    expect(traysBeforeResume - store.traysOnLine).toBe(0);
+    expect(store.traysOnLine).toBe(4);
     expect(store.batchesReady).toBeGreaterThanOrEqual(0);
   });
 
@@ -723,10 +721,9 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // Dough-timer pause must be cleared by the runStatus effect.
     expect(result.current.isDoughTimerPaused).toBe(false);
 
-    // Exactly 1 tray consumed on the first post-resume tick (one period).
-    const traysDropped = traysBeforeResume - store.traysOnLine;
-    expect(traysDropped).toBe(1);
-    expect(store.traysOnLine).toBe(3);
+    // Resume arms the full tray period; it must not fire early.
+    expect(traysBeforeResume - store.traysOnLine).toBe(0);
+    expect(store.traysOnLine).toBe(4);
   });
 
   // ───────────────────────────────────────────────────────────────────────────

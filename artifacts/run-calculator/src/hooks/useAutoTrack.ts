@@ -187,6 +187,60 @@ function clampPeriodMs(ms: number): number {
   return Math.min(60 * 60 * 1000, Math.max(1000, ms));
 }
 
+export interface AutoTrackTiming {
+  caseMs: number;
+  trayMs: number;
+  trayProductionMs: number;
+  batchConsumptionMs: number;
+  batchProductionMs: number;
+  hopperMs: number;
+}
+
+/**
+ * The single cadence contract shared by auto-track scheduling and countdown UI.
+ * Consumption remains quarter-batch internally so fractional inventory movement
+ * stays visible; the UI labels that event as such rather than calling it a
+ * full-batch completion.
+ */
+export function getAutoTrackTiming(
+  ppm: number,
+  pizzasPerCase: number,
+  perTray: number,
+  perBatch: number,
+  machine?: { spinSec: number; hopperSec: number },
+): AutoTrackTiming {
+  const caseMs = ppm > 0 && pizzasPerCase > 0
+    ? clampPeriodMs((pizzasPerCase / ppm) * 60000)
+    : 0;
+  const trayMs = ppm > 0 && perTray > 0
+    ? clampPeriodMs((perTray / ppm) * 60000)
+    : 0;
+  const lineBatchMs = ppm > 0 && perBatch > 0
+    ? (perBatch / ppm) * 60000
+    : 0;
+  const hopperMs = machine && Number.isFinite(machine.hopperSec) && machine.hopperSec > 0
+    ? clampPeriodMs(machine.hopperSec * 1000)
+    : 0;
+  const effectiveDrainMs = Math.max(hopperMs, lineBatchMs);
+  const batchConsumptionMs = effectiveDrainMs > 0
+    ? clampPeriodMs(effectiveDrainMs / 4)
+    : 0;
+  const spinMs = machine && Number.isFinite(machine.spinSec) && machine.spinSec > 0
+    ? machine.spinSec * 1000
+    : 0;
+  const batchProductionMs = spinMs > 0
+    ? clampPeriodMs(spinMs)
+    : (lineBatchMs > 0 ? clampPeriodMs(lineBatchMs) : 0);
+  return {
+    caseMs,
+    trayMs,
+    trayProductionMs: trayMs > 0 ? trayMs / 2 : 0,
+    batchConsumptionMs,
+    batchProductionMs,
+    hopperMs,
+  };
+}
+
 /**
  * Tracks expected progress automatically while running. Each counter updates
  * at its own natural production cadence instead of a fixed wall-clock interval:
@@ -415,16 +469,24 @@ export function useAutoTrack({
   // hopperProdNextDueMsRef reset to 0 causes the hopper countdown to restart
   // from the full hopper duration on the next second.
   const resumeDoughTimers = useCallback(() => {
+    const nowMs = Date.now();
+    const timing = getAutoTrackTiming(
+      calc.ppm,
+      v.pizzasPerCase,
+      calc.perTray,
+      calc.perBatch,
+      machine,
+    );
     doughTimerPausedRef.current = 0;
     setIsDoughTimerPaused(false);
-    trayProdNextDueMsRef.current = 0;
-    batchProdNextDueMsRef.current = 0;
-    hopperProdNextDueMsRef.current = 0;
-    trayNextDueMsRef.current = 0;
+    trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
+    batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
+    hopperProdNextDueMsRef.current = timing.hopperMs > 0 ? nowMs + timing.hopperMs : 0;
+    trayNextDueMsRef.current = timing.trayMs > 0 ? nowMs + timing.trayMs : 0;
     trayLastMsRef.current = 0;
-    batchNextDueMsRef.current = 0;
+    batchNextDueMsRef.current = timing.batchConsumptionMs > 0 ? nowMs + timing.batchConsumptionMs : 0;
     batchLastMsRef.current = 0;
-  }, []);
+  }, [calc.perBatch, calc.perTray, calc.ppm, machine, v.pizzasPerCase]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
@@ -464,8 +526,19 @@ export function useAutoTrack({
   // running (covers the paused → running resume transition). Without this, a
   // dough pause set before a global run pause would stay frozen after the run
   // is globally resumed even though the line is moving again.
+  const previousRunStatusRef = useRef<RunStatus | null>(null);
   useEffect(() => {
-    if (runStatus === "running") {
+    const resumed = previousRunStatusRef.current === "paused" && runStatus === "running";
+    previousRunStatusRef.current = runStatus;
+    if (resumed) {
+      const nowMs = nowTime.getTime();
+      const timing = getAutoTrackTiming(
+        calc.ppm,
+        v.pizzasPerCase,
+        calc.perTray,
+        calc.perBatch,
+        machine,
+      );
       doughTimerPausedRef.current = 0;
       setIsDoughTimerPaused(false);
       // Zero all consumption anchors on resume so the first post-resume tick does
@@ -475,21 +548,21 @@ export function useAutoTrack({
       // Task #570 and Task #571 required.
       trayLastMsRef.current = 0;
       batchLastMsRef.current = 0;
-      trayNextDueMsRef.current = 0;
+      trayNextDueMsRef.current = timing.trayMs > 0 ? nowMs + timing.trayMs : 0;
       // Also reset the production ticker so it re-arms at nowMs + period/2 via
       // the first-encounter path on the next tick — re-establishing the half-period
       // phase offset from the new resume baseline instead of carrying a stale or
       // simultaneously-overdue timestamp that collapses the offset to zero.
-      trayProdNextDueMsRef.current = 0;
-      batchNextDueMsRef.current = 0;
+      trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
+      batchNextDueMsRef.current = timing.batchConsumptionMs > 0 ? nowMs + timing.batchConsumptionMs : 0;
       // Reset batch-production schedule so a pause longer than one full batch
       // period (e.g. 12 min) does not trigger a phantom +1 batch production event
       // on the very first post-resume tick. The ref re-arms at nowMs+fullBatchMs
       // on the next tick (the same first-encounter path used on run start).
-      batchProdNextDueMsRef.current = 0;
-      hopperProdNextDueMsRef.current = 0;
+      batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
+      hopperProdNextDueMsRef.current = timing.hopperMs > 0 ? nowMs + timing.hopperMs : 0;
     }
-  }, [runStatus]);
+  }, [calc.perBatch, calc.perTray, calc.ppm, machine, nowTime, runStatus, v.pizzasPerCase]);
 
   // This barrier is declared before the tick-write effect below. React runs
   // effects in declaration order, so releasing a successful foreground sync
@@ -499,26 +572,13 @@ export function useAutoTrack({
   const foregroundRebaseRequestedRef = useRef(false);
   const rebaseAfterForegroundSync = useCallback(() => {
     const nowMs = nowTime.getTime();
-    const casePeriodMs =
-      calc.ppm > 0 && v.pizzasPerCase > 0
-        ? clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000)
-        : 0;
-    const trayPeriodMs =
-      calc.ppm > 0 && calc.perTray > 0
-        ? clampPeriodMs((calc.perTray / calc.ppm) * 60000)
-        : 0;
-    const batchPeriodMs =
-      calc.ppm > 0 && calc.perBatch > 0
-        ? clampPeriodMs((calc.perBatch / calc.ppm / 4) * 60000)
-        : 0;
-
-    caseNextDueMsRef.current = casePeriodMs > 0 ? nowMs + casePeriodMs : 0;
-    trayNextDueMsRef.current = trayPeriodMs > 0 ? nowMs + trayPeriodMs : 0;
-    trayProdNextDueMsRef.current = trayPeriodMs > 0 ? nowMs + trayPeriodMs / 2 : 0;
-    batchNextDueMsRef.current = batchPeriodMs > 0 ? nowMs + batchPeriodMs : 0;
-    batchProdNextDueMsRef.current = batchPeriodMs > 0 ? nowMs + batchPeriodMs : 0;
-    hopperProdNextDueMsRef.current =
-      machine && machine.hopperSec > 0 ? nowMs + machine.hopperSec * 1000 : 0;
+    const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
+    caseNextDueMsRef.current = timing.caseMs > 0 ? nowMs + timing.caseMs : 0;
+    trayNextDueMsRef.current = timing.trayMs > 0 ? nowMs + timing.trayMs : 0;
+    trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
+    batchNextDueMsRef.current = timing.batchConsumptionMs > 0 ? nowMs + timing.batchConsumptionMs : 0;
+    batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
+    hopperProdNextDueMsRef.current = timing.hopperMs > 0 ? nowMs + timing.hopperMs : 0;
     trayLastMsRef.current = nowMs;
     batchLastMsRef.current = nowMs;
     lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
@@ -699,7 +759,7 @@ export function useAutoTrack({
     // shows "—:—" + "timers paused" anyway), and resets to 0 on resume so
     // the next tick re-arms from the current moment (full duration restart).
     if (runStatus === "running" && machine && machine.hopperSec > 0) {
-      const hopperMs = machine.hopperSec * 1000;
+      const hopperMs = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine).hopperMs;
       if (hopperProdNextDueMsRef.current === 0) {
         hopperProdNextDueMsRef.current = nowMs + hopperMs;
       } else if (nowMs >= hopperProdNextDueMsRef.current) {
@@ -728,7 +788,8 @@ export function useAutoTrack({
     let traysSeededAmount = 0;
 
     if (runStatus === "running" && calc.perTray > 0 && calc.ppm > 0) {
-      const trayPeriodMs = clampPeriodMs((calc.perTray / calc.ppm) * 60000);
+      const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
+      const trayPeriodMs = timing.trayMs;
       let delta = 0;
       let traySeededThisTick = false;
 
@@ -797,17 +858,13 @@ export function useAutoTrack({
     // consumed (quarter-batch ticks with fractional remainder carry).
     // Never for an ended run — drain phase is case/skid-only. ──
     if (runStatus === "running" && calc.perBatch > 0 && calc.ppm > 0) {
-      // Line demand: how often the LINE eats a whole batch's worth of balls.
-      const lineBatchMs = (calc.perBatch / calc.ppm) * 60000;
-      // Drain can never be faster than the hopper converts a batch into balls
-      // (when measured) — effective drain period = slower of hopper and line.
-      const hopperMs = machine && machine.hopperSec > 0 ? machine.hopperSec * 1000 : 0;
-      const effDrainMs = Math.max(hopperMs, lineBatchMs);
-      const batchPeriodMs = clampPeriodMs(effDrainMs / 4);
-      // Mixer finishes a new batch every measured spin time (low + high stage)
-      // when it's been measured; otherwise fall back to line-demand pacing.
-      const spinMs = machine && machine.spinSec > 0 ? machine.spinSec * 1000 : 0;
-      const fullBatchMs = clampPeriodMs(spinMs > 0 ? spinMs : lineBatchMs);
+      const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, machine);
+      const batchPeriodMs = timing.batchConsumptionMs;
+      const fullBatchMs = timing.batchProductionMs;
+      const effDrainMs = Math.max(
+        machine && machine.hopperSec > 0 ? machine.hopperSec * 1000 : 0,
+        (calc.perBatch / calc.ppm) * 60000,
+      );
       let delta = 0;
       let batchSeededThisTick = false;
 

@@ -218,7 +218,7 @@ describe("live timer interruption invariants", () => {
     act(() => {
       hook.rerender(props("running", T0 + 5 * 60_000 + 2));
     });
-    expect(traysBeforePause - state.values.traysOnLine).toBe(1);
+    expect(traysBeforePause - state.values.traysOnLine).toBe(0);
     expect(state.persisted["run-pause"]).toMatchObject({
       traysOnLine: state.values.traysOnLine,
       batchesReady: state.values.batchesReady,

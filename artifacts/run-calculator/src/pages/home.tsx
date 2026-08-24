@@ -449,7 +449,7 @@ import {
 import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
-import { suggestedDoughStaging } from "../hooks/useAutoTrack";
+import { getAutoTrackTiming, suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
 import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
@@ -22291,6 +22291,10 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   const safeHigh = Math.max(0, Number(v.mixerHighSec) || 0);
                   const safeHopper = Math.max(0, Number(v.hopperSec) || 0);
                   const spinTotalSec = safeLow + safeHigh;
+                  const timing = getAutoTrackTiming(calc.ppm, v.pizzasPerCase, calc.perTray, calc.perBatch, {
+                    spinSec: spinTotalSec,
+                    hopperSec: safeHopper,
+                  });
                   const lineBatchSec = calc.ppm > 0 && calc.perBatch > 0 ? (calc.perBatch / calc.ppm) * 60 : 0;
                   const measured = spinTotalSec > 0 && lineBatchSec > 0;
                   const supplySec = Math.max(spinTotalSec, safeHopper);
@@ -22303,7 +22307,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   // spin-total, so display and counter always agree.
                   const batchProdDue = tickDueRefs.batchProd.current;
                   const spinLeft = running && batchProdDue > 0
-                    ? Math.min(spinTotalSec, Math.max(0, (batchProdDue - nowMs) / 1000))
+                    ? Math.min(timing.batchProductionMs / 1000, Math.max(0, (batchProdDue - nowMs) / 1000))
                     : null;
                   const spinElapsed = spinLeft !== null ? Math.max(0, spinTotalSec - spinLeft) : null;
                   const onLowStage = spinElapsed !== null && spinElapsed < safeLow;
@@ -22311,8 +22315,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     ? null
                     : onLowStage ? safeLow - spinElapsed : spinLeft;
                   const hopperProdDue = tickDueRefs.hopperProd.current;
-                  const hopperLeft = running && safeHopper > 0 && hopperProdDue > 0
-                    ? Math.max(0, (hopperProdDue - nowMs) / 1000)
+                  const hopperLeft = running && timing.hopperMs > 0 && hopperProdDue > 0
+                    ? Math.min(timing.hopperMs / 1000, Math.max(0, (hopperProdDue - nowMs) / 1000))
                     : null;
                   const suppressedNow = Date.now() < autoSuppressUntilRef.current;
                   const suppressedMinsLeftNow = suppressedNow ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
@@ -22540,11 +22544,20 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     const nowMs = nowTime.getTime();
                     const secLeftOf = (dueMs: number, periodSec: number) =>
                       dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
-                    const trayPeriodSec = calc.ppm > 0 && calc.perTray > 0 ? (calc.perTray / calc.ppm) * 60 : 0;
-                    const lineBatchSec = calc.ppm > 0 && calc.perBatch > 0 ? (calc.perBatch / calc.ppm) * 60 : 0;
-                    const hopperSecSafe = Math.max(0, Number(v.hopperSec) || 0);
-                    const drainQuarterSec = Math.max(hopperSecSafe, lineBatchSec) / 4;
-                    const spinSec = (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)) || lineBatchSec;
+                    const timing = getAutoTrackTiming(
+                      calc.ppm,
+                      v.pizzasPerCase,
+                      calc.perTray,
+                      calc.perBatch,
+                      {
+                        spinSec: Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0),
+                        hopperSec: Math.max(0, Number(v.hopperSec) || 0),
+                      },
+                    );
+                    const trayPeriodSec = timing.trayMs / 1000;
+                    const trayProductionSec = timing.trayProductionMs / 1000;
+                    const drainQuarterSec = timing.batchConsumptionMs / 1000;
+                    const spinSec = timing.batchProductionMs / 1000;
                     return (
                       <>
                         <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
@@ -22576,8 +22589,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 {calc.traysNeeded > 0 && (
                                   <TickBar
                                     label="Press adds 1 tray in"
-                                    secLeft={secLeftOf(tickDueRefs.trayProd.current, trayPeriodSec)}
-                                    periodSec={trayPeriodSec}
+                                    secLeft={secLeftOf(tickDueRefs.trayProd.current, trayProductionSec)}
+                                    periodSec={trayProductionSec}
                                     color="text-emerald-400"
                                   />
                                 )}
@@ -22798,9 +22811,16 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 
                 {/* Next batch due — merged countdown + start-next-batch card (graduated mockup) */}
                 {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && (() => {
-                  const spinSecCard =
-                    (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)) ||
-                    calc.timePerBatchSec;
+                  const spinSecCard = getAutoTrackTiming(
+                    calc.ppm,
+                    v.pizzasPerCase,
+                    calc.perTray,
+                    calc.perBatch,
+                    {
+                      spinSec: (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)),
+                      hopperSec: Math.max(0, Number(v.hopperSec) || 0),
+                    },
+                  ).batchProductionMs / 1000;
                   const dueMs = tickDueRefs.batchProd.current;
                   const secLeft = spinSecCard > 0 && dueMs > 0
                     ? Math.min(spinSecCard, Math.max(0, (dueMs - nowTime.getTime()) / 1000))
@@ -22815,7 +22835,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               {showBatchDue ? "Dough station — start next batch now" : "Dough station — next batch due"}
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">
-                              {showBatchDue ? `Time per batch: ${fmtTime(calc.timePerBatchSec)}` : "Countdown to the next mixer batch at current pace"}
+                              {showBatchDue ? `Time per batch: ${fmtTime(spinSecCard)}` : "Countdown to the next mixer batch at current pace"}
                             </p>
                           </div>
                         </div>
