@@ -107,14 +107,14 @@ export default function PhotoCountCard({ candidates, onCommitted }: {
     catch (e) { setError(e instanceof Error ? e.message : "Could not cancel draft."); }
     finally { setBusy(false); }
   }
-  return <Card className="bg-card/50 border-primary/30 shadow-md">
+  return <Card data-testid="photo-count-card" className="bg-card/50 border-primary/30 shadow-md">
     <CardHeader className="pb-2 pt-4 px-5"><div className="flex items-center justify-between gap-2">
       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5"><Camera className="w-4 h-4" /> Count from photos</CardTitle>
       <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setOpen((v) => !v)}>{open ? "Close" : "Start count"}</Button>
     </div></CardHeader>
     {open && <CardContent className="px-4 pb-4 space-y-3">
       {!observation ? <><p className="text-xs text-muted-foreground">Attach a close-up label and optional shelf or pallet view. Nothing is added until you review and Apply.</p><CameraFilePicker multiple disabled={busy} onFiles={(files) => void onFiles(files)} /></> :
-        <><div className="flex justify-between text-xs"><strong>Review count #{observation.id} · {photoCount} photo{photoCount === 1 ? "" : "s"}</strong><span className="text-muted-foreground">Draft only</span></div>
+        <><div data-testid="photo-count-review" className="flex justify-between text-xs"><strong>Review count #{observation.id} · {photoCount} photo{photoCount === 1 ? "" : "s"}</strong><span className="text-muted-foreground">Draft only</span></div>
           {observation.draft.reviewFlags.length > 0 && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400"><strong>Review flags:</strong> {observation.draft.reviewFlags.join(" · ")}</div>}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">{input("productName", "Product")}{input("brand", "Brand")}{input("variant", "Flavor / variant")}{input("barcode", "Barcode")}{input("packageSize", "Package size")}{input("printedWeight", "Printed weight", true)}{input("unitType", "Unit")}{input("casePack", "Case pack", true)}{input("quantity", "Counted quantity", true)}{input("context", "Shelf / pallet context")}</div>
           <p className="text-[11px] text-muted-foreground">AI output is advisory. Correct every value; overlapping or incomplete views require manual review.</p>
