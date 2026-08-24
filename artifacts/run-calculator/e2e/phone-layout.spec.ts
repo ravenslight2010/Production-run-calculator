@@ -573,6 +573,56 @@ test.describe("phone layout smoke", () => {
     });
   }
 
+  test("sync details stay fully visible from phone through desktop widths", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signInToSandbox(page);
+
+    const syncStatus = page.locator('button[title^="Sync"]');
+    await expect(syncStatus).toBeVisible();
+
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1280, height: 900 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await syncStatus.click();
+
+      const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
+      await expect(popover).toBeVisible();
+      await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+      await expect(
+        popover.getByText("Last acknowledgment", { exact: true }),
+      ).toBeVisible();
+      const retry = popover.getByRole("button", {
+        name: /retry latest retained change/i,
+      });
+      if (await retry.count()) await expect(retry).toBeVisible();
+
+      const geometry = await page.evaluate(() => {
+        const panel = document.querySelector("div.absolute.top-9");
+        if (!panel) return null;
+        const rect = panel.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        };
+      });
+      expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
+      expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
+      expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+
+      await syncStatus.click();
+    }
+  });
+
   test(`manager workflows stay usable in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
     page,
   }) => {

@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, ChevronDown, Clock3, Download, Loader2, RefreshCw, Wifi, WifiOff } from "lucide-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { SyncDiagnostic } from "../syncDiagnostics";
 import { ATTENTION_STATE_CLASS, ATTENTION_STATE_LABEL, type AttentionState } from "../attentionStates";
 
@@ -34,11 +34,46 @@ function time(at: number | null): string {
 
 export default function SyncStatusPopover(props: Props) {
   const [open, setOpen] = useState(false);
+  const [horizontalOffset, setHorizontalOffset] = useState(0);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const horizontalOffsetRef = useRef(0);
   const failed = props.status === "failed";
   const delayed = props.status === "delayed";
   const Icon = failed ? AlertTriangle : !props.connected ? WifiOff : props.status === "syncing" || props.status === "retrying" ? Loader2 : props.status === "synchronized" ? CheckCircle2 : delayed ? Clock3 : Wifi;
   const color = failed ? "text-red-400" : delayed || props.status === "retrying" ? "text-amber-400" : props.status === "synchronized" ? "text-emerald-400" : "text-muted-foreground";
   const attentionState: AttentionState = failed ? "blocker" : delayed || props.status === "retrying" || props.pendingCount > 0 ? "review" : "info";
+
+  useLayoutEffect(() => {
+    if (!open) {
+      horizontalOffsetRef.current = 0;
+      setHorizontalOffset(0);
+      return;
+    }
+
+    const clampToViewport = () => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth;
+      const edgeMargin = 8;
+      const baseLeft = rect.left - horizontalOffsetRef.current;
+      const baseRight = rect.right - horizontalOffsetRef.current;
+      const nextOffset =
+        baseLeft < edgeMargin
+          ? edgeMargin - baseLeft
+          : baseRight > viewportWidth - edgeMargin
+            ? viewportWidth - edgeMargin - baseRight
+            : 0;
+      if (nextOffset !== horizontalOffsetRef.current) {
+        horizontalOffsetRef.current = nextOffset;
+        setHorizontalOffset(nextOffset);
+      }
+    };
+
+    clampToViewport();
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  }, [open]);
 
   return (
     <div className="relative">
@@ -51,7 +86,11 @@ export default function SyncStatusPopover(props: Props) {
         <ChevronDown className="h-3 w-3" />
       </button>
       {open && (
-        <div className="absolute right-0 top-9 z-50 w-80 rounded-md border border-border bg-background p-3 text-xs shadow-xl">
+        <div
+          ref={panelRef}
+          style={horizontalOffset ? { transform: `translateX(${horizontalOffset}px)` } : undefined}
+          className="absolute right-0 top-9 z-50 w-[min(20rem,calc(100vw-1rem))] rounded-md border border-border bg-background p-3 text-xs shadow-xl"
+        >
           <div className="flex items-start justify-between gap-2">
             <div>
                <div className="flex items-center gap-2"><p className={`font-semibold ${color}`}>{labels[props.status]}</p><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[attentionState]}`}>{ATTENTION_STATE_LABEL[attentionState]}</span></div>
