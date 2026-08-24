@@ -82,3 +82,17 @@ mtime_ms = 1787543669405
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/fe4d9ba7-52e1-4ad5-bd4e-cbf908d33cff/0b8ffc53-a0ad-49d1-be0c-1e12e0f8418e"
 storage_version_token = "1787543681661691"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "-zL8AXd5cvbk17AvmGJgd"
+uri = "file://artifacts/run-calculator/release-evidence/preview-home.jpg"
+type = "image"
+title = "Release preview home screenshot"
+description = "Fresh desktop preview screenshot captured from the running Production Run Calculator web workflow."
+logical_id = "9d797b4d-3969-437b-b085-05bc6e224317"
+content_hash = "sha256:4e3a4bc27e6d7cf24381668eaf622a4efce67c01900e4cc6a3e6e431f2b40370"
+size = 26620
+mtime_ms = 1787607714737
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/9d797b4d-3969-437b-b085-05bc6e224317/5cbbc215-9659-4868-b27a-27a488ea43cf"
+storage_version_token = "1787607734009640"
+content_type = "image/jpeg"
