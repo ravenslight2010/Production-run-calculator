@@ -1479,12 +1479,13 @@ describe("/sync/events — date-scoped broadcasts", () => {
   // connections don't hang afterAll's server.close().
   function collectSenderIds(date: string, ctrl: AbortController, sink: string[]): Promise<void> {
     return (async () => {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
         const res = await fetch(
           `${baseUrl}/api/sync/events?clientId=watcher-${date}&today=${date}`,
           { headers: authHeaders(), signal: ctrl.signal },
         );
-        const reader = res.body!.getReader();
+        reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let buf = "";
         while (true) {
@@ -1503,6 +1504,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
         }
       } catch {
         // aborted or stream error — collection is best-effort.
+      } finally {
+        // Abort the fetch and cancel the reader independently. Node's fetch
+        // can leave a body reader pending when only the controller is aborted,
+        // which keeps the test server alive during suite teardown.
+        await reader?.cancel().catch(() => {});
       }
     })();
   }

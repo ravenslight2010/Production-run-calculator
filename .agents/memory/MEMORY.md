@@ -148,6 +148,7 @@
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
 - [Accessibility coverage gate](a11y-coverage-gate.md) — isolated multi-viewport axe checks should separate stable workflow coverage from known shell debt and destructive setup.
 - [Sync snapshot identity](sync-snapshot-identity.md) — only the server’s stable hash of protected canonical state may authorize an unchanged response; legacy reads stay full payloads.
+- [SSE disconnect registration](sse-disconnect-registration.md) — register close cleanup before awaited initial snapshot work, and cancel test readers explicitly.
 - [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) — compare ingredient changes in native batch/per-pizza units and retain a provenance-linked pre-import undo state.
 - [Release browser evidence](release-browser-evidence.md) — full Playwright runs need system Chromium, retained failure artifacts, and a disposable DB for destructive setup.

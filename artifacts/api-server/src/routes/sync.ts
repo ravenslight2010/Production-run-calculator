@@ -581,6 +581,18 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const clientId = (req.query.clientId as string) ?? "";
   const scope = currentScope();
   const watchDate = clientToday(req);
+  let closed = false;
+  let client: SseClient | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
+
+  // Register this before any awaited work. A browser can abort its wake
+  // reconciliation while the initial row lookup is in flight; registering
+  // afterward would add a disconnected response to `clients` permanently.
+  req.once("close", () => {
+    closed = true;
+    if (client) clients.delete(client);
+    if (heartbeat) clearInterval(heartbeat);
+  });
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -591,6 +603,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
     .select()
     .from(dailySyncTable)
     .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope)));
+  if (closed) return;
   // Always send a first frame, including when no row exists. The web client uses
   // this acknowledgement as its sync baseline and must not upload local state
   // before it has either applied the row or learned that the row is absent.
@@ -607,17 +620,12 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  const client: SseClient = { res, clientId, scope, watchDate };
+  client = { res, clientId, scope, watchDate };
   clients.add(client);
 
-  const heartbeat = setInterval(() => {
+  heartbeat = setInterval(() => {
     try { res.write(": heartbeat\n\n"); } catch {}
   }, 15_000);
-
-  req.on("close", () => {
-    clients.delete(client);
-    clearInterval(heartbeat);
-  });
 });
 
 // ── Scheduled (future) days ──────────────────────────────────────────────────

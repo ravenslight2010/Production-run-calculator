@@ -125,10 +125,22 @@ async function getToday(page: Page): Promise<Record<string, unknown>> {
 }
 
 async function localRuns(page: Page): Promise<Array<{ id?: string; endedAt?: number }>> {
-  return page.evaluate(() => {
-    const raw = localStorage.getItem("run-calc-day");
-    return ((JSON.parse(raw ?? "{}") as { runs?: Array<{ id?: string; endedAt?: number }> }).runs ?? []);
-  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.evaluate(() => {
+        const raw = localStorage.getItem("run-calc-day");
+        return ((JSON.parse(raw ?? "{}") as { runs?: Array<{ id?: string; endedAt?: number }> }).runs ?? []);
+      });
+    } catch (error) {
+      if (attempt === 2) throw error;
+      // Wake reconciliation can reload the page between the poll's call and
+      // its evaluation. Wait for that navigation to settle, then read the
+      // durable copy again rather than turning a transient destroyed context
+      // into a failed convergence test.
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+    }
+  }
+  return [];
 }
 
 function seededPayload(runId: string): SyncPayload {
@@ -200,10 +212,12 @@ test(
       // event through a destroyed execution context would hide the behavior
       // under test, so let the browser finish that navigation naturally.
       await peer.waitForTimeout(1_000);
+      await peer.waitForLoadState("domcontentloaded").catch(() => {});
       await expect.poll(async () => (await localRuns(peer)).some((run) => run.id === runId), {
         timeout: 15_000,
       }).toBe(false);
 
+      await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       await peer.reload({ waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       expect((await localRuns(peer)).some((run) => run.id === runId)).toBe(false);
@@ -271,7 +285,9 @@ test(
       await expect.poll(async () => (await localRuns(peer)).some((run) => run.id === runId), {
         timeout: 15_000,
       }).toBe(false);
+      await peer.waitForLoadState("domcontentloaded").catch(() => {});
       await peer.reload({ waitUntil: "domcontentloaded" });
+      await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       expect((await localRuns(peer)).some((run) => run.id === runId)).toBe(false);
 
       // A client-date-scoped read must still be a valid empty canonical row;
