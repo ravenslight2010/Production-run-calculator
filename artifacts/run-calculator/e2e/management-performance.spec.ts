@@ -347,11 +347,13 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
   }));
 });
 
-test("keeps the first authenticated calculator visit usable on slow 3G", async ({ page }, testInfo: TestInfo) => {
-  requireIsolatedTestDatabase("authenticated slow-network performance e2e");
-  if (!SIGNUP_CODE) {
-    throw new Error("STAFF_SIGNUP_CODE must be configured for authenticated slow-network performance e2e.");
-  }
+test(
+  "keeps the first authenticated calculator visit usable on slow 3G @mobile-slow-network",
+  async ({ page }, testInfo: TestInfo) => {
+    requireIsolatedTestDatabase("authenticated slow-network performance e2e");
+    if (!SIGNUP_CODE) {
+      throw new Error("STAFF_SIGNUP_CODE must be configured for authenticated slow-network performance e2e.");
+    }
 
   await page.addInitScript(() => {
     (window as Window & { __calculatorPerformance?: CapturedDiagnostic[] }).__calculatorPerformance = [];
@@ -429,22 +431,23 @@ test("keeps the first authenticated calculator visit usable on slow 3G", async (
     failedResources,
     setup: "isolated account and facility created; manager role authorized",
   };
-  await testInfo.attach("calculator-authenticated-slow-network.json", {
-    body: JSON.stringify(evidence, null, 2),
-    contentType: "application/json",
-  });
-  if (visitError) throw visitError;
-  expect(homeChunkRequests.length, "the deferred Home bundle should load after authentication").toBeGreaterThan(0);
-  expect(homeChunkDiagnostic, "the deferred Home bundle should report its load timing").toBeDefined();
-  expect(failureDiagnostic, "the deferred Home bundle must not fail to load").toBeUndefined();
-  expect(
-    runReadyMs,
-    `authenticated calculator was not usable within ${AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs}ms; evidence=${JSON.stringify({
-      elapsedMs: Math.round(runReadyMs),
-      homeChunkRequests: homeChunkRequests.length,
-      failedResources,
-      diagnostics: diagnostics.filter((entry) => entry.name.startsWith("startup:")),
-      setupElapsedMs: Date.now() - slowNetworkStartedAt,
-    })}`,
-  ).toBeLessThanOrEqual(AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs);
-});
+    await testInfo.attach("calculator-authenticated-slow-network.json", {
+      body: JSON.stringify(evidence, null, 2),
+      contentType: "application/json",
+    });
+    if (visitError) throw visitError;
+    expect(homeChunkRequests.length, "the deferred Home bundle should load after authentication").toBeGreaterThan(0);
+    expect(homeChunkDiagnostic, "the deferred Home bundle should report its load timing").toBeDefined();
+    expect(failureDiagnostic, "the deferred Home bundle must not fail to load").toBeUndefined();
+    expect(
+      runReadyMs,
+      `authenticated calculator was not usable within ${AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs}ms; evidence=${JSON.stringify({
+        elapsedMs: Math.round(runReadyMs),
+        homeChunkRequests: homeChunkRequests.length,
+        failedResources,
+        diagnostics: diagnostics.filter((entry) => entry.name.startsWith("startup:")),
+        setupElapsedMs: Date.now() - slowNetworkStartedAt,
+      })}`,
+    ).toBeLessThanOrEqual(AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs);
+  },
+);

@@ -26,6 +26,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop-chromium",
+      grepInvert: /@mobile-slow-network/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

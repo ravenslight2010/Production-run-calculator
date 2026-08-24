@@ -13,7 +13,7 @@ const realMobileBrowserWsEndpoint =
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "phone-layout.spec.ts",
+  testMatch: ["phone-layout.spec.ts", "management-performance.spec.ts"],
   timeout: 60_000,
   retries: 0,
   workers: 1,
@@ -30,7 +30,14 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      testMatch: "phone-layout.spec.ts",
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "mobile-slow-network",
+      testMatch: "management-performance.spec.ts",
+      grep: /@mobile-slow-network/,
+      use: { ...devices["Pixel 5"] },
     },
     // A device service supplies a Playwright/CDP endpoint connected to Android
     // Chrome on a physical device. Do not replace this with a Playwright device
@@ -39,6 +46,7 @@ export default defineConfig({
       ? [
           {
             name: "real-mobile-chromium",
+            testMatch: "phone-layout.spec.ts",
             use: {
               connectOptions: {
                 wsEndpoint: realMobileBrowserWsEndpoint,

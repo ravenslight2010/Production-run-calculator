@@ -54,9 +54,12 @@ The management performance browser check also creates an isolated account,
 throttles Chromium to 400 ms latency with 500 Kbps download/upload, and signs
 in before waiting for the run tab to become usable. The deferred Home bundle
 must load only on that authenticated transition and the run tab must be
-visible within 10,000 ms. The attached JSON keeps only pathname, status,
-bounded failure text, timing, and network-profile metadata; it never captures
-request bodies, response bodies, customer data, or full URLs.
+visible within 10,000 ms. The same tagged journey runs in the phone
+Playwright configuration using a Pixel 5 mobile Chromium profile, so mobile
+viewport and chunk scheduling are covered separately from desktop evidence.
+The attached JSON keeps only pathname, status, bounded failure text, timing,
+and network-profile metadata; it never captures request bodies, response
+bodies, customer data, or full URLs.
 
 ## Workbook startup split evidence
 
