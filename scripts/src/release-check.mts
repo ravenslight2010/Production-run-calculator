@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 type Step = {
@@ -15,7 +15,8 @@ const API_SHARD_TIMEOUT_MS = 4 * 60_000;
 const API_SHARD_WARNING_MS = 3 * 60_000;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
-const releaseEvidenceDir = "release-evidence";
+const releaseEvidenceDir =
+  process.env.RELEASE_EVIDENCE_DIR ?? "release-evidence";
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
 
 const steps: Step[] = [
@@ -271,6 +272,32 @@ async function writeReleaseReport(
   const cleanStartPassed = results.find(
     (result) => result.label === "clean-start smoke",
   )?.passed;
+  const cleanStartEvidenceFiles = [
+    "clean-start/clean-start-evidence.json",
+    "clean-start/browser-result.json",
+    "clean-start/preview-home.png",
+    "clean-start/startup-api.log",
+    "clean-start/startup-web.log",
+    "clean-start/startup-mockup.log",
+  ];
+  const availableEvidenceFiles = new Set(
+    (
+      await Promise.all(
+        cleanStartEvidenceFiles.map(async (file) => {
+          try {
+            await access(resolve(rootDir, releaseEvidenceDir, file));
+            return file;
+          } catch {
+            return undefined;
+          }
+        }),
+      )
+    ).filter((file): file is string => file !== undefined),
+  );
+  const evidenceLink = (file: string, label: string): string =>
+    availableEvidenceFiles.has(file)
+      ? `- [${label}](${file})`
+      : `- ${label}: not produced`;
   const lines = [
     "# Release Check Report",
     "",
@@ -293,12 +320,15 @@ async function writeReleaseReport(
     cleanStartPassed === undefined
       ? "- Clean-start did not run; no preview evidence was produced."
       : `- Clean-start: **${cleanStartPassed ? "PASS" : "FAIL"}**`,
-    `- [Clean-start evidence](clean-start/clean-start-evidence.json)`,
-    `- [Proxied browser result](clean-start/browser-result.json)`,
-    `- [Preview screenshot](clean-start/preview-home.png)`,
-    `- [API startup log](clean-start/startup-api.log)`,
-    `- [Web startup log](clean-start/startup-web.log)`,
-    `- [Mockup startup log](clean-start/startup-mockup.log)`,
+    evidenceLink(
+      "clean-start/clean-start-evidence.json",
+      "Clean-start evidence",
+    ),
+    evidenceLink("clean-start/browser-result.json", "Proxied browser result"),
+    evidenceLink("clean-start/preview-home.png", "Preview screenshot"),
+    evidenceLink("clean-start/startup-api.log", "API startup log"),
+    evidenceLink("clean-start/startup-web.log", "Web startup log"),
+    evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
     "",
     "The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.",
     "",

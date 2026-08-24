@@ -1,0 +1,71 @@
+name: Release check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  release-check:
+    name: Release gates and retained evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: release_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d release_check"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/release_check
+      SESSION_SECRET: release-check-ci-session
+      STAFF_SIGNUP_CODE: release-check-ci
+      NODE_ENV: test
+      E2E_TEST_DB: "1"
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+      RELEASE_EVIDENCE_DIR: release-evidence
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Remove stale evidence
+        run: rm -rf release-evidence && mkdir -p release-evidence
+
+      - name: Apply schema to disposable database
+        run: pnpm --filter @workspace/db run push-force
+
+      - name: Run release check
+        run: pnpm run release:check
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.run_id }}
+          path: release-evidence
+          if-no-files-found: warn
+          retention-days: 14
