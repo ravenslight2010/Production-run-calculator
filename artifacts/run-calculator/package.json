@@ -7,7 +7,7 @@
     "dev": "exec vite --config vite.config.ts --host 0.0.0.0",
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
-    "pretypecheck": "pnpm --filter @workspace/spec-import exec tsc -b",
+    "pretypecheck": "pnpm --filter @workspace/inventory-math exec tsc -b --force && pnpm --filter @workspace/spec-import exec tsc -b",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:performance": "vitest run src/performanceDiagnostics.test.ts src/homePerformance.test.ts src/warehouseGrouping.test.ts",
