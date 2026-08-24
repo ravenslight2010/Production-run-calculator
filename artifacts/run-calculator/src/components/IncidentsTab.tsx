@@ -138,9 +138,17 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function IncidentRow({ incident, assignees }: { incident: Incident; assignees: Array<{ userId: string; name: string; role: string }> }) {
+function IncidentRow({
+  incident,
+  assignees,
+  initiallyExpanded = false,
+}: {
+  incident: Incident;
+  assignees: Array<{ userId: string; name: string; role: string }>;
+  initiallyExpanded?: boolean;
+}) {
   const qc = useQueryClient();
-  const [expanded, setExpanded] = useState(incident.status === "new");
+  const [expanded, setExpanded] = useState(initiallyExpanded || incident.status === "new");
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["incidents"] });
     void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
@@ -357,6 +365,10 @@ export default function IncidentsTab() {
   const [platform, setPlatform] = useState<PlatformFilter>("all");
   const [source, setSource] = useState<SourceFilter>("all");
   const [workflowState, setWorkflowState] = useState<WorkflowFilter>("all");
+  const [selectedIncidentId] = useState(() => {
+    const match = window.location.hash.match(/^#incidents\/(.+)$/);
+    return match ? decodeURIComponent(match[1]) : null;
+  });
   const { data: assignees = [] } = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canReview });
 
   const incidents = data ?? [];
@@ -455,7 +467,12 @@ export default function IncidentsTab() {
           </p>
         ) : (
           filtered.map((incident) => (
-            <IncidentRow key={incident.id} incident={incident} assignees={assignees} />
+            <IncidentRow
+              key={incident.id}
+              incident={incident}
+              assignees={assignees}
+              initiallyExpanded={incident.id === selectedIncidentId}
+            />
           ))
         )}
       </CardContent>

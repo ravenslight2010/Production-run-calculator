@@ -58,7 +58,13 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
           <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span>{(() => { const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState; return <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[state]}`} data-testid={`attention-state-${item.id}`}>{ATTENTION_STATE_LABEL[state]}</span>; })()}<span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category]}</span></div>
             <p className="mt-1 text-xs text-muted-foreground">{item.description} · {age(item.createdAt)} · {item.assigneeName ?? "Unassigned"}</p>
-          </div><a className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline" href={item.sourcePath} onClick={() => onNavigate?.(item.sourceType === "incident" ? "incidents" : item.sourceType === "sync" ? "summary" : "setup")}>Open source <ExternalLink className="h-3 w-3" /></a></div>
+          </div><a className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline" href={item.sourcePath} onClick={(event) => {
+            event.preventDefault();
+            window.location.hash = item.sourcePath.replace(/^#/, "");
+            onNavigate?.(item.sourcePath.startsWith("#incidents/")
+              ? "incidents"
+              : item.sourceType === "sync" ? "summary" : "setup");
+          }}>Open source <ExternalLink className="h-3 w-3" /></a></div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <select aria-label={`Status for ${item.title}`} className="rounded border border-border bg-background px-2 py-1 text-xs" value={item.status} disabled={mutation.isPending} onChange={(e) => mutation.mutate({ item, input: { version: item.version, status: e.target.value as ActionItem["status"] } })}>
               {["open", "in_progress", "deferred", "resolved"].map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
