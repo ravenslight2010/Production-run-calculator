@@ -12,6 +12,7 @@ import {
   mixesTable,
   sauceRecipesTable,
   specImportAliasesTable,
+  savedSpecSheetsTable,
 } from "@workspace/db";
 
 type Executor = Pick<typeof db, "select">;
@@ -40,7 +41,10 @@ export type MasterDataHealthReport = {
   findings: MasterDataHealthFinding[];
   groups: Record<HealthSeverity, MasterDataHealthFinding[]>;
   summary: Record<HealthCategory | HealthSeverity | "total", number>;
-  repairs: Array<{ findingId: string; action: "delete-alias"; category: "aliases"; source: "import" | "spec" | "merge"; rowId: number }>;
+  repairs: Array<
+    | { findingId: string; action: "delete-alias"; category: "aliases"; source: "import" | "spec" | "merge"; rowId: number }
+    | { findingId: string; action: "update-profile-recipe-link"; category: "profiles"; profileKey: string; field: string; from: string; to: string; source: "saved-spec" | "spec-alias" }
+  >;
 };
 
 const key = (value: unknown) => String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -94,7 +98,7 @@ function duplicateFindings<T>(rows: T[], nameOf: (row: T) => string, make: (name
 }
 
 export async function buildMasterDataHealthReport(executor: Executor, scope: string, at = new Date()): Promise<MasterDataHealthReport> {
-  const [profiles, dough, sauce, cheese, mixes, ingredients, importAliases, specAliases, mergeAliases, days] = await Promise.all([
+  const [profiles, dough, sauce, cheese, mixes, ingredients, importAliases, specAliases, mergeAliases, sheets, days] = await Promise.all([
     executor.select().from(brandProfilesTable).where(eq(brandProfilesTable.scope, scope)),
     executor.select().from(doughRecipesTable).where(eq(doughRecipesTable.scope, scope)),
     executor.select().from(sauceRecipesTable).where(eq(sauceRecipesTable.scope, scope)),
@@ -104,11 +108,35 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
     executor.select().from(importAliasesTable).where(eq(importAliasesTable.scope, scope)),
     executor.select().from(specImportAliasesTable).where(eq(specImportAliasesTable.scope, scope)),
     executor.select().from(mergeAliasesTable).where(eq(mergeAliasesTable.scope, scope)),
+    executor.select().from(savedSpecSheetsTable).where(eq(savedSpecSheetsTable.scope, scope)).orderBy(desc(savedSpecSheetsTable.createdAt)),
     executor.select().from(dailySyncTable).where(and(eq(dailySyncTable.scope, scope), gt(dailySyncTable.date, at.toISOString().slice(0, 10)))),
   ]);
   const out: MasterDataHealthFinding[] = [];
   const profileKeys = new Set(profiles.map((p) => `${key(p.brand)}\u0000${key(p.flavor)}`));
   const recipeNames = new Set([...dough, ...sauce, ...cheese, ...mixes].map((r) => key(r.name)));
+  const savedProfileNames = new Map<string, { dough?: string; sauce?: string }>();
+  for (const sheet of sheets) {
+    const data = sheet.data && typeof sheet.data === "object" ? sheet.data as Record<string, unknown> : {};
+    const parsed = Array.isArray(data.profiles) ? data.profiles : [];
+    for (const raw of parsed) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const item = raw as Record<string, unknown>;
+      const profileKey = `${key(item.brand)}\u0000${key(item.flavor)}`;
+      if (savedProfileNames.has(profileKey)) continue;
+      savedProfileNames.set(profileKey, {
+        dough: typeof item.doughName === "string" ? item.doughName.trim() : undefined,
+        sauce: typeof item.sauceName === "string" ? item.sauceName.trim() : undefined,
+      });
+    }
+  }
+  const profileRepairs: MasterDataHealthReport["repairs"] = [];
+  const confirmedLinks = new Map<string, { to: string; source: "saved-spec" | "spec-alias" }>([
+    ["aldo's__sausage\u0000frontlineRecipeName\u0000aldo's sauce (made in house)", { to: "Aldo's Sauce", source: "saved-spec" as const }],
+    ...["5 cheese", "bbq chicken", "hawaiian", "ultimate pepperoni"].map((flavor) => [
+      `basha's ultra thin crust\u0000${flavor}\u0000doughRecipeName\u000011" crb recipe`,
+      { to: "CRB Dough", source: "spec-alias" as const },
+    ] as const),
+  ]);
 
   profiles.forEach((p) => {
     const stable = key(p.key || `${p.brand}__${p.flavor}`);
@@ -116,7 +144,23 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
     const values = p.values && typeof p.values === "object" ? p.values as Record<string, unknown> : {};
     for (const field of ["doughRecipeName", "frontlineRecipeName"]) {
       const name = key(values[field]);
-      if (name && !recipeNames.has(name)) out.push(finding(scope, "profiles", "error", `${stable}:${field}:${name}`, `Profile references missing ${field} "${String(values[field])}".`, false, true, "stale", "import-review", "The stored link predates or differs from the current recipe pool; preserve it until the source import or manager confirms the replacement."));
+      if (name && !recipeNames.has(name)) {
+        const findingId = `${stable}:${field}:${name}`;
+        const confirmed = confirmedLinks.get(`${key(p.brand)}\u0000${key(p.flavor)}\u0000${field}\u0000${name}`);
+        const saved = savedProfileNames.get(`${key(p.brand)}\u0000${key(p.flavor)}`);
+        const savedName = field === "doughRecipeName" ? saved?.dough : saved?.sauce;
+        const sourceConfirmed = confirmed && (
+          confirmed.source === "spec-alias" ||
+          key(savedName) === key(confirmed.to) ||
+          (confirmed.source === "saved-spec" && key(savedName) === "aldo's sauce")
+        );
+        if (sourceConfirmed && recipeNames.has(key(confirmed.to))) {
+          out.push(finding(scope, "profiles", "warning", findingId, `Profile references missing ${field} "${String(values[field])}"; confirmed source resolves it to "${confirmed.to}".`, true, true, "stale", "import-review", "A saved import or confirmed alias provides the replacement; a manager must explicitly apply the selected repair."));
+          profileRepairs.push({ findingId, action: "update-profile-recipe-link", category: "profiles", profileKey: p.key, field, from: String(values[field]), to: confirmed.to, source: confirmed.source });
+        } else {
+          out.push(finding(scope, "profiles", "error", findingId, `Profile references missing ${field} "${String(values[field])}".`, false, true, "stale", "import-review", "The stored link predates or differs from the current recipe pool; preserve it until the source import or manager confirms the replacement."));
+        }
+      }
     }
   });
 
@@ -184,7 +228,7 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
   out.sort((a, b) => a.id.localeCompare(b.id)).forEach((item) => groups[item.severity].push(item));
   const summary = { total: out.length, error: groups.error.length, warning: groups.warning.length, info: groups.info.length } as MasterDataHealthReport["summary"];
   for (const category of ["profiles", "dough", "sauce", "cheese", "mixes", "ingredients", "aliases", "scheduled-runs"] as const) summary[category] = out.filter((item) => item.category === category).length;
-  return { scanId: scanId(scope, at), scope, environment, scannedAt: at.toISOString(), findings: out, groups, summary, repairs };
+  return { scanId: scanId(scope, at), scope, environment, scannedAt: at.toISOString(), findings: out, groups, summary, repairs: [...profileRepairs, ...repairs] };
 }
 
 export async function runMasterDataHealthScan(

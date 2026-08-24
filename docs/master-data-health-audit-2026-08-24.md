@@ -38,6 +38,16 @@ The fresh development report, built at `2026-08-24T00:00:00.000Z`, contains:
 - Duplicate-name warnings are grouped by normalized name, avoiding repeated
   findings with the same stable ID.
 
+The five retained profile links now have bounded, source-backed repair
+proposals. Aldo's Sausage resolves `Aldo's Sauce (made in house)` to the
+saved-import recipe `Aldo's Sauce`. The four Basha's Ultra Thin Crust profiles
+(5 Cheese, BBQ Chicken, Hawaiian, and Ultimate Pepperoni) resolve
+`11" CRB recipe` to the current `CRB Dough` pool row through the confirmed CRB
+recipe-name alias. These proposals update only the recipe-name field, require
+an explicit manager-selected finding ID, and skip the update if the profile's
+stored value changed since the scan. No replacement is guessed and no started
+run snapshot is rewritten by this path.
+
 The scan is intentionally review-first. No manager-entered profile values,
 recipe formulas, ingredient rows, aliases, or deleted records were changed by
 this audit. Existing boot heals remain marker-guarded and were not broadened.
@@ -121,6 +131,9 @@ each set represents one material.
 - Development scan: rerun with the current detector; result retained above.
 - Production scan: read-only historical result retained above; current-code
   production verification is **not verified** until publish.
+- Confirmed profile-link repair coverage: the health report proposes exactly
+  the five allowlisted source-backed replacements; unrelated missing links
+  remain review-only.
 
 ## Release disposition
 

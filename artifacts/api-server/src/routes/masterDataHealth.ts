@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { and, desc, eq } from "drizzle-orm";
-import { db, masterDataHealthScansTable, importAliasesTable, specImportAliasesTable, mergeAliasesTable } from "@workspace/db";
+import { db, masterDataHealthScansTable, importAliasesTable, specImportAliasesTable, mergeAliasesTable, brandProfilesTable } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
 import { buildMasterDataHealthReport } from "../lib/masterDataHealth";
@@ -66,7 +66,11 @@ router.post("/master-data/health/repair", canReview, async (req: Request, res: R
     const scope = currentScope();
     const report = await buildMasterDataHealthReport(db, scope);
     const requested = new Set(Array.isArray(req.body?.findingIds) ? req.body.findingIds.filter((id: unknown): id is string => typeof id === "string") : []);
-    const repairs = report.repairs.filter((repair) => requested.size === 0 || requested.has(repair.findingId));
+    const repairs = report.repairs.filter((repair) =>
+      repair.action === "update-profile-recipe-link"
+        ? requested.size > 0 && requested.has(repair.findingId)
+        : requested.size === 0 || requested.has(repair.findingId),
+    );
     // Preview is the safe default. A caller must opt in explicitly after
     // reviewing the proposed rows.
     if (req.body?.apply !== true) {
@@ -75,6 +79,17 @@ router.post("/master-data/health/repair", canReview, async (req: Request, res: R
     }
     let applied = 0;
     for (const repair of repairs) {
+      if (repair.action === "update-profile-recipe-link") {
+        const [profile] = await db.select().from(brandProfilesTable)
+          .where(and(eq(brandProfilesTable.key, repair.profileKey), eq(brandProfilesTable.scope, scope)));
+        const values = profile?.values && typeof profile.values === "object" ? profile.values as Record<string, unknown> : {};
+        if (!profile || String(values[repair.field] ?? "") !== repair.from) continue;
+        await db.update(brandProfilesTable)
+          .set({ values: { ...values, [repair.field]: repair.to }, updatedAtMs: Date.now() + 1 })
+          .where(and(eq(brandProfilesTable.key, repair.profileKey), eq(brandProfilesTable.scope, scope)));
+        applied++;
+        continue;
+      }
       const id = repair.rowId;
       const table = repair.source === "import" ? importAliasesTable
         : repair.source === "spec" ? specImportAliasesTable : mergeAliasesTable;

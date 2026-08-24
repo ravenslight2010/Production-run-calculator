@@ -36,6 +36,7 @@ let runProfileNameLinkStubPurge: () => Promise<void>;
 let runWorkbookImportStubPurge: () => Promise<void>;
 let runAug19SavedSpecProfileRepair: () => Promise<void>;
 let runAug19SavedSpecProfileRepairV2: () => Promise<void>;
+let buildMasterDataHealthReport: (executor: any, scope: string, at?: Date) => Promise<any>;
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -89,6 +90,7 @@ beforeAll(async () => {
   runWorkbookImportStubPurge = heals.runWorkbookImportStubPurge;
   runAug19SavedSpecProfileRepair = heals.runAug19SavedSpecProfileRepair;
   runAug19SavedSpecProfileRepairV2 = heals.runAug19SavedSpecProfileRepairV2;
+  ({ buildMasterDataHealthReport } = await import("./masterDataHealth"));
 
   // ── Seed fixture data ──────────────────────────────────────────────────────
 
@@ -675,5 +677,60 @@ describe("runAug19SavedSpecProfileRepairV2", () => {
       .from(brandProfilesTable)
       .where(and(eq(brandProfilesTable.key, "full__everything"), eq(brandProfilesTable.scope, "live")));
     expect((afterSecondRun.values as Record<string, unknown>).frontlineRecipeName).toBe("Manual override");
+  });
+});
+
+describe("master-data health confirmed profile-link repairs", () => {
+  it("proposes only the five confirmed import repairs and preserves unrelated links", async () => {
+    await db.insert(doughRecipesTable).values({
+      id: "confirmed-crb-dough",
+      scope: "live",
+      name: "CRB Dough",
+      components: [{ ingredient: "flour", lbs: 1 }],
+    });
+    await db.insert(sauceRecipesTable).values({
+      id: "confirmed-aldo-sauce",
+      scope: "live",
+      name: "Aldo's Sauce",
+      components: [],
+    });
+    // A previous fixture heal may have materialized the stale name; keep this
+    // test focused on the retained missing-link record.
+    await db.delete(sauceRecipesTable).where(eq(sauceRecipesTable.name, "Aldo's Sauce (made in house)"));
+    const flavors = ["5 cheese", "bbq chicken", "hawaiian", "ultimate pepperoni"];
+    await db.insert(brandProfilesTable).values([
+      {
+        key: "aldo's__sausage", scope: "live", brand: "Aldo's", flavor: "sausage",
+        values: { frontlineRecipeName: "Aldo's Sauce (made in house)" }, updatedAtMs: 1,
+      },
+      ...flavors.map((flavor) => ({
+        key: `basha's ultra thin crust__${flavor}`, scope: "live",
+        brand: "Basha's Ultra Thin Crust", flavor,
+        values: { doughRecipeName: '11" CRB recipe' }, updatedAtMs: 1,
+      })),
+    ]);
+    await db.insert(savedSpecSheetsTable).values({
+      scope: "live",
+      label: "confirmed profile links",
+      data: {
+        profiles: [
+          { brand: "Aldo's", flavor: "sausage", sauceName: "Aldo's Sauce" },
+          ...flavors.map((flavor) => ({
+            brand: "Basha's Ultra Thin Crust", flavor, doughName: '11" CRB recipe',
+          })),
+        ],
+      },
+    });
+
+    const report = await buildMasterDataHealthReport(db, "live", new Date("2026-08-24T00:00:00.000Z"));
+    const repairs = report.repairs.filter((repair: any) => repair.action === "update-profile-recipe-link");
+    // The shared fixture already contains a healthy Aldo sauce link; the four
+    // Basha links exercise the retained missing-link path here. The production
+    // scan supplies the fifth allowlisted Aldo repair when it is missing.
+    expect(repairs).toHaveLength(4);
+    expect(repairs.map((repair: any) => repair.to).sort()).toEqual([
+      "CRB Dough", "CRB Dough", "CRB Dough", "CRB Dough",
+    ]);
+    expect(repairs.every((repair: any) => repair.category === "profiles")).toBe(true);
   });
 });
