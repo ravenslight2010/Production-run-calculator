@@ -49,14 +49,30 @@ async function signUp(page: Page, username: string): Promise<void> {
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
-    await page
-      .locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 })
-      .catch(() => {});
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (await welcome.isVisible().catch(() => false)) {
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
   }
+}
+
+async function dismissOnboarding(page: Page): Promise<void> {
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (!(await welcome.isVisible().catch(() => false))) return;
+  const seen = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/me/onboarding-seen") &&
+      response.request().method() === "POST",
+  );
+  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+  await expect((await seen).status()).toBe(200);
+  await expect(welcome).toBeHidden({ timeout: 10_000 });
 }
 
 async function promoteToManager(username: string): Promise<void> {
@@ -161,6 +177,7 @@ test("production, warehouse, QC, and management remain connected after navigatio
   await promoteToManager(username);
   const runId = await seedPendingRun(page);
 
+  await dismissOnboarding(page);
   await page.getByTestId("tab-run").click();
   await expect(page.getByTestId("button-start-run")).toBeVisible();
   await page.getByTestId("button-start-run").click();

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { Mix } from "@workspace/mixes";
 import { mergeMixUpdates } from "../mixes";
@@ -18,6 +18,28 @@ export function useOptimisticMixUpdates(items: Mix[], queryClient: QueryClient) 
     () => items.map((item) => pendingUpdates.get(item.id) ?? item),
     [items, pendingUpdates],
   );
+
+  // A cache observer may receive an older GET after the save response. Keep
+  // the acknowledged value mounted until the query's item has caught up;
+  // otherwise the plan can briefly (or permanently, for prep-only cards)
+  // revert to amountAlreadyMade = 0.
+  useEffect(() => {
+    if (pendingUpdates.size === 0) return;
+    const caughtUp = new Set(
+      items
+        .filter((item) => {
+          const pending = pendingUpdates.get(item.id);
+          return pending && item.amountAlreadyMade === pending.amountAlreadyMade;
+        })
+        .map((item) => item.id),
+    );
+    if (caughtUp.size === 0) return;
+    setPendingUpdates((current) => {
+      const next = new Map(current);
+      for (const id of caughtUp) next.delete(id);
+      return next;
+    });
+  }, [items, pendingUpdates]);
 
   const patchCache = useCallback((updates: Mix[]) => {
     queryClient.setQueryData<Mix[]>(MIXES_QUERY_KEY, (current) =>
@@ -47,7 +69,9 @@ export function useOptimisticMixUpdates(items: Mix[], queryClient: QueryClient) 
     void queryClient.cancelQueries({ queryKey: MIXES_QUERY_KEY });
     setPendingUpdates((current) => {
       const next = new Map(current);
-      next.delete(optimisticMix.id);
+      // Keep the overlay until the observer sees the acknowledged value.
+      // This is important when a refetch started before the POST resolves.
+      next.set(optimisticMix.id, persisted);
       return next;
     });
   }, [patchCache, queryClient]);

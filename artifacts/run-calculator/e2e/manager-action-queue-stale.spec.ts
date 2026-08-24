@@ -27,8 +27,17 @@ async function signUp(page: Page, username: string): Promise<void> {
   await page.locator("#accessCode").fill(SIGNUP_CODE);
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) await getStarted.click();
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (await welcome.isVisible().catch(() => false)) {
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
+  }
 }
 
 async function signIn(page: Page, username: string): Promise<void> {
@@ -43,7 +52,14 @@ async function signIn(page: Page, username: string): Promise<void> {
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
   if (await welcome.isVisible().catch(() => false)) {
-    await welcome.getByRole("button", { name: "Close" }).click();
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
   }
 }
 
@@ -111,6 +127,23 @@ test.beforeAll(async () => {
       ],
     );
     incidentQueueFixtureId = incidentQueue.rows[0].id as number;
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
+
+// The first scenario intentionally advances the shared fixture through
+// in_progress -> resolved. Restore its initial version before each independent
+// journey so later navigation checks do not depend on test order.
+test.beforeEach(async () => {
+  if (fixtureId === null || !process.env.DATABASE_URL) return;
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await db.query(
+      "UPDATE action_items SET status = 'open', version = 1, updated_at = NOW() WHERE id = $1",
+      [fixtureId],
+    );
   } finally {
     await db.end().catch(() => {});
   }
@@ -251,12 +284,20 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   await expect(page.getByTestId("manager-action-queue")).toContainText("Sync");
   await page.screenshot({ path: testInfo.outputPath("queue-source-before.png"), fullPage: true });
 
-  await page.getByRole("link", { name: "Open source" }).click();
+  const visibleQueue = page.locator('[data-testid="manager-action-queue"]:visible');
+  const syncHeader = visibleQueue
+    .getByText(title, { exact: true })
+    .locator("xpath=../../..");
+  await syncHeader.getByRole("link", { name: "Open source" }).click();
 
   // The source link must select the Summary tab and expose the actual sync
   // workflow, rather than only updating the URL hash or invoking a callback.
   await expect(page).toHaveURL(/#sync-diagnostics$/);
   await expect(page.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
+  // The source link selects the diagnostics workflow; the download action is
+  // inside the status popover, so open that user-facing control before checking
+  // its action rather than relying on hidden DOM content.
+  await page.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
   await expect(page.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("queue-source-sync-workflow.png"), fullPage: true });
   expect(browserErrors).toEqual([]);

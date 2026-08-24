@@ -67,11 +67,16 @@ async function waitForAppAfterNavigation(page: Page): Promise<void> {
     .locator('[data-testid="tab-run"]')
     .waitFor({ state: "attached", timeout: 25_000 });
 
-  const getStartedBtn = page.getByRole("button", { name: /^get.?started$/i });
-  if ((await getStartedBtn.count()) > 0) {
-    await getStartedBtn.waitFor({ state: "visible", timeout: 10_000 });
-    await getStartedBtn.click();
-    await getStartedBtn.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (await welcome.isVisible().catch(() => false)) {
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
   }
 
   // The tab can mount before the authenticated shell has finished restoring
@@ -85,10 +90,29 @@ async function waitForAppAfterNavigation(page: Page): Promise<void> {
   // On a reload the onboarding dialog can finish mounting just after the
   // shell controls become visible. Check once more immediately before using
   // the menu so a late dialog cannot intercept the click.
-  if (await getStartedBtn.isVisible().catch(() => false)) {
-    await getStartedBtn.click();
-    await getStartedBtn.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  if (await welcome.isVisible().catch(() => false)) {
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
   }
+}
+
+async function dismissOnboarding(page: Page): Promise<void> {
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (!(await welcome.isVisible().catch(() => false))) return;
+  const seen = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/me/onboarding-seen") &&
+      response.request().method() === "POST",
+  );
+  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+  await expect((await seen).status()).toBe(200);
+  await expect(welcome).toBeHidden({ timeout: 10_000 });
 }
 
 async function signUpAndDismissOnboarding(
@@ -830,8 +854,8 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await dismissOnboarding(page);
+      await page.locator('button[title="More"]').waitFor({ state: "visible", timeout: 15_000 });
       await page.waitForTimeout(1_000);
 
       await goToMixes(page);
@@ -941,8 +965,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await dismissOnboarding(page);
       await page.waitForTimeout(1_000);
 
       await goToMixes(page);
@@ -1027,8 +1050,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await dismissOnboarding(page);
       await page.waitForTimeout(1_000);
 
       await goToMixes(page);
@@ -1119,8 +1141,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-      await page.getByRole("button", { name: /^get.?started$/i })
-        .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
+      await dismissOnboarding(page);
       await page.waitForTimeout(1_000);
 
       await goToMixes(page);
@@ -1139,7 +1160,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(EDIT_AMOUNT));
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
       await page.waitForTimeout(1_500);
 
       // Step 3: badge shows "need 85.00 lbs"
@@ -1150,7 +1171,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // Step 4: clear back to 0
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill("0");
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
       await page.waitForTimeout(1_500);
 
       // Step 5: badge disappears

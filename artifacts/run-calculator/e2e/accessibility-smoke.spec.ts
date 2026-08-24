@@ -153,9 +153,16 @@ async function signUp(page: Page): Promise<void> {
   expect(response.status(), "isolated sign-up should not be rejected").toBeLessThan(300);
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 60_000 });
   await page.waitForTimeout(500);
-  const onboarding = page.getByRole("button", { name: /^get.?started$/i });
-  if (await onboarding.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await onboarding.click();
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (await welcome.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
   } else {
     // A delayed onboarding overlay can render after the tab is attached.
     // Escape is harmless when it is absent and closes that overlay when it is

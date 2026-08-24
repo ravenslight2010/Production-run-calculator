@@ -56,14 +56,30 @@ async function signUp(page: Page, username: string): Promise<void> {
     timeout: 25_000,
   });
 
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
-    await page
-      .locator('[data-state="open"][aria-hidden="true"]')
-      .waitFor({ state: "detached", timeout: 5_000 })
-      .catch(() => {});
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (await welcome.isVisible().catch(() => false)) {
+    const seen = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/me/onboarding-seen") &&
+        response.request().method() === "POST",
+    );
+    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+    await expect((await seen).status()).toBe(200);
+    await expect(welcome).toBeHidden({ timeout: 10_000 });
   }
+}
+
+async function dismissOnboarding(page: Page): Promise<void> {
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  if (!(await welcome.isVisible().catch(() => false))) return;
+  const seen = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/me/onboarding-seen") &&
+      response.request().method() === "POST",
+  );
+  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+  await expect((await seen).status()).toBe(200);
+  await expect(welcome).toBeHidden({ timeout: 10_000 });
 }
 
 async function seedPendingRun(page: Page): Promise<void> {
@@ -142,6 +158,9 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
   testUsernames.add(username);
   await signUp(page, username);
   await seedPendingRun(page);
+  // The reload used to install the pending run can race the first-login
+  // mutation; make the post-reload boundary explicit before clicking tabs.
+  await dismissOnboarding(page);
 
   // Selecting the Run tab is the stable cross-layout equivalent of choosing
   // the account's newly-created pending run from the run strip.

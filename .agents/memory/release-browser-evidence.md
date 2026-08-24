@@ -14,4 +14,6 @@ against the shared development database.
 
 **How to apply:** Keep the executable override optional with a system-browser
 fallback, retain HTML/results directories, and run the full destructive suite
-only against a disposable database accepted by the isolation guard.
+only against a disposable database accepted by the isolation guard; the API
+process used by the browser runner must use that same database URL, not the
+managed API workflow's environment.

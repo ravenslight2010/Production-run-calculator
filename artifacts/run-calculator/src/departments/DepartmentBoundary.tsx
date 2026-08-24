@@ -31,6 +31,7 @@ export function DepartmentBoundary({
     <div
       data-department={name}
       data-department-active={ownsActiveTab ? "true" : "false"}
+      role="group"
       aria-label={`${name} department`}
       aria-hidden={ownsActiveTab ? undefined : true}
     >
