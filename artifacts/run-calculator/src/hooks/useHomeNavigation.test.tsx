@@ -32,12 +32,16 @@ describe("useHomeNavigation performance diagnostics", () => {
     expect(localStorage.getItem(ACTIVE_TAB_STORAGE_KEY)).toBe("quality");
   });
 
-  it("prioritizes an incident deep link over the stored tab", () => {
-    localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, "run");
-    window.location.hash = "#incidents/incident-123";
+  it.each([
+    ["#incidents", "incidents"],
+    ["#incidents/incident-123", "incidents"],
+    ["#sync-diagnostics", "summary"],
+  ] as const)("maps %s to the %s Home surface", (hash, expectedTab) => {
+    localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, "warehouse");
+    window.location.hash = hash;
 
     const { result } = renderHook(() => useHomeNavigation());
 
-    expect(result.current.activeTab).toBe("incidents");
+    expect(result.current.activeTab).toBe(expectedTab);
   });
 });
