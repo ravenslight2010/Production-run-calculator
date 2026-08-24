@@ -34,7 +34,10 @@ async function signIn(page: Page, username: string): Promise<void> {
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(PASSWORD);
-  await page.getByRole("button", { name: /sign.?in|log.?in/i }).click();
+  // The sign-in page also exposes a "Log in as test user (sandbox)" button.
+  // Use the exact real-submit name so this helper cannot accidentally choose
+  // the sandbox shortcut when both controls are available.
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 }
 
@@ -55,8 +58,9 @@ async function promoteToManager(username: string): Promise<void> {
 }
 
 async function openQueue(page: Page): Promise<void> {
+  if (await page.getByTestId("manager-action-queue").isVisible().catch(() => false)) return;
   await page.getByRole("button", { name: /more/i }).click();
-  await page.getByText("Manager action queue", { exact: true }).click();
+  await page.getByRole("menuitem", { name: "Manager action queue", exact: true }).click();
   await expect(page.getByTestId("manager-action-queue")).toBeVisible();
 }
 
@@ -99,8 +103,14 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
   const first = await firstContext.newPage();
   const second = await secondContext.newPage();
   const browserErrors: string[] = [];
-  first.on("console", (message) => { if (message.type() === "error") browserErrors.push(message.text()); });
-  second.on("console", (message) => { if (message.type() === "error") browserErrors.push(message.text()); });
+  for (const page of [first, second]) {
+    page.on("pageerror", (error) => browserErrors.push(error.message));
+    page.on("response", (response) => {
+      if (response.status() >= 500) {
+        browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      }
+    });
+  }
 
   try {
     await signUp(first, username);
@@ -116,8 +126,22 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
 
     const firstStatus = first.getByLabel(`Status for ${title}`);
     const secondStatus = second.getByLabel(`Status for ${title}`);
+    const firstOwner = first.getByLabel(`Owner for ${title}`);
+    const secondOwner = second.getByLabel(`Owner for ${title}`);
+    await expect(firstOwner).toHaveValue("");
+    await expect(secondOwner).toHaveValue("");
     await first.screenshot({ path: testInfo.outputPath("queue-before-stale.png"), fullPage: true });
+    const firstUpdate = first.waitForResponse(
+      (response) =>
+        response.url().includes("/api/manager-action-queue/") &&
+        response.request().method() === "PATCH",
+    );
     await firstStatus.selectOption("in_progress");
+    await expect((await firstUpdate).status()).toBe(200);
+    await first.reload({ waitUntil: "domcontentloaded" });
+    await openQueue(first);
+    await first.getByLabel("Filter action status").selectOption("in_progress");
+    await expect(first.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
     await expect(firstStatus).toHaveValue("in_progress");
     await secondStatus.selectOption("resolved");
 
@@ -125,14 +149,27 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await second.screenshot({ path: testInfo.outputPath("queue-stale-error.png"), fullPage: true });
     await expect(secondStatus).toHaveValue("open");
     await expect(second.getByText("Refresh queue", { exact: true })).toBeVisible();
-    await expect(first.getByText("in progress", { exact: true })).toHaveCount(0);
+    await expect(first.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
 
     await second.getByRole("button", { name: "Refresh queue", exact: true }).click();
+    await second.reload({ waitUntil: "domcontentloaded" });
+    await openQueue(second);
+    await second.getByLabel("Filter action status").selectOption("in_progress");
     await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
+    const retryUpdate = second.waitForResponse(
+      (response) =>
+        response.url().includes("/api/manager-action-queue/") &&
+        response.request().method() === "PATCH",
+    );
     await second.getByLabel(`Status for ${title}`).selectOption("resolved");
-    await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("resolved");
+    await expect((await retryUpdate).status()).toBe(200);
     await expect(second.getByRole("alert")).toHaveCount(0);
     await second.screenshot({ path: testInfo.outputPath("queue-recovered.png"), fullPage: true });
+    await second.reload({ waitUntil: "domcontentloaded" });
+    await openQueue(second);
+    await second.getByLabel("Filter action status").selectOption("resolved");
+    await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("resolved");
+    await expect(second.getByLabel(`Owner for ${title}`)).toHaveValue("");
 
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     try {
