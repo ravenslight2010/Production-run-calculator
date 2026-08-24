@@ -132,18 +132,61 @@ async function assertDialogContract(
 ): Promise<void> {
   await expect(dialog, `${screen} should be a modal dialog`).toHaveAttribute("role", "dialog");
   await expect(dialog, `${screen} should contain modal semantics`).toHaveAttribute("aria-modal", "true");
-  await expect(dialog, `${screen} should have an accessible name`).toHaveAttribute(
-    "aria-labelledby",
-    /\S+/,
+  await expect(dialog, `${screen} should have an accessible name`).toHaveAccessibleName(/\S+/);
+  const close = dialog.getByRole("button", { name: /close/i }).first();
+  await expect(close, `${screen} should have a close action`).toBeVisible();
+
+  const controls = dialog.locator(
+    "button:not([disabled]):visible, input:not([disabled]):visible, select:not([disabled]):visible, textarea:not([disabled]):visible, [role='button']:not([aria-disabled='true']):visible, [role='tab']:not([aria-disabled='true']):visible",
   );
-  await expect(dialog.getByRole("button", { name: /close/i }).first(), `${screen} should have a close action`).toBeVisible();
-  await dialog.getByRole("button", { name: /close/i }).first().focus();
+  const controlCount = await controls.count();
+  expect(controlCount, `${screen} should expose focusable dialog controls`).toBeGreaterThan(0);
+
+  // Check both ends of the focus loop, not just an arbitrary number of tabs.
+  await controls.last().focus();
   await page.keyboard.press("Tab");
   await expect
     .poll(() => dialog.evaluate((node) => node.contains(document.activeElement)), {
-      message: `${screen} lost focus containment`,
+      message: `${screen} lost focus containment at the forward boundary`,
     })
     .toBeTruthy();
+  await controls.first().focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect
+    .poll(() => dialog.evaluate((node) => node.contains(document.activeElement)), {
+      message: `${screen} lost focus containment at the reverse boundary`,
+    })
+    .toBeTruthy();
+}
+
+type ImportDialogCheck = {
+  button: string;
+  dialog: string | RegExp;
+  screen: string;
+  file: { name: string; mimeType: string; buffer: Buffer };
+};
+
+async function checkImportDialog(
+  page: Page,
+  check: ImportDialogCheck,
+): Promise<void> {
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: check.button, exact: true }).click();
+  await (await chooser).setFiles(check.file);
+
+  const dialog = page.getByRole("dialog", { name: check.dialog });
+  await expect(dialog, `${check.screen} should open from its UI entry point`).toBeVisible({
+    timeout: 10_000,
+  });
+  await assertDialogContract(page, dialog, check.screen);
+  await scan(page, check.screen, ["button-name", "label", "landmark-unique"]);
+  await assertTargets(page, check.screen);
+  await assertKeyboardTraversal(page, check.screen, 6);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog, `${check.screen} should dismiss with Escape`).toBeHidden({
+    timeout: 10_000,
+  });
 }
 
 async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
@@ -172,6 +215,41 @@ async function signUp(page: Page): Promise<void> {
   const response = await signupResponse;
   expect(response.status(), "isolated sign-up should succeed").toBeGreaterThanOrEqual(200);
   expect(response.status(), "isolated sign-up should not be rejected").toBeLessThan(300);
+
+  // Keep this browser fixture independent of stale role seeds in disposable
+  // databases. Every import entry point below requires the manager's full
+  // capability set, including AI, inventory, and profile management.
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL must be configured for a11y smoke tests.");
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    const user = await db.query<{ id: string }>(
+      "SELECT id FROM users WHERE username = $1",
+      [username],
+    );
+    const userId = user.rows[0]?.id;
+    expect(userId, "isolated sign-up did not create a database user").toBeTruthy();
+    await db.query(
+      "INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager') " +
+        "ON CONFLICT (user_id) DO UPDATE SET role = 'manager'",
+      [userId],
+    );
+    await db.query(
+      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+      [JSON.stringify([
+        "manage-staff",
+        "manage-inventory",
+        "edit-production-rules",
+        "approve-password-resets",
+        "review-incidents",
+        "use-ai-tools",
+        "manage-factory-settings",
+        "manage-profiles",
+      ])],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 60_000 });
   await page.waitForTimeout(500);
   const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
@@ -326,8 +404,9 @@ test.describe("accessibility smoke", () => {
     // Settings is exposed from the stable warehouse header on compact and
     // desktop layouts; selecting it also ensures the header is in the active
     // navigation tree before opening the manager dialog.
-    const setupDialog = await openSettings(page);
-    await assertDialogContract(page, page.getByRole("dialog", { name: "Manage Lists & Settings" }), "manager setup dialog");
+    await openSettings(page);
+    const settingsDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+    await assertDialogContract(page, settingsDialog, "manager setup dialog");
     await scan(page, "manager setup dialog", ["button-name", "landmark-unique"]);
     await assertTargets(page, "manager setup dialog");
     await assertKeyboardTraversal(page, "manager setup dialog");
@@ -345,25 +424,86 @@ test.describe("accessibility smoke", () => {
           { message: `manager setup dialog lost focus containment at step ${index + 1}` })
         .toBeTruthy();
     }
-    const closeSetup = page.getByRole("button", { name: /close/i }).last();
+    const closeSetup = settingsDialog.getByRole("button", { name: /close/i }).first();
     await expect(closeSetup).toBeVisible();
     await closeSetup.click();
 
+    await openSettings(page);
     await page.getByRole("button", { name: "Tools", exact: true }).click();
-    await page.getByRole("button", { name: "Import", exact: true }).click();
-    await page.locator('input[type="file"]').first().setInputFiles({
+    const invalidWorkbook = {
       name: "a11y-invalid.xlsx",
       mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       buffer: Buffer.from("not a workbook"),
+    };
+    const invalidGuide = {
+      name: "a11y-invalid.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: Buffer.from("not a document"),
+    };
+
+    await checkImportDialog(page, {
+      button: "Import Spec Sheet",
+      dialog: "Import Spec Sheet",
+      screen: "spec-sheet import dialog",
+      file: invalidWorkbook,
     });
-    const review = page.locator("span").filter({ hasText: /^Import Excel$/ }).locator("xpath=../..");
-    await expect(review).toBeVisible({ timeout: 10_000 });
-    await assertDialogContract(page, page.getByRole("dialog", { name: "Import Excel" }), "import review dialog");
-    await scan(page, "import review dialog", ["button-name", "label", "landmark-unique"]);
-    await assertTargets(page, "import review dialog");
-    await assertKeyboardTraversal(page, "import review dialog");
-    await review.getByRole("button").first().click();
-    await expect(review).toBeHidden();
+    await checkImportDialog(page, {
+      button: "Import Shipping & Palletizing Guide",
+      dialog: "Import Shipping & Palletizing Guide",
+      screen: "shipping guide import dialog",
+      file: invalidWorkbook,
+    });
+    await checkImportDialog(page, {
+      button: "Import Sauce Guide",
+      dialog: "Import Sauce Guide",
+      screen: "sauce guide import dialog",
+      file: invalidGuide,
+    });
+    await checkImportDialog(page, {
+      button: "Import Dough Recipe Guide",
+      dialog: "Import Dough Recipe Guide",
+      screen: "dough guide import dialog",
+      file: invalidWorkbook,
+    });
+    await checkImportDialog(page, {
+      button: "Import Excel",
+      dialog: "Import Excel",
+      screen: "import review dialog",
+      file: invalidWorkbook,
+    });
+
+    // Setup Profiles is a management dialog launched from the same Tools
+    // section, but it does not use a file picker.
+    await page.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+    await page.getByRole("button", { name: "Open Setup Profiles Editor", exact: true }).click();
+    const setupProfiles = page.getByRole("dialog", { name: "Setup Profiles" });
+    await expect(setupProfiles).toBeVisible();
+    await assertDialogContract(page, setupProfiles, "setup profiles dialog");
+    await scan(page, "setup profiles dialog", ["button-name", "label", "landmark-unique"]);
+    await assertTargets(page, "setup profiles dialog");
+    await assertKeyboardTraversal(page, "setup profiles dialog", 6);
+    await page.keyboard.press("Escape");
+    await expect(setupProfiles).toBeHidden();
+
+    // The remaining import dialogs are exposed from their dedicated Recipes
+    // settings tabs. Closing each one returns to the settings dialog without
+    // changing any live-day or master-data values.
+    await openSettings(page);
+    await page.getByRole("button", { name: "Recipes", exact: true }).click();
+    await page.getByRole("button", { name: "Mix Recipes", exact: true }).click();
+    await checkImportDialog(page, {
+      button: "Import Premix Sheet",
+      dialog: "Import Premix Sheet",
+      screen: "premix import dialog",
+      file: invalidWorkbook,
+    });
+    await page.getByRole("button", { name: "Cheese", exact: true }).click();
+    await checkImportDialog(page, {
+      button: "Import Cheese Mix Recipe Specs",
+      dialog: "Import Cheese Recipes",
+      screen: "cheese import dialog",
+      file: invalidWorkbook,
+    });
   });
 
 });

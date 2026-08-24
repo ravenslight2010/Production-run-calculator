@@ -1098,7 +1098,7 @@ export function IngredientSelect({
         onClick={openDropdown}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
-        <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
+        <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
           {(value && labelOf(value)) || placeholder || "Select…"}
         </span>
         <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />

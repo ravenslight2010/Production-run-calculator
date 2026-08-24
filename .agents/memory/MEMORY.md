@@ -152,3 +152,4 @@
 - [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) — compare ingredient changes in native batch/per-pizza units and retain a provenance-linked pre-import undo state.
 - [Release browser evidence](release-browser-evidence.md) — full Playwright runs need system Chromium, retained failure artifacts, and a disposable DB for destructive setup.
+- [A11y dialog browser fixtures](a11y-dialog-browser-fixtures.md) — import-dialog journeys need a fully capable manager role seeded in disposable DBs before UI capability guards render entry points.

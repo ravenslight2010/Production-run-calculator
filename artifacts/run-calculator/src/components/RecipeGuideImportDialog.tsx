@@ -233,7 +233,7 @@ export function SauceGuideImportDialog({
             </div>
           )}
           {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-sm text-red-400 bg-destructive/10 rounded-lg p-3">
               <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
             </div>
           )}
@@ -326,7 +326,7 @@ export function SauceGuideImportDialog({
                             <p className="text-[11px] text-amber-600">Pick a brand to include this row.</p>
                           )}
                           {isBothUnmatched(c) && brand && !sauceRecipeNames.includes(recipePicks[c.id] ?? "") && (
-                            <p className="text-[11px] text-destructive font-medium">
+                            <p className="text-[11px] text-red-400 font-medium">
                               Neither brand nor sauce recipe was auto-matched — pick a known sauce recipe above before applying.
                             </p>
                           )}
@@ -492,7 +492,7 @@ export function DoughGuideImportDialog({
             </div>
           )}
           {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-sm text-red-400 bg-destructive/10 rounded-lg p-3">
               <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
             </div>
           )}
@@ -578,7 +578,7 @@ export function DoughGuideImportDialog({
                             <p className="text-[11px] text-amber-600">Pick a brand to include this row.</p>
                           )}
                           {isBothUnmatched(c) && brand && !doughRecipeNames.includes(recipePicks[c.id] ?? "") && (
-                            <p className="text-[11px] text-destructive font-medium">
+                            <p className="text-[11px] text-red-400 font-medium">
                               Neither brand nor dough recipe was auto-matched — pick a known dough recipe above before applying.
                             </p>
                           )}

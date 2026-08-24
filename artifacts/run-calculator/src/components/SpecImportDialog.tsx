@@ -948,11 +948,11 @@ export default function SpecImportDialog({
 
           {!loading && error && (
             <div className="rounded-md border border-destructive/60 bg-destructive/10 p-3">
-              <div className="flex items-center gap-2 text-destructive">
+              <div className="flex items-center gap-2 text-red-400">
                 <AlertTriangle className="h-4 w-4" />
                 <span className="text-sm font-medium">Could not import</span>
               </div>
-              <p className="mt-1 text-sm text-destructive/90">{error}</p>
+              <p className="mt-1 text-sm text-red-400">{error}</p>
             </div>
           )}
 

@@ -148,7 +148,7 @@ export default function ShippingImportDialog({
           )}
 
           {error && (
-            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-400">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <span className="whitespace-pre-wrap">{error}</span>
             </div>
