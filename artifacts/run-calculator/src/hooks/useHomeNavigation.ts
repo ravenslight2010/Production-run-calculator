@@ -26,7 +26,14 @@ export type HomeTab = (typeof HOME_TABS)[number];
 
 const VALID_TABS = new Set<string>(HOME_TABS);
 
+function loadHashTab(): HomeTab | null {
+  if (typeof window === "undefined") return null;
+  return /^#incidents(?:\/|$)/.test(window.location.hash) ? "incidents" : null;
+}
+
 function loadInitialTab(): HomeTab {
+  const hashTab = loadHashTab();
+  if (hashTab) return hashTab;
   try {
     const saved = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
     return saved && VALID_TABS.has(saved) ? (saved as HomeTab) : "run";
@@ -50,6 +57,14 @@ export function useHomeNavigation() {
   const prevTabRef = useRef<HomeTab>(activeTab);
   const skipHistoryRef = useRef(false);
   const navigationStartedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const hashTab = loadHashTab();
+    if (!hashTab || hashTab === activeTabRef.current) return;
+    skipHistoryRef.current = true;
+    activeTabRef.current = hashTab;
+    setActiveTab(hashTab);
+  }, []);
 
   useEffect(() => {
     if (typeof performance === "undefined") return;

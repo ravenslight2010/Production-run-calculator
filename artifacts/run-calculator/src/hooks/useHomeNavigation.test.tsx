@@ -13,6 +13,7 @@ vi.mock("../performanceDiagnostics", () => ({
 describe("useHomeNavigation performance diagnostics", () => {
   afterEach(() => {
     localStorage.clear();
+    window.location.hash = "";
     mocks.recordPerformance.mockReset();
     vi.restoreAllMocks();
   });
@@ -29,5 +30,14 @@ describe("useHomeNavigation performance diagnostics", () => {
     expect(render).toEqual(["tab-render:quality", expect.any(Number), "render"]);
     expect(navigation?.[1]).toBe(render?.[1]);
     expect(localStorage.getItem(ACTIVE_TAB_STORAGE_KEY)).toBe("quality");
+  });
+
+  it("prioritizes an incident deep link over the stored tab", () => {
+    localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, "run");
+    window.location.hash = "#incidents/incident-123";
+
+    const { result } = renderHook(() => useHomeNavigation());
+
+    expect(result.current.activeTab).toBe("incidents");
   });
 });

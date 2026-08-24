@@ -304,3 +304,54 @@ test("opens an incident queue item in the matching incident review surface", asy
   await page.screenshot({ path: testInfo.outputPath("incident-queue-review-surface.png"), fullPage: true });
   expect(browserErrors).toEqual([]);
 });
+
+test("keeps a direct incident link focused after reload", async ({ page }, testInfo: TestInfo) => {
+  const username = uniqueTestId("e2e_manager_incident_reload");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await signIn(page, username);
+
+  const incidentUrl = `/#incidents/${encodeURIComponent(incidentFixtureId)}`;
+  // Use a new page in the authenticated context so this is a true direct
+  // entry, rather than a hash-only navigation on the already-mounted shell.
+  const directPage = await page.context().newPage();
+  directPage.on("pageerror", (error) => browserErrors.push(error.message));
+  directPage.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+  await directPage.goto(incidentUrl, { waitUntil: "domcontentloaded" });
+  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
+  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
+  const selectedIncident = directPage
+    .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
+    .first();
+  await expect(selectedIncident).toBeVisible();
+  await expect(directPage.getByText("Queue fixture diagnosis", { exact: true }).first()).toBeVisible();
+  await expect(
+    selectedIncident.locator("xpath=../../..").getByRole("button", { name: "Mark reviewed", exact: true }),
+  ).toBeVisible();
+
+  await directPage.reload({ waitUntil: "domcontentloaded" });
+  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
+  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
+  await expect(selectedIncident).toBeVisible();
+  await expect(directPage.getByText("Queue fixture diagnosis", { exact: true }).first()).toBeVisible();
+  await expect(
+    selectedIncident.locator("xpath=../../..").getByRole("button", { name: "Mark reviewed", exact: true }),
+  ).toBeVisible();
+  await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
+  await directPage.close();
+  expect(browserErrors).toEqual([]);
+});
