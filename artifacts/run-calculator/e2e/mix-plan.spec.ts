@@ -62,6 +62,35 @@ function uid(): string {
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 
+async function waitForAppAfterNavigation(page: Page): Promise<void> {
+  await page
+    .locator('[data-testid="tab-run"]')
+    .waitFor({ state: "attached", timeout: 25_000 });
+
+  const getStartedBtn = page.getByRole("button", { name: /^get.?started$/i });
+  if ((await getStartedBtn.count()) > 0) {
+    await getStartedBtn.waitFor({ state: "visible", timeout: 10_000 });
+    await getStartedBtn.click();
+    await getStartedBtn.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  }
+
+  // The tab can mount before the authenticated shell has finished restoring
+  // its controls. Waiting for the menu makes the next navigation deterministic
+  // instead of relying on a fixed sleep after reload.
+  await page.locator('button[title="More"]').waitFor({
+    state: "visible",
+    timeout: 15_000,
+  });
+
+  // On a reload the onboarding dialog can finish mounting just after the
+  // shell controls become visible. Check once more immediately before using
+  // the menu so a late dialog cannot intercept the click.
+  if (await getStartedBtn.isVisible().catch(() => false)) {
+    await getStartedBtn.click();
+    await getStartedBtn.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  }
+}
+
 async function signUpAndDismissOnboarding(
   page: Page,
   username: string,
@@ -75,16 +104,7 @@ async function signUpAndDismissOnboarding(
   await page.locator("#accessCode").fill(SIGNUP_CODE);
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
 
-  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
-
-  const getStartedBtn = page.getByRole("button", { name: /^get.?started$/i });
-  await getStartedBtn.waitFor({ state: "visible", timeout: 10_000 });
-  await getStartedBtn.click();
-
-  await page
-    .locator('[data-state="open"][aria-hidden="true"]')
-    .waitFor({ state: "detached", timeout: 5_000 })
-    .catch(() => {});
+  await waitForAppAfterNavigation(page);
 
   await page.waitForTimeout(300);
 
@@ -109,8 +129,8 @@ async function signUpAndDismissOnboarding(
 }
 
 async function goToMixes(page: Page): Promise<void> {
+  await waitForAppAfterNavigation(page);
   const menuBtn = page.locator('button[title="More"]');
-  await menuBtn.waitFor({ state: "visible", timeout: 10_000 });
   await menuBtn.click();
   const mixesItem = page.getByRole("menuitem", { name: /^(mixes|mix plan)$/i });
   await mixesItem.waitFor({ state: "visible", timeout: 5_000 });
