@@ -389,7 +389,7 @@ async function assertMobileViewportAndSafeArea(
   };
 }
 
-async function dismissOnboardingIfPresent(page: Page): Promise<void> {
+async function dismissOnboardingIfPresent(page: Page): Promise<boolean> {
   const welcome = page.getByRole("dialog", {
     name: /welcome to production run calculator/i,
   });
@@ -403,7 +403,7 @@ async function dismissOnboardingIfPresent(page: Page): Promise<void> {
       .then(() => true)
       .catch(() => false))
   ) {
-    return;
+    return false;
   }
 
   const seen = page.waitForResponse(
@@ -416,9 +416,10 @@ async function dismissOnboardingIfPresent(page: Page): Promise<void> {
     .click();
   await expect((await seen).status()).toBe(200);
   await expect(welcome).toBeHidden({ timeout: 10_000 });
+  return true;
 }
 
-async function signInToSandbox(page: Page): Promise<void> {
+async function signInToSandbox(page: Page): Promise<boolean> {
   await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
   await page
     .locator("#username")
@@ -434,7 +435,7 @@ async function signInToSandbox(page: Page): Promise<void> {
   await page
     .locator('[data-testid="tab-run"]')
     .waitFor({ state: "attached", timeout: 25_000 });
-  await dismissOnboardingIfPresent(page);
+  return dismissOnboardingIfPresent(page);
 }
 
 async function visible(locator: Locator): Promise<boolean> {
@@ -770,6 +771,35 @@ test.describe("phone layout smoke", () => {
       "Password",
     );
     await assertPhoneLayout(page, "keyboard-safe password field");
+  });
+
+  test("@real-mobile-browser physical Android Chrome dismisses first-login onboarding before Run interactions", async ({
+    page,
+  }) => {
+    test.skip(
+      test.info().project.name !== "real-mobile-chromium",
+      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
+    );
+
+    const onboardingDismissed = await signInToSandbox(page);
+    expect(
+      onboardingDismissed,
+      "a fresh physical-device account should show and dismiss the Welcome dialog",
+    ).toBe(true);
+
+    const welcome = page.getByRole("dialog", {
+      name: /welcome to production run calculator/i,
+    });
+    await expect(welcome).toBeHidden();
+
+    const runTab = page.locator('[data-testid="tab-run"]');
+    await expect(runTab).toBeVisible();
+    await expect(runTab).toBeEnabled();
+    await expect(runTab).toHaveAttribute("data-state", "active");
+    await expect(
+      page.locator('[data-testid="button-start-run"]'),
+    ).toBeVisible();
+    await assertPhoneLayout(page, "real mobile onboarding dismissed");
   });
 
   test("@real-mobile-browser physical Android Chrome keeps sign-in fields above the real keyboard", async ({
