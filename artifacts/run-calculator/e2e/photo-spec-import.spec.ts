@@ -26,6 +26,8 @@ const RAW_MULTI_DOUGH_RECIPE = `ZZZ${FIXTURE_SUFFIX}MultiDough`;
 const EDITED_MULTI_DOUGH_RECIPE = `ZZZ${FIXTURE_SUFFIX}MultiDoughReviewed`;
 const RAW_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}Sauce`;
 const EDITED_SAUCE_RECIPE = `ZZZ${FIXTURE_SUFFIX}SauceReviewed`;
+const RAW_CHEESE_RECIPE = `ZZZ${FIXTURE_SUFFIX}Cheese`;
+const EDITED_CHEESE_RECIPE = `ZZZ${FIXTURE_SUFFIX}CheeseReviewed`;
 
 // A tiny valid PNG is enough to exercise browser image preparation before the
 // intercepted vision request. The source files get distinct names so thumbnail
@@ -768,6 +770,171 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
       { ingredient: "Tomato Sauce", lbs: 25 },
       { ingredient: "Garlic Puree", lbs: 3.5 },
       { ingredient: "Olive Oil", lbs: 1.25 },
+    ],
+  });
+});
+
+test("persists every ingredient from a photographed multi-ingredient cheese recipe", async ({
+  page,
+}) => {
+  const username = uniqueTestId("e2e_photo_multi_cheese");
+  testUsernames.add(username);
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await signIn(page, username);
+
+  let imageRequestCount = 0;
+  let transcriptionImageCount = 0;
+  let structuredParseCount = 0;
+  let cheeseClientId = "";
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/cheese-recipes")
+    ) {
+      cheeseClientId = request.headers()["x-client-id"] ?? cheeseClientId;
+    }
+  });
+  await page.route("**/api/ai/parse-spec-images", async (route) => {
+    imageRequestCount += 1;
+    const body = route.request().postDataJSON() as {
+      images?: Array<{ imageBase64?: string; mimeType?: string }>;
+    };
+    transcriptionImageCount = body.images?.length ?? 0;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        workbookText: `${RAW_BRAND}\t${RAW_FLAVOR}\t${RAW_CHEESE_RECIPE}`,
+        generatedAt: Date.now(),
+        note: "Two photographed cheese pages transcribed for review.",
+      }),
+    });
+  });
+  await page.route("**/api/ai/parse-spec-sheet", async (route) => {
+    structuredParseCount += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        profiles: [
+          {
+            brand: RAW_BRAND,
+            flavor: RAW_FLAVOR,
+            dieType: "12 inch",
+            pizzasPerCase: 12,
+            applicators: [],
+            pepperonis: [],
+          },
+        ],
+        recipes: [
+          {
+            kind: "cheese",
+            name: RAW_CHEESE_RECIPE,
+            rows: [
+              { ingredient: "Mozzarella", lbs: 18.5 },
+              { ingredient: "Provolone", lbs: 7.25 },
+              { ingredient: "Parmesan", lbs: 2.75 },
+            ],
+          },
+        ],
+        generatedAt: Date.now(),
+      }),
+    });
+  });
+  await page.route("**/api/ai/match-import", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        brandMatches: [],
+        flavorMatches: [],
+        ingredientMatches: [],
+        appTypeMatches: [],
+        pepTypeMatches: [],
+        generatedAt: Date.now(),
+      }),
+    });
+  });
+
+  await openPhotoImport(page);
+  const photoImport = page.getByTestId("spec-photo-import");
+  const uploadInput = photoImport.locator('input[type="file"]').last();
+  await uploadInput.setInputFiles([
+    { name: `${FIXTURE_SUFFIX}-cheese-page-one.png`, mimeType: "image/png", buffer: PNG },
+    { name: `${FIXTURE_SUFFIX}-cheese-page-two.png`, mimeType: "image/png", buffer: PNG },
+  ]);
+  await expect(photoImport.getByRole("img", { name: "Selected spec page 1" })).toBeVisible();
+  await expect(photoImport.getByRole("img", { name: "Selected spec page 2" })).toBeVisible();
+  await photoImport.getByRole("button", { name: "Read 2 photos", exact: true }).click();
+
+  const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
+  await expect(review).toContainText("Step 1 of 2 — products");
+  const cheeseBrandInput = review.locator('input[aria-label^="Brand for "]');
+  await expect(cheeseBrandInput).toHaveCount(1);
+  await cheeseBrandInput.fill(EDITED_BRAND);
+  await review.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(review).toContainText(`${EDITED_BRAND} — ${RAW_FLAVOR}`);
+  const cheeseRecipeInput = review.locator('input[aria-label^="Name for recipe "]');
+  await expect(cheeseRecipeInput).toHaveCount(1);
+  await cheeseRecipeInput.fill(EDITED_CHEESE_RECIPE);
+
+  await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
+  await expect.poll(async () => {
+    if (!await review.isVisible().catch(() => false)) return "hidden";
+    return (await review.textContent()) ?? "";
+  }, { timeout: 20_000 }).toMatch(/Step 1 of 2 — products|hidden/);
+  if (
+    await review.isVisible().catch(() => false) &&
+    await review.getByRole("button", { name: "Next", exact: true }).isVisible().catch(() => false)
+  ) {
+    await cheeseBrandInput.fill(EDITED_BRAND);
+    await review.getByRole("button", { name: "Next", exact: true }).click();
+    await cheeseRecipeInput.fill(EDITED_CHEESE_RECIPE);
+    const destructiveConfirmation = review.getByTestId("spec-import-destructive-confirmation");
+    if (await destructiveConfirmation.isVisible().catch(() => false)) {
+      await destructiveConfirmation.check();
+    }
+    await review.getByRole("button", { name: /^Apply \d+ items?$/ }).click();
+  }
+  await expect(review).toBeHidden({ timeout: 20_000 });
+
+  expect(imageRequestCount).toBe(1);
+  expect(transcriptionImageCount).toBe(2);
+  expect(structuredParseCount).toBeGreaterThanOrEqual(1);
+
+  await expect.poll(async () => {
+    const response = await page.evaluate(async ({ clientId }) => {
+      const headers = clientId ? { "x-client-id": clientId } : undefined;
+      const cheeseResponse = await fetch("/api/cheese-recipes", { headers });
+      if (!cheeseResponse.ok) {
+        throw new Error(`cheese recipe endpoint returned ${cheeseResponse.status}`);
+      }
+      return await cheeseResponse.json() as {
+        items?: Array<{
+          name?: string;
+          components?: Array<{ ingredient?: string; lbs?: number; sharePct?: number }>;
+        }>;
+      };
+    }, { clientId: cheeseClientId });
+    return response.items
+      ?.filter((item) => item.name?.toLowerCase() === EDITED_CHEESE_RECIPE.toLowerCase())
+      .map((item) => ({
+        name: item.name,
+        components: item.components?.map((component) => ({
+          ingredient: component.ingredient,
+          lbs: component.lbs,
+          sharePct: component.sharePct,
+        })),
+      }))[0];
+  }, { timeout: 20_000 }).toEqual({
+    name: EDITED_CHEESE_RECIPE,
+    components: [
+      // Photographed regular specs provide per-pizza ounces. The cheese pool
+      // persists those as blend shares while reserving batch pounds for the
+      // manager's curated batch-weight entry.
+      { ingredient: "Mozzarella", lbs: 0, sharePct: 64.91 },
+      { ingredient: "Provolone", lbs: 0, sharePct: 25.44 },
+      { ingredient: "Parmesan", lbs: 0, sharePct: 9.65 },
     ],
   });
 });
