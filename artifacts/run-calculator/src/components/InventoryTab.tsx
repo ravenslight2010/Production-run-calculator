@@ -101,6 +101,7 @@ import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/in
 import SubstitutionsManager from "./SubstitutionsManager";
 import SubstitutionLog from "./SubstitutionLog";
 import ProactiveAlertSettingsCard from "./ProactiveAlertSettingsCard";
+import { BarcodeScanner, CameraFilePicker } from "./CameraFilePicker";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -1358,7 +1359,6 @@ const QUALITY_STATUS_META: Record<
 
 function QualityCheckCard() {
   const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [productType, setProductType] = useState<QualityProductType>("pizza");
@@ -1420,7 +1420,6 @@ function QualityCheckCard() {
       return;
     } finally {
       setPreparing(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
     await analyze(imageBase64);
   }
@@ -1528,34 +1527,8 @@ function QualityCheckCard() {
             onChange={(e) => setNotes(e.target.value)}
             className="h-8 text-xs"
           />
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-          />
-          <Button
-            size="sm"
-            className="h-9 w-full text-sm"
-            disabled={preparing || analyzing}
-            onClick={() => fileRef.current?.click()}
-          >
-            {preparing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
-              </>
-            ) : analyzing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Assessing…
-              </>
-            ) : (
-              <>
-                <Camera className="w-3.5 h-3.5" /> Choose photo
-              </>
-            )}
-          </Button>
+          <CameraFilePicker disabled={preparing || analyzing} onFiles={(files) => void onPick(files[0] ?? null)} />
+          {(preparing || analyzing) && <p className="text-xs text-muted-foreground" role="status"><Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />{preparing ? "Preparing photo…" : "Assessing…"}</p>}
 
           {error && (
             <div className="space-y-1.5">
@@ -1647,7 +1620,6 @@ function QualityCheckCard() {
 // staff can review them and re-enter the ones they want into the schedule.
 // Nothing is written — this is purely a reading aid.
 function ProductionSheetCard() {
-  const fileRef = useRef<HTMLInputElement>(null);
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState("");
@@ -1704,7 +1676,6 @@ function ProductionSheetCard() {
       return;
     } finally {
       setPreparing(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
     await analyze(imageBase64);
   }
@@ -1742,34 +1713,8 @@ function ProductionSheetCard() {
             onChange={(e) => setNotes(e.target.value)}
             className="h-8 text-xs"
           />
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-          />
-          <Button
-            size="sm"
-            className="h-9 w-full text-sm"
-            disabled={preparing || analyzing}
-            onClick={() => fileRef.current?.click()}
-          >
-            {preparing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
-              </>
-            ) : analyzing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading sheet…
-              </>
-            ) : (
-              <>
-                <Camera className="w-3.5 h-3.5" /> Choose photo
-              </>
-            )}
-          </Button>
+          <CameraFilePicker disabled={preparing || analyzing} onFiles={(files) => void onPick(files[0] ?? null)} />
+          {(preparing || analyzing) && <p className="text-xs text-muted-foreground" role="status"><Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />{preparing ? "Preparing photo…" : "Reading sheet…"}</p>}
 
           {error && (
             <div className="space-y-1.5">
@@ -1853,7 +1798,6 @@ const LABEL_FIELD_LABELS: Record<string, string> = {
 };
 
 function LabelVerifyCard() {
-  const fileRef = useRef<HTMLInputElement>(null);
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [brand, setBrand] = useState("");
@@ -1929,7 +1873,6 @@ function LabelVerifyCard() {
       return;
     } finally {
       setPreparing(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
     await analyze(imageBase64);
   }
@@ -1977,34 +1920,8 @@ function LabelVerifyCard() {
             onChange={(e) => setNotes(e.target.value)}
             className="h-8 text-xs"
           />
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-          />
-          <Button
-            size="sm"
-            className="h-9 w-full text-sm"
-            disabled={preparing || analyzing}
-            onClick={() => fileRef.current?.click()}
-          >
-            {preparing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
-              </>
-            ) : analyzing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying…
-              </>
-            ) : (
-              <>
-                <Camera className="w-3.5 h-3.5" /> Choose photo
-              </>
-            )}
-          </Button>
+          <CameraFilePicker disabled={preparing || analyzing} onFiles={(files) => void onPick(files[0] ?? null)} />
+          {(preparing || analyzing) && <p className="text-xs text-muted-foreground" role="status"><Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />{preparing ? "Preparing photo…" : "Verifying…"}</p>}
 
           {error && (
             <div className="space-y-1.5">
@@ -2228,7 +2145,6 @@ function PhotoIntakeCard({
   // onsite). Only shown when more than one location exists, mirroring the
   // manual RestockForm picker.
   const [locationId, setLocationId] = useState<string>("");
-  const fileRef = useRef<HTMLInputElement>(null);
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -2300,7 +2216,6 @@ function PhotoIntakeCard({
     lastImageRef.current = imageBase64;
     setError(null);
     setNoResults(false);
-    setRows([]);
     setRetryIn(0);
     setAnalyzing(true);
     try {
@@ -2330,7 +2245,6 @@ function PhotoIntakeCard({
     lastImageRef.current = images[images.length - 1] ?? null;
     setError(null);
     setNoResults(false);
-    setRows([]);
     setRetryIn(0);
     setAnalyzing(true);
     setAnalyzeProgress({ done: 0, total: images.length });
@@ -2380,7 +2294,6 @@ function PhotoIntakeCard({
       images = settled.filter((b): b is string => !!b);
     } finally {
       setPreparing(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
     if (images.length === 0) {
       setError("Failed to read photo");
@@ -2485,37 +2398,26 @@ function PhotoIntakeCard({
             Take or upload a photo of incoming stock. We'll identify the items and pre-fill
             restock entries for you to confirm.
           </p>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => onPick(Array.from(e.target.files ?? []))}
-          />
-          <Button
-            size="sm"
-            className="h-9 w-full text-sm"
+          <CameraFilePicker multiple disabled={preparing || analyzing} onFiles={(files) => void onPick(files)} />
+          <BarcodeScanner
             disabled={preparing || analyzing}
-            onClick={() => fileRef.current?.click()}
-          >
-            {preparing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photos…
-              </>
-            ) : analyzing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />{" "}
-                {analyzeProgress && analyzeProgress.total > 1
-                  ? `Analyzing photo ${Math.min(analyzeProgress.done + 1, analyzeProgress.total)} of ${analyzeProgress.total}…`
-                  : "Analyzing…"}
-              </>
-            ) : (
-              <>
-                <Camera className="w-3.5 h-3.5" /> Choose photos
-              </>
-            )}
-          </Button>
+            onDetected={(value) => {
+              setRows((rs) => [...rs, {
+                id: `${Date.now()}-barcode`,
+                guessName: value,
+                name: value,
+                qty: "1",
+                unit: "units",
+                category: "packaging",
+                matchedKey: null,
+                confidence: 1,
+                lotNumber: "",
+                expiration: "",
+              }]);
+              setError(null);
+            }}
+          />
+          {(preparing || analyzing) && <p className="text-xs text-muted-foreground" role="status"><Loader2 className="mr-1 inline h-3.5 w-3.5 animate-spin" />{preparing ? "Preparing photos…" : analyzeProgress && analyzeProgress.total > 1 ? `Analyzing photo ${Math.min(analyzeProgress.done + 1, analyzeProgress.total)} of ${analyzeProgress.total}…` : "Analyzing…"}</p>}
 
           {error && (
             <div className="space-y-1.5">
@@ -2539,15 +2441,7 @@ function PhotoIntakeCard({
               <p className="text-xs text-muted-foreground">
                 Couldn't identify any items. Try a clearer photo, or add stock manually above.
               </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 w-full text-xs"
-                disabled={analyzing}
-                onClick={() => fileRef.current?.click()}
-              >
-                <Camera className="w-3.5 h-3.5" /> Retake photo
-              </Button>
+              <p className="text-xs text-muted-foreground">Use Take photo above to retake it, or upload a clearer image.</p>
             </div>
           )}
 
