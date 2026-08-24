@@ -22,6 +22,7 @@ import {
   saveList,
   loadDeletedItems,
   tombstoneDeleted,
+  saveProfile,
 } from "./storage";
 import {
   CHEESE_RECIPE_NAMES_KEY,
@@ -98,6 +99,36 @@ describe("specImportCheeseRecipeIsMix", () => {
     ).toBe(false);
     // Without component names the old behavior is unchanged.
     expect(specImportCheeseRecipeIsMix("Italian Beef & Gravy", none, 2)).toBe(false);
+  });
+});
+
+describe("spec import allergen identity", () => {
+  it("writes each adjacent product's allergen independently and clears explicit none", () => {
+    const base = {
+      brand: "Repeated Brand",
+      applicators: [{ type: "Cheese", ozPerPizza: 3 }],
+      pepperonis: [],
+    };
+    saveProfile("Repeated Brand", "Club", {
+      ...(loadProfile("Repeated Brand", "Club") ?? {}),
+      app1Type: "Cheese",
+      allergen: "egg",
+    } as any);
+
+    applySpecImport({
+      profiles: [
+        { ...base, flavor: "Meat Lover", allergen: "egg" },
+        { ...base, flavor: "Supreme", allergen: "soy" },
+        { ...base, flavor: "Club", allergen: "none" },
+        { ...base, flavor: "Neighbor", allergen: "milk" },
+      ],
+      recipes: [],
+    });
+
+    expect(loadProfile("Repeated Brand", "Meat Lover")?.allergen).toBe("egg");
+    expect(loadProfile("Repeated Brand", "Supreme")?.allergen).toBe("soy");
+    expect(loadProfile("Repeated Brand", "Club")?.allergen).toBe("none");
+    expect(loadProfile("Repeated Brand", "Neighbor")?.allergen).toBe("milk");
   });
 });
 

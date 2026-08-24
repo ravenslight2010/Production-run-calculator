@@ -98,6 +98,28 @@ describe("buildProfileAutofillPlan", () => {
     expect(p.pepCombinedTarget).toBe(true); // single named pep → combined
   });
 
+  it("keeps explicit none product-specific when neighboring products have allergens", () => {
+    const p = buildProfileAutofillPlan({
+      sheets: [
+        sheet(1, 100, {
+          profiles: [
+            profile({ flavor: "Meat Lover", allergen: "egg" }),
+            profile({ flavor: "Supreme", allergen: "soy" }),
+            profile({ flavor: "Club", allergen: "none" }),
+          ],
+        }),
+      ],
+      brand: "Aldo's",
+      flavor: "Club",
+      current: values({ allergen: "egg" }),
+      mixNamesLower: NO_MIXES,
+    });
+    expect(p.fills).toEqual([]);
+    expect(p.mismatches).toMatchObject([
+      { field: "allergen", currentValue: "egg", specValue: "none" },
+    ]);
+  });
+
   it("does not flag a mismatch when the type differs only by the neutral 'milk' descriptor", () => {
     // Regression: profile says "Whole Mozzarella", sheet says "Whole Milk
     // Mozzarella" — same product, the descriptor fold must treat them equal

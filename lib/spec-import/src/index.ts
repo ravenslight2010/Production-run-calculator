@@ -68,10 +68,10 @@ export type ParsedProfile = {
    */
   doughName?: string;
   /**
-   * Food allergen the sheet designates for this product (e.g. "egg", "soy", or
-   * another named allergen). Lower-cased free-form token; omitted when the sheet
-   * lists no allergen. The apply step writes it onto the profile so the run
-   * inherits the allergen (and its food-safety sequencing warnings).
+   * Food allergen the sheet designates for this product (e.g. "egg", "soy",
+   * "none", or another named allergen). Lower-cased free-form token; omitted
+   * when the sheet omits the field. Explicit "none" is retained so the apply
+   * step can clear a previously stored allergen.
    */
   allergen?: string;
   /**
@@ -4515,9 +4515,9 @@ export function groundRecipeName(
   return { kind: "flagged", match: best.name };
 }
 
-// "No allergen" spellings the spec importer treats as absent (the profile keeps
-// its default no-allergen). Mirrors normalizeAllergen's none-aliases in
-// @workspace/allergen without taking a runtime dependency on it.
+// "No allergen" spellings accepted by the spec importer. An explicitly stated
+// `none` is retained on the parsed profile so a correcting import can clear a
+// previously stored allergen; an omitted field remains omitted.
 const SPEC_NONE_ALLERGENS = new Set(["none", "no", "na", "n/a", "no allergen"]);
 
 /**
@@ -4784,12 +4784,16 @@ export function sanitizeParsedSpecImport(
       }
     }
     // Allergen the sheet names for this product. Free-form so a NEW allergen
-    // beyond egg/soy survives; "none"-style spellings and blanks are dropped
-    // (the profile keeps its default no-allergen). Lower-cased to match the
-    // app's normalizeAllergen token form.
-    const allergenRaw = clampName(o.allergen, lim.maxNameChars).toLowerCase();
-    if (allergenRaw && !SPEC_NONE_ALLERGENS.has(allergenRaw)) {
-      profile.allergen = allergenRaw;
+    // beyond egg/soy survives. Preserve an explicit "none" rather than
+    // dropping it: omission means "the sheet did not state an allergen", while
+    // `none` means "this product explicitly has no allergen" and must clear a
+    // prior value. Lower-cased/space-collapsed to match normalizeAllergen.
+    const allergenRaw = clampName(o.allergen, lim.maxNameChars)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    if (allergenRaw) {
+      profile.allergen = SPEC_NONE_ALLERGENS.has(allergenRaw) ? "none" : allergenRaw;
     }
     // Case pack (pizzas per case): a whole-count field, so round. Only set when
     // the sheet stated a positive count; otherwise the profile keeps its default.

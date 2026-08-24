@@ -4192,10 +4192,10 @@ export function applySpecImport(
         crustProfilesList.push({ brand, flavor });
       }
     }
-    // Allergen read from the spec sheet (egg/soy or any new allergen the sheet
-    // named); already a normalized lower-case token from the parser. Present
-    // only when the sheet designated one, so this never clobbers with "none".
-    if (p.allergen) values.allergen = p.allergen;
+    // Allergen read from the spec sheet (egg/soy, none, or any new allergen).
+    // `undefined` means the sheet omitted the field; explicit `none` is
+    // authoritative and must clear a previously stored allergen.
+    if (p.allergen !== undefined) values.allergen = p.allergen;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
     // Case pack read from the sheet (how many pizzas per case). Only present when
     // the sheet stated a positive count, so this never clobbers with a default.

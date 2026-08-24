@@ -12,6 +12,19 @@ improve future imports. Apply semantics: **overwrite existing profiles + recipes
 and add new ones automatically**, with a single review/summary screen before
 applying (no per-item prompts).
 
+## Explicit allergen semantics
+
+An allergen field has three distinct states: a named value, explicit `none`, and
+omitted. Sanitization must preserve `none` as the product's authoritative
+no-allergen designation while leaving omission undefined and non-destructive.
+
+**Why:** Dropping `none` lets a prior product/profile value survive and appear
+to leak across adjacent products.
+
+**How to apply:** Keep profile application checks presence (`!== undefined`),
+not truthiness; test neighboring products and repeated identities with both
+named allergens and `none`.
+
 ## Layering (keep both apps thin)
 - Pure logic lives in `@workspace/spec-import` (canonicalize w/ alias→exact→fuzzy
   (levenshtein ratio ≤0.34)→new, `collectSpecAliases`, `summarizeSpecImport`,

@@ -377,22 +377,22 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.profiles[1].sauceName).toBeUndefined();
     expect(out.profiles[2].sauceName).toBeUndefined();
   });
-  it("reads an allergen from the sheet (built-in or new), lower-cased, dropping 'none' spellings", () => {
+  it("keeps each product's explicit allergen, including none, without row leakage", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [
-        { brand: "A", flavor: "Egg Wash", allergen: "Egg" },
-        { brand: "A", flavor: "Milk Blend", allergen: "Milk" },
-        { brand: "A", flavor: "Plain", allergen: "None" },
-        { brand: "A", flavor: "Blank", allergen: "" },
-        { brand: "A", flavor: "NA", allergen: "N/A" },
+        { brand: "A", flavor: "Meat Lover", allergen: "Egg" },
+        { brand: "A", flavor: "Supreme", allergen: " SOY " },
+        { brand: "A", flavor: "Club", allergen: "None" },
+        { brand: "A", flavor: "Neighbor", allergen: "Milk  Allergen" },
+        { brand: "A", flavor: "Omitted" },
       ],
       recipes: [],
     });
     expect(out.profiles).toHaveLength(5);
     expect(out.profiles[0].allergen).toBe("egg");
-    expect(out.profiles[1].allergen).toBe("milk");
-    expect(out.profiles[2].allergen).toBeUndefined();
-    expect(out.profiles[3].allergen).toBeUndefined();
+    expect(out.profiles[1].allergen).toBe("soy");
+    expect(out.profiles[2].allergen).toBe("none");
+    expect(out.profiles[3].allergen).toBe("milk allergen");
     expect(out.profiles[4].allergen).toBeUndefined();
   });
   it("treats dough/sauce rows as OUNCES by default (converts to lbs); cheese rows stay verbatim per-pizza oz", () => {
