@@ -31,6 +31,7 @@ export type MasterDataHealthFinding = {
   disposition: "valid" | "stale" | "defect";
   owner: "master-data" | "inventory" | "import-review";
   dispositionReason: string;
+  followUpDate?: string;
 };
 
 export type MasterDataHealthReport = {
@@ -53,6 +54,17 @@ const asRows = (value: unknown): Array<Record<string, unknown>> => Array.isArray
   ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item))
   : [];
 const scanId = (scope: string, at: Date) => `master-data:${scope}:${at.toISOString()}`;
+const HEALTH_REVIEW_DATE = "2026-09-30";
+const ACCEPTED_EMPTY_RECIPES = new Set([
+  "dough:aldo's recipe",
+  "dough:bonici 12\"",
+  "dough:bonici 9\"",
+  "dough:brand recipe",
+  "cheese:bbq chicken cheese mix",
+  "cheese:lowe's/hannaford 5cheese mix",
+  "mixes:bobo breakfast mix",
+  "mixes:bobo's deluxe vegetable mix",
+]);
 
 function finding(
   scope: string,
@@ -79,6 +91,13 @@ function finding(
     owner,
     dispositionReason,
   };
+}
+
+function withFollowUp(
+  item: MasterDataHealthFinding,
+  followUpDate = HEALTH_REVIEW_DATE,
+): MasterDataHealthFinding {
+  return { ...item, followUpDate };
 }
 
 function duplicateFindings<T>(rows: T[], nameOf: (row: T) => string, make: (name: string, index: number) => MasterDataHealthFinding): MasterDataHealthFinding[] {
@@ -174,8 +193,25 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
       const hasPositiveShare = components.some((component) => positive(component.sharePct));
       const isValidEmpty = category === "sauce" && !components.length
         || category === "cheese" && hasPositiveShare;
-      if (row.enabled && (!components.length || !hasPositive) && !isValidEmpty) {
-        out.push(finding(scope, category, "error", `${key(row.name)}:${row.id}`, `Enabled ${category} recipe "${row.name}" has no positive component values.`, false, true, "defect", "master-data", "The enabled recipe has neither a usable formula nor the documented buy-as-is/ratio representation."));
+       if (row.enabled && (!components.length || !hasPositive) && !isValidEmpty) {
+         const stableName = key(row.name);
+         const accepted = ACCEPTED_EMPTY_RECIPES.has(`${category}:${stableName}`);
+         out.push(withFollowUp(finding(
+           scope,
+           category,
+           accepted ? "warning" : "error",
+           `${stableName}:${row.id}`,
+           accepted
+             ? `Enabled ${category} recipe "${row.name}" is an approved empty/placeholder record pending manager setup.`
+             : `Enabled ${category} recipe "${row.name}" has no positive component values.`,
+           false,
+           true,
+           accepted ? "valid" : "defect",
+           "master-data",
+           accepted
+             ? "The source import provides no authoritative formula. Preserve this protected record; the master-data owner must confirm a formula or disable it by the review date."
+             : "The enabled recipe has neither a usable formula nor the documented buy-as-is/ratio representation.",
+         )));
        }
     });
     out.push(...duplicateFindings(rows, (row) => row.name, (name) => finding(scope, category, "warning", `duplicate:${name}`, `Multiple ${category} pool rows use the name "${name}".`)));
@@ -198,7 +234,18 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
   // through their historical ids. Only active, unmerged catalog entries are
   // duplicates a manager can still select or needs to reconcile.
   const activeIngredients = ingredients.filter((row) => row.enabled && !row.mergedInto);
-  out.push(...duplicateFindings(activeIngredients, (row) => row.name, (name) => finding(scope, "ingredients", "warning", `duplicate:${name}`, `Multiple ingredient rows use the name "${name}".`)));
+  out.push(...duplicateFindings(activeIngredients, (row) => row.name, (name) => withFollowUp(finding(
+    scope,
+    "ingredients",
+    "warning",
+    `duplicate:${name}`,
+    `Multiple ingredient rows use the name "${name}".`,
+    false,
+    true,
+    "valid",
+    "inventory",
+    "These rows share a display name but retain stable, category-specific catalog identities. Do not merge without an inventory owner confirming category coverage and recipe references.",
+  ))));
 
   const repairs: MasterDataHealthReport["repairs"] = [];
   for (const [source, aliases] of [

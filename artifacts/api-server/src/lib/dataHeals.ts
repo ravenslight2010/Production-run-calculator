@@ -88,6 +88,59 @@ const CRB_FAMILY_CONSOLIDATION_HEAL_ID = "crb-dough-family-consolidation-v1";
 // Only rewrite current and future day-state rows; past production history stays intact.
 const CRB_FAMILY_CONSOLIDATION_FROM_DATE = "2026-08-22";
 
+const LIVE_PROFILE_RECIPE_LINK_HEAL_ID = "live-profile-recipe-link-repair-v1";
+const LIVE_PROFILE_RECIPE_LINK_REPAIRS = [
+  { brand: "aldo's", flavor: "sausage", field: "frontlineRecipeName", from: "Aldo's Sauce (made in house)", to: "Aldo's Sauce" },
+  { brand: "basha's ultra thin crust", flavor: "5 cheese", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
+  { brand: "basha's ultra thin crust", flavor: "bbq chicken", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
+  { brand: "basha's ultra thin crust", flavor: "hawaiian", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
+  { brand: "basha's ultra thin crust", flavor: "ultimate pepperoni", field: "doughRecipeName", from: "11\" CRB recipe", to: "CRB Dough" },
+] as const;
+
+async function runLiveProfileRecipeLinkRepair(): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .insert(dataHealsTable)
+      .values({ id: LIVE_PROFILE_RECIPE_LINK_HEAL_ID })
+      .onConflictDoNothing({ target: dataHealsTable.id })
+      .returning({ id: dataHealsTable.id });
+    if (claimed.length === 0) return;
+
+    const profiles = await tx.select().from(brandProfilesTable)
+      .where(eq(brandProfilesTable.scope, "live"))
+      .for("update");
+    const recipes = await tx.select().from(doughRecipesTable)
+      .where(eq(doughRecipesTable.scope, "live"));
+    const sauces = await tx.select().from(sauceRecipesTable)
+      .where(eq(sauceRecipesTable.scope, "live"));
+    let updated = 0;
+    for (const profile of profiles) {
+      const repair = LIVE_PROFILE_RECIPE_LINK_REPAIRS.find((candidate) =>
+        candidate.brand === profile.brand.trim().toLowerCase() &&
+        candidate.flavor === profile.flavor.trim().toLowerCase() &&
+        String((profile.values ?? {})[candidate.field] ?? "").trim() === candidate.from,
+      );
+      if (!repair) continue;
+      const targetRows = repair.field === "doughRecipeName" ? recipes : sauces;
+      const target = targetRows.find((row) => row.name.trim().toLowerCase() === repair.to.toLowerCase());
+      if (!target) continue;
+      const values = { ...(profile.values ?? {}) } as Record<string, unknown>;
+      values[repair.field] = target.name;
+      await tx.update(brandProfilesTable).set({
+        values,
+        updatedAtMs: Math.max((profile.updatedAtMs ?? 0) + 1, Date.now()),
+      }).where(and(
+        eq(brandProfilesTable.key, profile.key),
+        eq(brandProfilesTable.scope, profile.scope),
+      ));
+      updated++;
+    }
+    const result = { scanned: profiles.length, updated };
+    await tx.update(dataHealsTable).set({ result }).where(eq(dataHealsTable.id, LIVE_PROFILE_RECIPE_LINK_HEAL_ID));
+    logger.info({ heal: LIVE_PROFILE_RECIPE_LINK_HEAL_ID, ...result }, "Data heal applied");
+  });
+}
+
 function crbComponentsMatch(
   left: ReadonlyArray<{ ingredient?: string; lbs?: number }> | null | undefined,
   right: ReadonlyArray<{ ingredient?: string; lbs?: number }> | null | undefined,
@@ -3633,6 +3686,7 @@ async function runHistoricalHealResultBackfill(): Promise<void> {
 
 export async function runDataHeals(): Promise<void> {
   await runHistoricalHealResultBackfill();
+  await runLiveProfileRecipeLinkRepair();
   await runCrbIngredientHeal();
   await runCrbDoughFamilyConsolidation();
   await runCheesePoisonCleanup();
