@@ -9,7 +9,11 @@ import {
 import { normalizeIngredient, type Ingredient } from "@workspace/ingredient-catalog";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
-import { unionIngredientCategories } from "../lib/ingredientMerge";
+import {
+  ingredientMergePath,
+  resolveIngredientMergeTarget,
+  unionIngredientCategories,
+} from "../lib/ingredientMerge";
 
 // Factory-wide ingredient catalog. Reading is open to any signed-in
 // user (both apps resolve recipe rows and build category pickers from this),
@@ -194,18 +198,31 @@ router.post(
         const unknownSource = sourceIds.find((id) => !knownIds.has(id));
         if (unknownSource) return { error: "Unknown source ingredient" as const };
 
-        // Repoint anything that was previously merged into one of the sources
-        // (chained merges) directly at the new target, then merge the sources
-        // themselves — keeps resolution a single hop for every row. Categories
-        // from every involved row are retained on the established target so its
-        // category-scoped pickers continue to expose all confirmed uses.
-        const repointIds = existing
-          .filter((row) => row.mergedInto && sourceIds.includes(row.mergedInto))
+        // A target may itself be a predecessor from an earlier merge. Always
+        // continue at the final target so the catalog never develops a new
+        // branch hanging off a disabled row.
+        const canonicalTargetId = resolveIngredientMergeTarget(existing, targetId);
+        const canonicalTarget = existing.find((row) => row.id === canonicalTargetId);
+        if (!canonicalTarget) return { error: "Unknown target ingredient" as const };
+
+        // Include every row whose path passes through a requested source or
+        // target, including already-flattened predecessors. This both preserves
+        // all categories and makes every predecessor point directly at the
+        // final target.
+        const requestedIds = new Set([targetId, ...sourceIds]);
+        const allToRepoint = existing
+          .filter((row) => {
+            if (row.id === canonicalTargetId) return false;
+            const path = ingredientMergePath(existing, row.id);
+            return (
+              path.some((id) => requestedIds.has(id)) ||
+              resolveIngredientMergeTarget(existing, row.id) === canonicalTargetId
+            );
+          })
           .map((row) => row.id);
-        const allToRepoint = Array.from(new Set([...sourceIds, ...repointIds]));
         const rowsToRepoint = existing.filter((row) => allToRepoint.includes(row.id));
         const categories = unionIngredientCategories(
-          target.categories,
+          canonicalTarget.categories,
           ...rowsToRepoint.map((row) => row.categories),
         );
         const updatedAt = new Date();
@@ -215,13 +232,13 @@ router.post(
           .set({ categories, updatedAt })
           .where(
             and(
-              eq(ingredientsTable.id, targetId),
+              eq(ingredientsTable.id, canonicalTargetId),
               eq(ingredientsTable.scope, scope),
             ),
           );
         await tx
           .update(ingredientsTable)
-          .set({ mergedInto: targetId, enabled: false, updatedAt })
+          .set({ mergedInto: canonicalTargetId, enabled: false, updatedAt })
           .where(
             and(
               inArray(ingredientsTable.id, allToRepoint),

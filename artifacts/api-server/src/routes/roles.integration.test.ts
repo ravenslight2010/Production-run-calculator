@@ -849,6 +849,75 @@ describe("POST /ingredients/merge endpoint behavior", () => {
     expect(storedSource.enabled).toBe(false);
   });
 
+  it("flattens chained merges while retaining categories from every predecessor", async () => {
+    await db.insert(ingredientsTable).values([
+      {
+        id: "ingredient-final-target",
+        scope: "live",
+        name: "Established Flour",
+        categories: ["dough"],
+        enabled: true,
+      },
+      {
+        id: "ingredient-previous-target",
+        scope: "live",
+        name: "Previous Flour",
+        categories: ["mix"],
+        mergedInto: "ingredient-final-target",
+        enabled: false,
+      },
+      {
+        id: "ingredient-previous-source",
+        scope: "live",
+        name: "Legacy Flour",
+        categories: ["pep"],
+        mergedInto: "ingredient-previous-target",
+        enabled: false,
+      },
+      {
+        id: "ingredient-new-source",
+        scope: "live",
+        name: "New Legacy Flour",
+        categories: ["cheese"],
+        enabled: true,
+      },
+    ]);
+
+    const res = await req(MANAGER, "POST", "/api/ingredients/merge", {
+      targetId: "ingredient-previous-source",
+      sourceIds: ["ingredient-new-source"],
+    });
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      items: Array<{
+        id: string;
+        categories: string[];
+        mergedInto: string | null;
+        enabled: boolean;
+      }>;
+    };
+    const items = new Map(body.items.map((item) => [item.id, item]));
+    expect(items.get("ingredient-final-target")?.categories).toEqual([
+      "dough",
+      "mix",
+      "pep",
+      "cheese",
+    ]);
+    expect(items.get("ingredient-previous-target")).toMatchObject({
+      mergedInto: "ingredient-final-target",
+      enabled: false,
+    });
+    expect(items.get("ingredient-previous-source")).toMatchObject({
+      mergedInto: "ingredient-final-target",
+      enabled: false,
+    });
+    expect(items.get("ingredient-new-source")).toMatchObject({
+      mergedInto: "ingredient-final-target",
+      enabled: false,
+    });
+  });
+
   it("rejects an ingredient merge from a user without manage-inventory", async () => {
     await db.insert(ingredientsTable).values([
       {
