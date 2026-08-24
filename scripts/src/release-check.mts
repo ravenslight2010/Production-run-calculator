@@ -4,6 +4,7 @@ type Step = {
   label: string;
   args: string[];
   env?: Record<string, string>;
+  timeoutMs?: number;
 };
 
 const rootDir = new URL("../../", import.meta.url).pathname;
@@ -114,6 +115,7 @@ if (fullRun) {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
     },
+    timeoutMs: 12 * 60_000,
   });
 }
 
@@ -131,23 +133,47 @@ function printHelp(): void {
 
 function runStep(step: Step): Promise<number> {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
     const child = spawn("pnpm", step.args, {
       cwd: rootDir,
       env: { ...process.env, ...step.env },
       stdio: "inherit",
     });
+    let settled = false;
+    const finish = (code: number): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      console.log(
+        `${step.label} elapsed ${Math.round((Date.now() - startedAt) / 1000)}s`,
+      );
+      resolve(code);
+    };
+    const timer =
+      step.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            console.error(
+              `${step.label} exceeded its ${Math.round(
+                step.timeoutMs! / 60_000,
+              )} minute timeout`,
+            );
+            child.kill("SIGTERM");
+            setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+            finish(124);
+          }, step.timeoutMs);
 
     child.once("error", (error) => {
       console.error(`Could not start ${step.label}: ${error.message}`);
-      resolve(1);
+      finish(1);
     });
     child.once("close", (code, signal) => {
       if (signal) {
         console.error(`${step.label} stopped by ${signal}`);
-        resolve(1);
+        finish(1);
         return;
       }
-      resolve(code ?? 1);
+      finish(code ?? 1);
     });
   });
 }
@@ -157,9 +183,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
   process.exit(0);
 }
 
-console.log(
-  `Release check started (${fullRun ? "full" : "standard"} mode).`,
-);
+console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
 const results: Array<{ label: string; passed: boolean }> = [];
 
 for (const [index, step] of steps.entries()) {
@@ -179,7 +203,10 @@ for (const result of results) {
   console.log(`${result.passed ? "PASS" : "FAIL"} ${result.label}`);
 }
 
-if (results.length === steps.length && results.every((result) => result.passed)) {
+if (
+  results.length === steps.length &&
+  results.every((result) => result.passed)
+) {
   console.log("\nRelease check passed. Ready for final publish review.");
   process.exit(0);
 }

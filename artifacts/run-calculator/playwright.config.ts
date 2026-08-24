@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolveChromiumExecutable } from "./e2e/chromium";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const baseURL =
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -8,14 +10,21 @@ export default defineConfig({
   timeout: 60_000,
   retries: 0,
   workers: 1,
-  reporter: "list",
+  outputDir: "test-results/full",
+  reporter: [
+    ["list"],
+    ["html", { outputFolder: "playwright-report/full", open: "never" }],
+  ],
   use: {
     baseURL,
     headless: true,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    // Keep failure screenshots and traces without requiring Playwright's
+    // separately-installed ffmpeg package in the release environment.
     video: "off",
     launchOptions: {
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+      executablePath: resolveChromiumExecutable(),
     },
   },
   projects: [
