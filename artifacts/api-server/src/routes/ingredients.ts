@@ -9,6 +9,7 @@ import {
 import { normalizeIngredient, type Ingredient } from "@workspace/ingredient-catalog";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { unionIngredientCategories } from "../lib/ingredientMerge";
 
 // Factory-wide ingredient catalog. Reading is open to any signed-in
 // user (both apps resolve recipe rows and build category pickers from this),
@@ -177,33 +178,62 @@ router.post(
 
     try {
       const scope = currentScope();
-      const existing = await db
-        .select()
-        .from(ingredientsTable)
-        .where(eq(ingredientsTable.scope, scope));
-      const targetExists = existing.some((row) => row.id === targetId);
-      if (!targetExists) {
-        res.status(400).json({ error: "Unknown target ingredient" });
+      const mergeResult = await db.transaction(async (tx) => {
+        // Lock the scoped catalog while resolving chains and categories. This
+        // prevents two manager merges from losing a category union through
+        // interleaved read/update sequences.
+        const existing = await tx
+          .select()
+          .from(ingredientsTable)
+          .where(eq(ingredientsTable.scope, scope))
+          .for("update");
+        const target = existing.find((row) => row.id === targetId);
+        if (!target) return { error: "Unknown target ingredient" as const };
+
+        const knownIds = new Set(existing.map((row) => row.id));
+        const unknownSource = sourceIds.find((id) => !knownIds.has(id));
+        if (unknownSource) return { error: "Unknown source ingredient" as const };
+
+        // Repoint anything that was previously merged into one of the sources
+        // (chained merges) directly at the new target, then merge the sources
+        // themselves — keeps resolution a single hop for every row. Categories
+        // from every involved row are retained on the established target so its
+        // category-scoped pickers continue to expose all confirmed uses.
+        const repointIds = existing
+          .filter((row) => row.mergedInto && sourceIds.includes(row.mergedInto))
+          .map((row) => row.id);
+        const allToRepoint = Array.from(new Set([...sourceIds, ...repointIds]));
+        const rowsToRepoint = existing.filter((row) => allToRepoint.includes(row.id));
+        const categories = unionIngredientCategories(
+          target.categories,
+          ...rowsToRepoint.map((row) => row.categories),
+        );
+        const updatedAt = new Date();
+
+        await tx
+          .update(ingredientsTable)
+          .set({ categories, updatedAt })
+          .where(
+            and(
+              eq(ingredientsTable.id, targetId),
+              eq(ingredientsTable.scope, scope),
+            ),
+          );
+        await tx
+          .update(ingredientsTable)
+          .set({ mergedInto: targetId, enabled: false, updatedAt })
+          .where(
+            and(
+              inArray(ingredientsTable.id, allToRepoint),
+              eq(ingredientsTable.scope, scope),
+            ),
+          );
+        return { error: null };
+      });
+      if (mergeResult.error) {
+        res.status(400).json({ error: mergeResult.error });
         return;
       }
-
-      // Repoint anything that was previously merged into one of the sources
-      // (chained merges) directly at the new target, then merge the sources
-      // themselves — keeps resolution a single hop for every row.
-      const repointIds = existing
-        .filter((row) => row.mergedInto && sourceIds.includes(row.mergedInto))
-        .map((row) => row.id);
-      const allToRepoint = Array.from(new Set([...sourceIds, ...repointIds]));
-
-      await db
-        .update(ingredientsTable)
-        .set({ mergedInto: targetId, enabled: false, updatedAt: new Date() })
-        .where(
-          and(
-            inArray(ingredientsTable.id, allToRepoint),
-            eq(ingredientsTable.scope, scope),
-          ),
-        );
 
       const items = await listAll();
       res.json({ items });

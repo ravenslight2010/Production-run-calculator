@@ -103,7 +103,7 @@ the newer duplicate.
 | 36 | Provolone | `ing-1786795974936-hqqte3` → `ing-1787543786942-ajd5i0` | cheese / cheese | cheese (5) | **MERGE newer into established; keep `...-hqqte3`.** |
 | 37 | Red Hot Sauce (Old Vienna) | `ing-1787410683669-a01bn4` → `ing-1787543786942-9qcrt2` | frontline / frontline | sauce (1) | **MERGE newer into established; keep `...-a01bn4`.** |
 | 38 | Riplets Seanoning | `ing-1787410683669-5kyra0` → `ing-1787543786942-f2975o` | frontline / frontline | sauce (1) | **MERGE newer into established; keep `...-5kyra0`.** |
-| 39 | Salt | `ing-1786795974435-xi9j5z` → `ing-1787543786942-hnpd75` | frontline / dough, frontline | dough (1), sauce (1) | **MERGE newer into established; keep `...-xi9j5z`; union dough+frontline categories.** |
+| 39 | Salt | `ing-1787410683668-xi9j5z` → `ing-1787543786942-hnpd75` | frontline / dough, frontline | dough (1), sauce (1) | **MERGE newer into established; keep `...-xi9j5z`; union dough+frontline categories.** |
 | 40 | Sausage (C&F 001LPIS40) | `ing-1786795974936-kbrxk6` → `ing-1787543786942-45e55s` | cheese / general, cheese | cheese (1) | **MERGE newer into established; keep `...-kbrxk6`; retain cheese and review general flag.** |
 | 41 | SHEEP Romano | `ing-1786795974936-xd0atg` → `ing-1787543786942-cd1kn4` | cheese / cheese, frontline | cheese (1), sauce (1) | **MERGE newer into established; keep `...-xd0atg`; union cheese+frontline categories.** |
 | 42 | Sugar | `ing-1787410683668-3oz5kb` → `ing-1787543786942-jgj5yu` | frontline / frontline | sauce (2) | **MERGE newer into established; keep `...-3oz5kb`.** |
@@ -115,20 +115,30 @@ the newer duplicate.
 | 48 | Whole Mozzarella | `ing-1786795974936-6f4rtz` → `ing-1787543786942-zvo4fs` | cheese / general, cheese | cheese (4) | **MERGE newer into established; keep `...-6f4rtz`; retain cheese and review general flag.** |
 | 49 | Yellow Cheddar | `ing-1786795974936-ofdw1y` → `ing-1787543786942-c1xhhc` | cheese / cheese | cheese (3) | **MERGE newer into established; keep `...-ofdw1y`.** |
 
-These are decisions, not repairs: no ingredient rows, recipe component names,
-inventory items, learned batch weights, aliases, or deleted records were
-changed. Before any future merge, the manager action must preserve the
-established ID, union confirmed category metadata, repoint any references to
-the kept ID, and soft-disable the source through the manager-gated merge route.
-The two generic groups remain explicitly blocked until a manager confirms that
-each set represents one material.
+The approved 47 rows were subsequently applied after manager confirmation.
+Each newer source is now soft-disabled and points to the established ID; the
+kept entry retains the union of confirmed category metadata. Recipe component
+rows and inventory records were not rewritten. The two generic groups remain
+explicitly blocked until a manager confirms that each set represents one
+material.
 
 ## Verification
 
-- API typecheck: passed.
-- Focused existing cheese/heal tests: 15 passed.
-- API workflow restart: completed successfully; `/api/healthz` returned 200.
-- Development scan: rerun with the current detector; result retained above.
+- Approved matrix preflight: all 47 source/target pairs (94 distinct IDs)
+  present in the live catalog before the guarded merge transaction. The Salt
+  source timestamp in the original matrix was corrected to the matching live
+  established row (`ing-1787410683668-xi9j5z`) before applying.
+- Post-merge catalog: 47 sources disabled with a direct `merged_into` pointer
+  to 47 active established rows; no chain or missing target remains.
+- Post-merge health scan: the 47 resolved duplicate groups are absent. Only
+  the intentionally blocked generic **Cheese** and **Mix** groups remain as
+  ingredient duplicate warnings.
+- Recipe integrity: 110 component rows remain across the dough (7), sauce
+  (16), cheese (44), and mix (43) pools.
+- Inventory integrity: no ingredient inventory items/lots existed before the
+  merge and none were created or changed by it.
+- API typecheck and focused category-union tests: passed.
+- API workflow restart: completed successfully; server started cleanly.
 - Production scan: read-only historical result retained above; current-code
   production verification is **not verified** until publish.
 - Confirmed profile-link repair coverage: the health report proposes exactly

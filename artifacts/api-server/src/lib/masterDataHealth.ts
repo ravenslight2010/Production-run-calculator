@@ -194,7 +194,11 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
     if (!key(row.name)) out.push(finding(scope, "ingredients", "error", `blank:${row.id}`, "Ingredient has no usable name."));
     if (row.mergedInto && row.mergedInto === row.id) out.push(finding(scope, "ingredients", "error", `self-merge:${row.id}`, "Ingredient points to itself as its merge target."));
   });
-  out.push(...duplicateFindings(ingredients, (row) => row.name, (name) => finding(scope, "ingredients", "warning", `duplicate:${name}`, `Multiple ingredient rows use the name "${name}".`)));
+  // Merges are intentionally soft so existing recipe components keep resolving
+  // through their historical ids. Only active, unmerged catalog entries are
+  // duplicates a manager can still select or needs to reconcile.
+  const activeIngredients = ingredients.filter((row) => row.enabled && !row.mergedInto);
+  out.push(...duplicateFindings(activeIngredients, (row) => row.name, (name) => finding(scope, "ingredients", "warning", `duplicate:${name}`, `Multiple ingredient rows use the name "${name}".`)));
 
   const repairs: MasterDataHealthReport["repairs"] = [];
   for (const [source, aliases] of [
