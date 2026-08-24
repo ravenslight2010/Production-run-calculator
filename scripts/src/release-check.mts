@@ -5,9 +5,12 @@ type Step = {
   args: string[];
   env?: Record<string, string>;
   timeoutMs?: number;
+  warningMs?: number;
   group?: string;
 };
 
+const API_SHARD_TIMEOUT_MS = 4 * 60_000;
+const API_SHARD_WARNING_MS = 3 * 60_000;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
 
@@ -52,37 +55,43 @@ const steps: Step[] = [
   {
     label: "API unit tests (release shard 1/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
-    timeoutMs: 4 * 60_000,
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API integration tests (release shard 2/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:integration:1"],
-    timeoutMs: 4 * 60_000,
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API integration tests (release shard 3/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:integration:2"],
-    timeoutMs: 4 * 60_000,
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API integration tests (release shard 4/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:integration:3"],
-    timeoutMs: 4 * 60_000,
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API sync tests (release shard 5/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
-    timeoutMs: 4 * 60_000,
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API sync SSE tests (release shard 6/6)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
-    timeoutMs: 4 * 60_000,
+    timeoutMs: API_SHARD_TIMEOUT_MS,
+    warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
@@ -167,7 +176,7 @@ function printHelp(): void {
   );
 }
 
-function runStep(step: Step): Promise<number> {
+function runStep(step: Step): Promise<{ exitCode: number; elapsedMs: number }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn("pnpm", step.args, {
@@ -176,15 +185,31 @@ function runStep(step: Step): Promise<number> {
       stdio: "inherit",
     });
     let settled = false;
+    let warningTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (code: number): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      console.log(
-        `${step.label} elapsed ${Math.round((Date.now() - startedAt) / 1000)}s`,
-      );
-      resolve(code);
+      if (warningTimer) clearTimeout(warningTimer);
+      const elapsedMs = Date.now() - startedAt;
+      console.log(`${step.label} elapsed ${Math.round(elapsedMs / 1000)}s`);
+      resolve({ exitCode: code, elapsedMs });
     };
+    const warningMs =
+      step.warningMs !== undefined && step.timeoutMs !== undefined
+        ? Math.min(step.warningMs, step.timeoutMs)
+        : step.warningMs;
+    if (warningMs !== undefined) {
+      warningTimer = setTimeout(() => {
+        console.warn(
+          `WARNING: ${step.label} is approaching its ${Math.round(
+            (step.timeoutMs ?? warningMs) / 60_000,
+          )} minute timeout (elapsed ${Math.round(
+            (Date.now() - startedAt) / 1000,
+          )}s).`,
+        );
+      }, warningMs);
+    }
     const timer =
       step.timeoutMs === undefined
         ? undefined
@@ -220,7 +245,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 }
 
 console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
-const results: Array<{ label: string; passed: boolean }> = [];
+const results: Array<{ label: string; passed: boolean; elapsedMs: number }> = [];
 let failedGroup: string | undefined;
 
 for (const [index, step] of steps.entries()) {
@@ -228,9 +253,9 @@ for (const [index, step] of steps.entries()) {
     break;
   }
   console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-  const exitCode = await runStep(step);
+  const { exitCode, elapsedMs } = await runStep(step);
   const passed = exitCode === 0;
-  results.push({ label: step.label, passed });
+  results.push({ label: step.label, passed, elapsedMs });
   console.log(`${passed ? "PASS" : "FAIL"} ${step.label}`);
   if (!passed) {
     if (step.group !== undefined) {
@@ -245,7 +270,11 @@ for (const [index, step] of steps.entries()) {
 
 console.log("\nRelease check summary:");
 for (const result of results) {
-  console.log(`${result.passed ? "PASS" : "FAIL"} ${result.label}`);
+  console.log(
+    `${result.passed ? "PASS" : "FAIL"} ${result.label} (${Math.round(
+      result.elapsedMs / 1000,
+    )}s)`,
+  );
 }
 const apiShardResults = results.filter((result) =>
   result.label.includes("(release shard"),
