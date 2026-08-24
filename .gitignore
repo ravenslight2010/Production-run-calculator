@@ -33,6 +33,8 @@ node_modules
 /coverage
 /artifacts/run-calculator/playwright-report/
 /artifacts/run-calculator/test-results/
+/release-evidence/clean-start/
+/release-evidence/release-check-report.md
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
