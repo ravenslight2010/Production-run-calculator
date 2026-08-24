@@ -504,7 +504,11 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
           {
             kind: "sauce",
             name: RAW_SAUCE_RECIPE,
-            rows: [{ ingredient: "Tomato Sauce", lbs: 25 }],
+            rows: [
+              { ingredient: "Tomato Sauce", lbs: 25 },
+              { ingredient: "Garlic Puree", lbs: 3.5 },
+              { ingredient: "Olive Oil", lbs: 1.25 },
+            ],
           },
         ],
         generatedAt: Date.now(),
@@ -596,6 +600,10 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
       }))[0];
   }, { timeout: 20_000 }).toEqual({
     name: EDITED_SAUCE_RECIPE,
-    components: [{ ingredient: "Tomato Sauce", lbs: 25 }],
+    components: [
+      { ingredient: "Tomato Sauce", lbs: 25 },
+      { ingredient: "Garlic Puree", lbs: 3.5 },
+      { ingredient: "Olive Oil", lbs: 1.25 },
+    ],
   });
 });
