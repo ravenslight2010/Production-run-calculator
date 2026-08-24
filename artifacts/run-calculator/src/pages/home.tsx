@@ -121,6 +121,8 @@ import {
   loadDayState,
   saveDayState,
   overlayRunMetaStamps,
+  shouldKeepLocalRunLifecycle,
+  selectInboundRunLifecycles,
   adoptStrictlyNewerRemoteLifecycles,
   loadHistory,
   filterMeaningfulHistory,
@@ -7415,7 +7417,7 @@ export default function Home() {
           const localMetaById = new Map(overlayRunMetaStamps(dayStateRef.current.runs).map(r => [r.id, r]));
           if (payload.dayState.runs.some(rr => {
             const lr = localMetaById.get(rr.id);
-            return !!lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0);
+            return shouldKeepLocalRunLifecycle(lr, rr);
           })) rejectedStale = true;
         }
         setDayState(prev => {
@@ -7453,11 +7455,10 @@ export default function Home() {
                 // from the prior push (e.g. the "trick" push) would otherwise
                 // beat the local run and erase startedAt even though the
                 // operator just pressed Start.
-                const localById = new Map(overlayRunMetaStamps(prev.runs).map(r => [r.id, r]));
-                const mergedRemote = remoteRuns.map(rr => {
-                  const lr = localById.get(rr.id);
-                  return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr;
-                });
+                const mergedRemote = selectInboundRunLifecycles(
+                  overlayRunMetaStamps(prev.runs),
+                  remoteRuns,
+                );
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
                 const localOnly = prev.runs.filter(r => {
                   if (remoteIds.has(r.id)) return false;

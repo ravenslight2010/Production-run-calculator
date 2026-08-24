@@ -1464,6 +1464,51 @@ export function overlayRunMetaStamps(runs: RunMeta[]): RunMeta[] {
 }
 
 /**
+ * Decide whether a local lifecycle must survive an incoming copy of the same
+ * run. A pause is an explicit lifecycle transition, not a display-only flag:
+ * a running copy with the same production start cannot be a resume because a
+ * real resume shifts startedAt forward. Keep the pause when a delayed server
+ * snapshot or a skewed device clock tries to regress it back to running.
+ *
+ * All other lifecycle copies retain the normal metadata LWW behavior.
+ */
+export function shouldKeepLocalRunLifecycle(
+  localRun: RunMeta | undefined,
+  remoteRun: RunMeta | undefined,
+): boolean {
+  if (!localRun || !remoteRun) return false;
+
+  const localHasActivePause = !!localRun.pausedAt && !localRun.endedAt;
+  const remoteRegressesSameStartPause =
+    localHasActivePause
+    && !remoteRun.pausedAt
+    && !remoteRun.endedAt
+    && remoteRun.startedAt === localRun.startedAt;
+
+  return remoteRegressesSameStartPause
+    || (localRun.metaUpdatedAt ?? 0) > (remoteRun.metaUpdatedAt ?? 0);
+}
+
+/**
+ * Select the lifecycle copy for each run included in a normal inbound sync
+ * payload. The caller handles local-only runs, ordering, and tombstones; this
+ * helper keeps the per-run lifecycle choice testable and consistent with
+ * foreground recovery.
+ */
+export function selectInboundRunLifecycles(
+  localRuns: RunMeta[],
+  remoteRuns: RunMeta[],
+): RunMeta[] {
+  const localById = new Map(localRuns.map((run) => [run.id, run]));
+  return remoteRuns.map((remoteRun) => {
+    const localRun = localById.get(remoteRun.id);
+    return shouldKeepLocalRunLifecycle(localRun, remoteRun)
+      ? localRun!
+      : remoteRun;
+  });
+}
+
+/**
  * Atomically adopt strictly-newer remote lifecycle copies for runs already in
  * the local day. Foreground recovery uses this before releasing auto-track or
  * any queued push, so a sleeping client's durable running copy cannot survive
@@ -1485,6 +1530,7 @@ export function adoptStrictlyNewerRemoteLifecycles(
     if (
       !remoteRun
       || (remoteRun.metaUpdatedAt ?? 0) <= (localRun.metaUpdatedAt ?? 0)
+      || shouldKeepLocalRunLifecycle(localRun, remoteRun)
       || (
         remoteRun.startedAt === localRun.startedAt
         && remoteRun.pausedAt === localRun.pausedAt
