@@ -63,7 +63,7 @@ jobs:
 
       - name: Verify release evidence allowlist
         if: always()
-        run: pnpm run release:check -- --verify-evidence
+        run: pnpm --filter @workspace/scripts run check:release-evidence
 
       - name: Upload release evidence
         if: always()

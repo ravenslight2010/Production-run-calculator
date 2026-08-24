@@ -200,6 +200,9 @@ function printHelp(): void {
   console.log(
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
   );
+  console.log(
+    "  pnpm --filter @workspace/scripts run check:release-evidence  Verify retained evidence files",
+  );
   console.log("");
   console.log(
     "The full browser suite requires a disposable isolated test database.",
