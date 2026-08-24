@@ -79,7 +79,12 @@ function commandFor(name: "api" | "web" | "mockup"): {
   }
   return {
     args: ["--filter", "@workspace/run-calculator", "run", "dev"],
-    env: { ...process.env, NODE_ENV: "development", PORT: String(webPort) },
+    env: {
+      ...process.env,
+      NODE_ENV: "development",
+      PORT: String(webPort),
+      VITE_API_PROXY_TARGET: `http://127.0.0.1:${apiPort}`,
+    },
   };
 }
 
