@@ -25,6 +25,8 @@ import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
 import { recordPerformance } from "../performanceDiagnostics";
 import { calcRef } from "../liveRunCalc";
+import { computeLinePhases, lineHasProduct } from "../linePhases";
+import { pauseStopsTunnel } from "../pausePolicy";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 
@@ -121,6 +123,7 @@ export interface LiveRunContextValue {
   setShowPaceAlert: React.Dispatch<React.SetStateAction<boolean>>;
   /** Human-readable pace alert message (rate / shortfall / time remaining). */
   paceAlertMsg: string;
+  packagingDrainActive: boolean;
 }
 
 // Module-level calcRef is kept as a compatibility export for existing callers.
@@ -424,6 +427,35 @@ export function LiveRunProvider({
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
 
+  const packagingDrainActive = useMemo(() => {
+    if (runStatus !== "paused" || !currentRun?.pausedAt || Number(ve.freezerTime) <= 0) return false;
+    const openPause = (currentRun.stoppages ?? [])
+      .filter((s: any) => s.type === "pause" && !s.endedAt)
+      .reduce((latest: any, s: any) => (!latest || s.startedAt > latest.startedAt ? s : latest), null as any);
+    const phases = computeLinePhases({
+      elapsedBatchSec,
+      pausedAt: currentRun.pausedAt,
+      lastResumeWallMs: 0,
+      lastPauseStartWallMs: 0,
+      pauseStopsTunnel: pauseStopsTunnel(openPause),
+      runStatus,
+      preTunnelMin: Number(ve.preTunnelMin) > 0 ? Number(ve.preTunnelMin) : 2.5,
+      postTunnelMin: Number(ve.postTunnelMin) > 0 ? Number(ve.postTunnelMin) : 2.5,
+      freezerTime: Number(ve.freezerTime),
+      nowMs: nowTime.getTime(),
+    });
+    return phases.stage3.state === "draining" && lineHasProduct(phases);
+  }, [
+    currentRun?.pausedAt,
+    currentRun?.stoppages,
+    elapsedBatchSec,
+    nowTime,
+    runStatus,
+    ve.freezerTime,
+    ve.preTunnelMin,
+    ve.postTunnelMin,
+  ]);
+
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
   const casesFreezerPct =
     v.casesNeeded > 0
@@ -516,6 +548,10 @@ export function LiveRunProvider({
       runId: currentRunId,
       runStatus,
       endedAt: currentRun?.endedAt ?? null,
+      packagingDrainActive,
+      packagingDrainElapsedSec: currentRun?.pausedAt
+        ? Math.max(0, (nowTime.getTime() - currentRun.pausedAt) / 1000)
+        : 0,
       nowTime,
       elapsedBatchSec,
       calc,
@@ -576,6 +612,7 @@ export function LiveRunProvider({
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
+      packagingDrainActive,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
@@ -588,6 +625,7 @@ export function LiveRunProvider({
       isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
       stallPrompt, setStallPrompt, stallCheck,
       nextRunPrepActive,
+      packagingDrainActive,
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     ],
   );

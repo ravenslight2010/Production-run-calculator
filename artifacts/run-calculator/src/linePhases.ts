@@ -39,6 +39,13 @@ export interface LinePhases {
   stage3: PhaseInfo;
 }
 
+/** True while any modeled line segment still contains product. */
+export function lineHasProduct(phases: LinePhases): boolean {
+  return [phases.stage1, phases.stage2, phases.stage3].some(
+    (phase) => phase.state !== "empty",
+  );
+}
+
 export interface ComputeLinePhasesArgs {
   /** Virtual elapsed time (pause-excluded), in seconds. */
   elapsedBatchSec: number;

@@ -78,6 +78,52 @@ const total = (values: Record<string, number>, cps = 60) =>
   (values.skidsCompleted ?? 0) * cps + (values.casesOnCurrentSkid ?? 0);
 
 describe("auto-track freezer-drain phase", () => {
+  it("continues packaging during a paused Stage 3 drain without moving dough", () => {
+    const t0 = 1_700_000_000_000;
+    const { form, values } = makeForm({
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 12,
+      batchesReady: 2,
+    });
+    const pausedDrain = {
+      runStatus: "paused" as const,
+      endedAt: null,
+      nowTime: new Date(t0 + 4 * 60_000),
+      elapsedBatchSec: 20 * 60,
+      packagingDrainElapsedSec: 4 * 60,
+      v: makeV(),
+      calc: { ...baseCalc, pressDone: true, casesInFreezer: 40 },
+    };
+    const { result, rerender } = renderHook(
+      (props: typeof pausedDrain) =>
+        useAutoTrack({
+          runId: "run-1",
+          ...props,
+          packagingDrainActive: true,
+          form,
+        }),
+      { initialProps: pausedDrain },
+    );
+
+    // Opening during a drain establishes the shared baseline; it must not
+    // replay product that exited before this device was watching.
+    expect(total(values)).toBe(60);
+    rerender({
+      ...pausedDrain,
+      nowTime: new Date(t0 + 4 * 60_000 + 9_000),
+      packagingDrainElapsedSec: 4 * 60 + 9,
+    });
+    rerender({
+      ...pausedDrain,
+      nowTime: new Date(t0 + 4 * 60_000 + 30_000),
+      packagingDrainElapsedSec: 4 * 60 + 30,
+    });
+    expect(total(values)).toBe(64);
+    expect(values.traysOnLine).toBe(12);
+    expect(values.batchesReady).toBe(2);
+  });
+
   it("keeps counting cases as the freezer drains, and product moves freezer→done without double-counting", () => {
     const t0 = 1_700_000_000_000;
     const endedAt = t0;

@@ -72,6 +72,10 @@ interface AutoTrackParams {
    */
 
   endedAt?: number | null;
+  /** Line-stage signal for packaging-only drain after a pause. */
+  packagingDrainActive?: boolean;
+  /** Wall-clock seconds since the pause, used only for packaging drain output. */
+  packagingDrainElapsedSec?: number;
 
   nowTime: Date;
 
@@ -268,6 +272,8 @@ export function useAutoTrack({
   runId,
   runStatus,
   endedAt = null,
+  packagingDrainActive = false,
+  packagingDrainElapsedSec = 0,
   nowTime,
   elapsedBatchSec,
   calc,
@@ -383,7 +389,9 @@ export function useAutoTrack({
     const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
     // Clamp to the run's total need so skids/cases freeze at their final state
     // once production is complete instead of cycling past it (modulo wrap).
-    const expectedCasesRaw = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
+    const expectedCasesRaw = packagingDrainActive
+      ? Math.floor((Math.max(0, packagingDrainElapsedSec) * calc.ppm) / (v.pizzasPerCase * 60))
+      : Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
     const expectedCases = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCasesRaw) : expectedCasesRaw;
 
     return {
@@ -403,6 +411,8 @@ export function useAutoTrack({
   }, [
     runStatus,
     drainActive,
+    packagingDrainActive,
+    packagingDrainElapsedSec,
     calc.ppm,
     calc.perTray,
     calc.perBatch,
@@ -626,7 +636,7 @@ export function useAutoTrack({
       || autoTrackBlocked
       || disabled
       || !autoTrackProgress
-      || !(runStatus === "running" || drainActive)
+      || !(runStatus === "running" || drainActive || packagingDrainActive)
       || !autoTrackSuggestion
     ) return;
 
@@ -662,16 +672,16 @@ export function useAutoTrack({
         const curTotal =
           (Number(form.getValues("skidsCompleted")) || 0) * cps +
           (Number(form.getValues("casesOnCurrentSkid")) || 0);
-        if (drainActive) {
-          // Post-End drain: the line is stopped, so time-based expected output
-          // is meaningless — the ONLY product still becoming "done" is what
-          // exits the freezer tunnel. Advance by exactly the tunnel's drop
-          // since the last tick (never negative), still capped at the run
-          // target. A fresh device (prevFreezer < 0) just baselines: no
-          // back-fill jump when a page opens mid-drain.
-          const exited = prevFreezer >= 0
-            ? Math.max(0, prevFreezer - drainFreezerRef.current)
-            : 0;
+        if (drainActive || packagingDrainActive) {
+          // Ended runs use the freezer WIP drop. During a paused packaging
+          // drain, freezer WIP is intentionally frozen at pause, so use the
+          // pause-relative stage clock instead. Both paths baseline first,
+          // preventing reload/sync adoption from replaying old output.
+          const exited = packagingDrainActive
+            ? (prevExpected >= 0 ? Math.max(0, expectedRaw - prevExpected) : 0)
+            : (prevFreezer >= 0
+              ? Math.max(0, prevFreezer - drainFreezerRef.current)
+              : 0);
           if (exited > 0) {
             const target = curTotal + exited;
             const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;

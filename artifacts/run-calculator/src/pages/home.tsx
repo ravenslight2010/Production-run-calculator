@@ -19329,7 +19329,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
     showBatchDue, setShowBatchDue,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
+    fireAutoTrackNow, tickDueRefs, packagingDrainActive,
     stallPrompt, setStallPrompt, stallCheck,
     showPaceAlert, setShowPaceAlert, paceAlertMsg,
   } = useLiveRun();
@@ -19719,7 +19719,8 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       {(() => {
                         const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
                         const suppressed = Date.now() < autoSuppressUntilRef.current;
-                        const caseAutoActive = autoTrackProgress && !!autoTrackSuggestion && !suppressed;
+                        const caseAutoActive = autoTrackProgress && !!autoTrackSuggestion && !suppressed &&
+                          (runStatus === "running" || packagingDrainActive);
                         if (!caseAutoActive || casePeriodSec <= 0) return null;
                         const nowMs = nowTime.getTime();
                         const secLeft = tickDueRefs.case.current > 0
@@ -20807,7 +20808,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const {
     calc, nowTime, liveFreezerMin, elapsedBatchSec,
     autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion,
-    fireAutoTrackNow, tickDueRefs,
+    fireAutoTrackNow, tickDueRefs, packagingDrainActive,
   } = useLiveRun();
 
   // ── Speed drift detection ─────────────────────────────────────────────────
@@ -21260,7 +21261,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
 
                               {(() => {
                                 const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
-                                const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
+                                 const caseAutoActive = autoTrackProgress && !!s && !suppressed &&
+                                   (runStatus === "running" || packagingDrainActive);
                                 if (!caseAutoActive || casePeriodSec <= 0) return null;
                                 const nowMs = nowTime.getTime();
                                 const secLeft = tickDueRefs.case.current > 0
@@ -21648,7 +21650,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
-  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs } = useLiveRun();
+  const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive } = useLiveRun();
 
   // ── Barrel timer state: backed by module-level store so it survives Radix ──
   // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
@@ -21946,7 +21948,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
       )}
       {/* Packaging quick check — same widget as the dough tab so the sauce
           crew can update skid/case counts without switching tabs. */}
-      {(runStatus === "running" || runStatus === "paused") && (() => {
+      {(runStatus === "running" || runStatus === "paused" || (runStatus === "ended" && !!autoTrackSuggestion)) && (() => {
         const hasCps = v.casesPerSkid > 0;
         const cps = hasCps ? v.casesPerSkid : 0;
         const packedSkids = Number(v.skidsCompleted) || 0;
@@ -21955,7 +21957,8 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
         const skidsTotal = hasCps && v.casesNeeded > 0 ? Math.ceil(v.casesNeeded / cps) : null;
         const s = autoTrackSuggestion;
         const suppressed = Date.now() < autoSuppressUntilRef.current;
-        const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
+        const caseAutoActive = autoTrackProgress && !!s && !suppressed &&
+          (runStatus === "running" || packagingDrainActive);
         const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
         const nowMs = nowTime.getTime();
         const secLeftOf = (dueMs: number, periodSec: number) =>
@@ -22338,7 +22341,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     autoTrackProgress, autoTrackSuggestion,
     fireAutoTrackNow, tickDueRefs,
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
-    nextRunPrepActive,
+    nextRunPrepActive, packagingDrainActive,
   } = useLiveRun();
 
   // ── Shift prep phase (pre-production batch tracking) ─────────────────────
@@ -22786,7 +22789,8 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           const packedTotal = packedSkids * cps + packedCasesOnSkid;
                           const skidsTotal = hasCps && v.casesNeeded > 0 ? Math.ceil(v.casesNeeded / cps) : null;
                           const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
-                          const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
+                          const caseAutoActive = autoTrackProgress && !!s && !suppressed &&
+                            (runStatus === "running" || runStatus === "ended" || packagingDrainActive);
                           const expectedTotal = s ? s.expectedCases : null;
                           const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
                           const packOnPace = packGapCases <= 2;
