@@ -40,3 +40,45 @@ mtime_ms = 1787519367532
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/98edc87f-d2e2-49d1-ab2b-b5723ad09b68/e7a22236-dc66-4c9b-8846-b4ce583d09aa"
 storage_version_token = "1787519391560894"
 content_type = "image/png"
+
+[[outputs]]
+id = "c-2hBTSxO7Gh39pCtPEP0"
+uri = "file://artifacts/run-calculator/playwright-report/full/index.html"
+type = "text"
+title = "Full Playwright browser report"
+description = "HTML report from the full browser run against a disposable PostgreSQL database."
+logical_id = "8c815840-c938-44cf-9504-f0afce7efdfa"
+content_hash = "sha256:3d419915d414babfbfc646b9d93086cafb88e38813688a894f3399b4aa5f8cad"
+size = 862794
+mtime_ms = 1787543532796
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/8c815840-c938-44cf-9504-f0afce7efdfa/e3fc4f62-c5ae-444c-9d15-928c1b25facf"
+storage_version_token = "1787543643113502"
+content_type = "text/html"
+
+[[outputs]]
+id = "hfHYJ3UhdLOx0z-JpOYgO"
+uri = "file://artifacts/run-calculator/playwright-report/full/playwright-report-full.tar.gz"
+type = "unspecified"
+title = "Full Playwright HTML report archive"
+description = "HTML report archive from the disposable PostgreSQL full browser run."
+logical_id = "80be7912-e437-46a9-aa31-0d7b6a026259"
+content_hash = "sha256:9568a0e2be3bc3235f0d36ace5399d1f8b35ebe5903349bbe3c7dab1df6991ef"
+size = 91886805
+mtime_ms = 1787543667131
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/80be7912-e437-46a9-aa31-0d7b6a026259/8e061fca-1d7d-4a70-9fa7-46f216ee6c38"
+storage_version_token = "1787543679782031"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "WvYVze_8VdjtwF_rrn_zj"
+uri = "file://artifacts/run-calculator/test-results/full/test-results-full.tar.gz.part-aa"
+type = "unspecified"
+title = "Full Playwright test results archive"
+description = "Retained test-results archive from the disposable PostgreSQL full browser run."
+logical_id = "fe4d9ba7-52e1-4ad5-bd4e-cbf908d33cff"
+content_hash = "sha256:4bd3c8bb1f1392634de105f49ee09d9d46a7e7b446753d1793992596188f3413"
+size = 92320196
+mtime_ms = 1787543669405
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/fe4d9ba7-52e1-4ad5-bd4e-cbf908d33cff/0b8ffc53-a0ad-49d1-be0c-1e12e0f8418e"
+storage_version_token = "1787543681661691"
+content_type = "application/octet-stream"
