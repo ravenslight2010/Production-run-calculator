@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
+    "dev": "export NODE_ENV=development && pnpm run build && exec pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "pnpm exec tsc --build ../../lib/db ../../lib/api-zod ../../lib/integrations-openai-ai-server --force && tsc -p tsconfig.json --noEmit",

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -134,6 +134,35 @@ async function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
+function describePortOwner(port: number): string {
+  try {
+    const output = execFileSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpct"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    const pid = output.match(/^p(\d+)$/m)?.[1];
+    const command = output.match(/^c(.+)$/m)?.[1];
+    if (pid && command) return `${command} (pid ${pid})`;
+  } catch {
+    // Fall through to ss, which is present on most Linux hosts.
+  }
+  try {
+    const output = execFileSync("ss", ["-ltnp"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = output
+      .split("\n")
+      .find((candidate) => candidate.includes(`:${port} `));
+    const users = line?.match(/users:\(\("([^"]+)".*?pid=(\d+)/)?.slice(1);
+    if (users) return `${users[0]} (pid ${users[1]})`;
+  } catch {
+    // The port can still be detected even when owner inspection is unavailable.
+  }
+  return "owner unavailable";
+}
+
 async function waitForPort(
   process: ManagedProcess,
   port: number,
@@ -247,7 +276,7 @@ async function main(): Promise<void> {
   ] as const) {
     if (!(await isPortAvailable(port))) {
       throw new Error(
-        `${name} port ${port} is already in use. Stop the process that owns it or set CLEAN_START_${name.toUpperCase()}_PORT to an unused port; this check will not kill unrelated processes.`,
+        `${name} port ${port} is already in use by ${describePortOwner(port)}. This is a preflight conflict, not a startup failure. Stop that process or set CLEAN_START_${name.toUpperCase()}_PORT to an unused port; clean-start will not kill unrelated processes.`,
       );
     }
   }

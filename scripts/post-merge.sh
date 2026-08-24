@@ -1,5 +1,12 @@
 #!/bin/bash
 set -e
+
+# Artifact workflows are managed separately from this hook. During a merge,
+# their old pnpm parents can outlive the workflow restart and leave the
+# listener bound. Stop only the known artifact-dev process groups; never use
+# broad port-owner killing because developers may have unrelated services.
+node scripts/src/stop-artifact-workflows.mjs
+
 pnpm install --frozen-lockfile
 
 # drizzle push can hit transient "too many clients already" on the dev DB
