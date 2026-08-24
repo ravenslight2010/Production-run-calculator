@@ -13,7 +13,11 @@ const realMobileBrowserWsEndpoint =
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["phone-layout.spec.ts", "management-performance.spec.ts"],
+  testMatch: [
+    "phone-layout.spec.ts",
+    "management-performance.spec.ts",
+    "sync-convergence.spec.ts",
+  ],
   timeout: 60_000,
   retries: 0,
   workers: 1,
@@ -46,7 +50,7 @@ export default defineConfig({
       ? [
           {
             name: "real-mobile-chromium",
-            testMatch: "phone-layout.spec.ts",
+            testMatch: ["phone-layout.spec.ts", "sync-convergence.spec.ts"],
             use: {
               connectOptions: {
                 wsEndpoint: realMobileBrowserWsEndpoint,
