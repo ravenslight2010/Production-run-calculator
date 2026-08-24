@@ -16,11 +16,16 @@ export default defineConfig({
   timeout: 60_000,
   retries: 0,
   workers: 1,
-  reporter: "list",
+  outputDir: "test-results/department",
+  reporter: [
+    ["list"],
+    ["html", { outputFolder: "playwright-report", open: "never" }],
+  ],
   use: {
     baseURL,
     headless: true,
     trace: "on-first-retry",
+    screenshot: "only-on-failure",
     video: "off",
     launchOptions: {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,

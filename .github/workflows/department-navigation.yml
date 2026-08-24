@@ -100,6 +100,16 @@ jobs:
           name: department-navigation-server-logs
           path: /tmp/department-*.log
 
+      - name: Upload Playwright evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: department-navigation-playwright-evidence
+          path: |
+            artifacts/run-calculator/playwright-report
+            artifacts/run-calculator/test-results/department
+          if-no-files-found: warn
+
       - name: Stop browser servers
         if: always()
         run: |
