@@ -10,6 +10,7 @@
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
     "audit:recovery": "tsx ./src/recovery-audit.mts",
     "check-model-bump": "pnpm run test && bash ./src/check-model-version-bump.sh",
+    "check-department-playwright-projects": "tsx ./src/check-department-playwright-projects.mts",
     "check-operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.mts",
     "check:clean-start": "tsx ./src/verify-clean-start.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -52,6 +52,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check responsive department projects
+        run: pnpm --filter @workspace/scripts run check-department-playwright-projects
+
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
