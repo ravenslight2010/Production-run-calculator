@@ -16140,6 +16140,7 @@ export default function Home() {
                   <InventoryTab
                   candidates={inventoryCandidates}
                   runValsList={inventoryRunValues}
+                  coverageRunVals={inventoryRunValues}
                   substitutions={dayState.substitutions ?? []}
                   substitutionLog={dayState.substitutionLog ?? []}
                   substitutionOptions={inventorySubstitutionOptions}

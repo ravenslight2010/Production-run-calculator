@@ -42,6 +42,8 @@ import {
 import {
   type CandidateItem,
   type InventoryItem,
+  computeWarehouseCoverage,
+  type WarehouseCoverage,
   type InventoryLot,
   type InventoryLocation,
   type LedgerEntry,
@@ -144,6 +146,7 @@ export default function InventoryTab({
   onAddSubstitution = () => {},
   onRemoveSubstitution = () => {},
   onClearSubstitutions = () => {},
+  coverageRunVals = [],
 }: {
   candidates: CandidateItem[];
   runValsList?: FormValues[];
@@ -153,6 +156,7 @@ export default function InventoryTab({
   onAddSubstitution?: (sub: IngredientSubstitution) => void;
   onRemoveSubstitution?: (id: string) => void;
   onClearSubstitutions?: () => void;
+  coverageRunVals?: FormValues[];
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
@@ -246,6 +250,12 @@ export default function InventoryTab({
     }
     return { low, expiring, expired };
   }, [items, expirySoonDays]);
+  const coverage = useMemo(
+    () => canManageInventory && coverageRunVals.length > 0
+      ? computeWarehouseCoverage(coverageRunVals, items, productionIngredients)
+      : [],
+    [canManageInventory, coverageRunVals, items, productionIngredients],
+  );
 
   const grouped = useMemo(() => {
     const packaging = items.filter((i) => i.category === "packaging");
@@ -282,6 +292,8 @@ export default function InventoryTab({
   return (
     <div className="space-y-4 pb-4">
       {/* Alerts */}
+      {canManageInventory && coverage.length > 0 && <WarehouseCoverageCard coverage={coverage} />}
+
       {(alerts.expired.length > 0 || alerts.expiring.length > 0 || alerts.low.length > 0) && (
         <Card className="bg-card/50 border-amber-500/40 shadow-md">
           <CardHeader className="pb-2 pt-4 px-5">
@@ -489,6 +501,65 @@ export default function InventoryTab({
       {/* Proactive-alert tuning (use-ai-tools: AI nudge settings) */}
       {canUseAiTools && <ProactiveAlertSettingsCard />}
     </div>
+  );
+}
+
+function WarehouseCoverageCard({ coverage }: { coverage: WarehouseCoverage[] }) {
+  const statusLabel: Record<WarehouseCoverage["status"], string> = {
+    covered: "Covered",
+    short: "Short",
+    conversion: "Conversion needed",
+    missing: "Missing link",
+  };
+  const statusClass: Record<WarehouseCoverage["status"], string> = {
+    covered: "text-emerald-500 border-emerald-500/40",
+    short: "text-red-500 border-red-500/40",
+    conversion: "text-amber-500 border-amber-500/40",
+    missing: "text-red-500 border-red-500/40",
+  };
+  const blocked = coverage.filter((row) => row.status !== "covered").length;
+  return (
+    <Card className={blocked > 0 ? "bg-card/50 border-amber-500/40 shadow-md" : "bg-card/50 border-emerald-500/40 shadow-md"} data-testid="warehouse-coverage">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+          {blocked > 0 ? <AlertTriangle className="w-4 h-4 text-amber-500" /> : <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+          Warehouse coverage before start
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          {blocked > 0
+            ? `${blocked} production ingredient${blocked === 1 ? "" : "s"} need attention before production.`
+            : "Every planned production ingredient has confirmed onsite coverage."}
+        </p>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 space-y-1.5 text-sm">
+        {coverage.map((row) => (
+          <div key={row.ingredientName} className="flex items-start justify-between gap-3 rounded-md border border-border/30 bg-muted/10 px-3 py-2">
+            <div className="min-w-0">
+              <span className="font-medium">{row.ingredientName}</span>
+              <span className="block text-xs text-muted-foreground">
+                Need {fmtQty(row.needed)} {row.unit} · linked {row.linkedProducts.length} product{row.linkedProducts.length === 1 ? "" : "s"}
+              </span>
+              {row.status === "conversion" && (
+                <span className="block text-xs text-amber-500">Confirm the production conversion on a linked product.</span>
+              )}
+              {row.status === "missing" && (
+                <span className="block text-xs text-red-500">Link an inventory product to this production ingredient.</span>
+              )}
+            </div>
+            <div className="shrink-0 text-right">
+              <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold ${statusClass[row.status]}`}>
+                {statusLabel[row.status]}
+              </span>
+              {row.status !== "missing" && row.status !== "conversion" && (
+                <span className="block mt-1 text-xs tabular-nums text-muted-foreground">
+                  {fmtQty(row.covered)} / {fmtQty(row.needed)} {row.unit}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

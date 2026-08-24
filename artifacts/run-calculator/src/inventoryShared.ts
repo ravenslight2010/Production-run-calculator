@@ -112,6 +112,74 @@ export const computeRunLines = (vals: FormValues) =>
 export const computeRunConsumptionLines = (vals: FormValues) =>
   computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
 
+export type WarehouseCoverageStatus = "covered" | "short" | "conversion" | "missing";
+export type WarehouseCoverage = {
+  ingredientId: string | null;
+  ingredientName: string;
+  needed: number;
+  unit: string;
+  linkedProducts: InventoryItem[];
+  covered: number;
+  status: WarehouseCoverageStatus;
+};
+
+const coverageName = (key: string) => key.split(":").slice(1, -1).join(":").trim();
+
+/** Advisory comparison using the exact quantities sent to auto-deduction. */
+export function computeWarehouseCoverage(
+  runVals: FormValues[],
+  items: InventoryItem[],
+  productionIngredients: ProductionIngredient[],
+): WarehouseCoverage[] {
+  const needs = new Map<string, { name: string; unit: string; qty: number }>();
+  for (const vals of runVals) {
+    for (const line of computeRunConsumptionLines(vals)) {
+      if (!line.itemKey.startsWith("ingredient:") || line.qty <= 0) continue;
+      const name = coverageName(line.itemKey);
+      const unit = line.itemKey.split(":").at(-1) ?? "";
+      const current = needs.get(name.toLowerCase());
+      if (current) current.qty += line.qty;
+      else needs.set(name.toLowerCase(), { name, unit, qty: line.qty });
+    }
+  }
+
+  return [...needs.values()].map((need) => {
+    const catalog = productionIngredients.find(
+      (ingredient) => ingredient.enabled &&
+        ingredient.name.trim().toLowerCase() === need.name.toLowerCase(),
+    );
+    const linkedProducts = catalog
+      ? items.filter((item) => item.productionIngredientId === catalog.id)
+      : [];
+    const confirmed = linkedProducts.filter(
+      (item) => item.conversionConfirmed && Number(item.conversionFactor) > 0,
+    );
+    const covered = confirmed.reduce(
+      (sum, item) => sum + Math.max(0, item.onHand) * Number(item.conversionFactor),
+      0,
+    );
+    const hasUnconfirmed = linkedProducts.some(
+      (item) => !item.conversionConfirmed || !(Number(item.conversionFactor) > 0),
+    );
+    const status: WarehouseCoverageStatus = linkedProducts.length === 0
+      ? "missing"
+      : confirmed.length === 0
+        ? "conversion"
+        : covered >= need.qty
+          ? "covered"
+          : hasUnconfirmed ? "conversion" : "short";
+    return {
+      ingredientId: catalog?.id ?? null,
+      ingredientName: catalog?.name ?? need.name,
+      needed: need.qty,
+      unit: need.unit,
+      linkedProducts,
+      covered,
+      status,
+    };
+  });
+}
+
 export const deriveCandidateItems = (valsList: FormValues[]) =>
   deriveCandidateItemsShared(valsList.map(toRunLinesInput), DEFAULT_PEP_TYPES);
 
