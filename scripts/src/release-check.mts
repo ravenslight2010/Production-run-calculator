@@ -5,6 +5,7 @@ type Step = {
   args: string[];
   env?: Record<string, string>;
   timeoutMs?: number;
+  group?: string;
 };
 
 const rootDir = new URL("../../", import.meta.url).pathname;
@@ -49,8 +50,40 @@ const steps: Step[] = [
     },
   },
   {
-    label: "API server tests",
-    args: ["--filter", "@workspace/api-server", "run", "test"],
+    label: "API unit tests (release shard 1/6)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
+    timeoutMs: 4 * 60_000,
+    group: "api-test-shards",
+  },
+  {
+    label: "API integration tests (release shard 2/6)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:integration:1"],
+    timeoutMs: 4 * 60_000,
+    group: "api-test-shards",
+  },
+  {
+    label: "API integration tests (release shard 3/6)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:integration:2"],
+    timeoutMs: 4 * 60_000,
+    group: "api-test-shards",
+  },
+  {
+    label: "API integration tests (release shard 4/6)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:integration:3"],
+    timeoutMs: 4 * 60_000,
+    group: "api-test-shards",
+  },
+  {
+    label: "API sync tests (release shard 5/6)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync"],
+    timeoutMs: 4 * 60_000,
+    group: "api-test-shards",
+  },
+  {
+    label: "API sync SSE tests (release shard 6/6)",
+    args: ["--filter", "@workspace/api-server", "run", "test:release:sync-sse"],
+    timeoutMs: 4 * 60_000,
+    group: "api-test-shards",
   },
   {
     label: "run calculator tests",
@@ -129,6 +162,9 @@ function printHelp(): void {
   console.log(
     "The full browser suite requires a disposable isolated test database.",
   );
+  console.log(
+    "The API test gate runs six bounded shards; sync SSE tests run separately.",
+  );
 }
 
 function runStep(step: Step): Promise<number> {
@@ -185,14 +221,23 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
 console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
 const results: Array<{ label: string; passed: boolean }> = [];
+let failedGroup: string | undefined;
 
 for (const [index, step] of steps.entries()) {
+  if (failedGroup !== undefined && step.group !== failedGroup) {
+    break;
+  }
   console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
   const exitCode = await runStep(step);
   const passed = exitCode === 0;
   results.push({ label: step.label, passed });
   console.log(`${passed ? "PASS" : "FAIL"} ${step.label}`);
   if (!passed) {
+    if (step.group !== undefined) {
+      failedGroup = step.group;
+      console.error(`\n${step.group} has a failed shard; running the remaining shards.`);
+      continue;
+    }
     console.error("\nRelease check stopped at the first failed gate.");
     break;
   }
@@ -201,6 +246,15 @@ for (const [index, step] of steps.entries()) {
 console.log("\nRelease check summary:");
 for (const result of results) {
   console.log(`${result.passed ? "PASS" : "FAIL"} ${result.label}`);
+}
+const apiShardResults = results.filter((result) =>
+  result.label.includes("(release shard"),
+);
+if (apiShardResults.length > 0) {
+  const passedApiShards = apiShardResults.filter((result) => result.passed).length;
+  console.log(
+    `API release shards: ${passedApiShards}/${apiShardResults.length} passed.`,
+  );
 }
 
 if (
