@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 import { describeShippingPatch, type ShippingCandidate, type ShippingPatch } from "@workspace/shipping-import";
 import type { ShippingImportPrepared } from "@/shippingImport";
 import { loadProfile } from "@/storage";
@@ -33,6 +34,7 @@ export default function ShippingImportDialog({
   applying,
   onConfirm,
 }: Props) {
+  const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [brandPicks, setBrandPicks] = useState<Record<string, string>>({});
   // Per-row flavor targets. Missing/empty set = "All flavors" (whole brand).
@@ -130,9 +132,9 @@ export default function ShippingImportDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="dialog-shipping-import">
-      <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-lg border border-border bg-background shadow-lg">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shipping-import-dialog-title" className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-lg border border-border bg-background shadow-lg">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold">Import Shipping &amp; Palletizing Guide</h2>
+          <h2 id="shipping-import-dialog-title" className="text-sm font-semibold">Import Shipping &amp; Palletizing Guide</h2>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-muted" aria-label="Close" data-testid="button-shipping-import-close">
             <X className="w-4 h-4" />
           </button>

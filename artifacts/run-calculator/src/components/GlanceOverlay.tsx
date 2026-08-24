@@ -2,6 +2,7 @@ import { memo } from "react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { useLiveRun } from "../contexts/LiveRunContext";
 import { fmtTime, fmtComma, runLabel } from "../utils";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 
 // ─── GlanceOverlay ────────────────────────────────────────────────────────────
 // Full-screen "at a glance" overlay rendered when showGlance is true.
@@ -20,9 +21,14 @@ const GlanceOverlay = memo(function GlanceOverlay() {
   } = useHomeTabCtx();
 
   const { calc, nowTime, casesFreezerPct } = useLiveRun();
+  const dialogRef = useAccessibleDialog<HTMLDivElement>(true, () => setShowGlance(false));
   const pct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
   return (
     <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="glance-dialog-title"
       className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm p-8 cursor-pointer select-none"
       onClick={() => setShowGlance(false)}
     >
@@ -30,7 +36,7 @@ const GlanceOverlay = memo(function GlanceOverlay() {
         {/* Run name */}
         <div>
           <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Current Run</p>
-          <p className="text-2xl font-bold break-words min-w-0">{runLabel(currentRun)}</p>
+          <p id="glance-dialog-title" className="text-2xl font-bold break-words min-w-0">{runLabel(currentRun)}</p>
         </div>
         {/* Cases */}
         {v.casesNeeded > 0 ? (

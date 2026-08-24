@@ -4,6 +4,7 @@ import { HomeTabCtx, useHomeTabCtx } from "../contexts/HomeTabCtx";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import { SingleFlightSyncQueue } from "../syncPushQueue";
 import GlanceOverlay from "../components/GlanceOverlay";
+import { useAccessibleDialogStack } from "../components/useAccessibleDialog";
 import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
@@ -2846,6 +2847,7 @@ const GroupedPanel = ({
 // (imported at top of file)
 
 export default function Home() {
+  useAccessibleDialogStack();
   const {
     signOut,
     forceSignedOut,
@@ -13976,10 +13978,10 @@ export default function Home() {
         ];
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
-            <div className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="cast-screens-dialog-title" className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
-                <button type="button" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <h3 id="cast-screens-dialog-title" className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
+                <button type="button" aria-label="Close cast to screens" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
               {castSupported ? (
@@ -14076,15 +14078,18 @@ export default function Home() {
           onClick={() => setShowReorderDialog(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reorder-runs-dialog-title"
             className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
               <div className="flex items-center gap-2">
                 <GripVertical className="w-4 h-4 text-primary" />
-                <h2 className="font-bold text-base">Reorder Runs</h2>
+                <h2 id="reorder-runs-dialog-title" className="font-bold text-base">Reorder Runs</h2>
               </div>
-              <button type="button" onClick={() => setShowReorderDialog(false)} className="text-muted-foreground hover:text-foreground">
+              <button type="button" aria-label="Close reorder runs" onClick={() => setShowReorderDialog(false)} className="text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -15222,12 +15227,15 @@ export default function Home() {
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="supervisor-access-dialog-title"
             className="bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4 shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="text-center">
               <ShieldCheck className="w-9 h-9 mx-auto mb-2 text-primary" />
-              <h2 className="font-bold text-lg">Supervisor Access</h2>
+              <h2 id="supervisor-access-dialog-title" className="font-bold text-lg">Supervisor Access</h2>
               <p className="text-xs text-muted-foreground mt-1">Enter the supervisor PIN to unlock all settings</p>
             </div>
             <input
@@ -16658,10 +16666,10 @@ export default function Home() {
         {/* ── Re-import case-count offer: per-run Accept / Keep ────────────── */}
         {caseUpdatePrompt && caseUpdatePrompt.length > 0 && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="case-counts-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold">Case counts changed</h2>
-                <button type="button" onClick={() => setCaseUpdatePrompt(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <h2 id="case-counts-dialog-title" className="text-base font-bold">Case counts changed</h2>
+                <button type="button" aria-label="Close case counts dialog" onClick={() => setCaseUpdatePrompt(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-sm text-muted-foreground">
                 The re-imported schedule lists {caseUpdatePrompt.length === 1 ? "a different case count for a run that's" : `different case counts for ${caseUpdatePrompt.length} runs that are`} already going. Choose what to do for each run — progress is kept either way.
@@ -16780,14 +16788,14 @@ export default function Home() {
         {/* ── Edit Stoppage Dialog ───────────────────────────────────────────── */}
         {editingStop && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingStop(null)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <Pencil className="w-5 h-5 text-primary shrink-0" />
-                <h2 className="text-base font-bold">Edit Event</h2>
+                <h2 id="edit-event-dialog-title" className="text-base font-bold">Edit Event</h2>
                 <span className={`ml-1 text-xs font-semibold uppercase px-1.5 py-0.5 rounded ${editingStop.type === "pause" ? "bg-blue-500/20 text-blue-400" : editingStop.type === "manual" ? "bg-violet-500/20 text-violet-400" : "bg-orange-500/20 text-orange-400"}`}>
                   {editingStop.type ?? "stop"}
                 </span>
-                <button type="button" onClick={() => setEditingStop(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <button type="button" aria-label="Close edit event" onClick={() => setEditingStop(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-muted-foreground/50">(optional)</span></label>
@@ -16858,11 +16866,11 @@ export default function Home() {
         {/* ── Manual Entry Dialog ────────────────────────────────────────────── */}
         {showManualStopDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowManualStopDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="add-event-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
-                <h2 className="text-base font-bold">Add Past Event</h2>
-                <button type="button" onClick={() => setShowManualStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <h2 id="add-event-dialog-title" className="text-base font-bold">Add Past Event</h2>
+                <button type="button" aria-label="Close add past event" onClick={() => setShowManualStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground">Add a stop or pause that happened but wasn't logged at the time.</p>
               <div className="space-y-2">
@@ -16946,11 +16954,11 @@ export default function Home() {
         {/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */}
         {showEditReasonsDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="quick-reason-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <ListChecks className="w-5 h-5 text-primary shrink-0" />
-                <h2 className="text-base font-bold">Quick Reason List</h2>
-                <button type="button" onClick={() => setShowEditReasonsDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <h2 id="quick-reason-dialog-title" className="text-base font-bold">Quick Reason List</h2>
+                <button type="button" aria-label="Close quick reason list" onClick={() => setShowEditReasonsDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="space-y-2">
                 {stopReasonsList.map((r, i) => (
@@ -17084,13 +17092,13 @@ export default function Home() {
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
-            <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-primary" />
-                  <h2 className="font-bold text-base">Password</h2>
+                  <h2 id="password-dialog-title" className="font-bold text-base">Password</h2>
                 </div>
-                <button type="button" onClick={() => setShowPasswordDialog(false)} className="text-muted-foreground hover:text-foreground">
+                <button type="button" aria-label="Close password dialog" onClick={() => setShowPasswordDialog(false)} className="text-muted-foreground hover:text-foreground">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -17319,13 +17327,13 @@ export default function Home() {
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-labelledby="scheduled-days-dialog-title" className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
               {scheduleView === "list" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
                     <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
-                    <h2 className="text-base font-bold flex-1">Scheduled Days</h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <h2 id="scheduled-days-dialog-title" className="text-base font-bold flex-1">Scheduled Days</h2>
+                    <button type="button" aria-label="Close scheduled days" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-3 min-h-0">
                     {/* Recipe Setup Needed (managers): upcoming scheduled runs whose

@@ -6,6 +6,7 @@ import { fetchImportAliases, saveImportAliases } from "@/importAliases";
 import { saveAiCorrections } from "@/aiCorrections";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import ReviewBadge from "./ReviewBadge";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 
 const SKIP = "";
 const CREATE = "__create__";
@@ -49,6 +50,7 @@ export default function ExcelImportDialog({
   onConfirm,
   progress,
 }: Props) {
+  const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [date, setDate] = useState(defaultDate);
   const [brandChoice, setBrandChoice] = useState<Record<string, string>>({});
   const [flavorChoice, setFlavorChoice] = useState<Record<string, string>>({});
@@ -503,6 +505,7 @@ export default function ExcelImportDialog({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="excel-import-dialog-title"

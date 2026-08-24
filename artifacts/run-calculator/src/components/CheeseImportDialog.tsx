@@ -10,6 +10,7 @@ import {
   Clock,
 } from "lucide-react";
 import { resolveCheeseCandidate, type CheeseImportCandidate } from "@workspace/cheese-import";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { SpecImportAlias } from "@workspace/spec-import";
 import type { CheeseImportPrepared } from "@/cheeseImport";
@@ -53,6 +54,7 @@ export default function CheeseImportDialog({
   applying,
   onConfirm,
 }: Props) {
+  const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Absent-recipe ids the manager wants to remove on confirm.
@@ -282,13 +284,17 @@ export default function CheeseImportDialog({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cheese-import-dialog-title"
         className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5 text-primary" />
-            <h2 className="text-base font-semibold text-foreground">Import Cheese Recipes</h2>
+            <h2 id="cheese-import-dialog-title" className="text-base font-semibold text-foreground">Import Cheese Recipes</h2>
           </div>
           <button
             type="button"

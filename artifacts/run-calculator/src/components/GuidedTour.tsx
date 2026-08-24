@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 
 // Multi-step guided walkthrough that highlights each main tab in sequence.
 // As each tab step becomes active it switches the underlying tab (via
@@ -101,6 +102,7 @@ export default function GuidedTour({
 }) {
   const steps = buildSteps(isManager);
   const [index, setIndex] = useState(0);
+  const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
 
   // Reset to the first step every time the tour is opened.
   useEffect(() => {
@@ -121,16 +123,15 @@ export default function GuidedTour({
   const isFirst = index === 0;
   const isLast = index === steps.length - 1;
   const Icon = step.icon;
-
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-4 sm:items-center">
-      <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="guided-tour-dialog-title" className="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-2xl">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Icon className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-bold text-foreground">{step.title}</h2>
+            <h2 id="guided-tour-dialog-title" className="text-base font-bold text-foreground">{step.title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{step.body}</p>
           </div>
           <button

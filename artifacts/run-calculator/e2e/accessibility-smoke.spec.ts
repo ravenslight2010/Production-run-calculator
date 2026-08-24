@@ -125,6 +125,27 @@ async function assertKeyboardTraversal(
   }
 }
 
+async function assertDialogContract(
+  page: Page,
+  dialog: Locator,
+  screen: string,
+): Promise<void> {
+  await expect(dialog, `${screen} should be a modal dialog`).toHaveAttribute("role", "dialog");
+  await expect(dialog, `${screen} should contain modal semantics`).toHaveAttribute("aria-modal", "true");
+  await expect(dialog, `${screen} should have an accessible name`).toHaveAttribute(
+    "aria-labelledby",
+    /\S+/,
+  );
+  await expect(dialog.getByRole("button", { name: /close/i }).first(), `${screen} should have a close action`).toBeVisible();
+  await dialog.getByRole("button", { name: /close/i }).first().focus();
+  await page.keyboard.press("Tab");
+  await expect
+    .poll(() => dialog.evaluate((node) => node.contains(document.activeElement)), {
+      message: `${screen} lost focus containment`,
+    })
+    .toBeTruthy();
+}
+
 async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
   await page.evaluate(() => {
     document.documentElement.style.zoom = "2";
@@ -306,6 +327,7 @@ test.describe("accessibility smoke", () => {
     // desktop layouts; selecting it also ensures the header is in the active
     // navigation tree before opening the manager dialog.
     const setupDialog = await openSettings(page);
+    await assertDialogContract(page, page.getByRole("dialog", { name: "Manage Lists & Settings" }), "manager setup dialog");
     await scan(page, "manager setup dialog", ["button-name", "landmark-unique"]);
     await assertTargets(page, "manager setup dialog");
     await assertKeyboardTraversal(page, "manager setup dialog");
@@ -336,6 +358,7 @@ test.describe("accessibility smoke", () => {
     });
     const review = page.locator("span").filter({ hasText: /^Import Excel$/ }).locator("xpath=../..");
     await expect(review).toBeVisible({ timeout: 10_000 });
+    await assertDialogContract(page, page.getByRole("dialog", { name: "Import Excel" }), "import review dialog");
     await scan(page, "import review dialog", ["button-name", "label", "landmark-unique"]);
     await assertTargets(page, "import review dialog");
     await assertKeyboardTraversal(page, "import review dialog");

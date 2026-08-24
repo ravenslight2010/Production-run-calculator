@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAccessibleDialog } from "./useAccessibleDialog";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -307,6 +308,7 @@ export default function SetupProfileEditor({
   onRemoveFrontlineRecipeName,
   ingredientUniverse,
 }: SetupProfileEditorProps) {
+  const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
   const [brand, setBrand] = useState(initialBrand ?? "");
   const [flavor, setFlavor] = useState(initialFlavor ?? "");
   const [lineType, setLineType] = useState<"dough" | "crusts">("dough");
@@ -773,15 +775,19 @@ export default function SetupProfileEditor({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="setup-profile-dialog-title"
         className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             <Settings className="w-4 h-4 text-primary" />
-            <h2 className="font-bold text-base">Setup Profiles</h2>
+            <h2 id="setup-profile-dialog-title" className="font-bold text-base">Setup Profiles</h2>
           </div>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button type="button" aria-label="Close setup profiles" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
         </div>
