@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 type Step = {
@@ -18,6 +18,15 @@ const fullRun = process.argv.includes("--full");
 const releaseEvidenceDir =
   process.env.RELEASE_EVIDENCE_DIR ?? "release-evidence";
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
+const RELEASE_EVIDENCE_ALLOWLIST = [
+  "release-check-report.md",
+  "clean-start/clean-start-evidence.json",
+  "clean-start/browser-result.json",
+  "clean-start/preview-home.png",
+  "clean-start/startup-api.log",
+  "clean-start/startup-web.log",
+  "clean-start/startup-mockup.log",
+] as const;
 
 const steps: Step[] = [
   {
@@ -188,12 +197,78 @@ function printHelp(): void {
   console.log(
     "  pnpm run release:check:full  Standard gates plus full browser E2E",
   );
+  console.log(
+    "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
+  );
   console.log("");
   console.log(
     "The full browser suite requires a disposable isolated test database.",
   );
   console.log(
     "The API test gate runs six bounded shards; sync SSE tests run separately.",
+  );
+}
+
+async function listEvidenceFiles(
+  directory: string,
+  prefix = "",
+): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const absolutePath = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listEvidenceFiles(absolutePath, relativePath)));
+    } else {
+      files.push(relativePath);
+    }
+  }
+  return files;
+}
+
+async function verifyReleaseEvidence(): Promise<void> {
+  const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
+  const expected = new Set<string>(RELEASE_EVIDENCE_ALLOWLIST);
+  const unexpected: string[] = [];
+
+  let files: string[];
+  try {
+    files = await listEvidenceFiles(evidenceRoot);
+  } catch (error) {
+    throw new Error(
+      `Could not read release evidence directory ${evidenceRoot}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  for (const file of files) {
+    const filePath = resolve(evidenceRoot, file);
+    const stats = await lstat(filePath);
+    if (stats.isSymbolicLink() || !stats.isFile() || !expected.has(file)) {
+      unexpected.push(file);
+    }
+  }
+
+  if (!files.includes("release-check-report.md")) {
+    unexpected.push("release-check-report.md (missing)");
+  }
+
+  if (unexpected.length > 0) {
+    throw new Error(
+      [
+        "Release evidence contains files outside its allowlist:",
+        ...unexpected.map((file) => `- ${file}`),
+        `Allowed files: ${RELEASE_EVIDENCE_ALLOWLIST.join(", ")}`,
+      ].join("\n"),
+    );
+  }
+
+  console.log(
+    `Release evidence verified: ${files.length} allowlisted file${
+      files.length === 1 ? "" : "s"
+    }.`,
   );
 }
 
@@ -272,15 +347,10 @@ async function writeReleaseReport(
   const cleanStartPassed = results.find(
     (result) => result.label === "clean-start smoke",
   )?.passed;
-  const cleanStartEvidenceFiles = [
-    "clean-start/clean-start-evidence.json",
-    "clean-start/browser-result.json",
-    "clean-start/preview-home.png",
-    "clean-start/startup-api.log",
-    "clean-start/startup-web.log",
-    "clean-start/startup-mockup.log",
-  ];
-  const availableEvidenceFiles = new Set(
+  const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
+    file.startsWith("clean-start/"),
+  );
+  const availableEvidenceFiles = new Set<string>(
     (
       await Promise.all(
         cleanStartEvidenceFiles.map(async (file) => {
@@ -292,7 +362,10 @@ async function writeReleaseReport(
           }
         }),
       )
-    ).filter((file): file is string => file !== undefined),
+    ).filter(
+      (file): file is (typeof RELEASE_EVIDENCE_ALLOWLIST)[number] =>
+        file !== undefined,
+    ),
   );
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
@@ -340,6 +413,20 @@ async function writeReleaseReport(
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   printHelp();
   process.exit(0);
+}
+
+if (process.argv.includes("--verify-evidence")) {
+  try {
+    await verifyReleaseEvidence();
+    process.exit(0);
+  } catch (error) {
+    console.error(
+      `Release evidence verification failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exit(1);
+  }
 }
 
 console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
