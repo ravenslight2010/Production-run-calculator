@@ -158,6 +158,79 @@ function seededPayload(runId: string): SyncPayload {
 }
 
 test(
+  "temporarily failed sync write retries automatically after the network recovers",
+  async ({ page }: { page: Page }) => {
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+
+    let blocked = true;
+    let syncWriteAttempts = 0;
+    let blockedWrites = 0;
+    await page.route("**/api/sync/today**", async (route) => {
+      const request = route.request();
+      if (request.method() === "PUT") {
+        syncWriteAttempts += 1;
+      }
+      if (request.method() === "PUT" && blocked) {
+        blockedWrites += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary sync outage" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    const casesNeeded = page.getByTestId("input-casesNeeded");
+    await casesNeeded.fill("17");
+    await expect
+      .poll(() => blockedWrites, { timeout: 10_000 })
+      .toBe(1);
+
+    // The failed request must retain the edit locally and expose the queued
+    // retry state instead of treating the parseable error response as an ack.
+    await expect
+      .poll(async () => page.evaluate(() => {
+        const raw = localStorage.getItem("run-calc-day");
+        const day = JSON.parse(raw ?? "{}") as { runs?: Array<{ id?: string }> };
+        const runId = day.runs?.[0]?.id;
+        if (!runId) return null;
+        const values = JSON.parse(localStorage.getItem(`run-calc-values-${runId}`) ?? "{}") as {
+          casesNeeded?: number;
+        };
+        return values.casesNeeded;
+      }), { timeout: 10_000 })
+      .toBe(17);
+
+    const syncButton = page.locator('button[title="Sync connected"]');
+    await syncButton.click();
+    await expect(page.getByText("Retrying", { exact: true })).toBeVisible();
+    await expect(page.getByText("Your local change is retained on this device.")).toBeVisible();
+    await expect(page.getByText("Pending writes")).toBeVisible();
+    await expect(page.getByText("Retry latest retained change")).toBeVisible();
+
+    // The route now allows the next attempt through. The existing retry queue
+    // should recover without a manual retry and clear the retained-change state
+    // only after the server acknowledges the write.
+    blocked = false;
+    await expect(page.getByText("Synchronized", { exact: true })).toBeVisible();
+    await expect.poll(() => syncWriteAttempts, { timeout: 15_000 }).toBeGreaterThan(1);
+    await expect(page.getByText(
+      "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
+      { exact: true },
+    )).toBeHidden();
+    await expect.poll(async () => {
+      const server = await getToday(page);
+      const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
+      return Object.values(values ?? {})[0]?.casesNeeded;
+    }, { timeout: 15_000 }).toBe(17);
+  },
+);
+
+test(
   "offline device adopts active deletion, survives reload, and never resurrects the run",
   async ({ page, browser }: { page: Page; browser: Browser }) => {
     const username = uid();
