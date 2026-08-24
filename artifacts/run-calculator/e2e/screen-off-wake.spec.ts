@@ -847,6 +847,63 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
+    "keeps cases-on-line occupancy frozen across reload while paused",
+    async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const safeBaseMs = await setupAndStartRun(page);
+      const occupancy = {
+        ppm: 60,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      };
+      const pausedAt = safeBaseMs + 2 * 60_000;
+      const pausedCheckAt = safeBaseMs + 12 * 60_000;
+
+      // Persist the pause at a deterministic instant before recreating the
+      // station page.
+      await mockDateNow(page, pausedAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await page.getByRole("button", { name: /pause.?run/i }).first().click();
+      await page.waitForTimeout(600);
+
+      const expectedPaused = computeCasesOnLine({
+        startedAt: safeBaseMs,
+        pausedAt,
+        now: pausedCheckAt,
+        ...occupancy,
+      });
+
+      // A reload must restore the persisted paused lifecycle, not treat the
+      // elapsed wall time as newly-running time.
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await installHiddenMock(page);
+      await mockDateNow(page, pausedCheckAt);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
+      await expect(
+        page.getByRole("button", { name: /resume.?run/i }).first(),
+      ).toBeVisible();
+
+      // The selector remains frozen until the operator resumes the line.
+      const resumedStartedAt = safeBaseMs + 10 * 60_000;
+      const resumedCheckAt = safeBaseMs + 15 * 60_000;
+      await page.getByRole("button", { name: /resume.?run/i }).first().click();
+      await page.waitForTimeout(500);
+      await mockDateNow(page, resumedCheckAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(
+        computeCasesOnLine({
+          startedAt: resumedStartedAt,
+          now: resumedCheckAt,
+          ...occupancy,
+        }),
+      );
+    },
+  );
+
+  test(
     "D. pause, background sleep, and resume keep all live countdowns aligned",
     async ({ page }) => {
       const safeBaseMs = await setupAndStartRun(page);
