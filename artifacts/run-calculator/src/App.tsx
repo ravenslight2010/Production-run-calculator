@@ -24,11 +24,31 @@ import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
+import { recordPerformance } from "./performanceDiagnostics";
 
 const queryClient = new QueryClient();
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
-const LazyHome = lazy(() => import("@/pages/home"));
+const LazyHome = lazy(() => {
+  const startedAt = typeof performance === "undefined" ? null : performance.now();
+  return import("@/pages/home")
+    .then((module) => {
+      if (startedAt !== null && typeof performance !== "undefined") {
+        recordPerformance("startup:home-chunk-load", performance.now() - startedAt, "load");
+      }
+      return module;
+    })
+    .catch((error) => {
+      if (startedAt !== null && typeof performance !== "undefined") {
+        recordPerformance(
+          "startup:home-chunk-load-failure",
+          performance.now() - startedAt,
+          "load",
+        );
+      }
+      throw error;
+    });
+});
 
 // "/" renders the calculator for signed-in staff, and a branded welcome with a
 // sign-in CTA for everyone else (no auto-redirect into the sign-in form).

@@ -10,6 +10,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
 import {
+  AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS,
   MANAGEMENT_PERFORMANCE_BUDGETS,
   PERFORMANCE_BUDGETS,
 } from "../src/performanceDiagnostics";
@@ -29,6 +30,13 @@ type ApiEvidence = {
   path: string;
   status: number;
   durationMs: number;
+};
+
+type ResourceEvidence = {
+  path: string;
+  status?: number;
+  failed?: boolean;
+  errorText?: string;
 };
 
 function safePath(url: string): string {
@@ -86,6 +94,26 @@ async function signIn(page: Page, username: string): Promise<void> {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await page.keyboard.press("Escape");
+}
+
+async function throttleToSlow3G(page: Page): Promise<() => Promise<void>> {
+  const client = await page.context().newCDPSession(page);
+  await client.send("Network.enable");
+  await client.send("Network.emulateNetworkConditions", {
+    offline: false,
+    latency: 400,
+    downloadThroughput: Math.round((500 * 1024) / 8),
+    uploadThroughput: Math.round((500 * 1024) / 8),
+  });
+  return async () => {
+    await client.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+    });
+    await client.detach();
+  };
 }
 
 async function capturedDiagnostics(page: Page): Promise<CapturedDiagnostic[]> {
@@ -317,4 +345,106 @@ test("captures authenticated initial load and deferred staff visit budgets", asy
     apiRequests: apiEvidence.length,
     consoleMessages: consoleOutput.length,
   }));
+});
+
+test("keeps the first authenticated calculator visit usable on slow 3G", async ({ page }, testInfo: TestInfo) => {
+  requireIsolatedTestDatabase("authenticated slow-network performance e2e");
+  if (!SIGNUP_CODE) {
+    throw new Error("STAFF_SIGNUP_CODE must be configured for authenticated slow-network performance e2e.");
+  }
+
+  await page.addInitScript(() => {
+    (window as Window & { __calculatorPerformance?: CapturedDiagnostic[] }).__calculatorPerformance = [];
+    window.addEventListener("calculator-performance", (event) => {
+      const detail = (event as CustomEvent<CapturedDiagnostic>).detail;
+      if (!detail || typeof detail.name !== "string" || typeof detail.durationMs !== "number") return;
+      (window as Window & { __calculatorPerformance: CapturedDiagnostic[] })
+        .__calculatorPerformance.push({
+          name: detail.name,
+          durationMs: detail.durationMs,
+          kind: detail.kind,
+        });
+    });
+  });
+
+  const username = uniqueTestId("e2e_authenticated_slow_network");
+  testUsernames.add(username);
+  const homeChunkRequests: string[] = [];
+  let authenticatedVisitStarted = false;
+  const failedResources: ResourceEvidence[] = [];
+  const slowNetworkStartedAt = Date.now();
+  page.on("request", (request) => {
+    if (authenticatedVisitStarted && request.resourceType() === "script") {
+      homeChunkRequests.push(safePath(request.url()));
+    }
+  });
+  page.on("response", (response) => {
+    if (response.request().resourceType() !== "script" || response.status() < 400) return;
+    failedResources.push({ path: safePath(response.url()), status: response.status() });
+  });
+  page.on("requestfailed", (request) => {
+    if (request.resourceType() !== "script") return;
+    failedResources.push({
+      path: safePath(request.url()),
+      failed: true,
+      errorText: request.failure()?.errorText?.slice(0, 160),
+    });
+  });
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+
+  const restoreNetwork = await throttleToSlow3G(page);
+  const authenticatedVisitStartedAt = performance.now();
+  authenticatedVisitStarted = true;
+  let visitError: unknown;
+  try {
+    await page.locator("#username").fill(username);
+    await page.locator("#password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByTestId("tab-run").waitFor({ state: "visible", timeout: 20_000 });
+  } catch (error) {
+    visitError = error;
+  } finally {
+    await restoreNetwork();
+  }
+  const runReadyMs = performance.now() - authenticatedVisitStartedAt;
+  const diagnostics = await capturedDiagnostics(page);
+  const homeChunkDiagnostic = diagnostics.find((entry) => entry.name === "startup:home-chunk-load");
+  const failureDiagnostic = diagnostics.find((entry) => entry.name === "startup:home-chunk-load-failure");
+  const evidence = {
+    networkProfile: { latencyMs: 400, downloadKbps: 500, uploadKbps: 500 },
+    authenticatedVisitMs: Math.round(runReadyMs * 100) / 100,
+    budgetMs: AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs,
+    homeChunkRequests,
+    homeChunkDiagnostic: homeChunkDiagnostic
+      ? { name: homeChunkDiagnostic.name, durationMs: homeChunkDiagnostic.durationMs, kind: homeChunkDiagnostic.kind }
+      : null,
+    chunkLoadFailure: failureDiagnostic
+      ? { name: failureDiagnostic.name, durationMs: failureDiagnostic.durationMs, kind: failureDiagnostic.kind }
+      : null,
+    failedResources,
+    setup: "isolated account and facility created; manager role authorized",
+  };
+  await testInfo.attach("calculator-authenticated-slow-network.json", {
+    body: JSON.stringify(evidence, null, 2),
+    contentType: "application/json",
+  });
+  if (visitError) throw visitError;
+  expect(homeChunkRequests.length, "the deferred Home bundle should load after authentication").toBeGreaterThan(0);
+  expect(homeChunkDiagnostic, "the deferred Home bundle should report its load timing").toBeDefined();
+  expect(failureDiagnostic, "the deferred Home bundle must not fail to load").toBeUndefined();
+  expect(
+    runReadyMs,
+    `authenticated calculator was not usable within ${AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs}ms; evidence=${JSON.stringify({
+      elapsedMs: Math.round(runReadyMs),
+      homeChunkRequests: homeChunkRequests.length,
+      failedResources,
+      diagnostics: diagnostics.filter((entry) => entry.name.startsWith("startup:")),
+      setupElapsedMs: Date.now() - slowNetworkStartedAt,
+    })}`,
+  ).toBeLessThanOrEqual(AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs);
 });

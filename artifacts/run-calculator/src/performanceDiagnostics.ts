@@ -14,6 +14,11 @@ export const MANAGEMENT_PERFORMANCE_BUDGETS = {
   staffFirstVisitMs: 350,
 } as const;
 
+/** Reviewed budget for the first authenticated calculator visit on slow 3G. */
+export const AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS = {
+  runReadyMs: 10_000,
+} as const;
+
 export type PerformanceDiagnostic = {
   name: string;
   durationMs: number;
@@ -53,7 +58,10 @@ function remember(entry: PerformanceDiagnostic): void {
   const managementBudget = entry.name === "management:staff-first-visit"
     ? MANAGEMENT_PERFORMANCE_BUDGETS.staffFirstVisitMs
     : undefined;
-  const budget = importBudget ?? managementBudget ?? (entry.kind === "load"
+  const authenticatedStartupBudget = entry.name === "startup:home-chunk-load"
+    ? AUTHENTICATED_STARTUP_PERFORMANCE_BUDGETS.runReadyMs
+    : undefined;
+  const budget = importBudget ?? managementBudget ?? authenticatedStartupBudget ?? (entry.kind === "load"
     ? SLOW_LOAD_MS
     : entry.kind === "api"
       ? 1000

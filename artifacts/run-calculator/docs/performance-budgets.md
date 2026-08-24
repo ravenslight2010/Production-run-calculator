@@ -12,6 +12,7 @@ through the privacy-safe `calculator-performance` event:
 | Live calculation | 16 ms |
 | Persisted run-value storage scan | 100 ms |
 | Timed API request | 1,000 ms |
+| First authenticated calculator visit on slow 3G | 10,000 ms |
 | Workbook parse | 120,000 ms |
 | Review open after parse | 2,000 ms |
 | Import commit | 10,000 ms |
@@ -46,6 +47,16 @@ reload by the management performance browser check. Both measurements must stay
 at or below the 1,500 ms initial-load budget. The check also requires the
 normal signed-out `GET /api/me` 401 response and verifies that it does not
 produce a console error.
+
+## Authenticated slow-network evidence
+
+The management performance browser check also creates an isolated account,
+throttles Chromium to 400 ms latency with 500 Kbps download/upload, and signs
+in before waiting for the run tab to become usable. The deferred Home bundle
+must load only on that authenticated transition and the run tab must be
+visible within 10,000 ms. The attached JSON keeps only pathname, status,
+bounded failure text, timing, and network-profile metadata; it never captures
+request bodies, response bodies, customer data, or full URLs.
 
 ## Workbook startup split evidence
 
