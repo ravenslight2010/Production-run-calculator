@@ -1,7 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers, uniqueTestId } from "./isolation";
+import {
+  cleanupTestUsers,
+  requireIsolatedTestDatabase,
+  uniqueTestId,
+} from "./isolation";
 
 const testUsernames = new Set<string>();
 
@@ -172,6 +176,63 @@ test.afterAll(async () => {
   }
 });
 
+test.beforeAll(async () => {
+  await requireIsolatedTestDatabase("accessibility smoke browser check");
+});
+
+async function seedPendingRun(page: Page): Promise<string> {
+  const runId = uniqueTestId("a11y_run");
+  await page.evaluate(() => {
+    const keys = Array.from({ length: localStorage.length }, (_, index) =>
+      localStorage.key(index),
+    );
+    for (const key of keys) {
+      if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
+    }
+    localStorage.removeItem("run-calc-day");
+  });
+  await page.addInitScript((id: string) => {
+    // Seed only the next reload. Subsequent dialog checks and reloads should
+    // observe the state produced by the application, not recreate the run.
+    if (sessionStorage.getItem("a11y-pending-seed-applied") === "1") return;
+    sessionStorage.setItem("a11y-pending-seed-applied", "1");
+    localStorage.setItem(
+      "run-calc-day",
+      JSON.stringify({
+        date: new Date().toISOString().slice(0, 10),
+        runs: [{ id, brand: "Accessibility", flavor: "Smoke", seeded: false }],
+        currentIndex: 0,
+        resetAt: 0,
+      }),
+    );
+  }, runId);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await expect
+    .poll(
+      () =>
+        page.evaluate((id) => {
+          try {
+            const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}");
+            const run = day.runs?.find(
+              (candidate: { id?: string }) => candidate.id === id,
+            );
+            return {
+              runId: run?.id ?? null,
+              startedAt: run?.startedAt ?? null,
+              endedAt: run?.endedAt ?? null,
+            };
+          } catch {
+            return { runId: null, startedAt: null, endedAt: null };
+          }
+        }, runId),
+      { timeout: 10_000 },
+    )
+    .toEqual({ runId, startedAt: null, endedAt: null });
+  await expect(page.locator('[data-testid="button-start-run"]')).toBeVisible();
+  return runId;
+}
+
 async function openSettings(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
@@ -217,6 +278,7 @@ test.describe("accessibility smoke", () => {
 
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
     await signUp(page);
+    await seedPendingRun(page);
     await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
     await assertKeyboardTraversal(page, "live run");
