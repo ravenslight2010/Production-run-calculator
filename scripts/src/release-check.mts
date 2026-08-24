@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 type Step = {
   label: string;
@@ -13,6 +15,8 @@ const API_SHARD_TIMEOUT_MS = 4 * 60_000;
 const API_SHARD_WARNING_MS = 3 * 60_000;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
+const releaseEvidenceDir = "release-evidence";
+const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
 
 const steps: Step[] = [
   {
@@ -50,6 +54,7 @@ const steps: Step[] = [
       CLEAN_START_API_PORT: "18081",
       CLEAN_START_WEB_PORT: "18082",
       CLEAN_START_MOCKUP_PORT: "18180",
+      CLEAN_START_EVIDENCE_DIR: cleanStartEvidenceDir,
     },
   },
   {
@@ -61,21 +66,36 @@ const steps: Step[] = [
   },
   {
     label: "API integration tests (release shard 2/6)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:integration:1"],
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:1",
+    ],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API integration tests (release shard 3/6)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:integration:2"],
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:2",
+    ],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
   },
   {
     label: "API integration tests (release shard 4/6)",
-    args: ["--filter", "@workspace/api-server", "run", "test:release:integration:3"],
+    args: [
+      "--filter",
+      "@workspace/api-server",
+      "run",
+      "test:release:integration:3",
+    ],
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
@@ -239,13 +259,62 @@ function runStep(step: Step): Promise<{ exitCode: number; elapsedMs: number }> {
   });
 }
 
+async function writeReleaseReport(
+  results: Array<{ label: string; passed: boolean; elapsedMs: number }>,
+): Promise<string> {
+  const reportPath = resolve(
+    rootDir,
+    releaseEvidenceDir,
+    "release-check-report.md",
+  );
+  await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
+  const cleanStartPassed = results.find(
+    (result) => result.label === "clean-start smoke",
+  )?.passed;
+  const lines = [
+    "# Release Check Report",
+    "",
+    `Generated: ${new Date().toISOString()}`,
+    `Mode: ${fullRun ? "full" : "standard"}`,
+    "",
+    "## Gate results",
+    "",
+    "| Gate | Result | Elapsed |",
+    "| --- | --- | ---: |",
+    ...results.map(
+      (result) =>
+        `| ${result.label} | ${result.passed ? "PASS" : "FAIL"} | ${Math.round(
+          result.elapsedMs / 1000,
+        )}s |`,
+    ),
+    "",
+    "## Preview evidence",
+    "",
+    cleanStartPassed === undefined
+      ? "- Clean-start did not run; no preview evidence was produced."
+      : `- Clean-start: **${cleanStartPassed ? "PASS" : "FAIL"}**`,
+    `- [Clean-start evidence](clean-start/clean-start-evidence.json)`,
+    `- [Proxied browser result](clean-start/browser-result.json)`,
+    `- [Preview screenshot](clean-start/preview-home.png)`,
+    `- [API startup log](clean-start/startup-api.log)`,
+    `- [Web startup log](clean-start/startup-web.log)`,
+    `- [Mockup startup log](clean-start/startup-mockup.log)`,
+    "",
+    "The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.",
+    "",
+  ];
+  await writeFile(reportPath, `${lines.join("\n")}\n`, "utf8");
+  return `${releaseEvidenceDir}/release-check-report.md`;
+}
+
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   printHelp();
   process.exit(0);
 }
 
 console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
-const results: Array<{ label: string; passed: boolean; elapsedMs: number }> = [];
+const results: Array<{ label: string; passed: boolean; elapsedMs: number }> =
+  [];
 let failedGroup: string | undefined;
 
 for (const [index, step] of steps.entries()) {
@@ -260,7 +329,9 @@ for (const [index, step] of steps.entries()) {
   if (!passed) {
     if (step.group !== undefined) {
       failedGroup = step.group;
-      console.error(`\n${step.group} has a failed shard; running the remaining shards.`);
+      console.error(
+        `\n${step.group} has a failed shard; running the remaining shards.`,
+      );
       continue;
     }
     console.error("\nRelease check stopped at the first failed gate.");
@@ -280,7 +351,9 @@ const apiShardResults = results.filter((result) =>
   result.label.includes("(release shard"),
 );
 if (apiShardResults.length > 0) {
-  const passedApiShards = apiShardResults.filter((result) => result.passed).length;
+  const passedApiShards = apiShardResults.filter(
+    (result) => result.passed,
+  ).length;
   console.log(
     `API release shards: ${passedApiShards}/${apiShardResults.length} passed.`,
   );
@@ -290,8 +363,27 @@ if (
   results.length === steps.length &&
   results.every((result) => result.passed)
 ) {
+  try {
+    console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
+  } catch (error) {
+    console.error(
+      `Could not write release report: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exit(1);
+  }
   console.log("\nRelease check passed. Ready for final publish review.");
   process.exit(0);
 }
 
+try {
+  console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
+} catch (error) {
+  console.error(
+    `Could not write release report: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+}
 process.exit(1);

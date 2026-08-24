@@ -1,4 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import { createConnection } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -21,6 +23,36 @@ const startupTimeoutMs = parseDuration(
 );
 const pollIntervalMs = 250;
 const outputLimit = 12_000;
+const responseLimit = 20_000;
+const evidenceDir = resolve(
+  rootDir,
+  process.env.CLEAN_START_EVIDENCE_DIR ?? "release-evidence/clean-start",
+);
+
+type HttpEvidence = {
+  url: string;
+  status: number;
+  contentType: string | null;
+  body: string;
+  passed: boolean;
+};
+
+type CheckEvidence = HttpEvidence & {
+  error?: string;
+};
+
+type CleanStartEvidence = {
+  generatedAt: string;
+  ports: {
+    api: number;
+    web: number;
+    mockup: number;
+  };
+  checks: Record<string, CheckEvidence>;
+  startupLogs: Record<string, string>;
+  browserResult: string;
+  screenshot: string | null;
+};
 
 type ManagedProcess = {
   name: string;
@@ -30,6 +62,9 @@ type ManagedProcess = {
 };
 
 const processes: ManagedProcess[] = [];
+const checks: Record<string, CheckEvidence> = {};
+let screenshot: string | null = null;
+let screenshotError: string | undefined;
 let cleaningUp = false;
 
 function parsePort(value: string, variable: string): number {
@@ -196,10 +231,11 @@ async function managedExit(
 }
 
 async function fetchExpect(
+  checkName: string,
   process: ManagedProcess,
   url: string,
   assertion: (response: Response, body: string) => string | undefined,
-): Promise<void> {
+): Promise<HttpEvidence> {
   const deadline = Date.now() + startupTimeoutMs;
   let lastError = "no response";
   while (Date.now() < deadline) {
@@ -210,10 +246,27 @@ async function fetchExpect(
       });
       const body = await response.text();
       const failure = assertion(response, body);
-      if (!failure) return;
+      const evidence: CheckEvidence = {
+        url,
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        body: body.slice(0, responseLimit),
+        passed: !failure,
+        ...(failure ? { error: failure } : {}),
+      };
+      checks[checkName] = evidence;
+      if (!failure) return evidence;
       lastError = failure;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      checks[checkName] = {
+        url,
+        status: 0,
+        contentType: null,
+        body: "",
+        passed: false,
+        error: lastError,
+      };
     }
     const result = await managedExit(process);
     if (result) {
@@ -226,6 +279,124 @@ async function fetchExpect(
   throw new Error(
     `${process.name} health check failed for ${url}: ${lastError}`,
   );
+}
+
+function evidencePath(fileName: string): string {
+  return relative(rootDir, resolve(evidenceDir, fileName)) || fileName;
+}
+
+async function writeEvidence(): Promise<void> {
+  await mkdir(evidenceDir, { recursive: true });
+  const startupLogs: Record<string, string> = {};
+  for (const name of ["api", "web", "mockup"] as const) {
+    const process = processes.find((candidate) => candidate.name === name);
+    const fileName = `startup-${name}.log`;
+    await writeFile(
+      resolve(evidenceDir, fileName),
+      process?.output ?? `${name} process was not started.\n`,
+      "utf8",
+    );
+    startupLogs[name] = evidencePath(fileName);
+  }
+
+  const browserResult = evidencePath("browser-result.json");
+  const evidence: CleanStartEvidence = {
+    generatedAt: new Date().toISOString(),
+    ports: { api: apiPort, web: webPort, mockup: mockupPort },
+    checks,
+    startupLogs,
+    browserResult,
+    screenshot,
+  };
+  await writeFile(
+    resolve(evidenceDir, "clean-start-evidence.json"),
+    `${JSON.stringify(evidence, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    resolve(evidenceDir, "browser-result.json"),
+    `${JSON.stringify(
+      {
+        kind: "proxied-preview-browser-result",
+        generatedAt: evidence.generatedAt,
+        screenshot,
+        screenshotError,
+        web: checks.webHtml ?? null,
+        api: checks.apiHealthViaWebProxy ?? null,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  console.log(
+    `Evidence retained: ${evidencePath("clean-start-evidence.json")}, ${browserResult}, ${Object.values(startupLogs).join(", ")}`,
+  );
+}
+
+function chromiumExecutable(): string | undefined {
+  for (const executable of ["chromium", "chromium-browser", "google-chrome"]) {
+    try {
+      execFileSync(executable, ["--version"], {
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      return executable;
+    } catch {
+      // Check the next known browser binary.
+    }
+  }
+  return undefined;
+}
+
+async function capturePreviewScreenshot(): Promise<void> {
+  const executable = chromiumExecutable();
+  if (!executable) {
+    screenshotError =
+      "Chromium was not available; retained HTTP browser result instead.";
+    return;
+  }
+  await mkdir(evidenceDir, { recursive: true });
+  const fileName = "preview-home.png";
+  const outputPath = resolve(evidenceDir, fileName);
+  const result = await new Promise<{ code: number | null; output: string }>(
+    (resolveResult) => {
+      const browser = spawn(
+        executable,
+        [
+          "--headless=new",
+          "--no-sandbox",
+          "--disable-gpu",
+          "--window-size=1280,900",
+          `--screenshot=${outputPath}`,
+          `http://127.0.0.1:${webPort}/`,
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let output = "";
+      browser.stdout?.on("data", (chunk: Buffer) => {
+        output = `${output}${chunk.toString()}`.slice(-2_000);
+      });
+      browser.stderr?.on("data", (chunk: Buffer) => {
+        output = `${output}${chunk.toString()}`.slice(-2_000);
+      });
+      const timeout = setTimeout(() => {
+        browser.kill("SIGTERM");
+      }, 30_000);
+      browser.once("close", (code) => {
+        clearTimeout(timeout);
+        resolveResult({ code, output });
+      });
+      browser.once("error", (error) => {
+        clearTimeout(timeout);
+        resolveResult({ code: null, output: error.message });
+      });
+    },
+  );
+  if (result.code === 0) {
+    screenshot = evidencePath(fileName);
+    return;
+  }
+  screenshotError = `Chromium screenshot failed (code=${result.code}): ${result.output}`;
 }
 
 async function stopManaged(managed: ManagedProcess): Promise<void> {
@@ -284,6 +455,7 @@ async function main(): Promise<void> {
   const api = startManaged("api");
   await waitForPort(api, apiPort);
   await fetchExpect(
+    "apiHealthDirect",
     api,
     `http://127.0.0.1:${apiPort}/api/healthz`,
     (response, body) => {
@@ -307,21 +479,57 @@ async function main(): Promise<void> {
 
   const web = startManaged("web");
   await waitForPort(web, webPort);
-  await fetchExpect(web, `http://127.0.0.1:${webPort}/`, (response, body) => {
-    if (response.status !== 200)
-      return `expected HTTP 200, received ${response.status}`;
-    if (!body.includes("<html") && !body.includes("<!doctype")) {
-      return "response did not contain an HTML document";
-    }
-    return undefined;
-  });
+  await fetchExpect(
+    "webHtml",
+    web,
+    `http://127.0.0.1:${webPort}/`,
+    (response, body) => {
+      if (response.status !== 200)
+        return `expected HTTP 200, received ${response.status}`;
+      if (!body.includes("<html") && !body.includes("<!doctype")) {
+        return "response did not contain an HTML document";
+      }
+      return undefined;
+    },
+  );
   console.log(
     `PASS web: port ${webPort} open and / returns the initial HTML document`,
   );
+  await fetchExpect(
+    "apiHealthViaWebProxy",
+    web,
+    `http://127.0.0.1:${webPort}/api/healthz`,
+    (response, body) => {
+      if (response.status !== 200)
+        return `expected HTTP 200, received ${response.status}: ${body.slice(0, 500)}`;
+      try {
+        const payload = JSON.parse(body) as {
+          status?: string;
+          checks?: { database?: string };
+        };
+        if (payload.status !== "ok" || payload.checks?.database !== "ok") {
+          return `expected status=ok and checks.database=ok, received ${body.slice(0, 500)}`;
+        }
+      } catch {
+        return `expected JSON health response, received ${body.slice(0, 500)}`;
+      }
+      return undefined;
+    },
+  );
+  console.log(
+    `PASS web proxy: /api/healthz forwards a healthy API response on port ${webPort}`,
+  );
+  await capturePreviewScreenshot();
+  if (screenshot) {
+    console.log(`PASS browser: retained preview screenshot at ${screenshot}`);
+  } else {
+    console.log(`Browser screenshot unavailable: ${screenshotError}`);
+  }
 
   const mockup = startManaged("mockup");
   await waitForPort(mockup, mockupPort);
   await fetchExpect(
+    "mockupHtml",
     mockup,
     `http://127.0.0.1:${mockupPort}/__mockup/`,
     (response, body) => {
@@ -347,5 +555,15 @@ try {
   console.error(`FAIL clean-start smoke:\n${formatFailure(error)}`);
   process.exitCode = 1;
 } finally {
+  try {
+    await writeEvidence();
+  } catch (error) {
+    console.error(
+      `FAIL clean-start evidence: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exitCode = 1;
+  }
   await cleanup();
 }
