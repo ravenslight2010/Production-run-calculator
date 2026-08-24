@@ -503,15 +503,18 @@ export default function ExcelImportDialog({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="excel-import-dialog-title"
         className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Upload className="w-4 h-4 text-primary" />
-            <span className="text-base font-semibold text-foreground">Import Excel</span>
+            <span id="excel-import-dialog-title" className="text-base font-semibold text-foreground">Import Excel</span>
           </div>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button type="button" aria-label="Close import review" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="w-5 h-5" />
           </button>
         </div>

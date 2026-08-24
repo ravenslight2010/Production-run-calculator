@@ -14336,6 +14336,9 @@ export default function Home() {
             onClick={() => setShowManageDialog(false)}
           >
             <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="manage-lists-dialog-title"
               className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
               onClick={e => e.stopPropagation()}
             >
@@ -14343,9 +14346,9 @@ export default function Home() {
               <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
                 <div className="flex items-center gap-2">
                   <Settings className="w-4 h-4 text-primary" />
-                  <h2 className="font-bold text-base">Manage Lists & Settings</h2>
+                  <h2 id="manage-lists-dialog-title" className="font-bold text-base">Manage Lists & Settings</h2>
                 </div>
-                <button type="button" onClick={() => setShowManageDialog(false)} className="text-muted-foreground hover:text-foreground">
+                <button type="button" aria-label="Close settings" onClick={() => setShowManageDialog(false)} className="text-muted-foreground hover:text-foreground">
                   <X className="w-4 h-4" />
                 </button>
               </div>

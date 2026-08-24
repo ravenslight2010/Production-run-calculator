@@ -185,6 +185,17 @@
     @apply border-border;
   }
 
+  /*
+   * Keep keyboard focus visible even on controls whose Tailwind styles use
+   * outline-none. This is intentionally global: operators move between the
+   * same controls on the run, warehouse, and management screens at every
+   * breakpoint.
+   */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid hsl(var(--ring)) !important;
+    outline-offset: 2px;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
