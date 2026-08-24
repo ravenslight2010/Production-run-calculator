@@ -237,6 +237,92 @@ test(
 );
 
 test(
+  "queued Target Cases edit recovers when a sleeping tab wakes",
+  async ({ page }: { page: Page }) => {
+    const username = uid();
+    users.add(username);
+    await signUp(page, username);
+    await page.getByTestId("tab-run").click();
+    await page.getByTestId("input-casesNeeded").waitFor({ state: "visible", timeout: 20_000 });
+
+    let blocked = true;
+    let blockedWrites = 0;
+    let wakePulls = 0;
+    let syncWriteAttempts = 0;
+    await page.route("**/api/sync/today**", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        wakePulls += 1;
+        await route.continue();
+        return;
+      }
+      if (request.method() === "PUT") {
+        syncWriteAttempts += 1;
+        if (blocked) {
+          blockedWrites += 1;
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "sleep-time sync outage" }),
+          });
+          return;
+        }
+      }
+      await route.continue();
+    });
+
+    const casesNeeded = page.getByTestId("input-casesNeeded");
+    await casesNeeded.fill("23");
+    await expect.poll(() => blockedWrites, { timeout: 10_000 }).toBe(1);
+    await expect
+      .poll(async () => page.evaluate(() => {
+        const raw = localStorage.getItem("run-calc-day");
+        const day = JSON.parse(raw ?? "{}") as { runs?: Array<{ id?: string }> };
+        const runId = day.runs?.[0]?.id;
+        if (!runId) return null;
+        const values = JSON.parse(localStorage.getItem(`run-calc-run-${runId}`) ?? "{}") as {
+          casesNeeded?: number;
+        };
+        return values.casesNeeded;
+      }), { timeout: 10_000 })
+      .toBe(23);
+
+    const pullsBeforeSleep = wakePulls;
+    // Model the browser being backgrounded/suspended, then returning to the
+    // foreground. Dispatching the real DOM event exercises the same handler
+    // used by a browser wake; the visibilityState override makes the test
+    // deterministic in headless Chromium.
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    blocked = false;
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await expect.poll(() => wakePulls, { timeout: 15_000 }).toBeGreaterThan(pullsBeforeSleep);
+    await expect.poll(() => syncWriteAttempts, { timeout: 15_000 }).toBeGreaterThan(1);
+    await expect(page.getByText(
+      "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
+      { exact: true },
+    )).toBeHidden();
+    await expect.poll(async () => {
+      const server = await getToday(page);
+      const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
+      return Object.values(values ?? {})[0]?.casesNeeded;
+    }, { timeout: 15_000 }).toBe(23);
+  },
+);
+
+test(
   "exhausted sync failure retains the change for a manual retry",
   async ({ page }: { page: Page }) => {
     const username = uid();
