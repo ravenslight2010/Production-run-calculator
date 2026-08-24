@@ -20229,7 +20229,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       </div>
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-cases-on-line">{fmtNum(calc.casesOnLine, 0)}</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="cases-on-line-value">{fmtNum(calc.casesOnLine, 0)}</span>
                       </div>
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
@@ -20275,7 +20275,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       </div>
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
-                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-cases-on-line">{fmtNum(calc.casesOnLine, 0)}</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="cases-on-line-value">{fmtNum(calc.casesOnLine, 0)}</span>
                       </div>
                       <div className="p-3 flex items-center justify-between gap-2 col-span-2" data-testid="output-dough-status">
                         <span className="text-xs text-muted-foreground font-medium">Dough Status</span>

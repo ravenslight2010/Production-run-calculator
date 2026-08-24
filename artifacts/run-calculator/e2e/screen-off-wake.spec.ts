@@ -52,6 +52,7 @@
 
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { Client as PgClient } from "pg";
+import { computeCasesOnLine } from "@workspace/inventory-math";
 import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 
 // ── config ────────────────────────────────────────────────────────────────────
@@ -394,6 +395,14 @@ async function readCaseTotal(page: Page): Promise<number> {
   return parseInt((text ?? "0").replace(/[^0-9]/g, ""), 10) || 0;
 }
 
+async function readCasesOnLine(page: Page): Promise<number> {
+  const text = await page
+    .locator('[data-testid="cases-on-line-value"]')
+    .first()
+    .textContent({ timeout: 6_000 });
+  return Number((text ?? "0").replace(/[^0-9]/g, "")) || 0;
+}
+
 /**
  * Wait until tile-cases-completed differs from prevTotal.
  * Uses real-time Playwright polling — unaffected by any Date mock.
@@ -709,6 +718,76 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         casesAfterPausedWake,
         `paused wake: expected ${casesBeforePause}, got ${casesAfterPausedWake}`,
       ).toBe(casesBeforePause);
+    },
+  );
+
+  test(
+    "responsive display matches shared line occupancy while running, paused, and draining",
+    async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const safeBaseMs = await setupAndStartRun(page);
+      const occupancy = {
+        ppm: 60,
+        pizzasPerCase: 6,
+        freezerTimeMin: 5,
+      };
+      const expectedRunning = computeCasesOnLine({
+        startedAt: safeBaseMs,
+        now: safeBaseMs + 2 * 60_000,
+        ...occupancy,
+      });
+
+      await mockDateNow(page, safeBaseMs + 2 * 60_000);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedRunning);
+
+      const pauseButton = page.getByRole("button", { name: /pause.?run/i }).first();
+      await pauseButton.click();
+      await page.waitForTimeout(500);
+
+      const expectedPaused = computeCasesOnLine({
+        startedAt: safeBaseMs,
+        pausedAt: safeBaseMs + 2 * 60_000,
+        now: safeBaseMs + 12 * 60_000,
+        ...occupancy,
+      });
+      await mockDateNow(page, safeBaseMs + 12 * 60_000);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
+
+      await page.getByRole("button", { name: /resume.?run/i }).first().click();
+      await page.waitForTimeout(500);
+
+      // Resuming shifts the effective start by the ten-minute pause. At the
+      // original +15-minute wall time, the shared model has five live minutes.
+      const resumedStartedAt = safeBaseMs + 10 * 60_000;
+      const endedAt = safeBaseMs + 15 * 60_000;
+      const expectedAtEnd = computeCasesOnLine({
+        startedAt: resumedStartedAt,
+        endedAt,
+        now: endedAt,
+        ...occupancy,
+      });
+      await mockDateNow(page, endedAt);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedAtEnd);
+
+      await page.getByRole("button", { name: /stop.?run/i }).first().click();
+      await page.waitForTimeout(500);
+
+      const expectedDraining = computeCasesOnLine({
+        startedAt: resumedStartedAt,
+        endedAt,
+        now: endedAt + 3 * 60_000,
+        ...occupancy,
+      });
+      await mockDateNow(page, endedAt + 3 * 60_000);
+      await simulateScreenOff(page);
+      await simulateWake(page);
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedDraining);
     },
   );
 
