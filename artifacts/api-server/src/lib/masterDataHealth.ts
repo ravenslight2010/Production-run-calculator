@@ -27,6 +27,9 @@ export type MasterDataHealthFinding = {
   repairable: boolean;
   protectedValue: boolean;
   scope: string;
+  disposition: "valid" | "stale" | "defect";
+  owner: "master-data" | "inventory" | "import-review";
+  dispositionReason: string;
 };
 
 export type MasterDataHealthReport = {
@@ -47,21 +50,47 @@ const asRows = (value: unknown): Array<Record<string, unknown>> => Array.isArray
   : [];
 const scanId = (scope: string, at: Date) => `master-data:${scope}:${at.toISOString()}`;
 
-function finding(scope: string, category: HealthCategory, severity: HealthSeverity, stableKey: string, message: string, repairable = false, protectedValue = true): MasterDataHealthFinding {
-  return { id: `${category}:${stableKey}`, category, severity, stableKey, message, repairable, protectedValue, scope };
+function finding(
+  scope: string,
+  category: HealthCategory,
+  severity: HealthSeverity,
+  stableKey: string,
+  message: string,
+  repairable = false,
+  protectedValue = true,
+  disposition: MasterDataHealthFinding["disposition"] = "defect",
+  owner: MasterDataHealthFinding["owner"] = "master-data",
+  dispositionReason = "Requires manager review before any value is changed.",
+): MasterDataHealthFinding {
+  return {
+    id: `${category}:${stableKey}`,
+    category,
+    severity,
+    stableKey,
+    message,
+    repairable,
+    protectedValue,
+    scope,
+    disposition,
+    owner,
+    dispositionReason,
+  };
 }
 
 function duplicateFindings<T>(rows: T[], nameOf: (row: T) => string, make: (name: string, index: number) => MasterDataHealthFinding): MasterDataHealthFinding[] {
   const seen = new Map<string, number>();
-  const out: MasterDataHealthFinding[] = [];
   rows.forEach((row, index) => {
     const name = key(nameOf(row));
     if (!name) return;
     const first = seen.get(name);
-    if (first !== undefined) out.push(make(name, index));
+    // One finding represents one duplicate-name group. Emitting one finding
+    // for every extra row produced repeated IDs and inflated the health count.
+    if (first !== undefined) return;
     else seen.set(name, index);
   });
-  return out;
+  return Array.from(seen.entries())
+    .filter(([name]) => rows.filter((row) => key(nameOf(row)) === name).length > 1)
+    .map(([name, index]) => make(name, index));
 }
 
 export async function buildMasterDataHealthReport(executor: Executor, scope: string, at = new Date()): Promise<MasterDataHealthReport> {
@@ -87,7 +116,7 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
     const values = p.values && typeof p.values === "object" ? p.values as Record<string, unknown> : {};
     for (const field of ["doughRecipeName", "frontlineRecipeName"]) {
       const name = key(values[field]);
-      if (name && !recipeNames.has(name)) out.push(finding(scope, "profiles", "error", `${stable}:${field}:${name}`, `Profile references missing ${field} "${String(values[field])}".`));
+      if (name && !recipeNames.has(name)) out.push(finding(scope, "profiles", "error", `${stable}:${field}:${name}`, `Profile references missing ${field} "${String(values[field])}".`, false, true, "stale", "import-review", "The stored link predates or differs from the current recipe pool; preserve it until the source import or manager confirms the replacement."));
     }
   });
 
@@ -95,7 +124,15 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
     rows.forEach((row) => {
       const components = asRows(row.components);
       const hasPositive = components.some((component) => positive(component.lbs) || positive(component.perPizza));
-      if (row.enabled && (!components.length || !hasPositive)) out.push(finding(scope, category, "error", `${key(row.name)}:${row.id}`, `Enabled ${category} recipe "${row.name}" has no positive component values.`));
+      // Sauce rows with no formula are bought as-is. Cheese recipes imported
+      // from regular spec sheets intentionally store ratio shares while lbs
+      // remains zero; neither is a missing formula.
+      const hasPositiveShare = components.some((component) => positive(component.sharePct));
+      const isValidEmpty = category === "sauce" && !components.length
+        || category === "cheese" && hasPositiveShare;
+      if (row.enabled && (!components.length || !hasPositive) && !isValidEmpty) {
+        out.push(finding(scope, category, "error", `${key(row.name)}:${row.id}`, `Enabled ${category} recipe "${row.name}" has no positive component values.`, false, true, "defect", "master-data", "The enabled recipe has neither a usable formula nor the documented buy-as-is/ratio representation."));
+       }
     });
     out.push(...duplicateFindings(rows, (row) => row.name, (name) => finding(scope, category, "warning", `duplicate:${name}`, `Multiple ${category} pool rows use the name "${name}".`)));
   };
