@@ -10,7 +10,11 @@
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import {
+  cleanupTestUsers,
+  requireIsolatedTestDatabase,
+  uniqueTestId,
+} from "./isolation";
 
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
@@ -74,21 +78,52 @@ async function promoteToManager(username: string): Promise<void> {
 }
 
 async function seedPendingRun(page: Page): Promise<string> {
-  const runId = await page.evaluate(() => {
-    const id = `department-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const today = new Date().toISOString().slice(0, 10);
+  const runId = uniqueTestId("department_run");
+  await page.evaluate(() => {
+    const keys = Array.from({ length: localStorage.length }, (_, index) =>
+      localStorage.key(index),
+    );
+    for (const key of keys) {
+      if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
+    }
+    localStorage.removeItem("run-calc-day");
+  });
+  await page.addInitScript((id: string) => {
+    // Apply this only to the seed reload. Later reloads must preserve the
+    // lifecycle written by Start Run and the department navigation checks.
+    if (sessionStorage.getItem("department-pending-seed-applied") === "1") return;
+    sessionStorage.setItem("department-pending-seed-applied", "1");
     localStorage.setItem(
       "run-calc-day",
       JSON.stringify({
-        date: today,
-        runs: [{ id, brand: "Department", flavor: "Navigation" }],
+        date: new Date().toISOString().slice(0, 10),
+        runs: [{ id, brand: "Department", flavor: "Navigation", seeded: false }],
         currentIndex: 0,
+        resetAt: Date.now() + 60_000,
       }),
     );
-    return id;
-  });
+  }, runId);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await expect
+    .poll(
+      () =>
+        page.evaluate((id) => {
+          try {
+            const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}");
+            const run = day.runs?.find((candidate: { id?: string }) => candidate.id === id);
+            return {
+              runId: run?.id ?? null,
+              startedAt: run?.startedAt ?? null,
+              endedAt: run?.endedAt ?? null,
+            };
+          } catch {
+            return { runId: null, startedAt: null, endedAt: null };
+          }
+        }, runId),
+      { timeout: 10_000 },
+    )
+    .toEqual({ runId, startedAt: null, endedAt: null });
   return runId;
 }
 
