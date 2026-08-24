@@ -1,45 +1,93 @@
-# Final Post-Merge Release Readiness
+# Final Production Safety and Rollback Review
 
-Release: `b2107694a42b9462a90ae20f34c3afcd1a23064b`  
-Date: 2026-08-24  
-Environment: development database and artifact-managed local preview; disposable E2E approval flags were used where destructive setup was required. No production writes or destructive production tests were performed.
+**Decision: NO-GO**
+
+**Revision reviewed:** `e16456f043e2d248e27d838d21cf33eb0bf46779`
+**Review date:** 2026-08-24
+**Environment:** development database and artifact-managed local preview. No
+production writes or destructive production tests were performed.
 
 ## Required gates
 
-- Generated client: **PASS** — `pnpm run check:api-generated`; OpenAPI-generated outputs were fresh.
-- Typecheck: **PASS** — shared libraries, API server, run calculator, mockup sandbox, and scripts all passed.
-- Recovery evidence: **PASS** — `pnpm run audit:recovery`; 4 pass, 0 intentional differences, 0 missing.
-- Unit/integration: **PARTIAL / NO-GO** — run calculator passed 214 files / 2,272 tests; production-rules 17, inventory-math 59, spec-reconcile 33, scheduled-recipe-check 17, spec-export 36, corpus 11; model-bump and operational-evidence checks passed. API server tests did not reach a terminal summary within 5 minutes and were interrupted while an SSE request remained open.
-- Clean start: **PASS** — API, web, and mockup clean-start smoke passed on ports 18081/18082/18180.
-- Security: **PASS** — dependency audit 0 vulnerabilities, SAST 0 findings, HoundDog 0 findings.
-- Workflow/preview: **PASS** — API, web, and mockup workflows restarted successfully. API health returned `status=ok`, with process/database/dependencies all `ok`. Saved evidence: `api-health.jpg`, `web-preview.jpg`, `mockup-preview.jpg`.
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Generated API contract | PASS | `pnpm run check:api-generated` |
+| Type safety | PASS | `pnpm run typecheck:libs`; API server, run calculator, mockup sandbox, and scripts typechecks |
+| Recovery audit | PASS | `pnpm run audit:recovery` — 4 pass, 0 intentional differences, 0 missing |
+| API unit tests | PASS | 68 files, 974 tests |
+| API integration and authorization | PASS | Release shards and focused reruns: roles 522, sandbox auth 31, sync/reset/cache/signup 30, remaining shard-3 files 64; all passed |
+| Client/shared tests | PASS | Run calculator 214 files/2,275 tests; production rules 17; inventory math 65; spec reconcile 33; scheduled recipe check 17; spec export 36; corpus 11 |
+| Clean startup | PASS | `pnpm run check:clean-start`; API, web, and mockup health/HTML checks passed on isolated ports |
+| Model/import guard checks | PASS | `check-model-bump` and `check-operational-skill-evidence` |
+| Dependency risk | PASS | Dependency audit: 0 critical/high/moderate/low/info vulnerabilities |
+| Static security | PASS | SAST: 0 findings; HoundDog sensitive-data scan: 0 findings |
+| Secrets | PASS | No hardcoded credentials found in the reviewed surface; secrets are environment-backed and health output is status-only |
+| Sensitive-data logging | PASS | Reviewed startup/health logging emits bounded counts, statuses, IDs, and outcomes; no request/profile payload logging was found |
+| Authorization | PASS | Router-level auth plus capability tests cover anonymous rejection, role boundaries, and sandbox/environment separation |
+| Destructive-test isolation | PASS | Integration fixtures create disposable databases; destructive browser setup requires explicit approval flags and rejects `REPLIT_DEV_DOMAIN` alone |
 
-## Conditional gates
+## Production and data review
 
-- Browser smoke: **PASS** — desktop and 390×844 phone projects passed (2/2).
-- Accessibility: **FAIL** — after rerunning with approved isolation flags, 6/9 failed across desktop, phone, and tablet. Keyboard traversal reported no visible focus indicator at step 6; authenticated workflow checks could not find the expected close control.
-- Phone/mobile: **FAIL** — 2/9 passed; authenticated calculator at 375×812 could not find `button-start-run`. The slow-network case was initially refused without isolation flags and was not accepted as evidence.
-- Visual: **N/A** — no visual baseline change was being validated.
-- PWA: **N/A** — no PWA handoff change was in scope.
-- Sync convergence: **FAIL** — 3/4 passed; desktop wake/reset case failed with a navigation race (`Execution context was destroyed`), while phone cases passed.
-- Mix Plan: **INCOMPLETE / NO-GO** — targeted run exceeded the 5-minute command ceiling without a terminal result.
-- Full destructive E2E/isolation: **INCOMPLETE / NO-GO** — the full release runner did not reach this step because the API test gate timed out. Disposable-test approval flags were supplied for attempted destructive suites.
+- **Current revision changes:** the latest revision restores sync-convergence
+  browser coverage. The review also made the existing count-draft sanitizer
+  return type explicit so the test and implementation contract typecheck; it
+  does not alter runtime behavior.
+- **Schema:** no schema file changed in the reviewed working diff. The
+  application has existing schema history, but no destructive migration was
+  run during this review. A publish-time schema diff remains an operator gate.
+- **Startup heals:** `runDataHeals()` runs marker-guarded, transaction-scoped
+  heals at API startup. Tests confirm the guards and isolated behavior, but
+  startup can still change live stored data on first production boot. The
+  observed disposable fixtures exercised repairs including recipe/profile
+  corrections, alias/name cleanup, sauce additions, and stub/duplicate
+  cleanup. Deletion or name-repoint heals are not universally reversible;
+  review the marker/result rows and take a database backup before publishing.
+- **Sync/timer/inventory/import safety:** recovery audit and focused sync,
+  reset, authorization, inventory, timer, and import tests passed. The
+  production operator must still preserve a named checkpoint before publish
+  and monitor stale-write/reset/heal logs during the first boot.
+- **Production database separation:** **UNVERIFIED**. `.replit` selects
+  Autoscale but does not identify the production database binding. Confirm the
+  deployment environment uses the production database and not the development
+  `DATABASE_URL` before publishing.
+- **Monitoring:** **UNVERIFIED**. The app exposes `/api/healthz` and emits
+  structured health/error events, but monitoring/alert configuration is not
+  represented in the repository evidence. Enable deployment monitoring and
+  alerting after publish.
 
-## Operational review
+## Conditional browser/release evidence
 
-- Data heal: **Applied at API startup**. The development database is reachable. Existing one-time markers include non-zero corrections such as 8 cheese recipe weight rows, 5 profile corrections, 8 sauce additions, 119 tunnel-default profile updates, and 12 applicator contamination profile cleanups. These heals can correct live stored data on the first production boot after publish; the publish owner must review the complete marker/result set before release.
-- Schema: **Changed on the merged revision** across the DB schema package. Development startup/health is healthy, but publish-time schema diff and any rename/additive review remain required; no destructive schema operation was run during validation.
-- Sync: **Specialist review applied**. API/client-date, epoch, LWW, blank-over-populated, body-limit, and wake-handoff paths are release-sensitive. The desktop wake convergence failure and incomplete API integration suite are unresolved.
-- Destructive setup: **Isolated for attempted browser smoke/a11y/phone/sync runs** using the explicit E2E approval variables. No production database was used. The full suite did not complete, so final disposable cleanup evidence is incomplete.
-- Rollback and post-merge plan: **Do not publish this revision.** Fix the accessibility focus/dialog failures, reproduce and fix the 375px authenticated-flow failure, investigate the desktop sync wake race, and make the API suite terminate cleanly. Then rerun the full release checklist, including Mix Plan and full E2E, against disposable data. If remediation regresses startup or schema behavior, roll back to the last approved checkpoint and have the release owner re-run post-merge schema/workflow checks.
+The checked-in browser report and artifacts are not a fresh all-green release
+record. They document:
 
-## Decision
+- Desktop/phone browser smoke: PASS in the retained evidence.
+- Accessibility: FAIL — missing visible keyboard focus and unstable
+  authenticated dialog close semantics.
+- Narrow phone flow: FAIL — authenticated start-run control was not found.
+- Sync convergence: FAIL — a desktop wake/reset case hit a navigation race.
+- Mix Plan/full destructive browser completion: INCOMPLETE in the retained
+  evidence.
 
-**NO-GO**
+These failures may be addressed by later task work, but this review has no new
+passing artifacts proving them resolved. Therefore the conditional browser
+gate is **FAIL/UNVERIFIED**, not a release approval.
 
-Owners and next actions:
+## Rollback plan
 
-1. **Frontend/accessibility owner** — restore visible keyboard focus indicators and stable close-dialog semantics across desktop, phone, and tablet; rerun `test:e2e:a11y`.
-2. **Run-calculator E2E owner** — diagnose the 375×812 authenticated start-run failure and rerun `test:e2e:phone`.
-3. **Sync/API owner** — investigate the desktop wake navigation race and API SSE test hang; rerun sync convergence plus the focused API sync/reset integration tests.
-4. **Release owner** — after the above pass, rerun Mix Plan and full destructive E2E, review startup heal impacts and publish-time schema diff, then issue the next GO/NO-GO decision.
+1. Do not publish this revision.
+2. Preserve a named branch/tag at the exact candidate before the next release
+   attempt.
+3. Before publish, verify the production database binding, take the required
+   backup/checkpoint, and review startup heal markers/results.
+4. Rerun the accessibility, narrow-phone, sync-wake, Mix Plan, and full
+   destructive browser suites against disposable data.
+5. If startup, schema, or sync behavior regresses, restore the last approved
+   checkpoint rather than manually reversing broad data changes; then rerun
+   clean-start, health, and focused API checks.
+
+## Release decision
+
+**NO-GO — do not publish.** The security, authorization, type, contract,
+isolation, startup, and automated test gates pass. The unresolved or
+unverified browser gates, production database separation, and monitoring
+evidence are release blockers.

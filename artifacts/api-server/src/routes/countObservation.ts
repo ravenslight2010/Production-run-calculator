@@ -43,7 +43,15 @@ function field(value: unknown, evidence: number[] = [], confidence = 0) {
   return { value: safe ?? null, confidence: Math.max(0, Math.min(1, confidence)), evidence };
 }
 
-export function sanitizeCountDraft(raw: unknown, candidates: Set<string>) {
+type SanitizedCountDraft = {
+  [key: string]: unknown;
+  reviewFlags: string[];
+  matchedKey: string | null;
+};
+export function sanitizeCountDraft(
+  raw: unknown,
+  candidates: Set<string>,
+): SanitizedCountDraft | null {
   const parsed = Draft.safeParse(raw);
   if (!parsed.success) return null;
   const input = parsed.data;
