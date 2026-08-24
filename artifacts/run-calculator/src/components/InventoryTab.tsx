@@ -47,6 +47,9 @@ import {
   type LedgerEntry,
   type TransferNeed,
   fetchInventory,
+  fetchProductionIngredients,
+  linkInventoryProduct,
+  type ProductionIngredient,
   fetchInventoryLocations,
   createInventoryLocation,
   updateInventoryLocation,
@@ -153,6 +156,7 @@ export default function InventoryTab({
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [productionIngredients, setProductionIngredients] = useState<ProductionIngredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -174,6 +178,18 @@ export default function InventoryTab({
       ]);
       setItems(data);
       setLocations(locs);
+      // Only managers can edit product links. Avoid adding a catalog request
+      // to staff/read-only inventory loads (and keep those loads resilient if
+      // the catalog is temporarily unavailable).
+      if (canManageInventory) {
+        try {
+          setProductionIngredients(await fetchProductionIngredients());
+        } catch {
+          setProductionIngredients([]);
+        }
+      } else {
+        setProductionIngredients([]);
+      }
       setExpirySoonDays(settings.expirySoonDays);
       setExpiryInput(String(settings.expirySoonDays));
       setError(null);
@@ -419,6 +435,7 @@ export default function InventoryTab({
           setExpandedId={setExpandedId}
           onChanged={load}
           expirySoonDays={expirySoonDays}
+          productionIngredients={productionIngredients}
         />
       )}
       {grouped.ingredient.length > 0 && (
@@ -431,6 +448,7 @@ export default function InventoryTab({
           setExpandedId={setExpandedId}
           onChanged={load}
           expirySoonDays={expirySoonDays}
+          productionIngredients={productionIngredients}
         />
       )}
 
@@ -483,6 +501,7 @@ function CategorySection({
   setExpandedId,
   onChanged,
   expirySoonDays,
+  productionIngredients,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -492,6 +511,7 @@ function CategorySection({
   setExpandedId: (id: number | null) => void;
   onChanged: () => void;
   expirySoonDays: number;
+  productionIngredients: ProductionIngredient[];
 }) {
   return (
     <Card className="bg-card/50 border-border/50 shadow-md">
@@ -510,6 +530,7 @@ function CategorySection({
             onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
             onChanged={onChanged}
             expirySoonDays={expirySoonDays}
+            productionIngredients={productionIngredients}
           />
         ))}
       </CardContent>
@@ -524,6 +545,7 @@ function ItemRow({
   onToggle,
   onChanged,
   expirySoonDays,
+  productionIngredients,
 }: {
   item: InventoryItem;
   locations: InventoryLocation[];
@@ -531,6 +553,7 @@ function ItemRow({
   onToggle: () => void;
   onChanged: () => void;
   expirySoonDays: number;
+  productionIngredients: ProductionIngredient[];
 }) {
   const low = isLowStock(item);
   return (
@@ -543,18 +566,27 @@ function ItemRow({
         <span className="flex items-center gap-1.5 min-w-0">
           {expanded ? <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />}
           <span className="font-medium text-sm truncate">{item.name}</span>
+          {item.category !== "packaging" && (
+            <span className={`text-[10px] font-semibold rounded px-1 border shrink-0 ${
+              item.conversionConfirmed
+                ? "text-emerald-500 border-emerald-500/40"
+                : "text-amber-500 border-amber-500/40"
+            }`}>
+              {item.conversionConfirmed ? "Linked" : "Setup needed"}
+            </span>
+          )}
           {low && <span className="text-[10px] font-bold uppercase text-amber-500 border border-amber-500/50 rounded px-1 shrink-0">Low</span>}
         </span>
         <span className={`font-mono font-semibold text-sm tabular-nums whitespace-nowrap ${low ? "text-amber-500" : "text-foreground"}`}>
           {fmtQty(item.onHand)} <span className="font-normal text-muted-foreground">{item.unit}</span>
         </span>
       </button>
-      {expanded && <ItemDetail item={item} locations={locations} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
+      {expanded && <ItemDetail item={item} locations={locations} onChanged={onChanged} expirySoonDays={expirySoonDays} productionIngredients={productionIngredients} />}
     </div>
   );
 }
 
-function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: InventoryItem; locations: InventoryLocation[]; onChanged: () => void; expirySoonDays: number }) {
+function ItemDetail({ item, locations, onChanged, expirySoonDays, productionIngredients }: { item: InventoryItem; locations: InventoryLocation[]; onChanged: () => void; expirySoonDays: number; productionIngredients: ProductionIngredient[] }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const [busy, setBusy] = useState(false);
@@ -563,6 +595,9 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: Inve
   const [editThreshold, setEditThreshold] = useState(false);
   const [thresholdVal, setThresholdVal] = useState(String(item.reorderThreshold));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [linkId, setLinkId] = useState(item.productionIngredientId ?? "");
+  const [conversion, setConversion] = useState(item.conversionFactor == null ? "" : String(item.conversionFactor));
+  const [priority, setPriority] = useState(String(item.consumptionPriority ?? 0));
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -574,6 +609,22 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: Inve
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveProductionLink() {
+    const factor = conversion.trim() === "" ? null : Number(conversion);
+    if (linkId && !(factor != null && Number.isFinite(factor) && factor > 0)) {
+      window.alert("Enter the confirmed production units supplied by one inventory unit.");
+      return;
+    }
+    await run(async () => {
+      await linkInventoryProduct(item.id, {
+        productionIngredientId: linkId || null,
+        conversionFactor: linkId ? factor : null,
+        consumptionPriority: Math.max(0, Math.round(Number(priority) || 0)),
+      });
+      onChanged();
+    });
   }
 
   async function loadHistory() {
@@ -688,6 +739,31 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: Inve
       )}
 
       <Separator className="bg-border/40" />
+
+      {canManageInventory && item.category !== "packaging" && (
+        <div className="space-y-2 rounded-md border border-border/40 bg-background/50 p-2.5">
+          <div className="text-xs font-semibold">Production ingredient link</div>
+          <select
+            aria-label="Production ingredient"
+            value={linkId}
+            onChange={(e) => setLinkId(e.target.value)}
+            className="h-8 w-full rounded-md border border-border/60 bg-background px-2 text-xs"
+          >
+            <option value="">Not linked — never auto-deduct</option>
+            {productionIngredients.filter((i) => i.enabled).map((i) => (
+              <option key={i.id} value={i.id}>{i.name}</option>
+            ))}
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <Input aria-label="Production units per inventory unit" value={conversion} onChange={(e) => setConversion(e.target.value)} placeholder={`e.g. 20 ${item.unit} → lbs`} className="h-8 text-xs" />
+            <Input aria-label="Consumption priority" value={priority} onChange={(e) => setPriority(e.target.value)} type="number" min="0" className="h-8 text-xs" />
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {item.conversionConfirmed ? `Confirmed: ${item.conversionFactor} production units per ${item.unit}.` : "A confirmed conversion is required before production can deduct this product."}
+          </div>
+          <Button type="button" size="sm" className="h-7 text-xs" disabled={busy} onClick={saveProductionLink}>Save production link</Button>
+        </div>
+      )}
 
       {/* History */}
       <button type="button" onClick={loadHistory} className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground">

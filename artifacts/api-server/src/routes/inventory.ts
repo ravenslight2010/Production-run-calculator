@@ -11,6 +11,7 @@ import {
   inventorySettingsTable,
   inventoryObservationsTable,
   inventoryProductReferencesTable,
+  ingredientsTable,
   qualityChecksTable,
   dailySyncTable,
   type InventoryLot,
@@ -284,8 +285,17 @@ async function loadItemResponse(itemId: number) {
   const onsiteId = locations.find((l) => l.isOnsite)?.id ?? null;
   const sortedLots = sortLotsForConsumption(lots);
   const onHand = lots.reduce((acc, l) => acc + l.qtyRemaining, 0);
+  const linked = item.productionIngredientId
+    ? (await db.select({ id: ingredientsTable.id, name: ingredientsTable.name, mergedInto: ingredientsTable.mergedInto })
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.scope, currentScope())))
+      : [];
+  const linkedRow = linked.find((r) => r.id === item.productionIngredientId);
   return {
     ...item,
+    productionIngredientName: linkedRow?.name ?? null,
+    productionIngredientMergedInto: linkedRow?.mergedInto ?? null,
+    conversionConfirmed: item.conversionFactor != null && item.conversionFactor > 0,
     onHand,
     lots: sortedLots,
     byLocation: computeByLocation(lots, locations, onsiteId),
@@ -306,7 +316,16 @@ export async function drawDown(
   qty: number,
   locationCond?: SQL,
 ): Promise<number> {
-  if (qty <= 0) return 0;
+  return (await drawDownDetails(exec, itemId, qty, locationCond)).consumed;
+}
+
+async function drawDownDetails(
+  exec: Executor,
+  itemId: number,
+  qty: number,
+  locationCond?: SQL,
+): Promise<{ consumed: number; lots: Array<{ lotId: number; qty: number }> }> {
+  if (qty <= 0) return { consumed: 0, lots: [] };
   // Lock the item's lot rows FOR UPDATE so concurrent consume/adjust transactions
   // for the same item serialize here instead of reading the same stale quantities
   // and writing conflicting qtyRemaining values (lost updates / on-hand drift).
@@ -331,7 +350,13 @@ export async function drawDown(
       .set({ qtyRemaining: update.qtyRemaining })
       .where(eq(inventoryLotsTable.id, update.id));
   }
-  return consumed;
+  return {
+    consumed,
+    lots: updates.map((update) => ({
+      lotId: update.id,
+      qty: (lots.find((lot) => lot.id === update.id)?.qtyRemaining ?? 0) - update.qtyRemaining,
+    })),
+  };
 }
 
 // ── Routes ───────────────────────────────────────────────────────────────────
@@ -344,10 +369,15 @@ router.get("/inventory", async (_req, res): Promise<void> => {
     .from(inventoryItemsTable)
     .where(eq(inventoryItemsTable.scope, currentScope()))
     .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
+  await autoLinkUnambiguousProducts(items);
   const allLots = await db
     .select()
     .from(inventoryLotsTable)
     .where(eq(inventoryLotsTable.scope, currentScope()));
+  const ingredients = await db
+    .select({ id: ingredientsTable.id, name: ingredientsTable.name, mergedInto: ingredientsTable.mergedInto })
+    .from(ingredientsTable)
+    .where(eq(ingredientsTable.scope, currentScope()));
   const lotsByItem = new Map<number, InventoryLot[]>();
   for (const lot of allLots) {
     const arr = lotsByItem.get(lot.itemId) ?? [];
@@ -358,12 +388,55 @@ router.get("/inventory", async (_req, res): Promise<void> => {
     const lots = lotsByItem.get(item.id) ?? [];
     return {
       ...item,
+      productionIngredientName: ingredients.find((i) => i.id === item.productionIngredientId)?.name ?? null,
+      productionIngredientMergedInto: ingredients.find((i) => i.id === item.productionIngredientId)?.mergedInto ?? null,
+      conversionConfirmed: item.conversionFactor != null && item.conversionFactor > 0,
       onHand: lots.reduce((acc, l) => acc + l.qtyRemaining, 0),
       lots: sortLotsForConsumption(lots),
       byLocation: computeByLocation(lots, locations, onsite.id),
     };
   });
   res.json(out);
+});
+
+const InventoryProductLinkBody = z.object({
+  productionIngredientId: z.string().trim().min(1).nullable(),
+  conversionFactor: z.number().positive().nullable(),
+  consumptionPriority: z.number().int().min(0).max(100000).optional(),
+});
+
+router.patch("/inventory/items/:id/production-link", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
+  const id = parseId(req.params.id);
+  const parsed = InventoryProductLinkBody.safeParse(req.body);
+  if (id == null || !parsed.success) {
+    res.status(400).json({ error: "A valid product link and positive conversion are required." });
+    return;
+  }
+  const { productionIngredientId, conversionFactor, consumptionPriority } = parsed.data;
+  if (productionIngredientId && conversionFactor == null) {
+    res.status(400).json({ error: "Confirm the inventory-to-production conversion before linking." });
+    return;
+  }
+  if (productionIngredientId) {
+    const [ingredient] = await db.select({ id: ingredientsTable.id }).from(ingredientsTable)
+      .where(and(eq(ingredientsTable.id, productionIngredientId), eq(ingredientsTable.scope, currentScope())));
+    if (!ingredient) {
+      res.status(400).json({ error: "Production ingredient not found." });
+      return;
+    }
+  }
+  const [updated] = await db.update(inventoryItemsTable).set({
+    productionIngredientId,
+    conversionFactor: productionIngredientId ? conversionFactor : null,
+    ...(consumptionPriority == null ? {} : { consumptionPriority }),
+    updatedAt: new Date(),
+  }).where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.scope, currentScope()))).returning();
+  if (!updated) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  broadcast(headerSenderId(req), currentScope());
+  res.json(await loadItemResponse(id));
 });
 
 router.post("/inventory/items", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
@@ -1280,6 +1353,40 @@ async function findExpectedConsumptionForRun(
   return null;
 }
 
+function canonicalIngredientId(
+  id: string,
+  ingredients: Array<{ id: string; mergedInto: string | null }>,
+): string {
+  const byId = new Map(ingredients.map((row) => [row.id, row]));
+  const seen = new Set<string>();
+  let current = id;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const next = byId.get(current)?.mergedInto;
+    if (!next || !byId.has(next)) break;
+    current = next;
+  }
+  return current;
+}
+
+async function autoLinkUnambiguousProducts(
+  items: Array<typeof inventoryItemsTable.$inferSelect>,
+): Promise<void> {
+  const ingredients = await db.select({
+    id: ingredientsTable.id, name: ingredientsTable.name, enabled: ingredientsTable.enabled,
+  }).from(ingredientsTable).where(eq(ingredientsTable.scope, currentScope()));
+  for (const item of items) {
+    if (item.category === "packaging" || item.productionIngredientId) continue;
+    const matches = ingredients.filter((ingredient) =>
+      ingredient.enabled && ingredient.name.trim().toLowerCase() === item.name.trim().toLowerCase());
+    if (matches.length !== 1) continue;
+    await db.update(inventoryItemsTable)
+      .set({ productionIngredientId: matches[0].id, updatedAt: new Date() })
+      .where(and(eq(inventoryItemsTable.id, item.id), eq(inventoryItemsTable.scope, currentScope())));
+    item.productionIngredientId = matches[0].id;
+  }
+}
+
 // Claim + drawdown + ledger all run in one transaction. The unique runId
 // marker is written even for zero-consume runs, so a later restock + re-consume
 // of the same run can't double-deduct, and onConflictDoNothing makes the claim
@@ -1312,23 +1419,55 @@ export async function consumeRun(
           return Boolean(claim);
         },
         findItemByKey: async (itemKey) => {
-          const [item] = await tx
-            .select()
-            .from(inventoryItemsTable)
-            .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
-          return item ?? null;
+          const parts = itemKey.match(/^ingredient:(.*):(lbs|batches)$/);
+          const ingredients = await tx.select({
+            id: ingredientsTable.id, name: ingredientsTable.name, mergedInto: ingredientsTable.mergedInto,
+          }).from(ingredientsTable).where(eq(ingredientsTable.scope, currentScope()));
+          const expectedName = parts?.[1]?.trim().toLowerCase();
+          const expectedIngredient = expectedName
+            ? ingredients.find((i) => i.name.trim().toLowerCase() === expectedName)
+            : undefined;
+          const allItems = await tx.select().from(inventoryItemsTable)
+            .where(eq(inventoryItemsTable.scope, currentScope()));
+          const candidates = allItems
+            .filter((item) => {
+              if (item.productionIngredientId && expectedIngredient) {
+                return canonicalIngredientId(item.productionIngredientId, ingredients) ===
+                  canonicalIngredientId(expectedIngredient.id, ingredients) &&
+                  item.conversionFactor != null && item.conversionFactor > 0;
+              }
+              // Legacy canonical items are unambiguous only when their key and
+              // unit exactly match the production demand. Distinct products
+              // must use the explicit link + confirmed conversion path above.
+              return !item.productionIngredientId && item.key === itemKey &&
+                item.conversionFactor == null;
+            })
+            .sort((a, b) => a.consumptionPriority - b.consumptionPriority || a.id - b.id);
+          const item = candidates[0];
+          return item ? { id: item.id, conversionFactor: item.conversionFactor ?? 1 } : null;
         },
         drawDown: (itemId, qty) => drawDown(tx, itemId, qty, onsiteCond),
-        recordConsumption: async (itemId, consumed) => {
-          await tx.insert(inventoryLedgerTable).values({
-            itemId,
-            scope: currentScope(),
-            lotId: null,
-            type: "consume",
-            qtyDelta: -consumed,
-            runId,
-            note: "Auto-deducted on run completion",
-          });
+        drawDownDetails: (itemId, qty) => drawDownDetails(tx, itemId, qty, onsiteCond),
+        recordConsumption: async (itemId, consumed, lots) => {
+          // Keep the legacy one-row ledger shape for old canonical items. New
+          // linked products record each lot separately so the audit trail can
+          // identify every physical lot consumed.
+          const itemRow = await tx.select({ productionIngredientId: inventoryItemsTable.productionIngredientId })
+            .from(inventoryItemsTable).where(eq(inventoryItemsTable.id, itemId));
+          const entries = itemRow[0]?.productionIngredientId && lots?.length
+            ? lots
+            : [{ lotId: null, qty: consumed }];
+          for (const entry of entries) {
+            await tx.insert(inventoryLedgerTable).values({
+              itemId,
+              scope: currentScope(),
+              lotId: entry.lotId,
+              type: "consume",
+              qtyDelta: -entry.qty,
+              runId,
+              note: "Auto-deducted on run completion",
+            });
+          }
         },
       },
       runId,

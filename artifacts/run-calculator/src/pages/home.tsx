@@ -399,11 +399,8 @@ import {
   consumeSauceBarrel,
   deriveCandidateItems,
   consumeRun,
-  fetchInventory,
-  mergeInventory,
   scoreNameMatch,
   buildReorderDemandByKey,
-  type MergeInventoryLine,
 } from "../inventoryShared";
 import {
   applyRecipeSubstitutions,
@@ -5954,47 +5951,10 @@ export default function Home() {
     setMergeBusy(true);
     setMergeError("");
     // Snapshot master-data BEFORE the merge rewrites localStorage, so the change
-    // can be recorded for undo on success. (Undo restores names/lists but does
-    // NOT reverse the server-side inventory fold — the undo confirm warns about
-    // this.)
+    // can be recorded for undo on success. Separate inventory products are
+    // independent warehouse records and are intentionally not folded here.
     const mergeBefore = captureMasterDataSnapshot();
     try {
-      // Fold inventory stock first (server). If we can't read or fold inventory,
-      // abort BEFORE touching localStorage so the two stores can't drift apart.
-      let inv: import("../inventoryShared").InventoryItem[];
-      try {
-        inv = await fetchInventory();
-      } catch {
-        setMergeBusy(false);
-        setMergeError("Couldn't verify inventory state — merge cancelled. Check your connection and try again.");
-        return false;
-      }
-      const lines: MergeInventoryLine[] = [];
-      for (const item of inv) {
-        if (item.category !== "ingredient") continue; // sizes/packaging not merged
-        const toName = mapName(item.name, map);
-        if (toName === item.name) continue; // not a source
-        lines.push({
-          fromKey: item.key,
-          toKey: `ingredient:${toName}:${item.unit}`,
-          toName,
-          category: item.category,
-          unit: item.unit,
-        });
-      }
-      // Surface any inventory folds the server skipped (e.g. an item deleted
-      // between the fetch above and the merge). All lines here come from tracked
-      // inventory, so a skip is unexpected and worth flagging.
-      const skipped = lines.length > 0 ? (await mergeInventory(lines)).results.filter(r => r.status === "skipped") : [];
-      if (skipped.length > 0) {
-        const summary = skipped
-          .map(s => `• ${s.fromKey} → ${s.toKey} (${s.reason ?? "unknown"})`)
-          .join("\n");
-        window.alert(
-          `Some inventory stock wasn't folded into the target:\n\n${summary}\n\n` +
-            "Ingredient names were still merged everywhere else. Check these items' stock in Inventory.",
-        );
-      }
       // Rewrite every localStorage surface, then refresh React state in place so
       // the merged data shows immediately and the live-sync push carries the
       // merged lists — without tearing down the open Merge panel via a reload.
@@ -14614,7 +14574,7 @@ export default function Home() {
                           : "Combine duplicate flavors within a brand. Pick the flavor(s) to merge away, then the one to keep — today's runs are re-pointed. This can't be undone.")
                         : isRecipeNameCategory
                         ? "Combine duplicate recipe names in this category into one. Pick the recipe name(s) to merge away (sources), then the one to keep (target). Their recipe presets are folded and today's runs are re-pointed to the kept recipe. This can't be undone."
-                        : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
+                        : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated. Separate inventory products are preserved and follow their production ingredient link. This can't be undone."}
                     </p>
 
                     {/* AI + learned-memory suggestions: each tab scans ONLY its own
@@ -14863,7 +14823,7 @@ export default function Home() {
                                   : "Today's runs are re-pointed to the kept flavor.")
                                 : isRecipeNameCategory
                                 ? `${mergePreviewCount} reference${mergePreviewCount === 1 ? "" : "s"} will be updated. Recipe presets are folded into the kept recipe name.`
-                                : `${mergePreviewCount} reference${mergePreviewCount === 1 ? "" : "s"} will be updated. Inventory stock for merged items folds into the target.`}
+                                : `${mergePreviewCount} reference${mergePreviewCount === 1 ? "" : "s"} will be updated. Separate inventory products are preserved and relink through the production ingredient.`}
                             </p>
                           </div>
                         )}

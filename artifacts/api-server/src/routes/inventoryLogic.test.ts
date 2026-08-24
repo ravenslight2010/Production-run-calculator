@@ -142,6 +142,13 @@ function makeDeps(
 }
 
 describe("applyRunConsumption", () => {
+  it("uses a confirmed conversion when drawing inventory units", async () => {
+    const { deps, remaining } = makeDeps({ chicken: 1 }, { 1: 3 });
+    deps.findItemByKey = vi.fn(async () => ({ id: 1, conversionFactor: 20 }));
+    await applyRunConsumption(deps, "run-conversion", [{ itemKey: "chicken", qty: 40 }]);
+    expect(remaining[1]).toBe(1);
+  });
+
   it("deducts each matching line once and records a ledger entry per item drawn", async () => {
     const { deps, ledger, remaining } = makeDeps(
       { mozz: 1, boxes: 2 },

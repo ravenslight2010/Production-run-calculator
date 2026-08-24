@@ -18,6 +18,16 @@ export interface InventoryItem {
   onHand: number;
   lots: InventoryLot[];
   byLocation: LocationStock[];
+  /** @nullable */
+  productionIngredientId: string | null;
+  /** @nullable */
+  productionIngredientName?: string | null;
+  /** @nullable */
+  productionIngredientMergedInto?: string | null;
+  /** @nullable */
+  conversionFactor: number | null;
+  conversionConfirmed: boolean;
+  consumptionPriority: number;
   createdAt: Date;
   updatedAt: Date;
 }

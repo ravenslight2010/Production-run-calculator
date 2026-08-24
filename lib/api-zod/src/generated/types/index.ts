@@ -155,6 +155,7 @@ export * from './inventoryItem';
 export * from './inventoryLedgerEntry';
 export * from './inventoryLocation';
 export * from './inventoryLot';
+export * from './inventoryProductLinkInput';
 export * from './inventorySettings';
 export * from './labelExpected';
 export * from './labelFieldCheck';

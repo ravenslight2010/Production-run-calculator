@@ -420,6 +420,34 @@ paths:
           description: Deleted
         "404":
           description: Not found
+  /inventory/items/{id}/production-link:
+    patch:
+      operationId: linkInventoryProduct
+      tags: [inventory]
+      summary: Link a warehouse product to a production ingredient
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryProductLinkInput"
+      responses:
+        "200":
+          description: Updated inventory product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+        "400":
+          description: Invalid link or conversion
+        "404":
+          description: Not found
 
   /inventory/restock:
     post:
@@ -4314,6 +4342,10 @@ components:
         - onHand
         - lots
         - byLocation
+        - productionIngredientId
+        - conversionFactor
+        - consumptionPriority
+        - conversionConfirmed
         - createdAt
         - updatedAt
       properties:
@@ -4339,6 +4371,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LocationStock"
+        productionIngredientId:
+          type: [string, "null"]
+        productionIngredientName:
+          type: [string, "null"]
+        productionIngredientMergedInto:
+          type: [string, "null"]
+        conversionFactor:
+          type: [number, "null"]
+        conversionConfirmed:
+          type: boolean
+        consumptionPriority:
+          type: integer
         createdAt:
           type: string
           format: date-time
@@ -4364,6 +4408,12 @@ components:
           type: string
         reorderThreshold:
           type: number
+        productionIngredientId:
+          type: [string, "null"]
+        conversionFactor:
+          type: [number, "null"]
+        consumptionPriority:
+          type: integer
 
     UpdateInventoryItemInput:
       type: object
@@ -4372,6 +4422,17 @@ components:
           type: string
         reorderThreshold:
           type: number
+
+    InventoryProductLinkInput:
+      type: object
+      required: [productionIngredientId, conversionFactor]
+      properties:
+        productionIngredientId:
+          type: [string, "null"]
+        conversionFactor:
+          type: [number, "null"]
+        consumptionPriority:
+          type: integer
 
     RestockInput:
       type: object

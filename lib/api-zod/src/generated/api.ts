@@ -271,6 +271,12 @@ export const ListInventoryResponseItem = zod.object({
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
 })),
+  "productionIngredientId": zod.string().nullable(),
+  "productionIngredientName": zod.string().nullish(),
+  "productionIngredientMergedInto": zod.string().nullish(),
+  "conversionFactor": zod.number().nullable(),
+  "conversionConfirmed": zod.boolean(),
+  "consumptionPriority": zod.number(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -285,7 +291,10 @@ export const CreateInventoryItemBody = zod.object({
   "category": zod.string(),
   "name": zod.string(),
   "unit": zod.string(),
-  "reorderThreshold": zod.number().optional()
+  "reorderThreshold": zod.number().optional(),
+  "productionIngredientId": zod.string().nullish(),
+  "conversionFactor": zod.number().nullish(),
+  "consumptionPriority": zod.number().optional()
 })
 
 
@@ -326,6 +335,12 @@ export const UpdateInventoryItemResponse = zod.object({
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
 })),
+  "productionIngredientId": zod.string().nullable(),
+  "productionIngredientName": zod.string().nullish(),
+  "productionIngredientMergedInto": zod.string().nullish(),
+  "conversionFactor": zod.number().nullable(),
+  "conversionConfirmed": zod.boolean(),
+  "consumptionPriority": zod.number(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -336,6 +351,55 @@ export const UpdateInventoryItemResponse = zod.object({
  */
 export const DeleteInventoryItemParams = zod.object({
   "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary Link a warehouse product to a production ingredient
+ */
+export const LinkInventoryProductParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const LinkInventoryProductBody = zod.object({
+  "productionIngredientId": zod.string().nullable(),
+  "conversionFactor": zod.number().nullable(),
+  "consumptionPriority": zod.number().optional()
+})
+
+export const LinkInventoryProductResponse = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number(),
+  "onHand": zod.number(),
+  "lots": zod.array(zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "locationId": zod.number().nullish(),
+  "lotNumber": zod.string(),
+  "qtyReceived": zod.number(),
+  "qtyRemaining": zod.number(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "byLocation": zod.array(zod.object({
+  "locationId": zod.number(),
+  "locationName": zod.string(),
+  "isOnsite": zod.boolean(),
+  "onHand": zod.number()
+})),
+  "productionIngredientId": zod.string().nullable(),
+  "productionIngredientName": zod.string().nullish(),
+  "productionIngredientMergedInto": zod.string().nullish(),
+  "conversionFactor": zod.number().nullable(),
+  "conversionConfirmed": zod.boolean(),
+  "consumptionPriority": zod.number(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
 })
 
 
@@ -379,6 +443,12 @@ export const RestockInventoryResponse = zod.object({
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
 })),
+  "productionIngredientId": zod.string().nullable(),
+  "productionIngredientName": zod.string().nullish(),
+  "productionIngredientMergedInto": zod.string().nullish(),
+  "conversionFactor": zod.number().nullable(),
+  "conversionConfirmed": zod.boolean(),
+  "consumptionPriority": zod.number(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -418,6 +488,12 @@ export const AdjustInventoryResponse = zod.object({
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
 })),
+  "productionIngredientId": zod.string().nullable(),
+  "productionIngredientName": zod.string().nullish(),
+  "productionIngredientMergedInto": zod.string().nullish(),
+  "conversionFactor": zod.number().nullable(),
+  "conversionConfirmed": zod.boolean(),
+  "consumptionPriority": zod.number(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -548,6 +624,12 @@ export const TransferInventoryResponse = zod.object({
   "isOnsite": zod.boolean(),
   "onHand": zod.number()
 })),
+  "productionIngredientId": zod.string().nullable(),
+  "productionIngredientName": zod.string().nullish(),
+  "productionIngredientMergedInto": zod.string().nullish(),
+  "conversionFactor": zod.number().nullable(),
+  "conversionConfirmed": zod.boolean(),
+  "consumptionPriority": zod.number(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })

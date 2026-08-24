@@ -33,6 +33,14 @@ export const inventoryItemsTable = pgTable(
     name: text("name").notNull(),
     unit: text("unit").notNull(), // circles | shippers | cases | batches | lbs | …
     reorderThreshold: doublePrecision("reorder_threshold").notNull().default(0),
+    // A warehouse product is deliberately separate from the production
+    // ingredient it supplies. The id is stable across ingredient renames and
+    // merges; the merge resolver follows the pointer at consumption time.
+    productionIngredientId: text("production_ingredient_id"),
+    // Production units supplied by one inventory unit (for example 20 lbs per
+    // box). Null means a manager has not confirmed the conversion yet.
+    conversionFactor: doublePrecision("conversion_factor"),
+    consumptionPriority: integer("consumption_priority").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -62,9 +62,10 @@ export interface ConsumeLine {
 // only the first time a given runId is seen (false if already consumed).
 export interface ConsumeDeps {
   claimRun(runId: string): Promise<boolean>;
-  findItemByKey(itemKey: string): Promise<{ id: number } | null>;
+  findItemByKey(itemKey: string): Promise<{ id: number; conversionFactor?: number } | null>;
   drawDown(itemId: number, qty: number): Promise<number>;
-  recordConsumption(itemId: number, consumed: number): Promise<void>;
+  drawDownDetails?: (itemId: number, qty: number) => Promise<{ consumed: number; lots: Array<{ lotId: number; qty: number }> }>;
+  recordConsumption(itemId: number, consumed: number, lots?: Array<{ lotId: number; qty: number }>): Promise<void>;
 }
 
 // Run-once auto-deduction control flow. The run is claimed exactly once up
@@ -85,9 +86,13 @@ export async function applyRunConsumption(
     if (line.qty <= 0) continue;
     const item = await deps.findItemByKey(line.itemKey);
     if (!item) continue;
-    const consumed = await deps.drawDown(item.id, line.qty);
+    const requestedInventoryQty = line.qty / (item.conversionFactor ?? 1);
+    const detail = deps.drawDownDetails
+      ? await deps.drawDownDetails(item.id, requestedInventoryQty)
+      : { consumed: await deps.drawDown(item.id, requestedInventoryQty), lots: [] };
+    const consumed = detail.consumed;
     if (consumed > 0) {
-      await deps.recordConsumption(item.id, consumed);
+      await deps.recordConsumption(item.id, consumed, detail.lots);
       consumedItems += 1;
     }
   }

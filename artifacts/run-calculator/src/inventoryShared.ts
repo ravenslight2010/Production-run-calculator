@@ -75,6 +75,12 @@ export type InventoryItem = {
   onHand: number;
   lots: InventoryLot[];
   byLocation: LocationStock[];
+  productionIngredientId: string | null;
+  productionIngredientName?: string | null;
+  productionIngredientMergedInto?: string | null;
+  conversionFactor: number | null;
+  conversionConfirmed: boolean;
+  consumptionPriority: number;
 };
 
 // A named storage location. `isOnsite` marks the single location production
@@ -1117,6 +1123,21 @@ export const mergeInventory = (merges: MergeInventoryLine[]) =>
     method: "POST",
     body: JSON.stringify({ merges }),
   });
+
+export type ProductionIngredient = {
+  id: string;
+  name: string;
+  mergedInto: string | null;
+  enabled: boolean;
+};
+export const fetchProductionIngredients = () =>
+  api<{ items: ProductionIngredient[] }>("/ingredients").then((r) => r.items);
+export const linkInventoryProduct = (
+  itemId: number,
+  body: { productionIngredientId: string | null; conversionFactor: number | null; consumptionPriority?: number },
+) => api<InventoryItem>(`/inventory/items/${itemId}/production-link`, {
+  method: "PATCH", body: JSON.stringify(body),
+});
 
 // ── Incidents: report an issue / crash + AI diagnosis ────────────────────────
 export type IncidentSource = "user_report" | "auto_crash";

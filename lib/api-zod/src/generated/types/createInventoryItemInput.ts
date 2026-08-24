@@ -12,4 +12,9 @@ export interface CreateInventoryItemInput {
   name: string;
   unit: string;
   reorderThreshold?: number;
+  /** @nullable */
+  productionIngredientId?: string | null;
+  /** @nullable */
+  conversionFactor?: number | null;
+  consumptionPriority?: number;
 }

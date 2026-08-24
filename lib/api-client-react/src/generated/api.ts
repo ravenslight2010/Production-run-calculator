@@ -91,6 +91,7 @@ import type {
   InventoryItem,
   InventoryLedgerEntry,
   InventoryLocation,
+  InventoryProductLinkInput,
   InventorySettings,
   LabelVerifyInput,
   LabelVerifyResult,
@@ -1545,6 +1546,78 @@ export const useDeleteInventoryItem = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteInventoryItemMutationOptions(options));
+    }
+
+export const getLinkInventoryProductUrl = (id: number,) => {
+
+
+
+
+  return `/api/inventory/items/${id}/production-link`
+}
+
+/**
+ * @summary Link a warehouse product to a production ingredient
+ */
+export const linkInventoryProduct = async (id: number,
+    inventoryProductLinkInput: InventoryProductLinkInput, options?: RequestInit): Promise<InventoryItem> => {
+
+  return customFetch<InventoryItem>(getLinkInventoryProductUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      inventoryProductLinkInput,)
+  }
+);}
+
+
+
+
+export const getLinkInventoryProductMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkInventoryProduct>>, TError,{id: number;data: BodyType<InventoryProductLinkInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof linkInventoryProduct>>, TError,{id: number;data: BodyType<InventoryProductLinkInput>}, TContext> => {
+
+const mutationKey = ['linkInventoryProduct'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof linkInventoryProduct>>, {id: number;data: BodyType<InventoryProductLinkInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  linkInventoryProduct(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LinkInventoryProductMutationResult = NonNullable<Awaited<ReturnType<typeof linkInventoryProduct>>>
+    export type LinkInventoryProductMutationBody = BodyType<InventoryProductLinkInput>
+    export type LinkInventoryProductMutationError = ErrorType<void>
+
+    /**
+ * @summary Link a warehouse product to a production ingredient
+ */
+export const useLinkInventoryProduct = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkInventoryProduct>>, TError,{id: number;data: BodyType<InventoryProductLinkInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof linkInventoryProduct>>,
+        TError,
+        {id: number;data: BodyType<InventoryProductLinkInput>},
+        TContext
+      > => {
+      return useMutation(getLinkInventoryProductMutationOptions(options));
     }
 
 export const getRestockInventoryUrl = () => {
