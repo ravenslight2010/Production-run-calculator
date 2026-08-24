@@ -545,6 +545,14 @@ function WarehouseCoverageCard({ coverage }: { coverage: WarehouseCoverage[] }) 
               {row.status === "missing" && (
                 <span className="block text-xs text-red-500">Link an inventory product to this production ingredient.</span>
               )}
+              {row.transferSources.length > 0 && (
+                <span className="block text-xs text-sky-600 dark:text-sky-400">
+                  Can cover {fmtQty(row.transferable)} {row.unit} from{" "}
+                  {row.transferSources
+                    .map((source) => `${fmtQty(source.quantity)} ${row.unit} from ${source.locationName}`)
+                    .join("; ")}.
+                </span>
+              )}
             </div>
             <div className="shrink-0 text-right">
               <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold ${statusClass[row.status]}`}>

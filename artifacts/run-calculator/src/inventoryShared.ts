@@ -113,6 +113,11 @@ export const computeRunConsumptionLines = (vals: FormValues) =>
   computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
 
 export type WarehouseCoverageStatus = "covered" | "short" | "conversion" | "missing";
+export type WarehouseTransferSource = {
+  locationId: number;
+  locationName: string;
+  quantity: number;
+};
 export type WarehouseCoverage = {
   ingredientId: string | null;
   ingredientName: string;
@@ -120,10 +125,62 @@ export type WarehouseCoverage = {
   unit: string;
   linkedProducts: InventoryItem[];
   covered: number;
+  transferable: number;
+  transferSources: WarehouseTransferSource[];
   status: WarehouseCoverageStatus;
 };
 
 const coverageName = (key: string) => key.split(":").slice(1, -1).join(":").trim();
+
+function onsiteItemQuantity(item: InventoryItem): number {
+  // The API's onHand is the total across all locations. Keep the fallback for
+  // older/offline item payloads that do not include a location breakdown.
+  if (item.byLocation.length === 0) return Math.max(0, item.onHand);
+  return item.byLocation
+    .filter((location) => location.isOnsite)
+    .reduce((sum, location) => sum + Math.max(0, location.onHand), 0);
+}
+
+function transferSourcesForCoverage(
+  linkedProducts: InventoryItem[],
+  shortfall: number,
+): { transferable: number; sources: WarehouseTransferSource[] } {
+  if (!(shortfall > 0)) return { transferable: 0, sources: [] };
+
+  const byLocation = new Map<number, WarehouseTransferSource>();
+  for (const item of linkedProducts) {
+    if (!item.conversionConfirmed || !(Number(item.conversionFactor) > 0)) continue;
+    const conversionFactor = Number(item.conversionFactor);
+    for (const location of item.byLocation) {
+      if (location.isOnsite || !(location.onHand > 0)) continue;
+      const existing = byLocation.get(location.locationId);
+      const quantity = location.onHand * conversionFactor;
+      if (existing) existing.quantity += quantity;
+      else {
+        byLocation.set(location.locationId, {
+          locationId: location.locationId,
+          locationName: location.locationName,
+          quantity,
+        });
+      }
+    }
+  }
+
+  // Allocate the same capped transfer quantity in a deterministic order. This
+  // is display-only and does not change the actual FIFO/FEFO deduction plan.
+  let remaining = shortfall;
+  const sources: WarehouseTransferSource[] = [];
+  for (const source of [...byLocation.values()].sort((a, b) => b.quantity - a.quantity)) {
+    if (!(remaining > 0)) break;
+    const quantity = Math.min(remaining, source.quantity);
+    if (quantity > 0) sources.push({ ...source, quantity });
+    remaining -= quantity;
+  }
+  return {
+    transferable: shortfall - Math.max(0, remaining),
+    sources,
+  };
+}
 
 /** Advisory comparison using the exact quantities sent to auto-deduction. */
 export function computeWarehouseCoverage(
@@ -155,12 +212,13 @@ export function computeWarehouseCoverage(
       (item) => item.conversionConfirmed && Number(item.conversionFactor) > 0,
     );
     const covered = confirmed.reduce(
-      (sum, item) => sum + Math.max(0, item.onHand) * Number(item.conversionFactor),
+      (sum, item) => sum + onsiteItemQuantity(item) * Number(item.conversionFactor),
       0,
     );
     const hasUnconfirmed = linkedProducts.some(
       (item) => !item.conversionConfirmed || !(Number(item.conversionFactor) > 0),
     );
+    const transfer = transferSourcesForCoverage(linkedProducts, Math.max(0, need.qty - covered));
     const status: WarehouseCoverageStatus = linkedProducts.length === 0
       ? "missing"
       : confirmed.length === 0
@@ -175,6 +233,8 @@ export function computeWarehouseCoverage(
       unit: need.unit,
       linkedProducts,
       covered,
+      transferable: transfer.transferable,
+      transferSources: transfer.sources,
       status,
     };
   });
