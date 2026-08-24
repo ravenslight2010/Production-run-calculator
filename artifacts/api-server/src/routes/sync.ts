@@ -79,6 +79,14 @@ function requestedSnapshot(req: Request): string | undefined {
   return typeof value === "string" && SNAPSHOT_ID_RE.test(value) ? value : undefined;
 }
 
+function emptySyncData(date: string): Record<string, unknown> {
+  return {
+    dayState: { date, runs: [] },
+    runValues: {},
+    runValuesUpdatedAt: {},
+  };
+}
+
 function isPartialSyncPayload(payload: unknown): payload is Record<string, unknown> {
   return !!payload && typeof payload === "object" && !Array.isArray(payload) &&
     (payload as Record<string, unknown>).completeness === "partial";
@@ -495,7 +503,10 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
     .select()
     .from(dailySyncTable)
     .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, currentScope())));
-  const data = row?.data ?? null;
+  // A missing live row is an empty baseline, not a null payload. Returning the
+  // same shape as a populated row keeps reset/wake recovery within the client
+  // sync contract and gives it a stable snapshot identity.
+  const data = row?.data ?? emptySyncData(clientToday(req));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
   res.json(data);

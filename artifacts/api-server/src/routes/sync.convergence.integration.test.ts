@@ -372,11 +372,19 @@ describe("multi-client sync convergence soak", () => {
 
     const stale = await client.push(TODAY, fixture(), 0);
     expect(stale).toMatchObject({ ok: true, stale: true, epoch: 1 });
-    expect(await fetch(`${baseUrl}/api/sync/today?today=${TODAY}`, { headers: headers() }).then((r) => r.json())).toBeNull();
+    expect(await fetch(`${baseUrl}/api/sync/today?today=${TODAY}`, { headers: headers() }).then((r) => r.json())).toMatchObject({
+      dayState: { date: TODAY, runs: [] },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
 
     await client.adoptReset();
     expect(client.epoch).toBe(1);
-    expect(client.state).toBeNull();
+    expect(client.state).toMatchObject({
+      dayState: { date: TODAY, runs: [] },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
     const accepted = await client.push(TODAY, { dayState: { runs: [] }, runValues: {} }, 1);
     expect(accepted?.stale).not.toBe(true);
     expect(await fetch(`${baseUrl}/api/sync/today?today=${TODAY}`, { headers: headers() }).then((r) => r.json())).toMatchObject({

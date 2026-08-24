@@ -43,7 +43,7 @@ export default function SyncStatusPopover(props: Props) {
   return (
     <div className="relative">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-        title={`Sync: ${labels[props.status]}`}
+        title={props.connected ? "Sync connected" : `Sync: ${labels[props.status]}`}
         className={`flex h-8 items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold ${color} hover:bg-muted/60`}>
         <Icon className={`h-3.5 w-3.5 ${props.status === "syncing" ? "animate-spin" : ""}`} />
         <span className="hidden sm:inline">{labels[props.status]}</span>

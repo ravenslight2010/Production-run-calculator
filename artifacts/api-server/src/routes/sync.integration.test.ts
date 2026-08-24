@@ -216,6 +216,19 @@ describe("/sync/today — client-local-date keying", () => {
     expect(data?.dayState?.runs?.[0]?.id).toBe("run-2030-03-11");
   });
 
+  it("GET returns an empty sync payload when the client-local row does not exist", async () => {
+    const date = "2030-03-20";
+    const res = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      dayState: { date, runs: [] },
+      runValues: {},
+      runValuesUpdatedAt: {},
+    });
+  });
+
   it("PUT writes to the client-supplied `today` row, never the server's UTC date", async () => {
     const payload = { dayState: { runs: [{ id: "live-run" }] }, runValues: { "live-run": { casesNeeded: 42 } } };
     const put = await fetch(`${baseUrl}/api/sync/today?today=2030-03-20`, {
