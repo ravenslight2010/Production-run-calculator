@@ -918,6 +918,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // Start with both sources present so every write path is observable.
       await seedDoughCounters(page, { trays: 3, batches: 1 });
       await page.waitForTimeout(400);
+      // Counter edits follow the real operator path and temporarily suppress
+      // auto tracking. Resume it before asserting the live countdowns or the
+      // batch-production labels are correctly hidden by the UI.
+      await page.getByRole("button", { name: /resume auto tracking/i }).click();
 
       // These are the three visible dough stages plus both corresponding
       // machine/line countdowns. Their values are rendered from tickDueRefs,
@@ -931,7 +935,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await expect(page.getByText(label, { exact: true })).toBeVisible();
       }
       await expect(page.getByText("Mixer finishes +1 in", { exact: true })).toBeVisible();
-      await expect(page.getByText("Hopper finishes +1 in", { exact: true })).toBeVisible();
+      await expect(page.getByText("Line uses ¼ batch in", { exact: true })).toBeVisible();
 
       const beforePause = {
         cases: initialCases,
@@ -950,27 +954,32 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await mockDateNow(page, safeBaseMs + 10_000);
       await simulateWake(page);
       await page.waitForTimeout(800);
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
 
       expect(await readDoughCounters(page), "paused dough counters").toEqual(beforePause.dough);
 
       // Resume from the same mocked instant. The authoritative due refs must
       // re-arm from this instant; advancing one case period then permits one
       // case write, without replaying the hidden +10 s.
+      await page.locator('[data-testid="tab-run"]').click();
       const resumeButton = page.getByRole("button", { name: /resume.?run/i }).first();
       await resumeButton.click();
       await page.waitForTimeout(300);
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
 
       // Resume re-arms the dough schedules from the resume instant. At +1.1 s
-      // only the quarter-batch drain is due: one write, no tray or mixer
-      // production yet. The ten seconds spent paused must not be replayed.
+      // the quarter-batch drain and half-tray production boundaries are due;
+      // the ten seconds spent paused must not be replayed.
       await mockDateNow(page, safeBaseMs + 11_100);
       await simulateScreenOff(page);
       await simulateWake(page);
       await page.waitForTimeout(500);
       expect(
         await readDoughCounters(page),
-        "first resumed boundary should drain one quarter batch only",
-      ).toEqual({ trays: 3, batches: 0.75 });
+        "first resumed boundary should drain one quarter batch and produce one tray",
+      ).toEqual({ trays: 4, batches: 0.75 });
 
       // At +2.1 s, one tray production and one tray consumption coincide
       // (net zero), while mixer production adds one batch and the quarter
