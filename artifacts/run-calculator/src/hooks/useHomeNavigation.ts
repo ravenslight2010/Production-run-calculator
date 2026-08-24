@@ -28,7 +28,8 @@ const VALID_TABS = new Set<string>(HOME_TABS);
 
 function loadHashTab(): HomeTab | null {
   if (typeof window === "undefined") return null;
-  return /^#incidents(?:\/|$)/.test(window.location.hash) ? "incidents" : null;
+  if (/^#incidents(?:\/|$)/.test(window.location.hash)) return "incidents";
+  return window.location.hash === "#sync-diagnostics" ? "summary" : null;
 }
 
 function loadInitialTab(): HomeTab {

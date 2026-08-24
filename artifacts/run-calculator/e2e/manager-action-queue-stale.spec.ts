@@ -355,3 +355,50 @@ test("keeps a direct incident link focused after reload", async ({ page }, testI
   await directPage.close();
   expect(browserErrors).toEqual([]);
 });
+
+test("keeps a direct sync diagnostics link focused after reload", async ({ page }, testInfo: TestInfo) => {
+  const username = uniqueTestId("e2e_manager_sync_reload");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await signIn(page, username);
+
+  // Use a new page in the authenticated context so this is a true direct
+  // entry, rather than a hash-only navigation on the already-mounted shell.
+  const directPage = await page.context().newPage();
+  directPage.on("pageerror", (error) => browserErrors.push(error.message));
+  directPage.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  try {
+    await directPage.goto("/#sync-diagnostics", { waitUntil: "domcontentloaded" });
+    await expect(directPage).toHaveURL(/#sync-diagnostics$/);
+    await expect(directPage.getByTestId("summary-tools-header")).toBeVisible();
+    await expect(directPage.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
+    await directPage.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
+    await expect(directPage.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
+
+    await directPage.reload({ waitUntil: "domcontentloaded" });
+    await expect(directPage).toHaveURL(/#sync-diagnostics$/);
+    await expect(directPage.getByTestId("summary-tools-header")).toBeVisible();
+    await expect(directPage.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
+    await directPage.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
+    await expect(directPage.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
+    await directPage.screenshot({ path: testInfo.outputPath("sync-diagnostics-direct-link-reload.png"), fullPage: true });
+    expect(browserErrors).toEqual([]);
+  } finally {
+    await directPage.close();
+  }
+});
