@@ -8,11 +8,24 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers } from "./isolation";
+import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
 const testUsernames = new Set<string>();
+
+test.beforeEach(async () => {
+  const url = requireIsolatedTestDatabase("live Sauce/Dough phone beforeEach");
+  const db = new Client({ connectionString: url });
+  try {
+    await db.connect();
+    await db.query("DELETE FROM daily_sync WHERE date = $1", [
+      new Date().toISOString().slice(0, 10),
+    ]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
 
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
@@ -48,6 +61,11 @@ async function signUpAndDismissOnboarding(page: Page, username: string): Promise
 
 async function seedRunningValues(page: Page): Promise<void> {
   await page.locator('[data-testid="tab-run"]').click();
+  // The tab can be attached before the initial live-day snapshot has hydrated.
+  // Wait for the same visible setup surface an operator uses to know the run is
+  // ready, rather than racing the state transition or extending click timeout.
+  await expect(page.getByTestId("input-casesNeeded")).toBeVisible();
+  await expect(page.getByTestId("button-start-run")).toBeVisible();
   await page.getByTestId("button-start-run").click();
   await page.getByRole("button", { name: /stop.?run/i }).waitFor({ state: "visible" });
 
