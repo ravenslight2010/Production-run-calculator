@@ -1,0 +1,152 @@
+{
+  "provider": "gemini",
+  "manual_decisions_excluded_from_metrics": true,
+  "cases": [
+    {
+      "id": "customer-import-audit-near-miss-1",
+      "skill": "customer-import-audit",
+      "query": "The Excel parser linked a recipe to the wrong flavor; trace the bug and fix the poisoned records.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "The user is reporting an issue with data being linked incorrectly after an import process (implied by 'Excel parser'). This aligns with the skill description for 'customer-import-audit' which is used when 'reports something off after a new-customer import'."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "production-go-near-miss-1",
+      "skill": "production-go",
+      "query": "Please run the pre-publish checklist before I decide whether to deploy.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "The user explicitly asks to 'run the pre-publish checklist'. The skill description states, 'Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.' This indicates that running such a checklist is a core part of this skill's process, even if the user isn't directly asking for the GO/NO-GO decision itself yet."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "release-checklist-near-miss-1",
+      "skill": "release-checklist",
+      "query": "Give me a final production-ready GO or NO-GO decision.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "The user is asking for a 'final production-ready GO or NO-GO decision', which directly aligns with the 'Pre-publish verification' and 'before suggesting a deploy/publish' functionality of the 'release-checklist' skill. The skill is designed to perform the checks necessary to inform such a decision."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "spec-import-guard-near-miss-1",
+      "skill": "spec-import-guard",
+      "query": "Investigate a bad imported workbook by tracing what landed in the database.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "The user wants to investigate a 'bad imported workbook' by 'tracing what landed in the database'. This directly implies debugging or understanding issues related to the 'spec import pipeline' and its output, which is precisely what the `spec-import-guard` skill is designed to cover, especially in areas like parse/sanitize logic, chunk/merge logic, import link passes, and ultimately what data results from the import."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "state-accuracy-check-near-miss-2",
+      "skill": "state-accuracy-check",
+      "query": "Audit SSE merge stamps and stale writes across multiple devices.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "The user request to \"Audit SSE merge stamps and stale writes across multiple devices\" directly matches the skill's description of verifying that state remains accurate and consistent. Identifying stale writes is a core aspect of checking state accuracy and consistency."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "check-dependency-licenses-near-miss-1",
+      "skill": "check-dependency-licenses",
+      "query": "Add a new package and verify it is genuine before installing it.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "do_not_trigger",
+        "confidence": 0.7,
+        "rationale": "The user wants to 'add a new package' which aligns with the skill's purpose for 'adding dependencies'. However, the primary request is to 'verify it is genuine', which relates to authenticity or security, not license compliance. The skill 'check-dependency-licenses' is specifically for license-related checks (commercial use, open-source license, IP compliance), not genuineness."
+      },
+      "error": null,
+      "reason": "uncertain",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "handle-personal-and-sensitive-data-near-miss-2",
+      "skill": "handle-personal-and-sensitive-data",
+      "query": "Add a password reset flow using the existing authentication system.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "A password reset flow deals with user authentication credentials, which are highly sensitive data. This process involves transmitting, and potentially temporarily storing or logging, personal user data to enable the reset. This directly aligns with the skill's description for handling anything that 'collects, stores, logs, or transmits user data'."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "meet-an-accessibility-baseline-near-miss-1",
+      "skill": "meet-an-accessibility-baseline",
+      "query": "Make the layout responsive across phone and desktop widths.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.8,
+        "rationale": "The user request to make a layout responsive across phone and desktop widths directly relates to WCAG 2.1 Success Criterion 1.4.10 Reflow (AA), which is an accessibility requirement. Ensuring content reflows and is usable on different screen sizes is part of meeting a basic accessibility baseline to avoid excluding users, as described by the skill."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "review-before-shipping-near-miss-1",
+      "skill": "review-before-shipping",
+      "query": "Run only the pre-publish release checklist and its configured commands.",
+      "expected": "do_not_trigger",
+      "gemini": {
+        "decision": "trigger",
+        "confidence": 0.9,
+        "rationale": "The user explicitly mentions 'pre-publish release checklist', which directly indicates a readiness for publishing, aligning with the skill description 'before...publishing'."
+      },
+      "error": null,
+      "reason": "disagreement",
+      "manual_decision": null,
+      "manual_reason": null
+    },
+    {
+      "id": "validate-and-encode-untrusted-input-near-miss-1",
+      "skill": "validate-and-encode-untrusted-input",
+      "query": "Design defenses for prompt injection in an LLM agent.",
+      "expected": "do_not_trigger",
+      "gemini": {},
+      "error": "invalid_output",
+      "reason": "invalid_output",
+      "manual_decision": null,
+      "manual_reason": null
+    }
+  ]
+}
