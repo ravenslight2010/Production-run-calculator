@@ -84,10 +84,17 @@ router.post("/master-data/health/repair", canReview, async (req: Request, res: R
           .where(and(eq(brandProfilesTable.key, repair.profileKey), eq(brandProfilesTable.scope, scope)));
         const values = profile?.values && typeof profile.values === "object" ? profile.values as Record<string, unknown> : {};
         if (!profile || String(values[repair.field] ?? "") !== repair.from) continue;
-        await db.update(brandProfilesTable)
+        const updated = await db.update(brandProfilesTable)
           .set({ values: { ...values, [repair.field]: repair.to }, updatedAtMs: Date.now() + 1 })
-          .where(and(eq(brandProfilesTable.key, repair.profileKey), eq(brandProfilesTable.scope, scope)));
-        applied++;
+          .where(and(
+            eq(brandProfilesTable.key, repair.profileKey),
+            eq(brandProfilesTable.scope, scope),
+            // The report is a review snapshot. Do not overwrite a protected
+            // value if a profile changed after the manager reviewed it.
+            eq(brandProfilesTable.values, profile.values),
+          ))
+          .returning({ key: brandProfilesTable.key });
+        if (updated.length) applied++;
         continue;
       }
       const id = repair.rowId;

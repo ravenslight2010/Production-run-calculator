@@ -747,15 +747,15 @@ describe("master-data health launch classification", () => {
     });
 
     const report = await buildMasterDataHealthReport(db, "live", new Date("2026-08-25T00:00:00.000Z"));
-    const findings = report.findings.filter((item) =>
+    const findings = report.findings.filter((item: any) =>
       item.id.includes("health-legacy") ||
       item.id.includes("health-purchased-crust") ||
       item.id.includes("health-review-dough"),
     );
 
     expect(findings.length).toBeGreaterThanOrEqual(3);
-    expect(findings.every((item) => item.severity === "warning")).toBe(true);
-    expect(findings.every((item) => item.owner)).toBe(true);
-    expect(findings.every((item) => item.followUpDate === "2026-09-30")).toBe(true);
+    expect(findings.every((item: any) => item.severity === "warning")).toBe(true);
+    expect(findings.every((item: any) => item.owner)).toBe(true);
+    expect(findings.every((item: any) => item.followUpDate === "2026-09-30")).toBe(true);
   });
 });
