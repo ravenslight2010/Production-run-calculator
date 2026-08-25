@@ -2,11 +2,17 @@
 
 - Skills: **25**
 - Prompts: **100** (50 should-trigger, 50 near-miss should-not-trigger)
-- Runtime model rates: **not run** (Claude CLI is unavailable in this environment)
+- Runtime model rates: **blocked** (the complete 100-prompt run and balanced 40% held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
+
+## Runtime attempt
+
+The evaluator was exercised on all 25 skills: 100 prompts × 3 repetitions (300 attempts). A deterministic balanced 40% held-out split (one positive and one near-miss per skill) was also exercised: 50 prompts × 3 repetitions (150 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
+
+Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 rates are synthetic failure output, not model observations. Precision, recall, false-positive, and false-negative rates are therefore **unavailable** for every skill.
 
 ## Preflight findings
 
-These are lexical review signals only, not claims that Claude would trigger. A real run should use `run_eval.py` with three runs per prompt and a 40% held-out split.
+These are lexical review signals only, not claims that Claude would trigger. When the Claude CLI is available, rerun `run_eval.py` with three runs per prompt and this balanced 40% held-out split before changing any description.
 
 | Skill | Positive overlap | Negative overlap | Signals |
 | --- | --- | --- | --- |
@@ -39,4 +45,4 @@ These are lexical review signals only, not claims that Claude would trigger. A r
 ## Interpretation
 
 The preflight surfaced 7 skills for review: `customer-import-audit`, `production-go`, `sync-invariant-check`, `handle-personal-and-sensitive-data`, `make-apps-resilient-to-abuse-and-overload`, `meet-an-accessibility-baseline`, `review-before-shipping`.
-No skill description was changed from this proxy alone. Description edits require model-trigger evidence on held-out prompts; the corpus is ready for that run when the Claude CLI is available.
+No skill description was changed: the runtime attempt produced no model-trigger evidence. The lexical flags remain review signals only and must not be converted into description edits until the held-out model run succeeds.

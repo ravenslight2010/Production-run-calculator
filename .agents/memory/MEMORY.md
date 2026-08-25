@@ -156,3 +156,4 @@
 - [A11y browser fixtures](a11y-dialog-browser-fixtures.md) + [reload persistence](a11y-reload-fixtures.md) — seed manager capabilities and idempotent localStorage state before authenticated navigation.
 - [Browser timer fixtures](browser-timer-fixtures.md) + [onboarding overlay](delayed-onboarding-overlay.md) — controlled journeys must account for tunnel timing and asynchronously mounted dialogs.
 - [Release-check shard budget](release-check-shard-budget.md) — serialized API capability coverage can exceed four minutes; budget release timeouts from shard runtime, not individual tests.
+- [Skill trigger runtime](skill-trigger-runtime.md) — trigger benchmarks need an authenticated Claude CLI; evaluator subprocess failures are synthetic non-triggers, not model evidence.
