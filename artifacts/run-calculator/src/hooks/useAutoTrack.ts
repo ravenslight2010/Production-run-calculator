@@ -155,8 +155,12 @@ interface AutoTrackResult {
     batches: number | null;
   } | null;
   autoSuppressUntilRef: React.MutableRefObject<number>;
-  /** Force every counter's next tick to fire immediately (e.g. "Resume now"). */
-  fireAutoTrackNow: () => void;
+  /**
+   * Restart the requested auto-track countdown(s) from their full cadence.
+   * A scoped resume must not re-arm unrelated production timers or write a
+   * counter in the same render as the resume action.
+   */
+  fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
   /**
    * Wall-clock ms timestamps of each counter's next tick — read-only refs for
    * countdown displays (0 = not yet armed). The UI derives "next tick in m:ss"
@@ -443,43 +447,7 @@ export function useAutoTrack({
     setIsDoughTimerPaused(false);
   }, []);
 
-  // Cancel the wait until every counter's next tick (used by "Resume now" and
-  // the Auto toggle). Unlike resetBookkeeping this keeps the expectedCases
-  // baseline and last-tick timestamps, so resuming never causes a catch-up jump
-  // over a manual edit. Also clears any dough-timer pause so "Resume now" on
-  // the auto-track suppression banner doesn't leave dough timers frozen.
-  const fireAutoTrackNow = useCallback(() => {
-    caseNextDueMsRef.current = 0;
-    trayNextDueMsRef.current = 0;
-    batchNextDueMsRef.current = 0;
-    trayProdNextDueMsRef.current = 0;
-    batchProdNextDueMsRef.current = 0;
-    hopperProdNextDueMsRef.current = 0;
-    // If dough timers were paused, zero the consumption-tick anchors so the
-    // first post-resume tick uses ONE clean period instead of the accumulated
-    // pause span (which would be capped at 2 periods → 2 trays consumed).
-    if (doughTimerPausedRef.current > 0) {
-      trayLastMsRef.current = 0;
-      batchLastMsRef.current = 0;
-    }
-    doughTimerPausedRef.current = 0;
-    setIsDoughTimerPaused(false);
-  }, []);
-
-  // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
-  // Does not affect the cases/skids counter or the global auto-track toggle.
-  const pauseDoughTimers = useCallback(() => {
-    doughTimerPausedRef.current = Date.now();
-    setIsDoughTimerPaused(true);
-  }, []);
-
-  // Resume dough-timer countdowns, restarting each from its full duration.
-  // Resets production due refs to 0 (re-arms from current time on next tick)
-  // and consumption-tick timestamps so no catch-up decrement fires.
-  // hopperProdNextDueMsRef reset to 0 causes the hopper countdown to restart
-  // from the full hopper duration on the next second.
-  const resumeDoughTimers = useCallback(() => {
-    const nowMs = Date.now();
+  const rearmCaseTimer = useCallback((nowMs: number) => {
     const timing = getAutoTrackTiming(
       calc.ppm,
       v.pizzasPerCase,
@@ -487,6 +455,19 @@ export function useAutoTrack({
       calc.perBatch,
       machine,
     );
+    caseNextDueMsRef.current = timing.caseMs > 0 ? nowMs + timing.caseMs : 0;
+  }, [calc.perBatch, calc.perTray, calc.ppm, machine, v.pizzasPerCase]);
+
+  const rearmDoughTimers = useCallback((nowMs: number) => {
+    const timing = getAutoTrackTiming(
+      calc.ppm,
+      v.pizzasPerCase,
+      calc.perTray,
+      calc.perBatch,
+      machine,
+    );
+    // Rebase every dough channel at the same instant. Consumption anchors are
+    // cleared so the first completed interval cannot replay paused elapsed time.
     doughTimerPausedRef.current = 0;
     setIsDoughTimerPaused(false);
     trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
@@ -497,6 +478,32 @@ export function useAutoTrack({
     batchNextDueMsRef.current = timing.batchConsumptionMs > 0 ? nowMs + timing.batchConsumptionMs : 0;
     batchLastMsRef.current = 0;
   }, [calc.perBatch, calc.perTray, calc.ppm, machine, v.pizzasPerCase]);
+
+  // Restart the selected timer from its full duration. Unlike
+  // resetBookkeeping this keeps the case-progress baseline and completed work
+  // intact, so a manual "Resume auto tracking" cannot create a catch-up jump.
+  const fireAutoTrackNow = useCallback((scope: "case" | "dough" | "all" = "all") => {
+    const nowMs = Date.now();
+    if (scope === "case" || scope === "all") {
+      rearmCaseTimer(nowMs);
+    }
+    if (scope === "dough" || scope === "all") {
+      rearmDoughTimers(nowMs);
+    }
+  }, [rearmCaseTimer, rearmDoughTimers]);
+
+  // Freeze the dough-timer countdowns and suppress tray/batch tick writes.
+  // Does not affect the cases/skids counter or the global auto-track toggle.
+  const pauseDoughTimers = useCallback(() => {
+    doughTimerPausedRef.current = Date.now();
+    setIsDoughTimerPaused(true);
+  }, []);
+
+  // Resume dough-timer countdowns through the same re-arm path as automatic
+  // resume so either action starts from a full, clean interval.
+  const resumeDoughTimers = useCallback(() => {
+    rearmDoughTimers(Date.now());
+  }, [rearmDoughTimers]);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
@@ -525,12 +532,30 @@ export function useAutoTrack({
     resetBookkeeping();
   }, [runId, resetBookkeeping]);
 
-  // Re-baseline when auto-track is toggled on so the first tick after re-enabling
-  // continues from the current value instead of adding all the production that
-  // accumulated while it was off.
+  // Re-baseline when auto-track is toggled off so stale bookkeeping cannot
+  // carry across a manual-edit window. On the actual Manual → Auto
+  // transition, re-arm every timer from a full configured interval instead
+  // of resetting due refs to zero: React runs this effect after the toggle
+  // handler's state update, and a zero due ref would make the next clock
+  // render write immediately. Initial auto-enabled mount keeps the normal
+  // first-tick setup behavior.
+  const previousAutoTrackProgressRef = useRef(autoTrackProgress);
   useEffect(() => {
-    resetBookkeeping();
-  }, [autoTrackProgress, resetBookkeeping]);
+    const toggledOn = !previousAutoTrackProgressRef.current && autoTrackProgress;
+    previousAutoTrackProgressRef.current = autoTrackProgress;
+    if (!autoTrackProgress) {
+      resetBookkeeping();
+      return;
+    }
+    if (toggledOn) {
+      // `nowTime` is a display clock that can be almost one second behind the
+      // user interaction. Use the actual transition instant so the minimum
+      // one-second cadence cannot become immediately due on the next render.
+      const nowMs = Date.now();
+      rearmCaseTimer(nowMs);
+      rearmDoughTimers(nowMs);
+    }
+  }, [autoTrackProgress, nowTime, rearmCaseTimer, rearmDoughTimers, resetBookkeeping]);
 
   // Clear the independent dough-timer pause whenever the run becomes globally
   // running (covers the paused → running resume transition). Without this, a
@@ -541,38 +566,13 @@ export function useAutoTrack({
     const resumed = previousRunStatusRef.current === "paused" && runStatus === "running";
     previousRunStatusRef.current = runStatus;
     if (resumed) {
-      const nowMs = nowTime.getTime();
-      const timing = getAutoTrackTiming(
-        calc.ppm,
-        v.pizzasPerCase,
-        calc.perTray,
-        calc.perBatch,
-        machine,
-      );
-      doughTimerPausedRef.current = 0;
-      setIsDoughTimerPaused(false);
-      // Zero all consumption anchors on resume so the first post-resume tick does
-      // not compute a delta spanning the full pause duration (consumption overshoot).
-      // Zeroing the "next due" refs as well prevents a stale future timestamp from
-      // suppressing the first post-resume tick. This is the superset of what both
-      // Task #570 and Task #571 required.
-      trayLastMsRef.current = 0;
-      batchLastMsRef.current = 0;
-      trayNextDueMsRef.current = timing.trayMs > 0 ? nowMs + timing.trayMs : 0;
-      // Also reset the production ticker so it re-arms at nowMs + period/2 via
-      // the first-encounter path on the next tick — re-establishing the half-period
-      // phase offset from the new resume baseline instead of carrying a stale or
-      // simultaneously-overdue timestamp that collapses the offset to zero.
-      trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
-      batchNextDueMsRef.current = timing.batchConsumptionMs > 0 ? nowMs + timing.batchConsumptionMs : 0;
-      // Reset batch-production schedule so a pause longer than one full batch
-      // period (e.g. 12 min) does not trigger a phantom +1 batch production event
-      // on the very first post-resume tick. The ref re-arms at nowMs+fullBatchMs
-      // on the next tick (the same first-encounter path used on run start).
-      batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;
-      hopperProdNextDueMsRef.current = timing.hopperMs > 0 ? nowMs + timing.hopperMs : 0;
+      // See the Manual → Auto path above: resuming against a stale display
+      // clock can shorten a one-second timer to nothing.
+      const nowMs = Date.now();
+      rearmCaseTimer(nowMs);
+      rearmDoughTimers(nowMs);
     }
-  }, [calc.perBatch, calc.perTray, calc.ppm, machine, nowTime, runStatus, v.pizzasPerCase]);
+  }, [nowTime, rearmCaseTimer, rearmDoughTimers, runStatus]);
 
   // This barrier is declared before the tick-write effect below. React runs
   // effects in declaration order, so releasing a successful foreground sync

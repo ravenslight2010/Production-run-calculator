@@ -918,10 +918,17 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // Start with both sources present so every write path is observable.
       await seedDoughCounters(page, { trays: 3, batches: 1 });
       await page.waitForTimeout(400);
+      const beforeAutoResume = await readDoughCounters(page);
       // Counter edits follow the real operator path and temporarily suppress
       // auto tracking. Resume it before asserting the live countdowns or the
       // batch-production labels are correctly hidden by the UI.
       await page.getByRole("button", { name: /resume auto tracking/i }).click();
+      // Resume must re-arm the dough clocks from their full configured
+      // intervals. A 300ms window is safely below the shortest one-second
+      // batch cadence; an immediate due-time reset would already have changed
+      // the populated batch counter here.
+      await page.waitForTimeout(300);
+      expect(await readDoughCounters(page), "Auto Resume must not write immediately").toEqual(beforeAutoResume);
 
       // These are the three visible dough stages plus both corresponding
       // machine/line countdowns. Their values are rendered from tickDueRefs,

@@ -30,7 +30,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { UseFormReturn } from "react-hook-form";
-import { useAutoTrack } from "../useAutoTrack";
+import { getAutoTrackTiming, useAutoTrack } from "../useAutoTrack";
 import type { FormValues } from "../../types";
 
 // ── Fake form ────────────────────────────────────────────────────────────────
@@ -261,24 +261,29 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(0);
 
     // ── Resume ───────────────────────────────────────────────────────────
-    // caseNextDueMsRef is past-due → case tick fires.
-    // deltaCases=54, curTotal=0, prevExpected(30) > casesPerSkid(10)
-    // → guard fires: skip write, formResetSkippedRef ← true
+    // A resume starts the case countdown from a full period, so it must not
+    // write the stale 54-case delta in the same render.
     act(() => {
       vi.setSystemTime(tResume + 2);
       rerender(props("running", tResume + 2, elapsedAfterPause + 1));
     });
 
-    // Guard skipped the catch-up write; total ≤ 2 (never 54).
+    // No counter write is caused solely by the Resume action.
     const totalAfterResume = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
-    expect(totalAfterResume).toBeLessThanOrEqual(2);
+    expect(totalAfterResume).toBe(0);
 
-    // ── One more tick: guard disarmed → normal ≈ 1-case increment. ───────
+    // ── First full post-resume interval: stale-delta guard still wins. ────
     act(() => {
       vi.setSystemTime(tResume + CASE_PERIOD_MS + 3);
       rerender(props("running", tResume + CASE_PERIOD_MS + 3, elapsedAfterPause + 7));
     });
+    expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(0);
 
+    // ── Next ordinary period: guard disarmed → one normal increment. ──────
+    act(() => {
+      vi.setSystemTime(tResume + 2 * CASE_PERIOD_MS + 4);
+      rerender(props("running", tResume + 2 * CASE_PERIOD_MS + 4, elapsedAfterPause + 13));
+    });
     const totalAfterNextTick = store.skidsCompleted * 10 + store.casesOnCurrentSkid;
     expect(totalAfterNextTick).toBe(totalAfterResume + 1);
     expect(totalAfterNextTick).toBeLessThan(10);
@@ -874,8 +879,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 9. fireAutoTrackNow() clears a pre-existing dough-timer pause without
-  //    jumping trays.
+  // 9. Auto Resume clears a pre-existing dough-timer pause without jumping
+  //    trays or consuming during the resume render.
   //
   // "Resume now" on the auto-track suppression banner calls fireAutoTrackNow().
   // If doughTimerPausedRef was set BEFORE the operator tapped "Resume now",
@@ -892,8 +897,8 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   //   Tick 1  — establishes trayLastMsRef = T1.  trays: 5→4.
   //   pauseDoughTimers()  — freezes dough ticks; isDoughTimerPaused → true
   //   Wait 5 × TRAY_PERIOD_MS  — far past the 2-period cap.
-  //   fireAutoTrackNow()  — zeros doughTimerPausedRef AND trayLastMsRef.
-  //   Re-render — consumption tick fires; prevMs=0 → 1 period → 1 tray.
+  //   fireAutoTrackNow("dough") — clears the pause and re-arms from a full
+  //   duration. No consumption happens until that interval completes.
   //
   // Without the trayLastMsRef reset: prevMs=T1; elapsed ≈5 periods capped at
   // 4 min → floor(4*100/200) = 2 trays consumed → 4→2 (the jump).
@@ -902,7 +907,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   // Production (+1) ticks are suppressed by setting traysNeeded=0 and
   // batchesReady=0 so the consumption delta is observable on its own.
   // ───────────────────────────────────────────────────────────────────────────
-  it("9. fireAutoTrackNow() clears dough-timer pause; traysOnLine ticks on next render without jumping", () => {
+  it("9. Auto Resume clears dough pause and starts a full tray interval before consuming", () => {
     // batchesReady=0 + traysNeeded=0 suppress the production (+1) tick that
     // checks `calc.traysNeeded > 0 || v.batchesReady > 0`; without both being
     // zero the production +1 cancels the consumption −1 and traysOnLine never
@@ -968,32 +973,256 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(result.current.isDoughTimerPaused).toBe(true);
     expect(store.traysOnLine).toBe(4); // still frozen during pause
 
-    // ── fireAutoTrackNow() ────────────────────────────────────────────────
-    // Must zero doughTimerPausedRef  → isDoughTimerPaused false.
-    // Must zero trayLastMsRef        → consumption tick uses 1 period (no jump).
-    // Must zero trayNextDueMsRef     → tick fires on this same re-render.
-    //
-    // Tick fires immediately (trayNextDueMsRef=0):
-    //   prevMs = trayLastMsRef = 0  (just zeroed)
-    //   durationMin = trayPeriodMs/60000 = 2 min  (one clean period)
-    //   traysConsumed = floor(2*100/200) = 1  →  4→3
-    //
-    // WITHOUT trayLastMsRef zeroed: prevMs=T1; elapsed≈5 periods capped at
-    // 4 min → floor(4*100/200)=2 trays → 4→2 (the regression).
+    // ── Auto Resume ───────────────────────────────────────────────────────
+    // The populated timer restarts from its configured duration. Repeated
+    // resumes at the same instant are idempotent and cannot create a write.
     const tFire = tPaused + 1;
     act(() => {
       vi.setSystemTime(tFire);
-      result.current.fireAutoTrackNow();
+      result.current.fireAutoTrackNow("dough");
+      result.current.fireAutoTrackNow("dough");
       rerender(props(tFire));
     });
 
-    // ── Core assertion 1: isDoughTimerPaused clears immediately ───────────
     expect(result.current.isDoughTimerPaused).toBe(false);
+    expect(store.traysOnLine).toBe(4);
 
-    // ── Core assertion 2: exactly 1 tray consumed (no multi-tray jump) ────
-    // If trayLastMsRef had NOT been zeroed, 2 trays would be consumed (jump).
-    // If the dough-timer pause were still active, 0 trays would be consumed.
+    act(() => {
+      vi.setSystemTime(tFire + TRAY_PERIOD_MS + 1);
+      rerender(props(tFire + TRAY_PERIOD_MS + 1));
+    });
     expect(store.traysOnLine).toBe(3);
+  });
+
+  it("Manual → Auto re-arms every timer from its full cadence without an immediate write", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 3,
+      traysOnLine: 4,
+      batchesReady: 1,
+    });
+    const machine = { spinSec: 1, hopperSec: 1 };
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number): Props => ({
+      runId: "manual-to-auto",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC + (nowMs - T0) / 1000,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        skidsCompleted: store.skidsCompleted,
+        casesOnCurrentSkid: store.casesOnCurrentSkid,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+      machine,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0) },
+    );
+
+    // Operator switches to Manual, leaves it there longer than every normal
+    // cadence, then switches back to Auto through the same handler sequence
+    // (toggle state + fireAutoTrackNow("all")) used by Packaging.
+    act(() => {
+      result.current.setAutoTrackProgress(false);
+    });
+    const resumeAt = T0 + TRAY_PERIOD_MS * 2;
+    const beforeResume = {
+      cases: store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid,
+      trays: store.traysOnLine,
+      batches: store.batchesReady,
+    };
+    const timing = getAutoTrackTiming(
+      BASE_CALC.ppm,
+      BASE_V.pizzasPerCase,
+      BASE_CALC.perTray,
+      BASE_CALC.perBatch,
+      machine,
+    );
+
+    const staleDisplayNow = resumeAt - 999;
+    act(() => {
+      vi.setSystemTime(resumeAt);
+      result.current.setAutoTrackProgress(true);
+      result.current.fireAutoTrackNow("all");
+      // The display clock has not reached the resume event yet. This mirrors
+      // a tap immediately before the provider's next one-second clock render.
+      rerender(props(staleDisplayNow));
+    });
+
+    expect({
+      cases: store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid,
+      trays: store.traysOnLine,
+      batches: store.batchesReady,
+    }).toEqual(beforeResume);
+    expect({
+      case: result.current.tickDueRefs.case.current,
+      tray: result.current.tickDueRefs.tray.current,
+      trayProd: result.current.tickDueRefs.trayProd.current,
+      batch: result.current.tickDueRefs.batch.current,
+      batchProd: result.current.tickDueRefs.batchProd.current,
+      hopperProd: result.current.tickDueRefs.hopperProd.current,
+    }).toEqual({
+      case: resumeAt + timing.caseMs,
+      tray: resumeAt + timing.trayMs,
+      trayProd: resumeAt + timing.trayProductionMs,
+      batch: resumeAt + timing.batchConsumptionMs,
+      batchProd: resumeAt + timing.batchProductionMs,
+      hopperProd: resumeAt + timing.hopperMs,
+    });
+
+    // The one-second production countdown is the nearest configured boundary.
+    // If the toggle effect reset refs to zero after the handler re-armed them,
+    // this clock render would immediately mutate one of these counters.
+    act(() => {
+      vi.setSystemTime(resumeAt + timing.batchProductionMs - 1);
+      rerender(props(resumeAt + timing.batchProductionMs - 1));
+    });
+    expect({
+      cases: store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid,
+      trays: store.traysOnLine,
+      batches: store.batchesReady,
+    }).toEqual(beforeResume);
+  });
+
+  it("global pause → resume uses the real resume instant when the display clock is stale", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 3,
+      traysOnLine: 4,
+      batchesReady: 1,
+    });
+    const machine = { spinSec: 1, hopperSec: 1 };
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (status: "running" | "paused", nowMs: number): Props => ({
+      runId: "stale-clock-global-resume",
+      runStatus: status,
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC + (nowMs - T0) / 1000,
+      calc: BASE_CALC,
+      v: {
+        ...BASE_V,
+        skidsCompleted: store.skidsCompleted,
+        casesOnCurrentSkid: store.casesOnCurrentSkid,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+      machine,
+    });
+    const timing = getAutoTrackTiming(
+      BASE_CALC.ppm,
+      BASE_V.pizzasPerCase,
+      BASE_CALC.perTray,
+      BASE_CALC.perBatch,
+      machine,
+    );
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props("running", T0) },
+    );
+
+    act(() => {
+      vi.setSystemTime(T0 + 1);
+      rerender(props("paused", T0 + 1));
+    });
+    const beforeResume = {
+      cases: store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid,
+      trays: store.traysOnLine,
+      batches: store.batchesReady,
+    };
+    const resumeAt = T0 + TRAY_PERIOD_MS * 2;
+
+    act(() => {
+      vi.setSystemTime(resumeAt);
+      rerender(props("running", resumeAt - 999));
+    });
+
+    expect(result.current.tickDueRefs.batchProd.current).toBe(resumeAt + timing.batchProductionMs);
+    expect({
+      cases: store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid,
+      trays: store.traysOnLine,
+      batches: store.batchesReady,
+    }).toEqual(beforeResume);
+
+    act(() => {
+      vi.setSystemTime(resumeAt + timing.batchProductionMs - 1);
+      rerender(props("running", resumeAt + timing.batchProductionMs - 1));
+    });
+    expect({
+      cases: store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid,
+      trays: store.traysOnLine,
+      batches: store.batchesReady,
+    }).toEqual(beforeResume);
+  });
+
+  it("Auto Resume re-arms an empty packaging timer without touching dough schedules", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 0,
+      batchesReady: 0,
+    });
+    const autoSuppressUntilRef = { current: T0 + 60_000 };
+    const calcNoProd = { ...BASE_CALC, traysNeeded: 0, batchesNeeded: 0 };
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number): Props => ({
+      runId: "empty-packaging-resume",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: (nowMs - T0) / 1000,
+      calc: calcNoProd,
+      v: {
+        ...BASE_V,
+        freezerTime: 0,
+        traysOnLine: store.traysOnLine,
+        batchesReady: store.batchesReady,
+      },
+      form,
+      externalAutoSuppressRef: autoSuppressUntilRef,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0) },
+    );
+    const doughDueBeforeResume = {
+      tray: result.current.tickDueRefs.tray.current,
+      trayProd: result.current.tickDueRefs.trayProd.current,
+      batch: result.current.tickDueRefs.batch.current,
+      batchProd: result.current.tickDueRefs.batchProd.current,
+      hopperProd: result.current.tickDueRefs.hopperProd.current,
+    };
+    const resumeAt = T0 + CASE_PERIOD_MS - 1;
+
+    act(() => {
+      vi.setSystemTime(resumeAt);
+      autoSuppressUntilRef.current = 0;
+      result.current.fireAutoTrackNow("case");
+      result.current.fireAutoTrackNow("case");
+      rerender(props(resumeAt));
+    });
+
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(0);
+    expect(result.current.tickDueRefs.case.current).toBe(resumeAt + CASE_PERIOD_MS);
+    expect({
+      tray: result.current.tickDueRefs.tray.current,
+      trayProd: result.current.tickDueRefs.trayProd.current,
+      batch: result.current.tickDueRefs.batch.current,
+      batchProd: result.current.tickDueRefs.batchProd.current,
+      hopperProd: result.current.tickDueRefs.hopperProd.current,
+    }).toEqual(doughDueBeforeResume);
+
+    act(() => {
+      vi.setSystemTime(resumeAt + CASE_PERIOD_MS - 1);
+      rerender(props(resumeAt + CASE_PERIOD_MS - 1));
+    });
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(0);
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -1216,7 +1445,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 12. fireAutoTrackNow() after a long screen-off + suppress window
+  // 12. Auto Resume after a long screen-off + suppress window
   //     (no dough-timer pause): 2-period cap applies, ≤ 2 trays consumed.
   //
   // Unlike resumeDoughTimers() or the runStatus-"running" effect (both of which
@@ -1247,7 +1476,7 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
   //   fireAutoTrackNow() zeros trayNextDueMsRef but NOT trayLastMsRef.
   //   Re-render: tick fires; elapsed capped → exactly 2 trays consumed → 4→2.
   // ───────────────────────────────────────────────────────────────────────────
-  it("12. fireAutoTrackNow() after a long screen-off + suppress: 2-period cap, ≤ 2 trays consumed", () => {
+  it("12. Auto Resume after a long screen-off starts a clean full interval", () => {
     // Suppress production (+1) ticks so the net tray delta is purely from
     // consumption and the final count is exact and deterministic.
     const calcNoProd = { ...BASE_CALC, traysNeeded: 0, batchesNeeded: 0 };
@@ -1298,45 +1527,25 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     // apparent elapsed time seen by the post-fire tick.
     autoSuppressRef.current = T1 + 6 * TRAY_PERIOD_MS; // still "suppressed" at tFire
 
-    // ── Screen wakes: fireAutoTrackNow() + rerender at T1 + 5 periods. ─────
-    // tFire is 5 tray-periods after tick 1 — far beyond the 2-period cap.
-    // autoSuppressRef is still technically active; but fireAutoTrackNow()
-    // clears the internal "next due" gates (sets them to 0) so the tick fires
-    // on this re-render.  The suppression check (Date.now() < autoSuppressRef)
-    // is against Date.now() which we advance to tFire — we clear it first so
-    // the write is not blocked.
-    //
-    // fireAutoTrackNow() does NOT zero trayLastMsRef (doughTimerPausedRef=0),
-    // so prevMs stays at T1.
-    //
-    // Consumption tick math:
-    //   prevMs = T1  (unchanged — no mid-gap rerenders)
-    //   elapsed = tFire − T1 = 5 × TRAY_PERIOD_MS
-    //   durationMin = min(2 × TRAY_PERIOD_MS / 60000, elapsed / 60000)
-    //               = min(4 min, 10 min) = 4 min   ← 2-period cap
-    //   traysConsumed = floor(4 * 100 / 200) = floor(2) = 2
-    //   → traysOnLine: 4 − 2 = 2
+    // ── Screen wakes: Auto Resume re-arms from a clean baseline. ───────────
+    // The long hidden interval must not turn into an immediate tray write.
     const tFire = T1 + 5 * TRAY_PERIOD_MS;
     autoSuppressRef.current = 0; // expire suppress window so write proceeds
     act(() => {
       vi.setSystemTime(tFire);
-      result.current.fireAutoTrackNow();
+      result.current.fireAutoTrackNow("dough");
       rerender(props(tFire));
     });
 
     const traysDropped = 4 - store.traysOnLine;
+    expect(traysDropped).toBe(0);
+    expect(store.traysOnLine).toBe(4);
 
-    // ── Core assertion 1: cap — at most 2 trays consumed. ─────────────────
-    // This is the upper bound regardless of floating-point rounding.
-    expect(traysDropped).toBeLessThanOrEqual(2);
-
-    // ── Core assertion 2: exact cap hit — exactly 2 trays consumed. ───────
-    // elapsed ≈ 5 periods, capped at 2 → floor(4*100/200) = 2.
-    // If this drops to 1 in the future, fireAutoTrackNow() was changed to
-    // also zero trayLastMsRef (like resumeDoughTimers()) — that is a design
-    // choice that should be intentional, not accidental.
-    expect(traysDropped).toBe(2);
-    expect(store.traysOnLine).toBe(2);
+    act(() => {
+      vi.setSystemTime(tFire + TRAY_PERIOD_MS + 1);
+      rerender(props(tFire + TRAY_PERIOD_MS + 1));
+    });
+    expect(store.traysOnLine).toBe(3);
   });
 
   // ───────────────────────────────────────────────────────────────────────────

@@ -104,7 +104,7 @@ export interface LiveRunContextValue {
   setAutoTrackProgress: React.Dispatch<React.SetStateAction<boolean>>;
   autoTrackSuggestion: ReturnType<typeof useAutoTrack>["autoTrackSuggestion"];
   autoSuppressUntilRef: React.MutableRefObject<number>;
-  fireAutoTrackNow: () => void;
+  fireAutoTrackNow: (scope?: "case" | "dough" | "all") => void;
   tickDueRefs: ReturnType<typeof useAutoTrack>["tickDueRefs"];
   isDoughTimerPaused: boolean;
   pauseDoughTimers: () => void;

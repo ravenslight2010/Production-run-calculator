@@ -21176,7 +21176,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 setAutoTrackProgress(next);
                                 if (next) {
                                   autoSuppressUntilRef.current = 0;
-                                  fireAutoTrackNow();
+                                  fireAutoTrackNow("all");
                                 }
                               }}
                               className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
@@ -21224,7 +21224,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   const now = Date.now();
                                   onManual(skids, casesOnSkid, now);
                                   autoSuppressUntilRef.current = 0;
-                                  fireAutoTrackNow();
+                                  fireAutoTrackNow("case");
                                 }}
                               />
 
@@ -22431,7 +22431,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         show={manualOverrideBannerShow(autoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef.current)}
                         station="Dough"
                         minsLeft={suppressedMinsLeftNow}
-                        onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }}
+                        onResume={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow("dough"); }}
                       />
                       <div className="rounded-lg border border-border/50 bg-card/60 px-4 py-3 mb-3">
                           <div className="flex items-center justify-between mb-2">
