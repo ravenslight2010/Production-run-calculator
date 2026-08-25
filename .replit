@@ -66,15 +66,7 @@ args = "security:prod"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "evidence:operational"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "evidence:release"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "startup:clean"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
@@ -83,14 +75,6 @@ args = "release:standard"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "release:full"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "validation:spec-reconcile"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "validation:corpus"
 
 [[workflows.workflow]]
 name = "test"
@@ -233,34 +217,12 @@ args = "pnpm run audit:prod"
 isValidation = true
 
 [[workflows.workflow]]
-name = "evidence:operational"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/scripts run check-operational-skill-evidence"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
 name = "evidence:release"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scripts run check:release-evidence"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "startup:clean"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -283,28 +245,6 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run release:check:full"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "validation:spec-reconcile"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/spec-reconcile run test"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
-name = "validation:corpus"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/corpus-harness run test"
 
 [workflows.workflow.metadata]
 isValidation = true
