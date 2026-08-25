@@ -15,3 +15,30 @@
 - False-negative rate: **0.000**
 
 Excluded cases are not treated as do-not-trigger decisions. See the manual-review queue for provider failures, invalid or uncertain responses, and disagreements.
+
+## Manual review
+
+The queue is intentionally read-only input for review. List unresolved cases
+with:
+
+```sh
+python scripts/gemini_skill_trigger_benchmark.py review \
+  list
+```
+
+Record a manual decision and its reason in the separate
+`gemini-skill-trigger-manual-decisions.json` artifact:
+
+```sh
+python scripts/gemini_skill_trigger_benchmark.py review \
+  decide \
+  --id customer-import-audit-near-miss-1 \
+  --decision do_not_trigger \
+  --reason "This is a post-import data audit, not an import-pipeline change."
+```
+
+Use `--queue` and `--decisions` to work with alternate artifact paths. Manual
+decisions are never read by the benchmark evaluator and therefore never
+change Gemini metrics. Re-running the benchmark refreshes only the Gemini
+results, report, and review queue; the separate decisions artifact remains
+untouched.

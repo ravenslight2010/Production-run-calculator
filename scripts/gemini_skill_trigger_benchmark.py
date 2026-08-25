@@ -24,6 +24,8 @@ DECISIONS = {"trigger", "do_not_trigger", "uncertain"}
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_CONFIDENCE = 0.75
 MAX_RATIONALE_CHARS = 500
+MAX_MANUAL_REASON_CHARS = 1000
+DEFAULT_MANUAL_DECISIONS = Path("gemini-skill-trigger-manual-decisions.json")
 
 
 class ProviderUnavailable(RuntimeError):
@@ -272,12 +274,106 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text())
+    except FileNotFoundError as exc:
+        raise SystemExit(f"File not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid JSON in {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise SystemExit(f"Expected a JSON object in {path}")
+    return value
+
+
+def _manual_decisions(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    value = _read_json_object(path)
+    decisions = value.get("decisions", [])
+    if not isinstance(decisions, list) or not all(isinstance(item, dict) for item in decisions):
+        raise SystemExit(f"Expected a decisions array in {path}")
+    return decisions
+
+
+def _queue_cases(path: Path) -> list[dict[str, Any]]:
+    value = _read_json_object(path)
+    cases = value.get("cases")
+    if not isinstance(cases, list) or not all(isinstance(item, dict) for item in cases):
+        raise SystemExit(f"Expected a cases array in {path}")
+    return cases
+
+
+def list_review_cases(queue_path: Path, decisions_path: Path) -> list[dict[str, Any]]:
+    decisions = {item.get("id") for item in _manual_decisions(decisions_path)}
+    return [case for case in _queue_cases(queue_path) if case.get("id") not in decisions]
+
+
+def record_manual_decision(
+    queue_path: Path,
+    decisions_path: Path,
+    case_id: str,
+    decision: str,
+    reason: str,
+) -> dict[str, Any]:
+    if decision not in DECISIONS - {"uncertain"}:
+        raise SystemExit("manual decision must be trigger or do_not_trigger")
+    reason = reason.strip()
+    if not reason:
+        raise SystemExit("manual reason must not be empty")
+    if len(reason) > MAX_MANUAL_REASON_CHARS:
+        raise SystemExit(f"manual reason must be {MAX_MANUAL_REASON_CHARS} characters or fewer")
+
+    cases = _queue_cases(queue_path)
+    case = next((case for case in cases if case.get("id") == case_id), None)
+    if case is None:
+        raise SystemExit(f"Review case not found in {queue_path}: {case_id}")
+
+    existing = _manual_decisions(decisions_path)
+    if any(item.get("id") == case_id for item in existing):
+        raise SystemExit(f"Manual decision already recorded for {case_id}")
+
+    entry = {
+        "id": case_id,
+        "decision": decision,
+        "reason": reason,
+    }
+    payload = {
+        "provider": "manual",
+        "source": str(queue_path),
+        "manual_decisions_excluded_from_metrics": True,
+        "decisions": [*existing, entry],
+    }
+    decisions_path.write_text(json.dumps(payload, indent=2) + "\n")
+    return entry
+
+
+def _review_command(args: argparse.Namespace) -> None:
+    if args.review_action == "list":
+        cases = list_review_cases(args.queue, args.decisions)
+        for case in cases:
+            print(f"{case['id']}\t{case.get('skill', '')}\t{case.get('reason', '')}")
+        print(f"{len(cases)} pending case(s)")
+        return
+    entry = record_manual_decision(
+        args.queue, args.decisions, args.id, args.decision, args.reason
+    )
+    print(json.dumps(entry, indent=2))
+
+
 def _number(value: Any) -> str:
     return "N/A" if value is None else f"{value:.3f}"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("command", nargs="?", choices=("benchmark", "review"), default="benchmark")
+    parser.add_argument(
+        "review_action_positional",
+        nargs="?",
+        choices=("list", "decide"),
+        help="review action (use with the review command)",
+    )
     parser.add_argument("--corpus", type=Path, default=Path("skill-trigger-benchmark.json"))
     parser.add_argument("--results", type=Path, default=Path("gemini-skill-trigger-benchmark.json"))
     parser.add_argument("--report", type=Path, default=Path("gemini-skill-trigger-benchmark.md"))
@@ -285,7 +381,30 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--confidence-threshold", type=float, default=DEFAULT_CONFIDENCE)
     parser.add_argument("--retries", type=int, default=2)
+    parser.add_argument(
+        "--decisions",
+        type=Path,
+        default=DEFAULT_MANUAL_DECISIONS,
+        help="separate artifact for manual review decisions",
+    )
+    parser.add_argument("--review-action", choices=("list", "decide"))
+    parser.add_argument("--id", help="review case ID for --review-action decide")
+    parser.add_argument("--decision", choices=("trigger", "do_not_trigger"))
+    parser.add_argument("--reason", help="reason for a manual decision")
     args = parser.parse_args()
+    if args.command == "review":
+        review_action = args.review_action or args.review_action_positional
+        if not review_action:
+            parser.error("review requires --review-action list or decide")
+        if review_action == "decide" and not args.id:
+            parser.error("review decide requires --id")
+        if review_action == "decide" and not args.decision:
+            parser.error("review decide requires --decision")
+        if review_action == "decide" and args.reason is None:
+            parser.error("review decide requires --reason")
+        args.review_action = review_action
+        _review_command(args)
+        return
     corpus = json.loads(args.corpus.read_text())
     adapter = GeminiAdapter(model=args.model)
     records = evaluate(corpus, adapter, args.confidence_threshold, args.retries)

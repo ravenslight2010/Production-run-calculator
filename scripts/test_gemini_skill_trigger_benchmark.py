@@ -1,11 +1,16 @@
+import json
 import unittest
 from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from gemini_skill_trigger_benchmark import (
     Classification,
     GeminiAdapter,
     evaluate,
     metrics,
+    list_review_cases,
+    record_manual_decision,
     review_queue,
     validate_classification,
 )
@@ -78,6 +83,39 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["confusion"], {"true_positive": 1, "false_positive": 1, "true_negative": 1, "false_negative": 1})
         self.assertEqual(result["accuracy"], 0.5)
         self.assertEqual(result["excluded"], 1)
+
+    def test_manual_decisions_are_stored_separately_and_removed_from_pending(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue = root / "queue.json"
+            decisions = root / "decisions.json"
+            queue.write_text(json.dumps({
+                "provider": "gemini",
+                "cases": [
+                    {"id": "one", "skill": "demo", "reason": "disagreement"},
+                    {"id": "two", "skill": "demo", "reason": "uncertain"},
+                ],
+            }))
+            record = record_manual_decision(
+                queue, decisions, "one", "do_not_trigger", "The request is not in scope."
+            )
+            self.assertEqual(record["id"], "one")
+            self.assertEqual([case["id"] for case in list_review_cases(queue, decisions)], ["two"])
+            payload = json.loads(decisions.read_text())
+            self.assertTrue(payload["manual_decisions_excluded_from_metrics"])
+            self.assertEqual(payload["decisions"][0]["decision"], "do_not_trigger")
+
+    def test_manual_decision_rejects_unknown_or_duplicate_cases(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue = root / "queue.json"
+            decisions = root / "decisions.json"
+            queue.write_text(json.dumps({"cases": [{"id": "one"}]}))
+            with self.assertRaises(SystemExit):
+                record_manual_decision(queue, decisions, "missing", "trigger", "reason")
+            record_manual_decision(queue, decisions, "one", "trigger", "reason")
+            with self.assertRaises(SystemExit):
+                record_manual_decision(queue, decisions, "one", "trigger", "again")
 
 
 if __name__ == "__main__":
