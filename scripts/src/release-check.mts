@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { access, lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-type Step = {
+export type ReleaseStep = {
   label: string;
   args: string[];
   env?: Record<string, string>;
@@ -17,7 +17,7 @@ type StepStatus =
   | "INFRASTRUCTURE TIMEOUT"
   | "INFRASTRUCTURE ERROR";
 
-type StepResult = {
+export type ReleaseStepResult = {
   label: string;
   status: StepStatus;
   elapsedMs: number;
@@ -40,7 +40,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-mockup.log",
 ] as const;
 
-const steps: Step[] = [
+const steps: ReleaseStep[] = [
   {
     label: "generated API client freshness",
     args: ["run", "check:api-generated"],
@@ -288,8 +288,8 @@ export async function verifyReleaseEvidence(
   );
 }
 
-function runStep(
-  step: Step,
+export function runStep(
+  step: ReleaseStep,
 ): Promise<{ exitCode: number; elapsedMs: number; status: StepStatus }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -357,36 +357,14 @@ function runStep(
   });
 }
 
-async function writeReleaseReport(results: StepResult[]): Promise<string> {
-  const reportPath = resolve(
-    rootDir,
-    releaseEvidenceDir,
-    "release-check-report.md",
-  );
-  await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
+export function formatReleaseReport(
+  results: ReleaseStepResult[],
+  mode: "standard" | "full" = fullRun ? "full" : "standard",
+  availableEvidenceFiles: ReadonlySet<string> = new Set(),
+): string {
   const cleanStartPassed =
     results.find((result) => result.label === "clean-start smoke")?.status ===
     "PASS";
-  const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
-    file.startsWith("clean-start/"),
-  );
-  const availableEvidenceFiles = new Set<string>(
-    (
-      await Promise.all(
-        cleanStartEvidenceFiles.map(async (file) => {
-          try {
-            await access(resolve(rootDir, releaseEvidenceDir, file));
-            return file;
-          } catch {
-            return undefined;
-          }
-        }),
-      )
-    ).filter(
-      (file): file is (typeof RELEASE_EVIDENCE_ALLOWLIST)[number] =>
-        file !== undefined,
-    ),
-  );
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
@@ -395,7 +373,7 @@ async function writeReleaseReport(results: StepResult[]): Promise<string> {
     "# Release Check Report",
     "",
     `Generated: ${new Date().toISOString()}`,
-    `Mode: ${fullRun ? "full" : "standard"}`,
+    `Mode: ${mode}`,
     "",
     "## Gate results",
     "",
@@ -426,7 +404,45 @@ async function writeReleaseReport(results: StepResult[]): Promise<string> {
     "The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.",
     "",
   ];
-  await writeFile(reportPath, `${lines.join("\n")}\n`, "utf8");
+  return `${lines.join("\n")}\n`;
+}
+
+async function writeReleaseReport(results: ReleaseStepResult[]): Promise<string> {
+  const reportPath = resolve(
+    rootDir,
+    releaseEvidenceDir,
+    "release-check-report.md",
+  );
+  await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
+  const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
+    file.startsWith("clean-start/"),
+  );
+  const availableEvidenceFiles = new Set<string>(
+    (
+      await Promise.all(
+        cleanStartEvidenceFiles.map(async (file) => {
+          try {
+            await access(resolve(rootDir, releaseEvidenceDir, file));
+            return file;
+          } catch {
+            return undefined;
+          }
+        }),
+      )
+    ).filter(
+      (file): file is (typeof RELEASE_EVIDENCE_ALLOWLIST)[number] =>
+        file !== undefined,
+    ),
+  );
+  await writeFile(
+    reportPath,
+    formatReleaseReport(
+      results,
+      fullRun ? "full" : "standard",
+      availableEvidenceFiles,
+    ),
+    "utf8",
+  );
   return `${releaseEvidenceDir}/release-check-report.md`;
 }
 
@@ -451,7 +467,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
-  const results: Array<StepResult & { passed: boolean }> = [];
+  const results: Array<ReleaseStepResult & { passed: boolean }> = [];
   let failedGroup: string | undefined;
 
   for (const [index, step] of steps.entries()) {

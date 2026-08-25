@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  formatReleaseReport,
+  runStep,
   verifyReleaseEvidence,
 } from "./release-check.mts";
 
@@ -20,6 +22,41 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  const timedOut = await runStep({
+    label: "timed-out fixture",
+    args: ["exec", "node", "-e", "setTimeout(() => {}, 5000)"],
+    timeoutMs: 50,
+  });
+  assert.equal(timedOut.exitCode, 124);
+  assert.equal(timedOut.status, "INFRASTRUCTURE TIMEOUT");
+  assert.match(
+    formatReleaseReport([
+      {
+        label: "timed-out fixture",
+        status: timedOut.status,
+        elapsedMs: timedOut.elapsedMs,
+      },
+    ]),
+    /\| timed-out fixture \| INFRASTRUCTURE TIMEOUT \|/,
+  );
+
+  const failedChild = await runStep({
+    label: "failed-child fixture",
+    args: ["exec", "node", "-e", "process.exit(7)"],
+  });
+  assert.equal(failedChild.exitCode, 7);
+  assert.equal(failedChild.status, "FAIL");
+  assert.match(
+    formatReleaseReport([
+      {
+        label: "failed-child fixture",
+        status: failedChild.status,
+        elapsedMs: failedChild.elapsedMs,
+      },
+    ]),
+    /\| failed-child fixture \| FAIL \|/,
+  );
+
   const allowlistedFiles = [...RELEASE_EVIDENCE_ALLOWLIST];
   const root = await fixture(allowlistedFiles);
   try {
