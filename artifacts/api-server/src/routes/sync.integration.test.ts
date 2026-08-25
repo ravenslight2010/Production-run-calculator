@@ -1253,6 +1253,68 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b"]);
   });
 
+  it("preserves both operators' edits under concurrent scheduled-day writes", async () => {
+    // Scheduled days use the explicit-date route and allow intentional run-list
+    // replacement. The first-write unique-key retry must still merge the two
+    // operators' edits rather than letting whichever request commits last win.
+    const scheduledDate = "2030-06-03";
+    const clientToday = "2030-06-01";
+    const writes = [
+      { id: "scheduled-device-a", casesNeeded: 15 },
+      { id: "scheduled-device-b", casesNeeded: 25 },
+    ];
+    const putScheduled = ({ id, casesNeeded }: (typeof writes)[number]) =>
+      fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${clientToday}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: id,
+          payload: {
+            dayState: { runs: [run(id)], resetAt: 1_000 },
+            runValues: { [id]: { casesNeeded } },
+            runValuesUpdatedAt: { [id]: 1 },
+          },
+        }),
+      });
+
+    const responses = await Promise.all(writes.map(putScheduled));
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const storedResponse = await fetch(`${baseUrl}/api/sync/${scheduledDate}`, {
+      headers: authHeaders(),
+    });
+    expect(storedResponse.status).toBe(200);
+    const stored = (await storedResponse.json()) as {
+      dayState?: { runs?: Array<{ id: string }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    };
+    expect((stored.dayState?.runs ?? []).map((entry) => entry.id).sort()).toEqual(
+      writes.map(({ id }) => id).sort(),
+    );
+    expect(stored.runValues).toMatchObject({
+      "scheduled-device-a": { casesNeeded: 15 },
+      "scheduled-device-b": { casesNeeded: 25 },
+    });
+
+    // The losing first insert must retry against the newly-created scheduled
+    // row. Conflict logging is asynchronous, so wait for that retry evidence.
+    const deadline = Date.now() + 2_000;
+    let conflicts = await db
+      .select()
+      .from(syncConflictLogsTable)
+      .where(eq(syncConflictLogsTable.date, scheduledDate));
+    while (conflicts.length < 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      conflicts = await db
+        .select()
+        .from(syncConflictLogsTable)
+        .where(eq(syncConflictLogsTable.date, scheduledDate));
+    }
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].scope).toBe("live");
+    expect(conflicts[0].resolution).toBe("additive-union");
+    expect(conflicts[0].fieldsWithConflicts.some((field) => field.startsWith("dayState.runs:appended"))).toBe(true);
+  });
+
   it("preserves every run and logs each merge under a burst of concurrent FIRST writes", async () => {
     // Exercise more contention than the two-writer regression above. Every
     // writer starts from an empty date with a distinct run and value. The
