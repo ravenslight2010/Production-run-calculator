@@ -182,6 +182,36 @@ async function run(): Promise<void> {
     await rm(forbiddenRoot, { recursive: true, force: true });
   }
 
+  const fullRoot = await fixture(
+    RELEASE_EVIDENCE_ALLOWLIST.filter((file) => !file.startsWith("browser-full/")),
+    formatReleaseReport(
+      validLabels.map((label) => ({
+        label,
+        status: "PASS" as const,
+        elapsedMs: 100,
+      })),
+      "full",
+      new Set(),
+      {
+        revision: "current-revision",
+        environment: "disposable release test",
+        decision: "NO-GO",
+      },
+    ),
+  );
+  try {
+    await assert.rejects(
+      verifyReleaseEvidence(fullRoot, {
+        currentRevision: "current-revision",
+        expectedLabels: validLabels,
+      }),
+      /browser-full\/FINAL-REPORT\.md/,
+      "full mode must require browser evidence",
+    );
+  } finally {
+    await rm(fullRoot, { recursive: true, force: true });
+  }
+
   const symlinkRoot = await fixture();
   try {
     await mkdir(join(symlinkRoot, "clean-start"), { recursive: true });

@@ -1,5 +1,13 @@
 import { execFile, spawn } from "node:child_process";
-import { access, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+} from "node:fs/promises";
 import { resolve } from "node:path";
 
 export type ReleaseStep = {
@@ -50,6 +58,8 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "release-check.log",
+  "release-check-state.json",
 ] as const;
 
 const steps: ReleaseStep[] = [
@@ -233,6 +243,9 @@ function printHelp(): void {
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
   );
   console.log(
+    "  pnpm run release:check -- --resume       Resume the current revision's incomplete run",
+  );
+  console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence  Verify retained evidence files",
   );
   console.log("");
@@ -301,9 +314,21 @@ export async function verifyReleaseEvidence(
       ].join("\n"),
     );
   }
-  const requiredEvidence = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
-    file.startsWith("clean-start/"),
-  );
+  const reportPath = resolve(evidenceRoot, "release-check-report.md");
+  const report = await readFile(reportPath, "utf8");
+  const reportMode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
+    | "standard"
+    | "full"
+    | undefined;
+  const evidenceMode = options.expectedMode ?? reportMode;
+  const requiredEvidence = [
+    ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
+      file.startsWith("clean-start/"),
+    ),
+    ...(evidenceMode === "full"
+      ? ["browser-full/FINAL-REPORT.md" as const]
+      : []),
+  ];
   const missingEvidence = requiredEvidence.filter((file) => !files.includes(file));
   if (missingEvidence.length > 0) {
     throw new Error(
@@ -312,9 +337,18 @@ export async function verifyReleaseEvidence(
         .join("\n")}`,
     );
   }
-
-  const reportPath = resolve(evidenceRoot, "release-check-report.md");
-  const report = await readFile(reportPath, "utf8");
+  const emptyEvidence: string[] = [];
+  for (const file of requiredEvidence) {
+    const stats = await lstat(resolve(evidenceRoot, file));
+    if (stats.size === 0) emptyEvidence.push(file);
+  }
+  if (emptyEvidence.length > 0) {
+    throw new Error(
+      `Required release evidence is empty:\n${emptyEvidence
+        .map((file) => `- ${file}`)
+        .join("\n")}`,
+    );
+  }
   const revision =
     options.currentRevision ??
     (await new Promise<string>((resolveRevision, reject) => {
@@ -424,14 +458,27 @@ export function validateReleaseReport(
 
 export function runStep(
   step: ReleaseStep,
+  options: { logPath?: string } = {},
 ): Promise<{ exitCode: number; elapsedMs: number; status: StepStatus }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn(step.command ?? "pnpm", step.args, {
       cwd: rootDir,
       env: { ...process.env, ...step.env },
-      stdio: "inherit",
+      stdio: options.logPath ? ["ignore", "pipe", "pipe"] : "inherit",
     });
+    let logWrite = Promise.resolve();
+    const capture = (chunk: Buffer): void => {
+      const text = chunk.toString();
+      process.stdout.write(text);
+      if (options.logPath) {
+        logWrite = logWrite.then(() => appendFile(options.logPath!, text));
+      }
+    };
+    if (options.logPath) {
+      child.stdout?.on("data", capture);
+      child.stderr?.on("data", capture);
+    }
     let settled = false;
     let warningTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (code: number, status?: StepStatus): void => {
@@ -441,11 +488,13 @@ export function runStep(
       if (warningTimer) clearTimeout(warningTimer);
       const elapsedMs = Date.now() - startedAt;
       console.log(`${step.label} elapsed ${Math.round(elapsedMs / 1000)}s`);
-      resolve({
-        exitCode: code,
-        elapsedMs,
-        status: status ?? (code === 0 ? "PASS" : "FAIL"),
-      });
+      void logWrite.then(() =>
+        resolve({
+          exitCode: code,
+          elapsedMs,
+          status: status ?? (code === 0 ? "PASS" : "FAIL"),
+        }),
+      );
     };
     const warningMs =
       step.warningMs !== undefined && step.timeoutMs !== undefined
@@ -559,6 +608,7 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-api.log", "API startup log"),
     evidenceLink("clean-start/startup-web.log", "Web startup log"),
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
+    evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     "",
     "The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.",
     "",
@@ -623,6 +673,51 @@ async function writeReleaseReport(
   return `${releaseEvidenceDir}/release-check-report.md`;
 }
 
+type ReleaseCheckpoint = {
+  revision: string;
+  mode: "standard" | "full";
+  results: Array<ReleaseStepResult & { passed: boolean }>;
+};
+
+async function writeCheckpoint(
+  checkpointPath: string,
+  checkpoint: ReleaseCheckpoint,
+): Promise<void> {
+  await writeFile(
+    checkpointPath,
+    `${JSON.stringify(
+      { ...checkpoint, updatedAt: new Date().toISOString() },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
+async function readCheckpoint(
+  checkpointPath: string,
+  revision: string,
+): Promise<ReleaseCheckpoint | undefined> {
+  try {
+    const checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as ReleaseCheckpoint;
+    if (
+      checkpoint.revision !== revision ||
+      checkpoint.mode !== (fullRun ? "full" : "standard") ||
+      !Array.isArray(checkpoint.results)
+    ) {
+      throw new Error("checkpoint belongs to another revision or release mode");
+    }
+    return checkpoint;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new Error(
+      `Cannot resume release check: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 async function currentRevision(): Promise<string> {
   return new Promise((resolveRevision, reject) => {
     execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
@@ -663,17 +758,49 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
-  const results: Array<ReleaseStepResult & { passed: boolean }> = [];
+  const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
+  const checkpointPath = resolve(evidenceRoot, "release-check-state.json");
+  const logPath = resolve(evidenceRoot, "release-check.log");
+  await mkdir(evidenceRoot, { recursive: true });
+  const resume = process.argv.includes("--resume");
+  let results: Array<ReleaseStepResult & { passed: boolean }> = [];
+  if (resume) {
+    const checkpoint = await readCheckpoint(checkpointPath, revision);
+    if (!checkpoint) {
+      console.error("No incomplete release checkpoint exists for this revision.");
+      process.exit(1);
+    }
+    const firstUnpassed = checkpoint.results.findIndex((result) => !result.passed);
+    results =
+      firstUnpassed === -1
+        ? checkpoint.results
+        : checkpoint.results.slice(0, firstUnpassed);
+    console.log(`Resuming after ${results.length} completed gate(s).`);
+  } else {
+    await writeFile(
+      logPath,
+      `Release check ${new Date().toISOString()} revision ${revision} mode ${
+        fullRun ? "full" : "standard"
+      }\n`,
+      "utf8",
+    );
+  }
   let failedGroup: string | undefined;
 
   for (const [index, step] of steps.entries()) {
+    if (results.some((result) => result.label === step.label)) continue;
     if (failedGroup !== undefined && step.group !== failedGroup) {
       break;
     }
     console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-    const { exitCode, elapsedMs, status } = await runStep(step);
+    const { exitCode, elapsedMs, status } = await runStep(step, { logPath });
     const passed = exitCode === 0;
     results.push({ label: step.label, passed, status, elapsedMs });
+    await writeCheckpoint(checkpointPath, {
+      revision,
+      mode: fullRun ? "full" : "standard",
+      results,
+    });
     console.log(`${status} ${step.label}`);
     if (!passed) {
       if (step.group !== undefined) {
@@ -721,6 +848,7 @@ async function main(): Promise<void> {
         currentRevision: revision,
         expectedMode: fullRun ? "full" : "standard",
       });
+      await writeFile(checkpointPath, "", "utf8");
       console.log(`\nRelease report: ${reportPath}`);
     } catch (error) {
       console.error(

@@ -56,6 +56,42 @@ args = "check-model-bump"
 task = "workflow.run"
 args = "operational-skill-evidence"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "security:prod"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "evidence:operational"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "evidence:release"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "startup:clean"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "release:standard"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "release:full"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "validation:spec-reconcile"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "validation:corpus"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -71,34 +107,34 @@ isValidation = true
 name = "test:client"
 author = "agent"
 
+[workflows.workflow.metadata]
+isValidation = true
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/run-calculator run test"
-
-[workflows.workflow.metadata]
-isValidation = true
 
 [[workflows.workflow]]
 name = "test:rules"
 author = "agent"
 
+[workflows.workflow.metadata]
+isValidation = true
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/production-rules run test"
-
-[workflows.workflow.metadata]
-isValidation = true
 
 [[workflows.workflow]]
 name = "test:inventory-math"
 author = "agent"
 
+[workflows.workflow.metadata]
+isValidation = true
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/inventory-math run test"
-
-[workflows.workflow.metadata]
-isValidation = true
 
 [[workflows.workflow]]
 name = "test:spec-reconcile"
@@ -115,23 +151,23 @@ outputType = "console"
 name = "test:scheduled-recipe-check"
 author = "agent"
 
+[workflows.workflow.metadata]
+isValidation = true
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scheduled-recipe-check run test"
-
-[workflows.workflow.metadata]
-isValidation = true
 
 [[workflows.workflow]]
 name = "test:spec-export"
 author = "agent"
 
+[workflows.workflow.metadata]
+isValidation = true
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/spec-export run test"
-
-[workflows.workflow.metadata]
-isValidation = true
 
 [[workflows.workflow]]
 name = "test:corpus"
@@ -148,15 +184,56 @@ args = "pnpm --filter @workspace/corpus-harness run test"
 name = "check-model-bump"
 author = "agent"
 
+[workflows.workflow.metadata]
+isValidation = true
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scripts run check-model-bump"
+
+[[workflows.workflow]]
+name = "operational-skill-evidence"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run check-operational-skill-evidence"
+
+[[workflows.workflow]]
+name = "check:clean-start"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
+
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true
 
 [[workflows.workflow]]
-name = "operational-skill-evidence"
+name = "security:prod"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run audit:prod"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "evidence:operational"
 author = "agent"
 
 [[workflows.workflow.tasks]]
@@ -167,12 +244,70 @@ args = "pnpm --filter @workspace/scripts run check-operational-skill-evidence"
 isValidation = true
 
 [[workflows.workflow]]
-name = "check:clean-start"
+name = "evidence:release"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run check:release-evidence"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "startup:clean"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "release:standard"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run release:check"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "release:full"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run release:check:full"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "validation:spec-reconcile"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/spec-reconcile run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "validation:corpus"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/corpus-harness run test"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
