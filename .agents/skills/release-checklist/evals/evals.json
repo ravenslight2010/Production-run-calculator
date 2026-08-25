@@ -1,0 +1,27 @@
+{
+  "skill_name": "release-checklist",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We changed an API route and a shared client type. Tell me whether this release is ready to publish.",
+      "expected_output": "Runs or requests generated-client, typecheck, relevant tests, workflow/preview, and security/release gates; does not infer GO from one passing test.",
+      "assertions": [
+        {"name": "checks contract freshness", "description": "Requires generated-client verification when API contract or generated artifacts changed."},
+        {"name": "requires evidence", "description": "Reports command-level evidence and gives NO-GO for missing or failed required checks."},
+        {"name": "checks preview path", "description": "Verifies the browser-facing workflow and proxied preview, not localhost alone."}
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "A release adds a data heal and changes sync merge logic. Prepare the release decision without touching production data.",
+      "expected_output": "Identifies live heal impact, invokes sync safety checks, preserves destructive-test isolation, and stops on unresolved failures.",
+      "assertions": [
+        {"name": "surfaces live-data impact", "description": "Names the startup heal and explains that stored live data will change."},
+        {"name": "covers sync risks", "description": "Requires sync/reset/stamp evidence for sync changes."},
+        {"name": "protects production", "description": "Rejects destructive tests against production or shared operational databases."}
+      ],
+      "files": []
+    }
+  ]
+}

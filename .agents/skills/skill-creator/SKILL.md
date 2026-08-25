@@ -7,6 +7,10 @@ description: Create new skills, modify and improve existing skills, and measure 
 
 A skill for creating new skills and iteratively improving them.
 
+For maintenance-mode guidance, read `references/maintenance.md` when improving
+an existing skill. It covers identity preservation, bounded evaluation, safety,
+and completion checks without expanding the core workflow.
+
 At a high level, the process of creating a skill goes like this:
 
 - Decide what you want the skill to do and roughly how it should do it

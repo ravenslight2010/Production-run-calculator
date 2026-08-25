@@ -1,0 +1,26 @@
+{
+  "skill_name": "skill-creator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Improve an existing editable release skill. Keep its identity, add clear safety gates, and create a small regression eval set rather than running a large benchmark.",
+      "expected_output": "The original skill name and directory are preserved; the revised skill has explicit safety/output guidance and a focused eval set.",
+      "assertions": [
+        {"name": "preserves identity", "description": "Keeps the existing skill directory and lowercase-hyphen frontmatter name."},
+        {"name": "adds safety contract", "description": "Includes stop conditions and an explicit output format."},
+        {"name": "bounded evaluation", "description": "Creates 2–3 realistic eval prompts with objective assertions."}
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Audit a platform-managed authoring guide and an editable project skill. Upgrade only the editable skill and record the managed guide as deferred.",
+      "expected_output": "The managed file is not modified; the editable skill is reviewed and the deferment is recorded.",
+      "assertions": [
+        {"name": "respects managed boundary", "description": "Does not edit platform-managed skill content."},
+        {"name": "records deferral", "description": "Audit notes identify the managed guide and why it was deferred."}
+      ],
+      "files": []
+    }
+  ]
+}

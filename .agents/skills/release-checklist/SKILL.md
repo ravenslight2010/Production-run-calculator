@@ -10,6 +10,14 @@ specific than a generic "tests passed" check: the browser uses the artifact API
 workflow, some browser suites mutate live-day data, and server startup can run
 one-time data heals.
 
+## Scope
+
+Use this as the repository-specific release gate after reviewing the changed
+surface. Compose with, rather than duplicate, `review-before-shipping` for
+security, privacy, dependency, authorization, and deployment-fit decisions.
+Do not recommend deployment until every required and applicable gate below has
+recorded evidence.
+
 ## 0. Establish scope and the release record
 
 * Review the diff and classify it as server, client/UI, shared library,
