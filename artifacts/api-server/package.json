@@ -17,7 +17,7 @@
     "test:release:sync-sse": "vitest run src/routes/sync.integration.test.ts --testNamePattern='\\/sync\\/events'"
   },
   "dependencies": {
-    "@google/genai": "^2.10.0",
+    "@google/genai": "^2.18.0",
     "@workspace/ai-memory": "workspace:*",
     "@workspace/ai-review": "workspace:*",
     "@workspace/anomaly": "workspace:*",
