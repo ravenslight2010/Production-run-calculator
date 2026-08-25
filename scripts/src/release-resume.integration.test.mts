@@ -105,8 +105,13 @@ async function runRejectedCheckpointScenario(options: {
     assert.equal(rejected.code, 1, rejected.output);
     assert.match(
       rejected.output,
-      /checkpoint belongs to another revision or release mode/,
+      /Checkpoint revision or release mode is stale\. Rerun without --resume to create a fresh checkpoint\./,
       `${options.name} should explain why the checkpoint was rejected`,
+    );
+    assert.doesNotMatch(
+      rejected.output,
+      /uncaught|at readCheckpoint|Cannot resume release check:/i,
+      `${options.name} should report a concise recovery message`,
     );
     await assert.rejects(
       readFile(marker, "utf8"),

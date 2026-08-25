@@ -735,7 +735,9 @@ async function readCheckpoint(
       checkpoint.mode !== (fullRun ? "full" : "standard") ||
       !Array.isArray(checkpoint.results)
     ) {
-      throw new Error("checkpoint belongs to another revision or release mode");
+      throw new Error(
+        "Checkpoint revision or release mode is stale. Rerun without --resume to create a fresh checkpoint.",
+      );
     }
     return checkpoint;
   } catch (error) {
@@ -795,7 +797,14 @@ async function main(): Promise<void> {
   const resume = process.argv.includes("--resume");
   let results: Array<ReleaseStepResult & { passed: boolean }> = [];
   if (resume) {
-    const checkpoint = await readCheckpoint(checkpointPath, revision);
+    let checkpoint: ReleaseCheckpoint | undefined;
+    try {
+      checkpoint = await readCheckpoint(checkpointPath, revision);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message.replace(/^Cannot resume release check:\s*/, ""));
+      process.exit(1);
+    }
     if (!checkpoint) {
       console.error("No incomplete release checkpoint exists for this revision.");
       process.exit(1);
