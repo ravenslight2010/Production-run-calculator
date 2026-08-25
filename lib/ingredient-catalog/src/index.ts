@@ -25,6 +25,22 @@ export const INGREDIENT_CATEGORIES: IngredientCategory[] = [
   "general",
 ];
 
+/** Stable comparison key for catalog display names. */
+export function ingredientNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/** Merge category coverage without dropping categories already recorded. */
+export function unionIngredientCategories(
+  ...categoryLists: Array<readonly IngredientCategory[] | null | undefined>
+): IngredientCategory[] {
+  const categories = new Set<IngredientCategory>();
+  for (const list of categoryLists) {
+    for (const category of list ?? []) categories.add(category);
+  }
+  return [...categories];
+}
+
 export interface Ingredient {
   id: string;
   scope?: string;
@@ -107,7 +123,7 @@ export function buildIngredientIndex(items: Ingredient[]): IngredientIndex {
   const byName = new Map<string, Ingredient>();
   for (const item of items) {
     byId.set(item.id, item);
-    const key = item.name.trim().toLowerCase();
+    const key = ingredientNameKey(item.name);
     if (key && !byName.has(key)) byName.set(key, item);
   }
   return { byId, byName };

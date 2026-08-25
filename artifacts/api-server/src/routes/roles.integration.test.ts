@@ -796,6 +796,41 @@ describe("capability-based access control", () => {
 });
 
 describe("POST /ingredients/merge endpoint behavior", () => {
+  it("reuses an active identity on repeat import and adds categories", async () => {
+    const first = await req(MANAGER, "POST", "/api/ingredients", {
+      items: [{
+        id: "ingredient-first",
+        name: "  Mozzarella  ",
+        categories: ["cheese"],
+        enabled: true,
+      }],
+    });
+    expect(first.status).toBe(200);
+
+    const second = await req(MANAGER, "POST", "/api/ingredients", {
+      items: [{
+        id: "ingredient-from-repeat-import",
+        name: "mozzarella",
+        categories: ["mix"],
+        enabled: true,
+      }],
+    });
+    expect(second.status).toBe(200);
+
+    const body = (await second.json()) as {
+      items: Array<{ id: string; name: string; categories: string[]; enabled: boolean }>;
+    };
+    expect(body.items.filter((item) => item.enabled && item.name.toLowerCase() === "mozzarella")).toEqual([
+      {
+        id: "ingredient-first",
+        name: "Mozzarella",
+        categories: ["cheese", "mix"],
+        mergedInto: null,
+        enabled: true,
+      },
+    ]);
+  });
+
   it("lets a manager merge ingredients while preserving both category sets", async () => {
     await db.insert(ingredientsTable).values([
       {

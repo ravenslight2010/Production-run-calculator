@@ -8,6 +8,8 @@ import {
   pickerNamesForCategory,
   resolveActiveIngredient,
   resolveRowName,
+  ingredientNameKey,
+  unionIngredientCategories,
   type CatalogRecipeRow,
   type Ingredient,
 } from "./index";
@@ -22,6 +24,18 @@ function mkIngredient(overrides: Partial<Ingredient> = {}): Ingredient {
     ...overrides,
   };
 }
+
+describe("catalog identity helpers", () => {
+  it("uses a trimmed, case-insensitive key for repeat imports", () => {
+    expect(ingredientNameKey("  MozzARELLA ")).toBe("mozzarella");
+  });
+
+  it("unions category coverage without duplicates", () => {
+    expect(
+      unionIngredientCategories(["cheese", "general"], ["mix", "cheese"]),
+    ).toEqual(["cheese", "general", "mix"]);
+  });
+});
 
 describe("normalizeIngredient", () => {
   it("returns null for non-object input", () => {

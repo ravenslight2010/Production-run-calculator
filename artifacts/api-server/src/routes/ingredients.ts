@@ -6,13 +6,17 @@ import {
   DeleteIngredientsBody,
   MergeIngredientsBody,
 } from "@workspace/api-zod";
-import { normalizeIngredient, type Ingredient } from "@workspace/ingredient-catalog";
+import {
+  ingredientNameKey,
+  normalizeIngredient,
+  type Ingredient,
+  unionIngredientCategories,
+} from "@workspace/ingredient-catalog";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 import {
   ingredientMergePath,
   resolveIngredientMergeTarget,
-  unionIngredientCategories,
 } from "../lib/ingredientMerge";
 
 // Factory-wide ingredient catalog. Reading is open to any signed-in
@@ -96,22 +100,67 @@ router.post(
     }
 
     try {
-      for (const ingredient of byId.values()) {
-        const values = toDbValues(ingredient);
-        await db
-          .insert(ingredientsTable)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [ingredientsTable.id, ingredientsTable.scope],
-            set: {
-              name: values.name,
-              categories: values.categories,
-              mergedInto: values.mergedInto,
-              enabled: values.enabled,
-              updatedAt: values.updatedAt,
-            },
+      const scope = currentScope();
+      await db.transaction(async (tx) => {
+        // Serialize catalog writes for this scope so concurrent repeat imports
+        // cannot both observe a missing name and mint separate identities.
+        const existing = await tx
+          .select()
+          .from(ingredientsTable)
+          .where(eq(ingredientsTable.scope, scope))
+          .for("update");
+        for (const ingredient of byId.values()) {
+          const sameId = existing.find((row) => row.id === ingredient.id);
+          const sameName = existing.find(
+            (row) =>
+              row.enabled &&
+              !row.mergedInto &&
+              ingredientNameKey(row.name) === ingredientNameKey(ingredient.name),
+          );
+          // A fresh import commonly generates a fresh client id. Reuse the
+          // active name owner instead of creating another selectable identity.
+          const target = sameName ?? sameId;
+          if (target) {
+            const updatedAt = new Date();
+            await tx
+              .update(ingredientsTable)
+              .set({
+                ...(sameName && sameName.id !== ingredient.id
+                  ? {}
+                  : {
+                      name: ingredient.name,
+                      mergedInto: ingredient.mergedInto ?? null,
+                      enabled: ingredient.enabled,
+                    }),
+                categories: unionIngredientCategories(
+                  target.categories,
+                  ingredient.categories,
+                ),
+                updatedAt,
+              })
+              .where(
+                and(
+                  eq(ingredientsTable.id, target.id),
+                  eq(ingredientsTable.scope, scope),
+                ),
+              );
+            Object.assign(target, {
+              name: sameName && sameName.id !== ingredient.id ? target.name : ingredient.name,
+              categories: unionIngredientCategories(target.categories, ingredient.categories),
+              mergedInto: sameName && sameName.id !== ingredient.id ? target.mergedInto : ingredient.mergedInto ?? null,
+              enabled: sameName && sameName.id !== ingredient.id ? target.enabled : ingredient.enabled,
+            });
+            continue;
+          }
+
+          const values = toDbValues(ingredient);
+          await tx.insert(ingredientsTable).values(values);
+          existing.push({
+            ...values,
+            createdAt: new Date(),
           });
-      }
+        }
+      });
       const items = await listAll();
       res.json({ items });
     } catch (err) {

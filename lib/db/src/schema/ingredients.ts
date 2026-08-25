@@ -6,6 +6,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // Factory-wide ingredient catalog (Task #102). Ingredients used to be plain
 // names carried in each device's synced list (`ingredientTypes`,
@@ -53,7 +54,14 @@ export const ingredientsTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("ingredients_id_scope_idx").on(t.id, t.scope)],
+  (t) => [
+    uniqueIndex("ingredients_id_scope_idx").on(t.id, t.scope),
+    // Only one selectable identity may own a display name in a scope. Soft
+    // deleted and merged rows remain available for historical references.
+    uniqueIndex("ingredients_active_name_scope_idx")
+      .on(t.scope, sql`lower(btrim(${t.name}))`)
+      .where(sql`${t.enabled} = true AND ${t.mergedInto} IS NULL`),
+  ],
 );
 
 export type IngredientRow = typeof ingredientsTable.$inferSelect;
