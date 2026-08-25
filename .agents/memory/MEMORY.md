@@ -142,6 +142,7 @@
 - [Profile write gating](profile-write-gating.md) — profile saves/deletes gate on hasCapability("manage-profiles") not isManager; boot heals deferred to a capability-gated effect; push queue drops 403s as terminal.
 - [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa `autoUpdate` reloads clients; interactive “Reload now” UI requires `prompt` so `needRefresh` fires.
 - [AI memory health audits](ai-memory-health-audits.md) — historic aliases are evidence, not stale records; safe cleanup must rely on canonical merge/import maps and never touch facility facts or user conversations.
+- [Master-data health ownership](master-data-health-ownership.md) — legacy setup rows and purchased crusts stay protected as owned review warnings, not automatic launch blockers.
 - [Mounted AI cost paths](mounted-ai-cost-paths.md) — Express strips mount prefixes from req.path; cost lookups keyed by public API paths must recombine baseUrl + path.
 - [Mix-plan E2E setup](mix-plan-e2e-setup.md) — localStorage-seeded live runs can be replaced before Mix Plan renders; baseline pull tests may fail before exercising their assertions.
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.

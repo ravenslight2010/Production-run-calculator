@@ -60,10 +60,17 @@ const ACCEPTED_EMPTY_RECIPES = new Set([
   "dough:bonici 12\"",
   "dough:bonici 9\"",
   "dough:brand recipe",
+  // Purchased crusts intentionally have no in-house formula. Keep these
+  // visible for periodic setup review without treating them as defects.
+  "dough:pedone crust 7\"x12\" oval",
+  "dough:pinsa 12\" crust - pedone (wbf-1200-r)",
   "cheese:bbq chicken cheese mix",
   "cheese:lowe's/hannaford 5cheese mix",
   "mixes:bobo breakfast mix",
   "mixes:bobo's deluxe vegetable mix",
+]);
+const REVIEW_EMPTY_RECIPES = new Set([
+  "dough:lucia's dough recipe",
 ]);
 
 function finding(
@@ -159,7 +166,18 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
 
   profiles.forEach((p) => {
     const stable = key(p.key || `${p.brand}__${p.flavor}`);
-    if (!key(p.brand) || !key(p.flavor)) out.push(finding(scope, "profiles", "error", stable || `row:${p.key}`, "Profile has no usable brand and flavor identity."));
+    if (!key(p.brand) || !key(p.flavor)) out.push(withFollowUp(finding(
+      scope,
+      "profiles",
+      "warning",
+      stable || `row:${p.key}`,
+      "Profile has no usable brand and flavor identity.",
+      false,
+      true,
+      "stale",
+      "import-review",
+      "This legacy brand-level setup record is retained for its operational defaults; an import-review owner must assign a product identity before it is used for a scheduled run.",
+    )));
     const values = p.values && typeof p.values === "object" ? p.values as Record<string, unknown> : {};
     for (const field of ["doughRecipeName", "frontlineRecipeName"]) {
       const name = key(values[field]);
@@ -177,7 +195,7 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
           out.push(finding(scope, "profiles", "warning", findingId, `Profile references missing ${field} "${String(values[field])}"; confirmed source resolves it to "${confirmed.to}".`, true, true, "stale", "import-review", "A saved import or confirmed alias provides the replacement; a manager must explicitly apply the selected repair."));
           profileRepairs.push({ findingId, action: "update-profile-recipe-link", category: "profiles", profileKey: p.key, field, from: String(values[field]), to: confirmed.to, source: confirmed.source });
         } else {
-          out.push(finding(scope, "profiles", "error", findingId, `Profile references missing ${field} "${String(values[field])}".`, false, true, "stale", "import-review", "The stored link predates or differs from the current recipe pool; preserve it until the source import or manager confirms the replacement."));
+          out.push(withFollowUp(finding(scope, "profiles", "warning", findingId, `Profile references missing ${field} "${String(values[field])}".`, false, true, "stale", "import-review", "The stored link predates or differs from the current recipe pool; preserve it until the source import or manager confirms the replacement.")));
         }
       }
     }
@@ -196,25 +214,37 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
        if (row.enabled && (!components.length || !hasPositive) && !isValidEmpty) {
          const stableName = key(row.name);
          const accepted = ACCEPTED_EMPTY_RECIPES.has(`${category}:${stableName}`);
+         const reviewOnly = REVIEW_EMPTY_RECIPES.has(`${category}:${stableName}`);
          out.push(withFollowUp(finding(
            scope,
            category,
-           accepted ? "warning" : "error",
+           accepted || reviewOnly ? "warning" : "error",
            `${stableName}:${row.id}`,
-           accepted
+           accepted || reviewOnly
              ? `Enabled ${category} recipe "${row.name}" is an approved empty/placeholder record pending manager setup.`
              : `Enabled ${category} recipe "${row.name}" has no positive component values.`,
            false,
            true,
-           accepted ? "valid" : "defect",
+           accepted || reviewOnly ? "valid" : "defect",
            "master-data",
-           accepted
+           accepted || reviewOnly
              ? "The source import provides no authoritative formula. Preserve this protected record; the master-data owner must confirm a formula or disable it by the review date."
              : "The enabled recipe has neither a usable formula nor the documented buy-as-is/ratio representation.",
          )));
        }
     });
-    out.push(...duplicateFindings(rows, (row) => row.name, (name) => finding(scope, category, "warning", `duplicate:${name}`, `Multiple ${category} pool rows use the name "${name}".`)));
+    out.push(...duplicateFindings(rows, (row) => row.name, (name) => withFollowUp(finding(
+      scope,
+      category,
+      "warning",
+      `duplicate:${name}`,
+      `Multiple ${category} pool rows use the name "${name}".`,
+      false,
+      true,
+      "valid",
+      "master-data",
+      "Duplicate display names are retained until a manager confirms which protected recipe row is canonical.",
+    ))));
   };
   inspectRecipes("dough", dough);
   inspectRecipes("sauce", sauce);
@@ -222,7 +252,18 @@ export async function buildMasterDataHealthReport(executor: Executor, scope: str
   inspectRecipes("mixes", mixes);
   dough.forEach((row) => asRows(row.doughballVariants).forEach((variant, index) => {
     if (!key(variant.label) || (!positive(variant.weightOz) && !positive(variant.perTray))) {
-      out.push(finding(scope, "dough", "warning", `variant:${row.id}:${index}`, `Dough recipe "${row.name}" contains an unusable variant.`, false, true));
+      out.push(withFollowUp(finding(
+        scope,
+        "dough",
+        "warning",
+        `variant:${row.id}:${index}`,
+        `Dough recipe "${row.name}" contains an unusable variant.`,
+        false,
+        true,
+        "stale",
+        "master-data",
+        "The variant lacks enough information for automatic calculation; preserve the recipe and have the master-data owner confirm its weight or tray capacity.",
+      )));
     }
   }));
 

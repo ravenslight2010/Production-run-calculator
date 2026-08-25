@@ -734,3 +734,28 @@ describe("master-data health confirmed profile-link repairs", () => {
     expect(repairs.every((repair: any) => repair.category === "profiles")).toBe(true);
   });
 });
+
+describe("master-data health launch classification", () => {
+  it("keeps known legacy live records owned and non-blocking", async () => {
+    await db.insert(doughRecipesTable).values([
+      { id: "health-purchased-crust", scope: "live", name: 'Pedone Crust 7"x12" Oval', components: [] },
+      { id: "health-review-dough", scope: "live", name: "Lucia's Dough recipe", components: [] },
+    ]);
+    await db.insert(brandProfilesTable).values({
+      key: "health-legacy__", scope: "live", brand: "Health Legacy", flavor: "",
+      values: { frontlineRecipeName: "Missing legacy sauce" }, updatedAtMs: 1,
+    });
+
+    const report = await buildMasterDataHealthReport(db, "live", new Date("2026-08-25T00:00:00.000Z"));
+    const findings = report.findings.filter((item) =>
+      item.id.includes("health-legacy") ||
+      item.id.includes("health-purchased-crust") ||
+      item.id.includes("health-review-dough"),
+    );
+
+    expect(findings.length).toBeGreaterThanOrEqual(3);
+    expect(findings.every((item) => item.severity === "warning")).toBe(true);
+    expect(findings.every((item) => item.owner)).toBe(true);
+    expect(findings.every((item) => item.followUpDate === "2026-09-30")).toBe(true);
+  });
+});
