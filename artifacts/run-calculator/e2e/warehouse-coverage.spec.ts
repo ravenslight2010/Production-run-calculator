@@ -348,3 +348,62 @@ test("keeps capped offsite transfer guidance readable on a phone", async ({
     await db.end().catch(() => {});
   }
 });
+
+test("keeps capped offsite transfer guidance readable on a tablet", async ({
+  page,
+  request,
+}, testInfo) => {
+  const viewport = { width: 768, height: 1024 };
+  await page.setViewportSize(viewport);
+
+  const username = uniqueTestId("warehouse_tablet_manager");
+  const runId = uniqueTestId("warehouse_tablet_run");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await seedInventory(db);
+    await createManager(request, db, username);
+    await signIn(page, username);
+    await seedRun(page, runId);
+    await openInventory(page);
+
+    const coverage = page.getByTestId("warehouse-coverage");
+    const row = coverage
+      .getByText(fixture.ingredientName, { exact: true })
+      .locator("xpath=../..");
+    const guidanceText = `Can cover 9 lbs from 9 lbs from ${fixture.locationName}.`;
+    const guidance = row.getByText(guidanceText, { exact: true });
+
+    await expect(row).toContainText("Short");
+    await expect(guidance).toBeVisible();
+    await expect(guidance).toHaveText(guidanceText);
+
+    const layout = await guidance.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      right: element.getBoundingClientRect().right,
+    }));
+    expect(layout.scrollWidth).toBe(layout.clientWidth);
+    expect(layout.scrollHeight).toBe(layout.clientHeight);
+    expect(layout.right).toBeLessThanOrEqual(viewport.width);
+    expect(browserErrors).toEqual([]);
+
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-coverage-tablet-guidance.png"),
+      fullPage: true,
+    });
+  } finally {
+    await db.end().catch(() => {});
+  }
+});
