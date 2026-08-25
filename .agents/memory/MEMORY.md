@@ -11,8 +11,7 @@
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
 - [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; PURCHASED crusts (Bonici/Pedone parbake/pinsa) get NO die ever; apps self-heal DIE_TYPES from profiles honoring deletions.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
-- [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) — maintain the responsive web app for desktop, phone, and tablet; `?screen=` station displays remain web-only.
-- [Web+mobile live sync](live-sync-web-mobile.md) + [body limit](sync-body-limit.md) — shared /api/sync day-state; non-clobber merges, echo/lost-update guards; API json limit 10mb (payload embeds full recipes, default 100kb → 413 broke all sync).
+- [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
 - [Autosave edit attribution](autosave-edit-attribution.md) + [profile clobber](profile-clobber-blank-form.md) — autosave must never stamp an all-default run (empty-over-populated clobbers peers) nor zero a profile before it loads (saveProfile guard + seed self-heal).
 - [Run-list loss protection](run-list-loss-protection.md) — protectRunValues additively unions dayState.runs + tombstone filter + resetAt escape hatch; upsert retries on 23505.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
