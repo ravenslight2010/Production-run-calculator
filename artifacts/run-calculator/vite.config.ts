@@ -195,6 +195,12 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
+    // Playwright writes HTML reports, traces, screenshots, and other retained
+    // failure artifacts under the calculator root. They are not app source and
+    // must not trigger a Vite reload while browser checks are running.
+    watch: {
+      ignored: ["**/playwright-report/**", "**/test-results/**"],
+    },
     // Keep local/CI browser journeys same-origin while the API runs separately.
     // Replit's production proxy provides this routing outside Vite.
     proxy: {
