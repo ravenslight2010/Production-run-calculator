@@ -1801,6 +1801,57 @@ describe("/sync — conflict logging to sync_conflict_logs", () => {
     )).toBe(true);
   });
 
+  it("keeps concurrent PUTs for different future dates isolated", async () => {
+    // These requests must use the dated endpoint, not /sync/today: a date-key
+    // mix-up would otherwise write one scheduled day into the other. Both
+    // inserts start from an empty disposable database and must retain only
+    // their own run and run value after completing concurrently.
+    const dateA = "2030-09-10";
+    const dateB = "2030-09-11";
+    const putScheduled = (date: string, runId: string, casesNeeded: number) =>
+      fetch(`${baseUrl}/api/sync/${date}?today=2030-09-09`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: `scheduled-${runId}`,
+          payload: {
+            dayState: {
+              date,
+              runs: [{ id: runId, brand: "Cross-date", flavor: date }],
+              resetAt: 1000,
+            },
+            runValues: { [runId]: { casesNeeded } },
+            runValuesUpdatedAt: { [runId]: 1 },
+          },
+        }),
+      });
+
+    const responses = await Promise.all([
+      putScheduled(dateA, "date-a-run", 10),
+      putScheduled(dateB, "date-b-run", 20),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+
+    const readScheduled = async (date: string) => fetch(
+      `${baseUrl}/api/sync/${date}?today=2030-09-09`,
+      { headers: authHeaders() },
+    ).then((response) => response.json()) as Promise<{
+      dayState?: { date?: string; runs?: Array<{ id: string }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    }>;
+    const [storedA, storedB] = await Promise.all([
+      readScheduled(dateA),
+      readScheduled(dateB),
+    ]);
+
+    expect(storedA.dayState?.date).toBe(dateA);
+    expect(storedA.dayState?.runs?.map((run) => run.id)).toEqual(["date-a-run"]);
+    expect(storedA.runValues).toEqual({ "date-a-run": { casesNeeded: 10 } });
+    expect(storedB.dayState?.date).toBe(dateB);
+    expect(storedB.dayState?.runs?.map((run) => run.id)).toEqual(["date-b-run"]);
+    expect(storedB.runValues).toEqual({ "date-b-run": { casesNeeded: 20 } });
+  });
+
   it("inserts a conflict row when the stored run object wins the metaUpdatedAt LWW", async () => {
     // Seed a run with a high metaUpdatedAt (simulating a started run). Push an
     // older copy of the same run — the server must keep the newer stored object.

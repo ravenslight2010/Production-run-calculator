@@ -1,0 +1,97 @@
+{
+  "revision": "005bd8fd83fcc589a0eedec99599184c5ac778e7",
+  "mode": "standard",
+  "results": [
+    {
+      "label": "production dependency audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1904
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 30281
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 938
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 26402
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 66640
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 5980
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2736
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1166
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 14250
+    },
+    {
+      "label": "API unit tests (release shard 1/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 56833
+    },
+    {
+      "label": "API integration tests (release shard 2/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 413633
+    },
+    {
+      "label": "API integration tests (release shard 3/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 224480
+    },
+    {
+      "label": "API integration tests (release shard 4/6)",
+      "passed": false,
+      "status": "INFRASTRUCTURE TIMEOUT",
+      "elapsedMs": 480008
+    },
+    {
+      "label": "API sync tests (release shard 5/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 63497
+    },
+    {
+      "label": "API sync SSE tests (release shard 6/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 20992
+    }
+  ],
+  "updatedAt": "2026-08-25T20:14:22.469Z"
+}
