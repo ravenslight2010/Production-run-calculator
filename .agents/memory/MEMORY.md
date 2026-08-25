@@ -156,3 +156,4 @@
 - [A11y dialog browser fixtures](a11y-dialog-browser-fixtures.md) — import-dialog journeys need a fully capable manager role seeded in disposable DBs before UI capability guards render entry points.
 - [Browser timer fixtures](browser-timer-fixtures.md) — controlled sleep/resume checks must account for tunnel delay and capture counters on their owning tab.
 - [Delayed onboarding overlay](delayed-onboarding-overlay.md) — sign-up fixtures must wait for and dismiss the asynchronously mounted first-login dialog before interacting with the app.
+- [Release-check shard budget](release-check-shard-budget.md) — serialized API capability coverage can exceed four minutes; budget release timeouts from shard runtime, not individual tests.

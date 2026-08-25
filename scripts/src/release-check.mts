@@ -23,8 +23,12 @@ export type ReleaseStepResult = {
   elapsedMs: number;
 };
 
-const API_SHARD_TIMEOUT_MS = 4 * 60_000;
-const API_SHARD_WARNING_MS = 3 * 60_000;
+// The third integration shard contains the capability matrix and the
+// remaining integration fixtures. It is intentionally serialized by the API
+// Vitest config, so it can exceed four minutes on the release environment even
+// when every test is healthy.
+const API_SHARD_TIMEOUT_MS = 8 * 60_000;
+const API_SHARD_WARNING_MS = 6 * 60_000;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
 const releaseEvidenceDir =
@@ -38,6 +42,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-api.log",
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
+  "browser-full/FINAL-REPORT.md",
 ] as const;
 
 const steps: ReleaseStep[] = [
