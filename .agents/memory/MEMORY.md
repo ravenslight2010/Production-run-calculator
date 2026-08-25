@@ -153,7 +153,6 @@
 - [SSE disconnect registration](sse-disconnect-registration.md) — register close cleanup before awaited initial snapshot work, and cancel test readers explicitly.
 - [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) — compare ingredient changes in native batch/per-pizza units and retain a provenance-linked pre-import undo state.
-- [A11y dialog browser fixtures](a11y-dialog-browser-fixtures.md) — import-dialog journeys need a fully capable manager role seeded in disposable DBs before UI capability guards render entry points.
-- [Browser timer fixtures](browser-timer-fixtures.md) — controlled sleep/resume checks must account for tunnel delay and capture counters on their owning tab.
-- [Delayed onboarding overlay](delayed-onboarding-overlay.md) — sign-up fixtures must wait for and dismiss the asynchronously mounted first-login dialog before interacting with the app.
+- [A11y browser fixtures](a11y-dialog-browser-fixtures.md) + [reload persistence](a11y-reload-fixtures.md) — seed manager capabilities and idempotent localStorage state before authenticated navigation.
+- [Browser timer fixtures](browser-timer-fixtures.md) + [onboarding overlay](delayed-onboarding-overlay.md) — controlled journeys must account for tunnel timing and asynchronously mounted dialogs.
 - [Release-check shard budget](release-check-shard-budget.md) — serialized API capability coverage can exceed four minutes; budget release timeouts from shard runtime, not individual tests.

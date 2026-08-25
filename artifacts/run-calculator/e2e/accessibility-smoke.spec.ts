@@ -298,10 +298,20 @@ async function seedPendingRun(page: Page): Promise<string> {
     localStorage.removeItem("run-calc-day");
   });
   await page.addInitScript((id: string) => {
-    // Seed only the next reload. Subsequent dialog checks and reloads should
-    // observe the state produced by the application, not recreate the run.
-    if (sessionStorage.getItem("a11y-pending-seed-applied") === "1") return;
-    sessionStorage.setItem("a11y-pending-seed-applied", "1");
+    // Init scripts run before every navigation, including reloads triggered by
+    // authenticated startup (for example, a sandbox refresh). Keep the seed
+    // idempotent so a startup reload cannot strand this journey on the blank
+    // placeholder, while never replacing a real run that the app has created.
+    try {
+      const raw = localStorage.getItem("run-calc-day");
+      const day = raw ? JSON.parse(raw) as {
+        runs?: Array<{ id?: string; brand?: string; flavor?: string; startedAt?: string; endedAt?: string }>;
+      } : {};
+      if (day.runs?.some((run) => run.id === id)) return;
+      if (day.runs?.some((run) => run.brand || run.flavor || run.startedAt || run.endedAt)) return;
+    } catch {
+      // Replace malformed fixture state below.
+    }
     localStorage.setItem(
       "run-calc-day",
       JSON.stringify({
