@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -116,6 +118,78 @@ class GeminiBenchmarkTests(unittest.TestCase):
             record_manual_decision(queue, decisions, "one", "trigger", "reason")
             with self.assertRaises(SystemExit):
                 record_manual_decision(queue, decisions, "one", "trigger", "again")
+
+    def test_cli_review_workflow_and_benchmark_decisions_isolation(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            queue = root / "queue.json"
+            decisions = root / "decisions.json"
+            queue.write_text(json.dumps({
+                "provider": "gemini",
+                "cases": [
+                    {"id": "one", "skill": "demo", "reason": "disagreement"},
+                    {"id": "two", "skill": "demo", "reason": "uncertain"},
+                ],
+            }))
+            script = Path(__file__).with_name("gemini_skill_trigger_benchmark.py").resolve()
+
+            def run_cli(*arguments):
+                return subprocess.run(
+                    [sys.executable, str(script), *arguments],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                )
+
+            listed = run_cli(
+                "review", "list",
+                "--queue", str(queue),
+                "--decisions", str(decisions),
+            )
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            self.assertIn("2 pending case(s)", listed.stdout)
+            self.assertIn("one", listed.stdout)
+            self.assertIn("two", listed.stdout)
+
+            decided = run_cli(
+                "review", "decide",
+                "--queue", str(queue),
+                "--decisions", str(decisions),
+                "--id", "one",
+                "--decision", "do_not_trigger",
+                "--reason", "The request is not in scope.",
+            )
+            self.assertEqual(decided.returncode, 0, decided.stderr)
+            self.assertTrue(decisions.exists())
+            decision_payload = json.loads(decisions.read_text())
+            self.assertEqual(decision_payload["decisions"][0]["id"], "one")
+            self.assertEqual(decision_payload["decisions"][0]["decision"], "do_not_trigger")
+
+            listed_after_decision = run_cli(
+                "review", "list",
+                "--queue", str(queue),
+                "--decisions", str(decisions),
+            )
+            self.assertEqual(listed_after_decision.returncode, 0, listed_after_decision.stderr)
+            self.assertIn("1 pending case(s)", listed_after_decision.stdout)
+            self.assertNotIn("one", listed_after_decision.stdout)
+            self.assertIn("two", listed_after_decision.stdout)
+
+            decisions.write_text("manual decisions must not be read by benchmark\n")
+            decisions_before_benchmark = decisions.read_bytes()
+            corpus_path = root / "corpus.json"
+            corpus_path.write_text(json.dumps({"skills": []}))
+            benchmark = run_cli(
+                "benchmark",
+                "--corpus", str(corpus_path),
+                "--results", str(root / "results.json"),
+                "--report", str(root / "report.md"),
+                "--queue", str(root / "benchmark-queue.json"),
+                "--decisions", str(decisions),
+            )
+            self.assertEqual(benchmark.returncode, 0, benchmark.stderr)
+            self.assertIn('"evaluated": 0', benchmark.stdout)
+            self.assertEqual(decisions.read_bytes(), decisions_before_benchmark)
 
 
 if __name__ == "__main__":
