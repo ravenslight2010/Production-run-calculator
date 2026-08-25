@@ -423,6 +423,47 @@ async function runStaleCheckpointScenarios(): Promise<void> {
   );
 }
 
+async function runDamagedCheckpointScenarios(): Promise<void> {
+  for (const scenario of ["truncated", "unreadable"]) {
+    const evidenceDir = await mkdtemp(
+      join(tmpdir(), `release-resume-damaged-${scenario}-`),
+    );
+    const checkpointPath = join(evidenceDir, "release-check-state.json");
+    const steps: FixtureStep[] = [
+      {
+        label: "fixture gate must not start",
+        command: process.execPath,
+        args: ["-e", "throw new Error('gate should not run');"],
+      },
+    ];
+
+    try {
+      if (scenario === "truncated") {
+        await writeFile(checkpointPath, '{"revision":"truncated"', "utf8");
+      } else {
+        await mkdir(checkpointPath);
+      }
+
+      const rejected = await runReleaseCheck(evidenceDir, steps, ["--resume"]);
+      assert.equal(rejected.code, 1, rejected.output);
+      assert.match(
+        rejected.output,
+        /Release checkpoint is malformed or unreadable\. Rerun without --resume to create a fresh checkpoint\./,
+        `${scenario} checkpoint should explain how to recover`,
+      );
+      assert.doesNotMatch(
+        rejected.output,
+        /uncaught|at readCheckpoint|Cannot resume release check:|Unexpected end of JSON input|EISDIR/i,
+        `${scenario} checkpoint should not expose parser or filesystem details`,
+      );
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+  console.log("Release resume damaged-checkpoint scenarios passed.");
+}
+
 await run();
 await runFullModeScenario();
 await runStaleCheckpointScenarios();
+await runDamagedCheckpointScenarios();

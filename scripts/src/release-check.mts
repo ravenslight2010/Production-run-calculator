@@ -709,6 +709,11 @@ type ReleaseCheckpoint = {
   results: Array<ReleaseStepResult & { passed: boolean }>;
 };
 
+const STALE_CHECKPOINT_MESSAGE =
+  "Checkpoint revision or release mode is stale. Rerun without --resume to create a fresh checkpoint.";
+const DAMAGED_CHECKPOINT_MESSAGE =
+  "Release checkpoint is malformed or unreadable. Rerun without --resume to create a fresh checkpoint.";
+
 async function writeCheckpoint(
   checkpointPath: string,
   checkpoint: ReleaseCheckpoint,
@@ -729,24 +734,30 @@ async function readCheckpoint(
   revision: string,
 ): Promise<ReleaseCheckpoint | undefined> {
   try {
-    const checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as ReleaseCheckpoint;
+    const checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as
+      | Partial<ReleaseCheckpoint>
+      | null;
+    if (checkpoint === null || typeof checkpoint !== "object") {
+      throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
+    }
     if (
       checkpoint.revision !== revision ||
       checkpoint.mode !== (fullRun ? "full" : "standard") ||
       !Array.isArray(checkpoint.results)
     ) {
-      throw new Error(
-        "Checkpoint revision or release mode is stale. Rerun without --resume to create a fresh checkpoint.",
-      );
+      throw new Error(STALE_CHECKPOINT_MESSAGE);
     }
-    return checkpoint;
+    return checkpoint as ReleaseCheckpoint;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw new Error(
-      `Cannot resume release check: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+    if (
+      error instanceof Error &&
+      (error.message === STALE_CHECKPOINT_MESSAGE ||
+        error.message === DAMAGED_CHECKPOINT_MESSAGE)
+    ) {
+      throw error;
+    }
+    throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
   }
 }
 
