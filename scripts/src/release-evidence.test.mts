@@ -1,0 +1,74 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  RELEASE_EVIDENCE_ALLOWLIST,
+  verifyReleaseEvidence,
+} from "./release-check.mts";
+
+async function fixture(
+  files: string[] = ["release-check-report.md"],
+): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "release-evidence-"));
+  for (const file of files) {
+    const path = join(root, file);
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, "fixture evidence\n");
+  }
+  return root;
+}
+
+async function run(): Promise<void> {
+  const allowlistedFiles = [...RELEASE_EVIDENCE_ALLOWLIST];
+  const root = await fixture(allowlistedFiles);
+  try {
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root),
+      "an allowlisted evidence set should pass",
+    );
+
+    await rm(join(root, "release-check-report.md"));
+    await assert.rejects(
+      verifyReleaseEvidence(root),
+      /release-check-report\.md \(missing\)/,
+      "a missing report should be clearly identified",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const forbiddenRoot = await fixture();
+  try {
+    await writeFile(join(forbiddenRoot, "debug.log"), "not retained\n");
+    await assert.rejects(
+      verifyReleaseEvidence(forbiddenRoot),
+      /- debug\.log/,
+      "a forbidden file should be listed in the validation error",
+    );
+  } finally {
+    await rm(forbiddenRoot, { recursive: true, force: true });
+  }
+
+  const symlinkRoot = await fixture();
+  try {
+    await mkdir(join(symlinkRoot, "clean-start"), { recursive: true });
+    await symlink(
+      join(symlinkRoot, "release-check-report.md"),
+      join(symlinkRoot, "clean-start", "startup-api.log"),
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(symlinkRoot),
+      /- clean-start\/startup-api\.log/,
+      "a symlink should be listed as an invalid evidence entry",
+    );
+  } finally {
+    await rm(symlinkRoot, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release evidence tests passed (allowlist, missing report, forbidden file, symlink).",
+  );
+}
+
+await run();

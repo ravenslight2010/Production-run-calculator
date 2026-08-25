@@ -18,7 +18,7 @@ const fullRun = process.argv.includes("--full");
 const releaseEvidenceDir =
   process.env.RELEASE_EVIDENCE_DIR ?? "release-evidence";
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
-const RELEASE_EVIDENCE_ALLOWLIST = [
+export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
@@ -230,8 +230,9 @@ async function listEvidenceFiles(
   return files;
 }
 
-async function verifyReleaseEvidence(): Promise<void> {
-  const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
+export async function verifyReleaseEvidence(
+  evidenceRoot = resolve(rootDir, releaseEvidenceDir),
+): Promise<void> {
   const expected = new Set<string>(RELEASE_EVIDENCE_ALLOWLIST);
   const unexpected: string[] = [];
 
@@ -413,76 +414,91 @@ async function writeReleaseReport(
   return `${releaseEvidenceDir}/release-check-report.md`;
 }
 
-if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  printHelp();
-  process.exit(0);
-}
-
-if (process.argv.includes("--verify-evidence")) {
-  try {
-    await verifyReleaseEvidence();
+async function main(): Promise<void> {
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    printHelp();
     process.exit(0);
-  } catch (error) {
-    console.error(
-      `Release evidence verification failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    process.exit(1);
   }
-}
 
-console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
-const results: Array<{ label: string; passed: boolean; elapsedMs: number }> =
-  [];
-let failedGroup: string | undefined;
-
-for (const [index, step] of steps.entries()) {
-  if (failedGroup !== undefined && step.group !== failedGroup) {
-    break;
-  }
-  console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-  const { exitCode, elapsedMs } = await runStep(step);
-  const passed = exitCode === 0;
-  results.push({ label: step.label, passed, elapsedMs });
-  console.log(`${passed ? "PASS" : "FAIL"} ${step.label}`);
-  if (!passed) {
-    if (step.group !== undefined) {
-      failedGroup = step.group;
+  if (process.argv.includes("--verify-evidence")) {
+    try {
+      await verifyReleaseEvidence();
+      process.exit(0);
+    } catch (error) {
       console.error(
-        `\n${step.group} has a failed shard; running the remaining shards.`,
+        `Release evidence verification failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
-      continue;
+      process.exit(1);
     }
-    console.error("\nRelease check stopped at the first failed gate.");
-    break;
   }
-}
 
-console.log("\nRelease check summary:");
-for (const result of results) {
-  console.log(
-    `${result.passed ? "PASS" : "FAIL"} ${result.label} (${Math.round(
-      result.elapsedMs / 1000,
-    )}s)`,
-  );
-}
-const apiShardResults = results.filter((result) =>
-  result.label.includes("(release shard"),
-);
-if (apiShardResults.length > 0) {
-  const passedApiShards = apiShardResults.filter(
-    (result) => result.passed,
-  ).length;
-  console.log(
-    `API release shards: ${passedApiShards}/${apiShardResults.length} passed.`,
-  );
-}
+  console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
+  const results: Array<{ label: string; passed: boolean; elapsedMs: number }> =
+    [];
+  let failedGroup: string | undefined;
 
-if (
-  results.length === steps.length &&
-  results.every((result) => result.passed)
-) {
+  for (const [index, step] of steps.entries()) {
+    if (failedGroup !== undefined && step.group !== failedGroup) {
+      break;
+    }
+    console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
+    const { exitCode, elapsedMs } = await runStep(step);
+    const passed = exitCode === 0;
+    results.push({ label: step.label, passed, elapsedMs });
+    console.log(`${passed ? "PASS" : "FAIL"} ${step.label}`);
+    if (!passed) {
+      if (step.group !== undefined) {
+        failedGroup = step.group;
+        console.error(
+          `\n${step.group} has a failed shard; running the remaining shards.`,
+        );
+        continue;
+      }
+      console.error("\nRelease check stopped at the first failed gate.");
+      break;
+    }
+  }
+
+  console.log("\nRelease check summary:");
+  for (const result of results) {
+    console.log(
+      `${result.passed ? "PASS" : "FAIL"} ${result.label} (${Math.round(
+        result.elapsedMs / 1000,
+      )}s)`,
+    );
+  }
+  const apiShardResults = results.filter((result) =>
+    result.label.includes("(release shard"),
+  );
+  if (apiShardResults.length > 0) {
+    const passedApiShards = apiShardResults.filter(
+      (result) => result.passed,
+    ).length;
+    console.log(
+      `API release shards: ${passedApiShards}/${apiShardResults.length} passed.`,
+    );
+  }
+
+  if (
+    results.length === steps.length &&
+    results.every((result) => result.passed)
+  ) {
+    try {
+      console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
+    } catch (error) {
+      console.error(
+        `Could not write release report: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      process.exit(1);
+    }
+    console.log("\nRelease check passed. Ready for final publish review.");
+    process.exit(0);
+  }
+
   try {
     console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
   } catch (error) {
@@ -491,19 +507,8 @@ if (
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    process.exit(1);
   }
-  console.log("\nRelease check passed. Ready for final publish review.");
-  process.exit(0);
+  process.exit(1);
 }
 
-try {
-  console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
-} catch (error) {
-  console.error(
-    `Could not write release report: ${
-      error instanceof Error ? error.message : String(error)
-    }`,
-  );
-}
-process.exit(1);
+if (import.meta.url === `file://${process.argv[1]}`) await main();
