@@ -1,0 +1,1060 @@
+{
+  "benchmark": "editable-skills-trigger-2026-08",
+  "method": "held-out, balanced, two positive and two near-miss negative prompts per skill",
+  "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
+  "runtime_status": "not-run: claude CLI unavailable in this environment",
+  "skills": [
+    {
+      "name": "brainstorming",
+      "metadata_name": "brainstorming",
+      "path": ".agents/skills/brainstorming/SKILL.md",
+      "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+      "evals": [
+        {
+          "id": "brainstorming-trigger-1",
+          "query": "Help me design a new customer-facing workflow before anyone writes code.",
+          "should_trigger": true
+        },
+        {
+          "id": "brainstorming-trigger-2",
+          "query": "I have a fuzzy product idea; explore the intent, compare approaches, and get approval on a design first.",
+          "should_trigger": true
+        },
+        {
+          "id": "brainstorming-near-miss-1",
+          "query": "Implement this small fix directly; do not spend time exploring alternatives.",
+          "should_trigger": false
+        },
+        {
+          "id": "brainstorming-near-miss-2",
+          "query": "Review the finished API implementation for bugs and type errors.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "customer-import-audit",
+      "metadata_name": "customer-import-audit",
+      "path": ".agents/skills/customer-import-audit/SKILL.md",
+      "description": "Audit after importing a new customer's spec workbook. Use when the user imports a new brand/customer and wants confirmation everything landed right, or reports something off after a new-customer import.",
+      "evals": [
+        {
+          "id": "customer-import-audit-trigger-1",
+          "query": "A new customer's workbook was imported yesterday; audit what landed in profiles and pools and tell me if it is correct.",
+          "should_trigger": true
+        },
+        {
+          "id": "customer-import-audit-trigger-2",
+          "query": "Please verify the imported brand's recipes, links, and names without changing the importer or repairing data.",
+          "should_trigger": true
+        },
+        {
+          "id": "customer-import-audit-near-miss-1",
+          "query": "The Excel parser linked a recipe to the wrong flavor; trace the bug and fix the poisoned records.",
+          "should_trigger": false
+        },
+        {
+          "id": "customer-import-audit-near-miss-2",
+          "query": "I need to import a new workbook and build the customer setup from scratch.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "data-heal-playbook",
+      "metadata_name": "data-heal-playbook",
+      "path": ".agents/skills/data-heal-playbook/SKILL.md",
+      "description": "Fix bugs that poisoned stored data (profiles, pools, day-state). Use whenever a bug fix alone is not enough because wrong values are already saved in the database \u2014 e.g. an import wrote a wrong number into many profiles. Covers checking for poisoned data, writing a one-time server heal, and verifying it.",
+      "evals": [
+        {
+          "id": "data-heal-playbook-trigger-1",
+          "query": "An importer saved the wrong yield into hundreds of profiles; diagnose the stored damage and ship a one-time data heal.",
+          "should_trigger": true
+        },
+        {
+          "id": "data-heal-playbook-trigger-2",
+          "query": "The bug is fixed but production rows are already poisoned\u2014repair persisted profiles safely and verify the heal.",
+          "should_trigger": true
+        },
+        {
+          "id": "data-heal-playbook-near-miss-1",
+          "query": "A new workbook was imported; only audit whether the result is correct, do not repair anything.",
+          "should_trigger": false
+        },
+        {
+          "id": "data-heal-playbook-near-miss-2",
+          "query": "The UI displays the wrong number, but no incorrect value has been saved yet.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "import-bug-investigation",
+      "metadata_name": "import-bug-investigation",
+      "path": ".agents/skills/import-bug-investigation/SKILL.md",
+      "description": "Diagnose spec/premix/cheese/shipping Excel import bugs. Use when the user says an import got something wrong, mislinked, misnamed, duplicated, or skipped data. Standard drill for tracing what the parse saw vs what landed in profiles/pools.",
+      "evals": [
+        {
+          "id": "import-bug-investigation-trigger-1",
+          "query": "The cheese Excel import skipped several varieties and created duplicate links; trace parse versus apply versus pool data.",
+          "should_trigger": true
+        },
+        {
+          "id": "import-bug-investigation-trigger-2",
+          "query": "A premix workbook misnamed recipes after import\u2014investigate which layer produced the bad result before changing code.",
+          "should_trigger": true
+        },
+        {
+          "id": "import-bug-investigation-near-miss-1",
+          "query": "The import is correct, but old profile rows must be repaired with a one-time migration.",
+          "should_trigger": false
+        },
+        {
+          "id": "import-bug-investigation-near-miss-2",
+          "query": "Please add a new column to the mixes database table.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "operational-browser-verification",
+      "metadata_name": "operational-browser-verification",
+      "path": ".agents/skills/operational-browser-verification/SKILL.md",
+      "description": "Verify manager-facing operational workflows in a real browser, including authorization, scoped navigation, queue actions, import-review reopening, sync diagnostics, reload persistence, and startup health. Use when a request needs user-journey evidence that unit, API, integration, visual, or accessibility checks cannot provide.",
+      "evals": [
+        {
+          "id": "operational-browser-verification-trigger-1",
+          "query": "Verify the manager queue in a real browser: authorization, scoped navigation, queue action, reload persistence, and startup health.",
+          "should_trigger": true
+        },
+        {
+          "id": "operational-browser-verification-trigger-2",
+          "query": "Unit tests pass; collect browser evidence that a manager can reopen an import review and complete the operational workflow.",
+          "should_trigger": true
+        },
+        {
+          "id": "operational-browser-verification-near-miss-1",
+          "query": "Add a Playwright unit test for a pure date formatter.",
+          "should_trigger": false
+        },
+        {
+          "id": "operational-browser-verification-near-miss-2",
+          "query": "Compare two screenshots visually and update the accessibility snapshots.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "production-go",
+      "metadata_name": "production-go",
+      "path": ".agents/skills/production-go/SKILL.md",
+      "description": "Decide whether this application is production-ready and give a bounded GO/NO-GO release status. Use whenever the user asks if the app is production-ready, ready to publish, safe to ship, ready to go live, or asks for release status\u2014even if they do not use the words GO or NO-GO. Run the applicable release and shipping gates before recommending publish; do not replace the release checklist.",
+      "evals": [
+        {
+          "id": "production-go-trigger-1",
+          "query": "Is this app ready to go live? Run the applicable release gates and give one bounded GO or NO-GO decision.",
+          "should_trigger": true
+        },
+        {
+          "id": "production-go-trigger-2",
+          "query": "Can we safely publish this application today, including production safety and deployment readiness?",
+          "should_trigger": true
+        },
+        {
+          "id": "production-go-near-miss-1",
+          "query": "Please run the pre-publish checklist before I decide whether to deploy.",
+          "should_trigger": false
+        },
+        {
+          "id": "production-go-near-miss-2",
+          "query": "The production deploy is broken; investigate its server logs and repair the incident.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "release-checklist",
+      "metadata_name": "release-checklist",
+      "path": ".agents/skills/release-checklist/SKILL.md",
+      "description": "Pre-publish verification for this app. Use before suggesting a deploy/publish, or when the user asks to publish. Runs the right tests, typechecks, workflow restarts, and reminds what data heals will apply live.",
+      "evals": [
+        {
+          "id": "release-checklist-trigger-1",
+          "query": "Before publishing, run the app's release tests, typechecks, workflow restart, and live-data-heal checks.",
+          "should_trigger": true
+        },
+        {
+          "id": "release-checklist-trigger-2",
+          "query": "I want the pre-publish verification checklist completed before we suggest a deployment.",
+          "should_trigger": true
+        },
+        {
+          "id": "release-checklist-near-miss-1",
+          "query": "Give me a final production-ready GO or NO-GO decision.",
+          "should_trigger": false
+        },
+        {
+          "id": "release-checklist-near-miss-2",
+          "query": "A deployed app is returning 500s; diagnose production rather than running release gates.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "rollback-recovery",
+      "metadata_name": "rollback-recovery",
+      "path": ".agents/skills/rollback-recovery/SKILL.md",
+      "description": "Safely recover missing or regressed behavior after a rollback, checkpoint comparison, rebase, or partial restore. Use whenever the user mentions a checkpoint, rollback, restore, recovery, parity audit, missing post-merge behavior, or divergent historical implementation. Preserve a named baseline, run the repository recovery audit, restore incrementally, and require evidence before declaring recovery complete; never replace the current branch wholesale.",
+      "evals": [
+        {
+          "id": "rollback-recovery-trigger-1",
+          "query": "After restoring an old checkpoint, recover the missing post-merge behavior incrementally and prove parity without replacing the branch wholesale.",
+          "should_trigger": true
+        },
+        {
+          "id": "rollback-recovery-trigger-2",
+          "query": "The rollback removed a feature; compare against a named baseline and safely restore only what is missing.",
+          "should_trigger": true
+        },
+        {
+          "id": "rollback-recovery-near-miss-1",
+          "query": "Implement a normal feature on the current branch with no rollback or restore involved.",
+          "should_trigger": false
+        },
+        {
+          "id": "rollback-recovery-near-miss-2",
+          "query": "Revert the last commit because the user wants a simple undo of their local edit.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "schema-change-checklist",
+      "metadata_name": "schema-change-checklist",
+      "path": ".agents/skills/schema-change-checklist/SKILL.md",
+      "description": "Use this skill whenever you are adding a new column or field to an existing database table \u2014",
+      "evals": [
+        {
+          "id": "schema-change-checklist-trigger-1",
+          "query": "Add an isPrep column to an existing populated production-rules table and update the schema, API, and migration safely.",
+          "should_trigger": true
+        },
+        {
+          "id": "schema-change-checklist-trigger-2",
+          "query": "Extend a persisted database entity with a new field; make sure push-force and additive migration safety are covered.",
+          "should_trigger": true
+        },
+        {
+          "id": "schema-change-checklist-near-miss-1",
+          "query": "Rename a TypeScript interface field that is never persisted.",
+          "should_trigger": false
+        },
+        {
+          "id": "schema-change-checklist-near-miss-2",
+          "query": "Add a CSS class and a client-only form value; there is no database schema change.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "skill-creator",
+      "metadata_name": "skill-creator",
+      "path": ".agents/skills/skill-creator/SKILL.md",
+      "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+      "evals": [
+        {
+          "id": "skill-creator-trigger-1",
+          "query": "Improve an existing skill's trigger description and measure it with should-trigger and should-not-trigger held-out prompts.",
+          "should_trigger": true
+        },
+        {
+          "id": "skill-creator-trigger-2",
+          "query": "Create or optimize a reusable skill, then run a bounded evaluation and report its results.",
+          "should_trigger": true
+        },
+        {
+          "id": "skill-creator-near-miss-1",
+          "query": "Use the existing release checklist to validate this application before publishing.",
+          "should_trigger": false
+        },
+        {
+          "id": "skill-creator-near-miss-2",
+          "query": "Write a one-off README section describing today's implementation.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "spec-import-guard",
+      "metadata_name": "spec-import-guard",
+      "path": ".agents/skills/spec-import-guard/SKILL.md",
+      "description": "Run this checklist whenever you touch the spec import pipeline \u2014 AI parse prompts (buildParseSpecSheetPrompt, aiParseSpecSheet.ts), parse/sanitize logic (lib/spec-import, @workspace/spec-import), the alias system (sanitizeSpecAliases, collectSpecAliases, canonicalize, specImportAliases.ts), corpus harness (lib/corpus-harness), chunk/merge logic (splitGridsForPrompt, mergeParsedSpecImports), import link passes (linkParsed, linkSpecImportNamedRecipesToExisting), or spec export (lib/spec-export).",
+      "evals": [
+        {
+          "id": "spec-import-guard-trigger-1",
+          "query": "I changed the spec Excel parser and prompt; run the import guard, corpus checks, and alias safety checks before merging.",
+          "should_trigger": true
+        },
+        {
+          "id": "spec-import-guard-trigger-2",
+          "query": "This work touches split-grid merge logic and spec export\u2014apply the specialist import regression checklist.",
+          "should_trigger": true
+        },
+        {
+          "id": "spec-import-guard-near-miss-1",
+          "query": "Investigate a bad imported workbook by tracing what landed in the database.",
+          "should_trigger": false
+        },
+        {
+          "id": "spec-import-guard-near-miss-2",
+          "query": "Add a new server column unrelated to spec parsing or exports.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "state-accuracy-check",
+      "metadata_name": "state-accuracy-check",
+      "path": ".agents/skills/state-accuracy-check/SKILL.md",
+      "description": "Verify that timers, counters, and live state remain accurate and consistent",
+      "evals": [
+        {
+          "id": "state-accuracy-check-trigger-1",
+          "query": "I changed the live run timer and autosave math; verify counters, pause/resume, dough supply, and press completion remain accurate.",
+          "should_trigger": true
+        },
+        {
+          "id": "state-accuracy-check-trigger-2",
+          "query": "After modifying LiveRunContext, check that timers and production counts stay consistent across live state updates.",
+          "should_trigger": true
+        },
+        {
+          "id": "state-accuracy-check-near-miss-1",
+          "query": "Change a static settings page that does not read live run state.",
+          "should_trigger": false
+        },
+        {
+          "id": "state-accuracy-check-near-miss-2",
+          "query": "Audit SSE merge stamps and stale writes across multiple devices.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "sync-invariant-check",
+      "metadata_name": "sync-invariant-check",
+      "path": ".agents/skills/sync-invariant-check/SKILL.md",
+      "description": "Pre-ship checklist for sync-related code changes. Trigger when an agent",
+      "evals": [
+        {
+          "id": "sync-invariant-check-trigger-1",
+          "query": "I changed routes/sync.ts and the SSE receive merge; check epochs, stamps, reset behavior, and stale-write invariants.",
+          "should_trigger": true
+        },
+        {
+          "id": "sync-invariant-check-trigger-2",
+          "query": "Review this day-state synchronization change for awake-device handoff and non-clobber guarantees.",
+          "should_trigger": true
+        },
+        {
+          "id": "sync-invariant-check-near-miss-1",
+          "query": "Change a local-only timer with no sync or day-state involvement.",
+          "should_trigger": false
+        },
+        {
+          "id": "sync-invariant-check-near-miss-2",
+          "query": "Verify a manager's browser workflow in a real browser.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "test-gap-triage",
+      "metadata_name": "test-gap-triage",
+      "path": ".agents/skills/test-gap-triage/SKILL.md",
+      "description": "Turn a bug report, feature request, or \u201cwhere should this test go?\u201d question into a bounded regression strategy. Use before proposing new coverage or a test task; classify the source-of-truth layer, check existing tasks, and route to the smallest effective test and specialist safety skills.",
+      "evals": [
+        {
+          "id": "test-gap-triage-trigger-1",
+          "query": "A bug report needs coverage; classify the source of truth and choose the smallest effective regression test and specialist safety checks.",
+          "should_trigger": true
+        },
+        {
+          "id": "test-gap-triage-trigger-2",
+          "query": "Where should this feature test go? Triage the gap before proposing a new test task.",
+          "should_trigger": true
+        },
+        {
+          "id": "test-gap-triage-near-miss-1",
+          "query": "Run the existing test suite and fix the failing assertion immediately.",
+          "should_trigger": false
+        },
+        {
+          "id": "test-gap-triage-near-miss-2",
+          "query": "Design a new product workflow before implementation.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "wrong-number-triage",
+      "metadata_name": "wrong-number-triage",
+      "path": ".agents/skills/wrong-number-triage/SKILL.md",
+      "description": "Trace where a wrong number on screen comes from. Use when the user reports a specific wrong value (\"it says 5.7 but should be 8.25\", \"wrong yield\", \"wrong batch count\") anywhere in the web app.",
+      "evals": [
+        {
+          "id": "wrong-number-triage-trigger-1",
+          "query": "The screen says 5.7 batches but the expected value is 8.25; trace where the wrong number comes from before editing it.",
+          "should_trigger": true
+        },
+        {
+          "id": "wrong-number-triage-trigger-2",
+          "query": "A run shows the wrong yield and batch count\u2014identify the source of the displayed value and verify the correction.",
+          "should_trigger": true
+        },
+        {
+          "id": "wrong-number-triage-near-miss-1",
+          "query": "The displayed number is correct; I only want a layout redesign.",
+          "should_trigger": false
+        },
+        {
+          "id": "wrong-number-triage-near-miss-2",
+          "query": "A database import created incorrect stored values across many profiles.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "check-dependency-licenses",
+      "metadata_name": "Check dependency licenses",
+      "path": ".local/custom_skills/check-dependency-licenses/SKILL.md",
+      "description": "Use this skill when adding dependencies or before releasing, or when the user asks whether a library is safe to use commercially or mentions open-source license or IP compliance.",
+      "evals": [
+        {
+          "id": "check-dependency-licenses-trigger-1",
+          "query": "Before release, audit every production dependency for license policy violations and document any blocked package.",
+          "should_trigger": true
+        },
+        {
+          "id": "check-dependency-licenses-trigger-2",
+          "query": "Check the npm dependency tree for license compliance, including transitive packages, before we ship.",
+          "should_trigger": true
+        },
+        {
+          "id": "check-dependency-licenses-near-miss-1",
+          "query": "Add a new package and verify it is genuine before installing it.",
+          "should_trigger": false
+        },
+        {
+          "id": "check-dependency-licenses-near-miss-2",
+          "query": "Scan the application for SQL injection and XSS vulnerabilities.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "handle-personal-and-sensitive-data",
+      "metadata_name": "Handle personal and sensitive data",
+      "path": ".local/custom_skills/handle-personal-and-sensitive-data/SKILL.md",
+      "description": "Use when building anything that collects, stores, logs, or transmits user data \u2014 sign-up, profiles, payments, uploads, analytics, logging \u2014 or when the user mentions PII, GDPR, CCPA, HIPAA, PCI, or privacy.",
+      "evals": [
+        {
+          "id": "handle-personal-and-sensitive-data-trigger-1",
+          "query": "This feature processes customer addresses and private account details; design the data flow with minimization, access controls, and retention limits.",
+          "should_trigger": true
+        },
+        {
+          "id": "handle-personal-and-sensitive-data-trigger-2",
+          "query": "Review how we collect and store personal information and sensitive data, and prevent it leaking into logs or analytics.",
+          "should_trigger": true
+        },
+        {
+          "id": "handle-personal-and-sensitive-data-near-miss-1",
+          "query": "Validate a public URL parameter against an allow-list.",
+          "should_trigger": false
+        },
+        {
+          "id": "handle-personal-and-sensitive-data-near-miss-2",
+          "query": "Add a password reset flow using the existing authentication system.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "instrument-observability-and-graceful-errors",
+      "metadata_name": "Instrument observability and graceful errors",
+      "path": ".local/custom_skills/instrument-observability-and-graceful-errors/SKILL.md",
+      "description": "Use when building backend services, APIs, scheduled jobs, or anything going to production \u2014 to add structured logging, health checks, and graceful error handling so the app is debuggable in production without leaking internals to users.",
+      "evals": [
+        {
+          "id": "instrument-observability-and-graceful-errors-trigger-1",
+          "query": "Add bounded structured events, correlation IDs, useful timing, and safe user-facing errors to this production workflow.",
+          "should_trigger": true
+        },
+        {
+          "id": "instrument-observability-and-graceful-errors-trigger-2",
+          "query": "Instrument this API so failures are observable without logging request payloads or secrets, and degrade gracefully.",
+          "should_trigger": true
+        },
+        {
+          "id": "instrument-observability-and-graceful-errors-near-miss-1",
+          "query": "Add authentication and role checks to the endpoint.",
+          "should_trigger": false
+        },
+        {
+          "id": "instrument-observability-and-graceful-errors-near-miss-2",
+          "query": "Add SQL parameterization and HTML escaping for form input.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "make-apps-resilient-to-abuse-and-overload",
+      "metadata_name": "Make apps resilient to abuse and overload",
+      "path": ".local/custom_skills/make-apps-resilient-to-abuse-and-overload/SKILL.md",
+      "description": "Use when building public endpoints, APIs, auth/login routes, forms, file uploads, search, or any endpoint that calls a paid service (AI, email, SMS) \u2014 to add rate limiting, timeouts, and quotas that prevent abuse, runaway cost, and denial of service.",
+      "evals": [
+        {
+          "id": "make-apps-resilient-to-abuse-and-overload-trigger-1",
+          "query": "A public endpoint can be spammed and expensive requests can exhaust the service; add rate limits, quotas, timeouts, and overload behavior.",
+          "should_trigger": true
+        },
+        {
+          "id": "make-apps-resilient-to-abuse-and-overload-trigger-2",
+          "query": "Make this app resilient to abuse and traffic spikes without exposing whether protected records exist.",
+          "should_trigger": true
+        },
+        {
+          "id": "make-apps-resilient-to-abuse-and-overload-near-miss-1",
+          "query": "Add a responsive tablet layout for the dashboard.",
+          "should_trigger": false
+        },
+        {
+          "id": "make-apps-resilient-to-abuse-and-overload-near-miss-2",
+          "query": "Review personal-data retention and privacy controls.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "make-ui-responsive-across-devices",
+      "metadata_name": "Make UI responsive across devices",
+      "path": ".local/custom_skills/make-ui-responsive-across-devices/SKILL.md",
+      "description": "Use when building or changing any web UI that real people will use on different screens \u2014 pages, dashboards, forms, marketing sites, customer-facing apps \u2014 so the layout works on phone, tablet, and desktop, not just the preview width.",
+      "evals": [
+        {
+          "id": "make-ui-responsive-across-devices-trigger-1",
+          "query": "The dashboard works at desktop width but breaks on phones and tablets; make the real UI usable across screen sizes.",
+          "should_trigger": true
+        },
+        {
+          "id": "make-ui-responsive-across-devices-trigger-2",
+          "query": "Build this customer-facing form so it is responsive on mobile, tablet, and desktop rather than only the preview width.",
+          "should_trigger": true
+        },
+        {
+          "id": "make-ui-responsive-across-devices-near-miss-1",
+          "query": "Make the API tolerate traffic spikes and abusive callers.",
+          "should_trigger": false
+        },
+        {
+          "id": "make-ui-responsive-across-devices-near-miss-2",
+          "query": "Run an accessibility audit for keyboard navigation and screen readers.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "meet-an-accessibility-baseline",
+      "metadata_name": "Meet an accessibility baseline",
+      "path": ".local/custom_skills/meet-an-accessibility-baseline/SKILL.md",
+      "description": "Use this skill when building or changing any user-facing UI \u2014 pages, forms, navigation, modals, components \u2014 especially for customer-facing or public apps. Ensures the app meets basic WCAG accessibility so it doesn't exclude users or fail an audit.",
+      "evals": [
+        {
+          "id": "meet-an-accessibility-baseline-trigger-1",
+          "query": "Audit this app for keyboard access, labels, focus management, contrast, and screen-reader semantics, then fix the blockers.",
+          "should_trigger": true
+        },
+        {
+          "id": "meet-an-accessibility-baseline-trigger-2",
+          "query": "Before shipping the new dialog, establish an accessibility baseline and verify it across representative viewports.",
+          "should_trigger": true
+        },
+        {
+          "id": "meet-an-accessibility-baseline-near-miss-1",
+          "query": "Make the layout responsive across phone and desktop widths.",
+          "should_trigger": false
+        },
+        {
+          "id": "meet-an-accessibility-baseline-near-miss-2",
+          "query": "Benchmark whether a skill description triggers for realistic prompts.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "review-before-shipping",
+      "metadata_name": "Review before shipping",
+      "path": ".local/custom_skills/review-before-shipping/SKILL.md",
+      "description": "Use this skill before committing, opening a pull request, merging, deploying, or publishing, or when the user says the app is \"done\", \"ready to ship\", or \"ready to go live\".",
+      "evals": [
+        {
+          "id": "review-before-shipping-trigger-1",
+          "query": "Review this completed change before release for security, authorization, data safety, tests, and deploy readiness.",
+          "should_trigger": true
+        },
+        {
+          "id": "review-before-shipping-trigger-2",
+          "query": "Do a final risk-based shipping review and report blockers, evidence, and explicit exceptions.",
+          "should_trigger": true
+        },
+        {
+          "id": "review-before-shipping-near-miss-1",
+          "query": "Run only the pre-publish release checklist and its configured commands.",
+          "should_trigger": false
+        },
+        {
+          "id": "review-before-shipping-near-miss-2",
+          "query": "Design the feature architecture before any implementation begins.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "secure-ai-features-against-prompt-injection",
+      "metadata_name": "Secure AI features against prompt injection",
+      "path": ".local/custom_skills/secure-ai-features-against-prompt-injection/SKILL.md",
+      "description": "Use when building any feature that sends user input or external content (web pages, files, emails, documents) to an LLM \u2014 chatbots, AI assistants, summarizers, RAG, or agents that can call tools or take actions. Defends against prompt injection and excessive agency.",
+      "evals": [
+        {
+          "id": "secure-ai-features-against-prompt-injection-trigger-1",
+          "query": "Build an AI assistant that summarizes uploaded documents and can call tools; defend against prompt injection and excessive agency.",
+          "should_trigger": true
+        },
+        {
+          "id": "secure-ai-features-against-prompt-injection-trigger-2",
+          "query": "User text and web pages will be sent to an LLM\u2014secure the feature against instruction hijacking and unauthorized actions.",
+          "should_trigger": true
+        },
+        {
+          "id": "secure-ai-features-against-prompt-injection-near-miss-1",
+          "query": "Validate ordinary form fields and encode them for HTML output; no LLM is involved.",
+          "should_trigger": false
+        },
+        {
+          "id": "secure-ai-features-against-prompt-injection-near-miss-2",
+          "query": "Add a conventional password login with no AI or external content.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "validate-and-encode-untrusted-input",
+      "metadata_name": "Validate and encode untrusted input",
+      "path": ".local/custom_skills/validate-and-encode-untrusted-input/SKILL.md",
+      "description": "Use whenever the app accepts input from any source the server doesn't control \u2014 form fields, query/path params, headers, JSON/API request bodies, file uploads, webhooks, third-party API responses, and LLM output \u2014 to prevent SQL/NoSQL/command injection, XSS, and SSRF through allow-list validation, parameterized/safe APIs, and contextual output encoding.",
+      "evals": [
+        {
+          "id": "validate-and-encode-untrusted-input-trigger-1",
+          "query": "This endpoint accepts JSON, path parameters, uploads, and webhook data; add allow-list validation, safe queries, and contextual output encoding.",
+          "should_trigger": true
+        },
+        {
+          "id": "validate-and-encode-untrusted-input-trigger-2",
+          "query": "Harden the API against SQL injection, XSS, and SSRF from user input and third-party responses.",
+          "should_trigger": true
+        },
+        {
+          "id": "validate-and-encode-untrusted-input-near-miss-1",
+          "query": "Design defenses for prompt injection in an LLM agent.",
+          "should_trigger": false
+        },
+        {
+          "id": "validate-and-encode-untrusted-input-near-miss-2",
+          "query": "Audit how customer PII is retained and who can access it.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "vet-dependencies-before-adding",
+      "metadata_name": "Vet dependencies before adding",
+      "path": ".local/custom_skills/vet-dependencies-before-adding/SKILL.md",
+      "description": "Use this skill when adding, upgrading, or installing any third-party package or library (npm, pip, etc.), or when the user asks to add a dependency.",
+      "evals": [
+        {
+          "id": "vet-dependencies-before-adding-trigger-1",
+          "query": "I want to install a new npm package for spreadsheet parsing; verify the registry package, provenance, typosquat risk, and compatibility first.",
+          "should_trigger": true
+        },
+        {
+          "id": "vet-dependencies-before-adding-trigger-2",
+          "query": "Before adding or upgrading this pip dependency, vet that it is genuine and safe rather than blindly editing the manifest.",
+          "should_trigger": true
+        },
+        {
+          "id": "vet-dependencies-before-adding-near-miss-1",
+          "query": "Audit the license of packages already in the production dependency tree.",
+          "should_trigger": false
+        },
+        {
+          "id": "vet-dependencies-before-adding-near-miss-2",
+          "query": "Fix a parser bug in an existing dependency-free module.",
+          "should_trigger": false
+        }
+      ]
+    }
+  ],
+  "preflight": [
+    {
+      "name": "brainstorming",
+      "positive_overlap": [
+        2,
+        2
+      ],
+      "negative_overlap": [
+        0,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "customer-import-audit",
+      "positive_overlap": [
+        5,
+        1
+      ],
+      "negative_overlap": [
+        0,
+        4
+      ],
+      "under_trigger_signal": 1,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "data-heal-playbook",
+      "positive_overlap": [
+        7,
+        5
+      ],
+      "negative_overlap": [
+        0,
+        3
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "import-bug-investigation",
+      "positive_overlap": [
+        6,
+        3
+      ],
+      "negative_overlap": [
+        1,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "operational-browser-verification",
+      "positive_overlap": [
+        11,
+        4
+      ],
+      "negative_overlap": [
+        1,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "production-go",
+      "positive_overlap": [
+        9,
+        2
+      ],
+      "negative_overlap": [
+        5,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 1,
+      "status": "review"
+    },
+    {
+      "name": "release-checklist",
+      "positive_overlap": [
+        4,
+        3
+      ],
+      "negative_overlap": [
+        0,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "rollback-recovery",
+      "positive_overlap": [
+        10,
+        6
+      ],
+      "negative_overlap": [
+        4,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "schema-change-checklist",
+      "positive_overlap": [
+        3,
+        3
+      ],
+      "negative_overlap": [
+        1,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "skill-creator",
+      "positive_overlap": [
+        4,
+        3
+      ],
+      "negative_overlap": [
+        1,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "spec-import-guard",
+      "positive_overlap": [
+        5,
+        6
+      ],
+      "negative_overlap": [
+        0,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "state-accuracy-check",
+      "positive_overlap": [
+        5,
+        4
+      ],
+      "negative_overlap": [
+        2,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "sync-invariant-check",
+      "positive_overlap": [
+        0,
+        0
+      ],
+      "negative_overlap": [
+        0,
+        0
+      ],
+      "under_trigger_signal": 2,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "test-gap-triage",
+      "positive_overlap": [
+        10,
+        8
+      ],
+      "negative_overlap": [
+        2,
+        2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "wrong-number-triage",
+      "positive_overlap": [
+        9,
+        5
+      ],
+      "negative_overlap": [
+        1,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "check-dependency-licenses",
+      "positive_overlap": [
+        2,
+        3
+      ],
+      "negative_overlap": [
+        1,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "handle-personal-and-sensitive-data",
+      "positive_overlap": [
+        1,
+        3
+      ],
+      "negative_overlap": [
+        0,
+        0
+      ],
+      "under_trigger_signal": 1,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "instrument-observability-and-graceful-errors",
+      "positive_overlap": [
+        3,
+        2
+      ],
+      "negative_overlap": [
+        2,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "make-apps-resilient-to-abuse-and-overload",
+      "positive_overlap": [
+        7,
+        1
+      ],
+      "negative_overlap": [
+        1,
+        0
+      ],
+      "under_trigger_signal": 1,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "make-ui-responsive-across-devices",
+      "positive_overlap": [
+        4,
+        5
+      ],
+      "negative_overlap": [
+        0,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "meet-an-accessibility-baseline",
+      "positive_overlap": [
+        1,
+        1
+      ],
+      "negative_overlap": [
+        0,
+        0
+      ],
+      "under_trigger_signal": 2,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "review-before-shipping",
+      "positive_overlap": [
+        1,
+        0
+      ],
+      "negative_overlap": [
+        0,
+        1
+      ],
+      "under_trigger_signal": 2,
+      "over_trigger_signal": 0,
+      "status": "review"
+    },
+    {
+      "name": "secure-ai-features-against-prompt-injection",
+      "positive_overlap": [
+        9,
+        6
+      ],
+      "negative_overlap": [
+        1,
+        2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "validate-and-encode-untrusted-input",
+      "positive_overlap": [
+        10,
+        8
+      ],
+      "negative_overlap": [
+        2,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "vet-dependencies-before-adding",
+      "positive_overlap": [
+        2,
+        4
+      ],
+      "negative_overlap": [
+        1,
+        0
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    }
+  ]
+}
