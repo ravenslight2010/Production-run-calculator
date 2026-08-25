@@ -7,4 +7,4 @@ The release checker’s API shard timeout must reflect serialized Vitest runtime
 
 **Why:** A release run can report an infrastructure timeout even when the complete shard passes when isolated, creating a false NO-GO.
 
-**How to apply:** When API integration coverage or its fixture set grows, compare the slowest serialized shard duration with the checker budget and retain a warning margin.
+**How to apply:** When API integration coverage or its fixture set grows, compare the slowest serialized shard duration with the checker budget and retain a warning margin. The Replit shell runner may cap one foreground command at five minutes, so validate long release runs by executing the exact bounded shards individually when needed.
