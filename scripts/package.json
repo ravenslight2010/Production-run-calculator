@@ -9,6 +9,7 @@
     "test": "bash ./src/check-model-version-bump.test.sh",
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
     "test:release-evidence": "tsx ./src/release-evidence.test.mts",
+    "test:release-resume": "tsx ./src/release-resume.integration.test.mts",
     "audit:recovery": "tsx ./src/recovery-audit.mts",
     "check-model-bump": "pnpm run test && bash ./src/check-model-version-bump.sh",
     "check-department-playwright-projects": "tsx ./src/check-department-playwright-projects.mts",

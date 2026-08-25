@@ -233,6 +233,36 @@ if (fullRun) {
   });
 }
 
+// The disposable resume integration test supplies a tiny step list so it can
+// exercise the real process/checkpoint boundary without running the release
+// suite itself. This is intentionally an undocumented test hook rather than a
+// production configuration surface.
+const fixtureSteps = process.env.RELEASE_CHECK_FIXTURE_STEPS;
+if (fixtureSteps !== undefined) {
+  try {
+    const parsed = JSON.parse(fixtureSteps) as unknown;
+    if (
+      !Array.isArray(parsed) ||
+      parsed.some(
+        (step) =>
+          typeof step !== "object" ||
+          step === null ||
+          typeof (step as { label?: unknown }).label !== "string" ||
+          !Array.isArray((step as { args?: unknown }).args),
+      )
+    ) {
+      throw new Error("fixture steps must be an array of release steps");
+    }
+    steps.splice(0, steps.length, ...(parsed as ReleaseStep[]));
+  } catch (error) {
+    throw new Error(
+      `Invalid RELEASE_CHECK_FIXTURE_STEPS: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 function printHelp(): void {
   console.log("Usage:");
   console.log("  pnpm run release:check       Safe standard release gates");
