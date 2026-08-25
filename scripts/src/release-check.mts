@@ -48,6 +48,10 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
 
 const steps: ReleaseStep[] = [
   {
+    label: "production dependency audit",
+    args: ["run", "audit:prod"],
+  },
+  {
     label: "generated API client freshness",
     args: ["run", "check:api-generated"],
   },
