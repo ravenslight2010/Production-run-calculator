@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -44,6 +45,77 @@ function runReleaseCheck(
     child.once("error", reject);
     child.once("close", (code) => resolveRun({ code: code ?? 1, output }));
   });
+}
+
+async function getCurrentRevision(): Promise<string> {
+  return new Promise((resolveRevision, reject) => {
+    execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
+      error ? reject(error) : resolveRevision(stdout.trim()),
+    );
+  });
+}
+
+async function runRejectedCheckpointScenario(options: {
+  name: string;
+  args: string[];
+  revision: string;
+  mode: "standard" | "full";
+}): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), `release-resume-rejected-${options.name}-`),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), `release-resume-rejected-${options.name}-marker-`),
+  );
+  const marker = join(markerDir, "gate-started");
+  const steps: FixtureStep[] = [
+    {
+      label: "fixture gate must not start",
+      command: process.execPath,
+      args: [
+        "-e",
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started\\n');`,
+      ],
+    },
+  ];
+
+  try {
+    await writeFile(
+      join(evidenceDir, "release-check-state.json"),
+      `${JSON.stringify(
+        {
+          revision: options.revision,
+          mode: options.mode,
+          results: [
+            {
+              label: "fixture previous gate",
+              passed: false,
+              status: "FAIL",
+              elapsedMs: 1,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const rejected = await runReleaseCheck(evidenceDir, steps, options.args);
+    assert.equal(rejected.code, 1, rejected.output);
+    assert.match(
+      rejected.output,
+      /checkpoint belongs to another revision or release mode/,
+      `${options.name} should explain why the checkpoint was rejected`,
+    );
+    await assert.rejects(
+      readFile(marker, "utf8"),
+      `${options.name} must reject the checkpoint before starting any gate`,
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
 }
 
 async function run(): Promise<void> {
@@ -321,5 +393,31 @@ async function runFullModeScenario(): Promise<void> {
   }
 }
 
+async function runStaleCheckpointScenarios(): Promise<void> {
+  const revision = await getCurrentRevision();
+  await runRejectedCheckpointScenario({
+    name: "revision",
+    args: ["--resume"],
+    revision: `${revision}-stale`,
+    mode: "standard",
+  });
+  await runRejectedCheckpointScenario({
+    name: "standard-to-full",
+    args: ["--full", "--resume"],
+    revision,
+    mode: "standard",
+  });
+  await runRejectedCheckpointScenario({
+    name: "full-to-standard",
+    args: ["--resume"],
+    revision,
+    mode: "full",
+  });
+  console.log(
+    "Release resume stale-checkpoint scenarios passed (revision and mode).",
+  );
+}
+
 await run();
 await runFullModeScenario();
+await runStaleCheckpointScenarios();
