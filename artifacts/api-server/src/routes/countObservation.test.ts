@@ -22,6 +22,10 @@ describe("photo inventory count draft", () => {
 
     expect(draft?.matchedKey).toBeNull();
     expect(draft?.quantity).toMatchObject({ value: 8, confidence: 0.4, evidence: [1] });
+    expect(draft).toMatchObject({
+      reviewFlags: expect.any(Array),
+      matchedKey: null,
+    });
     expect(draft?.reviewFlags).toContain("Quantity estimate needs review");
     expect(draft?.reviewFlags).toContain("Printed weight not visible");
   });

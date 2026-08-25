@@ -67,10 +67,7 @@ export function sanitizeCountDraft(
   if (input.quantity?.confidence != null && input.quantity.confidence < 0.7) flags.add("Quantity estimate needs review");
   if (input.printedWeight?.value == null) flags.add("Printed weight not visible");
   if (input.quantity?.value == null) flags.add("Enter the counted quantity");
-  return { ...out, reviewFlags: [...flags], matchedKey } as Record<string, unknown> & {
-    quantity?: ReturnType<typeof field>;
-    reviewFlags: string[];
-  };
+  return { ...out, reviewFlags: [...flags], matchedKey };
 }
 
 export function buildCountPrompt(candidateLines: string) {
