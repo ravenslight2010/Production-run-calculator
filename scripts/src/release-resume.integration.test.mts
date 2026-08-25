@@ -167,4 +167,159 @@ async function run(): Promise<void> {
   console.log("Release resume integration test passed (checkpoint, rerun, log, report).");
 }
 
+async function runFullModeScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-full-"));
+  const markerDir = await mkdtemp(join(tmpdir(), "release-resume-full-marker-"));
+  const marker = join(markerDir, "full-browser-started");
+  const fullBrowserScript = [
+    "const fs = require('node:fs');",
+    "const marker = process.env.RELEASE_RESUME_MARKER;",
+    "if (!marker) process.exit(2);",
+    "if (!fs.existsSync(marker)) {",
+    "  fs.writeFileSync(marker, 'started\\n');",
+    "  console.log('fixture full browser attempt');",
+    "  setTimeout(() => {}, 10_000);",
+    "} else {",
+    "  console.log('fixture full browser resumed');",
+    "  process.exit(0);",
+    "}",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: "fixture gate one",
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+    },
+    {
+      label: "full browser E2E suite",
+      command: process.execPath,
+      args: ["-e", fullBrowserScript],
+      timeoutMs: 500,
+      env: { RELEASE_RESUME_MARKER: marker },
+    },
+    {
+      label: "fixture gate three",
+      command: process.execPath,
+      args: ["-e", "console.log('fixture gate three resumed'); process.exit(0)"],
+    },
+  ];
+
+  try {
+    for (const file of [
+      "clean-start/clean-start-evidence.json",
+      "clean-start/browser-result.json",
+      "clean-start/preview-home.png",
+      "clean-start/startup-api.log",
+      "clean-start/startup-web.log",
+      "clean-start/startup-mockup.log",
+      "browser-full/FINAL-REPORT.md",
+    ]) {
+      const path = join(evidenceDir, file);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
+    }
+
+    const interrupted = await runReleaseCheck(evidenceDir, steps, ["--full"]);
+    assert.equal(interrupted.code, 1, interrupted.output);
+    assert.match(
+      interrupted.output,
+      /full browser E2E suite exceeded its 0 minute timeout/,
+    );
+
+    const checkpointPath = join(evidenceDir, "release-check-state.json");
+    const firstCheckpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as {
+      revision: string;
+      mode: string;
+      results: Array<{ label: string; passed: boolean; status: string }>;
+    };
+    assert.equal(firstCheckpoint.mode, "full");
+    assert.equal(firstCheckpoint.results.length, 2);
+    assert.deepEqual(
+      firstCheckpoint.results.map(({ label, passed, status }) => [
+        label,
+        passed,
+        status,
+      ]),
+      [
+        ["fixture gate one", true, "PASS"],
+        ["full browser E2E suite", false, "INFRASTRUCTURE TIMEOUT"],
+      ],
+      "full mode must checkpoint the interrupted browser gate as failed",
+    );
+    assert.equal(await readFile(marker, "utf8"), "started\n");
+
+    const interruptedReport = await readFile(
+      join(evidenceDir, "release-check-report.md"),
+      "utf8",
+    );
+    assert.match(interruptedReport, /^Mode: full$/m);
+    assert.match(interruptedReport, /^Decision: NO-GO$/m);
+    assert.match(
+      interruptedReport,
+      /\| full browser E2E suite \| INFRASTRUCTURE TIMEOUT \|/,
+    );
+    assert.doesNotMatch(
+      interruptedReport,
+      /^Decision: GO$/m,
+      "an interrupted full browser gate must not produce a passing report",
+    );
+
+    const resumed = await runReleaseCheck(evidenceDir, steps, [
+      "--full",
+      "--resume",
+    ]);
+    assert.equal(resumed.code, 0, resumed.output);
+    assert.match(resumed.output, /Resuming after 1 completed gate\(s\)\./);
+    assert.doesNotMatch(
+      resumed.output,
+      /Resuming after 2 completed gate\(s\)\./,
+      "resume must rerun the failed full browser gate",
+    );
+
+    const report = await readFile(join(evidenceDir, "release-check-report.md"), "utf8");
+    assert.match(report, /^Revision: \S+$/m);
+    assert.equal(
+      report.match(/^Revision:\s*(\S+)\s*$/m)?.[1],
+      firstCheckpoint.revision,
+      "resume must keep the checkpoint revision",
+    );
+    assert.match(report, /^Mode: full$/m);
+    assert.match(report, /^Decision: GO$/m);
+    for (const label of [
+      "fixture gate one",
+      "full browser E2E suite",
+      "fixture gate three",
+    ]) {
+      assert.match(report, new RegExp(`\\| ${label} \\| PASS \\|`));
+    }
+    assert.equal(
+      (report.match(/\| full browser E2E suite \| PASS \|/g) ?? []).length,
+      1,
+      "the full report must contain one successful result for the rerun browser gate",
+    );
+    const log = await readFile(join(evidenceDir, "release-check.log"), "utf8");
+    assert.match(log, /fixture full browser attempt/);
+    assert.match(log, /fixture full browser resumed/);
+    assert.ok(
+      log.indexOf("fixture full browser attempt") <
+        log.indexOf("fixture full browser resumed"),
+      "the full browser rerun must follow its interrupted attempt",
+    );
+    assert.ok(
+      log.indexOf("fixture full browser resumed") <
+        log.indexOf("fixture gate three resumed"),
+      "the resumed full browser gate must run before subsequent gates",
+    );
+    assert.equal(
+      await readFile(checkpointPath, "utf8"),
+      "",
+      "full mode may clear its checkpoint only after every gate passes",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+}
+
 await run();
+await runFullModeScenario();
