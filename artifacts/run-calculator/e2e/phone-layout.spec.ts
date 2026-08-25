@@ -1,6 +1,10 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers, uniqueTestId } from "./isolation";
+import {
+  cleanupTestUsers,
+  requireIsolatedTestDatabase,
+  uniqueTestId,
+} from "./isolation";
 
 const PHONE_VIEWPORTS = [
   { width: 375, height: 812 },
@@ -45,6 +49,19 @@ test.afterAll(async () => {
     await cleanupTestUsers(cleanupDb, testUsernames);
   } finally {
     await cleanupDb.end().catch(() => {});
+  }
+});
+
+test.beforeEach(async () => {
+  requireIsolatedTestDatabase("phone layout smoke beforeEach");
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await db.query("DELETE FROM daily_sync WHERE date = $1", [
+      new Date().toLocaleDateString("en-CA"),
+    ]);
+  } finally {
+    await db.end().catch(() => {});
   }
 });
 

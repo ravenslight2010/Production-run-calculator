@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Client } from "pg";
 import * as XLSX from "xlsx";
+import { requireIsolatedTestDatabase } from "./isolation";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const suffix = Math.random().toString(36).slice(2, 10);
@@ -92,8 +93,12 @@ test.describe("intentional visual regression baselines", () => {
 
   test.beforeAll(async () => {
     if (!process.env.DATABASE_URL) return;
+    requireIsolatedTestDatabase("visual regression beforeAll");
     cleanupDb = new Client({ connectionString: process.env.DATABASE_URL });
     await cleanupDb.connect();
+    await cleanupDb.query("DELETE FROM daily_sync WHERE date = $1", [
+      new Date().toLocaleDateString("en-CA"),
+    ]);
   });
 
   test.afterAll(async () => {

@@ -188,6 +188,10 @@ const steps: ReleaseStep[] = [
   {
     label: "browser accessibility tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
+    env: {
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+    },
   },
 ];
 
