@@ -31,9 +31,13 @@ sources, workflow callers, and documentation links:
 - Tracked screenshots, release evidence, source-library workbooks, and
   generated API-client packages.
 
-### Retained: review required
+### Retained: review required (excluding retired audit helpers)
 
-- `scripts/src/audit-parse.mts` and `scripts/src/audit-compare-cheese.mts` have
+The first entry below records the pre-decision inventory; the historical audit
+decision at the end of this document supersedes it.
+
+- The retired helpers `scripts/src/audit-parse.mts` and
+  `scripts/src/audit-compare-cheese.mts` had
   no current package command or CI caller, but they reproduce the
   source-library-vs-live-data audit recorded in
   `attached_assets/source-library/AUDIT-REPORT-2026-07-18.md`. They are
@@ -85,6 +89,16 @@ standard and full release checks concurrently; standard encountered the same
 two API integration timeouts, while full encountered a temporary shared
 generated-output race. Neither failure is caused by the removed scaffold or
 duplicate workflow definitions.
+
+## Historical audit decision
+
+The July 18, 2026 source-library audit is retained as the authoritative
+historical record in
+`attached_assets/source-library/AUDIT-REPORT-2026-07-18.md`. The two unreferenced
+helpers that produced it are formally retired: they had no supported command
+or CI caller, depended on an implicit working directory, and used untracked
+`/tmp` production and parsed-data files. The production snapshot and invocation
+contract were not retained, so rerunning them could not reproduce the report.
 
 ## Reversal
 
