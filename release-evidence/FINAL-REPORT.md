@@ -2,92 +2,133 @@
 
 **Decision: NO-GO**
 
-**Revision reviewed:** `e16456f043e2d248e27d838d21cf33eb0bf46779`
-**Review date:** 2026-08-24
+**Revision reviewed:** `fd6b6f1be1b0a6691c275aadb14ed917abbeee2c`
+**Review date:** 2026-08-25
 **Environment:** development database and artifact-managed local preview. No
 production writes or destructive production tests were performed.
 
-## Required gates
+## Deployment fit and live metadata
+
+- **Configured target:** Autoscale (`.replit`).
+- **Live deployment metadata:** public deployment exists at
+  `https://Lucias-Production-Assistant.replit.app`; deployment type is
+  Autoscale and the current build is successful.
+- **Fit:** PASS. Autoscale is appropriate for this web/API application, including
+  the always-on API, browser preview, SSE streams, and operational workflows.
+  The API listens on its configured `PORT`, exposes `/api/healthz`, and the
+  web artifact proxies API requests through the same deployment surface.
+- **Production database separation:** **FAIL / UNVERIFIED.** The deployment
+  metadata and repository do not expose the production database binding. The
+  managed environment inventory exposes no inspectable `DATABASE_URL` value or
+  production binding identity. Before publishing or republishing, an operator
+  must verify that the deployment environment resolves its managed production
+  database and does not inherit the development database, disposable E2E
+  database, or CI database.
+
+## Required release evidence
 
 | Area | Result | Evidence |
 | --- | --- | --- |
+| Deployment type and build | PASS | `.replit` selects `autoscale`; `getDeploymentInfo` reports deployed, public, successful build |
 | Generated API contract | PASS | `pnpm run check:api-generated` |
-| Type safety | PASS | `pnpm run typecheck:libs`; API server, run calculator, mockup sandbox, and scripts typechecks |
+| API type safety | **FAIL** | `pnpm --filter @workspace/api-server run typecheck` fails in `src/routes/countObservation.ts:70` because the returned object is not assignable to `SanitizedCountDraft \| null` |
 | Recovery audit | PASS | `pnpm run audit:recovery` — 4 pass, 0 intentional differences, 0 missing |
-| API unit tests | PASS | 68 files, 974 tests |
-| API integration and authorization | PASS | Release shards and focused reruns: roles 522, sandbox auth 31, sync/reset/cache/signup 30, remaining shard-3 files 64; all passed |
-| Client/shared tests | PASS | Run calculator 214 files/2,275 tests; production rules 17; inventory math 65; spec reconcile 33; scheduled recipe check 17; spec export 36; corpus 11 |
-| Clean startup | PASS | `pnpm run check:clean-start`; API, web, and mockup health/HTML checks passed on isolated ports |
-| Model/import guard checks | PASS | `check-model-bump` and `check-operational-skill-evidence` |
-| Dependency risk | PASS | Dependency audit: 0 critical/high/moderate/low/info vulnerabilities |
-| Static security | PASS | SAST: 0 findings; HoundDog sensitive-data scan: 0 findings |
-| Secrets | PASS | No hardcoded credentials found in the reviewed surface; secrets are environment-backed and health output is status-only |
-| Sensitive-data logging | PASS | Reviewed startup/health logging emits bounded counts, statuses, IDs, and outcomes; no request/profile payload logging was found |
-| Authorization | PASS | Router-level auth plus capability tests cover anonymous rejection, role boundaries, and sandbox/environment separation |
-| Destructive-test isolation | PASS | Integration fixtures create disposable databases; destructive browser setup requires explicit approval flags and rejects `REPLIT_DEV_DOMAIN` alone |
+| Clean startup and health | PASS | `CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start`; API health, web proxy health, initial HTML, mockup HTML, and retained screenshot passed |
+| Secret storage | PASS for inspected surface | Managed secret names are present for Gemini integration, session signing, and staff signup; no secret values were displayed |
+| Secret separation | PASS for inspected source | Repository scan found no bundled application credential; CI fixtures contain intentionally local test-only values and GitHub Actions secret references |
+| Sensitive-data logging | PASS | Startup/health logging uses status, outcome, bounded counts, and error codes; no request/profile payload logging was found in the reviewed paths |
+| Production monitoring | **FAIL / UNVERIFIED** | `/api/healthz` and structured startup/error events exist, but no configured production uptime alert, deployment monitoring, or alert destination is represented in repository evidence |
+| Authorization and test isolation | PASS by retained evidence | Existing release report and recovery evidence document auth boundaries and disposable destructive-test setup; no production destructive test was run |
 
-## Production and data review
+## Schema and startup data review
 
-- **Current revision changes:** the latest revision restores sync-convergence
-  browser coverage. The review also made the existing count-draft sanitizer
-  return type explicit so the test and implementation contract typecheck; it
-  does not alter runtime behavior.
-- **Schema:** no schema file changed in the reviewed working diff. The
-  application has existing schema history, but no destructive migration was
-  run during this review. A publish-time schema diff remains an operator gate.
-- **Startup heals:** `runDataHeals()` runs marker-guarded, transaction-scoped
-  heals at API startup. Tests confirm the guards and isolated behavior, but
-  startup can still change live stored data on first production boot. The
-  observed disposable fixtures exercised repairs including recipe/profile
-  corrections, alias/name cleanup, sauce additions, and stub/duplicate
-  cleanup. Deletion or name-repoint heals are not universally reversible;
-  review the marker/result rows and take a database backup before publishing.
-- **Sync/timer/inventory/import safety:** recovery audit and focused sync,
-  reset, authorization, inventory, timer, and import tests passed. The
-  production operator must still preserve a named checkpoint before publish
-  and monitor stale-write/reset/heal logs during the first boot.
-- **Production database separation:** **UNVERIFIED**. `.replit` selects
-  Autoscale but does not identify the production database binding. Confirm the
-  deployment environment uses the production database and not the development
-  `DATABASE_URL` before publishing.
-- **Monitoring:** **UNVERIFIED**. The app exposes `/api/healthz` and emits
-  structured health/error events, but monitoring/alert configuration is not
-  represented in the repository evidence. Enable deployment monitoring and
-  alerting after publish.
+### Schema
 
-## Conditional browser/release evidence
+Recent work added three fields to the populated `inventory_items` table:
+`production_ingredient_id` (nullable text), `conversion_factor` (nullable
+double precision), and `consumption_priority` (integer default `0`). The
+change is additive and uses an existing scoped unique index; no column is
+`.unique()` and no composite primary key was changed. The OpenAPI request and
+response schemas and generated clients are present and the generated check
+passes.
 
-The checked-in browser report and artifacts are not a fresh all-green release
-record. They document:
+No production schema diff was inspected in this review. The publish operator
+must review the development-to-production schema diff and apply the repository’s
+non-interactive `push-force` process only after confirming it is additive and
+backward compatible. Do not treat the local disposable database as production
+evidence.
 
-- Desktop/phone browser smoke: PASS in the retained evidence.
-- Accessibility: FAIL — missing visible keyboard focus and unstable
-  authenticated dialog close semantics.
-- Narrow phone flow: FAIL — authenticated start-run control was not found.
-- Sync convergence: FAIL — a desktop wake/reset case hit a navigation race.
-- Mix Plan/full destructive browser completion: INCOMPLETE in the retained
-  evidence.
+### Startup data heals
 
-These failures may be addressed by later task work, but this review has no new
-passing artifacts proving them resolved. Therefore the conditional browser
-gate is **FAIL/UNVERIFIED**, not a release approval.
+The API calls `runDataHeals()` before accepting requests. It claims each heal
+with a stable marker inside a transaction, so each database runs pending heals
+once. The current registry includes repairs for profile/recipe links, CRB
+ingredient and dough-family corrections, cheese and mix poison/duplicate
+cleanup, alias/name cleanup and reversals, purchased-crust die cleanup,
+dough-variant and merge-vanish recovery, saved-parse/import corrections,
+brand/name drift, sync-row restoration, fresh-device contamination cleanup,
+incident workflow reconciliation, and cheese-component-ounce cleanup.
 
-## Rollback plan
+These heals can update, repoint, or delete live rows on first production boot.
+They are not universally reversible. Before publishing:
 
-1. Do not publish this revision.
-2. Preserve a named branch/tag at the exact candidate before the next release
-   attempt.
-3. Before publish, verify the production database binding, take the required
-   backup/checkpoint, and review startup heal markers/results.
-4. Rerun the accessibility, narrow-phone, sync-wake, Mix Plan, and full
-   destructive browser suites against disposable data.
-5. If startup, schema, or sync behavior regresses, restore the last approved
-   checkpoint rather than manually reversing broad data changes; then rerun
-   clean-start, health, and focused API checks.
+1. Take a production database backup/snapshot and preserve the candidate
+   revision under a named checkpoint or tag.
+2. Review existing `data_heals` marker/result rows and identify which pending
+   heals will run.
+3. Capture the documented minimal counts and preservation checks for each
+   pending repair; do not run ad-hoc production mutations.
+4. Monitor the first boot for `data_heals`, health, startup, and master-data
+   health events.
+
+No live marker/result verification was performed because production database
+access was not available through this review.
+
+## Rollback and post-publish procedure
+
+### Before publish
+
+1. Resolve the API typecheck failure.
+2. Verify the production deployment binding uses the production database and
+   that development/E2E/CI database settings cannot be inherited.
+3. Review the production schema diff; apply only approved additive changes.
+4. Take and name a production backup/checkpoint, and record the exact candidate
+   revision.
+5. Enable deployment monitoring and an uptime alert against
+   `/api/healthz`, with an owner and notification destination.
+
+### After publish
+
+1. Confirm the deployment build is successful and the published URL loads.
+2. Check `/api/healthz` and verify the database health result is healthy.
+3. Exercise authenticated browser smoke for desktop and phone-sized views,
+   including an operational workflow and SSE/live update path.
+4. Review startup logs for failed heals, schema errors, auth failures, and
+   master-data health findings; verify heal marker/result rows using the
+   approved read-only production procedure.
+5. Confirm monitoring receives healthy telemetry before declaring the release
+   complete.
+
+### Rollback
+
+If startup, schema, health, sync, or operational checks regress, stop further
+publishes, open the named checkpoint, and restore the last approved application
+revision using Replit’s checkpoint/rollback flow. Restore the database from the
+pre-publish backup when data was changed or a heal/schema operation is
+implicated; do not attempt broad manual reverse edits. After rollback, rerun
+clean-start, health, generated-contract/type checks, and focused authenticated
+browser/API checks, then re-review the deployment database binding.
+
+Irreversible-risk items are the startup heals that delete or repoint rows and
+any schema operation that a publish-time diff identifies as destructive. The
+inventory change currently visible in source is additive, but its production
+application still requires operator diff review.
 
 ## Release decision
 
-**NO-GO — do not publish.** The security, authorization, type, contract,
-isolation, startup, and automated test gates pass. The unresolved or
-unverified browser gates, production database separation, and monitoring
-evidence are release blockers.
+**NO-GO — do not publish.** Autoscale fit, successful deployment metadata,
+managed secret presence, generated contracts, recovery audit, clean startup,
+and inspected logging are satisfactory. Publishing is blocked by the current
+API typecheck failure, unverified production database separation, and
+unverified production monitoring/alerting. The unresolved database and
+monitoring checks are hard blockers even if the typecheck is fixed.
