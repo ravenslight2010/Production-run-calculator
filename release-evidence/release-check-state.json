@@ -19,7 +19,13 @@
       "passed": true,
       "status": "PASS",
       "elapsedMs": 1182
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 24694
     }
   ],
-  "updatedAt": "2026-08-25T16:11:26.164Z"
+  "updatedAt": "2026-08-25T16:11:50.860Z"
 }
