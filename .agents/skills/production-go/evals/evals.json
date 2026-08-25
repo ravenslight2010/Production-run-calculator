@@ -1,0 +1,23 @@
+{
+  "skill_name": "production-go",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We finished the release candidate. Can you check whether the app is production-ready and tell me if we should publish? The generated-client check, relevant typechecks and tests, desktop and 390x844 smoke tests, accessibility scan, browser-facing API/web workflows, security review, and operational checklist all have current passing evidence for this commit.",
+      "expected_output": "A concise report with App health, Release evidence, Security readiness, Operational readiness, Accepted exceptions, and exactly one Decision: GO. It recommends publish only after citing the current evidence.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Is this ready to ship? The unit tests passed, but nobody ran the generated API client freshness check or the browser smoke tests, and we do not have current security review results. Please give me the release status rather than making changes.",
+      "expected_output": "A report with Decision: NO-GO. It treats missing generated-client, browser, and security evidence as blockers, names the exact evidence needed, and stops without inventing extra tasks or recommending publish.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Can we go live today? The API process answers on its local port, but the artifact-managed browser API is stale and the preview shows a blank page after the workflow reported DIDNT_OPEN_A_PORT twice. The dependency audit also has an unresolved high finding.",
+      "expected_output": "A report with Decision: NO-GO. It distinguishes local process health from browser-facing workflow health, points to workflow-port diagnosis, treats the unresolved high security finding as blocking, and gives one bounded blocker list.",
+      "files": []
+    }
+  ]
+}
