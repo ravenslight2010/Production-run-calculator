@@ -3,6 +3,208 @@
   "method": "held-out, balanced, two positive and two near-miss negative prompts per skill",
   "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
   "runtime_status": "blocked: run_eval.py was exercised on 100 prompts with 3 repetitions and a balanced 40% held-out split, but the claude CLI is unavailable",
+  "runtime_metrics": [
+    {
+      "skill": "brainstorming",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "customer-import-audit",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "data-heal-playbook",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "import-bug-investigation",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "operational-browser-verification",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "production-go",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "release-checklist",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "rollback-recovery",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "schema-change-checklist",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "skill-creator",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "spec-import-guard",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "state-accuracy-check",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "sync-invariant-check",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "test-gap-triage",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "wrong-number-triage",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "check-dependency-licenses",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "handle-personal-and-sensitive-data",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "instrument-observability-and-graceful-errors",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "make-apps-resilient-to-abuse-and-overload",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "make-ui-responsive-across-devices",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "meet-an-accessibility-baseline",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "review-before-shipping",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "secure-ai-features-against-prompt-injection",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "validate-and-encode-untrusted-input",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "vet-dependencies-before-adding",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    }
+  ],
   "skills": [
     {
       "name": "brainstorming",

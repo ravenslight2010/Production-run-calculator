@@ -246,6 +246,17 @@ def build() -> dict:
             "blocked: run_eval.py was exercised on 100 prompts with 3 repetitions "
             "and a balanced 40% held-out split, but the claude CLI is unavailable"
         ),
+        "runtime_metrics": [
+            {
+                "skill": skill["name"],
+                "precision": None,
+                "recall": None,
+                "false_positive_rate": None,
+                "false_negative_rate": None,
+                "status": "unavailable: claude CLI missing before model evaluation",
+            }
+            for skill in skills
+        ],
         "skills": skills,
     }
 
@@ -309,8 +320,14 @@ def main() -> None:
             "When the Claude CLI is available, rerun `run_eval.py` with three runs per prompt and this "
             "balanced 40% held-out split before changing any description.",
             "",
-            "| Skill | Positive overlap | Negative overlap | Signals |",
-            "| --- | --- | --- | --- |",
+            "## Per-skill runtime metrics",
+            "",
+            "Runtime precision, recall, false-positive rate, and false-negative rate are "
+            "**unavailable** for every skill because all attempts failed before model evaluation. "
+            "The evaluator's 0/3 output is synthetic and is not included as evidence.",
+            "",
+            "| Skill | Precision | Recall | False-positive rate | False-negative rate | Signals |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
         for row in data["preflight"]:
             signals = []
@@ -319,7 +336,7 @@ def main() -> None:
             if row["over_trigger_signal"]:
                 signals.append(f"over-trigger candidate ({row['over_trigger_signal']})")
             lines.append(
-                f"| `{row['name']}` | {row['positive_overlap']} | {row['negative_overlap']} | "
+                f"| `{row['name']}` | N/A | N/A | N/A | N/A | "
                 f"{'; '.join(signals) or 'none'} |"
             )
         lines.extend([

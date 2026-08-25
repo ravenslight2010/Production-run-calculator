@@ -14,33 +14,37 @@ Because `run_eval.py` records failed subprocesses as non-triggers, its resulting
 
 These are lexical review signals only, not claims that Claude would trigger. When the Claude CLI is available, rerun `run_eval.py` with three runs per prompt and this balanced 40% held-out split before changing any description.
 
-| Skill | Positive overlap | Negative overlap | Signals |
-| --- | --- | --- | --- |
-| `brainstorming` | [2, 2] | [0, 1] | none |
-| `customer-import-audit` | [5, 1] | [0, 4] | under-trigger candidate (1) |
-| `data-heal-playbook` | [7, 5] | [0, 3] | none |
-| `import-bug-investigation` | [6, 3] | [1, 0] | none |
-| `operational-browser-verification` | [11, 4] | [1, 1] | none |
-| `production-go` | [9, 2] | [5, 0] | over-trigger candidate (1) |
-| `release-checklist` | [4, 3] | [0, 0] | none |
-| `rollback-recovery` | [10, 6] | [4, 0] | none |
-| `schema-change-checklist` | [3, 3] | [1, 1] | none |
-| `skill-creator` | [4, 3] | [1, 0] | none |
-| `spec-import-guard` | [5, 6] | [0, 1] | none |
-| `state-accuracy-check` | [5, 4] | [2, 0] | none |
-| `sync-invariant-check` | [0, 0] | [0, 0] | under-trigger candidate (2) |
-| `test-gap-triage` | [10, 8] | [2, 2] | none |
-| `wrong-number-triage` | [9, 5] | [1, 0] | none |
-| `check-dependency-licenses` | [2, 3] | [1, 0] | none |
-| `handle-personal-and-sensitive-data` | [1, 3] | [0, 0] | under-trigger candidate (1) |
-| `instrument-observability-and-graceful-errors` | [3, 2] | [2, 1] | none |
-| `make-apps-resilient-to-abuse-and-overload` | [7, 1] | [1, 0] | under-trigger candidate (1) |
-| `make-ui-responsive-across-devices` | [4, 5] | [0, 0] | none |
-| `meet-an-accessibility-baseline` | [1, 1] | [0, 0] | under-trigger candidate (2) |
-| `review-before-shipping` | [1, 0] | [0, 1] | under-trigger candidate (2) |
-| `secure-ai-features-against-prompt-injection` | [9, 6] | [1, 2] | none |
-| `validate-and-encode-untrusted-input` | [10, 8] | [2, 0] | none |
-| `vet-dependencies-before-adding` | [2, 4] | [1, 0] | none |
+## Per-skill runtime metrics
+
+Runtime precision, recall, false-positive rate, and false-negative rate are **unavailable** for every skill because all attempts failed before model evaluation. The evaluator's 0/3 output is synthetic and is not included as evidence.
+
+| Skill | Precision | Recall | False-positive rate | False-negative rate | Signals |
+| --- | --- | --- | --- | --- | --- |
+| `brainstorming` | N/A | N/A | N/A | N/A | none |
+| `customer-import-audit` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `data-heal-playbook` | N/A | N/A | N/A | N/A | none |
+| `import-bug-investigation` | N/A | N/A | N/A | N/A | none |
+| `operational-browser-verification` | N/A | N/A | N/A | N/A | none |
+| `production-go` | N/A | N/A | N/A | N/A | over-trigger candidate (1) |
+| `release-checklist` | N/A | N/A | N/A | N/A | none |
+| `rollback-recovery` | N/A | N/A | N/A | N/A | none |
+| `schema-change-checklist` | N/A | N/A | N/A | N/A | none |
+| `skill-creator` | N/A | N/A | N/A | N/A | none |
+| `spec-import-guard` | N/A | N/A | N/A | N/A | none |
+| `state-accuracy-check` | N/A | N/A | N/A | N/A | none |
+| `sync-invariant-check` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
+| `test-gap-triage` | N/A | N/A | N/A | N/A | none |
+| `wrong-number-triage` | N/A | N/A | N/A | N/A | none |
+| `check-dependency-licenses` | N/A | N/A | N/A | N/A | none |
+| `handle-personal-and-sensitive-data` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `instrument-observability-and-graceful-errors` | N/A | N/A | N/A | N/A | none |
+| `make-apps-resilient-to-abuse-and-overload` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `make-ui-responsive-across-devices` | N/A | N/A | N/A | N/A | none |
+| `meet-an-accessibility-baseline` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
+| `review-before-shipping` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
+| `secure-ai-features-against-prompt-injection` | N/A | N/A | N/A | N/A | none |
+| `validate-and-encode-untrusted-input` | N/A | N/A | N/A | N/A | none |
+| `vet-dependencies-before-adding` | N/A | N/A | N/A | N/A | none |
 
 ## Interpretation
 
