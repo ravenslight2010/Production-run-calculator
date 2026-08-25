@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 export type ReleaseStep = {
   label: string;
   args: string[];
+  command?: string;
   env?: Record<string, string>;
   timeoutMs?: number;
   warningMs?: number;
@@ -302,7 +303,7 @@ export function runStep(
 ): Promise<{ exitCode: number; elapsedMs: number; status: StepStatus }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
-    const child = spawn("pnpm", step.args, {
+    const child = spawn(step.command ?? "pnpm", step.args, {
       cwd: rootDir,
       env: { ...process.env, ...step.env },
       stdio: "inherit",
@@ -358,7 +359,12 @@ export function runStep(
     child.once("close", (code, signal) => {
       if (signal) {
         console.error(`${step.label} stopped by ${signal}`);
-        finish(1);
+        // A signal means the runner or operating environment stopped the
+        // child (for example an external cancellation or resource limit).
+        // Keep this distinct from a test process that exits non-zero so the
+        // release report does not misclassify infrastructure as a product
+        // regression.
+        finish(1, "INFRASTRUCTURE ERROR");
         return;
       }
       finish(code ?? 1);
@@ -416,7 +422,9 @@ export function formatReleaseReport(
   return `${lines.join("\n")}\n`;
 }
 
-async function writeReleaseReport(results: ReleaseStepResult[]): Promise<string> {
+async function writeReleaseReport(
+  results: ReleaseStepResult[],
+): Promise<string> {
   const reportPath = resolve(
     rootDir,
     releaseEvidenceDir,

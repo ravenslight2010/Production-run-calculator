@@ -1,5 +1,9 @@
 # Browser test isolation
 
+For ownership, release relevance, required checks by change category, failure
+classification, and bounded coverage gaps, see
+[`docs/test-release-matrix.md`](../../../docs/test-release-matrix.md).
+
 ## Suite boundaries
 
 | Suite/config | Classification | Database behavior |
@@ -139,6 +143,7 @@ deterministic. A failed test may leave its own temporary server data behind;
 rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
+
 ## Accessibility smoke gate
 
 Run `pnpm --filter @workspace/run-calculator run test:e2e:a11y` against the

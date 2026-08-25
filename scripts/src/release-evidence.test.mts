@@ -57,6 +57,24 @@ async function run(): Promise<void> {
     /\| failed-child fixture \| FAIL \|/,
   );
 
+  const signaledChild = await runStep({
+    label: "signaled-child fixture",
+    command: process.execPath,
+    args: ["-e", "process.kill(process.pid, 'SIGTERM')"],
+  });
+  assert.equal(signaledChild.exitCode, 1);
+  assert.equal(signaledChild.status, "INFRASTRUCTURE ERROR");
+  assert.match(
+    formatReleaseReport([
+      {
+        label: "signaled-child fixture",
+        status: signaledChild.status,
+        elapsedMs: signaledChild.elapsedMs,
+      },
+    ]),
+    /\| signaled-child fixture \| INFRASTRUCTURE ERROR \|/,
+  );
+
   const allowlistedFiles = [...RELEASE_EVIDENCE_ALLOWLIST];
   const root = await fixture(allowlistedFiles);
   try {
