@@ -59,8 +59,8 @@ async function apiSignUp(
     data: { username, password, accessCode: SIGNUP_CODE },
   });
   expect(resp.ok(), `sign-up failed: ${resp.status()}`).toBe(true);
-  const body = await resp.json() as { token: string; user: { id: string } };
-  const { token, user: { id: userId } } = body;
+  const body = await resp.json() as { token: string; user: { userId: string } };
+  const { token, user: { userId } } = body;
 
   // Promote to manager so Accept (requires use-ai-tools capability) works
   await db.query(
@@ -82,7 +82,7 @@ async function signIn(page: Page, username: string, password: string): Promise<v
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(password);
-  await page.getByRole("button", { name: /sign.?in|log.?in/i }).click();
+  await page.getByRole("button", { name: /^sign in$/i }).click();
   // Wait for the main app tabs to be ready
   await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
   // Brief pause for startup async effects (seedProfilesFromServer, etc.)
@@ -252,19 +252,24 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     await expect(suggestionBlock).toHaveCount(0);
 
     // Step 7: Verify the server-side profile was updated
-    const profilesResp = await request.get(`${API_BASE}/api/brand-profiles`, {
-      headers: { Cookie: `rc_auth=${token}` },
-    });
-    expect(profilesResp.ok()).toBe(true);
-    const { items } = await profilesResp.json() as {
-      items: Array<{ brand: string; flavor: string; values: Record<string, unknown> }>;
-    };
-    const profile = items.find((p) => p.brand === BRAND && p.flavor === FLAVOR_A);
-    expect(profile, "brand profile not found after Accept").toBeTruthy();
-    expect(
-      profile?.values?.cycleSpeed,
-      "profile cycleSpeed was not updated to the recommended value",
-    ).toBe(RECOMMENDED_SPEED);
+    await expect
+      .poll(
+        async () => {
+          const profilesResp = await request.get(`${API_BASE}/api/brand-profiles`, {
+            headers: { Cookie: `rc_auth=${token}` },
+          });
+          if (!profilesResp.ok()) return null;
+          const { items } = (await profilesResp.json()) as {
+            items: Array<{ brand: string; flavor: string; values: Record<string, unknown> }>;
+          };
+          return items.find((p) => p.brand === BRAND && p.flavor === FLAVOR_A)?.values?.cycleSpeed;
+        },
+        {
+          message: "profile cycleSpeed was not persisted to the recommended value",
+          timeout: 10_000,
+        },
+      )
+      .toBe(RECOMMENDED_SPEED);
   });
 
   test("Dismiss suppresses the suggestion and it stays suppressed on same drift", async ({
