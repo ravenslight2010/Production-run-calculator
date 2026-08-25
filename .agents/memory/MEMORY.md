@@ -148,13 +148,10 @@
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
 - [Accessibility coverage gate](a11y-coverage-gate.md) — isolated multi-viewport axe checks should separate stable workflow coverage from known shell debt and destructive setup.
-- [Sync snapshot identity](sync-snapshot-identity.md) — only the server’s stable hash of protected canonical state may authorize an unchanged response; legacy reads stay full payloads.
-- [Sync HTTP failure handling](sync-http-failure-handling.md) — parseable JSON from a non-OK sync write is still a failed write; never let response parsing imply acknowledgment.
+- [Sync response safety](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial contract](partial-sync-contract.md) — unchanged responses require a stable protected-state hash; non-OK JSON is failure; partial writes need a versioned snapshot dependency.
 - [SSE disconnect registration](sse-disconnect-registration.md) — register close cleanup before awaited initial snapshot work, and cancel test readers explicitly.
-- [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) — compare ingredient changes in native batch/per-pizza units and retain a provenance-linked pre-import undo state.
-- [Release browser evidence](release-browser-evidence.md) + [isolated destructive browser tests](isolated-destructive-browser-tests.md) — use system Chromium, retained artifacts, and a temporary DB for destructive setup; Drizzle ignores URL `search_path` isolation.
-- [Release evidence isolation](release-evidence-isolation.md) — browser launchers and fixtures must consistently opt into disposable mode whenever setup mutates cleanup state.
+- [Release browser evidence](release-browser-evidence.md) + [evidence isolation](release-evidence-isolation.md) + [destructive fixtures](isolated-destructive-browser-tests.md) — use system Chromium, retained artifacts, and disposable DBs; Drizzle ignores URL `search_path` isolation.
 - [A11y dialog browser fixtures](a11y-dialog-browser-fixtures.md) — import-dialog journeys need a fully capable manager role seeded in disposable DBs before UI capability guards render entry points.
 - [Browser timer fixtures](browser-timer-fixtures.md) — controlled sleep/resume checks must account for tunnel delay and capture counters on their owning tab.
 - [Delayed onboarding overlay](delayed-onboarding-overlay.md) — sign-up fixtures must wait for and dismiss the asynchronously mounted first-login dialog before interacting with the app.
