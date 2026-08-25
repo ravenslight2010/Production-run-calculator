@@ -21,7 +21,10 @@ let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../..",
+);
 const BACKFILL_ID = "data-heal-result-backfill-v1";
 const LEGACY_NULL_ID = "legacy-null-result";
 const RECORDED_RESULT_ID = "recorded-result";
@@ -31,7 +34,11 @@ beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set");
 
-  adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
+  adminPool = new pg.Pool({
+    connectionString: originalDatabaseUrl,
+    connectionTimeoutMillis: 15_000,
+    statement_timeout: 90_000,
+  });
   adminPool.on("error", () => {});
   testDbName = `helium_heal_results_int_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   await adminPool.query(`CREATE DATABASE "${testDbName}"`);
@@ -39,13 +46,26 @@ beforeAll(async () => {
   const testUrl = new URL(originalDatabaseUrl);
   testUrl.pathname = `/${testDbName}`;
   const testUrlStr = testUrl.toString();
-  const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
-    cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: testUrlStr },
-    encoding: "utf8",
-  });
+  const push = spawnSync(
+    "pnpm",
+    ["--filter", "@workspace/db", "run", "push-force"],
+    {
+      cwd: repoRoot,
+      env: { ...process.env, DATABASE_URL: testUrlStr },
+      encoding: "utf8",
+      timeout: 90_000,
+      killSignal: "SIGTERM",
+    },
+  );
   if (push.status !== 0) {
-    throw new Error(`drizzle push-force failed:\n${push.stdout}\n${push.stderr}`);
+    const reason =
+      (push.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT" ||
+      push.signal
+        ? "timed out after 90 seconds"
+        : `exited with status ${push.status}`;
+    throw new Error(
+      `drizzle push-force ${reason}:\n${push.stdout}\n${push.stderr}`,
+    );
   }
 
   process.env.DATABASE_URL = testUrlStr;
@@ -60,7 +80,9 @@ afterAll(async () => {
   if (pool) await pool.end();
   if (adminPool) {
     if (testDbName) {
-      await adminPool.query(`DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`);
+      await adminPool.query(
+        `DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`,
+      );
     }
     await adminPool.end();
   }
@@ -80,7 +102,9 @@ describe("historical data-heal result backfill", () => {
 
     const afterFirstBoot = await db.select().from(dataHealsTable);
     const legacy = afterFirstBoot.find((row) => row.id === LEGACY_NULL_ID);
-    const recorded = afterFirstBoot.find((row) => row.id === RECORDED_RESULT_ID);
+    const recorded = afterFirstBoot.find(
+      (row) => row.id === RECORDED_RESULT_ID,
+    );
     const marker = afterFirstBoot.find((row) => row.id === BACKFILL_ID);
 
     expect(legacy?.result).toMatchObject({
@@ -111,9 +135,15 @@ describe("historical data-heal result backfill", () => {
 
     const afterSecondBoot = await db.select().from(dataHealsTable);
     const markerRows = afterSecondBoot.filter((row) => row.id === BACKFILL_ID);
-    expect(afterSecondBoot.find((row) => row.id === LEGACY_NULL_ID)?.result).toEqual(legacy?.result);
-    expect(afterSecondBoot.find((row) => row.id === RECORDED_RESULT_ID)?.result).toEqual(recordedResult);
-    expect(afterSecondBoot.find((row) => row.id === LATE_NULL_ID)?.result).toBeNull();
+    expect(
+      afterSecondBoot.find((row) => row.id === LEGACY_NULL_ID)?.result,
+    ).toEqual(legacy?.result);
+    expect(
+      afterSecondBoot.find((row) => row.id === RECORDED_RESULT_ID)?.result,
+    ).toEqual(recordedResult);
+    expect(
+      afterSecondBoot.find((row) => row.id === LATE_NULL_ID)?.result,
+    ).toBeNull();
     expect(markerRows).toHaveLength(1);
     expect(markerRows[0]?.appliedAt.getTime()).toBe(markerAppliedAt);
   });

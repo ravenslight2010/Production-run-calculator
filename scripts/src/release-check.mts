@@ -11,6 +11,18 @@ type Step = {
   group?: string;
 };
 
+type StepStatus =
+  | "PASS"
+  | "FAIL"
+  | "INFRASTRUCTURE TIMEOUT"
+  | "INFRASTRUCTURE ERROR";
+
+type StepResult = {
+  label: string;
+  status: StepStatus;
+  elapsedMs: number;
+};
+
 const API_SHARD_TIMEOUT_MS = 4 * 60_000;
 const API_SHARD_WARNING_MS = 3 * 60_000;
 const rootDir = new URL("../../", import.meta.url).pathname;
@@ -276,7 +288,9 @@ export async function verifyReleaseEvidence(
   );
 }
 
-function runStep(step: Step): Promise<{ exitCode: number; elapsedMs: number }> {
+function runStep(
+  step: Step,
+): Promise<{ exitCode: number; elapsedMs: number; status: StepStatus }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn("pnpm", step.args, {
@@ -286,14 +300,18 @@ function runStep(step: Step): Promise<{ exitCode: number; elapsedMs: number }> {
     });
     let settled = false;
     let warningTimer: ReturnType<typeof setTimeout> | undefined;
-    const finish = (code: number): void => {
+    const finish = (code: number, status?: StepStatus): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
       if (warningTimer) clearTimeout(warningTimer);
       const elapsedMs = Date.now() - startedAt;
       console.log(`${step.label} elapsed ${Math.round(elapsedMs / 1000)}s`);
-      resolve({ exitCode: code, elapsedMs });
+      resolve({
+        exitCode: code,
+        elapsedMs,
+        status: status ?? (code === 0 ? "PASS" : "FAIL"),
+      });
     };
     const warningMs =
       step.warningMs !== undefined && step.timeoutMs !== undefined
@@ -321,12 +339,12 @@ function runStep(step: Step): Promise<{ exitCode: number; elapsedMs: number }> {
             );
             child.kill("SIGTERM");
             setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
-            finish(124);
+            finish(124, "INFRASTRUCTURE TIMEOUT");
           }, step.timeoutMs);
 
     child.once("error", (error) => {
       console.error(`Could not start ${step.label}: ${error.message}`);
-      finish(1);
+      finish(1, "INFRASTRUCTURE ERROR");
     });
     child.once("close", (code, signal) => {
       if (signal) {
@@ -339,18 +357,16 @@ function runStep(step: Step): Promise<{ exitCode: number; elapsedMs: number }> {
   });
 }
 
-async function writeReleaseReport(
-  results: Array<{ label: string; passed: boolean; elapsedMs: number }>,
-): Promise<string> {
+async function writeReleaseReport(results: StepResult[]): Promise<string> {
   const reportPath = resolve(
     rootDir,
     releaseEvidenceDir,
     "release-check-report.md",
   );
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
-  const cleanStartPassed = results.find(
-    (result) => result.label === "clean-start smoke",
-  )?.passed;
+  const cleanStartPassed =
+    results.find((result) => result.label === "clean-start smoke")?.status ===
+    "PASS";
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
     file.startsWith("clean-start/"),
   );
@@ -387,7 +403,7 @@ async function writeReleaseReport(
     "| --- | --- | ---: |",
     ...results.map(
       (result) =>
-        `| ${result.label} | ${result.passed ? "PASS" : "FAIL"} | ${Math.round(
+        `| ${result.label} | ${result.status} | ${Math.round(
           result.elapsedMs / 1000,
         )}s |`,
     ),
@@ -435,8 +451,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
-  const results: Array<{ label: string; passed: boolean; elapsedMs: number }> =
-    [];
+  const results: Array<StepResult & { passed: boolean }> = [];
   let failedGroup: string | undefined;
 
   for (const [index, step] of steps.entries()) {
@@ -444,10 +459,10 @@ async function main(): Promise<void> {
       break;
     }
     console.log(`\n[${index + 1}/${steps.length}] ${step.label}`);
-    const { exitCode, elapsedMs } = await runStep(step);
+    const { exitCode, elapsedMs, status } = await runStep(step);
     const passed = exitCode === 0;
-    results.push({ label: step.label, passed, elapsedMs });
-    console.log(`${passed ? "PASS" : "FAIL"} ${step.label}`);
+    results.push({ label: step.label, passed, status, elapsedMs });
+    console.log(`${status} ${step.label}`);
     if (!passed) {
       if (step.group !== undefined) {
         failedGroup = step.group;
@@ -464,7 +479,7 @@ async function main(): Promise<void> {
   console.log("\nRelease check summary:");
   for (const result of results) {
     console.log(
-      `${result.passed ? "PASS" : "FAIL"} ${result.label} (${Math.round(
+      `${result.status} ${result.label} (${Math.round(
         result.elapsedMs / 1000,
       )}s)`,
     );
