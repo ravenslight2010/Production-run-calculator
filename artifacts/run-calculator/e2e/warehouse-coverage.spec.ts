@@ -403,6 +403,31 @@ test("keeps capped offsite transfer guidance readable on a tablet", async ({
       path: testInfo.outputPath("warehouse-coverage-tablet-guidance.png"),
       fullPage: true,
     });
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-coverage")).toBeVisible();
+
+    const reloadedCoverage = page.getByTestId("warehouse-coverage");
+    const reloadedRow = reloadedCoverage
+      .getByText(fixture.ingredientName, { exact: true })
+      .locator("xpath=../..");
+    const reloadedGuidance = reloadedRow.getByText(guidanceText, { exact: true });
+
+    await expect(reloadedRow).toContainText("Short");
+    await expect(reloadedGuidance).toBeVisible();
+    await expect(reloadedGuidance).toHaveText(guidanceText);
+
+    const reloadedLayout = await reloadedGuidance.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      right: element.getBoundingClientRect().right,
+    }));
+    expect(reloadedLayout.scrollWidth).toBe(reloadedLayout.clientWidth);
+    expect(reloadedLayout.scrollHeight).toBe(reloadedLayout.clientHeight);
+    expect(reloadedLayout.right).toBeLessThanOrEqual(viewport.width);
+    expect(browserErrors).toEqual([]);
   } finally {
     await db.end().catch(() => {});
   }
