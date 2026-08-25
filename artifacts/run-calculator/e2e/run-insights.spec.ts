@@ -78,6 +78,12 @@ async function apiSignUp(
  * Assumes onboarding_seen = true (no overlay to dismiss).
  */
 async function signIn(page: Page, username: string, password: string): Promise<void> {
+  // This fixture creates a synthetic server profile without mutating the shared
+  // factory brand list. Skip the one-time legacy orphan-profile cleanup so it
+  // does not delete that deliberately isolated record during startup.
+  await page.addInitScript(() => {
+    localStorage.setItem("run-calc-purge-orphaned-profiles-v1", "1");
+  });
   await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
@@ -260,9 +266,13 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
           });
           if (!profilesResp.ok()) return null;
           const { items } = (await profilesResp.json()) as {
-            items: Array<{ brand: string; flavor: string; values: Record<string, unknown> }>;
+            items: Array<{
+              key: string;
+              crustValues: Record<string, unknown>;
+            }>;
           };
-          return items.find((p) => p.brand === BRAND && p.flavor === FLAVOR_A)?.values?.cycleSpeed;
+          const key = `${BRAND.toLowerCase()}__${FLAVOR_A.toLowerCase()}`;
+          return items.find((p) => p.key === key)?.crustValues?.cycleSpeed;
         },
         {
           message: "profile cycleSpeed was not persisted to the recommended value",

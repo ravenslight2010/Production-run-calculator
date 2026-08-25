@@ -67,6 +67,7 @@
 - [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
 - [Scheduled recipe-setup warning](scheduled-recipe-check.md) + [move runs](schedule-move.md) — manager card flags runs missing a profile; per-run move MUST key on run id, not list index.
 - [Scheduled-day client date](scheduled-day-client-date.md) — ALL sync endpoints must key on client `?today=` not server UTC, or evening live pushes clobber scheduled rows; SSE date-scoped too.
+- [Scheduled-day response validation](scheduled-day-response-validation.md) — never cast scheduled-sync JSON into state; a 401 `{error}` envelope otherwise becomes `scheduledDays` and crashes `.flatMap()` on reload.
 - [AI model routing + streaming](ai-model-routing-and-streaming.md) — pickModel is the only model source; vi.mock MUST export pickModel/AI_MODELS or routes 502; ask/recipe SSE opt-in.
 - [Merge category tabs](merge-category-tabs.md) — 6-tab scoped merge picker; full-universe (AI suggest) vs scoped-universe (pickers) split; Brand/Flavor is its own merge path; mobile Mixes always empty, empty-state below tabs not early-return.
 - [Server empty-over-populated guard](server-empty-over-populated-guard.md) — /api/sync protectRunValues rejects all-default-over-populated in BOTH the additive path AND the wholesale-adopt (reset) path; blank-over-populated during a rollover push keeps stored value + advances stamp.
@@ -143,7 +144,6 @@
 - [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa `autoUpdate` reloads clients; interactive “Reload now” UI requires `prompt` so `needRefresh` fires.
 - [AI memory health audits](ai-memory-health-audits.md) — historic aliases are evidence, not stale records; safe cleanup must rely on canonical merge/import maps and never touch facility facts or user conversations.
 - [Mounted AI cost paths](mounted-ai-cost-paths.md) — Express strips mount prefixes from req.path; cost lookups keyed by public API paths must recombine baseUrl + path.
-- [Isolated destructive browser tests](isolated-destructive-browser-tests.md) — Drizzle push ignores URL search_path isolation; use a temporary database for Playwright setup that deletes live-day rows.
 - [Mix-plan E2E setup](mix-plan-e2e-setup.md) — localStorage-seeded live runs can be replaced before Mix Plan renders; baseline pull tests may fail before exercising their assertions.
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
 - [Visual regression baselines](visual-regression-baselines.md) — screenshot tests need isolated setup, masked dynamic content, and explicit reviewed snapshot updates.
@@ -153,7 +153,7 @@
 - [SSE disconnect registration](sse-disconnect-registration.md) — register close cleanup before awaited initial snapshot work, and cancel test readers explicitly.
 - [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) — compare ingredient changes in native batch/per-pizza units and retain a provenance-linked pre-import undo state.
-- [Release browser evidence](release-browser-evidence.md) — full Playwright runs need system Chromium, retained failure artifacts, and a disposable DB for destructive setup.
+- [Release browser evidence](release-browser-evidence.md) + [isolated destructive browser tests](isolated-destructive-browser-tests.md) — use system Chromium, retained artifacts, and a temporary DB for destructive setup; Drizzle ignores URL `search_path` isolation.
 - [A11y dialog browser fixtures](a11y-dialog-browser-fixtures.md) — import-dialog journeys need a fully capable manager role seeded in disposable DBs before UI capability guards render entry points.
 - [Browser timer fixtures](browser-timer-fixtures.md) — controlled sleep/resume checks must account for tunnel delay and capture counters on their owning tab.
 - [Delayed onboarding overlay](delayed-onboarding-overlay.md) — sign-up fixtures must wait for and dismiss the asynchronously mounted first-login dialog before interacting with the app.

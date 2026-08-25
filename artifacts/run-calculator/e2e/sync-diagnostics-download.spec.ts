@@ -85,9 +85,10 @@ async function signUp(page: Page, username: string): Promise<void> {
     state: "attached",
     timeout: 25_000,
   });
-  const getStarted = page.getByRole("button", { name: /^get.?started$/i });
-  if (await getStarted.isVisible().catch(() => false)) {
-    await getStarted.click();
+  const onboarding = page.getByRole("dialog");
+  await onboarding.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  if (await onboarding.isVisible().catch(() => false)) {
+    await onboarding.getByRole("button", { name: "Close" }).click();
     await page
       .locator('[data-state="open"][aria-hidden="true"]')
       .waitFor({ state: "detached", timeout: 5_000 })
@@ -100,7 +101,7 @@ test("downloads a date-scoped sync diagnostic JSON report", async ({ page }) => 
   testUsernames.add(username);
   await signUp(page, username);
 
-  const syncStatus = page.locator('button[title^="Sync:"]');
+  const syncStatus = page.locator('button[title^="Sync"]');
   await expect(syncStatus).toBeVisible();
   await syncStatus.click();
 
@@ -194,7 +195,7 @@ test("filters older local sync diagnostics from the downloaded report", async ({
   }, { dates, seededEvents });
   await page.reload({ waitUntil: "domcontentloaded" });
 
-  const syncStatus = page.locator('button[title^="Sync:"]');
+  const syncStatus = page.locator('button[title^="Sync"]');
   await expect(syncStatus).toBeVisible();
   await syncStatus.click();
 
@@ -279,7 +280,7 @@ test("keeps the diagnostic report on the active date across local midnight", asy
   });
   await mockDateNow(page, afterMidnight);
 
-  const syncStatus = page.locator('button[title^="Sync:"]');
+  const syncStatus = page.locator('button[title^="Sync"]');
   await expect(syncStatus).toBeVisible();
   await syncStatus.click();
   const downloadPromise = page.waitForEvent("download");

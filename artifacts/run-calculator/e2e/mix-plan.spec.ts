@@ -821,6 +821,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       });
 
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
 
       await page.evaluate(
         ({ brand1, brand2, ingredient, oz1, oz2, cases1, cases2, ppc }) => {
@@ -940,6 +941,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       });
 
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
 
       await page.evaluate(
         ({ brand, ingredient, runOz, casesNeeded, pizzasPerCase }) => {
@@ -2187,6 +2189,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       });
 
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
 
       // Inject two runs sharing the same ingredient via localStorage
       await page.evaluate(
@@ -2875,12 +2878,14 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await page.waitForTimeout(500);
       await expect(page.locator(`[data-testid="mix-plan-${today}"]`)).toBeVisible({ timeout: 5_000 });
 
-      // Switch to run 2 via Next, start + stop it
+      // Stopping run 1 advances selection to the remaining run. Older builds
+      // kept run 1 selected, so only use Next when that legacy state remains.
       await page.locator('[data-testid="tab-run"]').click();
       const nextBtn = page.getByRole("button", { name: /next/i });
-      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
-      await nextBtn.click();
-      await page.waitForTimeout(600);
+      if (await nextBtn.isVisible().catch(() => false)) {
+        await nextBtn.click();
+        await page.waitForTimeout(600);
+      }
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
@@ -2960,6 +2965,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       });
 
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
 
       // Inject run data into localStorage so the mix card appears
       await page.evaluate(
@@ -3003,7 +3009,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(EDIT_AMOUNT));
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
 
       // Wait for the save round-trip to complete before reloading
       await page.waitForTimeout(2_000);
@@ -3732,11 +3738,13 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stopBtn1.click();
       await page.waitForTimeout(800);
 
-      // Switch to run 2 via Next, start + stop it
+      // Stopping run 1 advances selection to the remaining run. Older builds
+      // kept run 1 selected, so only use Next when that legacy state remains.
       const nextBtn = page.getByRole("button", { name: /next/i });
-      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
-      await nextBtn.click();
-      await page.waitForTimeout(600);
+      if (await nextBtn.isVisible().catch(() => false)) {
+        await nextBtn.click();
+        await page.waitForTimeout(600);
+      }
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
@@ -3860,11 +3868,13 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await stopBtn1.click();
       await page.waitForTimeout(800);
 
-      // Stop run 2.
+      // Stopping run 1 advances selection to the remaining run. Older builds
+      // kept run 1 selected, so only use Next when that legacy state remains.
       const nextBtn = page.getByRole("button", { name: /next/i });
-      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
-      await nextBtn.click();
-      await page.waitForTimeout(600);
+      if (await nextBtn.isVisible().catch(() => false)) {
+        await nextBtn.click();
+        await page.waitForTimeout(600);
+      }
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
@@ -3975,6 +3985,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         casesPerLayer: 0,
       });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -4004,7 +4015,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(EDIT_AMOUNT));
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
       await page.waitForTimeout(1_500);
 
       // ── Step 3: batch count updates to 8.50 batches ──────────────────────────
@@ -4019,12 +4030,12 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // ── Step 4: type amountAlreadyMade >= totalLbs ───────────────────────────
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(FULL_AMOUNT));
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
       await page.waitForTimeout(1_500);
 
       // ── Step 5: batch count drops to 0.00 ────────────────────────────────────
       // remainingLbs = max(0, 135 - 135) = 0 → batches = 0 / 10 = 0.00
-      await expect(mixCard.getByText(/0\.00/, { exact: false })).toBeVisible({ timeout: 5_000 });
+      await expect(mixCard.getByText("0.00 batches", { exact: true })).toBeVisible({ timeout: 5_000 });
       // Partial batch count from step 3 is gone
       await expect(mixCard.getByText(new RegExp(batchesAfterEditStr))).toHaveCount(0, { timeout: 3_000 });
     } finally {
@@ -4298,7 +4309,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await alreadyMadeInput.waitFor({ state: "visible", timeout: 5_000 });
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(EDIT_PARTIAL));
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
 
       // Polling assertion: waits until both component rows re-render with scaled lbs.
       await expect(component1Row).toContainText(scaledPull1Str, { timeout: 5_000 });
@@ -4310,7 +4321,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // ── Step 3: type a value >= totalLbs — pull must reach 0.00 ────────────
       await alreadyMadeInput.click();
       await alreadyMadeInput.fill(String(EDIT_FULL));
-      await alreadyMadeInput.press("Tab");
+      await alreadyMadeInput.blur();
 
       // Polling assertion: both component rows must show 0.00 once remainingLbs
       // clamps to 0.

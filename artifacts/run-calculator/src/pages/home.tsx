@@ -94,6 +94,7 @@ import {
   writeDayResetAt,
   runLabel,
 } from "../utils";
+import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
@@ -5082,7 +5083,7 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -6691,7 +6692,7 @@ export default function Home() {
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
-  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {id: string; brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
+  const [scheduledDays, setScheduledDays] = useState<ScheduledDay[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
@@ -6912,7 +6913,7 @@ export default function Home() {
         scheduleEditorDate === todayStr(),
       );
       if (res.ok && !stale) {
-        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
         setScheduleView("list");
       } else if (!res.ok) {
         setScheduleError(res.status === 401 ? "Session expired — please sign in again and re-save." : `Couldn't save (server error ${res.status}) — check your connection and try again.`);
@@ -6939,7 +6940,7 @@ export default function Home() {
   async function refreshScheduledDays() {
     try {
       const d = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json());
-      setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[]);
+      setScheduledDays(normalizeScheduledDays(d));
     } catch {}
   }
   // Move a whole scheduled day (sel "all") or a single run (sel.runId) to another
@@ -8421,7 +8422,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
               // The new day's resetAt becomes the server-side session boundary
               // (pushed above), so the daily reset signs everyone out. Call
               // signOut (not forceSignedOut) to also clear the rc_auth cookie —
@@ -12814,7 +12815,7 @@ export default function Home() {
       );
       ok = res.ok && !stale;
       if (ok) {
-        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
       }
     } catch {}
     setShowImportDialog(false);
@@ -13017,7 +13018,7 @@ export default function Home() {
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
-    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
     setImportProgress(null);
     setShowImportDialog(false);
     setImportResult(null);
@@ -13259,7 +13260,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
               // Sign out to clear the rc_auth cookie — without this a hard
               // refresh re-authenticates from the cookie before resetBoundaryAt
               // propagates, bypassing the sign-in requirement.
@@ -15564,7 +15565,7 @@ export default function Home() {
                   </DropdownMenuItem>
                 )}
                 {isSupervisor && (
-                  <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
+                  <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
                       <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center leading-none">
@@ -16111,7 +16112,7 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
+                          fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
                         }}
                         title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
