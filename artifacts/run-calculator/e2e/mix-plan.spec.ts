@@ -712,6 +712,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         casesPerLayer: 0,
       });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.waitForTimeout(1_000);
@@ -2435,6 +2436,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         casesPerLayer: 0,
       });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(1_000);
 
@@ -2525,6 +2527,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         casesPerLayer: 0,
       });
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
+      await makeTestUserManager(username);
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(1_000);
 

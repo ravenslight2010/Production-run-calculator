@@ -325,6 +325,10 @@ test(
 test(
   "@real-mobile-browser queued Target Cases edit recovers after Android Chrome suspension",
   async ({ page }: { page: Page }) => {
+    test.skip(
+      test.info().project.name !== "real-mobile-chromium",
+      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
+    );
     test.setTimeout(300_000);
     const username = uid();
     users.add(username);
@@ -411,6 +415,10 @@ test(
 test(
   "@real-mobile-browser queued Target Cases edit survives an Android Chrome process restart",
   async ({ page }: { page: Page }) => {
+    test.skip(
+      test.info().project.name !== "real-mobile-chromium",
+      "This optional check requires PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT.",
+    );
     test.setTimeout(180_000);
     const username = uid();
     users.add(username);
@@ -689,14 +697,15 @@ test(
       expect(unchanged.body).toMatchObject({ unchanged: true, snapshotId: firstSnapshot });
       expect(unchanged.body.data).toBeUndefined();
 
-      const reset = await page.evaluate(async () => {
-        const response = await fetch("/api/sync/reset", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ reason: "sync convergence test" }),
-        });
-        return { status: response.status, body: await response.json() as { epoch?: number } };
+      // Use the context request client so the reset broadcast can navigate the
+      // page without destroying an in-flight page.evaluate execution context.
+      const resetResponse = await page.request.post("/api/sync/reset", {
+        data: { reason: "sync convergence test" },
       });
+      const reset = {
+        status: resetResponse.status(),
+        body: await resetResponse.json() as { epoch?: number },
+      };
       expect(reset.status).toBe(200);
       expect(reset.body.epoch).toBeGreaterThan(0);
 

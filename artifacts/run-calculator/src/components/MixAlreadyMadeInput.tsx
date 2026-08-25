@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Mix } from "@workspace/mixes";
 import { toast } from "@/hooks/use-toast";
 
@@ -21,6 +21,7 @@ export function MixAlreadyMadeInput({
   saveMixes,
 }: Props) {
   const [val, setVal] = useState(mix.amountAlreadyMade);
+  const failedValueRef = useRef<number | null>(null);
 
   // Sync if the mix record is updated externally (e.g. another save path)
   useEffect(() => {
@@ -37,7 +38,8 @@ export function MixAlreadyMadeInput({
         value={val}
         onChange={(e) => setVal(Math.max(0, Number(e.target.value) || 0))}
         onBlur={async () => {
-          if (val === mix.amountAlreadyMade) return;
+          const isRetry = failedValueRef.current === val;
+          if (val === mix.amountAlreadyMade && !isRetry) return;
           try {
             const nextMix = { ...mix, amountAlreadyMade: val };
             // Update the mounted plan immediately; the network round-trip
@@ -45,8 +47,10 @@ export function MixAlreadyMadeInput({
             onOptimisticSave(nextMix);
             const saved = await saveMixes([nextMix]);
             onSaveAcknowledged(nextMix, saved);
+            failedValueRef.current = null;
           } catch {
             // Keep the local value so the manager can retry without retyping.
+            failedValueRef.current = val;
             toast({
               variant: "destructive",
               title: "Couldn't save already made amount",
