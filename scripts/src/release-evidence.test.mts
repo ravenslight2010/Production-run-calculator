@@ -6,17 +6,22 @@ import {
   RELEASE_EVIDENCE_ALLOWLIST,
   formatReleaseReport,
   runStep,
+  validateReleaseReport,
   verifyReleaseEvidence,
 } from "./release-check.mts";
 
 async function fixture(
   files: string[] = ["release-check-report.md"],
+  report = "fixture evidence\n",
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "release-evidence-"));
   for (const file of files) {
     const path = join(root, file);
     await mkdir(join(path, ".."), { recursive: true });
-    await writeFile(path, "fixture evidence\n");
+    await writeFile(
+      path,
+      file === "release-check-report.md" ? report : "fixture evidence\n",
+    );
   }
   return root;
 }
@@ -38,6 +43,74 @@ async function run(): Promise<void> {
       },
     ]),
     /\| timed-out fixture \| INFRASTRUCTURE TIMEOUT \|/,
+  );
+  const validLabels = ["gate one", "gate two"];
+  const validReport = formatReleaseReport(
+    validLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "GO",
+    },
+  );
+  assert.doesNotThrow(() =>
+    validateReleaseReport(validReport, {
+      currentRevision: "current-revision",
+      expectedMode: "standard",
+      expectedLabels: validLabels,
+    }),
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(validReport, {
+        currentRevision: "stale-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+    /stale/,
+    "a report from another revision must be rejected",
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(
+        validReport.replace("| gate two | PASS |", "| gate two | FAIL |"),
+        {
+          currentRevision: "current-revision",
+          expectedMode: "standard",
+          expectedLabels: validLabels,
+        },
+      ),
+    /every applicable gate is PASS/,
+    "GO with a failed gate must be rejected",
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(
+        validReport.replace("| gate two | PASS |", "| gate two | INFRASTRUCTURE TIMEOUT |"),
+        {
+          currentRevision: "current-revision",
+          expectedMode: "standard",
+          expectedLabels: validLabels,
+        },
+      ),
+    /every applicable gate is PASS/,
+    "GO with an infrastructure timeout must be rejected",
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(validReport.replace("Commands:", "Commandz:"), {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+    /malformed/,
+    "a partial report must be rejected",
   );
 
   const failedChild = await runStep({
@@ -76,10 +149,14 @@ async function run(): Promise<void> {
   );
 
   const allowlistedFiles = [...RELEASE_EVIDENCE_ALLOWLIST];
-  const root = await fixture(allowlistedFiles);
+  const root = await fixture(allowlistedFiles, validReport);
   try {
     await assert.doesNotReject(
-      verifyReleaseEvidence(root),
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
       "an allowlisted evidence set should pass",
     );
 

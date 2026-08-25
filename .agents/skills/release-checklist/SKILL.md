@@ -306,3 +306,16 @@ Only after the report is **GO**, all required and applicable conditional gates
 pass, and the operational warnings have explicit answers, suggest deployment.
 
 Skip steps that don't apply (e.g. no schema change) — don't re-run unrelated suites for a tiny fix.
+
+
+## Mechanical release evidence
+
+The release runner is the source of the retained release record. A successful
+standard or full run must write `release-evidence/release-check-report.md` and
+the clean-start evidence files, then validate that record before returning
+success. The report must be tied to the current git revision and mode, list
+commands and results, and use explicit `PASS`/`FAIL` or infrastructure failure
+statuses for every gate. `GO` is invalid unless every applicable gate is
+`PASS`, operational warnings are answered, and accepted exceptions are either
+`none` or include an owner, next action, and expiry. A timeout is never a
+product pass or an accepted exception by implication.

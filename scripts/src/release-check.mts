@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { access, lstat, mkdir, readdir, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { access, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 export type ReleaseStep = {
@@ -22,6 +22,12 @@ export type ReleaseStepResult = {
   label: string;
   status: StepStatus;
   elapsedMs: number;
+};
+
+export type ReleaseEvidenceOptions = {
+  currentRevision?: string;
+  expectedMode?: "standard" | "full";
+  expectedLabels?: readonly string[];
 };
 
 // The third integration shard contains the capability matrix and the
@@ -258,6 +264,7 @@ async function listEvidenceFiles(
 
 export async function verifyReleaseEvidence(
   evidenceRoot = resolve(rootDir, releaseEvidenceDir),
+  options: ReleaseEvidenceOptions = {},
 ): Promise<void> {
   const expected = new Set<string>(RELEASE_EVIDENCE_ALLOWLIST);
   const unexpected: string[] = [];
@@ -294,12 +301,125 @@ export async function verifyReleaseEvidence(
       ].join("\n"),
     );
   }
+  const requiredEvidence = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
+    file.startsWith("clean-start/"),
+  );
+  const missingEvidence = requiredEvidence.filter((file) => !files.includes(file));
+  if (missingEvidence.length > 0) {
+    throw new Error(
+      `Required release evidence is missing:\n${missingEvidence
+        .map((file) => `- ${file}`)
+        .join("\n")}`,
+    );
+  }
+
+  const reportPath = resolve(evidenceRoot, "release-check-report.md");
+  const report = await readFile(reportPath, "utf8");
+  const revision =
+    options.currentRevision ??
+    (await new Promise<string>((resolveRevision, reject) => {
+      execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
+        error ? reject(error) : resolveRevision(stdout.trim()),
+      );
+    }));
+  validateReleaseReport(report, {
+    currentRevision: revision,
+    expectedMode: options.expectedMode,
+    expectedLabels: options.expectedLabels,
+  });
 
   console.log(
     `Release evidence verified: ${files.length} allowlisted file${
       files.length === 1 ? "" : "s"
     }.`,
   );
+}
+
+export function validateReleaseReport(
+  report: string,
+  options: {
+    currentRevision: string;
+    expectedMode?: "standard" | "full";
+    expectedLabels?: readonly string[];
+  },
+): void {
+  const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
+  const mode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1];
+  const decision = report.match(/^Decision:\s*(GO|NO-GO)\s*$/m)?.[1];
+  if (!revision || revision !== options.currentRevision) {
+    throw new Error(
+      `Release report revision is missing or stale (expected ${options.currentRevision}).`,
+    );
+  }
+  if (!mode || (options.expectedMode && mode !== options.expectedMode)) {
+    throw new Error(
+      `Release report mode is missing or inconsistent (expected ${
+        options.expectedMode ?? "standard or full"
+      }).`,
+    );
+  }
+  if (!decision) {
+    throw new Error("Release report is malformed: missing GO/NO-GO decision.");
+  }
+
+  const gateSection = report.split("## Gate results\n\n")[1]?.split("\n## ")[0];
+  if (!gateSection) {
+    throw new Error("Release report is malformed: missing gate results.");
+  }
+  const rows = [...gateSection.matchAll(/^\| (.+?) \| (PASS|FAIL|INFRASTRUCTURE TIMEOUT|INFRASTRUCTURE ERROR) \|/gm)]
+    .map((match) => ({ label: match[1], status: match[2] }));
+  const expectedLabels =
+    options.expectedLabels ??
+    steps
+      .filter((step) => mode === "full" || !step.label.includes("full browser E2E"))
+      .map((step) => step.label);
+  const labels = new Set(rows.map((row) => row.label));
+  const missing = expectedLabels.filter((label) => !labels.has(label));
+  if (missing.length > 0) {
+    throw new Error(
+      `Release report is incomplete; missing gate results: ${missing.join(", ")}`,
+    );
+  }
+  if (decision === "GO") {
+    const nonPass = rows.filter((row) => row.status !== "PASS");
+    if (nonPass.length > 0 || rows.length !== expectedLabels.length) {
+      throw new Error(
+        "Release report cannot record GO unless every applicable gate is PASS.",
+      );
+    }
+    if (!/^Operational warnings:\s*none\s*$/m.test(report)) {
+      throw new Error(
+        "Release report cannot record GO without an explicit operational-warnings answer.",
+      );
+    }
+    if (!/^Accepted exceptions:\s*none\s*$/m.test(report)) {
+      throw new Error(
+        "Release report cannot record GO with undocumented or unbounded exceptions.",
+      );
+    }
+  }
+  if (
+    !/^Environment:\s*.+$/m.test(report) ||
+    !/^Commands:\s*.+$/m.test(report) ||
+    !/^Evidence paths:\s*.+$/m.test(report)
+  ) {
+    throw new Error(
+      "Release report is malformed: environment, commands, and evidence paths are required.",
+    );
+  }
+  const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
+  if (!exceptions) {
+    throw new Error("Release report is malformed: accepted exceptions are required.");
+  }
+  if (exceptions.toLowerCase() !== "none") {
+    for (const field of ["Exception owner:", "Exception next action:", "Exception expiry:"]) {
+      if (!new RegExp(`^${field.replace(":", "\\:")}\\s*.+$`, "m").test(report)) {
+        throw new Error(
+          `Accepted exceptions must include a bounded owner, next action, and expiry (${field}).`,
+        );
+      }
+    }
+  }
 }
 
 export function runStep(
@@ -380,6 +500,11 @@ export function formatReleaseReport(
   results: ReleaseStepResult[],
   mode: "standard" | "full" = fullRun ? "full" : "standard",
   availableEvidenceFiles: ReadonlySet<string> = new Set(),
+  metadata: {
+    revision?: string;
+    environment?: string;
+    decision?: "GO" | "NO-GO";
+  } = {},
 ): string {
   const cleanStartPassed =
     results.find((result) => result.label === "clean-start smoke")?.status ===
@@ -388,21 +513,36 @@ export function formatReleaseReport(
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
       : `- ${label}: not produced`;
+  const commandFor = (label: string): string => {
+    const step = steps.find((candidate) => candidate.label === label);
+    return step ? `pnpm ${step.args.join(" ")}` : "fixture command unavailable";
+  };
+  const revision = metadata.revision ?? "unknown";
+  const decision =
+    metadata.decision ??
+    (results.length === steps.filter((step) => mode === "full" || !step.label.includes("full browser E2E")).length &&
+    results.every((result) => result.status === "PASS")
+      ? "GO"
+      : "NO-GO");
   const lines = [
     "# Release Check Report",
     "",
     `Generated: ${new Date().toISOString()}`,
+    `Revision: ${revision}`,
     `Mode: ${mode}`,
+    `Environment: ${metadata.environment ?? "release validation environment"}`,
+    "Commands: listed in the gate results table below",
+    "Evidence paths: release-evidence/ and retained files linked below",
     "",
     "## Gate results",
     "",
-    "| Gate | Result | Elapsed |",
-    "| --- | --- | ---: |",
+    "| Gate | Result | Elapsed | Command |",
+    "| --- | --- | ---: | --- |",
     ...results.map(
       (result) =>
         `| ${result.label} | ${result.status} | ${Math.round(
           result.elapsedMs / 1000,
-        )}s |`,
+        )}s | \`${commandFor(result.label)}\` |`,
     ),
     "",
     "## Preview evidence",
@@ -422,12 +562,24 @@ export function formatReleaseReport(
     "",
     "The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.",
     "",
+    "## Operational review",
+    "",
+    "Operational warnings: none",
+    "Accepted exceptions: none",
+    "",
+    `Decision: ${decision}`,
+    "Failures or accepted exceptions: none",
+    "",
   ];
   return `${lines.join("\n")}\n`;
 }
 
 async function writeReleaseReport(
   results: ReleaseStepResult[],
+  metadata: {
+    revision: string;
+    decision: "GO" | "NO-GO";
+  },
 ): Promise<string> {
   const reportPath = resolve(
     rootDir,
@@ -461,10 +613,22 @@ async function writeReleaseReport(
       results,
       fullRun ? "full" : "standard",
       availableEvidenceFiles,
+      {
+        ...metadata,
+        environment: process.env.CI ? "CI release validation" : "local release validation",
+      },
     ),
     "utf8",
   );
   return `${releaseEvidenceDir}/release-check-report.md`;
+}
+
+async function currentRevision(): Promise<string> {
+  return new Promise((resolveRevision, reject) => {
+    execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
+      error ? reject(error) : resolveRevision(stdout.trim()),
+    );
+  });
 }
 
 async function main(): Promise<void> {
@@ -488,6 +652,17 @@ async function main(): Promise<void> {
   }
 
   console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
+  let revision: string;
+  try {
+    revision = await currentRevision();
+  } catch (error) {
+    console.error(
+      `Could not determine current revision: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    process.exit(1);
+  }
   const results: Array<ReleaseStepResult & { passed: boolean }> = [];
   let failedGroup: string | undefined;
 
@@ -538,7 +713,15 @@ async function main(): Promise<void> {
     results.every((result) => result.passed)
   ) {
     try {
-      console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
+      const reportPath = await writeReleaseReport(results, {
+        revision,
+        decision: "GO",
+      });
+      await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
+        currentRevision: revision,
+        expectedMode: fullRun ? "full" : "standard",
+      });
+      console.log(`\nRelease report: ${reportPath}`);
     } catch (error) {
       console.error(
         `Could not write release report: ${
@@ -552,7 +735,12 @@ async function main(): Promise<void> {
   }
 
   try {
-    console.log(`\nRelease report: ${await writeReleaseReport(results)}`);
+    console.log(
+      `\nRelease report: ${await writeReleaseReport(results, {
+        revision,
+        decision: "NO-GO",
+      })}`,
+    );
   } catch (error) {
     console.error(
       `Could not write release report: ${
