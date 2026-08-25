@@ -133,6 +133,10 @@ test.describe("intentional visual regression baselines", () => {
     });
 
     await goToMixPlan(page);
+    // Opening the header menu can leave its trigger focused in some Chromium
+    // runs. Clear that transient focus ring so the Mix Plan baseline captures
+    // the page, not the menu interaction that navigated to it.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await expect(page).toHaveScreenshot("mix-plan-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
@@ -151,6 +155,7 @@ test.describe("intentional visual regression baselines", () => {
       state: "visible",
       timeout: 10_000,
     });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await expect(page).toHaveScreenshot("import-review-desktop.png", {
       fullPage: false,
       mask: dynamicMask(page),
