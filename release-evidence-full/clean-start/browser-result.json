@@ -1,6 +1,6 @@
 {
   "kind": "proxied-preview-browser-result",
-  "generatedAt": "2026-08-26T16:27:19.677Z",
+  "generatedAt": "2026-08-26T18:34:43.984Z",
   "screenshot": "release-evidence-full/clean-start/preview-home.png",
   "web": {
     "url": "http://127.0.0.1:18082/",
@@ -13,7 +13,7 @@
     "url": "http://127.0.0.1:18082/api/healthz",
     "status": 200,
     "contentType": "application/json; charset=utf-8",
-    "body": "{\"status\":\"ok\",\"checks\":{\"process\":\"ok\",\"database\":\"ok\",\"dependencies\":\"ok\"},\"timestamp\":\"2026-08-26T16:27:08.961Z\"}",
+    "body": "{\"status\":\"ok\",\"checks\":{\"process\":\"ok\",\"database\":\"ok\",\"dependencies\":\"ok\"},\"timestamp\":\"2026-08-26T18:34:32.688Z\"}",
     "passed": true
   }
 }

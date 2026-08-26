@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-26T16:27:19.677Z",
+  "generatedAt": "2026-08-26T18:34:43.984Z",
   "ports": {
     "api": 18081,
     "web": 18082,
@@ -10,7 +10,7 @@
       "url": "http://127.0.0.1:18081/api/healthz",
       "status": 200,
       "contentType": "application/json; charset=utf-8",
-      "body": "{\"status\":\"ok\",\"checks\":{\"process\":\"ok\",\"database\":\"ok\",\"dependencies\":\"ok\"},\"timestamp\":\"2026-08-26T16:27:07.845Z\"}",
+      "body": "{\"status\":\"ok\",\"checks\":{\"process\":\"ok\",\"database\":\"ok\",\"dependencies\":\"ok\"},\"timestamp\":\"2026-08-26T18:34:31.605Z\"}",
       "passed": true
     },
     "webHtml": {
@@ -24,7 +24,7 @@
       "url": "http://127.0.0.1:18082/api/healthz",
       "status": 200,
       "contentType": "application/json; charset=utf-8",
-      "body": "{\"status\":\"ok\",\"checks\":{\"process\":\"ok\",\"database\":\"ok\",\"dependencies\":\"ok\"},\"timestamp\":\"2026-08-26T16:27:08.961Z\"}",
+      "body": "{\"status\":\"ok\",\"checks\":{\"process\":\"ok\",\"database\":\"ok\",\"dependencies\":\"ok\"},\"timestamp\":\"2026-08-26T18:34:32.688Z\"}",
       "passed": true
     },
     "mockupHtml": {
