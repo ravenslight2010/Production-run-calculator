@@ -51,6 +51,21 @@ export type ParsedSauce = {
   components: FormulaComponent[];
 };
 
+type SourceComparisonReport = {
+  format: "source-audit-comparison";
+  formatVersion: 1;
+  comparedAt: string;
+  inputs: Record<string, unknown>;
+  liveRowCounts: Record<string, number>;
+  workbookCounts: Record<string, number>;
+  parsedFormulas: {
+    dough: ParsedDough[];
+    sauce: ParsedSauce[];
+  };
+  findings: Record<string, unknown>;
+  rerun: string;
+};
+
 const ROOT = path.resolve(process.cwd(), "..");
 const SOURCE_ROOT = path.join(ROOT, "attached_assets/source-library");
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -67,6 +82,297 @@ const arg = (name: string) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
+
+const REPORT_FORMAT = "source-audit-comparison";
+const REPORT_FORMAT_VERSION = 1;
+const REPORT_TOP_LEVEL_FIELDS = [
+  "format",
+  "formatVersion",
+  "comparedAt",
+  "inputs",
+  "liveRowCounts",
+  "workbookCounts",
+  "parsedFormulas",
+  "findings",
+  "rerun",
+] as const;
+const INPUT_FIELDS = ["snapshot", "sourceLibrary"] as const;
+const SNAPSHOT_INPUT_FIELDS = ["path", "sha256", "capturedAt"] as const;
+const SOURCE_LIBRARY_INPUT_FIELDS = ["root", "manifestSha256", "files"] as const;
+const MANIFEST_FILE_FIELDS = ["path", "bytes", "sha256"] as const;
+const LIVE_ROW_COUNT_FIELDS = [
+  "brand_profiles",
+  "cheese_recipes",
+  "dough_recipes",
+  "sauce_recipes",
+  "mixes",
+  "ingredients",
+] as const;
+const WORKBOOK_COUNT_FIELDS = [
+  "specs",
+  "dough",
+  "sauce",
+  "cheese",
+  "premixBlocks",
+  "shippingRows",
+] as const;
+const PARSED_FORMULA_FIELDS = ["dough", "sauce"] as const;
+const DOUGH_FORMULA_FIELDS = ["sourceFile", "name", "components", "doughballVariants"] as const;
+const SAUCE_FORMULA_FIELDS = ["sourceFile", "name", "components"] as const;
+const FORMULA_COMPONENT_FIELDS = ["ingredient", "lbs"] as const;
+const DOUGHBALL_VARIANT_FIELDS = ["label", "weightOz", "perTray"] as const;
+const FINDING_BUCKET_FIELDS = [
+  "cheeseMissingFromLive",
+  "cheeseLiveOnly",
+  "cheeseComponentDiffs",
+  "premixLiveOnly",
+  "premixComponentDiffs",
+  "shippingUnmatched",
+  "shippingUnmapped",
+  "doughMissingFromLive",
+  "doughLiveOnly",
+  "doughComponentDiffs",
+  "doughVariantMissingFromLive",
+  "doughVariantDiffs",
+  "sauceMissingFromLive",
+  "sauceLiveOnly",
+  "sauceComponentDiffs",
+] as const;
+const STRING_FINDING_BUCKETS = new Set([
+  "cheeseMissingFromLive",
+  "cheeseLiveOnly",
+  "premixLiveOnly",
+  "shippingUnmatched",
+  "doughLiveOnly",
+  "sauceLiveOnly",
+]);
+const NAME_SOURCE_FINDING_BUCKETS = new Set([
+  "doughMissingFromLive",
+  "doughVariantMissingFromLive",
+  "sauceMissingFromLive",
+]);
+const DIFF_FINDING_BUCKETS = new Set([
+  "doughComponentDiffs",
+  "doughVariantDiffs",
+  "sauceComponentDiffs",
+]);
+
+type RecordValue = Record<string, unknown>;
+
+function invalidReport(pathName: string, detail: string): never {
+  throw new Error(`Invalid source comparison report: ${pathName} ${detail}`);
+}
+
+function reportRecord(value: unknown, pathName: string): RecordValue {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    invalidReport(pathName, "must be an object");
+  }
+  return value as RecordValue;
+}
+
+function reportArray(value: unknown, pathName: string): unknown[] {
+  if (!Array.isArray(value)) invalidReport(pathName, "must be an array");
+  return value;
+}
+
+function reportString(value: unknown, pathName: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    invalidReport(pathName, "must be a non-empty string");
+  }
+  return value;
+}
+
+function reportNumber(value: unknown, pathName: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    invalidReport(pathName, "must be a finite number");
+  }
+  return value;
+}
+
+function reportNonNegativeNumber(value: unknown, pathName: string): number {
+  const number = reportNumber(value, pathName);
+  if (number < 0) invalidReport(pathName, "must be non-negative");
+  return number;
+}
+
+function reportFields(
+  value: unknown,
+  pathName: string,
+  fields: readonly string[],
+  options: { allowOptional?: readonly string[] } = {},
+): RecordValue {
+  const record = reportRecord(value, pathName);
+  const optional = new Set(options.allowOptional ?? []);
+  for (const field of fields) {
+    if (!(field in record) && !optional.has(field)) {
+      invalidReport(`${pathName}.${field}`, "is required");
+    }
+  }
+  for (const field of Object.keys(record)) {
+    if (!fields.includes(field) && !optional.has(field)) {
+      invalidReport(`${pathName}.${field}`, "is not a supported field");
+    }
+  }
+  return record;
+}
+
+function reportStringArray(value: unknown, pathName: string): string[] {
+  return reportArray(value, pathName).map((entry, index) =>
+    reportString(entry, `${pathName}[${index}]`),
+  );
+}
+
+function validateManifestFiles(value: unknown): void {
+  reportArray(value, "inputs.sourceLibrary.files").forEach((entry, index) => {
+    const file = reportFields(entry, `inputs.sourceLibrary.files[${index}]`, MANIFEST_FILE_FIELDS);
+    reportString(file.path, `inputs.sourceLibrary.files[${index}].path`);
+    reportNonNegativeNumber(file.bytes, `inputs.sourceLibrary.files[${index}].bytes`);
+    reportString(file.sha256, `inputs.sourceLibrary.files[${index}].sha256`);
+  });
+}
+
+function validateFormulaComponents(value: unknown, pathName: string): void {
+  reportArray(value, pathName).forEach((entry, index) => {
+    const component = reportFields(entry, `${pathName}[${index}]`, FORMULA_COMPONENT_FIELDS);
+    reportString(component.ingredient, `${pathName}[${index}].ingredient`);
+    reportNumber(component.lbs, `${pathName}[${index}].lbs`);
+  });
+}
+
+function validateParsedFormulas(value: unknown): void {
+  const parsedFormulas = reportFields(value, "parsedFormulas", PARSED_FORMULA_FIELDS);
+  reportArray(parsedFormulas.dough, "parsedFormulas.dough").forEach((entry, index) => {
+    const formula = reportFields(entry, `parsedFormulas.dough[${index}]`, DOUGH_FORMULA_FIELDS);
+    reportString(formula.sourceFile, `parsedFormulas.dough[${index}].sourceFile`);
+    reportString(formula.name, `parsedFormulas.dough[${index}].name`);
+    validateFormulaComponents(formula.components, `parsedFormulas.dough[${index}].components`);
+    reportArray(formula.doughballVariants, `parsedFormulas.dough[${index}].doughballVariants`)
+      .forEach((variant, variantIndex) => {
+        const parsedVariant = reportFields(
+          variant,
+          `parsedFormulas.dough[${index}].doughballVariants[${variantIndex}]`,
+          DOUGHBALL_VARIANT_FIELDS,
+          { allowOptional: ["perTray"] },
+        );
+        reportString(
+          parsedVariant.label,
+          `parsedFormulas.dough[${index}].doughballVariants[${variantIndex}].label`,
+        );
+        if (!(reportNumber(
+          parsedVariant.weightOz,
+          `parsedFormulas.dough[${index}].doughballVariants[${variantIndex}].weightOz`,
+        ) > 0)) {
+          invalidReport(
+            `parsedFormulas.dough[${index}].doughballVariants[${variantIndex}].weightOz`,
+            "must be greater than zero",
+          );
+        }
+        if (parsedVariant.perTray !== undefined) {
+          if (!(reportNumber(
+            parsedVariant.perTray,
+            `parsedFormulas.dough[${index}].doughballVariants[${variantIndex}].perTray`,
+          ) > 0)) {
+            invalidReport(
+              `parsedFormulas.dough[${index}].doughballVariants[${variantIndex}].perTray`,
+              "must be greater than zero",
+            );
+          }
+        }
+      });
+  });
+  reportArray(parsedFormulas.sauce, "parsedFormulas.sauce").forEach((entry, index) => {
+    const formula = reportFields(entry, `parsedFormulas.sauce[${index}]`, SAUCE_FORMULA_FIELDS);
+    reportString(formula.sourceFile, `parsedFormulas.sauce[${index}].sourceFile`);
+    reportString(formula.name, `parsedFormulas.sauce[${index}].name`);
+    validateFormulaComponents(formula.components, `parsedFormulas.sauce[${index}].components`);
+  });
+}
+
+function validateFindingEntries(value: unknown, pathName: string, fields: readonly string[]): void {
+  reportArray(value, pathName).forEach((entry, index) => {
+    const finding = reportFields(entry, `${pathName}[${index}]`, fields);
+    reportString(finding.name, `${pathName}[${index}].name`);
+    if (fields.includes("sourceFile")) {
+      reportString(finding.sourceFile, `${pathName}[${index}].sourceFile`);
+    }
+    for (const field of ["missing", "changed", "liveOnly"]) {
+      if (fields.includes(field)) reportStringArray(finding[field], `${pathName}[${index}].${field}`);
+    }
+  });
+}
+
+function validateFindings(value: unknown): void {
+  const findings = reportFields(value, "findings", FINDING_BUCKET_FIELDS);
+  for (const bucket of FINDING_BUCKET_FIELDS) {
+    const bucketValue = findings[bucket];
+    const bucketPath = `findings.${bucket}`;
+    if (STRING_FINDING_BUCKETS.has(bucket)) {
+      reportStringArray(bucketValue, bucketPath);
+    } else if (bucket === "shippingUnmapped") {
+      reportArray(bucketValue, bucketPath).forEach((entry, index) => {
+        const finding = reportFields(entry, `${bucketPath}[${index}]`, ["brand", "fields"]);
+        reportString(finding.brand, `${bucketPath}[${index}].brand`);
+        reportStringArray(finding.fields, `${bucketPath}[${index}].fields`);
+      });
+    } else if (NAME_SOURCE_FINDING_BUCKETS.has(bucket)) {
+      validateFindingEntries(bucketValue, bucketPath, ["name", "sourceFile"]);
+    } else if (bucket === "cheeseComponentDiffs" || bucket === "premixComponentDiffs") {
+      validateFindingEntries(bucketValue, bucketPath, ["name", "missing", "changed"]);
+    } else if (DIFF_FINDING_BUCKETS.has(bucket)) {
+      validateFindingEntries(bucketValue, bucketPath, ["name", "sourceFile", "missing", "changed", "liveOnly"]);
+    }
+  }
+}
+
+/**
+ * Validate the persisted source-comparison report contract without touching
+ * the database or source workbooks. Keep this strict: a retained report must
+ * remain readable by the reviewers and tools that consume its findings.
+ */
+export function validateSourceComparisonReport(
+  value: unknown,
+): asserts value is SourceComparisonReport {
+  const report = reportFields(value, "report", REPORT_TOP_LEVEL_FIELDS);
+  if (report.format !== REPORT_FORMAT) {
+    invalidReport("format", `must be "${REPORT_FORMAT}"`);
+  }
+  if (report.formatVersion !== REPORT_FORMAT_VERSION) {
+    invalidReport("formatVersion", `must be ${REPORT_FORMAT_VERSION}`);
+  }
+  reportString(report.comparedAt, "comparedAt");
+
+  const inputs = reportFields(report.inputs, "inputs", INPUT_FIELDS);
+  const snapshot = reportFields(inputs.snapshot, "inputs.snapshot", SNAPSHOT_INPUT_FIELDS);
+  reportString(snapshot.path, "inputs.snapshot.path");
+  reportString(snapshot.sha256, "inputs.snapshot.sha256");
+  reportString(snapshot.capturedAt, "inputs.snapshot.capturedAt");
+  const sourceLibrary = reportFields(
+    inputs.sourceLibrary,
+    "inputs.sourceLibrary",
+    SOURCE_LIBRARY_INPUT_FIELDS,
+  );
+  reportString(sourceLibrary.root, "inputs.sourceLibrary.root");
+  reportString(sourceLibrary.manifestSha256, "inputs.sourceLibrary.manifestSha256");
+  validateManifestFiles(sourceLibrary.files);
+
+  for (const field of LIVE_ROW_COUNT_FIELDS) {
+    reportNonNegativeNumber(reportFields(
+      report.liveRowCounts,
+      "liveRowCounts",
+      LIVE_ROW_COUNT_FIELDS,
+    )[field], `liveRowCounts.${field}`);
+  }
+  for (const field of WORKBOOK_COUNT_FIELDS) {
+    reportNonNegativeNumber(reportFields(
+      report.workbookCounts,
+      "workbookCounts",
+      WORKBOOK_COUNT_FIELDS,
+    )[field], `workbookCounts.${field}`);
+  }
+  validateParsedFormulas(report.parsedFormulas);
+  validateFindings(report.findings);
+  reportString(report.rerun, "rerun");
+}
 
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -591,6 +897,7 @@ function main() {
     findings,
     rerun: `From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot ${path.relative(ROOT, snapshotPath).split(path.sep).join("/")} --out ${path.relative(ROOT, outPath).split(path.sep).join("/")}`,
   };
+  validateSourceComparisonReport(result);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${JSON.stringify(result, null, 2)}\n`, { flag: "w" });
   console.log(`Wrote ${path.relative(ROOT, outPath)}`);

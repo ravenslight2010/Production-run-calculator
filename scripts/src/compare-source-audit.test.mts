@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import {
   parseDoughRows,
   parseDoughWorkbook,
   parseSauceRows,
   parseSauceWorkbook,
+  validateSourceComparisonReport,
 } from "./compare-source-audit.mts";
 
 type Row = unknown[];
@@ -198,10 +200,78 @@ function testRepresentativeRetainedWorkbooks() {
   assert.equal(componentAmounts(tested.components).get("Franks Hot Sauce"), 145);
 }
 
+function retainedComparisonReport(): Record<string, unknown> {
+  return JSON.parse(
+    fs.readFileSync(
+      path.resolve(
+        process.cwd(),
+        "..",
+        "attached_assets",
+        "source-library",
+        "audits",
+        "source-comparison-2026-08-26.json",
+      ),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+}
+
+function testRetainedComparisonReportContract() {
+  const report = retainedComparisonReport();
+  assert.doesNotThrow(() => validateSourceComparisonReport(report));
+}
+
+function testComparisonReportFormatDriftFailsClearly() {
+  const report = retainedComparisonReport();
+  report.formatVersion = 2;
+  assert.throws(
+    () => validateSourceComparisonReport(report),
+    /Invalid source comparison report: formatVersion must be 1/,
+  );
+}
+
+function testComparisonReportFindingFieldDriftFailsClearly() {
+  const report = retainedComparisonReport();
+  const findings = report.findings as Record<string, unknown>;
+  const diffs = findings.doughComponentDiffs as Array<Record<string, unknown>>;
+  delete diffs[0]!.changed;
+  assert.throws(
+    () => validateSourceComparisonReport(report),
+    /Invalid source comparison report: findings\.doughComponentDiffs\[0\]\.changed is required/,
+  );
+}
+
+function testComparisonReportFindingBucketDriftFailsClearly() {
+  const report = retainedComparisonReport();
+  const findings = report.findings as Record<string, unknown>;
+  delete findings.sauceLiveOnly;
+  assert.throws(
+    () => validateSourceComparisonReport(report),
+    /Invalid source comparison report: findings\.sauceLiveOnly is required/,
+  );
+}
+
+function testComparisonReportParsedFormulaFieldDriftFailsClearly() {
+  const report = retainedComparisonReport();
+  const parsedFormulas = report.parsedFormulas as Record<string, unknown>;
+  const dough = parsedFormulas.dough as Array<Record<string, unknown>>;
+  const components = dough[0]!.components as Array<Record<string, unknown>>;
+  delete components[0]!.lbs;
+  assert.throws(
+    () => validateSourceComparisonReport(report),
+    /Invalid source comparison report: parsedFormulas\.dough\[0\]\.components\[0\]\.lbs is required/,
+  );
+}
+
 testDoughNumericAnnotatedAndVariants();
 testDoughInstructionOnlyAmount();
 testSauceNumericAnnotatedAndMultiBatch();
 testSauceSideBySideTestedTable();
 testUnrecognizedLayoutsFailClosed();
 testRepresentativeRetainedWorkbooks();
+testRetainedComparisonReportContract();
+testComparisonReportFormatDriftFailsClearly();
+testComparisonReportFindingFieldDriftFailsClearly();
+testComparisonReportFindingBucketDriftFailsClearly();
+testComparisonReportParsedFormulaFieldDriftFailsClearly();
 console.log("Source audit parser fixture tests passed.");
