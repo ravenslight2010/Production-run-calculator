@@ -50,6 +50,10 @@ args = "test:corpus"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
+args = "test:gemini"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
 args = "check-model-bump"
 
 [[workflows.workflow.tasks]]
@@ -163,6 +167,17 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/corpus-harness run test"
+
+[[workflows.workflow]]
+name = "test:gemini"
+author = "agent"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 scripts/test_gemini_skill_trigger_benchmark.py"
 
 [[workflows.workflow]]
 name = "check-model-bump"
