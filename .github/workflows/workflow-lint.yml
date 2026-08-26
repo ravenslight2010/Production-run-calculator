@@ -9,6 +9,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - scripts/package.json
+      - scripts/src/check-ci-binary-provenance.sh
       - scripts/src/check-workflows.sh
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - scripts/package.json
+      - scripts/src/check-ci-binary-provenance.sh
       - scripts/src/check-workflows.sh
   workflow_dispatch:
 
@@ -79,3 +81,6 @@ jobs:
 
       - name: Validate all GitHub Actions workflows
         run: pnpm run check:workflows
+
+      - name: Enforce CI binary provenance policy
+        run: pnpm --filter @workspace/scripts run check:ci-binary-provenance
