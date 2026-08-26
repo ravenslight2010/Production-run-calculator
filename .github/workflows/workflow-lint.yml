@@ -42,10 +42,26 @@ jobs:
 
       - name: Install actionlint
         run: |
-          archive="/tmp/actionlint.tar.gz"
+          archive_name="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          archive="/tmp/$archive_name"
+          checksums="/tmp/actionlint-checksums.txt"
           curl --fail --silent --show-error --location --retry 3 \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive_name" \
             --output "$archive"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt" \
+            --output "$checksums"
+
+          expected_checksum="$(awk -v archive_name="$archive_name" '$2 == archive_name { print $1; exit }' "$checksums")"
+          if [ -z "$expected_checksum" ]; then
+            echo "::error::No published checksum found for $archive_name; refusing to install actionlint." >&2
+            exit 1
+          fi
+          if ! printf '%s  %s\n' "$expected_checksum" "$archive" | sha256sum --check --strict --status; then
+            echo "::error::Checksum mismatch for $archive_name; refusing to install actionlint." >&2
+            exit 1
+          fi
+
           tar -xzf "$archive" -C /tmp
           install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
 
