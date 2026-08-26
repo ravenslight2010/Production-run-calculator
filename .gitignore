@@ -36,6 +36,7 @@ node_modules
 /release-evidence/clean-start/
 /release-evidence/release-check-report.md
 /release-evidence/release-check-state.json
+/release-evidence-full/
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
