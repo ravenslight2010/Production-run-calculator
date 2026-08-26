@@ -16,6 +16,27 @@
 
 Excluded cases are not treated as do-not-trigger decisions. See the manual-review queue for provider failures, invalid or uncertain responses, and disagreements.
 
+## Credentialed scheduled check
+
+The nightly large-spec workflow also runs a live Gemini check at 03:00 UTC and
+supports `workflow_dispatch`. It supplies
+`AI_INTEGRATIONS_GEMINI_API_KEY` and `AI_INTEGRATIONS_GEMINI_BASE_URL` from
+repository Actions secrets, then invokes:
+
+```sh
+python scripts/gemini_skill_trigger_benchmark.py \
+  --fail-on-provider-error \
+  --results gemini-live-results.json \
+  --report gemini-live-report.md \
+  --queue gemini-live-review-queue.json
+```
+
+The strict flag is intentionally opt-in: the normal benchmark and
+`test:gemini` remain offline-safe. In the scheduled check, missing credentials,
+request failures, and invalid structured output fail the job after all three
+artifacts have been written. The workflow retains those artifacts for 14 days,
+including failed runs, so provider incidents can be reviewed.
+
 ## Manual review
 
 The queue is intentionally read-only input for review. List unresolved cases

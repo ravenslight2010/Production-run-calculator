@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -12,6 +13,7 @@ from gemini_skill_trigger_benchmark import (
     evaluate,
     metrics,
     list_review_cases,
+    provider_failure_cases,
     record_manual_decision,
     review_queue,
     validate_classification,
@@ -53,6 +55,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertTrue(all(r["status"] == "provider_unavailable" for r in result))
         self.assertIsNone(metrics(result)["accuracy"])
         self.assertEqual(len(review_queue(result)), 2)
+        self.assertEqual([case["id"] for case in provider_failure_cases(result)], ["yes", "no"])
 
     def test_invalid_output_is_reviewed(self):
         adapter = Fixture([{"decision": "maybe", "confidence": 0.9, "rationale": "x"}] * 2)
@@ -190,6 +193,38 @@ class GeminiBenchmarkTests(unittest.TestCase):
             self.assertEqual(benchmark.returncode, 0, benchmark.stderr)
             self.assertIn('"evaluated": 0', benchmark.stdout)
             self.assertEqual(decisions.read_bytes(), decisions_before_benchmark)
+
+    def test_strict_provider_mode_writes_artifacts_then_fails(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.json"
+            corpus_path.write_text(json.dumps(corpus()))
+            script = Path(__file__).with_name("gemini_skill_trigger_benchmark.py").resolve()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "benchmark",
+                    "--corpus", str(corpus_path),
+                    "--results", str(root / "results.json"),
+                    "--report", str(root / "report.md"),
+                    "--queue", str(root / "queue.json"),
+                    "--fail-on-provider-error",
+                ],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "AI_INTEGRATIONS_GEMINI_API_KEY": "",
+                    "AI_INTEGRATIONS_GEMINI_BASE_URL": "",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Gemini provider health check failed", result.stderr)
+            self.assertTrue((root / "results.json").exists())
+            self.assertTrue((root / "report.md").exists())
+            self.assertTrue((root / "queue.json").exists())
 
 
 if __name__ == "__main__":

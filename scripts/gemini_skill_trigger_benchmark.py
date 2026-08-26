@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -274,6 +275,17 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+PROVIDER_FAILURE_STATUSES = {
+    "provider_unavailable",
+    "provider_failure",
+    "invalid_output",
+}
+
+
+def provider_failure_cases(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [record for record in records if record["status"] in PROVIDER_FAILURE_STATUSES]
+
+
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
@@ -382,6 +394,11 @@ def main() -> None:
     parser.add_argument("--confidence-threshold", type=float, default=DEFAULT_CONFIDENCE)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument(
+        "--fail-on-provider-error",
+        action="store_true",
+        help="exit non-zero after writing artifacts when Gemini has provider or structured-output failures",
+    )
+    parser.add_argument(
         "--decisions",
         type=Path,
         default=DEFAULT_MANUAL_DECISIONS,
@@ -420,6 +437,15 @@ def main() -> None:
     args.queue.write_text(json.dumps({"provider": "gemini", "manual_decisions_excluded_from_metrics": True, "cases": review_queue(records)}, indent=2) + "\n")
     write_report(args.report, result)
     print(json.dumps({"provider": "gemini", "evaluated": result["metrics"]["evaluated"], "excluded": result["metrics"]["excluded"]}, indent=2))
+    if args.fail_on_provider_error:
+        failures = provider_failure_cases(records)
+        if failures:
+            print(
+                "Gemini provider health check failed for: "
+                + ", ".join(f"{record['id']} ({record['status']})" for record in failures),
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

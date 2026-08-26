@@ -43,6 +43,38 @@ on:
         default: ''
 
 jobs:
+  gemini-live-benchmark:
+    name: Live Gemini skill-trigger benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AI_INTEGRATIONS_GEMINI_API_KEY: ${{ secrets.AI_INTEGRATIONS_GEMINI_API_KEY }}
+      AI_INTEGRATIONS_GEMINI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_GEMINI_BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run credentialed Gemini benchmark
+        run: |
+          python3 scripts/gemini_skill_trigger_benchmark.py \
+            --fail-on-provider-error \
+            --results gemini-live-results.json \
+            --report gemini-live-report.md \
+            --queue gemini-live-review-queue.json
+
+      - name: Upload Gemini benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemini-live-benchmark-${{ github.run_id }}
+          path: |
+            gemini-live-results.json
+            gemini-live-report.md
+            gemini-live-review-queue.json
+          if-no-files-found: error
+          retention-days: 14
+
   large-spec-verify:
     name: Large-spec import (${{ inputs.brands || '30' }}×${{ inputs.flavors || '8' }})
     runs-on: ubuntu-latest
