@@ -2,8 +2,16 @@ import { defineConfig, InputTransformerFn } from "orval";
 import path from "path";
 
 const root = path.resolve(__dirname, "..", "..");
-const apiClientReactSrc = path.resolve(root, "lib", "api-client-react", "src");
-const apiZodSrc = path.resolve(root, "lib", "api-zod", "src");
+// The freshness check sets this to a unique temporary directory so Orval
+// never cleans or rewrites the checked-in generated output. Normal generation
+// deliberately keeps using the source directories.
+const outputRoot = process.env.ORVAL_CHECK_OUTPUT_ROOT;
+const apiClientReactSrc = outputRoot
+  ? path.resolve(outputRoot, "api-client-react")
+  : path.resolve(root, "lib", "api-client-react", "src");
+const apiZodSrc = outputRoot
+  ? path.resolve(outputRoot, "api-zod")
+  : path.resolve(root, "lib", "api-zod", "src");
 
 // Our exports make assumptions about the title of the API being "Api" (i.e. generated output is `api.ts`).
 const titleTransformer: InputTransformerFn = (config) => {

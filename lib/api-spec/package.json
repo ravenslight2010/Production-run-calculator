@@ -5,7 +5,8 @@
   "scripts": {
     "generate": "orval --config ./orval.config.ts",
     "codegen": "pnpm run generate && pnpm -w run typecheck:libs",
-    "check-generated": "bash ./check-generated.sh"
+    "check-generated": "bash ./check-generated.sh",
+    "test:generated-isolation": "bash ./check-generated.test.sh"
   },
   "devDependencies": {
     "orval": "^8.9.1"

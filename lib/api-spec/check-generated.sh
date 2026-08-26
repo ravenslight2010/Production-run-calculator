@@ -2,14 +2,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-generated_root="$repo_root/lib/api-spec/.generated-check"
+generated_root="$(mktemp -d "${TMPDIR:-/tmp}/workspace-api-generated-check.XXXXXX")"
 trap 'rm -rf "$generated_root"' EXIT
 
 mkdir -p "$generated_root/api-client-react" "$generated_root/api-zod"
-cp -R "$repo_root/lib/api-client-react/src/generated" "$generated_root/api-client-react/"
-cp -R "$repo_root/lib/api-zod/src/generated" "$generated_root/api-zod/"
+cp "$repo_root/lib/api-client-react/src/custom-fetch.ts" \
+  "$generated_root/api-client-react/custom-fetch.ts"
 
-pnpm exec orval --config ./orval.config.ts
+ORVAL_CHECK_OUTPUT_ROOT="$generated_root" \
+  pnpm exec orval --config ./orval.config.ts
 
 if ! diff -ru \
   "$generated_root/api-client-react/generated" \
