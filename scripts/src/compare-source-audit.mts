@@ -35,9 +35,32 @@ type Snapshot = {
   tables: Record<string, { rowCount: number; rows: Record<string, any>[] }>;
 };
 
+type WorkbookRow = unknown[];
+type FormulaComponent = { ingredient: string; lbs: number };
+type DoughballVariant = { label: string; weightOz: number; perTray?: number };
+type ParsedDough = {
+  sourceFile: string;
+  name: string;
+  components: FormulaComponent[];
+  doughballVariants: DoughballVariant[];
+};
+type ParsedSauce = {
+  sourceFile: string;
+  name: string;
+  components: FormulaComponent[];
+};
+
 const ROOT = path.resolve(process.cwd(), "..");
 const SOURCE_ROOT = path.join(ROOT, "attached_assets/source-library");
 const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+const comparisonKey = (s: unknown) =>
+  norm(s)
+    .replace(/[“”]/g, '"')
+    .replace(/[’‘]/g, "'")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 const sha = (b: Buffer) => crypto.createHash("sha256").update(b).digest("hex");
 const arg = (name: string) => {
   const i = process.argv.indexOf(name);
@@ -58,6 +81,242 @@ function grids(file: string): SheetGrid[] {
     name,
     rows: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: "" }) as string[][],
   }));
+}
+
+function workbookRows(file: string): WorkbookRow[] {
+  return grids(file).flatMap((grid) => grid.rows as unknown as WorkbookRow[]);
+}
+
+function cellText(value: unknown): string {
+  return String(value ?? "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function cellNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = cellText(value);
+  const match = text.match(/^(-?(?:\d+\.?\d*|\.\d+))(?:\s|$|\()/);
+  if (!match) return undefined;
+  const result = Number(match[1]);
+  return Number.isFinite(result) ? result : undefined;
+}
+
+function numericColumns(row: WorkbookRow): number[] {
+  return row.flatMap((value, index) => cellNumber(value) === undefined ? [] : [index]);
+}
+
+function firstTextBeforeNumber(row: WorkbookRow): { text: string; numberIndex: number } | null {
+  const numberIndex = numericColumns(row)[0];
+  if (numberIndex === undefined) return null;
+  for (let index = 0; index < numberIndex; index++) {
+    const text = cellText(row[index]);
+    if (text) return { text, numberIndex };
+  }
+  return null;
+}
+
+function totalRow(row: WorkbookRow): boolean {
+  return row.some((value) => /^total(?:\s+weight)?$/i.test(cellText(value)));
+}
+
+function retainedDoughName(file: string): string {
+  const namesByFile: Record<string, string> = {
+    "Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx": "Aldo's Dough",
+    "Brand_Dough_Mixing_Procedure_-_08_1784339683868.xlsx": "Brand Dough",
+    "CRB_Dough_Mixing_Procedure_-_39_1784339683921.xlsx": "CRB Dough",
+    "Lowe's_French_Fry_Dough_Mixing_Procedure_-_03_1784339683985.xlsx": "Lowe's French Fry Dough",
+    "Lucia's_French_Fry_Dough_Mixing_Procedure_-_06_1784339684078.xlsx": "Lucia's French Fry Dough",
+    "Malted_Barley_Dough_Mixing_Procedure_-_29_1784339684152.xlsx": "Malted Barley Dough",
+    "Margherita_Dough_Mixing_Procedure_-_05_1784339684241.xlsx": "Margherita Dough",
+    "Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04_1784339684386.xlsx": "Masa Dough - Natural",
+    "Masa_Dough_Mixing_Procedure_-_12_1784339684313.xlsx": "Masa Dough",
+    "Microwavable_Lucia's_Dough_Mixing_Procedure_-_04_1784339684454.xlsx": "Microwavable Lucia's Dough",
+    "Modified_Malted_Barley_Dough_Mixing_Procedure_-_07_1784339684515.xlsx": "MODIFIED - MALTED BARLEY DOUGH",
+    "Naan_Dough_Mixing_Procedure_-_12_1784339684591.xlsx": "Naan Dough",
+    "Sriracha_Dough_Mixing_Procedure_-_01_1784339684659.xlsx": "Sriracha DOUGH",
+  };
+  const name = namesByFile[path.basename(file)];
+  if (!name) throw new Error(`No retained dough-name mapping for ${path.basename(file)}`);
+  return name;
+}
+
+function retainedSauceName(file: string): string {
+  const namesByFile: Record<string, string> = {
+    "Aldo_Pizza_Sauce_02_1784339518984.xlsx": "Aldo's Pizza Sauce",
+    "Alfredo_Pizza_Sauce_07_1784339519130.xlsx": "Alfredo Sauce",
+    "Asiago_Sauce_02_1784339519196.xlsx": "Asiago Sauce",
+    "Bobo's_Buffalo_Pizza_Sauce_-_01_1784339519274.xlsx": "Bobo's Buffalo Pizza Sauce",
+    "Bobo's_Pizza_Sauce_01_1784339519352.xlsx": "Bobo's Pizza Sauce",
+    "Brand_Marriott_Pizza_Sauce_03_1784339519433.xlsx": "BRAND CONCESSIONS MARRIOTT SAUCE",
+    "Four_Hands_Red_Hot_Pizza_Sauce_-_03_1784339519513.xlsx": "Red Hot Pizza Sauce",
+    "Garlic_Alfredo_Pizza_Sauce_02_1784339519592.xlsx": "Garlic Alfredo Sauce",
+    "Gravy_Sauce_-_05_1784339519678.xlsx": "Gravy Sauce",
+    "Lucia_Pizza_Sauce_06_1784339519754.xlsx": "Lucia’s Sauce",
+    "Medulla's_TOI_Pizza_Sauce_03_1784339519838.xlsx": "Medulla Toi Pizza Sauce",
+    "Mystic_Pizza_Sauce_05_1784339519919.xlsx": "Mystic Pizza Sauce",
+    "Sweet_Chili_Sauce_02_1784339520083.xlsx": "Sweet Chili Sauce",
+    "Sweet_and_Sour_Sauce_02_1784339519999.xlsx": "Legacy Sweet & Sour sauce",
+    "Tikka_Masala_Process_1784339520201.xlsx": "Tika Masala Sauce",
+  };
+  const name = namesByFile[path.basename(file)];
+  if (!name) throw new Error(`No retained sauce-name mapping for ${path.basename(file)}`);
+  return name;
+}
+
+function instructionAmount(rows: WorkbookRow[], ingredient: string): number | undefined {
+  // A pair of French-fry workbooks lists the component in the materials table
+  // but puts its weight only in the numbered procedure ("ADD 18 LB ...").
+  const ingredientKey = comparisonKey(ingredient).replace(/^25029\s+/, "");
+  if (!ingredientKey) return undefined;
+  for (const row of rows) {
+    const text = cellText(row.filter((value) => typeof value === "string").join(" "));
+    if (!text || !comparisonKey(text).includes(ingredientKey)) continue;
+    const amount = text.match(/(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)\b/i);
+    if (amount) return Number(amount[1]);
+  }
+  return undefined;
+}
+
+function parseDoughWorkbook(file: string): ParsedDough {
+  const rows = workbookRows(file);
+  const formulaHeaderIndex = rows.findIndex((row) =>
+    row.some((value) => /^lbs?\.?$/i.test(cellText(value))),
+  );
+  if (formulaHeaderIndex < 0) {
+    throw new Error(`Dough workbook has no LBS formula header: ${path.basename(file)}`);
+  }
+  const header = rows[formulaHeaderIndex]!;
+  const preferredColumn = header.findIndex((value) => /^4\s*bag$/i.test(cellText(value)));
+  const components: FormulaComponent[] = [];
+  for (let index = formulaHeaderIndex + 1; index < rows.length; index++) {
+    const row = rows[index]!;
+    if (totalRow(row)) break;
+    const candidate = firstTextBeforeNumber(row);
+    const ingredient = candidate?.text ?? row.map(cellText).find(Boolean) ?? "";
+    if (!ingredient || /^(?:lbs?|oz|yield|per\s+tray)$/i.test(ingredient)) continue;
+    if (/^(?:all ingredients|scale must|acceptable range|\*|\d+\.)/i.test(ingredient)) continue;
+
+    let amount: number | undefined;
+    if (preferredColumn >= 0) amount = cellNumber(row[preferredColumn]);
+    if (amount === undefined && candidate) {
+      amount = cellNumber(row.slice(candidate.numberIndex)[0]);
+    }
+    if (amount === undefined) amount = instructionAmount(rows.slice(index + 1), ingredient);
+    if (amount === undefined) {
+      // Only formula rows reach this point: the parser has already bounded the
+      // scan to the LBS table and stops at TOTAL. Refuse to guess if a retained
+      // revision introduces a new table shape.
+      throw new Error(`Unable to parse dough amount for "${ingredient}" in ${path.basename(file)}`);
+    }
+    components.push({ ingredient, lbs: amount });
+  }
+  if (components.length === 0) {
+    throw new Error(`Dough workbook has no formula components: ${path.basename(file)}`);
+  }
+
+  const variantHeaderIndex = rows.findIndex((row) => {
+    const oz = row.findIndex((value) => /^oz\.?$/i.test(cellText(value)));
+    const tray = row.findIndex((value) => /\btray\b/i.test(cellText(value)));
+    return oz >= 0 && tray > oz;
+  });
+  const doughballVariants: DoughballVariant[] = [];
+  if (variantHeaderIndex >= 0) {
+    const variantHeader = rows[variantHeaderIndex]!;
+    const ozColumn = variantHeader.findIndex((value) => /^oz\.?$/i.test(cellText(value)));
+    const trayColumn = variantHeader.findIndex((value) => /\btray\b/i.test(cellText(value)));
+    for (let index = variantHeaderIndex + 1; index < rows.length; index++) {
+      const row = rows[index]!;
+      const weightOz = cellNumber(row[ozColumn]);
+      if (weightOz === undefined || !(weightOz > 0)) continue;
+      let label = "";
+      for (let labelIndex = ozColumn - 1; labelIndex >= 0; labelIndex--) {
+        label = cellText(row[labelIndex]);
+        if (label) break;
+      }
+      if (!label) continue;
+      const perTray = cellNumber(row[trayColumn]);
+      doughballVariants.push({
+        label,
+        weightOz,
+        ...(perTray !== undefined && perTray > 0 ? { perTray } : {}),
+      });
+    }
+  }
+  return {
+    sourceFile: path.relative(SOURCE_ROOT, file).split(path.sep).join("/"),
+    name: retainedDoughName(file),
+    components,
+    doughballVariants,
+  };
+}
+
+function parseSauceWorkbook(file: string): ParsedSauce {
+  const rows = workbookRows(file);
+  if (path.basename(file) === "Four_Hands_Red_Hot_Pizza_Sauce_-_03_1784339519513.xlsx") {
+    const components: FormulaComponent[] = [];
+    for (const row of rows) {
+      if (row.some((value) => /all ingredients are to be weighed/i.test(cellText(value)))) break;
+      const amountColumn = numericColumns(row).find((column) => column >= 5);
+      if (amountColumn === undefined) continue;
+      const ingredient = cellText(row[amountColumn - 1]);
+      const amount = cellNumber(row[amountColumn]);
+      if (!ingredient || amount === undefined) continue;
+      components.push({ ingredient, lbs: amount });
+    }
+    if (components.length === 0) {
+      throw new Error(`Sauce workbook has no tested formula table: ${path.basename(file)}`);
+    }
+    return {
+      sourceFile: path.relative(SOURCE_ROOT, file).split(path.sep).join("/"),
+      name: retainedSauceName(file),
+      components,
+    };
+  }
+  const ingredientsMarkerIndex = rows.findIndex((row) =>
+    row.some((value) => /^(?:ingredients:?)$/i.test(cellText(value))),
+  );
+  const formulaHeaderIndex = ingredientsMarkerIndex >= 0
+    ? ingredientsMarkerIndex
+    : rows.findIndex((row) => row.some((value) =>
+      /^lbs?\.?$/i.test(cellText(value)) || /^(?:drum|single)\s+batch$/i.test(cellText(value)),
+    ));
+  if (formulaHeaderIndex < 0) {
+    throw new Error(`Sauce workbook has no formula header: ${path.basename(file)}`);
+  }
+
+  const components: FormulaComponent[] = [];
+  for (let index = formulaHeaderIndex + 1; index < rows.length; index++) {
+    const row = rows[index]!;
+    if (totalRow(row) || row.some((value) => /^process$/i.test(cellText(value)))) break;
+    const firstText = row.map(cellText).find(Boolean) ?? "";
+    if (!firstText || /^(?:lbs?|full batch|half batch|single batch)$/i.test(firstText)) continue;
+    if (cellNumber(firstText) !== undefined) continue;
+    const numeric = numericColumns(row);
+    if (numeric.length === 0) continue;
+    const textColumns = row
+      .map((value, column) => ({ text: cellText(value), column }))
+      .filter(({ text }) => text);
+    const firstTextColumn = textColumns[0]?.column ?? 0;
+    const repeatedTextColumn = textColumns.find(
+      ({ text, column }) => column > firstTextColumn && comparisonKey(text) === comparisonKey(firstText),
+    )?.column;
+    // Tika Masala has a six-batch calculation table. Its per-batch amount is
+    // the last numeric cell before the repeated ingredient name; all other
+    // retained sauce sheets use their first numeric cell (full/single batch).
+    const amountColumn = repeatedTextColumn === undefined
+      ? numeric[0]!
+      : [...numeric].reverse().find((column) => column < repeatedTextColumn) ?? numeric[0]!;
+    const amount = cellNumber(row[amountColumn]);
+    if (amount === undefined) continue;
+    components.push({ ingredient: firstText, lbs: amount });
+  }
+  if (components.length === 0) {
+    throw new Error(`Sauce workbook has no formula components: ${path.basename(file)}`);
+  }
+  return {
+    sourceFile: path.relative(SOURCE_ROOT, file).split(path.sep).join("/"),
+    name: retainedSauceName(file),
+    components,
+  };
 }
 
 function names(rows: Record<string, any>[]): string[] {
@@ -110,6 +369,136 @@ function recipeComponentDiff(
   return diffs;
 }
 
+function componentMap(components: Array<{ ingredient: string; lbs?: number }>): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const component of components) {
+    const key = comparisonKey(component.ingredient);
+    if (!key) continue;
+    result.set(key, (result.get(key) ?? 0) + Number(component.lbs ?? 0));
+  }
+  return result;
+}
+
+function compareFormulaComponents(
+  source: Array<{ name: string; sourceFile: string; components: FormulaComponent[] }>,
+  live: Record<string, any>[],
+) {
+  const liveByName = new Map(live.map((row) => [comparisonKey(row.name), row]));
+  const sourceMissingFromLive: Array<{ name: string; sourceFile: string }> = [];
+  const liveOnly = new Set(live.map((row) => String(row.name ?? "").trim()).filter(Boolean));
+  const componentDiffs: Array<{
+    name: string;
+    sourceFile: string;
+    missing: string[];
+    changed: string[];
+    liveOnly: string[];
+  }> = [];
+
+  for (const recipe of source) {
+    const current = liveByName.get(comparisonKey(recipe.name));
+    if (!current) {
+      sourceMissingFromLive.push({ name: recipe.name, sourceFile: recipe.sourceFile });
+      continue;
+    }
+    liveOnly.delete(String(current.name ?? "").trim());
+    const expected = componentMap(recipe.components);
+    const actual = componentMap(current.components ?? []);
+    const missing: string[] = [];
+    const changed: string[] = [];
+    for (const component of recipe.components) {
+      const key = comparisonKey(component.ingredient);
+      if (!key || !expected.has(key)) continue;
+      const got = actual.get(key);
+      const expectedAmount = expected.get(key)!;
+      if (got === undefined) {
+        missing.push(`${component.ingredient}=${expectedAmount}`);
+      } else if (Math.abs(got - expectedAmount) > 0.005) {
+        changed.push(`${component.ingredient}: source ${expectedAmount}, live ${got}`);
+      }
+    }
+    const sourceKeys = new Set(expected.keys());
+    const extra = [...actual.keys()]
+      .filter((key) => !sourceKeys.has(key))
+      .map((key) => `${key}=${actual.get(key)}`);
+    if (missing.length || changed.length || extra.length) {
+      componentDiffs.push({
+        name: recipe.name,
+        sourceFile: recipe.sourceFile,
+        missing,
+        changed,
+        liveOnly: extra,
+      });
+    }
+  }
+  return {
+    sourceMissingFromLive,
+    liveOnly: [...liveOnly].sort((a, b) => a.localeCompare(b)),
+    componentDiffs,
+  };
+}
+
+function compareDoughballVariants(source: ParsedDough[], live: Record<string, any>[]) {
+  const liveByName = new Map(live.map((row) => [comparisonKey(row.name), row]));
+  const sourceMissingFromLive: Array<{ name: string; sourceFile: string }> = [];
+  const variantDiffs: Array<{
+    name: string;
+    sourceFile: string;
+    missing: string[];
+    changed: string[];
+    liveOnly: string[];
+  }> = [];
+  for (const recipe of source) {
+    const current = liveByName.get(comparisonKey(recipe.name));
+    if (!current) {
+      sourceMissingFromLive.push({ name: recipe.name, sourceFile: recipe.sourceFile });
+      continue;
+    }
+    const sourceByLabel = new Map(recipe.doughballVariants.map((variant) => [
+      comparisonKey(variant.label),
+      variant,
+    ]));
+    const liveVariants = Array.isArray(current.doughball_variants) ? current.doughball_variants : [];
+    const liveByLabel = new Map(liveVariants.map((variant: any) => [
+      comparisonKey(variant.label),
+      variant,
+    ]));
+    const missing: string[] = [];
+    const changed: string[] = [];
+    for (const variant of recipe.doughballVariants) {
+      const key = comparisonKey(variant.label);
+      const actual = liveByLabel.get(key);
+      if (!actual) {
+        missing.push(`${variant.label}=${variant.weightOz}oz/${variant.perTray ?? "?"} per tray`);
+        continue;
+      }
+      const actualWeight = Number(actual.weightOz ?? 0);
+      const actualPerTray = Number(actual.perTray ?? 0);
+      if (Math.abs(actualWeight - variant.weightOz) > 0.005 || (variant.perTray ?? 0) !== actualPerTray) {
+        changed.push(
+          `${variant.label}: source ${variant.weightOz}oz/${variant.perTray ?? "?"} per tray, ` +
+          `live ${actualWeight}oz/${actualPerTray || "?"} per tray`,
+        );
+      }
+    }
+    const liveOnly = [...liveByLabel.keys()]
+      .filter((key) => !sourceByLabel.has(key))
+      .map((key) => {
+        const variant = liveByLabel.get(key);
+        return `${variant.label}=${variant.weightOz}oz/${variant.perTray ?? "?"} per tray`;
+      });
+    if (missing.length || changed.length || liveOnly.length) {
+      variantDiffs.push({
+        name: recipe.name,
+        sourceFile: recipe.sourceFile,
+        missing,
+        changed,
+        liveOnly,
+      });
+    }
+  }
+  return { sourceMissingFromLive, variantDiffs };
+}
+
 function main() {
   const snapshotPath = path.resolve(ROOT, arg("--snapshot") ?? "attached_assets/source-library/audits/production-snapshot-2026-08-26.json");
   const outPath = path.resolve(ROOT, arg("--out") ?? "attached_assets/source-library/audits/source-comparison-2026-08-26.json");
@@ -142,6 +531,8 @@ function main() {
   const shippingFile = byKind("shipping")[0];
   const shippingRows = parseShippingGuide(grids(path.join(SOURCE_ROOT, shippingFile.path)));
   const shipping = buildShippingCandidates(shippingRows, liveNames.brands);
+  const sourceDough = byKind("dough").map((file) => parseDoughWorkbook(path.join(SOURCE_ROOT, file.path)));
+  const sourceSauce = byKind("sauce").map((file) => parseSauceWorkbook(path.join(SOURCE_ROOT, file.path)));
 
   const workbookCounts = {
     specs: byKind("specs").length,
@@ -153,6 +544,9 @@ function main() {
   };
   const sourceCheese = cheese.recipes.map((r) => ({ name: r.name, components: r.components }));
   const sourcePremix = knownMixes.map((r) => ({ name: r.name, components: r.components }));
+  const doughFormulaComparison = compareFormulaComponents(sourceDough, live.dough_recipes.rows);
+  const sauceFormulaComparison = compareFormulaComponents(sourceSauce, live.sauce_recipes.rows);
+  const doughVariantComparison = compareDoughballVariants(sourceDough, live.dough_recipes.rows);
   const findings = {
     cheeseMissingFromLive: setDiff(sourceCheese.map((r) => r.name), liveNames.cheese),
     cheeseLiveOnly: setDiff(liveNames.cheese, sourceCheese.map((r) => r.name)),
@@ -161,11 +555,14 @@ function main() {
     premixComponentDiffs: recipeComponentDiff(sourcePremix, live.mixes.rows, "perPizza"),
     shippingUnmatched: shipping.filter((c) => !c.brand).map((c) => c.guideName),
     shippingUnmapped: shipping.filter((c) => c.unmapped.length).map((c) => ({ brand: c.brand ?? c.guideName, fields: c.unmapped })),
-    // Dough and sauce workbooks do not have a shared deterministic parser in
-    // this package. Their retained file counts and live row counts are still
-    // recorded above; avoid presenting filename heuristics as recipe findings.
-    doughWorkbookCount: byKind("dough").length,
-    sauceWorkbookCount: byKind("sauce").length,
+    doughMissingFromLive: doughFormulaComparison.sourceMissingFromLive,
+    doughLiveOnly: doughFormulaComparison.liveOnly,
+    doughComponentDiffs: doughFormulaComparison.componentDiffs,
+    doughVariantMissingFromLive: doughVariantComparison.sourceMissingFromLive,
+    doughVariantDiffs: doughVariantComparison.variantDiffs,
+    sauceMissingFromLive: sauceFormulaComparison.sourceMissingFromLive,
+    sauceLiveOnly: sauceFormulaComparison.liveOnly,
+    sauceComponentDiffs: sauceFormulaComparison.componentDiffs,
   };
 
   const result = {
@@ -178,6 +575,10 @@ function main() {
     },
     liveRowCounts: Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.rowCount])),
     workbookCounts,
+    parsedFormulas: {
+      dough: sourceDough,
+      sauce: sourceSauce,
+    },
     findings,
     rerun: "From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot attached_assets/source-library/audits/production-snapshot-2026-08-26.json --out attached_assets/source-library/audits/source-comparison-2026-08-26.json",
   };

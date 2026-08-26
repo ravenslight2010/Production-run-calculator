@@ -1,7 +1,7 @@
 {
   "format": "source-audit-comparison",
   "formatVersion": 1,
-  "comparedAt": "2026-08-26T00:39:20.915Z",
+  "comparedAt": "2026-08-26T01:22:25.438Z",
   "inputs": {
     "snapshot": {
       "path": "attached_assets/source-library/audits/production-snapshot-2026-08-26.json",
@@ -295,6 +295,1143 @@
     "cheese": 114,
     "premixBlocks": 60,
     "shippingRows": 20
+  },
+  "parsedFormulas": {
+    "dough": [
+      {
+        "sourceFile": "dough/Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx",
+        "name": "Aldo's Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 89
+          },
+          {
+            "ingredient": "CORN OIL",
+            "lbs": 16
+          },
+          {
+            "ingredient": "HONEY",
+            "lbs": 2
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 2
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1
+          },
+          {
+            "ingredient": "GARLIC POWDER",
+            "lbs": 0.5
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "12'' Aldo",
+            "weightOz": 7.7,
+            "perTray": 24
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Brand_Dough_Mixing_Procedure_-_08_1784339683868.xlsx",
+        "name": "Brand Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 103.8
+          },
+          {
+            "ingredient": "CORN OIL",
+            "lbs": 10
+          },
+          {
+            "ingredient": "BAKING POWDER",
+            "lbs": 7
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1.7
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "BRAND 7\" DOUGH",
+            "weightOz": 6.2,
+            "perTray": 24
+          },
+          {
+            "label": "BRAND 12\" DOUGH",
+            "weightOz": 14.2,
+            "perTray": 16
+          },
+          {
+            "label": "CORKY'S 7\" DOUGH",
+            "weightOz": 5,
+            "perTray": 24
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/CRB_Dough_Mixing_Procedure_-_39_1784339683921.xlsx",
+        "name": "CRB Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 97.4
+          },
+          {
+            "ingredient": "SUNFLOWER OIL",
+            "lbs": 16
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "HONEY",
+            "lbs": 2
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1
+          },
+          {
+            "ingredient": "GARLIC POWDER",
+            "lbs": 0.5
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "Costco",
+            "weightOz": 9.6,
+            "perTray": 20
+          },
+          {
+            "label": "Hannaford, Lowe's, & SMD",
+            "weightOz": 7.6,
+            "perTray": 24
+          },
+          {
+            "label": "Corner Booth",
+            "weightOz": 8.25,
+            "perTray": 24
+          },
+          {
+            "label": "Basha's Original, Lucia's New & Improved",
+            "weightOz": 8.6,
+            "perTray": 24
+          },
+          {
+            "label": "Four Hands CRB Heavy",
+            "weightOz": 8.7,
+            "perTray": 24
+          },
+          {
+            "label": "Hannaford, Lowe's & Lucia's Craft CRB Heavy Plus",
+            "weightOz": 12,
+            "perTray": 16
+          },
+          {
+            "label": "Lowe's CRB Heavier",
+            "weightOz": 13,
+            "perTray": 16
+          },
+          {
+            "label": "Lucia's & Hannaford Craft CRB Thick",
+            "weightOz": 13.8,
+            "perTray": 16
+          },
+          {
+            "label": "Craft, Basha's Ultra Thin",
+            "weightOz": 7.8,
+            "perTray": 24
+          },
+          {
+            "label": "Nob Hill Craft Heavy Plus",
+            "weightOz": 12.1,
+            "perTray": 16
+          },
+          {
+            "label": "7'' FSD",
+            "weightOz": 5.5,
+            "perTray": 24
+          },
+          {
+            "label": "Lowe's 7 Inch",
+            "weightOz": 5.7,
+            "perTray": 24
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Lowe's_French_Fry_Dough_Mixing_Procedure_-_03_1784339683985.xlsx",
+        "name": "Lowe's French Fry Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 101.5
+          },
+          {
+            "ingredient": "25029 FRENCH FRIES",
+            "lbs": 18
+          },
+          {
+            "ingredient": "SUNFLOWER OIL",
+            "lbs": 12
+          },
+          {
+            "ingredient": "HONEY",
+            "lbs": 9
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "LION'S CHOICE SEASONING",
+            "lbs": 2
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "LOWE'S HEAVY FRENCH FRY DOUGH",
+            "weightOz": 15,
+            "perTray": 15
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Lucia's_French_Fry_Dough_Mixing_Procedure_-_06_1784339684078.xlsx",
+        "name": "Lucia's French Fry Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 101.5
+          },
+          {
+            "ingredient": "25029 FRENCH FRIES",
+            "lbs": 18
+          },
+          {
+            "ingredient": "SUNFLOWER OIL",
+            "lbs": 12
+          },
+          {
+            "ingredient": "HONEY",
+            "lbs": 9
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "LUCIA'S CRAFT BACON BURGER SUPREME",
+            "weightOz": 14,
+            "perTray": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Malted_Barley_Dough_Mixing_Procedure_-_29_1784339684152.xlsx",
+        "name": "Malted Barley Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 77.4
+          },
+          {
+            "ingredient": "MALTED BARLEY",
+            "lbs": 22
+          },
+          {
+            "ingredient": "HONEY",
+            "lbs": 10
+          },
+          {
+            "ingredient": "OLIVE OIL",
+            "lbs": 7.5
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 6
+          },
+          {
+            "ingredient": "SEA SALT",
+            "lbs": 1
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "LOWE'S, HANNAFORD, LUCIA CRAFT, NOB HILL CRAFT Thick (Argus)",
+            "weightOz": 13.8,
+            "perTray": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Margherita_Dough_Mixing_Procedure_-_05_1784339684241.xlsx",
+        "name": "Margherita Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 98.8
+          },
+          {
+            "ingredient": "CORN OIL",
+            "lbs": 10
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 3
+          },
+          {
+            "ingredient": "CREAM OF TARTAR",
+            "lbs": 2.1
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1.7
+          },
+          {
+            "ingredient": "SODIUM BICARBONATE",
+            "lbs": 1.4
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "LOWE'S MARGHERITA DOUGH",
+            "weightOz": 11,
+            "perTray": 16
+          },
+          {
+            "label": "HANNAFORD MARGHERITA DOUGH",
+            "weightOz": 11,
+            "perTray": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04_1784339684386.xlsx",
+        "name": "Masa Dough - Natural",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 121
+          },
+          {
+            "ingredient": "MASA FLOUR",
+            "lbs": 25
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 7.5
+          },
+          {
+            "ingredient": "CORN OIL",
+            "lbs": 6.25
+          },
+          {
+            "ingredient": "CREAM OF TARTAR",
+            "lbs": 3.75
+          },
+          {
+            "ingredient": "YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SODIUM BICARBONATE",
+            "lbs": 2.5
+          },
+          {
+            "ingredient": "SEA SALT",
+            "lbs": 2.5
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "Lowe's SOB Masa",
+            "weightOz": 12,
+            "perTray": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Masa_Dough_Mixing_Procedure_-_12_1784339684313.xlsx",
+        "name": "Masa Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 121
+          },
+          {
+            "ingredient": "MASA FLOUR",
+            "lbs": 25
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 7.5
+          },
+          {
+            "ingredient": "CORN OIL",
+            "lbs": 6.25
+          },
+          {
+            "ingredient": "BAKING POWDER",
+            "lbs": 6.25
+          },
+          {
+            "ingredient": "YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SEA SALT",
+            "lbs": 2.5
+          },
+          {
+            "ingredient": "DOUGH CONDITIONER UFI-U1420",
+            "lbs": 1.75
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "Hannaford & Lucia Craft SOB Masa",
+            "weightOz": 12,
+            "perTray": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Microwavable_Lucia's_Dough_Mixing_Procedure_-_04_1784339684454.xlsx",
+        "name": "Microwavable Lucia's Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 81
+          },
+          {
+            "ingredient": "BUTTER ALTERNATIVE",
+            "lbs": 25
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 11
+          },
+          {
+            "ingredient": "CORN OIL",
+            "lbs": 10
+          },
+          {
+            "ingredient": "YEAST",
+            "lbs": 6
+          },
+          {
+            "ingredient": "BAKING POWDER",
+            "lbs": 5.25
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 2.25
+          },
+          {
+            "ingredient": "SAFE PRO 3.1 DOUGH CONDITIONER",
+            "lbs": 1.5
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "Lucia's 7\" Morning Melts",
+            "weightOz": 5.5,
+            "perTray": 24
+          },
+          {
+            "label": "7'' FSD",
+            "weightOz": 5.5,
+            "perTray": 24
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Modified_Malted_Barley_Dough_Mixing_Procedure_-_07_1784339684515.xlsx",
+        "name": "MODIFIED - MALTED BARLEY DOUGH",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 75
+          },
+          {
+            "ingredient": "SPENT GRAIN (CHOPPED FINE)",
+            "lbs": 22
+          },
+          {
+            "ingredient": "SUNFLOWER OIL",
+            "lbs": 20
+          },
+          {
+            "ingredient": "HONEY",
+            "lbs": 3
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 3
+          },
+          {
+            "ingredient": "SEA SALT",
+            "lbs": 1.3
+          },
+          {
+            "ingredient": "GARLIC POWDER",
+            "lbs": 0.7
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "FOUR HANDS Modified",
+            "weightOz": 8.8,
+            "perTray": 24
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Naan_Dough_Mixing_Procedure_-_12_1784339684591.xlsx",
+        "name": "Naan Dough",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 86
+          },
+          {
+            "ingredient": "LIQUID MILK",
+            "lbs": 16
+          },
+          {
+            "ingredient": "SOYBEAN OIL",
+            "lbs": 15
+          },
+          {
+            "ingredient": "YOGURT",
+            "lbs": 8
+          },
+          {
+            "ingredient": "COMPRESSED YEAST",
+            "lbs": 4
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 3.75
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 2
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "Lucia's Craft & 4Hands Naan (Masala Pizza)",
+            "weightOz": 12,
+            "perTray": 16
+          },
+          {
+            "label": "Hannaford (Masala Pizza)",
+            "weightOz": 11.5,
+            "perTray": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "dough/Sriracha_Dough_Mixing_Procedure_-_01_1784339684659.xlsx",
+        "name": "Sriracha DOUGH",
+        "components": [
+          {
+            "ingredient": "ADM WHEAT FLOUR",
+            "lbs": 200
+          },
+          {
+            "ingredient": "WATER",
+            "lbs": 97.4
+          },
+          {
+            "ingredient": "SRIRACHA SAUCE",
+            "lbs": 22
+          },
+          {
+            "ingredient": "SUNFLOWER OIL",
+            "lbs": 16
+          },
+          {
+            "ingredient": "FRESH COMPRESSED YEAST",
+            "lbs": 4
+          },
+          {
+            "ingredient": "SUGAR",
+            "lbs": 2
+          },
+          {
+            "ingredient": "SALT",
+            "lbs": 1
+          }
+        ],
+        "doughballVariants": [
+          {
+            "label": "Craft Pepperoni & Jalapeno",
+            "weightOz": 12,
+            "perTray": 16
+          }
+        ]
+      }
+    ],
+    "sauce": [
+      {
+        "sourceFile": "sauce/Aldo_Pizza_Sauce_02_1784339518984.xlsx",
+        "name": "Aldo's Pizza Sauce",
+        "components": [
+          {
+            "ingredient": "Tomatek Tomato Puree",
+            "lbs": 260
+          },
+          {
+            "ingredient": "Sunflower Oil",
+            "lbs": 4
+          },
+          {
+            "ingredient": "Olive Oil",
+            "lbs": 3
+          },
+          {
+            "ingredient": "Granulated Garlic",
+            "lbs": 2.5
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 1
+          },
+          {
+            "ingredient": "Sea Salt",
+            "lbs": 1
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Alfredo_Pizza_Sauce_07_1784339519130.xlsx",
+        "name": "Alfredo Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 175
+          },
+          {
+            "ingredient": "UFI Alfredo Sauce Powder",
+            "lbs": 50
+          },
+          {
+            "ingredient": "Soybean Oil",
+            "lbs": 38
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Asiago_Sauce_02_1784339519196.xlsx",
+        "name": "Asiago Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 236
+          },
+          {
+            "ingredient": "Asiago Mix",
+            "lbs": 50
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Bobo's_Buffalo_Pizza_Sauce_-_01_1784339519274.xlsx",
+        "name": "Bobo's Buffalo Pizza Sauce",
+        "components": [
+          {
+            "ingredient": "Legacy Buffalo Ranch Sauce",
+            "lbs": 400
+          },
+          {
+            "ingredient": "Frank's Red Hot Sauce",
+            "lbs": 16
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Bobo's_Pizza_Sauce_01_1784339519352.xlsx",
+        "name": "Bobo's Pizza Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 250
+          },
+          {
+            "ingredient": "Tomatek Crushed & Concentrate Tomatoes",
+            "lbs": 165
+          },
+          {
+            "ingredient": "Soybean Oil",
+            "lbs": 18
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 9
+          },
+          {
+            "ingredient": "Salt",
+            "lbs": 5
+          },
+          {
+            "ingredient": "Ground Basil",
+            "lbs": 5
+          },
+          {
+            "ingredient": "Olive Oil",
+            "lbs": 4
+          },
+          {
+            "ingredient": "Ground Oregano",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Granulated Garlic",
+            "lbs": 2
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Brand_Marriott_Pizza_Sauce_03_1784339519433.xlsx",
+        "name": "BRAND CONCESSIONS MARRIOTT SAUCE",
+        "components": [
+          {
+            "ingredient": "Tomatek Tomato Puree",
+            "lbs": 425
+          },
+          {
+            "ingredient": "Olive Oil",
+            "lbs": 16
+          },
+          {
+            "ingredient": "Garlic, Granulated",
+            "lbs": 5.6
+          },
+          {
+            "ingredient": "Salt",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Oregano, Ground",
+            "lbs": 0.5
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Four_Hands_Red_Hot_Pizza_Sauce_-_03_1784339519513.xlsx",
+        "name": "Red Hot Pizza Sauce",
+        "components": [
+          {
+            "ingredient": "Red Hot Sauce (Old Vienna)",
+            "lbs": 48
+          },
+          {
+            "ingredient": "Franks Hot Sauce",
+            "lbs": 145
+          },
+          {
+            "ingredient": "Galrlic Sauce",
+            "lbs": 200
+          },
+          {
+            "ingredient": "Riplets Seanoning",
+            "lbs": 2.7
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 30
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Garlic_Alfredo_Pizza_Sauce_02_1784339519592.xlsx",
+        "name": "Garlic Alfredo Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 175
+          },
+          {
+            "ingredient": "UFI Alfredo Sauce Powder",
+            "lbs": 50
+          },
+          {
+            "ingredient": "Soybean Oil",
+            "lbs": 38
+          },
+          {
+            "ingredient": "Garlic Powder",
+            "lbs": 2.5
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Gravy_Sauce_-_05_1784339519678.xlsx",
+        "name": "Gravy Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 235
+          },
+          {
+            "ingredient": "Gravy Mix",
+            "lbs": 40
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Lucia_Pizza_Sauce_06_1784339519754.xlsx",
+        "name": "Lucia’s Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 250
+          },
+          {
+            "ingredient": "Tomatek Crushed & Concentrate Tomatoes",
+            "lbs": 165
+          },
+          {
+            "ingredient": "Soybean Oil",
+            "lbs": 18
+          },
+          {
+            "ingredient": "Olive Oil",
+            "lbs": 4
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 4
+          },
+          {
+            "ingredient": "Salt",
+            "lbs": 4
+          },
+          {
+            "ingredient": "Ground Oregano",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Ground Basil",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Granulated Garlic",
+            "lbs": 2
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Medulla's_TOI_Pizza_Sauce_03_1784339519838.xlsx",
+        "name": "Medulla Toi Pizza Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 223
+          },
+          {
+            "ingredient": "Tomatek Crushed & Concentrate Tomatoes",
+            "lbs": 112
+          },
+          {
+            "ingredient": "Olive Oil",
+            "lbs": 42
+          },
+          {
+            "ingredient": "Light Brown Sugar",
+            "lbs": 6.2
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 3.2
+          },
+          {
+            "ingredient": "Granulated Garlic",
+            "lbs": 3.2
+          },
+          {
+            "ingredient": "Salt",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Onion Powder",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Ground Oregano",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Ground Basil",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Black Pepper",
+            "lbs": 2
+          },
+          {
+            "ingredient": "Fennel",
+            "lbs": 0.4
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Mystic_Pizza_Sauce_05_1784339519919.xlsx",
+        "name": "Mystic Pizza Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 270
+          },
+          {
+            "ingredient": "Tomatek Crushed & Concentrate Tomatoes",
+            "lbs": 160
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 5.4
+          },
+          {
+            "ingredient": "Salt",
+            "lbs": 5.4
+          },
+          {
+            "ingredient": "Granulated Garlic",
+            "lbs": 4.5
+          },
+          {
+            "ingredient": "Romano Sheep Cheese",
+            "lbs": 2.52
+          },
+          {
+            "ingredient": "Basil Flakes",
+            "lbs": 2.15
+          },
+          {
+            "ingredient": "Onion Powder",
+            "lbs": 0.68
+          },
+          {
+            "ingredient": "Oregano Flake",
+            "lbs": 0.09
+          },
+          {
+            "ingredient": "Black Pepper",
+            "lbs": 0.09
+          },
+          {
+            "ingredient": "Ground Basil",
+            "lbs": 0.04
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Sweet_Chili_Sauce_02_1784339520083.xlsx",
+        "name": "Sweet Chili Sauce",
+        "components": [
+          {
+            "ingredient": "UFI Sweet Chili Powder",
+            "lbs": 50
+          },
+          {
+            "ingredient": "Water",
+            "lbs": 43.5
+          },
+          {
+            "ingredient": "White Vinegar",
+            "lbs": 0.48
+          },
+          {
+            "ingredient": "Ultrasperse",
+            "lbs": 1.65
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Sweet_and_Sour_Sauce_02_1784339519999.xlsx",
+        "name": "Legacy Sweet & Sour sauce",
+        "components": [
+          {
+            "ingredient": "Legacy Sweet and Sour",
+            "lbs": 320
+          },
+          {
+            "ingredient": "Pineapple Juice",
+            "lbs": 40
+          }
+        ]
+      },
+      {
+        "sourceFile": "sauce/Tikka_Masala_Process_1784339520201.xlsx",
+        "name": "Tika Masala Sauce",
+        "components": [
+          {
+            "ingredient": "Water",
+            "lbs": 106.57800000000002
+          },
+          {
+            "ingredient": "Oil",
+            "lbs": 10
+          },
+          {
+            "ingredient": "Ginger",
+            "lbs": 3.65
+          },
+          {
+            "ingredient": "Garlic Puree",
+            "lbs": 3.65
+          },
+          {
+            "ingredient": "Cinnamon Sticks",
+            "lbs": 0.1
+          },
+          {
+            "ingredient": "Anise",
+            "lbs": 0.15
+          },
+          {
+            "ingredient": "Cumin, Whole",
+            "lbs": 0.38
+          },
+          {
+            "ingredient": "Bay Leaves",
+            "lbs": 0.002
+          },
+          {
+            "ingredient": "Fenu Greek Leaves",
+            "lbs": 0.39
+          },
+          {
+            "ingredient": "Tomato Paste",
+            "lbs": 83.2
+          },
+          {
+            "ingredient": "Sugar",
+            "lbs": 7
+          },
+          {
+            "ingredient": "Salt",
+            "lbs": 2.5
+          },
+          {
+            "ingredient": "Cumin, Ground",
+            "lbs": 0.67
+          },
+          {
+            "ingredient": "Corrrander Powder",
+            "lbs": 0.67
+          },
+          {
+            "ingredient": "Chili Powder",
+            "lbs": 1
+          },
+          {
+            "ingredient": "Green Cardamon Powder",
+            "lbs": 0.07
+          },
+          {
+            "ingredient": "Gara Masalla Powder",
+            "lbs": 0.67
+          },
+          {
+            "ingredient": "Paprika",
+            "lbs": 1
+          },
+          {
+            "ingredient": "Cloves, Whole",
+            "lbs": 0.08
+          },
+          {
+            "ingredient": "Heavy Cream",
+            "lbs": 48
+          },
+          {
+            "ingredient": "Black Pepper Powder",
+            "lbs": 0.24
+          }
+        ]
+      }
+    ]
   },
   "findings": {
     "cheeseMissingFromLive": [
@@ -690,8 +1827,232 @@
         ]
       }
     ],
-    "doughWorkbookCount": 13,
-    "sauceWorkbookCount": 15
+    "doughMissingFromLive": [],
+    "doughLiveOnly": [
+      "Bonici 12\"",
+      "BONiCi 9\"",
+      "Lucia's Dough recipe",
+      "Pedone Crust 7\"x12\" Oval",
+      "Pinsa 12\" Crust - Pedone (WBF-1200-R)"
+    ],
+    "doughComponentDiffs": [
+      {
+        "name": "Masa Dough - Natural",
+        "sourceFile": "dough/Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04_1784339684386.xlsx",
+        "missing": [
+          "YEAST=3"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "fresh compressed yeast=3"
+        ]
+      },
+      {
+        "name": "Masa Dough",
+        "sourceFile": "dough/Masa_Dough_Mixing_Procedure_-_12_1784339684313.xlsx",
+        "missing": [
+          "YEAST=3"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "fresh compressed yeast=3"
+        ]
+      },
+      {
+        "name": "Microwavable Lucia's Dough",
+        "sourceFile": "dough/Microwavable_Lucia's_Dough_Mixing_Procedure_-_04_1784339684454.xlsx",
+        "missing": [
+          "YEAST=6"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "fresh compressed yeast=6"
+        ]
+      },
+      {
+        "name": "MODIFIED - MALTED BARLEY DOUGH",
+        "sourceFile": "dough/Modified_Malted_Barley_Dough_Mixing_Procedure_-_07_1784339684515.xlsx",
+        "missing": [
+          "SPENT GRAIN (CHOPPED FINE)=22"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "malted barley=22"
+        ]
+      },
+      {
+        "name": "Naan Dough",
+        "sourceFile": "dough/Naan_Dough_Mixing_Procedure_-_12_1784339684591.xlsx",
+        "missing": [
+          "COMPRESSED YEAST=4"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "fresh compressed yeast=4"
+        ]
+      }
+    ],
+    "doughVariantMissingFromLive": [],
+    "doughVariantDiffs": [
+      {
+        "name": "Aldo's Dough",
+        "sourceFile": "dough/Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx",
+        "missing": [
+          "12'' Aldo=7.7oz/24 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "Aldo's Dough=7.7oz/24 per tray"
+        ]
+      },
+      {
+        "name": "CRB Dough",
+        "sourceFile": "dough/CRB_Dough_Mixing_Procedure_-_39_1784339683921.xlsx",
+        "missing": [
+          "Hannaford, Lowe's & Lucia's Craft CRB Heavy Plus=12oz/16 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "Hannaford, Lowe's, Lucia's Craft CRB Heavy Plus=12oz/16 per tray"
+        ]
+      },
+      {
+        "name": "Malted Barley Dough",
+        "sourceFile": "dough/Malted_Barley_Dough_Mixing_Procedure_-_29_1784339684152.xlsx",
+        "missing": [
+          "LOWE'S, HANNAFORD, LUCIA CRAFT, NOB HILL CRAFT Thick (Argus)=13.8oz/16 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "Malted Barley Dough Thick=13.8oz/16 per tray"
+        ]
+      },
+      {
+        "name": "Masa Dough - Natural",
+        "sourceFile": "dough/Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04_1784339684386.xlsx",
+        "missing": [
+          "Lowe's SOB Masa=12oz/16 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "Masa Dough - Natural=12oz/16 per tray"
+        ]
+      },
+      {
+        "name": "Masa Dough",
+        "sourceFile": "dough/Masa_Dough_Mixing_Procedure_-_12_1784339684313.xlsx",
+        "missing": [
+          "Hannaford & Lucia Craft SOB Masa=12oz/16 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "Masa Dough=12oz/16 per tray"
+        ]
+      },
+      {
+        "name": "MODIFIED - MALTED BARLEY DOUGH",
+        "sourceFile": "dough/Modified_Malted_Barley_Dough_Mixing_Procedure_-_07_1784339684515.xlsx",
+        "missing": [
+          "FOUR HANDS Modified=8.8oz/24 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "MODIFIED - MALTED BARLEY DOUGH=8.8oz/24 per tray"
+        ]
+      },
+      {
+        "name": "Sriracha DOUGH",
+        "sourceFile": "dough/Sriracha_Dough_Mixing_Procedure_-_01_1784339684659.xlsx",
+        "missing": [
+          "Craft Pepperoni & Jalapeno=12oz/16 per tray"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "Sriracha DOUGH=12oz/16 per tray"
+        ]
+      }
+    ],
+    "sauceMissingFromLive": [],
+    "sauceLiveOnly": [
+      "Al Pastor Sauce",
+      "Armanino Basil Pesto Sauce",
+      "Cheeseburger Sauce",
+      "Garlic Sauce (Oasis)",
+      "Hoosier Daddy Sweet & Sassy",
+      "Legacy BBQ Sauce",
+      "Legacy Buffalo Sauce",
+      "Legacy Cheeseburger Sauce",
+      "Olive Oil",
+      "Ranch Sauce",
+      "Salsa Sauce"
+    ],
+    "sauceComponentDiffs": [
+      {
+        "name": "Bobo's Buffalo Pizza Sauce",
+        "sourceFile": "sauce/Bobo's_Buffalo_Pizza_Sauce_-_01_1784339519274.xlsx",
+        "missing": [
+          "Legacy Buffalo Ranch Sauce=400"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "buffalo sauce legacy=400"
+        ]
+      },
+      {
+        "name": "BRAND CONCESSIONS MARRIOTT SAUCE",
+        "sourceFile": "sauce/Brand_Marriott_Pizza_Sauce_03_1784339519433.xlsx",
+        "missing": [
+          "Garlic, Granulated=5.6",
+          "Oregano, Ground=0.5"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "granulated garlic=5.6",
+          "ground oregano=0.5"
+        ]
+      },
+      {
+        "name": "Red Hot Pizza Sauce",
+        "sourceFile": "sauce/Four_Hands_Red_Hot_Pizza_Sauce_-_03_1784339519513.xlsx",
+        "missing": [
+          "Franks Hot Sauce=145",
+          "Galrlic Sauce=200",
+          "Riplets Seanoning=2.7"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "frank s red hot sauce=145",
+          "garlic sauce=200",
+          "red hot riplet seasoning=2.7"
+        ]
+      },
+      {
+        "name": "Mystic Pizza Sauce",
+        "sourceFile": "sauce/Mystic_Pizza_Sauce_05_1784339519919.xlsx",
+        "missing": [
+          "Romano Sheep Cheese=2.52",
+          "Oregano Flake=0.09"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "romano sheep=2.52",
+          "oregano flakes=0.09"
+        ]
+      },
+      {
+        "name": "Tika Masala Sauce",
+        "sourceFile": "sauce/Tikka_Masala_Process_1784339520201.xlsx",
+        "missing": [
+          "Garlic Puree=3.65",
+          "Chili Powder=1",
+          "Black Pepper Powder=0.24"
+        ],
+        "changed": [],
+        "liveOnly": [
+          "garlic powder=4.65"
+        ]
+      }
+    ]
   },
   "rerun": "From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot attached_assets/source-library/audits/production-snapshot-2026-08-26.json --out attached_assets/source-library/audits/source-comparison-2026-08-26.json"
 }

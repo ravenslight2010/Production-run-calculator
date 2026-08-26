@@ -41,10 +41,19 @@ snapshot and workbook bytes and rewrites the comparison output.
 | Shipping guide | 20 parsed rows | represented in profile values |
 | Ingredient catalog | source components referenced by workbooks | 528 ingredients |
 
-The deterministic comparator parses cheese, premix, and shipping layouts. Dough
-and sauce workbook counts are retained and linked, but their workbook layouts
-do not have a shared deterministic parser in the comparison command; no
-filename heuristic is reported as a recipe mismatch.
+The deterministic comparator parses all retained cheese, premix, shipping,
+dough, and sauce layouts. Dough and sauce names are mapped from an explicit
+retained-file map (not inferred from a filename heuristic). Formula components
+are normalized by case, whitespace, punctuation, apostrophes, and `&`; amounts
+are compared in pounds with a 0.005 lb tolerance. Doughball labels use the same
+normalization and their ounce/per-tray values are compared separately.
+
+Two source-layout rules are explicit in the parser: the Malted Barley
+multi-batch dough table uses its 4-bag column, and the two French-fry dough
+tables take the 18 lb fries amount from the numbered procedure because the
+materials row has no numeric cell. Tikka Masala uses its per-batch calculated
+amount column. The Four Hands Red Hot workbook uses its tested right-hand
+formula table. No database connection or write is used.
 
 ## Findings
 
@@ -91,18 +100,38 @@ filename heuristic is reported as a recipe mismatch.
 
 ### Profiles, dough, sauces, and ingredients
 
-- The retained evidence contains all 19 spec, 13 dough, and 15 sauce source
-  workbooks and the corresponding live master-data tables. This comparison
-  does not re-run the AI spec parser or infer dough/sauce formulas from
-  filenames; those would require a separate parser-backed audit.
+- All 13 dough source recipes and all 15 sauce source recipes have a matching
+  live recipe name. The live-only counts are 5 dough rows and 11 sauce rows;
+  these are retained master-data rows outside the workbook set (for example,
+  purchased crusts and ready-made sauces), not source recipes missing from
+  the snapshot.
+- Dough amounts have no numeric changes. Five component findings are
+  name-only drift: `YEAST` vs `FRESH COMPRESSED YEAST` in three procedures,
+  `COMPRESSED YEAST` vs `FRESH COMPRESSED YEAST`, and `SPENT GRAIN (CHOPPED
+  FINE)` vs `MALTED BARLEY`. The full source/live component lists are in the
+  machine-readable comparison.
+- All doughball numeric values match for every source variant. Seven
+  variant findings are label-only drift, including the Aldo, CRB Heavy Plus,
+  Malted Barley, Masa, Modified Barley, and Sriracha labels. No source variant
+  is absent by normalized recipe matching.
+- Sauce has four name-only component drifts (Bobo's Buffalo, Brand Marriott,
+  Red Hot, and Mystic), with matching amounts. The source Red Hot table also
+  contains spelling/name variants such as `Franks Hot Sauce`, `Galrlic Sauce`,
+  and `Riplets Seanoning`; these are retained as findings rather than silently
+  aliased.
+- Tikka Masala is the substantive sauce formula finding: the source has
+  `Garlic Puree=3.65`, `Chili Powder=1`, and `Black Pepper Powder=0.24`,
+  while the live snapshot has `Garlic Powder=4.65` in their place. This needs
+  review before any production edit.
 - The snapshot's 156 profile rows, 18 dough rows, 26 sauce rows, and 528
-  ingredient rows are preserved for independent follow-up comparisons.
+  ingredient rows remain preserved for independent follow-up comparisons.
 
 ## Result
 
 The comparison is **complete and rerunnable**, with both inputs retained and
 hash-linked. It confirms the broad known review areas (cheese naming/component
-drift, premix naming/component drift, and conservative shipping-field gaps)
-without making production writes. The machine-readable output is the
-authoritative detailed finding set; this report records the dated scope,
-limitations, and review conclusions.
+drift, premix naming/component drift, conservative shipping-field gaps, dough
+label/name drift, and one substantive Tikka Masala formula mismatch) without
+making production writes. The machine-readable output is the authoritative
+detailed finding set; this report records the dated scope, parser rules, and
+review conclusions.
