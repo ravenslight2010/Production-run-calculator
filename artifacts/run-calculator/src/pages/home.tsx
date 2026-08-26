@@ -12677,10 +12677,18 @@ export default function Home() {
     }
     setCheeseImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
+    const importRollbackBefore = captureMasterDataSnapshot();
     try {
       const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
+      noteChange(
+        "merge",
+        cheeseImportPrepared.auditApproval
+          ? `${cheeseImportPrepared.auditApproval.auditId}: ${cheeseImportPrepared.auditApproval.approvedLinks.length} approved cheese links`
+          : `Cheese recipe import: ${(cheeseImportPrepared.sourceNames ?? []).join(", ") || "workbook"}`,
+        importRollbackBefore,
+      );
       void recordImportHistory({
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
@@ -12695,9 +12703,37 @@ export default function Home() {
           },
           landed: { recipes: result.count, removed: recipesToRemove.length },
           components: { ingredientRows: recipesToApply.reduce((n, r) => n + (r.components?.length ?? 0), 0) },
-          links: { recipes: recipesToApply.length - result.count },
+          links: {
+            recipes: cheeseImportPrepared.auditApproval?.approvedLinks.length
+              ?? recipesToApply.length - result.count,
+          },
           mismatches: recipesToApply.length !== result.count ? [`${recipesToApply.length - result.count} reviewed cheese recipe(s) were not landed.`] : [],
           counts: { parsed: cheeseImportPrepared.candidates.length, updated: result.count, removed: recipesToRemove.length },
+          ...(cheeseImportPrepared.auditApproval
+            ? {
+                warnings: [
+                  `Held separately: ${cheeseImportPrepared.auditApproval.held.sourceName} (${cheeseImportPrepared.auditApproval.held.reason})`,
+                  `Before/undo evidence: ${cheeseImportPrepared.auditApproval.evidence.snapshotSha256}`,
+                ],
+                changes: [
+                  ...cheeseImportPrepared.auditApproval.approvedLinks.map((link) => ({
+                    kind: "approved-cheese-link",
+                    entity: link.targetId,
+                    message: `${link.brand}: ${link.sourceName} → ${link.targetName}`,
+                  })),
+                  {
+                    kind: "held-formula-conflict",
+                    entity: cheeseImportPrepared.auditApproval.held.sourceId,
+                    message: cheeseImportPrepared.auditApproval.held.reason,
+                  },
+                  {
+                    kind: "audit-evidence",
+                    entity: cheeseImportPrepared.auditApproval.auditId,
+                    message: `audit=${cheeseImportPrepared.auditApproval.evidence.auditSha256}; comparison=${cheeseImportPrepared.auditApproval.evidence.comparisonSha256}; snapshot=${cheeseImportPrepared.auditApproval.evidence.snapshotSha256}`,
+                  },
+                ],
+              }
+            : {}),
         },
       }).catch(() => {});
       // Refresh the shared cheese-recipes query so imported recipes appear

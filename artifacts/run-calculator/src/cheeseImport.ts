@@ -47,6 +47,12 @@ import {
   saveSpecImportAliases,
 } from "./specImportAliases";
 import { saveAiCorrections } from "./aiCorrections";
+import {
+  auditedCheeseApprovalFor,
+  isAuditedCheeseWorkbook,
+  matchesAuditedCheeseCommit,
+  type AuditedCheeseApproval,
+} from "./cheeseReconciliationApproval";
 
 export type CheeseImportPrepared = {
   /** Ready-to-apply cheese recipes (deterministic ids). */
@@ -77,11 +83,23 @@ export type CheeseImportPrepared = {
   absentRecipes: (CheeseLinkTarget & { brand: string })[];
   /** Uploaded filename(s) for this import. */
   sourceNames?: string[];
+  /**
+   * Present only for the byte-identical workbook covered by the retained
+   * reconciliation. Its exact allowlist is enforced again at commit time.
+   */
+  auditApproval?: AuditedCheeseApproval;
+  /** The audited workbook was uploaded but its source/pool no longer matches. */
+  auditBlockedReason?: string;
   note?: string;
 };
 
 /** Hard cap on files per import so one batch can't fan out into a flood. */
 export const MAX_CHEESE_IMPORT_FILES = 10;
+
+async function sha256Hex(data: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /**
  * Resolve a parsed cheese recipe's brand through the learned brand aliases
@@ -117,6 +135,9 @@ export async function prepareCheeseImport(
   signal?: AbortSignal,
 ): Promise<CheeseImportPrepared> {
   const existing = await fetchCheeseRecipes();
+  // The audited bundle is byte-bound. A renamed or amended workbook must go
+  // through the usual manager review rather than inheriting these decisions.
+  const workbookHashes = await Promise.all(buffers.map(sha256Hex));
   // Learned blend-name aliases (best-effort): a "use existing recipe" pick the
   // manager made in a past review is remembered as an "appType" alias, so a
   // re-import of the same sheet pre-suggests the same link automatically.
@@ -202,13 +223,30 @@ export async function prepareCheeseImport(
   // After links attach, auto-prefix any still-unlinked blend whose name
   // collides with a DIFFERENT customer's recipe ("Lucia's Taco Mix") so two
   // brands' same-named blends never overwrite each other.
+  const auditApproval = auditedCheeseApprovalFor(workbookHashes, recipes, existing);
+  const auditBlockedReason = isAuditedCheeseWorkbook(workbookHashes) && !auditApproval
+    ? "This reviewed workbook no longer matches the retained source/pool evidence. Reconcile it again before applying any changes."
+    : undefined;
+  const auditedTargets = new Map(
+    (auditApproval?.approvedLinks ?? []).map((link) => [link.sourceId, link]),
+  );
   const candidates = withCheeseSubMixes(
     withCheeseBrandPrefixes(
       withCheeseLinks(
         buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
         existing,
         buildCheeseAliasLinkMaps(aliases),
-      ),
+      ).map((candidate) => {
+        const approved = auditedTargets.get(candidate.recipe.id);
+        return approved
+          ? {
+              ...candidate,
+              linkTo: approved.targetId === candidate.recipe.id
+                ? candidate.linkTo
+                : { id: approved.targetId, name: approved.targetName },
+            }
+          : candidate;
+      }),
       existing,
     ),
     detectCheeseSubMixes(sheets),
@@ -234,6 +272,8 @@ export async function prepareCheeseImport(
       .map((r) => ({ id: r.id, name: r.name, brand: r.brand }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     absentRecipes,
+    ...(auditApproval ? { auditApproval } : {}),
+    ...(auditBlockedReason ? { auditBlockedReason } : {}),
     ...(note ? { note } : {}),
   };
 }
@@ -253,7 +293,7 @@ export type CheeseCommitResult = {
  * Re-reads current recipes right before writing so we merge onto the freshest list.
  */
 export async function commitCheeseImport(
-  _prepared: CheeseImportPrepared,
+  prepared: CheeseImportPrepared,
   recipesToApply: ReadonlyArray<CheeseRecipe>,
   newAliases: ReadonlyArray<SpecImportAlias> = [],
   recipesToRemove: ReadonlyArray<string> = [],
@@ -263,6 +303,18 @@ export async function commitCheeseImport(
   const recipesWithComponents = recipesToApply.filter(
     (recipe) => (recipe.components?.length ?? 0) > 0,
   );
+  if (prepared.auditBlockedReason) throw new Error(prepared.auditBlockedReason);
+  if (prepared.auditApproval) {
+    if (!matchesAuditedCheeseCommit(
+      prepared.auditApproval,
+      recipesWithComponents,
+      recipesToRemove,
+    )) {
+      throw new Error(
+        `This audited re-import can apply only its ${prepared.auditApproval.approvedLinks.length} approved links. The held Price Chopper conflict, removals, and unrelated rows are blocked.`,
+      );
+    }
+  }
   if (recipesToApply.length === 0 && recipesToRemove.length === 0) return { count: 0, saved: [] };
   const existing = await fetchCheeseRecipes();
   const removeSet = new Set(recipesToRemove);

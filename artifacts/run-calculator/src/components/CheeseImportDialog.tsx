@@ -101,11 +101,14 @@ export default function CheeseImportDialog({
       );
       setMergedAwayKeys(mergedAway);
       setItems(prepared.candidates.map((c) => ({ key: c.recipe.id, candidate: c })));
+      const auditedIds = prepared.auditApproval
+        ? new Set(prepared.auditApproval.approvedLinks.map((link) => link.sourceId))
+        : null;
       setSelected(
         new Set(
           prepared.candidates
             .map((c) => c.recipe.id)
-            .filter((id) => !mergedAway.has(id)),
+            .filter((id) => !mergedAway.has(id) && (!auditedIds || auditedIds.has(id))),
         ),
       );
       setLinkOn(
@@ -128,10 +131,14 @@ export default function CheeseImportDialog({
   if (!open) return null;
 
   const s = prepared?.summary;
+  const auditApproval = prepared?.auditApproval;
   const nothing = s != null && s.total === 0;
   const selectedCount = items.filter((it) => selected.has(it.key)).length;
 
   const toggle = (key: string) =>
+    auditApproval
+      ? undefined
+      :
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -140,6 +147,9 @@ export default function CheeseImportDialog({
     });
 
   const toggleLink = (key: string) =>
+    auditApproval
+      ? undefined
+      :
     setLinkOn((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -148,6 +158,9 @@ export default function CheeseImportDialog({
     });
 
   const setRedirect = (key: string, targetId: string) =>
+    auditApproval
+      ? undefined
+      :
     setRedirects((prev) => {
       const next = new Map(prev);
       if (targetId) next.set(key, targetId);
@@ -156,6 +169,9 @@ export default function CheeseImportDialog({
     });
 
   const setRename = (key: string, name: string) =>
+    auditApproval
+      ? undefined
+      :
     setRenames((prev) => {
       const next = new Map(prev);
       if (name) next.set(key, name);
@@ -315,6 +331,17 @@ export default function CheeseImportDialog({
                   ? `Reading file ${Math.min(progress.done + 1, progress.total)} of ${progress.total} and reading cheese sheets…`
                   : "Reading the workbook and building cheese recipes from each tab…"}
               </p>
+              {auditApproval && (
+                <div className="rounded-md border border-blue-400/60 bg-blue-500/10 p-3 text-xs text-blue-800" data-testid="cheese-audit-approval">
+                  This is the retained audited workbook. Exactly {auditApproval.approvedLinks.length} approved links are locked for application.
+                  The Price Chopper Chicken Bacon Club formula conflict is held separately; no rows can be added or removed in this mode.
+                </div>
+              )}
+              {prepared?.auditBlockedReason && (
+                <div className="rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive" data-testid="cheese-audit-blocked">
+                  {prepared.auditBlockedReason}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground/80">
                 If the app sat idle, the server may need a moment to wake up first.
               </p>
@@ -384,6 +411,7 @@ export default function CheeseImportDialog({
                             type="checkbox"
                             checked={isSel}
                             onChange={() => toggle(it.key)}
+                            disabled={!!auditApproval}
                             className="mt-1 h-4 w-4 accent-primary"
                             aria-label={`Include ${r.name}`}
                           />
@@ -467,7 +495,7 @@ export default function CheeseImportDialog({
                                   <span className="font-medium">"{c.linkTo.name}"</span>
                                 </span>
                                 <label
-                                  className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-blue-700"
+                                  className="ml-auto flex items-center gap-1.5 text-xs text-blue-700"
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <input
@@ -475,13 +503,14 @@ export default function CheeseImportDialog({
                                     className="h-3.5 w-3.5 accent-blue-600"
                                     checked={!!c.linkTo && linkOn.has(it.key)}
                                     onChange={() => toggleLink(it.key)}
+                                    disabled={!!auditApproval}
                                     data-testid={`cheese-link-${it.key}`}
                                   />
                                   Update it instead of adding new
                                 </label>
                               </div>
                             )}
-                            {!redirectTarget && isSel && (
+                            {!auditApproval && !redirectTarget && isSel && (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <label
                                   className="text-xs text-muted-foreground"
@@ -500,7 +529,7 @@ export default function CheeseImportDialog({
                                 />
                               </div>
                             )}
-                            {prepared.existingPool.length > 0 && (
+                            {!auditApproval && prepared.existingPool.length > 0 && (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <label
                                   className="text-xs text-muted-foreground"
@@ -534,6 +563,11 @@ export default function CheeseImportDialog({
                                   with this sheet's ingredients — and remember this
                                   choice for future imports.
                                 </span>
+                              </div>
+                            )}
+                            {auditApproval?.held.sourceId === it.key && (
+                              <div className="mt-2 rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-800">
+                                {auditApproval.held.reason} It is intentionally not applied.
                               </div>
                             )}
                           </div>
@@ -575,7 +609,7 @@ export default function CheeseImportDialog({
                 </div>
               )}
 
-              {(prepared.absentRecipes?.length ?? 0) > 0 && (
+              {!auditApproval && (prepared.absentRecipes?.length ?? 0) > 0 && (
                 <div
                   className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
                   data-testid="cheese-absent-recipes"
@@ -703,6 +737,7 @@ export default function CheeseImportDialog({
               loading ||
               applying ||
               !!error ||
+              !!prepared?.auditBlockedReason ||
               !prepared ||
               nothing ||
               selectedCount === 0 ||
