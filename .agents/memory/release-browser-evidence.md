@@ -40,3 +40,29 @@ valid concurrent full run fail the standard allowlist check.
 **How to apply:** Keep the existing standard root stable for retained evidence
 and place default full-mode artifacts in a separate sibling root. Verify each
 default mode against its matching mode flag.
+
+Retained full-browser summaries must be checked for semantic freshness against
+the assessed revision and run date; an allowlisted evidence verifier can pass
+while a nested prior-day summary still says PASS.
+
+**Why:** A current full run can fail while an older passing
+`browser-full/FINAL-REPORT.md` remains present, creating a misleading release
+record unless the stale artifact is called out explicitly.
+
+**How to apply:** Treat a stale retained summary as an evidence blocker, keep
+the current full-suite log and Playwright artifacts, and do not infer current
+coverage from file presence alone.
+
+When a failed serial full run does not write its normal reporter output, rebuild
+diagnostic counts from the individual test statuses and the reporter contract,
+not just the terminal summary wording: completed = passed + skipped + failed,
+and not-run = enumerated − completed.
+
+**Why:** Playwright's terminal “did not run” summary can group skipped and
+unexecuted cases differently from the retained reporter's `notRun` field. Mixing
+the two interpretations makes a truthful diagnostic report fail mechanical
+evidence validation.
+
+**How to apply:** Reconcile per-file rows to the verifier invariants before
+running `check:release-evidence`; preserve the terminal summary separately when
+its wording differs.

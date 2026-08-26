@@ -1,39 +1,49 @@
 # Full Browser Release Run
 
-**Result:** PASS  
-**Date:** 2026-08-25  
-**Application:** Production Run Calculator  
-**Browser:** system Chromium, one worker  
-**Database boundary:** approved disposable-test mode (`E2E_TEST_DB=1` and `E2E_APPROVED_DESTRUCTIVE_MODE=1`)
+Generated: 2026-08-26T02:58:41.597Z
+Revision: 88afb8c94bd0a2ce0b24eb7665c01390e1153545
+Result: FAIL
+Expected cases: 99
+Enumerated cases: 99
+Completed cases: 98
+Passed cases: 89
+Skipped cases: 4
+Failed cases: 5
+Not-run cases: 1
+Coverage: INCOMPLETE
+Duration: 1068000ms
 
-## Coverage
+## Per-file duration
 
-- 99 test cases were enumerated and covered across the main browser suite.
-- 95 test cases passed in the functional batches and final targeted retries.
-- 4 physical-device-only cases were skipped as expected (`@real-mobile-browser`).
-- The two visual cases passed under the dedicated 1280×900 visual configuration.
-- The reviewed Mix Plan and import-review snapshots were regenerated after the stable, intentional baseline drift was confirmed.
+| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `e2e/accessibility-smoke.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 26220ms |
+| `e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5600ms |
+| `e2e/cross-device-smoke.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10900ms |
+| `e2e/department-workflow-navigation.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10300ms |
+| `e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 6200ms |
+| `e2e/home-navigation-reload.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 15900ms |
+| `e2e/live-sauce-dough-phone.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 18500ms |
+| `e2e/management-performance.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 18142ms |
+| `e2e/manager-action-queue-stale.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 89400ms |
+| `e2e/mix-plan.spec.ts` | 34 | 34 | 30 | 0 | 4 | 0 | 527500ms |
+| `e2e/phone-layout.spec.ts` | 11 | 11 | 9 | 2 | 0 | 0 | 38539ms |
+| `e2e/photo-count.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 7900ms |
+| `e2e/photo-spec-import.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 42000ms |
+| `e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 14700ms |
+| `e2e/pwa-handoff.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 19800ms |
+| `e2e/run-insights.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 20900ms |
+| `e2e/screen-off-wake.spec.ts` | 8 | 8 | 8 | 0 | 0 | 0 | 101800ms |
+| `e2e/sync-convergence.spec.ts` | 7 | 7 | 5 | 2 | 0 | 0 | 43600ms |
+| `e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 13800ms |
+| `e2e/visual-regression.spec.ts` | 2 | 1 | 0 | 0 | 1 | 1 | 4900ms |
+| `e2e/warehouse-coverage.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 14500ms |
 
-## Retained evidence
+## Historical duration comparison
 
-- `batch-01.log` — 19 passed
-- `batch-02-mix-a.log` — 16 passed; two startup retries retained separately
-- `batch-03-mix-b.log` — 15 passed; reload persistence retry retained separately
-- `batch-04.log` — 21 passed, 2 expected device skips
-- `batch-05.log` — 19 passed, 2 expected device skips
-- `retry-mix-startup.log` — two initially flaky cases passed
-- `retry-mix-reload-pass.log` — reload persistence case passed
-- `visual-final-pass.log` — 2 passed
+Baseline: unavailable (the prior retained report was stale and did not contain
+the current revision-bound full-suite contract).
 
-## Startup and logs
-
-- API workflow restarted successfully and `/api/healthz` returned 200.
-- Web workflow restarted successfully and Vite became ready.
-- Final workflow logs show successful API requests; no web workflow errors or browser console output were reported.
-
-## Cleanup
-
-- Test-only `phonee2e...` accounts: 0 remaining.
-- Test-only brand profiles: 0 remaining.
-- Disposable current-day `daily_sync` rows: 0 remaining.
-- Failure screenshots, traces, diffs, and logs remain in the Playwright output/evidence directories for auditability.
+Per-file durations are reconstructed from the current complete Playwright
+output retained in `release-evidence/release-check.log`. The suite remains
+serial (`workers: 1`) and retains all enumerated cases.
