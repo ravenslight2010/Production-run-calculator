@@ -146,14 +146,12 @@
 - [Mounted AI cost paths](mounted-ai-cost-paths.md) — Express strips mount prefixes from req.path; cost lookups keyed by public API paths must recombine baseUrl + path.
 - [Mix-plan E2E setup](mix-plan-e2e-setup.md) — localStorage-seeded live runs can be replaced before Mix Plan renders; baseline pull tests may fail before exercising their assertions.
 - [Mobile safe-area browser tests](mobile-safe-area-browser-tests.md) — headless mobile Chromium can return empty computed safe-area env values; geometry checks must treat them as zero insets.
-- [Visual/release browser evidence](visual-regression-baselines.md) + [release isolation](release-browser-evidence.md) — screenshot tests need isolated setup, masked dynamic content, retained artifacts, and explicit reviewed snapshot updates.
-- [Accessibility coverage gate](a11y-coverage-gate.md) — isolated multi-viewport axe checks should separate stable workflow coverage from known shell debt and destructive setup.
-- [Sync snapshot identity](sync-snapshot-identity.md) — only the server’s stable hash of protected canonical state may authorize an unchanged response; legacy reads stay full payloads.
-- [Sync HTTP failure handling](sync-http-failure-handling.md) — parseable JSON from a non-OK sync write is still a failed write; never let response parsing imply acknowledgment.
+- [Visual/release browser evidence](visual-regression-baselines.md) + [release isolation](release-browser-evidence.md) + [accessibility gate](a11y-coverage-gate.md) — browser evidence needs isolated setup, masked dynamic content, retained artifacts, and explicit review of shell debt/snapshot updates.
+- [Sync snapshot identity](sync-snapshot-identity.md) + [sync HTTP failure handling](sync-http-failure-handling.md) — unchanged responses require a stable protected-state hash; parseable non-OK writes are never acknowledgments.
 - [SSE disconnect registration](sse-disconnect-registration.md) — register close cleanup before awaited initial snapshot work, and cancel test readers explicitly.
 - [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
-- [A11y browser fixtures](a11y-dialog-browser-fixtures.md) + [reload persistence](a11y-reload-fixtures.md) — seed manager capabilities and idempotent localStorage state before authenticated navigation.
-- [Browser timer fixtures](browser-timer-fixtures.md) + [onboarding overlay](delayed-onboarding-overlay.md) — controlled journeys must account for tunnel timing and asynchronously mounted dialogs.
+- [A11y browser fixtures](a11y-dialog-browser-fixtures.md) + [reload persistence](a11y-reload-fixtures.md) + [browser timer fixtures](browser-timer-fixtures.md) — authenticated journeys need seeded capabilities, idempotent state, tunnel timing, and async overlay handling.
 - [Release-check shard budget](release-check-shard-budget.md) — serialized API capability coverage can exceed four minutes; budget release timeouts from shard runtime, not individual tests.
 - [Skill trigger runtime](skill-trigger-runtime.md) — trigger benchmarks need an authenticated Claude CLI; evaluator subprocess failures are synthetic non-triggers, not model evidence.
+- [Large source-audit captures](large-source-audit-captures.md) — shard escaped production JSON reads and assemble only after the hashed source corpus is stable.

@@ -589,7 +589,7 @@ function main() {
       sauce: sourceSauce,
     },
     findings,
-    rerun: "From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot attached_assets/source-library/audits/production-snapshot-2026-08-26.json --out attached_assets/source-library/audits/source-comparison-2026-08-26.json",
+    rerun: `From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot ${path.relative(ROOT, snapshotPath).split(path.sep).join("/")} --out ${path.relative(ROOT, outPath).split(path.sep).join("/")}`,
   };
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${JSON.stringify(result, null, 2)}\n`, { flag: "w" });
