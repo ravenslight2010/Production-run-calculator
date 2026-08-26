@@ -11,6 +11,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import XLSX from "xlsx";
 import {
   parseCheeseWorkbook,
@@ -36,15 +37,15 @@ type Snapshot = {
 };
 
 type WorkbookRow = unknown[];
-type FormulaComponent = { ingredient: string; lbs: number };
-type DoughballVariant = { label: string; weightOz: number; perTray?: number };
-type ParsedDough = {
+export type FormulaComponent = { ingredient: string; lbs: number };
+export type DoughballVariant = { label: string; weightOz: number; perTray?: number };
+export type ParsedDough = {
   sourceFile: string;
   name: string;
   components: FormulaComponent[];
   doughballVariants: DoughballVariant[];
 };
-type ParsedSauce = {
+export type ParsedSauce = {
   sourceFile: string;
   name: string;
   components: FormulaComponent[];
@@ -176,8 +177,7 @@ function instructionAmount(rows: WorkbookRow[], ingredient: string): number | un
   return undefined;
 }
 
-function parseDoughWorkbook(file: string): ParsedDough {
-  const rows = workbookRows(file);
+export function parseDoughRows(rows: WorkbookRow[], file: string): ParsedDough {
   const formulaHeaderIndex = rows.findIndex((row) =>
     row.some((value) => /^lbs?\.?$/i.test(cellText(value))),
   );
@@ -249,8 +249,11 @@ function parseDoughWorkbook(file: string): ParsedDough {
   };
 }
 
-function parseSauceWorkbook(file: string): ParsedSauce {
-  const rows = workbookRows(file);
+export function parseDoughWorkbook(file: string): ParsedDough {
+  return parseDoughRows(workbookRows(file), file);
+}
+
+export function parseSauceRows(rows: WorkbookRow[], file: string): ParsedSauce {
   if (path.basename(file) === "Four_Hands_Red_Hot_Pizza_Sauce_-_03_1784339519513.xlsx") {
     const components: FormulaComponent[] = [];
     for (const row of rows) {
@@ -291,7 +294,9 @@ function parseSauceWorkbook(file: string): ParsedSauce {
     if (!firstText || /^(?:lbs?|full batch|half batch|single batch)$/i.test(firstText)) continue;
     if (cellNumber(firstText) !== undefined) continue;
     const numeric = numericColumns(row);
-    if (numeric.length === 0) continue;
+    if (numeric.length === 0) {
+      throw new Error(`Unable to parse sauce amount for "${firstText}" in ${path.basename(file)}`);
+    }
     const textColumns = row
       .map((value, column) => ({ text: cellText(value), column }))
       .filter(({ text }) => text);
@@ -317,6 +322,10 @@ function parseSauceWorkbook(file: string): ParsedSauce {
     name: retainedSauceName(file),
     components,
   };
+}
+
+export function parseSauceWorkbook(file: string): ParsedSauce {
+  return parseSauceRows(workbookRows(file), file);
 }
 
 function names(rows: Record<string, any>[]): string[] {
@@ -588,4 +597,6 @@ function main() {
   console.log(JSON.stringify({ workbookCounts, findings: Object.fromEntries(Object.entries(findings).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])) }, null, 2));
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  main();
+}

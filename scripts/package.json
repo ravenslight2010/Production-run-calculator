@@ -6,8 +6,9 @@
   "scripts": {
     "audit:source-snapshot": "tsx ./src/capture-source-audit-snapshot.mts",
     "audit:source-compare": "tsx ./src/compare-source-audit.mts",
+    "test:source-compare": "tsx ./src/compare-source-audit.test.mts",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
-    "test": "bash ./src/check-model-version-bump.test.sh",
+    "test": "bash ./src/check-model-version-bump.test.sh && pnpm run test:source-compare",
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
     "test:release-evidence": "tsx ./src/release-evidence.test.mts",
     "test:release-resume": "tsx ./src/release-resume.integration.test.mts",
