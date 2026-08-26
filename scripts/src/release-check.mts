@@ -38,6 +38,14 @@ export type ReleaseEvidenceOptions = {
   expectedLabels?: readonly string[];
 };
 
+export type BrowserDurationRegression = {
+  file: string;
+  baselineDurationMs: number;
+  durationMs: number;
+  increaseMs: number;
+  increasePercent: number;
+};
+
 // The third integration shard contains the capability matrix and the
 // remaining integration fixtures. It is intentionally serialized by the API
 // Vitest config, so it can exceed four minutes on the release environment even
@@ -531,6 +539,29 @@ export function validateFullBrowserReport(
   }
 }
 
+export function parseBrowserDurationRegressions(
+  report: string,
+): BrowserDurationRegression[] {
+  const comparisonSection = report
+    .split("## Historical duration comparison\n\n")[1]
+    ?.split("\n## ")[0];
+  if (!comparisonSection || /Baseline: unavailable/.test(comparisonSection)) {
+    return [];
+  }
+
+  return [
+    ...comparisonSection.matchAll(
+      /^\| `([^`]+)` \| (\d+)ms \| (\d+)ms \| \+(\d+)ms \(\+([\d.]+)%\) \|$/gm,
+    ),
+  ].map((match) => ({
+    file: match[1],
+    baselineDurationMs: Number(match[2]),
+    durationMs: Number(match[3]),
+    increaseMs: Number(match[4]),
+    increasePercent: Number(match[5]),
+  }));
+}
+
 export function validateReleaseReport(
   report: string,
   options: {
@@ -715,6 +746,7 @@ export function formatReleaseReport(
     revision?: string;
     environment?: string;
     decision?: "GO" | "NO-GO";
+    browserDurationRegressions?: readonly BrowserDurationRegression[];
   } = {},
 ): string {
   const cleanStartPassed =
@@ -772,6 +804,32 @@ export function formatReleaseReport(
     evidenceLink("clean-start/startup-mockup.log", "Mockup startup log"),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     "",
+    "## Browser duration review",
+    "",
+    ...(metadata.browserDurationRegressions === undefined
+      ? [
+          "Not evaluated in this release mode.",
+          "",
+        ]
+      : metadata.browserDurationRegressions.length === 0
+        ? [
+            "No meaningful per-file duration regressions detected.",
+            "",
+          ]
+        : [
+            "ALERT: meaningful per-file duration regressions detected:",
+            ...metadata.browserDurationRegressions.map(
+              (regression) =>
+                `- \`${regression.file}\`: +${Math.round(
+                  regression.increaseMs,
+                )}ms (+${regression.increasePercent.toFixed(
+                  1,
+                )}%), from ${Math.round(
+                  regression.baselineDurationMs,
+                )}ms to ${Math.round(regression.durationMs)}ms`,
+            ),
+            "",
+          ]),
     "The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.",
     "",
     "## Operational review",
@@ -819,6 +877,24 @@ async function writeReleaseReport(
         file !== undefined,
     ),
   );
+  let browserDurationRegressions: BrowserDurationRegression[] | undefined;
+  if (fullRun) {
+    try {
+      const browserReport = await readFile(
+        resolve(rootDir, releaseEvidenceDir, "browser-full/FINAL-REPORT.md"),
+        "utf8",
+      );
+      const browserRevision = browserReport.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
+      if (browserRevision === metadata.revision) {
+        browserDurationRegressions = parseBrowserDurationRegressions(
+          browserReport,
+        );
+      }
+    } catch {
+      // Full browser evidence validation below remains responsible for
+      // reporting a missing or unreadable report.
+    }
+  }
   await writeFile(
     reportPath,
     formatReleaseReport(
@@ -828,6 +904,7 @@ async function writeReleaseReport(
       {
         ...metadata,
         environment: process.env.CI ? "CI release validation" : "local release validation",
+        browserDurationRegressions,
       },
     ),
     "utf8",

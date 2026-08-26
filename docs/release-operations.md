@@ -29,6 +29,15 @@ Playwright's completed test results; a `GO` report requires all 99 cases to be
 enumerated and completed. The main config remains serial with `workers: 1`,
 with no retries or reduced test-match coverage.
 
+Each complete, passing full-suite run compares matching file paths with the
+prior complete, passing retained full-suite report before replacing it. An
+interrupted, timed-out, or incomplete run leaves the last valid baseline
+untouched. The report flags a file when it is at least 30 seconds and 25%
+slower than its prior duration. This filters normal cold-environment noise
+while surfacing a slowdown that can consume the 20-minute budget. New files,
+removed files, faster files, and a missing or legacy baseline are not treated
+as regressions.
+
 ## How to interpret a result
 
 - `PASS` is a product or tooling gate that completed successfully.
@@ -42,6 +51,10 @@ with no retries or reduced test-match coverage.
 - A missing gate in the report is an incomplete run, never a pass.
 - A missing, empty, stale-revision, or unexpected evidence file is an evidence
   failure, never a pass.
+- A browser duration alert is an operational review signal, not a coverage or
+  serial-execution bypass. It is copied into the release summary for
+  investigation; the full suite still must complete all 99 cases and pass the
+  revision-bound evidence verifier.
 
 Every run retains `release-evidence/release-check.log` and a revision-bound
 `release-evidence/release-check-state.json`. If a run stops after a bounded

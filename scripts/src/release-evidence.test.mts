@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
   formatReleaseReport,
+  parseBrowserDurationRegressions,
   runStep,
   validateFullBrowserReport,
   validateReleaseReport,
@@ -64,6 +65,58 @@ async function run(): Promise<void> {
     validateReleaseReport(validReport, {
       currentRevision: "current-revision",
       expectedMode: "standard",
+      expectedLabels: validLabels,
+    }),
+  );
+  const browserDurationReport = [
+    "## Historical duration comparison",
+    "",
+    "Baseline: prior retained full browser report.",
+    "Alert thresholds: at least 30s and 25% slower for the same file.",
+    "",
+    "| File | Prior | Current | Increase |",
+    "| --- | ---: | ---: | ---: |",
+    "| `e2e/slow.spec.ts` | 60000ms | 100000ms | +40000ms (+66.7%) |",
+    "",
+  ].join("\n");
+  assert.deepEqual(parseBrowserDurationRegressions(browserDurationReport), [
+    {
+      file: "e2e/slow.spec.ts",
+      baselineDurationMs: 60_000,
+      durationMs: 100_000,
+      increaseMs: 40_000,
+      increasePercent: 66.7,
+    },
+  ]);
+  const alertingReleaseReport = formatReleaseReport(
+    validLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "full",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "GO",
+      browserDurationRegressions: parseBrowserDurationRegressions(
+        browserDurationReport,
+      ),
+    },
+  );
+  assert.match(
+    alertingReleaseReport,
+    /ALERT: meaningful per-file duration regressions detected:/,
+  );
+  assert.match(
+    alertingReleaseReport,
+    /`e2e\/slow\.spec\.ts`: \+40000ms \(\+66\.7%\)/,
+  );
+  assert.doesNotThrow(() =>
+    validateReleaseReport(alertingReleaseReport, {
+      currentRevision: "current-revision",
+      expectedMode: "full",
       expectedLabels: validLabels,
     }),
   );
