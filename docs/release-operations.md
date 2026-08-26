@@ -71,6 +71,26 @@ continues to select one exact evidence directory for deliberate single-run
 use. To verify the default full-mode evidence, use
 `pnpm run release:check:full -- --verify-evidence`.
 
+## GitHub Actions evidence
+
+The release-check workflow runs standard mode on pull requests and manual
+dispatches. Its separate full-mode job is an explicit `workflow_dispatch`
+opt-in (`Run full browser release suite and retain full evidence`) so the
+longer browser budget does not extend every pull request. Each selected job
+starts with its own disposable database and evidence root:
+
+- Standard mode runs `pnpm run release:check`, verifies `release-evidence/`,
+  and uploads `release-evidence-standard-<run-id>`.
+- Full mode runs `pnpm run release:check:full`, verifies
+  `release-evidence-full/` with the full-mode verifier (including
+  `browser-full/FINAL-REPORT.md`), and uploads
+  `release-evidence-full-<run-id>`.
+
+The retained artifacts also include the release report, durable log, checkpoint,
+clean-start evidence, and startup logs. The roots and artifact names are
+deliberately distinct so a full run cannot overwrite or be mistaken for
+standard evidence.
+
 ## Startup and port recovery
 
 Clean-start uses disposable ports (`18081`, `18082`, `18180` in release
