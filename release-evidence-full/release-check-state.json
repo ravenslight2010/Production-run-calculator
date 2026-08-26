@@ -67,7 +67,13 @@
       "passed": true,
       "status": "PASS",
       "elapsedMs": 221913
+    },
+    {
+      "label": "API integration tests (release shard 3/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 152389
     }
   ],
-  "updatedAt": "2026-08-26T12:26:19.274Z"
+  "updatedAt": "2026-08-26T12:28:51.665Z"
 }
