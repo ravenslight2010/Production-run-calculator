@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "audit:source-snapshot": "tsx ./src/capture-source-audit-snapshot.mts",
+    "audit:source-compare": "tsx ./src/compare-source-audit.mts",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
     "test": "bash ./src/check-model-version-bump.test.sh",
     "test:recovery": "tsx ./src/recovery-audit.test.mts",

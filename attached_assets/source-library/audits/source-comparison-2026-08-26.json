@@ -1,0 +1,697 @@
+{
+  "format": "source-audit-comparison",
+  "formatVersion": 1,
+  "comparedAt": "2026-08-26T00:39:20.915Z",
+  "inputs": {
+    "snapshot": {
+      "path": "attached_assets/source-library/audits/production-snapshot-2026-08-26.json",
+      "sha256": "4bff312e8176dc5333a2a5982798ea9f9bb951bb50409bb9affbd89c3407e9b6",
+      "capturedAt": "2026-08-26T00:21:27.339Z"
+    },
+    "sourceLibrary": {
+      "root": "attached_assets/source-library",
+      "manifestSha256": "c4241480ebf3ccda8a03ce3565fea78f68063f2531a9d20902619a8e3140cf8f",
+      "files": [
+        {
+          "path": "AUDIT-REPORT-2026-07-18.md",
+          "bytes": 9787,
+          "sha256": "7d2913f7b6a14aff33927f26c50d0fab5d0bcc7218b55794f4feea05eb2948bc"
+        },
+        {
+          "path": "AUDIT-REPORT-2026-07-21.md",
+          "bytes": 5707,
+          "sha256": "2c014bf42c0cf458bd07351848409cd8b8ee9cea7f9f29355fa9b4bf1bbc78d0"
+        },
+        {
+          "path": "cheese/Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer_-_07.10.26_1784339826076.xlsx",
+          "bytes": 158480,
+          "sha256": "21432dc3c0260f578d66989830458f51c19d2524ebf0453efcf7b761e78d9878"
+        },
+        {
+          "path": "dough/Aldo's_Dough_Mixing_Procedure_-_09_1784339683714.xlsx",
+          "bytes": 13206,
+          "sha256": "f6d80526acda8ea185c067fc8a2ea229cfc43d3346c61423f7ba3301930d7900"
+        },
+        {
+          "path": "dough/Brand_Dough_Mixing_Procedure_-_08_1784339683868.xlsx",
+          "bytes": 13492,
+          "sha256": "80205cf5b92aed0166763c128e45b5424a1a48955a50f8006ea0d82696a27344"
+        },
+        {
+          "path": "dough/CRB_Dough_Mixing_Procedure_-_39_1784339683921.xlsx",
+          "bytes": 12482,
+          "sha256": "649fa0eda4bd4e284cb56f39fbac4b20138e182fcee56dea44aa05e5ce0872e2"
+        },
+        {
+          "path": "dough/Lowe's_French_Fry_Dough_Mixing_Procedure_-_03_1784339683985.xlsx",
+          "bytes": 12223,
+          "sha256": "faede01f37b99bfbb0883aa74fce85b509f4b3b70d80b8e5df8f1a784fcd18aa"
+        },
+        {
+          "path": "dough/Lucia's_French_Fry_Dough_Mixing_Procedure_-_06_1784339684078.xlsx",
+          "bytes": 12647,
+          "sha256": "0deeb28c84971377bd7d1cdfec19c5a3937d311e0432f687d99d6720b214df4f"
+        },
+        {
+          "path": "dough/Malted_Barley_Dough_Mixing_Procedure_-_29_1784339684152.xlsx",
+          "bytes": 13630,
+          "sha256": "a5c51684297725af452b72d346dc3abda8ad095c0a9854747327f6b22c47c087"
+        },
+        {
+          "path": "dough/Margherita_Dough_Mixing_Procedure_-_05_1784339684241.xlsx",
+          "bytes": 12707,
+          "sha256": "e0ed4b1c5f4311d35d224f0ff963cd74a389fb53a77ccfbc321c627c6aa70013"
+        },
+        {
+          "path": "dough/Masa_Dough,_Natural,_(Lowe's)_Mixing_Procedure_-_04_1784339684386.xlsx",
+          "bytes": 13554,
+          "sha256": "5ed46df7d915252c049531f0a0591618baad5a986001c140160130ecca1b29fb"
+        },
+        {
+          "path": "dough/Masa_Dough_Mixing_Procedure_-_12_1784339684313.xlsx",
+          "bytes": 13076,
+          "sha256": "a9cd2422ce728c304f8f72e6a3ec7ddebcea349d5d6b8c4186c4cc1009b0444a"
+        },
+        {
+          "path": "dough/Microwavable_Lucia's_Dough_Mixing_Procedure_-_04_1784339684454.xlsx",
+          "bytes": 14035,
+          "sha256": "695687ffc705595a8562df6c59094d088117976a310622180eb4962591403d98"
+        },
+        {
+          "path": "dough/Modified_Malted_Barley_Dough_Mixing_Procedure_-_07_1784339684515.xlsx",
+          "bytes": 13609,
+          "sha256": "303ce22d0f394ba67a985e2b4eec056c6dd46947d58e93a077d5cf8e72b86d0d"
+        },
+        {
+          "path": "dough/Naan_Dough_Mixing_Procedure_-_12_1784339684591.xlsx",
+          "bytes": 13931,
+          "sha256": "3fd262c0b2dece4151b0c8808ebc37ed99723468634993f2bfb3007b91298453"
+        },
+        {
+          "path": "dough/Sriracha_Dough_Mixing_Procedure_-_01_1784339684659.xlsx",
+          "bytes": 12498,
+          "sha256": "eeb47f2ce2177d5c262cbce778ec1f9b8eef215acb8c2f21fca67a4db1a67c89"
+        },
+        {
+          "path": "premix/Updated_Pre_Mix_Sheets_1784339838726.xlsx",
+          "bytes": 580708,
+          "sha256": "1369fbe83130db3dd0c4a5a406ea6c420c9eb1897e435cb2e0ddcba5959b0958"
+        },
+        {
+          "path": "sauce/Aldo_Pizza_Sauce_02_1784339518984.xlsx",
+          "bytes": 11758,
+          "sha256": "e42ab181171c5abdbbbe17b28fdca2d2053ae22356c1cf65f0f19feb4c1d1f74"
+        },
+        {
+          "path": "sauce/Alfredo_Pizza_Sauce_07_1784339519130.xlsx",
+          "bytes": 11755,
+          "sha256": "e096c2b852181483f4beb00953e1072628a5c4244cbd90c59200d68854fe60b8"
+        },
+        {
+          "path": "sauce/Asiago_Sauce_02_1784339519196.xlsx",
+          "bytes": 13455,
+          "sha256": "1b4a8e8725b2083199ecb170ff0f2c6ead13ef22f13b1da0d327599a2a860382"
+        },
+        {
+          "path": "sauce/Bobo's_Buffalo_Pizza_Sauce_-_01_1784339519274.xlsx",
+          "bytes": 11235,
+          "sha256": "4296b638c59ce2db0c274aba616bc5f18a24b47dceb0f0bb181a187b381a85bd"
+        },
+        {
+          "path": "sauce/Bobo's_Pizza_Sauce_01_1784339519352.xlsx",
+          "bytes": 11802,
+          "sha256": "61bc53d1f85206433886529fc65a62124ad08e0e98b6918faad1eff3384e0d90"
+        },
+        {
+          "path": "sauce/Brand_Marriott_Pizza_Sauce_03_1784339519433.xlsx",
+          "bytes": 12089,
+          "sha256": "d9ea35818c5be764c9b60d142f41b4e6935891fd9afff0813fb2ab212713e737"
+        },
+        {
+          "path": "sauce/Four_Hands_Red_Hot_Pizza_Sauce_-_03_1784339519513.xlsx",
+          "bytes": 12248,
+          "sha256": "c25b3adde61ecc716efd6c6a9db13bc4933e10848e8e4b39b6d39b6a67ae6c67"
+        },
+        {
+          "path": "sauce/Garlic_Alfredo_Pizza_Sauce_02_1784339519592.xlsx",
+          "bytes": 12228,
+          "sha256": "972215783d9007d9bb795d2606ad655fd9b8554c9f3b0bc90720c4ea9d2ac669"
+        },
+        {
+          "path": "sauce/Gravy_Sauce_-_05_1784339519678.xlsx",
+          "bytes": 13156,
+          "sha256": "b368d0eec848aa514c84d447b1501595221d36103c1f1654bb143b2112ac24ad"
+        },
+        {
+          "path": "sauce/Lucia_Pizza_Sauce_06_1784339519754.xlsx",
+          "bytes": 11715,
+          "sha256": "0de93f7116311d1962e65f37de25f9c8b8fd4efa6f707871f9cc377e9c6b0453"
+        },
+        {
+          "path": "sauce/Medulla's_TOI_Pizza_Sauce_03_1784339519838.xlsx",
+          "bytes": 11704,
+          "sha256": "b0b06c20db5a08a4a0b46365bbca2130b83b741a6ad9737523c4c352318e89e7"
+        },
+        {
+          "path": "sauce/Mystic_Pizza_Sauce_05_1784339519919.xlsx",
+          "bytes": 12388,
+          "sha256": "548920eab4985d0c4fdfbeab971e2d1b04925ed7b66ac83100ad24a9876d3201"
+        },
+        {
+          "path": "sauce/Sweet_Chili_Sauce_02_1784339520083.xlsx",
+          "bytes": 12283,
+          "sha256": "302b83c41f14be087b6149823e7a18d5dc088f2e81a66595317cf9f39d7a7d7f"
+        },
+        {
+          "path": "sauce/Sweet_and_Sour_Sauce_02_1784339519999.xlsx",
+          "bytes": 11606,
+          "sha256": "9f533730f759ea0b3259565e5e99707b51994233e6258f578455b118ec546581"
+        },
+        {
+          "path": "sauce/Tikka_Masala_Process_1784339520201.xlsx",
+          "bytes": 48411,
+          "sha256": "89618c9d7737ff2a38d460013e33dc36059e3ba73689cfadc179d8ef0b7685b9"
+        },
+        {
+          "path": "schedule/Production_Schedule_7-8-26_1784339875921.xlsx",
+          "bytes": 849338,
+          "sha256": "f7066f55fc9f335daa691a5ab4d915c3a26ccc08f8e57b5038d4bf0db119c46d"
+        },
+        {
+          "path": "shipping/Shipping_and_Palletizing_Guide_07.02.2026_1784339849858.xlsx",
+          "bytes": 13664,
+          "sha256": "bf76dcf04c37218e41a1a16d118922647b0e488e5264365696c65705799e8de6"
+        },
+        {
+          "path": "specs/Aldo's_Pizza_Specs_-_09_1784339783417.xlsx",
+          "bytes": 13835,
+          "sha256": "54c6e9660c5da91e80f41180d5b181d53758d55e688ad5684e5217d130fc100c"
+        },
+        {
+          "path": "specs/Basha's_Original_Pizza_Recipe_Specs_-_3_1784339783551.xlsx",
+          "bytes": 13040,
+          "sha256": "2585a2af5600084e2bd9b6c3bef6184c5c96c483d887c3af37899ede3eba52d3"
+        },
+        {
+          "path": "specs/Basha's_Ultra_Thin_Pizza_Recipe_Specs_-_2_1784339783640.xlsx",
+          "bytes": 13244,
+          "sha256": "d87b649ae2d2ca131d97ab3660e3747b5f8c97bd63f03a54dedbf0fc53b8e2b4"
+        },
+        {
+          "path": "specs/Bobo's_Pizza_Recipe_Specs_-_29_1784339783713.xlsx",
+          "bytes": 14986,
+          "sha256": "76a9edd23a45017b9f52a08b403260e6207bb92de458e25803d37cab09785adf"
+        },
+        {
+          "path": "specs/Brand_Pizza_Recipe_Specs_-_14_1784339783800.xlsx",
+          "bytes": 12014,
+          "sha256": "ac4429ae0b141c86483d96d298bc5cfc393d48153e2e59fabe4b00a8f74ef794"
+        },
+        {
+          "path": "specs/Corner_Booth_Recipe_Specs_-_24_1784339783909.xlsx",
+          "bytes": 15307,
+          "sha256": "9ab3b8a302b24e6826658ea0ea21a854c4e9e08c2f237dad7325e17491148276"
+        },
+        {
+          "path": "specs/Costco_Pizza_Recipe_Specs_-_14_1784339783975.xlsx",
+          "bytes": 11693,
+          "sha256": "0f1c7fa684cb52a90a4395d5cab8663d611c3a59051f0d97bd01e3fae432f9b5"
+        },
+        {
+          "path": "specs/FSD_7_Inch_Pizza_Specs_-_03_1784339784063.xlsx",
+          "bytes": 13053,
+          "sha256": "3eb4977e2fb4b1bd8c1807d68b08d6636bdfb828f3131421bdfa0a598845c876"
+        },
+        {
+          "path": "specs/Hannaford's_Pizza_Recipe_Specs_-_19_1784339784165.xlsx",
+          "bytes": 14609,
+          "sha256": "1b86cbc2007a150a1dd00ba1c87592e0660c8184498acb430fd97d9e9539e178"
+        },
+        {
+          "path": "specs/Lowe's_7_Inch_Pizza_Specs_-_06_1784339784279.xlsx",
+          "bytes": 13753,
+          "sha256": "61f465313520cf89033be836b1ad6b57b0e989c789d83ac470844db272ad618c"
+        },
+        {
+          "path": "specs/Lowe's_Pizza_Recipe_Specs_-_28_1784339784386.xlsx",
+          "bytes": 19719,
+          "sha256": "f0c61bbfac5c6e415797dae04316170e0e5c02ce4279e310b78caba53ed87f5c"
+        },
+        {
+          "path": "specs/Lucia's_7_Inch_Morning_Melts_Pizza_Specs_-_08_1784339784700.xlsx",
+          "bytes": 13168,
+          "sha256": "7af96f86b50eb2eb6c03d1bf9389be3771afc9fdba7c214fe960cefa94520d2f"
+        },
+        {
+          "path": "specs/Lucia's_Pinsa_Pizzas_-_03_1784339784809.xlsx",
+          "bytes": 12892,
+          "sha256": "1cde9d8b2e0215fd4c89ed3fe9a7eb9d1181509735e6fdfaf8335b2fe2a67312"
+        },
+        {
+          "path": "specs/Lucia_Craft_Pizza_(New)_Recipe_Specs_-_01_1784339784487.xlsx",
+          "bytes": 15391,
+          "sha256": "60f12f0be76589ced5302dddfb6ef2fb3e1891e2ca6b64e22e463c6e3c7067bf"
+        },
+        {
+          "path": "specs/Lucia_Pizza_Recipe_Specs_-_35_1784339784592.xlsx",
+          "bytes": 14113,
+          "sha256": "62f8b601999588a4fece6fdb6eee0888482ee2715ea6d312408311f225948cfb"
+        },
+        {
+          "path": "specs/Mauro's_Pinsa_Pizza_Recipe_Specs_-_01_1784339784913.xlsx",
+          "bytes": 12085,
+          "sha256": "42443c46a8a40aa66f69e623115154340061c632e00901dba9fc110e04e3785d"
+        },
+        {
+          "path": "specs/Nob_Hill_Pizza_Recipe_Specs_-_3_1784339785017.xlsx",
+          "bytes": 13953,
+          "sha256": "e56d7504e9687b2873333c033b32cdb05a9b7e9290c69ca6791e8ae8a33380eb"
+        },
+        {
+          "path": "specs/Price_Chopper_Pizza_Recipe_Specs_-_05_1784339785110.xlsx",
+          "bytes": 13361,
+          "sha256": "f787d4ab73d94c1c9e432fb8e5ed7ba58b494b3255178712e04880168acae53e"
+        },
+        {
+          "path": "specs/Show_Me_Dough_Pizza_Recipe_Specs_-_17_1784339785174.xlsx",
+          "bytes": 13408,
+          "sha256": "890dcddac778b98abfe340b98cd8d4b77c3668b45a4c36b87cec7533eac09b10"
+        }
+      ]
+    }
+  },
+  "liveRowCounts": {
+    "brand_profiles": 156,
+    "cheese_recipes": 129,
+    "dough_recipes": 18,
+    "sauce_recipes": 26,
+    "mixes": 50,
+    "ingredients": 528
+  },
+  "workbookCounts": {
+    "specs": 19,
+    "dough": 13,
+    "sauce": 15,
+    "cheese": 114,
+    "premixBlocks": 60,
+    "shippingRows": 20
+  },
+  "findings": {
+    "cheeseMissingFromLive": [
+      "Whole Mozzarella Cheese Mix",
+      "Five Cheese Spice Blend",
+      "Monterey Jack Cheese Mix",
+      "Corner BBQ Chicken Cheese Mix",
+      "Lucia's Americano Cheese Mix",
+      "4Hands Seven Cheese Mix",
+      "4Hands Pizella Cheese",
+      "4Hands Chicken Bacon Club Cheese Mix",
+      "Cheeseburger Cheese Mix",
+      "4Hands Meat Cheese Mix",
+      "4Hands Sugarfire Chicken Cheese Mix",
+      "Gyro Cheese Mix",
+      "Red Hot Cheese Mix",
+      "Hannaford's Chicken Bacon Club Cheese Mix",
+      "4 Cheese with Sweet & Spicy Chili Sauce",
+      "Lowes/Hannaford Five Cheese Mix",
+      "Skim Mozzarella Cheese Mix",
+      "Spinach Goat Cheese Mix",
+      "Lucia's Caribbean Cheese Mix",
+      "Lucia's Monterey Jack Cheese Mix",
+      "Lucia's 6 Cheese Mix",
+      "Lucia's Standard Cheese Mix",
+      "Lucia's Pepperoni Cheese Mix",
+      "Lucia's Cheeseburger Cheese Mix",
+      "Lucia's Club Cheese Mix",
+      "Lucia's Spinach Cheese Mix",
+      "Lucia's Craft Cheese Mix",
+      "Lucia's Italiano Cheese Mix",
+      "Lucia's Mexicano Cheese Mix",
+      "Lucia's Parisian Cheese Mix",
+      "Mozzarella Cheese Mix",
+      "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie Cheese Mix)"
+    ],
+    "cheeseLiveOnly": [
+      "Basha's Original Whole Mozzarella Cheese Mix",
+      "Basha's Ultra Thin Five Cheese Spice Blend",
+      "Basha's Ultra Thin Whole Mozzarella Cheese Mix",
+      "Corner Booth BBQ Chicken Cheese Mix",
+      "Corner Booth Monterey Jack Cheese Mix",
+      "Corner Booth Whole Mozzarella Cheese Mix",
+      "Four Hands Chicken Bacon Club Cheese Mix",
+      "Four Hands Meat Cheese Mix",
+      "Four Hands Pizella Cheese",
+      "Four Hands Seven Cheese Mix",
+      "Four Hands Sugarfire Chicken Cheese Mix",
+      "Four Hands Cheeseburger Cheese Mix",
+      "Four Hands Gyro Cheese Mix",
+      "Four Hands Red Hot Cheese Mix",
+      "Four Hands Whole Mozzarella Cheese Mix",
+      "FSD 7\" Breakfast Cheese Mix",
+      "Hannaford Five Cheese Spice Blend",
+      "Hannaford Chicken Bacon Club Cheese Mix",
+      "Hannaford Five Cheese Mix",
+      "Hannaford Monterey Jack Cheese Mix",
+      "Hannaford Skim Mozzarella Cheese Mix",
+      "Hannaford Spinach Goat Cheese Mix",
+      "Lowe's 7\" Five Cheese Spice Blend",
+      "Lowe's Cheeseburger Cheese Mix",
+      "Lowe's Five Cheese Spice Blend",
+      "Lowe's Five Cheese Mix",
+      "Lowe's Caribbean Cheese Mix",
+      "Lowe's Monterey Jack Cheese Mix",
+      "Lowe's Red Hot Cheese Mix",
+      "Lowe's Skim Mozzarella Cheese Mix",
+      "Lucia's Craft Parmesan / Oregano Mix",
+      "Lucia's Craft Blazin' Pepperoni & Jalapeno Cheese Mix",
+      "Lucia's Craft 3 Meat Cheese Mix",
+      "Lucia's Craft Sweet Chili Veggie Cheese Mix",
+      "Lucia's Craft Whole Mozzarella Cheese Mix",
+      "Lucia's Craft Caribbean Cheese Mix",
+      "Lucia's Craft Cheeseburger Cheese Mix",
+      "Lucia's Craft Club Cheese Mix",
+      "Lucia's Craft 4 Cheese Mix",
+      "Lucia's Craft Spinach Cheese Mix",
+      "Lucia's New & Improved 6 Cheese Mix",
+      "Lucia's New & Improved Cheeseburger Cheese Mix",
+      "Lucia's New & Improved Monterey Jack Cheese Mix",
+      "Lucia's New & Improved Pepperoni Cheese Mix",
+      "Lucia's New & Improved Standard Cheese Mix",
+      "Lucia's Morning Melts Americano Cheese Mix",
+      "Lucia's Morning Melts Italiano Cheese Mix",
+      "Lucia's Morning Melts Mexicano Cheese Mix",
+      "Lucia's Morning Melts Parisian Cheese Mix",
+      "Lucia's Craft Aldo's Parmesan / Oregano Mix",
+      "Lucia's Crft Bratwurst Cheese Mix",
+      "Lucia's Pinsa Whole Mozzarella Cheese Mix",
+      "Mauro Mozzarella Cheese Mix",
+      "Medulla 12x16 Mozzarella Cheese Mix",
+      "Mystic Mozzarella Cheese Mix",
+      "Nob Hill Craft Monterey Jack Cheese Mix",
+      "Price Chopper Chicken Bacon Club Cheese Mix",
+      "Price Chopper Monterey Jack Cheese Mix",
+      "Price Chopper Skim Mozzarella Cheese Mix",
+      "SMD Mozzarella Cheese Mix",
+      "basha's ultra thin crust Basha's Ultra Thin BBQ Chicken Cheese Mix",
+      "basha's ultra thin crust Basha's Ultra Thin Pepperoni Cheese Mix",
+      "basha's ultra thin crust Basha's Ultra Thin Pepperoni/Romano Cheese Mix",
+      "Bobo's Deluxe Meat Mix",
+      "Hannaford Spicy 4Cheese Mix",
+      "Lowe's 7 Pepperoni/Romano Cheese Mix",
+      "Lucia's Craft BBQ Cheese Mix",
+      "Lucia's Craft Pepperoni Cheese Mix",
+      "Lucia's Craft Pepperoni/Jalapeno Cheese Mix",
+      "Lucia's Craft Red Hot Cheese Mix",
+      "SMD Supreme Cheese Mix",
+      "Vita Mozzarella Cheese Mix",
+      "Vocelli's Whole Mozzarella Cheese Mix",
+      "Hannaford Whole Mozzarella Cheese Mix"
+    ],
+    "cheeseComponentDiffs": [
+      {
+        "name": "Edwardo's Parmesan Oregano Mix",
+        "missing": [
+          "Parmesan Grated=5",
+          "Oregano Flake=1.25",
+          "NO Cellulose=0"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Edwardo's Bacon Spinach Mix",
+        "missing": [
+          "Spinach - Fresh=7"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Edwardo's Mozzarella Cheese Mix",
+        "missing": [
+          "Part Skim Mozzarella Cheese=80"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Mystic 50/50 Cheese Mix",
+        "missing": [
+          "Whole Milk Mozzarella=20"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Member's Selection (PriceSmart) Color Cheese Mix",
+        "missing": [
+          "Whole Milk Mozzarella=20"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Vita Red Pepper Cheese Mix",
+        "missing": [
+          "Fresh Spinach=4.6"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Vocelli's Garlic Spinaci Cheese Mix",
+        "missing": [
+          "Fresh Spinach=22.7",
+          "Feta=16.7",
+          "Cow's Romano=1.3"
+        ],
+        "changed": []
+      }
+    ],
+    "premixLiveOnly": [
+      "Basha's Red Fajita Mix",
+      "Hot Giardiniera Mix",
+      "Spinach",
+      "Corner Booth Garlic Chicken Mix",
+      "Lucia's Craft Club Mix",
+      "FSD Breakfast Mix",
+      "Lowe's Caribbean Mix",
+      "Lowe's Chicken Club",
+      "Lowe's Grilled Vegetable Mix",
+      "Lowe's Red Fajita Mix",
+      "Lowe's Spinach Mix",
+      "Lucia's Morning Melts Parisian Mix",
+      "Lucia's Craft Caribbean Mix",
+      "Lucia's Craft Chicken Masala Mix",
+      "Lucia's Craft White Fajita Mix",
+      "Lucia's Pinsa Chicken Masala Mix",
+      "Lucia's Red Fajita Mix",
+      "Mauros Pinsa Italian Beef and Gravy Mix",
+      "Nob Hill Craft Bacon Cheeseburger Mix",
+      "Nob Hill Craft Caribbean Mix",
+      "Nob Hill Craft Red Hot Bacon Jalapeno Mix",
+      "Nob Hill Craft Red Hot Chicken Mix",
+      "Nob Hill Craft South of the Border Mix",
+      "Bobo's Deluxe Meat Mix",
+      "Pineapples",
+      "Lowe's Red Hot Bacon Jalapeno Mix",
+      "Lowe's Red Hot Chicken Mix",
+      "Lucia's Craft Bacon Cheeseburger Mix",
+      "Lucia's Craft House Dlux Mix",
+      "Lucia's Craft Red Hot Chicken Mix",
+      "Lucia's Craft Red Hot Bacon Jalapeno Mix",
+      "Lucia's Craft South of the Border Mix",
+      "Lucia's Craft Sweet Chili Veggie Mix",
+      "Lucia's Pinsa White Fajita Mix",
+      "Nob Hill Craft Club Mix"
+    ],
+    "premixComponentDiffs": [
+      {
+        "name": "Bobo's Deluxe Veggie Mix",
+        "missing": [
+          "Red Onion, FR Strips=0.4",
+          "Red Peppers, FR Strips=0.82",
+          "Green Peppers, FR Strips=0.82",
+          "1/8 Green Pepper=0",
+          "Basil, Frozen=0.06"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Corner Booth House Mix",
+        "missing": [
+          "White Onion Strips, Blanched=0.7"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Corner Booth White Fajita Mix",
+        "missing": [
+          "White Onion Strips, Blanched=0.563",
+          "Red Pepper Strips, Blanched=0.563",
+          "Yellow Pepper Strips, Blanched=0.563"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Hannaford White Fajita Mix",
+        "missing": [
+          "White Onion Strips, Blanched=0.375",
+          "1/8 onion=0",
+          "1/8 green pepper=0",
+          "Red Pepper Strips, Blanched=0.375",
+          "Yellow Pepper Strips, Blanched=0.375"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Lowes 7in Diced Red Fajita",
+        "missing": [
+          "Red Onion Diced, Blanched=0.125",
+          "Green Pepper Diced, Blanched=0.125",
+          "Red Pepper Diced, Blanched=0.125",
+          "Yellow Pepper Diced, Blanched=0.125"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Lowe's Bacon Cheeseburger Mix",
+        "missing": [
+          "Bacon - NATURAL=0.5"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Lowe's California Mix",
+        "missing": [
+          "FR Red Pepper Strips=1.25"
+        ],
+        "changed": []
+      },
+      {
+        "name": "Lucia's Craft Bratwurst Veggie Mix",
+        "missing": [
+          "1/8 onion=0"
+        ],
+        "changed": []
+      },
+      {
+        "name": "SMD Supreme",
+        "missing": [
+          "White Onion Strips, Blanched=0.35",
+          "1/8 onion=0",
+          "1/8 Green Pepper=0",
+          "Red Pepper Strips, Blanched=0.35",
+          "Yellow Pepper Strips, Blanched=0.35"
+        ],
+        "changed": []
+      }
+    ],
+    "shippingUnmatched": [
+      "Basha's Ultra Thin",
+      "Brand MR07CH24",
+      "Brand MR12CH14",
+      "Costco (Lucia's)",
+      "FSD 7''",
+      "Lucia's w Cartons",
+      "Lucia's w Labels",
+      "Nob Hill",
+      "PriceSmart Member's Selection"
+    ],
+    "shippingUnmapped": [
+      {
+        "brand": "Basha's Ultra Thin",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "Brand MR07CH24",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "Brand MR12CH14",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "corner booth",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "Costco (Lucia's)",
+        "fields": [
+          "Gripsheets: x+cardboard"
+        ]
+      },
+      {
+        "brand": "FSD 7''",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "hannaford",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "lowe's",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "lowe's 7\"",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "Lucia's w Cartons",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "lucia's morning melts",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "lucia's pinsa (proof)",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "Nob Hill",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "price chopper",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      },
+      {
+        "brand": "PriceSmart Member's Selection",
+        "fields": [
+          "Gripsheets: x+cardboard"
+        ]
+      },
+      {
+        "brand": "show me dough",
+        "fields": [
+          "Gripsheets: X"
+        ]
+      }
+    ],
+    "doughWorkbookCount": 13,
+    "sauceWorkbookCount": 15
+  },
+  "rerun": "From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot attached_assets/source-library/audits/production-snapshot-2026-08-26.json --out attached_assets/source-library/audits/source-comparison-2026-08-26.json"
+}
