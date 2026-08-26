@@ -28,3 +28,15 @@ stale or incomplete browser evidence look like the latest release result.
 
 **How to apply:** Give release runs an explicit report path, require the 99-case
 coverage contract for GO, and skip writes for `--list` or non-full local runs.
+
+Default standard and full release checks use sibling evidence roots rather than
+nesting one mode under the other; an explicit `RELEASE_EVIDENCE_DIR` remains an
+exact single-run override.
+
+**Why:** Evidence validation recursively scans its selected root and rejects
+unexpected files. Nesting full evidence under the standard root would make a
+valid concurrent full run fail the standard allowlist check.
+
+**How to apply:** Keep the existing standard root stable for retained evidence
+and place default full-mode artifacts in a separate sibling root. Verify each
+default mode against its matching mode flag.

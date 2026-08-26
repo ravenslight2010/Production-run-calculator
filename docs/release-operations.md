@@ -56,16 +56,20 @@ as regressions.
   investigation; the full suite still must complete all 99 cases and pass the
   revision-bound evidence verifier.
 
-Every run retains `release-evidence/release-check.log` and a revision-bound
-`release-evidence/release-check-state.json`. If a run stops after a bounded
-failure, retry with:
+Without an explicit `RELEASE_EVIDENCE_DIR`, standard and full checks retain
+their reports, logs, checkpoints, and browser artifacts independently under
+`release-evidence/` and `release-evidence-full/`, respectively. If a run
+stops after a bounded failure, retry with:
 
 ```bash
 pnpm run release:check -- --resume
 ```
 
 Resume is safe only for the same revision and mode. A fresh run discards the
-old checkpoint and starts a new log.
+old checkpoint and starts a new log. An explicit `RELEASE_EVIDENCE_DIR`
+continues to select one exact evidence directory for deliberate single-run
+use. To verify the default full-mode evidence, use
+`pnpm run release:check:full -- --verify-evidence`.
 
 ## Startup and port recovery
 

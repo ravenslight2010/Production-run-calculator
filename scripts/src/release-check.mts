@@ -63,9 +63,26 @@ const FULL_BROWSER_WARNING_MS = 15 * 60_000;
 const FULL_BROWSER_EXPECTED_CASES = 99;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
-const releaseEvidenceDir =
-  process.env.RELEASE_EVIDENCE_DIR ?? "release-evidence";
+export function defaultReleaseEvidenceDir(mode: "standard" | "full"): string {
+  return mode === "full" ? "release-evidence-full" : "release-evidence";
+}
+
+export function resolveReleaseEvidenceDir(
+  mode: "standard" | "full",
+  configuredDir = process.env.RELEASE_EVIDENCE_DIR,
+): string {
+  return configuredDir ?? defaultReleaseEvidenceDir(mode);
+}
+
+const releaseEvidenceDir = resolveReleaseEvidenceDir(
+  fullRun ? "full" : "standard",
+);
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
+const fullBrowserReportPath = resolve(
+  rootDir,
+  releaseEvidenceDir,
+  "browser-full/FINAL-REPORT.md",
+);
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "clean-start/clean-start-evidence.json",
@@ -226,11 +243,7 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
-      PLAYWRIGHT_RELEASE_REPORT_PATH: resolve(
-        rootDir,
-        releaseEvidenceDir,
-        "browser-full/FINAL-REPORT.md",
-      ),
+      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
   },
   {
@@ -239,6 +252,7 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
   },
 ];
@@ -294,6 +308,9 @@ function printHelp(): void {
   );
   console.log(
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
+  );
+  console.log(
+    "  pnpm run release:check:full -- --verify-evidence  Verify full retained evidence files",
   );
   console.log(
     "  pnpm run release:check -- --resume       Resume the current revision's incomplete run",
@@ -775,7 +792,7 @@ export function formatReleaseReport(
     `Mode: ${mode}`,
     `Environment: ${metadata.environment ?? "release validation environment"}`,
     "Commands: listed in the gate results table below",
-    "Evidence paths: release-evidence/ and retained files linked below",
+    `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     "",
     "## Gate results",
     "",

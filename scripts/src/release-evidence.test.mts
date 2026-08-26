@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  defaultReleaseEvidenceDir,
   formatReleaseReport,
   parseBrowserDurationRegressions,
   runStep,
+  resolveReleaseEvidenceDir,
   validateFullBrowserReport,
   validateReleaseReport,
   verifyReleaseEvidence,
@@ -29,6 +31,32 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  assert.equal(
+    defaultReleaseEvidenceDir("standard"),
+    "release-evidence",
+    "standard release checks should use their own default evidence directory",
+  );
+  assert.equal(
+    defaultReleaseEvidenceDir("full"),
+    "release-evidence-full",
+    "full release checks should use their own default evidence directory",
+  );
+  assert.notEqual(
+    defaultReleaseEvidenceDir("standard"),
+    defaultReleaseEvidenceDir("full"),
+    "standard and full release checks must not share default evidence paths",
+  );
+  assert.equal(
+    resolveReleaseEvidenceDir("standard", "release-evidence-single-run"),
+    "release-evidence-single-run",
+    "an explicit evidence directory must remain an exact override",
+  );
+  assert.equal(
+    resolveReleaseEvidenceDir("full", "release-evidence-single-run"),
+    "release-evidence-single-run",
+    "an explicit full-mode evidence directory must remain an exact override",
+  );
+
   const timedOut = await runStep({
     label: "timed-out fixture",
     args: ["exec", "node", "-e", "setTimeout(() => {}, 5000)"],
