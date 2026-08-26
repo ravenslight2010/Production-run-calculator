@@ -22,6 +22,13 @@ is a bounded execution budget, not a retry or an evidence-validation bypass:
 all 99 enumerated cases still need to complete and the retained report must
 pass the same revision-bound evidence verifier.
 
+The full browser config retains `browser-full/FINAL-REPORT.md` automatically.
+It records the run revision, total/complete/pass/skip/fail/not-run counts,
+wall-clock duration, and a sorted per-file duration table. The report is generated from
+Playwright's completed test results; a `GO` report requires all 99 cases to be
+enumerated and completed. The main config remains serial with `workers: 1`,
+with no retries or reduced test-match coverage.
+
 ## How to interpret a result
 
 - `PASS` is a product or tooling gate that completed successfully.
@@ -62,7 +69,8 @@ forwarding still fails.
 
 Evidence is allowlisted and revision-linked. Standard mode requires all
 clean-start artifacts; full mode additionally requires
-`browser-full/FINAL-REPORT.md`. Do not manually mark a report GO or delete
-missing artifacts. Escalate only after the documented retry/diagnostic path:
+`browser-full/FINAL-REPORT.md`, including its revision-bound duration summary.
+Do not manually mark a report GO or delete missing artifacts. Escalate only
+after the documented retry/diagnostic path:
 the failing gate, revision, retained log path, port owner (if applicable), and
 whether the failure is product, infrastructure, or evidence-related.

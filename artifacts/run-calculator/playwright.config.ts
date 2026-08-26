@@ -14,6 +14,7 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { outputFolder: "playwright-report/full", open: "never" }],
+    ["./e2e/release-duration-reporter.ts"],
   ],
   use: {
     baseURL,

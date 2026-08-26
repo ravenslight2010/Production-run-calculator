@@ -6,6 +6,7 @@ import {
   RELEASE_EVIDENCE_ALLOWLIST,
   formatReleaseReport,
   runStep,
+  validateFullBrowserReport,
   validateReleaseReport,
   verifyReleaseEvidence,
 } from "./release-check.mts";
@@ -207,6 +208,50 @@ async function run(): Promise<void> {
       }),
       /browser-full\/FINAL-REPORT\.md/,
       "full mode must require browser evidence",
+    );
+    const validBrowserReport = [
+      "# Full Browser Release Run",
+      "",
+      "Revision: current-revision",
+      "Result: FAIL",
+      "Expected cases: 99",
+      "Enumerated cases: 99",
+      "Completed cases: 0",
+      "Passed cases: 0",
+      "Skipped cases: 0",
+      "Failed cases: 0",
+      "Not-run cases: 99",
+      "Coverage: INCOMPLETE",
+      "Duration: 0ms",
+      "## Per-file duration",
+      "",
+      "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+      "| `e2e/example.spec.ts` | 99 | 0 | 0 | 0 | 0 | 99 | 0ms |",
+      "",
+    ].join("\n");
+    await mkdir(join(fullRoot, "browser-full"), { recursive: true });
+    await writeFile(
+      join(fullRoot, "browser-full/FINAL-REPORT.md"),
+      validBrowserReport,
+      "utf8",
+    );
+    await assert.doesNotReject(
+      verifyReleaseEvidence(fullRoot, {
+        currentRevision: "current-revision",
+        expectedMode: "full",
+        expectedLabels: validLabels,
+      }),
+      "full mode should accept revision-bound diagnostic browser evidence",
+    );
+    assert.throws(
+      () =>
+        validateFullBrowserReport(
+          validBrowserReport.replace("current-revision", "stale-revision"),
+          { currentRevision: "current-revision" },
+        ),
+      /stale/,
+      "browser evidence must be bound to the current revision",
     );
   } finally {
     await rm(fullRoot, { recursive: true, force: true });

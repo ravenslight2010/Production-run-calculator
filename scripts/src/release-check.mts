@@ -52,6 +52,7 @@ const API_SHARD_WARNING_MS = 6 * 60_000;
 // retries.
 const FULL_BROWSER_TIMEOUT_MS = 20 * 60_000;
 const FULL_BROWSER_WARNING_MS = 15 * 60_000;
+const FULL_BROWSER_EXPECTED_CASES = 99;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
 const releaseEvidenceDir =
@@ -217,6 +218,11 @@ const steps: ReleaseStep[] = [
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      PLAYWRIGHT_RELEASE_REPORT_PATH: resolve(
+        rootDir,
+        releaseEvidenceDir,
+        "browser-full/FINAL-REPORT.md",
+      ),
     },
   },
   {
@@ -400,12 +406,129 @@ export async function verifyReleaseEvidence(
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
   });
+  if (evidenceMode === "full") {
+    const browserReport = await readFile(
+      resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
+      "utf8",
+    );
+    validateFullBrowserReport(browserReport, {
+      currentRevision: revision,
+      requirePass: /^Decision:\s*GO\s*$/m.test(report),
+    });
+  }
 
   console.log(
     `Release evidence verified: ${files.length} allowlisted file${
       files.length === 1 ? "" : "s"
     }.`,
   );
+}
+
+export function validateFullBrowserReport(
+  report: string,
+  options: { currentRevision: string; requirePass?: boolean },
+): void {
+  const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
+  if (!revision || revision !== options.currentRevision) {
+    throw new Error(
+      `Full browser report revision is missing or stale (expected ${options.currentRevision}).`,
+    );
+  }
+
+  const result = report.match(/^Result:\s*(PASS|FAIL|TIMEDOUT|INTERRUPTED)\s*$/m)?.[1];
+  const expectedCases = Number(
+    report.match(/^Expected cases:\s*(\d+)\s*$/m)?.[1],
+  );
+  const enumeratedCases = Number(
+    report.match(/^Enumerated cases:\s*(\d+)\s*$/m)?.[1],
+  );
+  const completedCases = Number(
+    report.match(/^Completed cases:\s*(\d+)\s*$/m)?.[1],
+  );
+  const coverage = report.match(/^Coverage:\s*(COMPLETE|INCOMPLETE)\s*$/m)?.[1];
+  const durationMs = Number(report.match(/^Duration:\s*(\d+)ms\s*$/m)?.[1]);
+  if (!result || !Number.isInteger(expectedCases) || !coverage || !Number.isInteger(durationMs)) {
+    throw new Error(
+      "Full browser report is malformed: result, case counts, coverage, and duration are required.",
+    );
+  }
+  if (expectedCases !== FULL_BROWSER_EXPECTED_CASES) {
+    throw new Error(
+      `Full browser report has unexpected coverage contract (expected ${FULL_BROWSER_EXPECTED_CASES} cases).`,
+    );
+  }
+  if (
+    !Number.isInteger(enumeratedCases) ||
+    enumeratedCases !== FULL_BROWSER_EXPECTED_CASES ||
+    !Number.isInteger(completedCases) ||
+    completedCases < 0 ||
+    completedCases > enumeratedCases
+  ) {
+    throw new Error(
+      "Full browser report has incomplete or invalid enumerated/completed case counts.",
+    );
+  }
+  if (
+    options.requirePass &&
+    (result !== "PASS" ||
+      coverage !== "COMPLETE" ||
+      completedCases !== expectedCases)
+  ) {
+    throw new Error(
+      "Full browser report cannot support GO unless all expected cases passed.",
+    );
+  }
+
+  const durationSection = report.split("## Per-file duration\n\n")[1];
+  if (!durationSection) {
+    throw new Error("Full browser report is malformed: per-file durations are required.");
+  }
+  const rows = [
+    ...durationSection.matchAll(
+      /^\| `([^`]+)` \| (\d+) \| (\d+) \| (\d+) \| (\d+) \| (\d+) \| (\d+) \| (\d+)ms \|$/gm,
+    ),
+  ].map((match) => ({
+    cases: Number(match[2]),
+    completed: Number(match[3]),
+    passed: Number(match[4]),
+    skipped: Number(match[5]),
+    failed: Number(match[6]),
+    notRun: Number(match[7]),
+    durationMs: Number(match[8]),
+  }));
+  if (rows.length === 0) {
+    throw new Error("Full browser report is malformed: no per-file durations found.");
+  }
+  const totals = rows.reduce(
+    (total, row) => ({
+      cases: total.cases + row.cases,
+      completed: total.completed + row.completed,
+      passed: total.passed + row.passed,
+      skipped: total.skipped + row.skipped,
+      failed: total.failed + row.failed,
+      notRun: total.notRun + row.notRun,
+      durationMs: total.durationMs + row.durationMs,
+    }),
+    {
+      cases: 0,
+      completed: 0,
+      passed: 0,
+      skipped: 0,
+      failed: 0,
+      notRun: 0,
+      durationMs: 0,
+    },
+  );
+  if (
+    totals.cases !== enumeratedCases ||
+    totals.completed !== completedCases ||
+    totals.passed + totals.skipped + totals.failed !== completedCases ||
+    totals.passed + totals.skipped + totals.failed + totals.notRun !==
+      totals.cases ||
+    totals.durationMs < 0
+  ) {
+    throw new Error("Full browser report per-file totals do not match its case counts.");
+  }
 }
 
 export function validateReleaseReport(

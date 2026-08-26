@@ -248,6 +248,28 @@ async function runFullModeScenario(): Promise<void> {
   const evidenceDir = await mkdtemp(join(tmpdir(), "release-resume-full-"));
   const markerDir = await mkdtemp(join(tmpdir(), "release-resume-full-marker-"));
   const marker = join(markerDir, "full-browser-started");
+  const revision = await getCurrentRevision();
+  const browserReport = [
+    "# Full Browser Release Run",
+    "",
+    `Revision: ${revision}`,
+    "Result: PASS",
+    "Expected cases: 99",
+    "Enumerated cases: 99",
+    "Completed cases: 99",
+    "Passed cases: 99",
+    "Skipped cases: 0",
+    "Failed cases: 0",
+    "Not-run cases: 0",
+    "Coverage: COMPLETE",
+    "Duration: 1ms",
+    "## Per-file duration",
+    "",
+    "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| `e2e/example.spec.ts` | 99 | 99 | 99 | 0 | 0 | 0 | 1ms |",
+    "",
+  ].join("\n");
   const fullBrowserScript = [
     "const fs = require('node:fs');",
     "const marker = process.env.RELEASE_RESUME_MARKER;",
@@ -293,7 +315,13 @@ async function runFullModeScenario(): Promise<void> {
     ]) {
       const path = join(evidenceDir, file);
       await mkdir(join(path, ".."), { recursive: true });
-      await writeFile(path, "fixture evidence\n", { encoding: "utf8" });
+      await writeFile(
+        path,
+        file === "browser-full/FINAL-REPORT.md"
+          ? browserReport
+          : "fixture evidence\n",
+        { encoding: "utf8" },
+      );
     }
 
     const interrupted = await runReleaseCheck(evidenceDir, steps, ["--full"]);
