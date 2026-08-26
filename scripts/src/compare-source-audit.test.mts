@@ -6,6 +6,7 @@ import {
   parseDoughWorkbook,
   parseSauceRows,
   parseSauceWorkbook,
+  validateCurrentSourceComparisonReport,
   validateSourceComparisonReport,
 } from "./compare-source-audit.mts";
 
@@ -225,8 +226,22 @@ function testComparisonReportFormatDriftFailsClearly() {
   const report = retainedComparisonReport();
   report.formatVersion = 2;
   assert.throws(
-    () => validateSourceComparisonReport(report),
+    () => validateCurrentSourceComparisonReport(report),
     /Invalid source comparison report: formatVersion must be 1/,
+  );
+}
+
+function testHistoricalComparisonReportRemainsReadable() {
+  const report = retainedComparisonReport();
+  assert.doesNotThrow(() => validateSourceComparisonReport(report));
+}
+
+function testUnknownComparisonReportVersionFailsClosedForReaders() {
+  const report = retainedComparisonReport();
+  report.formatVersion = 2;
+  assert.throws(
+    () => validateSourceComparisonReport(report),
+    /Invalid source comparison report: formatVersion must be one of 1/,
   );
 }
 
@@ -271,6 +286,8 @@ testUnrecognizedLayoutsFailClosed();
 testRepresentativeRetainedWorkbooks();
 testRetainedComparisonReportContract();
 testComparisonReportFormatDriftFailsClearly();
+testHistoricalComparisonReportRemainsReadable();
+testUnknownComparisonReportVersionFailsClosedForReaders();
 testComparisonReportFindingFieldDriftFailsClearly();
 testComparisonReportFindingBucketDriftFailsClearly();
 testComparisonReportParsedFormulaFieldDriftFailsClearly();

@@ -155,3 +155,4 @@
 - [Release-check shard budget](release-check-shard-budget.md) — serialized API capability coverage can exceed four minutes; budget release timeouts from shard runtime, not individual tests.
 - [Skill trigger runtime](skill-trigger-runtime.md) — trigger benchmarks need an authenticated Claude CLI; evaluator subprocess failures are synthetic non-triggers, not model evidence.
 - [Large source-audit captures](large-source-audit-captures.md) — shard escaped production JSON reads and assemble only after the hashed source corpus is stable.
+- [Source-audit report versions](source-audit-report-versions.md) — persisted comparisons dispatch by supported read version while newly generated reports remain current-version strict.

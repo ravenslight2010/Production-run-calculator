@@ -324,12 +324,7 @@ function validateFindings(value: unknown): void {
   }
 }
 
-/**
- * Validate the persisted source-comparison report contract without touching
- * the database or source workbooks. Keep this strict: a retained report must
- * remain readable by the reviewers and tools that consume its findings.
- */
-export function validateSourceComparisonReport(
+function validateSourceComparisonReportV1(
   value: unknown,
 ): asserts value is SourceComparisonReport {
   const report = reportFields(value, "report", REPORT_TOP_LEVEL_FIELDS);
@@ -372,6 +367,47 @@ export function validateSourceComparisonReport(
   validateParsedFormulas(report.parsedFormulas);
   validateFindings(report.findings);
   reportString(report.rerun, "rerun");
+}
+
+/**
+ * Validate a persisted source-comparison report for reading. Keep validators
+ * for every supported historical version in this dispatch table when the
+ * current writer moves to a newer contract.
+ */
+const SOURCE_COMPARISON_REPORT_VALIDATORS = new Map<number, (value: unknown) => void>([
+  [1, validateSourceComparisonReportV1],
+]);
+
+export function validateSourceComparisonReport(
+  value: unknown,
+): asserts value is SourceComparisonReport {
+  const report = reportRecord(value, "report");
+  const formatVersion = report.formatVersion;
+  const validator =
+    typeof formatVersion === "number"
+      ? SOURCE_COMPARISON_REPORT_VALIDATORS.get(formatVersion)
+      : undefined;
+  if (!validator) {
+    invalidReport(
+      "formatVersion",
+      `must be one of ${[...SOURCE_COMPARISON_REPORT_VALIDATORS.keys()].join(", ")}`,
+    );
+  }
+  validator(value);
+}
+
+/**
+ * Validate a newly generated report. Unlike the historical read path, the
+ * writer must always emit the current contract version.
+ */
+export function validateCurrentSourceComparisonReport(
+  value: unknown,
+): asserts value is SourceComparisonReport {
+  const report = reportRecord(value, "report");
+  if (report.formatVersion !== REPORT_FORMAT_VERSION) {
+    invalidReport("formatVersion", `must be ${REPORT_FORMAT_VERSION}`);
+  }
+  validateSourceComparisonReport(value);
 }
 
 function filesUnder(dir: string): string[] {
@@ -897,7 +933,7 @@ function main() {
     findings,
     rerun: `From repository root: pnpm --filter @workspace/scripts run audit:source-compare -- --snapshot ${path.relative(ROOT, snapshotPath).split(path.sep).join("/")} --out ${path.relative(ROOT, outPath).split(path.sep).join("/")}`,
   };
-  validateSourceComparisonReport(result);
+  validateCurrentSourceComparisonReport(result);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, `${JSON.stringify(result, null, 2)}\n`, { flag: "w" });
   console.log(`Wrote ${path.relative(ROOT, outPath)}`);
