@@ -100,6 +100,32 @@ or CI caller, depended on an implicit working directory, and used untracked
 `/tmp` production and parsed-data files. The production snapshot and invocation
 contract were not retained, so rerunning them could not reproduce the report.
 
+## Reproducible source-audit captures
+
+Future source-library comparisons must retain the exact read-only production
+input beside the source library. Run:
+
+```sh
+DATABASE_URL="$PRODUCTION_DATABASE_URL" \
+  pnpm --filter @workspace/scripts run audit:source-snapshot -- \
+  --out attached_assets/source-library/audits/production-snapshot-YYYY-MM-DD.json
+```
+
+The command is intentionally bounded (10,000 live rows per table by default;
+use `--max-rows N` only when the selected bound is still complete). It opens
+one PostgreSQL `READ ONLY` transaction, refuses to write an incomplete table,
+and captures only the allowlisted master-data tables: `brand_profiles`,
+`cheese_recipes`, `dough_recipes`, `sauce_recipes`, `mixes`, and `ingredients`,
+all at `scope = live`. It excludes authentication, personal/AI data,
+inventory, runs, daily sync state, and other transient data.
+
+Each JSON snapshot records its UTC capture time, repository revision, every
+source-library file path/size/SHA-256, a manifest SHA-256, table row counts,
+and the comparison scope. Retain the generated JSON with the audit report and
+link it from the report's evidence section. The July 18 report predates this
+procedure; its production input was in `/tmp` and is intentionally not
+reproducible from the retained files.
+
 ## Reversal
 
 The normal repository checkpoint/history path reverses this cleanup. The

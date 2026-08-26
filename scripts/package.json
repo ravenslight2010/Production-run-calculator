@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "audit:source-snapshot": "tsx ./src/capture-source-audit-snapshot.mts",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
     "test": "bash ./src/check-model-version-bump.test.sh",
     "test:recovery": "tsx ./src/recovery-audit.test.mts",
@@ -18,6 +19,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/db": "workspace:*",
     "@workspace/spec-export": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/cheese-import": "workspace:*",

@@ -4,6 +4,16 @@ This report compares every uploaded source workbook (now stored in `attached_ass
 
 **Legend:** ✅ = matches | ⚠️ = needs attention | ℹ️ = by design, no action
 
+## Evidence retention
+
+This historical report is retained for reference, but reproducibility is
+intentionally out of scope: the production input used for this one-off audit
+was a temporary `/tmp` export and no production snapshot was retained.
+Future audits that require reproduction must follow the bounded capture
+procedure in [`docs/repository-cleanup-2026-08-25.md`](../../docs/repository-cleanup-2026-08-25.md)
+and retain the generated `production-snapshot-YYYY-MM-DD.json` beside the
+source-library report.
+
 ---
 
 ## 1. Cheese Mix Recipes — BIGGEST PROBLEM AREA ⚠️
