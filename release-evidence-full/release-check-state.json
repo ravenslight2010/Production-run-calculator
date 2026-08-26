@@ -1,0 +1,79 @@
+{
+  "revision": "e9eedb9b86a1a052eacda9b517ea79cdfefbcbc2",
+  "mode": "full",
+  "results": [
+    {
+      "label": "production dependency audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1852
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 17304
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1112
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 35534
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 41635
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 4701
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2831
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1128
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 18557
+    },
+    {
+      "label": "API unit tests (release shard 1/6)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 45525
+    },
+    {
+      "label": "API integration tests (release shard 2/6)",
+      "passed": false,
+      "status": "INFRASTRUCTURE TIMEOUT",
+      "elapsedMs": 480005
+    },
+    {
+      "label": "API integration tests (release shard 3/6)",
+      "passed": false,
+      "status": "INFRASTRUCTURE TIMEOUT",
+      "elapsedMs": 480017
+    }
+  ],
+  "updatedAt": "2026-08-26T21:20:33.187Z"
+}

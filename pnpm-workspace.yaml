@@ -59,7 +59,7 @@ catalog:
   react-dom: 19.1.0
   tailwind-merge: ^3.3.1
   tailwindcss: ^4.1.14
-  tsx: ^4.21.0
+  tsx: ^4.23.12
   vite: ^7.3.6
   wouter: ^3.3.5
   zod: ^3.25.76
@@ -143,10 +143,6 @@ overrides:
   "rollup>@rollup/rollup-win32-ia32-msvc": "-"
   "rollup>@rollup/rollup-win32-x64-gnu": "-"
   "rollup>@rollup/rollup-win32-x64-msvc": "-"
-  # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
-  "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
-  # esbuild <0.28.1 allows arbitrary file read via the dev server on Windows (GHSA-g7r4-m6w7-qqqr)
-  esbuild: "^0.28.1"
   # typedoc (via orval devDependency) pulls a vulnerable markdown-it/linkify-it; force the patched versions
   linkify-it: "^5.0.2"
   markdown-it: "^14.2.0"

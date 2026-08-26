@@ -9,6 +9,6 @@
     "test:generated-isolation": "bash ./check-generated.test.sh"
   },
   "devDependencies": {
-    "orval": "^8.9.1"
+    "orval": "8.9.1"
   }
 }

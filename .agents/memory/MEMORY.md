@@ -152,8 +152,8 @@
 - [Partial sync contract](partial-sync-contract.md) — hot writes may omit unchanged run values only with a versioned server-snapshot dependency; recovery stays complete.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [A11y browser fixtures](a11y-dialog-browser-fixtures.md) + [reload persistence](a11y-reload-fixtures.md) + [browser timer fixtures](browser-timer-fixtures.md) — authenticated journeys need seeded capabilities, idempotent state, tunnel timing, and async overlay handling.
-- [Release-check shard budget](release-check-shard-budget.md) — serialized API capability coverage can exceed four minutes; budget release timeouts from shard runtime, not individual tests.
-- [Revision-bound release evidence](revision-bound-release-evidence.md) — managed rebases can invalidate reports during completion validation; rerun one isolated full assessment and regenerate failed-browser evidence.
+- [Release evidence timing and revision](release-check-shard-budget.md) + [revision-bound-release-evidence](revision-bound-release-evidence.md) — shard runtime and managed rebases both affect whether release reports remain valid.
 - [Skill trigger runtime](skill-trigger-runtime.md) — trigger benchmarks need an authenticated Claude CLI; evaluator subprocess failures are synthetic non-triggers, not model evidence.
 - [Large source-audit captures](large-source-audit-captures.md) — shard escaped production JSON reads and assemble only after the hashed source corpus is stable.
 - [Source-audit report versions](source-audit-report-versions.md) — persisted comparisons dispatch by supported read version while newly generated reports remain current-version strict.
+- [Development esbuild override placement](esbuild-override-placement.md) — pnpm security overrides belong in the root package manifest; verify the lock graph rather than trusting workspace YAML alone.
