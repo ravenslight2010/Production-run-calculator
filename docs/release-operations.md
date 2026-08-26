@@ -16,7 +16,11 @@ The standard run includes typechecks, security audit, recovery and operational
 evidence checks, clean-start startup health, API test shards, package tests,
 and browser smoke/accessibility checks. Full mode adds the complete browser
 suite. API shards are serialized and have an eight-minute hard limit with a
-six-minute warning.
+six-minute warning. The full browser suite is also serialized for disposable
+live-day safety and has a 20-minute hard limit with a 15-minute warning. This
+is a bounded execution budget, not a retry or an evidence-validation bypass:
+all 99 enumerated cases still need to complete and the retained report must
+pass the same revision-bound evidence verifier.
 
 ## How to interpret a result
 
