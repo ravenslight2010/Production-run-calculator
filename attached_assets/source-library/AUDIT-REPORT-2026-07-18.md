@@ -6,13 +6,13 @@ This report compares every uploaded source workbook (now stored in `attached_ass
 
 ## Evidence retention
 
-This historical report is retained for reference, but reproducibility is
-intentionally out of scope: the production input used for this one-off audit
-was a temporary `/tmp` export and no production snapshot was retained.
-Future audits that require reproduction must follow the bounded capture
-procedure in [`docs/repository-cleanup-2026-08-25.md`](../../docs/repository-cleanup-2026-08-25.md)
-and retain the generated `production-snapshot-YYYY-MM-DD.json` beside the
-source-library report.
+This historical report is retained for reference, but its original July
+production input was a temporary `/tmp` export and cannot be backfilled.
+The first reproducible follow-up capture is retained here:
+[`audits/production-snapshot-2026-08-26.json`](audits/production-snapshot-2026-08-26.json).
+Future audits must follow the bounded capture procedure in
+[`docs/repository-cleanup-2026-08-25.md`](../../docs/repository-cleanup-2026-08-25.md)
+and retain the generated dated snapshot beside the source-library report.
 
 ---
 
