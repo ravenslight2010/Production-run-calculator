@@ -1,0 +1,53 @@
+name: GitHub Actions workflow lint
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/**
+      - package.json
+      - pnpm-lock.yaml
+      - scripts/package.json
+      - scripts/src/check-workflows.sh
+  pull_request:
+    paths:
+      - .github/workflows/**
+      - package.json
+      - pnpm-lock.yaml
+      - scripts/package.json
+      - scripts/src/check-workflows.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Validate workflow syntax and expressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install actionlint
+        run: |
+          archive="/tmp/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            --output "$archive"
+          tar -xzf "$archive" -C /tmp
+          install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+
+      - name: Validate all GitHub Actions workflows
+        run: pnpm run check:workflows
