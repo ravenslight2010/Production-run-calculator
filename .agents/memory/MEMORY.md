@@ -9,6 +9,7 @@
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
+- [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
 - [Die size source](die-size-source.md) + [master heal](die-type-master-heal.md) — dieType comes from the CRUST row not the size header; PURCHASED crusts (Bonici/Pedone parbake/pinsa) get NO die ever; apps self-heal DIE_TYPES from profiles honoring deletions.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
@@ -96,7 +97,6 @@
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time profile reconciliation in @workspace/profile-cleanup; "has real data" gates must exclude dough or dough-only profiles ghost.
 - [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
-- [Calculator module boundaries](home-splitting-boundaries.md) — eventual home.tsx split follows production line, warehouse/inventory, QC, and management tools.
 - [Import gen guards](import-gen-guard.md) — slow import prepares need per-kind generation refs (stale parse clobbers next import); post-import merge scan is background + toast, never force-navigates.
 - [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — every sync write sends epoch= and parses {stale:true} (200 ≠ persisted); guard fails closed once a scope was reset; clamp needs small future-skew allowance.
 - [Sync integration reset isolation](sync-integration-reset-isolation.md) — whole-scope reset endpoints must stay out of shared multi-device fixtures; use the dedicated reset suite to avoid cross-test row deletion.

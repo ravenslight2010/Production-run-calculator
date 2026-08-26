@@ -2,7 +2,10 @@
 
 This is a read-only comparison of the retained production master-data snapshot
 against the retained source-library workbooks. It supersedes the July 18 audit
-only as the current evidence record; it does not change production data.
+only as the current evidence record; the comparison itself does not change
+production data. The approved Tikka Masala correction made after this snapshot
+is recorded separately in
+[`audits/tikka-masala-resolution-2026-08-26.json`](audits/tikka-masala-resolution-2026-08-26.json).
 
 ## Evidence and rerun contract
 
@@ -126,12 +129,38 @@ formula table. No database connection or write is used.
 - The snapshot's 156 profile rows, 18 dough rows, 26 sauce rows, and 528
   ingredient rows remain preserved for independent follow-up comparisons.
 
+### Tikka Masala resolution — 2026-08-26
+
+- **Authority:** The retained
+  [`sauce/Tikka_Masala_Process_1784339520201.xlsx`](sauce/Tikka_Masala_Process_1784339520201.xlsx)
+  is authoritative for this formula. It is the only detailed formula source
+  retained for this recipe. No separate current operating workbook or signed
+  formula revision was found in the source library. The July 18 operating
+  audit independently records the same Garlic Puree and Chili Powder naming
+  corruption, so the live snapshot was treated as the known-bad state rather
+  than a newer formula revision.
+- **Decision:** The retained workbook wins. With explicit approval, the
+  existing manager-controlled `POST /api/sauce-recipes` path updated
+  `sauce:maria-son-s-tikka-masala` without changing its recipe name or any
+  unaffected component.
+- **Correction:** `Garlic Powder=3.65` became `Garlic Puree=3.65`,
+  `Garlic Powder=1` became `Chili Powder=1`, and
+  `Black Pepper Powder=0.24` was restored.
+- **Verification:** An authenticated production readback contains 21
+  components and matches the workbook-parsed formula exactly. The canonical
+  formula digest changed from
+  `5c87427ffddf48b19149b18f35e7715eec3eb51003faae16b14bae4c623930de` to
+  `16385e2047c1a6379c0c1377e61a6c5abd66be24b0526ac17f089bfaba9428c7`,
+  which equals the retained source formula digest. No audit script performed
+  a database write.
+
 ## Result
 
 The comparison is **complete and rerunnable**, with both inputs retained and
-hash-linked. It confirms the broad known review areas (cheese naming/component
-drift, premix naming/component drift, conservative shipping-field gaps, dough
-label/name drift, and one substantive Tikka Masala formula mismatch) without
-making production writes. The machine-readable output is the authoritative
-detailed finding set; this report records the dated scope, parser rules, and
-review conclusions.
+hash-linked. It confirmed the broad known review areas (cheese
+naming/component drift, premix naming/component drift, conservative
+shipping-field gaps, dough label/name drift, and one substantive Tikka Masala
+formula mismatch). The Tikka Masala mismatch is now resolved through the
+manager-controlled recipe path; the machine-readable comparison remains the
+authoritative pre-change finding set, and the dated resolution record contains
+the post-change evidence.
