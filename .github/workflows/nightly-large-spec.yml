@@ -25,6 +25,7 @@ name: Nightly large-spec harness
 # OPTIONAL SECRETS / VARS:
 #   VERIFY_BRANDS    — Override dataset width  (default 30)
 #   VERIFY_FLAVORS   — Override dataset height (default 8)
+#   GEMINI_FAILURE_ALERT_THRESHOLD — Failed live Gemini runs before alert (default 2)
 
 on:
   schedule:
@@ -47,15 +48,23 @@ jobs:
     name: Live Gemini skill-trigger benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     env:
       AI_INTEGRATIONS_GEMINI_API_KEY: ${{ secrets.AI_INTEGRATIONS_GEMINI_API_KEY }}
       AI_INTEGRATIONS_GEMINI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_GEMINI_BASE_URL }}
+      GH_TOKEN: ${{ github.token }}
+      # Optional repository variable. The default avoids one-off failure noise.
+      GEMINI_FAILURE_ALERT_THRESHOLD: ${{ vars.GEMINI_FAILURE_ALERT_THRESHOLD || '2' }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Run credentialed Gemini benchmark
+        id: gemini-benchmark
         run: |
           python3 scripts/gemini_skill_trigger_benchmark.py \
             --fail-on-provider-error \
@@ -74,6 +83,68 @@ jobs:
             gemini-live-review-queue.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Notify Slack on repeated Gemini failures
+        if: ${{ failure() && steps.gemini-benchmark.outcome == 'failure' && env.SLACK_WEBHOOK_URL != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          threshold="${GEMINI_FAILURE_ALERT_THRESHOLD:-2}"
+          if ! [[ "$threshold" =~ ^[2-9][0-9]*$ ]]; then
+            echo "::warning::GEMINI_FAILURE_ALERT_THRESHOLD must be an integer >= 2; skipping alert."
+            exit 0
+          fi
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          artifact_url="${run_url}#artifacts"
+          workflow_runs_url="repos/${GITHUB_REPOSITORY}/actions/workflows/nightly-large-spec.yml/runs?per_page=20&exclude_pull_requests=true"
+
+          if ! workflow_runs="$(gh api "$workflow_runs_url")"; then
+            echo "::warning::Unable to inspect prior Gemini workflow runs; skipping alert."
+            exit 0
+          fi
+
+          mapfile -t prior_run_ids < <(
+            jq -r --arg current "$GITHUB_RUN_ID" \
+              '.workflow_runs[]
+               | select(.status == "completed")
+               | select((.id | tostring) != $current)
+               | .id' <<<"$workflow_runs"
+          )
+
+          failure_streak=1
+          for prior_run_id in "${prior_run_ids[@]}"; do
+            if ! job_conclusion="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prior_run_id}/jobs?per_page=100" \
+                --jq '.jobs[]
+                  | select(.name == "Live Gemini skill-trigger benchmark")
+                  | .conclusion'
+            )"; then
+              echo "::warning::Unable to inspect run ${prior_run_id}; skipping alert."
+              exit 0
+            fi
+
+            if [[ "$job_conclusion" == "failure" ]]; then
+              failure_streak=$((failure_streak + 1))
+            else
+              break
+            fi
+          done
+
+          if (( failure_streak != threshold )); then
+            echo "Gemini failure streak is ${failure_streak}; alert threshold is ${threshold}."
+            exit 0
+          fi
+
+          jq -n \
+            --arg text ":rotating_light: Live Gemini skill-trigger benchmark has failed ${failure_streak} consecutive run(s). <${run_url}|Open failed workflow run> · <${artifact_url}|Open retained artifacts>" \
+            '{text: $text}' |
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              --data @- \
+              "$SLACK_WEBHOOK_URL"
 
   large-spec-verify:
     name: Large-spec import (${{ inputs.brands || '30' }}×${{ inputs.flavors || '8' }})

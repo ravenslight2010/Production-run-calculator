@@ -37,6 +37,17 @@ request failures, and invalid structured output fail the job after all three
 artifacts have been written. The workflow retains those artifacts for 14 days,
 including failed runs, so provider incidents can be reviewed.
 
+Repeated live failures notify the existing Slack operational channel. The
+workflow checks the Gemini benchmark job in recent runs (rather than the
+overall workflow, so unrelated large-spec failures do not count) and sends one
+notification when a streak reaches two failures. Later failures in the same
+streak do not duplicate the alert; a successful Gemini run resets the streak.
+The notification links to the failed workflow run and directly to its retained
+artifacts section. Set the optional repository Actions variable
+`GEMINI_FAILURE_ALERT_THRESHOLD` to an integer of at least `2` to change the
+streak length. Without `SLACK_WEBHOOK_URL`, the check remains notification-free
+and the benchmark result is unchanged.
+
 ## Manual review
 
 The queue is intentionally read-only input for review. List unresolved cases
