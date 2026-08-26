@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  attestations: read
 
 jobs:
   lint:
@@ -59,6 +60,17 @@ jobs:
           fi
           if ! printf '%s  %s\n' "$expected_checksum" "$archive" | sha256sum --check --strict --status; then
             echo "::error::Checksum mismatch for $archive_name; refusing to install actionlint." >&2
+            exit 1
+          fi
+
+          # GitHub artifact attestations provide the independent provenance
+          # signal. Trust only the actionlint repository's Release workflow,
+          # signed by GitHub's Actions OIDC issuer, for this downloaded binary.
+          if ! GH_TOKEN="${{ github.token }}" gh attestation verify "$archive" \
+            --repo rhysd/actionlint \
+            --signer-workflow rhysd/actionlint/.github/workflows/release.yaml \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com; then
+            echo "::error::Signed provenance verification failed for $archive_name; refusing to install actionlint." >&2
             exit 1
           fi
 
