@@ -9,7 +9,7 @@
     "check:api-generated": "pnpm --filter @workspace/api-spec run check-generated && tsc --build --force ./lib/api-client-react/tsconfig.json ./lib/api-zod/tsconfig.json",
     "audit:recovery": "pnpm --filter @workspace/scripts run audit:recovery",
     "check:clean-start": "pnpm --filter @workspace/scripts run check:clean-start",
-    "test:gemini": "python3 scripts/test_gemini_skill_trigger_benchmark.py",
+    "test:gemini": "python3 scripts/test_gemini_skill_trigger_benchmark.py && python3 scripts/test_gemini_failure_alert.py",
     "release:check": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts",
     "release:check:full": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full",
     "typecheck:libs": "tsc --build",

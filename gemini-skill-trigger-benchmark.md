@@ -48,6 +48,16 @@ artifacts section. Set the optional repository Actions variable
 streak length. Without `SLACK_WEBHOOK_URL`, the check remains notification-free
 and the benchmark result is unchanged.
 
+Before the live benchmark starts, the workflow runs an offline alert-policy
+fixture using fake GitHub and Slack commands. It verifies that the first
+failure is silent, the configured threshold sends exactly one request with
+both operator links, later failures in the same streak remain silent, and a
+successful run resets the streak. Run the same check locally with:
+
+```sh
+python scripts/test_gemini_failure_alert.py
+```
+
 ## Manual review
 
 The queue is intentionally read-only input for review. List unresolved cases
