@@ -85,7 +85,7 @@ assert.equal(
 );
 assert.equal(DURATION_REGRESSION_MIN_INCREASE_PERCENT, 25);
 
-const completeCases = Array.from({ length: 99 }, () => ({
+const completeCases = Array.from({ length: 100 }, () => ({
   file: slowFile,
   durationMs: 1_000,
   completed: true,
@@ -94,12 +94,13 @@ const completeCases = Array.from({ length: 99 }, () => ({
 const validBaselineReport = formatFullBrowserReport(
   completeCases,
   "passed",
-  99_000,
+  100_000,
   "prior-revision",
 );
 const validBaseline = parseCompleteFullBrowserBaseline(validBaselineReport);
-assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 99_000]]));
+assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 100_000]]));
 assert.equal(canRetainFullBrowserReport(completeCases, "passed"), true);
+assert.equal(canRetainFullBrowserReport(completeCases, "failed"), true);
 
 const incompleteCases = completeCases.map((testCase) => ({
   ...testCase,
@@ -134,9 +135,9 @@ assert.deepEqual(
     {
       file: "artifacts/run-calculator/e2e/slow.spec.ts",
       durationMs: 140_000,
-      baselineDurationMs: 99_000,
-      increaseMs: 41_000,
-      increasePercent: (41_000 / 99_000) * 100,
+      baselineDurationMs: 100_000,
+      increaseMs: 40_000,
+      increasePercent: (40_000 / 100_000) * 100,
     },
   ],
 );

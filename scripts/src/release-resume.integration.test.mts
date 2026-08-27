@@ -254,10 +254,10 @@ async function runFullModeScenario(): Promise<void> {
     "",
     `Revision: ${revision}`,
     "Result: PASS",
-    "Expected cases: 99",
-    "Enumerated cases: 99",
-    "Completed cases: 99",
-    "Passed cases: 99",
+    "Expected cases: 100",
+    "Enumerated cases: 100",
+    "Completed cases: 100",
+    "Passed cases: 100",
     "Skipped cases: 0",
     "Failed cases: 0",
     "Not-run cases: 0",
@@ -267,7 +267,7 @@ async function runFullModeScenario(): Promise<void> {
     "",
     "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    "| `e2e/example.spec.ts` | 99 | 99 | 99 | 0 | 0 | 0 | 1ms |",
+    "| `e2e/example.spec.ts` | 100 | 100 | 100 | 0 | 0 | 0 | 1ms |",
     "",
   ].join("\n");
   const fullBrowserScript = [

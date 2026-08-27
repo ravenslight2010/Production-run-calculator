@@ -26,8 +26,9 @@ commands must not overwrite that retained report.
 **Why:** A zero-test discovery run or a focused diagnostic can otherwise make
 stale or incomplete browser evidence look like the latest release result.
 
-**How to apply:** Give release runs an explicit report path, require the 99-case
-coverage contract for GO, and skip writes for `--list` or non-full local runs.
+**How to apply:** Give release runs an explicit report path, require the current
+case-count coverage contract for GO, and skip writes for `--list` or non-full
+local runs.
 
 Default standard and full release checks use sibling evidence roots rather than
 nesting one mode under the other; an explicit `RELEASE_EVIDENCE_DIR` remains an
@@ -53,16 +54,29 @@ record unless the stale artifact is called out explicitly.
 the current full-suite log and Playwright artifacts, and do not infer current
 coverage from file presence alone.
 
-When a failed serial full run does not write its normal reporter output, rebuild
-diagnostic counts from the individual test statuses and the reporter contract,
-not just the terminal summary wording: completed = passed + skipped + failed,
-and not-run = enumerated − completed.
+Complete full runs should retain a current diagnostic report even when the
+result is FAIL; only interrupted or incomplete runs should leave the prior
+passing duration baseline untouched.
 
-**Why:** Playwright's terminal “did not run” summary can group skipped and
-unexecuted cases differently from the retained reporter's `notRun` field. Mixing
-the two interpretations makes a truthful diagnostic report fail mechanical
-evidence validation.
+**Why:** A current NO-GO must remain reviewable and must not be represented by
+an older passing browser report. Failed reports are not valid duration
+baselines, so they are safe to retain for diagnosis without affecting future
+regression comparisons.
 
 **How to apply:** Reconcile per-file rows to the verifier invariants before
-running `check:release-evidence`; preserve the terminal summary separately when
-its wording differs.
+running `check:release-evidence`; for an older reporter that did not retain a
+complete failed run, rebuild counts from individual test statuses:
+completed = passed + skipped + failed, and not-run = enumerated − completed.
+
+When a release assessment stops at its first failed gate, its NO-GO report is
+only a partial checkpoint and cannot be retained as final evidence. Complete
+the remaining evidence-producing gates independently, then retain a report
+with every applicable gate marked with its observed result.
+
+**Why:** The standalone verifier intentionally rejects partial reports, while
+the complete browser artifact can still provide useful diagnostics for a
+current NO-GO.
+
+**How to apply:** Treat a stopped assessment as a checkpoint, not as the final
+report; preserve real failures and never fill omitted gate rows with assumed
+passes.
