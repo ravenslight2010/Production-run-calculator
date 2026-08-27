@@ -21061,7 +21061,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     setSpeedNudgeStatus(null);
   }, [currentRunId]);
 
-  function detectSpeedDrift(newTotal: number, correctionDeltaCases: number) {
+  function detectSpeedDrift(correctionDeltaCases: number) {
     const now = Date.now();
     const tracking = speedNudgeTrackingRef.current;
     if (!canDetectPackagingSpeedNudge(tracking, now)) return;
@@ -21084,8 +21084,12 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     const elapsedOutputMin = Math.max(0, elapsedNetMin - Number(v.freezerTime));
     const nextTracking = recordPackagingSpeedCorrection(tracking, correctionDeltaCases);
     speedNudgeTrackingRef.current = nextTracking;
+    if (nextTracking.corrections.length === 0) {
+      setSpeedNudge(null);
+      setSpeedNudgeStatus(null);
+      return;
+    }
     const evaluation = evaluatePackagingSpeedNudge({
-      displayedCases: newTotal,
       elapsedOutputMin,
       configuredPpm: calc.ppm,
       pizzasPerCase: v.pizzasPerCase,
@@ -21513,7 +21517,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex justify-center items-end gap-3 font-mono">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { navigator.vibrate?.(8); const ns = Math.max(0, skids - 1); onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -21527,7 +21531,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); const ns = skids + 1; onManual(ns, casesOnSkid); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid + casesOnSkid : ns; form.setValue("skidsCompleted", ns, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -21548,7 +21552,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <div className="flex items-center gap-3">
                                   <button
                                     type="button"
-                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { navigator.vibrate?.(8); const nc = Math.max(0, casesOnSkid - 1); onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -21567,7 +21571,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal, nextTotal - currentTotal); }}
+                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); const nc = casesOnSkid + 1; onManual(skids, nc); const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids; const nextTotal = casesPerSkid > 0 ? skids * casesPerSkid + nc : skids; form.setValue("casesOnCurrentSkid", nc, { shouldDirty: true }); detectSpeedDrift(nextTotal - currentTotal); }}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -21633,7 +21637,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                     form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                                     const currentTotal = casesPerSkid > 0 ? skids * casesPerSkid + casesOnSkid : skids;
                                     const nextTotal = casesPerSkid > 0 ? ns * casesPerSkid : ns;
-                                    detectSpeedDrift(nextTotal, nextTotal - currentTotal);
+                                    detectSpeedDrift(nextTotal - currentTotal);
                                   }}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"

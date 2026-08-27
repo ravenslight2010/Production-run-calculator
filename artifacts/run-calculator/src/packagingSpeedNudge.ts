@@ -67,27 +67,31 @@ export function createPackagingSpeedNudgeTracking(runId: string): PackagingSpeed
   };
 }
 
-/**
- * Starts a new correction episode when the operator reverses direction. A mix
- * of adds and subtracts is an adjustment to the counters, not reliable speed
- * evidence, so it must not reuse stale corrections from the prior episode.
- */
 export function recordPackagingSpeedCorrection(
   tracking: PackagingSpeedNudgeTracking,
   deltaCases: number,
 ): PackagingSpeedNudgeTracking {
-  const direction = directionOf(deltaCases);
-  if (direction === 0) return tracking;
+  if (directionOf(deltaCases) === 0) return tracking;
 
   // Do not use Array.prototype.at here: this handler runs in older iOS Safari
   // versions where an unsupported array method can abort the click silently.
-  const lastCorrection = tracking.corrections[tracking.corrections.length - 1];
-  const priorDirection = directionOf(lastCorrection?.deltaCases ?? 0);
-  const corrections = (
-    priorDirection !== 0 && priorDirection !== direction
-      ? []
-      : tracking.corrections
-  ).concat({ deltaCases }).slice(-MAX_CORRECTIONS);
+  const currentNetCorrection = tracking.corrections.reduce(
+    (total, correction) => total + correction.deltaCases,
+    0,
+  );
+  const nextNetCorrection = currentNetCorrection + deltaCases;
+
+  // A reverse click cancels only as much prior evidence as it matches. Once
+  // it crosses zero, keep only the residual in the new direction so a small
+  // over-correction does not inherit the old episode's magnitude or count.
+  const currentDirection = directionOf(currentNetCorrection);
+  const deltaDirection = directionOf(deltaCases);
+  const nextDirection = directionOf(nextNetCorrection);
+  const corrections = nextDirection === 0
+    ? []
+    : currentDirection !== 0 && deltaDirection !== currentDirection
+      ? [{ deltaCases: nextNetCorrection }]
+      : tracking.corrections.concat({ deltaCases }).slice(-MAX_CORRECTIONS);
 
   return { ...tracking, corrections };
 }
@@ -117,8 +121,8 @@ export function dismissPackagingSpeedNudge(
 }
 
 type EvaluatePackagingSpeedNudgeInput = {
-  /** Total shown by the packaging counters after this correction. */
-  displayedCases: number;
+  /** @deprecated Kept for callers during rollout; never affects the result. */
+  displayedCases?: number;
   elapsedOutputMin: number;
   configuredPpm: number;
   pizzasPerCase: number;
@@ -137,17 +141,13 @@ type EvaluatePackagingSpeedNudgeInput = {
  *
  * Auto-track starts from the configured rate, so manual case corrections are
  * best understood as signed movement away from that expected output. Anchoring
- * the correction-adjusted observation to expected cases means a subtract can
- * prove slower output even while an earlier auto-track overcount leaves the
- * displayed total on pace (or ahead). The display remains useful evidence: if
- * it already shows a larger drift in the same direction, retain that stronger
- * signal instead.
+ * the observation to expected cases means the recommendation reflects the
+ * operator's net correction rather than an unrelated displayed counter.
  */
 export function evaluatePackagingSpeedNudge(
   input: EvaluatePackagingSpeedNudgeInput,
 ): PackagingSpeedNudgeEvaluation {
   const {
-    displayedCases,
     elapsedOutputMin,
     configuredPpm,
     pizzasPerCase,
@@ -181,16 +181,22 @@ export function evaluatePackagingSpeedNudge(
   }
 
   const direction = directionOf(corrections[0]?.deltaCases ?? 0);
+  const cumulativeCorrectionCases = corrections.reduce(
+    (total, correction) => total + correction.deltaCases,
+    0,
+  );
+  const netDirection = directionOf(cumulativeCorrectionCases);
   if (
     direction === 0 ||
+    netDirection === 0 ||
     corrections.some((correction) => directionOf(correction.deltaCases) !== direction)
   ) {
     return { nudge: null, reason: { kind: "invalid-data" } };
   }
 
-  const nudgeDirection = direction > 0 ? "faster" : "slower";
+  const nudgeDirection = netDirection > 0 ? "faster" : "slower";
   const hasRepeatedCorrection = corrections.length >= 2;
-  const latestCorrectionCases = Math.abs(corrections[corrections.length - 1]?.deltaCases ?? 0);
+  const netCorrectionCases = Math.abs(cumulativeCorrectionCases);
   const skidSize = Number(casesPerSkid);
   const correctionCasesNeeded =
     Number.isFinite(skidSize) && skidSize > 0
@@ -208,13 +214,13 @@ export function evaluatePackagingSpeedNudge(
         },
       };
     }
-    if (latestCorrectionCases < correctionCasesNeeded) {
+    if (netCorrectionCases < correctionCasesNeeded) {
       return {
         nudge: null,
         reason: {
           kind: "correction-size",
           direction: nudgeDirection,
-          correctionCases: latestCorrectionCases,
+          correctionCases: netCorrectionCases,
           correctionCasesNeeded,
         },
       };
@@ -226,25 +232,16 @@ export function evaluatePackagingSpeedNudge(
     return { nudge: null, reason: { kind: "invalid-data" } };
   }
 
-  const cumulativeCorrectionCases = corrections.reduce(
-    (total, correction) => total + correction.deltaCases,
-    0,
-  );
-
   const correctionAdjustedCases = Math.max(
     0,
     expectedCases + cumulativeCorrectionCases,
   );
-  const safeDisplayedCases = Math.max(0, Number(displayedCases) || 0);
-  const observedCases = direction > 0
-    ? Math.max(safeDisplayedCases, correctionAdjustedCases)
-    : Math.min(safeDisplayedCases, correctionAdjustedCases);
-  const driftRatio = observedCases / expectedCases;
+  const driftRatio = correctionAdjustedCases / expectedCases;
 
   if (
     !Number.isFinite(driftRatio) ||
-    (direction > 0 && driftRatio <= 1) ||
-    (direction < 0 && driftRatio >= 1)
+    (netDirection > 0 && driftRatio <= 1) ||
+    (netDirection < 0 && driftRatio >= 1)
   ) {
     return {
       nudge: null,
@@ -257,7 +254,7 @@ export function evaluatePackagingSpeedNudge(
     };
   }
 
-  const observedPpm = (observedCases * pizzasPerCase) / elapsedOutputMin;
+  const observedPpm = (correctionAdjustedCases * pizzasPerCase) / elapsedOutputMin;
   const value = isCrust
     ? Math.round(observedPpm * 100) / 100
     : Math.max(

@@ -19,11 +19,10 @@ const BASE = {
 
 describe("packaging speed nudge", () => {
   it("uses repeated downward current-skid corrections even when auto-track is still ahead", () => {
-    // Configured output is 100 cases. Auto-track is still showing 110 cases,
-    // but two small corrections prove the physical line is at 96 cases.
+    // Configured output is 100 cases; two small corrections prove the physical
+    // line is at 96 cases without relying on the displayed counter.
     const evaluation = evaluatePackagingSpeedNudge({
       ...BASE,
-      displayedCases: 110,
       corrections: [{ deltaCases: -2 }, { deltaCases: -2 }],
     });
 
@@ -41,7 +40,6 @@ describe("packaging speed nudge", () => {
     const evaluation = evaluatePackagingSpeedNudge({
       ...BASE,
       elapsedOutputMin: 0.5,
-      displayedCases: 5,
       corrections: [{ deltaCases: 1 }, { deltaCases: 1 }],
     });
 
@@ -56,7 +54,6 @@ describe("packaging speed nudge", () => {
     const evaluation = evaluatePackagingSpeedNudge({
       ...BASE,
       elapsedOutputMin: 29 / 60,
-      displayedCases: 5,
       corrections: [{ deltaCases: 4 }],
     });
 
@@ -75,13 +72,11 @@ describe("packaging speed nudge", () => {
     const justEnough = evaluatePackagingSpeedNudge({
       ...BASE,
       casesPerSkid: 61,
-      displayedCases: 100,
       corrections: [{ deltaCases: -4 }],
     });
     const oneShort = evaluatePackagingSpeedNudge({
       ...BASE,
       casesPerSkid: 61,
-      displayedCases: 100,
       corrections: [{ deltaCases: -3 }],
     });
 
@@ -105,13 +100,11 @@ describe("packaging speed nudge", () => {
     const first = evaluatePackagingSpeedNudge({
       ...BASE,
       casesPerSkid: 0,
-      displayedCases: 100,
       corrections: [{ deltaCases: 2 }],
     });
     const repeated = evaluatePackagingSpeedNudge({
       ...BASE,
       casesPerSkid: 0,
-      displayedCases: 100,
       corrections: [{ deltaCases: 2 }, { deltaCases: 2 }],
     });
 
@@ -134,7 +127,6 @@ describe("packaging speed nudge", () => {
     const evaluation = evaluatePackagingSpeedNudge({
       ...BASE,
       isCrust: true,
-      displayedCases: 100,
       corrections: [{ deltaCases: 10 }, { deltaCases: 10 }],
     });
 
@@ -168,19 +160,76 @@ describe("packaging speed nudge", () => {
     expect(
       evaluatePackagingSpeedNudge({
         ...BASE,
-        displayedCases: 100,
         corrections: tracking.corrections,
       }).nudge,
     ).toMatchObject({ direction: "slower" });
   });
 
-  it("resets a correction episode on direction changes and preserves accept/dismiss lifecycle behavior", () => {
+  it("keeps the remaining net correction through a partial reversal", () => {
+    let tracking = createPackagingSpeedNudgeTracking("run-a");
+    tracking = recordPackagingSpeedCorrection(tracking, 5);
+    tracking = recordPackagingSpeedCorrection(tracking, -1);
+
+    expect(tracking.corrections).toEqual([{ deltaCases: 4 }]);
+    expect(
+      evaluatePackagingSpeedNudge({
+        ...BASE,
+        // This deliberately disagrees with predicted output; it must not
+        // exaggerate the recommendation.
+        corrections: tracking.corrections,
+      }).nudge,
+    ).toEqual({
+      direction: "faster",
+      isCrust: false,
+      value: 1.3,
+    });
+  });
+
+  it("clears exact cancellation and keeps only residual evidence after crossing zero", () => {
+    let tracking = createPackagingSpeedNudgeTracking("run-a");
+    tracking = recordPackagingSpeedCorrection(tracking, 5);
+    tracking = recordPackagingSpeedCorrection(tracking, -5);
+    expect(tracking.corrections).toEqual([]);
+
+    tracking = recordPackagingSpeedCorrection(tracking, 5);
+    tracking = recordPackagingSpeedCorrection(tracking, -9);
+    expect(tracking.corrections).toEqual([{ deltaCases: -4 }]);
+    expect(
+      evaluatePackagingSpeedNudge({
+        ...BASE,
+        corrections: tracking.corrections,
+      }).nudge,
+    ).toEqual({
+      direction: "slower",
+      isCrust: false,
+      value: 1.2,
+    });
+  });
+
+  it("uses net correction instead of a high displayed total", () => {
+    const evaluation = evaluatePackagingSpeedNudge({
+      ...BASE,
+      speedAdjustment: 0.92,
+      displayedCases: 250,
+      corrections: [{ deltaCases: 3 }],
+    });
+
+    expect(evaluation).toEqual({
+      nudge: {
+        direction: "faster",
+        isCrust: false,
+        value: 0.95,
+      },
+      reason: null,
+    });
+  });
+
+  it("preserves accept/dismiss lifecycle behavior", () => {
     let tracking = createPackagingSpeedNudgeTracking("run-a");
     tracking = recordPackagingSpeedCorrection(tracking, -5);
     tracking = recordPackagingSpeedCorrection(tracking, -5);
-    tracking = recordPackagingSpeedCorrection(tracking, 5);
 
-    expect(tracking.corrections).toEqual([{ deltaCases: 5 }]);
+    expect(tracking.corrections).toEqual([{ deltaCases: -5 }, { deltaCases: -5 }]);
 
     tracking = acceptPackagingSpeedNudge(tracking, 1_000);
     expect(tracking.corrections).toEqual([]);
