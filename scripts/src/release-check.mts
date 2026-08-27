@@ -63,6 +63,17 @@ const FULL_BROWSER_WARNING_MS = 15 * 60_000;
 const FULL_BROWSER_EXPECTED_CASES = 99;
 const rootDir = new URL("../../", import.meta.url).pathname;
 const fullRun = process.argv.includes("--full");
+function cliOptionValue(option: string): string | undefined {
+  const inlineValue = process.argv.find((argument) =>
+    argument.startsWith(`${option}=`),
+  );
+  if (inlineValue !== undefined) return inlineValue.slice(option.length + 1);
+  const optionIndex = process.argv.indexOf(option);
+  const value = optionIndex === -1 ? undefined : process.argv[optionIndex + 1];
+  return value !== undefined && !value.startsWith("--") ? value : undefined;
+}
+
+const evidenceDirArgument = cliOptionValue("--evidence-dir");
 export function defaultReleaseEvidenceDir(mode: "standard" | "full"): string {
   return mode === "full" ? "release-evidence-full" : "release-evidence";
 }
@@ -76,6 +87,7 @@ export function resolveReleaseEvidenceDir(
 
 const releaseEvidenceDir = resolveReleaseEvidenceDir(
   fullRun ? "full" : "standard",
+  evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR,
 );
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
 const fullBrowserReportPath = resolve(
@@ -314,6 +326,9 @@ function printHelp(): void {
     "  pnpm run release:check:full -- --verify-evidence  Verify full retained evidence files",
   );
   console.log(
+    "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
+  );
+  console.log(
     "  pnpm run release:check -- --resume       Resume the current revision's incomplete run",
   );
   console.log(
@@ -391,7 +406,20 @@ export async function verifyReleaseEvidence(
     | "standard"
     | "full"
     | undefined;
-  const evidenceMode = options.expectedMode ?? reportMode;
+  if (reportMode === undefined) {
+    throw new Error(
+      "Release report mode is missing or invalid; regenerate the report or point the verifier at a retained standard/full evidence directory.",
+    );
+  }
+  if (options.expectedMode !== undefined && reportMode !== options.expectedMode) {
+    throw new Error(
+      [
+        `Evidence directory contains a ${reportMode} report, but ${options.expectedMode} verification was requested.`,
+        `Use ${reportMode === "full" ? "--full" : "standard mode"} for this directory, or point the verifier at a ${options.expectedMode} evidence directory.`,
+      ].join(" "),
+    );
+  }
+  const evidenceMode = reportMode;
   const requiredEvidence = [
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
@@ -597,6 +625,11 @@ export function validateReleaseReport(
     );
   }
   if (!mode || (options.expectedMode && mode !== options.expectedMode)) {
+    if (mode && options.expectedMode && mode !== options.expectedMode) {
+      throw new Error(
+        `Release report is ${mode} mode, but ${options.expectedMode} mode was requested; use the matching verifier mode or evidence directory.`,
+      );
+    }
     throw new Error(
       `Release report mode is missing or inconsistent (expected ${
         options.expectedMode ?? "standard or full"
@@ -1004,13 +1037,15 @@ async function main(): Promise<void> {
 
   if (process.argv.includes("--verify-evidence")) {
     try {
-      await verifyReleaseEvidence();
+      await verifyReleaseEvidence(undefined, {
+        expectedMode: fullRun ? "full" : undefined,
+      });
       process.exit(0);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Release evidence verification failed: ${message}`);
       console.error(
-        `Release evidence verification failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        "Next action: regenerate matching evidence at the current revision, then rerun verification.",
       );
       process.exit(1);
     }

@@ -71,6 +71,19 @@ continues to select one exact evidence directory for deliberate single-run
 use. To verify the default full-mode evidence, use
 `pnpm run release:check:full -- --verify-evidence`.
 
+The standalone verifier reads the `Mode:` field in the selected report, so it
+automatically applies the full contract when pointed at a full evidence
+directory. To select a directory explicitly:
+
+```bash
+pnpm --filter @workspace/scripts run check:release-evidence -- \
+  --evidence-dir release-evidence-full
+```
+
+Passing `--full` forces full-mode verification. A mode mismatch is rejected
+with a corrective command rather than treating the directory as valid under
+the other contract.
+
 ## GitHub Actions evidence
 
 The release-check workflow runs standard mode on pull requests and manual

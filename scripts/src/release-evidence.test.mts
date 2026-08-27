@@ -15,7 +15,7 @@ import {
 } from "./release-check.mts";
 
 async function fixture(
-  files: string[] = ["release-check-report.md"],
+  files: readonly string[] = ["release-check-report.md"],
   report = "fixture evidence\n",
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "release-evidence-"));
@@ -264,6 +264,23 @@ async function run(): Promise<void> {
     await rm(forbiddenRoot, { recursive: true, force: true });
   }
 
+  const missingModeRoot = await fixture(
+    RELEASE_EVIDENCE_ALLOWLIST,
+    validReport.replace("Mode: standard\n", ""),
+  );
+  try {
+    await assert.rejects(
+      verifyReleaseEvidence(missingModeRoot, {
+        currentRevision: "current-revision",
+        expectedLabels: validLabels,
+      }),
+      /Release report mode is missing or invalid; regenerate the report/,
+      "a report without a mode must explain how to recover",
+    );
+  } finally {
+    await rm(missingModeRoot, { recursive: true, force: true });
+  }
+
   const fullRoot = await fixture(
     RELEASE_EVIDENCE_ALLOWLIST.filter((file) => !file.startsWith("browser-full/")),
     formatReleaseReport(
@@ -280,6 +297,10 @@ async function run(): Promise<void> {
         decision: "NO-GO",
       },
     ),
+  );
+  const standardModeRoot = await fixture(
+    RELEASE_EVIDENCE_ALLOWLIST,
+    validReport,
   );
   try {
     await assert.rejects(
@@ -320,10 +341,27 @@ async function run(): Promise<void> {
     await assert.doesNotReject(
       verifyReleaseEvidence(fullRoot, {
         currentRevision: "current-revision",
+        expectedLabels: validLabels,
+      }),
+      "the report mode should automatically select the full evidence contract",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(fullRoot, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      /contains a full report, but standard verification was requested.*--full/,
+      "standard verification must not accept a full evidence directory",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(standardModeRoot, {
+        currentRevision: "current-revision",
         expectedMode: "full",
         expectedLabels: validLabels,
       }),
-      "full mode should accept revision-bound diagnostic browser evidence",
+      /contains a standard report, but full verification was requested/,
+      "full verification must not accept a standard evidence directory",
     );
     assert.throws(
       () =>
@@ -334,8 +372,39 @@ async function run(): Promise<void> {
       /stale/,
       "browser evidence must be bound to the current revision",
     );
+
+    const staleReportRoot = await fixture(
+      RELEASE_EVIDENCE_ALLOWLIST,
+      formatReleaseReport(
+        validLabels.map((label) => ({
+          label,
+          status: "PASS" as const,
+          elapsedMs: 100,
+        })),
+        "full",
+        new Set(),
+        {
+          revision: "stale-revision",
+          environment: "disposable release test",
+          decision: "NO-GO",
+        },
+      ),
+    );
+    try {
+      await assert.rejects(
+        verifyReleaseEvidence(staleReportRoot, {
+          currentRevision: "current-revision",
+          expectedLabels: validLabels,
+        }),
+        /Release report revision is missing or stale/,
+        "a stale release report must remain invalid even when mode is auto-detected",
+      );
+    } finally {
+      await rm(staleReportRoot, { recursive: true, force: true });
+    }
   } finally {
     await rm(fullRoot, { recursive: true, force: true });
+    await rm(standardModeRoot, { recursive: true, force: true });
   }
 
   const symlinkRoot = await fixture();
