@@ -25,7 +25,37 @@
       "passed": true,
       "status": "PASS",
       "elapsedMs": 24705
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 54194
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 6817
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 3627
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1034
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 23081
     }
   ],
-  "updatedAt": "2026-08-27T12:31:12.005Z"
+  "updatedAt": "2026-08-27T12:32:40.765Z"
 }
