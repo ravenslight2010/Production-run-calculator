@@ -19,7 +19,43 @@
       "passed": true,
       "status": "PASS",
       "elapsedMs": 765
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 30544
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 50965
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 5888
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 3207
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1040
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 3337
     }
   ],
-  "updatedAt": "2026-08-27T09:46:07.696Z"
+  "updatedAt": "2026-08-27T09:47:42.684Z"
 }

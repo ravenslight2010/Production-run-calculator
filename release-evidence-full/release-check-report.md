@@ -1,7 +1,7 @@
 # Release Check Report
 
-Generated: 2026-08-27T07:48:11.689Z
-Revision: 9036559f41404e15035c6939e0ad986d4649c43d
+Generated: 2026-08-27T09:47:42.690Z
+Revision: 518880654ac925be6d3e8caa23b7c30d746642e3
 Mode: full
 Environment: local release validation
 Commands: listed in the gate results table below
@@ -11,37 +11,19 @@ Evidence paths: release-evidence-full/ and retained files linked below
 
 | Gate | Result | Elapsed | Command |
 | --- | --- | ---: | --- |
-| production dependency audit | PASS | 1s | `pnpm run audit:prod` |
-| generated API client freshness | PASS | 17s | `pnpm run check:api-generated` |
-| shared library typechecks | PASS | 2s | `pnpm run typecheck:libs` |
-| API server typecheck | PASS | 18s | `pnpm --filter @workspace/api-server run typecheck` |
-| run calculator typecheck | PASS | 53s | `pnpm --filter @workspace/run-calculator run typecheck` |
-| mockup sandbox typecheck | PASS | 10s | `pnpm --filter @workspace/mockup-sandbox run typecheck` |
-| scripts typecheck | PASS | 6s | `pnpm --filter @workspace/scripts run typecheck` |
-| recovery evidence audit | PASS | 2s | `pnpm run audit:recovery` |
-| clean-start smoke | PASS | 28s | `pnpm run check:clean-start` |
-| API unit tests (release shard 1/6) | PASS | 48s | `pnpm --filter @workspace/api-server run test:release:unit` |
-| API integration tests (release shard 2/6) | PASS | 148s | `pnpm --filter @workspace/api-server run test:release:integration:1` |
-| API integration tests (release shard 3/6) | PASS | 102s | `pnpm --filter @workspace/api-server run test:release:integration:2` |
-| API integration tests (release shard 4/6) | PASS | 423s | `pnpm --filter @workspace/api-server run test:release:integration:3` |
-| API sync tests (release shard 5/6) | PASS | 50s | `pnpm --filter @workspace/api-server run test:release:sync` |
-| API sync SSE tests (release shard 6/6) | PASS | 16s | `pnpm --filter @workspace/api-server run test:release:sync-sse` |
-| run calculator tests | PASS | 229s | `pnpm --filter @workspace/run-calculator run test` |
-| production rules tests | PASS | 1s | `pnpm --filter @workspace/production-rules run test` |
-| inventory math tests | PASS | 1s | `pnpm --filter @workspace/inventory-math run test` |
-| spec reconcile tests | PASS | 1s | `pnpm --filter @workspace/spec-reconcile run test` |
-| scheduled recipe check tests | PASS | 1s | `pnpm --filter @workspace/scheduled-recipe-check run test` |
-| spec export tests | PASS | 1s | `pnpm --filter @workspace/spec-export run test` |
-| corpus tests | PASS | 6s | `pnpm --filter @workspace/corpus-harness run test` |
-| model-bump check | PASS | 5s | `pnpm --filter @workspace/scripts run check-model-bump` |
-| operational evidence check | PASS | 1s | `pnpm --filter @workspace/scripts run check-operational-skill-evidence` |
-| browser smoke tests | PASS | 41s | `pnpm --filter @workspace/run-calculator run test:e2e:smoke` |
-| browser accessibility tests | PASS | 77s | `pnpm --filter @workspace/run-calculator run test:e2e:a11y` |
-| full browser E2E suite | PASS | 1122s | `pnpm --filter @workspace/run-calculator run test:e2e` |
+| production dependency audit | PASS | 2s | `pnpm run audit:prod` |
+| generated API client freshness | PASS | 19s | `pnpm run check:api-generated` |
+| shared library typechecks | PASS | 1s | `pnpm run typecheck:libs` |
+| API server typecheck | PASS | 31s | `pnpm --filter @workspace/api-server run typecheck` |
+| run calculator typecheck | PASS | 51s | `pnpm --filter @workspace/run-calculator run typecheck` |
+| mockup sandbox typecheck | PASS | 6s | `pnpm --filter @workspace/mockup-sandbox run typecheck` |
+| scripts typecheck | PASS | 3s | `pnpm --filter @workspace/scripts run typecheck` |
+| recovery evidence audit | PASS | 1s | `pnpm run audit:recovery` |
+| clean-start smoke | FAIL | 3s | `pnpm run check:clean-start` |
 
 ## Preview evidence
 
-- Clean-start: **PASS**
+- Clean-start: **FAIL**
 - [Clean-start evidence](clean-start/clean-start-evidence.json)
 - [Proxied browser result](clean-start/browser-result.json)
 - [Preview screenshot](clean-start/preview-home.png)
@@ -52,7 +34,7 @@ Evidence paths: release-evidence-full/ and retained files linked below
 
 ## Browser duration review
 
-No meaningful per-file duration regressions detected.
+Not evaluated in this release mode.
 
 The browser result contains the retained web HTML response and the API health response observed through the web preview proxy.
 
@@ -61,6 +43,6 @@ The browser result contains the retained web HTML response and the API health re
 Operational warnings: none
 Accepted exceptions: none
 
-Decision: GO
+Decision: NO-GO
 Failures or accepted exceptions: none
 
