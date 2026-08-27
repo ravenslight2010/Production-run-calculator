@@ -20,10 +20,12 @@ function headers(json = false): Record<string, string> {
 export async function fetchActionQueue(filters: {
   status?: string;
   category?: string;
-} = {}): Promise<{ items: ActionItem[]; counts: Record<string, number> }> {
+  cursor?: string;
+} = {}): Promise<{ items: ActionItem[]; counts: Record<string, number>; nextCursor?: string | null }> {
   const params = new URLSearchParams();
   if (filters.status && filters.status !== "all") params.set("status", filters.status);
   if (filters.category && filters.category !== "all") params.set("category", filters.category);
+  if (filters.cursor) params.set("cursor", filters.cursor);
   const query = params.toString();
   const response = await fetch(`/api/manager-action-queue${query ? `?${query}` : ""}`, { headers: headers() });
   if (!response.ok) throw new Error(`Load action queue failed (${response.status})`);

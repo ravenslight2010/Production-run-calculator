@@ -3880,6 +3880,8 @@ export type ManagerActionQueueCounts = {[key: string]: number};
 export interface ManagerActionQueue {
   items: ManagerActionItem[];
   counts: ManagerActionQueueCounts;
+  /** @nullable */
+  nextCursor: string | null;
 }
 
 export type ManagerActionItemUpdateStatus = typeof ManagerActionItemUpdateStatus[keyof typeof ManagerActionItemUpdateStatus];
@@ -4034,6 +4036,10 @@ export type ListIncidentAssignees200Item = {
 export type ListManagerActionQueueParams = {
 status?: ListManagerActionQueueStatus;
 category?: ListManagerActionQueueCategory;
+/**
+ * Opaque cursor for loading the next page of resolved history.
+ */
+cursor?: string;
 };
 
 export type ListManagerActionQueueStatus = typeof ListManagerActionQueueStatus[keyof typeof ListManagerActionQueueStatus];
@@ -4089,3 +4095,4 @@ export type PutSyncToday200 = {
   stale?: boolean;
   epoch?: number;
 };
+

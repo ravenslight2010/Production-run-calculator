@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { ClipboardCheck, ExternalLink, Lock, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ const age = (value: string) => {
   return days ? `${days}d old` : "today";
 };
 const queueStatuses = ["open", "in_progress", "deferred", "resolved"] as const;
-type QueueData = { items: ActionItem[]; counts: Record<string, number> };
+type QueueData = { items: ActionItem[]; counts: Record<string, number>; nextCursor?: string | null };
 type QueueMutationVariables = {
   item: ActionItem;
   input: Parameters<typeof updateActionItem>[1];
@@ -80,9 +80,15 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
   const [noteFor, setNoteFor] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const queryKey = ["manager-action-queue", filter, category] as const;
-  const query = useQuery<QueueData>({
+  const query = useInfiniteQuery<QueueData, Error, InfiniteData<QueueData, string | undefined>, typeof queryKey, string | undefined>({
     queryKey: queryKey,
-    queryFn: () => fetchActionQueue({ status: filter, category }),
+    queryFn: ({ pageParam }) => fetchActionQueue({
+      status: filter,
+      category,
+      cursor: pageParam,
+    }),
+    initialPageParam: undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: canView,
     staleTime: 10_000,
     refetchInterval: 30_000,
@@ -94,20 +100,17 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
       // Patch the writer's cache from the authoritative PATCH response before
       // refetching. A refetch can briefly race another queue refresh, and the
       // manager should never see its own successful change revert in the UI.
-      client.setQueryData<QueueData>(
+      client.setQueryData<InfiniteData<QueueData, string | undefined>>(
         variables.queryKey,
         (current) => {
           if (!current) return current;
-          const previous = current.items.find((item) => item.id === updated.id);
-          const counts = { ...current.counts };
-          if (previous && previous.status !== updated.status) {
-            counts[previous.status] = Math.max(0, (counts[previous.status] ?? 0) - 1);
-            counts[updated.status] = (counts[updated.status] ?? 0) + 1;
-          }
-          const items = current.items.some((item) => item.id === updated.id)
-            ? current.items.map((item) => item.id === updated.id ? updated : item)
-            : current.items;
-          return { items, counts };
+          return {
+            ...current,
+            pages: current.pages.map((page) => ({
+              ...page,
+              items: page.items.map((item) => item.id === updated.id ? updated : item),
+            })),
+          };
         },
       );
       void client.invalidateQueries({ queryKey: ["manager-action-queue"] });
@@ -121,13 +124,16 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
   const handleUpdate = useCallback((item: ActionItem, input: Parameters<typeof updateActionItem>[1]) => {
     mutation.mutate({ item, input, queryKey });
   }, [mutation.mutate, queryKey]);
-  const items = useMemo(() => (query.data?.items ?? []).filter((item) =>
+  const items = useMemo(() => (query.data?.pages.flatMap((page) => page.items) ?? []).filter((item) =>
     (filter === "all" || item.status === filter) && (category === "all" || item.category === category),
-  ).sort((a, b) => {
+  ).filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index).sort((a, b) => {
     const aState = a.attentionState ?? attentionStateForSeverity(a.severity, a.status);
     const bState = b.attentionState ?? attentionStateForSeverity(b.severity, b.status);
     return rank[aState] - rank[bState] || Date.parse(a.createdAt) - Date.parse(b.createdAt);
-  }), [query.data?.items, filter, category]);
+  }), [query.data?.pages, filter, category]);
+  const counts = query.data?.pages[0]?.counts ?? {};
+  const lastPage = query.data?.pages[query.data.pages.length - 1];
+  const hasOlderHistory = Boolean(lastPage?.nextCursor);
   if (!roleLoading && !canView) return <Card><CardContent className="py-8 flex items-center justify-center gap-2 text-sm text-muted-foreground"><Lock className="h-4 w-4" /> Manager action queue is restricted to managers.</CardContent></Card>;
   return <Card data-testid="manager-action-queue">
     <CardHeader className="pb-3"><div className="flex items-center justify-between gap-2">
@@ -137,7 +143,7 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
     <CardContent className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <select aria-label="Filter action status" className="rounded border border-border bg-background px-2 py-1.5 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
-          {[...queueStatuses, "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All" : value.replace("_", " ")}{value !== "all" ? ` (${query.data?.counts[value] ?? 0})` : ""}</option>)}
+           {[...queueStatuses, "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All" : value.replace("_", " ")}{value !== "all" ? ` (${counts[value] ?? 0})` : ""}</option>)}
         </select>
         <select aria-label="Filter action category" className="rounded border border-border bg-background px-2 py-1.5 text-xs" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="all">All sources</option>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -158,6 +164,14 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
            onUpdate={handleUpdate}
            onNavigate={onNavigate}
          />)}</div>}
+      {(filter === "all" || filter === "resolved") && hasOlderHistory && <Button
+        className="w-full"
+        variant="outline"
+        onClick={() => void query.fetchNextPage()}
+        disabled={query.isFetchingNextPage}
+      >
+        {query.isFetchingNextPage ? "Loading older history…" : "Load older history"}
+      </Button>}
       {mutation.isError && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
         <span>{mutation.error instanceof Error ? mutation.error.message : "This item changed. Refresh and try again."}</span>
         <Button size="sm" variant="outline" className="h-7 border-destructive/40 text-xs text-destructive" onClick={() => { mutation.reset(); void query.refetch(); }}>Refresh queue</Button>

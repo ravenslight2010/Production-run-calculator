@@ -109,6 +109,16 @@ async function openQueue(page: Page): Promise<void> {
   await expect(page.getByTestId("manager-action-queue")).toBeVisible();
 }
 
+async function revealHistoryItem(page: Page, title: string): Promise<void> {
+  const itemStatus = page.getByLabel(`Status for ${title}`);
+  for (let pageNumber = 0; pageNumber < 12 && !(await itemStatus.isVisible().catch(() => false)); pageNumber += 1) {
+    const loadOlder = page.getByRole("button", { name: "Load older history", exact: true });
+    if (!(await loadOlder.isVisible().catch(() => false))) break;
+    await loadOlder.click();
+  }
+  await expect(itemStatus).toBeVisible();
+}
+
 function scopeQueueBody(body: string): string {
   const payload = JSON.parse(body) as {
     items: Array<{ category: string; status: string }>;
@@ -277,12 +287,20 @@ test("loads the active view without hiding large queue history", async ({ page }
   const allPayload = await (await allResponse).json() as {
     items: Array<{ status: string }>;
     counts: Record<string, number>;
+    nextCursor: string | null;
   };
-  expect(allPayload.items.length).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
+  expect(allPayload.items.length).toBeLessThan(LARGE_HISTORY_COUNT);
+  expect(allPayload.nextCursor).toBeTruthy();
   expect(allPayload.counts.resolved).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
   await expect(
-    page.getByText(`Historical queue item 1`, { exact: true }),
+    page.getByText(`Historical queue item ${LARGE_HISTORY_COUNT}`, { exact: true }),
   ).toBeVisible();
+  await expect(page.getByText("Historical queue item 1", { exact: true })).toHaveCount(0);
+  const oldestHistoryItem = page.getByText("Historical queue item 1", { exact: true });
+  for (let pageNumber = 0; pageNumber < 10 && !(await oldestHistoryItem.isVisible().catch(() => false)); pageNumber += 1) {
+    await page.getByRole("button", { name: "Load older history", exact: true }).click();
+  }
+  await expect(oldestHistoryItem).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("queue-large-history-all.png") });
   expect(browserErrors).toEqual([]);
 });
@@ -368,6 +386,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await second.getByRole("button", { name: "Refresh queue", exact: true }).click();
     await second.reload({ waitUntil: "domcontentloaded" });
     await openQueue(second);
+    await second.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action status").selectOption("in_progress");
     await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
     const retryUpdate = second.waitForResponse(
@@ -381,7 +400,9 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await second.screenshot({ path: testInfo.outputPath("queue-recovered.png") });
     await second.reload({ waitUntil: "domcontentloaded" });
     await openQueue(second);
+    await second.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action status").selectOption("resolved");
+    await revealHistoryItem(second, title);
     await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("resolved");
     await expect(second.getByLabel(`Owner for ${title}`)).toHaveValue("");
 

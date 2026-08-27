@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import {
   actionItemsTable,
   auditLogsTable,
@@ -16,6 +16,8 @@ import { dataHealthWorkspace } from "./profileDataHealth";
 
 const router = Router();
 const statuses = new Set(["open", "in_progress", "deferred", "resolved"]);
+const activeStatuses = ["open", "in_progress", "deferred"] as const;
+const HISTORY_PAGE_SIZE = 100;
 const refreshes = new Map<string, Promise<void>>();
 
 type Candidate = {
@@ -39,6 +41,24 @@ function attentionStateFor(severity: string): Candidate["attentionState"] {
 
 function nextActionFor(state: Candidate["attentionState"]): string {
   return state === "blocker" ? "Act now" : state === "review" ? "Review and decide" : state === "stale" ? "Recover or close" : "Monitor";
+}
+
+type QueueCursor = { id: number };
+
+function encodeQueueCursor(item: { id: number }): string {
+  return Buffer.from(JSON.stringify({ id: item.id })).toString("base64url");
+}
+
+function decodeQueueCursor(value: unknown): QueueCursor | undefined {
+  if (typeof value !== "string" || value.length > 300) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<QueueCursor>;
+    const id = parsed.id;
+    if (typeof id !== "number" || !Number.isInteger(id) || id < 1) return undefined;
+    return { id };
+  } catch {
+    return undefined;
+  }
 }
 
 function clean(value: unknown, max: number): string {
@@ -157,24 +177,51 @@ async function refreshQueue(): Promise<void> {
 router.get("/manager-action-queue", requireCapability("manage-staff"), async (req: Request, res: Response) => {
   const requestedStatus = typeof req.query.status === "string" ? req.query.status : undefined;
   const requestedCategory = typeof req.query.category === "string" ? clean(req.query.category, 40) : undefined;
+  const requestedCursor = req.query.cursor;
   if (requestedStatus && requestedStatus !== "all" && !statuses.has(requestedStatus)) {
     res.status(400).json({ error: "Invalid action queue status filter" });
+    return;
+  }
+  if (requestedCursor !== undefined && !decodeQueueCursor(requestedCursor)) {
+    res.status(400).json({ error: "Invalid action queue cursor" });
     return;
   }
   try {
     await refreshQueue();
     const scope = currentScope();
-    const itemConditions = [eq(actionItemsTable.scope, scope)];
-    if (requestedStatus && requestedStatus !== "all") {
-      itemConditions.push(eq(actionItemsTable.status, requestedStatus));
-    }
+    const baseConditions = [eq(actionItemsTable.scope, scope)];
     if (requestedCategory && requestedCategory !== "all") {
-      itemConditions.push(eq(actionItemsTable.category, requestedCategory));
+      baseConditions.push(eq(actionItemsTable.category, requestedCategory));
     }
-    const [rows, groupedCounts] = await Promise.all([
-      db.select().from(actionItemsTable)
-        .where(and(...itemConditions))
-        .orderBy(desc(actionItemsTable.status), desc(actionItemsTable.updatedAt), desc(actionItemsTable.id)),
+    const cursor = decodeQueueCursor(requestedCursor);
+    const beforeCursor = cursor
+      ? lt(actionItemsTable.id, cursor.id)
+      : undefined;
+    const historyConditions = [
+      ...baseConditions,
+      eq(actionItemsTable.status, "resolved"),
+      ...(beforeCursor ? [beforeCursor] : []),
+    ];
+    const activeConditions = [
+      ...baseConditions,
+      inArray(actionItemsTable.status, [...activeStatuses]),
+    ];
+    const pageHistory = requestedStatus === undefined || requestedStatus === "all" || requestedStatus === "resolved";
+    const pageSize = HISTORY_PAGE_SIZE + 1;
+    const [activeRows, historyRows, groupedCounts] = await Promise.all([
+      requestedStatus === "resolved"
+        ? Promise.resolve([])
+        : db.select().from(actionItemsTable)
+          .where(requestedStatus && requestedStatus !== "all"
+            ? and(...baseConditions, eq(actionItemsTable.status, requestedStatus))
+            : and(...activeConditions))
+          .orderBy(desc(actionItemsTable.updatedAt), desc(actionItemsTable.id)),
+      pageHistory
+        ? db.select().from(actionItemsTable)
+          .where(and(...historyConditions))
+          .orderBy(desc(actionItemsTable.id))
+          .limit(pageSize)
+        : Promise.resolve([]),
       db.select({
         status: actionItemsTable.status,
         count: sql<number>`count(*)::int`,
@@ -182,6 +229,12 @@ router.get("/manager-action-queue", requireCapability("manage-staff"), async (re
         .where(eq(actionItemsTable.scope, scope))
         .groupBy(actionItemsTable.status),
     ]);
+    const hasMore = historyRows.length > HISTORY_PAGE_SIZE;
+    const rows = [
+      ...activeRows,
+      ...historyRows.slice(0, HISTORY_PAGE_SIZE),
+    ];
+    const nextCursor = hasMore ? encodeQueueCursor(historyRows[HISTORY_PAGE_SIZE - 1]) : null;
     const counts = Object.fromEntries(["open", "in_progress", "deferred", "resolved"].map((status) => [
       status,
       groupedCounts.find((row) => row.status === status)?.count ?? 0,
@@ -189,6 +242,7 @@ router.get("/manager-action-queue", requireCapability("manage-staff"), async (re
     res.json({
       items: rows,
       counts,
+      nextCursor,
     });
   } catch (err) {
     req.log.error({ err }, "failed to load manager action queue");

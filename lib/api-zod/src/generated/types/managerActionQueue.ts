@@ -11,4 +11,6 @@ import type { ManagerActionQueueCounts } from './managerActionQueueCounts';
 export interface ManagerActionQueue {
   items: ManagerActionItem[];
   counts: ManagerActionQueueCounts;
+  /** @nullable */
+  nextCursor: string | null;
 }

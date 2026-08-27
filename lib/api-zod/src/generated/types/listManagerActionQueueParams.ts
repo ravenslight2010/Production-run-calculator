@@ -11,4 +11,8 @@ import type { ListManagerActionQueueStatus } from './listManagerActionQueueStatu
 export type ListManagerActionQueueParams = {
 status?: ListManagerActionQueueStatus;
 category?: ListManagerActionQueueCategory;
+/**
+ * Opaque cursor for loading the next page of resolved history.
+ */
+cursor?: string;
 };

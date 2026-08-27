@@ -3775,6 +3775,11 @@ paths:
           schema:
             type: string
             enum: [incident, import, data-health, sync, production-rule, report, all]
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor for loading the next page of resolved history.
+          schema: { type: string }
       responses:
         "200":
           description: Current action items and status counts
@@ -10194,7 +10199,7 @@ components:
 
     ManagerActionQueue:
       type: object
-      required: [items, counts]
+      required: [items, counts, nextCursor]
       properties:
         items:
           type: array
@@ -10202,6 +10207,8 @@ components:
         counts:
           type: object
           additionalProperties: { type: integer }
+        nextCursor:
+          type: [string, "null"]
 
     ManagerActionItemUpdate:
       type: object
