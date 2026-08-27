@@ -1,97 +1,55 @@
 {
-  "revision": "804f6e4952f5b538a3bce703b04e8df0e6d55595",
+  "revision": "a85606640c1fda39aac7cf1f7556c5c4e7ce6e96",
   "mode": "full",
   "results": [
     {
       "label": "production dependency audit",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1999
+      "elapsedMs": 1193
     },
     {
       "label": "generated API client freshness",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 14233
+      "elapsedMs": 15117
     },
     {
       "label": "shared library typechecks",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 706
+      "elapsedMs": 1515
     },
     {
       "label": "API server typecheck",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 21405
+      "elapsedMs": 26171
     },
     {
       "label": "run calculator typecheck",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 53719
+      "elapsedMs": 74522
     },
     {
       "label": "mockup sandbox typecheck",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 6275
+      "elapsedMs": 7079
     },
     {
       "label": "scripts typecheck",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 4097
+      "elapsedMs": 3611
     },
     {
       "label": "recovery evidence audit",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1114
-    },
-    {
-      "label": "clean-start smoke",
-      "passed": true,
-      "status": "PASS",
-      "elapsedMs": 22085
-    },
-    {
-      "label": "API unit tests (release shard 1/6)",
-      "passed": true,
-      "status": "PASS",
-      "elapsedMs": 51951
-    },
-    {
-      "label": "API integration tests (release shard 2/6)",
-      "passed": true,
-      "status": "PASS",
-      "elapsedMs": 361374
-    },
-    {
-      "label": "API integration tests (release shard 3/6)",
-      "passed": true,
-      "status": "PASS",
-      "elapsedMs": 250858
-    },
-    {
-      "label": "API integration tests (release shard 4/6)",
-      "passed": false,
-      "status": "INFRASTRUCTURE TIMEOUT",
-      "elapsedMs": 480006
-    },
-    {
-      "label": "API sync tests (release shard 5/6)",
-      "passed": true,
-      "status": "PASS",
-      "elapsedMs": 45491
-    },
-    {
-      "label": "API sync SSE tests (release shard 6/6)",
-      "passed": true,
-      "status": "PASS",
-      "elapsedMs": 14639
+      "elapsedMs": 1176
     }
   ],
-  "updatedAt": "2026-08-27T13:37:48.140Z"
+  "updatedAt": "2026-08-27T14:53:01.499Z"
 }
