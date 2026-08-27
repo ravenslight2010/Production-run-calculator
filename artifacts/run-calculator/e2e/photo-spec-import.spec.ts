@@ -77,6 +77,16 @@ async function signIn(page: Page, username: string): Promise<void> {
   await dismissWelcome(page);
 }
 
+async function reloadAsManager(page: Page): Promise<void> {
+  // The sign-up session remains valid while the fixture promotes its user in
+  // the database. Reloading re-reads /api/me with that same session, avoiding
+  // a redundant sign-out/sign-in pair that can exhaust the shared auth limiter
+  // late in the serial release suite.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await dismissWelcome(page);
+}
+
 async function promoteToManager(username: string): Promise<void> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
@@ -160,8 +170,7 @@ test("keeps photographed pages editable and canceling review leaves master data 
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-  await signIn(page, username);
+  await reloadAsManager(page);
 
   const before = await masterDataSnapshot(page);
   let imageRequestCount = 0;
@@ -289,8 +298,7 @@ test("applies photographed review edits to the authenticated profile and recipe 
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-  await signIn(page, username);
+  await reloadAsManager(page);
 
   let imageRequestCount = 0;
   let transcriptionImageCount = 0;
@@ -458,8 +466,7 @@ test("persists every ingredient from a photographed multi-ingredient dough recip
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-  await signIn(page, username);
+  await reloadAsManager(page);
 
   let imageRequestCount = 0;
   let transcriptionImageCount = 0;
@@ -620,8 +627,7 @@ test("applies a photographed sauce review edit to the authenticated sauce recipe
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-  await signIn(page, username);
+  await reloadAsManager(page);
 
   let imageRequestCount = 0;
   let transcriptionImageCount = 0;
@@ -782,8 +788,7 @@ test("persists every ingredient from a photographed multi-ingredient cheese reci
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-  await signIn(page, username);
+  await reloadAsManager(page);
 
   let imageRequestCount = 0;
   let transcriptionImageCount = 0;

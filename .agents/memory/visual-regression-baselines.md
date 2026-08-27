@@ -14,3 +14,14 @@ baseline changes.
 **How to apply:** Keep visual config/test data isolated from behavioral E2E
 fixtures; document the exact update command and inspect diff artifacts before
 accepting regenerated images.
+
+Full-page screenshots of large live Summary surfaces can consume substantial
+browser time and memory; prefer viewport-scoped captures when the assertion is
+about visible layout rather than the entire document.
+
+**Why:** A release browser run once spent its remaining budget capturing a
+large live surface even though the visual contract only covered the viewport.
+
+**How to apply:** Scope screenshots to the intended viewport or component
+region in visual and release evidence tests, while retaining full-page
+captures only when document extent is itself the behavior under test.

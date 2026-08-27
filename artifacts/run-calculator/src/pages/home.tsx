@@ -7032,6 +7032,10 @@ export default function Home() {
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncBaselineGateRef = useRef(createSyncBaselineGate());
   const isSyncApplyingRef = useRef(false);
+  // A local lifecycle action can land in the same frame as an inbound SSE
+  // snapshot. Keep that write queued instead of dropping it behind the
+  // receive-side form/state handoff.
+  const syncApplyPushPendingRef = useRef(false);
   // Foreground reconciliation fence. A clock snap can arrive in the same
   // frame as a stale recovery push, so keep auto-track and outgoing pushes
   // blocked until the date-scoped shared row has been pulled and applied.
@@ -7857,10 +7861,12 @@ export default function Home() {
         if (packagingFenceRaised && !foregroundSyncBarrierRef.current) {
           setAutoTrackBlocked(false);
         }
+        const queuedDuringApply = syncApplyPushPendingRef.current;
+        syncApplyPushPendingRef.current = false;
         // We kept a strictly-newer local run value over a stale remote — re-push so
         // peers adopt ours and converge. Clear the signature gate so the push isn't
         // skipped as a no-op, and defer until isSyncApplyingRef is cleared above.
-        if (rejectedStale) {
+        if (rejectedStale || queuedDuringApply) {
           lastSyncSigRef.current = "";
           schedulePush(dayStateRef.current, 0);
         }
@@ -8771,7 +8777,11 @@ export default function Home() {
       foregroundPushPendingRef.current = true;
       return;
     }
-    if (isSyncApplyingRef.current || formHandoffRef.current) return;
+    if (isSyncApplyingRef.current) {
+      syncApplyPushPendingRef.current = true;
+      return;
+    }
+    if (formHandoffRef.current) return;
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.

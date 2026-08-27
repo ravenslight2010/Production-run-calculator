@@ -90,6 +90,10 @@ function dynamicMask(page: Page) {
 
 test.describe("intentional visual regression baselines", () => {
   test.describe.configure({ mode: "serial" });
+  // The checked-in desktop/tablet baselines are intentionally 1280×900.
+  // Desktop Chrome's device preset defaults to 1280×720, which would make
+  // the baseline contract fail before comparing the rendered application.
+  test.use({ viewport: { width: 1280, height: 900 } });
 
   test.beforeAll(async () => {
     if (!process.env.DATABASE_URL) return;

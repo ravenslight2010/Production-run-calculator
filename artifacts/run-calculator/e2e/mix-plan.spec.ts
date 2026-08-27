@@ -142,7 +142,10 @@ async function signUpAndDismissOnboarding(
       runs: [{ id: runId, brand: "", flavor: "", seeded: false }],
       currentIndex: 0,
       date: new Date().toISOString().slice(0, 10),
-      resetAt: Date.now() + 60_000,
+      // Today's resetAt is also the server's auth boundary. Keep this
+      // same-day fixture at the stable baseline instead of manufacturing a
+      // future reset that can invalidate the account's just-issued session.
+      resetAt: 0,
       substitutions: [],
       substitutionLog: [],
       stagedItems: {},
@@ -189,7 +192,10 @@ async function seedLiveRunBeforeAppLoad(
       // Keep a test-local seed ahead of any blank baseline left by a prior
       // authenticated startup. The run is intentionally not a pristine seed,
       // so same-day sync still merges it additively.
-      resetAt: Date.now() + 60_000,
+      // Today's resetAt is also the server's auth boundary. Keep this
+      // same-day fixture at the stable baseline instead of manufacturing a
+      // future reset that can invalidate the account's just-issued session.
+      resetAt: 0,
       substitutions: [],
       substitutionLog: [],
       stagedItems: {},
@@ -248,7 +254,10 @@ async function stampLocalFixtureForReload(page: Page): Promise<void> {
         : {};
       if (Array.isArray(day.runs)) {
         day.runs = day.runs.map((run) => ({ ...run, metaUpdatedAt: now }));
-        day.resetAt = now;
+        // resetAt is the server's daily auth boundary, not a generic LWW
+        // freshness stamp. Today's fixture must never advance it; the
+        // per-run meta/value stamps above are sufficient to win the merge.
+        day.resetAt = typeof day.resetAt === "number" ? day.resetAt : 0;
         localStorage.setItem("run-calc-day", JSON.stringify(day));
         const updated = JSON.parse(localStorage.getItem("run-calc-runvalues-updated") ?? "{}") as Record<string, number>;
         for (const run of day.runs) updated[run.id] = now;

@@ -113,12 +113,25 @@ async function candidates(): Promise<Candidate[]> {
 
 async function refreshQueue(): Promise<void> {
   const scope = currentScope();
-  for (const item of await candidates()) {
-    await db.insert(actionItemsTable).values({ scope, ...item }).onConflictDoUpdate({
-      target: [actionItemsTable.scope, actionItemsTable.dedupKey],
-      set: { ...item, updatedAt: new Date() },
-    });
-  }
+  const items = await candidates();
+  if (items.length === 0) return;
+  // Refresh all derived candidates in one upsert. The previous per-item
+  // awaited loop made opening the queue scale linearly with accumulated
+  // findings, delaying manually inserted queue items behind hundreds of
+  // round-trips and making concurrent manager views race their UI budget.
+  await db.insert(actionItemsTable).values(items.map((item) => ({ scope, ...item }))).onConflictDoUpdate({
+    target: [actionItemsTable.scope, actionItemsTable.dedupKey],
+    set: {
+      category: sql`excluded.category`,
+      severity: sql`excluded.severity`,
+      title: sql`excluded.title`,
+      description: sql`excluded.description`,
+      sourceType: sql`excluded.source_type`,
+      sourceId: sql`excluded.source_id`,
+      sourcePath: sql`excluded.source_path`,
+      updatedAt: sql`NOW()`,
+    },
+  });
 }
 
 router.get("/manager-action-queue", requireCapability("manage-staff"), async (req: Request, res: Response) => {

@@ -264,6 +264,7 @@ if (fullRun) {
     env: {
       E2E_TEST_DB: "1",
       E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+      PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
     },
     timeoutMs: FULL_BROWSER_TIMEOUT_MS,
     warningMs: FULL_BROWSER_WARNING_MS,

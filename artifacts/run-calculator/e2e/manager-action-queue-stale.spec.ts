@@ -15,8 +15,30 @@ const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
 let fixtureId: number | null = null;
 let fixtureDedupKey = "";
+let staleWriteFixtureId: number | null = null;
+let staleWriteDedupKey = "";
 let incidentFixtureId = "";
 let incidentQueueFixtureId: number | null = null;
+
+async function dismissWelcomeIfPresent(page: Page, timeout = 1_500): Promise<void> {
+  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
+  // The shell mounts before the onboarding query resolves. Checking
+  // isVisible() immediately after tab-run is therefore racy: the dialog can
+  // appear after the check and intercept the next header-menu interaction.
+  try {
+    await welcome.waitFor({ state: "visible", timeout });
+  } catch {
+    return;
+  }
+  const seen = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/me/onboarding-seen") &&
+      response.request().method() === "POST",
+  );
+  await welcome.getByRole("button", { name: "Get started", exact: true }).click();
+  await expect((await seen).status()).toBe(200);
+  await expect(welcome).toBeHidden({ timeout: 10_000 });
+}
 
 async function signUp(page: Page, username: string): Promise<void> {
   await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
@@ -27,17 +49,10 @@ async function signUp(page: Page, username: string): Promise<void> {
   await page.locator("#accessCode").fill(SIGNUP_CODE);
   await page.getByRole("button", { name: /create.?account|sign.?up/i }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
-  }
+  // A new account must finish onboarding before another context signs in.
+  // Allow the first authenticated shell's deferred query enough time to
+  // reveal the dialog; returning sign-ins use the short no-dialog probe.
+  await dismissWelcomeIfPresent(page, 5_000);
 }
 
 async function signIn(page: Page, username: string): Promise<void> {
@@ -50,17 +65,6 @@ async function signIn(page: Page, username: string): Promise<void> {
   // the sandbox shortcut when both controls are available.
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
-  if (await welcome.isVisible().catch(() => false)) {
-    const seen = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/me/onboarding-seen") &&
-        response.request().method() === "POST",
-    );
-    await welcome.getByRole("button", { name: "Get started", exact: true }).click();
-    await expect((await seen).status()).toBe(200);
-    await expect(welcome).toBeHidden({ timeout: 10_000 });
-  }
 }
 
 async function promoteToManager(username: string): Promise<void> {
@@ -74,6 +78,23 @@ async function promoteToManager(username: string): Promise<void> {
        ON CONFLICT (user_id) DO UPDATE SET role = 'manager'`,
       [user.rows[0].id],
     );
+    // Other browser fixtures may tailor the built-in manager row for their
+    // own journey. Restore the complete role here so this file remains
+    // independent of serial suite ordering, including the incident source
+    // journeys below.
+    await db.query(
+      "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+      [JSON.stringify([
+        "manage-staff",
+        "manage-inventory",
+        "edit-production-rules",
+        "approve-password-resets",
+        "review-incidents",
+        "use-ai-tools",
+        "manage-factory-settings",
+        "manage-profiles",
+      ])],
+    );
   } finally {
     await db.end().catch(() => {});
   }
@@ -86,6 +107,19 @@ async function openQueue(page: Page): Promise<void> {
   await expect(page.getByTestId("manager-action-queue")).toBeVisible();
 }
 
+function scopeQueueBody(body: string): string {
+  const payload = JSON.parse(body) as {
+    items: Array<{ category: string; status: string }>;
+    counts: Record<string, number>;
+  };
+  payload.items = payload.items.filter((item) => item.category === "report");
+  payload.counts = Object.fromEntries(
+    ["open", "in_progress", "deferred", "resolved"]
+      .map((status) => [status, payload.items.filter((item) => item.status === status).length]),
+  );
+  return JSON.stringify(payload);
+}
+
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase("manager action queue stale-write e2e");
   const db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -93,6 +127,8 @@ test.beforeAll(async () => {
   try {
     await db.connect();
     incidentFixtureId = uniqueTestId("incident_queue_source");
+    fixtureDedupKey = `e2e:${uniqueTestId("manager_queue_source")}`;
+    staleWriteDedupKey = `e2e:${uniqueTestId("manager_queue_stale")}`;
     await db.query(
       `INSERT INTO incidents
         (id, scope, source, reporter_name, reporter_role, screen, app_platform, context, diagnosis, workaround, status, priority, workflow_state, notes, activity)
@@ -107,11 +143,25 @@ test.beforeAll(async () => {
     const result = await db.query(
       `INSERT INTO action_items
         (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
-       VALUES ($1, $2, 'sync', 'warning', $3, $4, 'sync', $5, '#sync-diagnostics', 'open', 1)
+        VALUES ($1, $2, 'sync', 'warning', $3, $4, 'sync', $5, '#sync-diagnostics', 'open', 1)
        RETURNING id`,
       ["live", fixtureDedupKey, `Stale queue item ${fixtureDedupKey}`, "Two managers must recover this stale update.", fixtureDedupKey],
     );
     fixtureId = result.rows[0].id as number;
+    const staleWriteResult = await db.query(
+      `INSERT INTO action_items
+         (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
+       VALUES ($1, $2, 'report', 'warning', $3, $4, 'report', $5, '#manager-action-queue', 'open', 1)
+       RETURNING id`,
+      [
+        "live",
+        staleWriteDedupKey,
+        `Stale queue item ${staleWriteDedupKey}`,
+        "Two managers must recover this stale update.",
+        staleWriteDedupKey,
+      ],
+    );
+    staleWriteFixtureId = staleWriteResult.rows[0].id as number;
     const incidentQueue = await db.query(
       `INSERT INTO action_items
         (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
@@ -136,13 +186,13 @@ test.beforeAll(async () => {
 // in_progress -> resolved. Restore its initial version before each independent
 // journey so later navigation checks do not depend on test order.
 test.beforeEach(async () => {
-  if (fixtureId === null || !process.env.DATABASE_URL) return;
+  if (staleWriteFixtureId === null || !process.env.DATABASE_URL) return;
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
     await db.query(
       "UPDATE action_items SET status = 'open', version = 1, updated_at = NOW() WHERE id = $1",
-      [fixtureId],
+      [staleWriteFixtureId],
     );
   } finally {
     await db.end().catch(() => {});
@@ -155,6 +205,7 @@ test.afterAll(async () => {
   try {
     await db.connect();
     if (fixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [fixtureId]);
+    if (staleWriteFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [staleWriteFixtureId]);
     if (incidentQueueFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [incidentQueueFixtureId]);
     if (incidentFixtureId) {
       await db.query("DELETE FROM action_items WHERE source_type = 'incident' AND source_id = $1", [incidentFixtureId]);
@@ -186,14 +237,39 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
   try {
     await signUp(first, username);
     await promoteToManager(username);
-    await first.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-    await signIn(first, username);
+    // A full reload re-reads the promoted role from /me without spending
+    // another sign-out/sign-in cycle. Sign-up already marked onboarding seen.
+    await first.reload({ waitUntil: "domcontentloaded" });
+    await first.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     await signIn(second, username);
+    const queueRoute = "**/api/manager-action-queue";
+    let initialQueueBody: string | undefined;
+    await first.route(queueRoute, async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({ response, body: scopeQueueBody(await response.text()) });
+    });
+    await second.route(queueRoute, async (route) => {
+      const response = await route.fetch();
+      const body = initialQueueBody ?? scopeQueueBody(await response.text());
+      initialQueueBody ??= body;
+      await route.fulfill({ response, body });
+    });
     await Promise.all([openQueue(first), openQueue(second)]);
+    // This fixture is a report item. Scope both views before locating the
+    // fixture so accumulated historical import findings do not make the
+    // serial release browser render hundreds of unrelated cards first.
+    await first.getByLabel("Filter action category").selectOption("report");
+    await second.getByLabel("Filter action category").selectOption("report");
 
-    const title = `Stale queue item ${fixtureDedupKey}`;
+    const title = `Stale queue item ${staleWriteDedupKey}`;
     await expect(first.getByText(title, { exact: true })).toBeVisible();
     await expect(second.getByText(title, { exact: true })).toBeVisible();
+    await first.getByLabel("Filter action status").selectOption("all");
+    // Keep the second manager's stale row rendered after the first manager
+    // advances it. The all-status view preserves the stale snapshot needed
+    // for the intentional 409, rather than filtering the row out underneath
+    // the second page.
+    await second.getByLabel("Filter action status").selectOption("all");
 
     const firstStatus = first.getByLabel(`Status for ${title}`);
     const secondStatus = second.getByLabel(`Status for ${title}`);
@@ -201,7 +277,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     const secondOwner = second.getByLabel(`Owner for ${title}`);
     await expect(firstOwner).toHaveValue("");
     await expect(secondOwner).toHaveValue("");
-    await first.screenshot({ path: testInfo.outputPath("queue-before-stale.png"), fullPage: true });
+    await first.screenshot({ path: testInfo.outputPath("queue-before-stale.png") });
     const firstUpdate = first.waitForResponse(
       (response) =>
         response.url().includes("/api/manager-action-queue/") &&
@@ -209,19 +285,16 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     );
     await firstStatus.selectOption("in_progress");
     await expect((await firstUpdate).status()).toBe(200);
-    await first.reload({ waitUntil: "domcontentloaded" });
-    await openQueue(first);
-    await first.getByLabel("Filter action status").selectOption("in_progress");
-    await expect(first.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
     await expect(firstStatus).toHaveValue("in_progress");
     await secondStatus.selectOption("resolved");
 
     await expect(second.getByRole("alert")).toContainText("changed; refresh and try again");
-    await second.screenshot({ path: testInfo.outputPath("queue-stale-error.png"), fullPage: true });
+    await second.screenshot({ path: testInfo.outputPath("queue-stale-error.png") });
     await expect(secondStatus).toHaveValue("open");
     await expect(second.getByText("Refresh queue", { exact: true })).toBeVisible();
     await expect(first.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
 
+    await second.unroute(queueRoute);
     await second.getByRole("button", { name: "Refresh queue", exact: true }).click();
     await second.reload({ waitUntil: "domcontentloaded" });
     await openQueue(second);
@@ -235,7 +308,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await second.getByLabel(`Status for ${title}`).selectOption("resolved");
     await expect((await retryUpdate).status()).toBe(200);
     await expect(second.getByRole("alert")).toHaveCount(0);
-    await second.screenshot({ path: testInfo.outputPath("queue-recovered.png"), fullPage: true });
+    await second.screenshot({ path: testInfo.outputPath("queue-recovered.png") });
     await second.reload({ waitUntil: "domcontentloaded" });
     await openQueue(second);
     await second.getByLabel("Filter action status").selectOption("resolved");
@@ -245,7 +318,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     try {
       await db.connect();
-      const row = await db.query("SELECT status, version FROM action_items WHERE id = $1", [fixtureId]);
+      const row = await db.query("SELECT status, version FROM action_items WHERE id = $1", [staleWriteFixtureId]);
       expect(row.rows[0]).toEqual({ status: "resolved", version: 3 });
     } finally {
       await db.end().catch(() => {});
@@ -274,15 +347,21 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
-  await signIn(page, username);
+  // Keep the established session and reload so the freshly promoted role is
+  // fetched again without paying for another full authentication journey.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await openQueue(page);
 
   const title = `Stale queue item ${fixtureDedupKey}`;
+  // This journey exercises the real sync source link. Scope the queue before
+  // locating it so accumulated historical action items do not turn a
+  // navigation assertion into a full-history render.
+  await page.getByLabel("Filter action category").selectOption("sync");
   const item = page.getByText(title, { exact: true });
   await expect(item).toBeVisible();
   await expect(page.getByTestId("manager-action-queue")).toContainText("Sync");
-  await page.screenshot({ path: testInfo.outputPath("queue-source-before.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("queue-source-before.png") });
 
   const visibleQueue = page.locator('[data-testid="manager-action-queue"]:visible');
   const syncHeader = visibleQueue
@@ -299,7 +378,7 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   // its action rather than relying on hidden DOM content.
   await page.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
   await expect(page.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("queue-source-sync-workflow.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("queue-source-sync-workflow.png") });
   expect(browserErrors).toEqual([]);
 });
 
@@ -437,7 +516,10 @@ test("keeps a direct sync diagnostics link focused after reload", async ({ page 
     await expect(directPage.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
     await directPage.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
     await expect(directPage.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
-    await directPage.screenshot({ path: testInfo.outputPath("sync-diagnostics-direct-link-reload.png"), fullPage: true });
+    // Summary includes a large, live operations surface. A viewport capture
+    // retains the visible diagnostics evidence without spending the test
+    // budget rasterizing its full scroll height.
+    await directPage.screenshot({ path: testInfo.outputPath("sync-diagnostics-direct-link-reload.png") });
     expect(browserErrors).toEqual([]);
   } finally {
     await directPage.close();

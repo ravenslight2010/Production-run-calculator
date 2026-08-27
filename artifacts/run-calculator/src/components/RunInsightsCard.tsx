@@ -57,6 +57,7 @@ export default function RunInsightsCard({
       const updated = await updateRunSuggestion(s.id, { status: "accepted" });
       return { message, updated };
     },
+    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
     onSuccess: ({ message, updated }) => {
       setError(null);
       setConfirmation(message);
@@ -70,6 +71,7 @@ export default function RunInsightsCard({
 
   const dismissMutation = useMutation({
     mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { status: "dismissed" }),
+    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
     onSuccess: (updated) => {
       setError(null);
       qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated);
@@ -80,11 +82,13 @@ export default function RunInsightsCard({
 
   const clearFollowUpMutation = useMutation({
     mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { clearFollowUp: true }),
+    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
     onSuccess: (updated) => qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated),
   });
 
   const reopenMutation = useMutation({
     mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { status: "pending" }),
+    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
     onSuccess: (updated) => {
       setError(null);
       qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated);

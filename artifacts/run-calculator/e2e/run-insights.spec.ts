@@ -67,6 +67,22 @@ async function apiSignUp(
     "UPDATE user_roles SET role = 'manager' WHERE user_id = $1",
     [userId],
   );
+  // Other browser fixtures exercise custom manager capability sets. Restore
+  // the complete built-in manager definition so this API-first fixture remains
+  // independent of serial release ordering.
+  await db.query(
+    "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
+    [JSON.stringify([
+      "manage-staff",
+      "manage-inventory",
+      "edit-production-rules",
+      "approve-password-resets",
+      "review-incidents",
+      "use-ai-tools",
+      "manage-factory-settings",
+      "manage-profiles",
+    ])],
+  );
   // Skip the "Get Started" onboarding overlay that auto-opens on first login
   await db.query("UPDATE users SET onboarding_seen = true WHERE id = $1", [userId]);
 
@@ -206,6 +222,14 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
 
   let username: string;
   let token: string;
+
+  test.beforeEach(async () => {
+    // Suggestions are factory-wide, not user-scoped. A timed-out release run
+    // can be terminated before afterEach cleanup, leaving a pending fixture
+    // that would be rendered alongside this test's deliberately unique one.
+    await db.query("DELETE FROM run_suggestions WHERE brand LIKE 'InsightBrand_e2e_ri_%'");
+    await db.query("DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand_e2e_ri_%'");
+  });
 
   test.afterEach(async () => {
     // Clean up test suggestions, brand profiles, and user (user_roles cascades)

@@ -27,7 +27,26 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
   const [note, setNote] = useState("");
   const mutation = useMutation({
     mutationFn: ({ item, input }: { item: ActionItem; input: Parameters<typeof updateActionItem>[1] }) => updateActionItem(item.id, input),
-    onSuccess: () => { void client.invalidateQueries({ queryKey: ["manager-action-queue"] }); setNoteFor(null); setNote(""); },
+    onSuccess: (updated) => {
+      // Patch the writer's cache from the authoritative PATCH response before
+      // refetching. A refetch can briefly race another queue refresh, and the
+      // manager should never see its own successful change revert in the UI.
+      client.setQueryData<{ items: ActionItem[]; counts: Record<string, number> }>(
+        ["manager-action-queue"],
+        (current) => {
+          if (!current) return current;
+          const items = current.items.map((item) => item.id === updated.id ? updated : item);
+          const counts = Object.fromEntries(
+            ["open", "in_progress", "deferred", "resolved"]
+              .map((status) => [status, items.filter((item) => item.status === status).length]),
+          );
+          return { items, counts };
+        },
+      );
+      void client.invalidateQueries({ queryKey: ["manager-action-queue"] });
+      setNoteFor(null);
+      setNote("");
+    },
   });
   const items = useMemo(() => (query.data?.items ?? []).filter((item) =>
     (filter === "all" || item.status === filter) && (category === "all" || item.category === category),
