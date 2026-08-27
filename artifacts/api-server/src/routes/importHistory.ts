@@ -1,12 +1,22 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, ilike } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray } from "drizzle-orm";
 import { db, importHistoryTable, type ImportHistoryRow } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
-import { requireCapability } from "../middlewares/requireCapability";
+import { requireAnyCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 const MAX_ROWS = 100;
 const MAX_TEXT = 300;
+const PROFILE_IMPORT_TYPES = ["spec", "sauce", "dough", "schedule", "shipping", "recipe"] as const;
+const INVENTORY_IMPORT_TYPES = ["premix", "cheese"] as const;
+
+function allowedImportHistoryTypes(req: Request): string[] {
+  const capabilities = req.capabilities ?? [];
+  return [
+    ...(capabilities.includes("manage-profiles") ? PROFILE_IMPORT_TYPES : []),
+    ...(capabilities.includes("manage-inventory") ? INVENTORY_IMPORT_TYPES : []),
+  ];
+}
 
 type ImportHistorySummary = {
   phases?: Record<string, string>;
@@ -86,16 +96,27 @@ function toApi(row: ImportHistoryRow) {
     status: row.status,
     summary: row.summary,
     snapshotId: row.snapshotId ? Number(row.snapshotId) : null,
+    operationId: row.operationId,
     createdAt: row.createdAt.getTime(),
   };
 }
 
-router.get("/import-history", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
+router.get("/import-history", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req: Request, res: Response) => {
   try {
     const type = String(req.query.type ?? "").trim();
     const status = String(req.query.status ?? "").trim();
     const customer = String(req.query.customer ?? "").trim();
     const clauses = [eq(importHistoryTable.scope, currentScope())];
+    const allowedTypes = allowedImportHistoryTypes(req);
+    if (allowedTypes.length === 0) {
+      res.status(403).json({ error: "Missing importer audit capability" });
+      return;
+    }
+    if (type && !allowedTypes.includes(type)) {
+      res.status(403).json({ error: "Missing capability for this importer history" });
+      return;
+    }
+    clauses.push(inArray(importHistoryTable.importType, allowedTypes));
     if (type) clauses.push(eq(importHistoryTable.importType, type));
     if (status) clauses.push(eq(importHistoryTable.status, status));
     if (customer) clauses.push(ilike(importHistoryTable.customerScope, `%${customer.slice(0, 80)}%`));
@@ -110,18 +131,27 @@ router.get("/import-history", requireCapability("manage-profiles"), async (req: 
   }
 });
 
-router.post("/import-history", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
+router.post("/import-history", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req: Request, res: Response) => {
   const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
   const importType = String(body.importType ?? "").trim();
   const sourceLabel = String(body.sourceLabel ?? "").trim().slice(0, MAX_TEXT);
   const status = String(body.status ?? "").trim();
+  const operationId = String(body.operationId ?? "").trim();
   if (!["spec", "premix", "cheese", "sauce", "dough", "schedule", "shipping", "recipe"].includes(importType) || !sourceLabel || !["complete", "partial", "failed"].includes(status)) {
     res.status(400).json({ error: "Invalid import history record" });
     return;
   }
+  if (!allowedImportHistoryTypes(req).includes(importType)) {
+    res.status(403).json({ error: "Missing capability for this importer history" });
+    return;
+  }
+  if (!operationId || !/^[a-zA-Z0-9_-]{16,120}$/.test(operationId)) {
+    res.status(400).json({ error: "Invalid import history operation id" });
+    return;
+  }
   try {
     const summary = sanitizeSummary(body.summary);
-    const inserted = await db.insert(importHistoryTable).values({
+    const values = {
       scope: currentScope(),
       importType,
       sourceKey: String(body.sourceKey ?? "").trim().slice(0, MAX_TEXT) || null,
@@ -130,7 +160,40 @@ router.post("/import-history", requireCapability("manage-profiles"), async (req:
       status,
       summary,
       snapshotId: summary.snapshotId ? String(summary.snapshotId) : null,
-    }).returning();
+      operationId,
+      actorId: req.userId,
+    };
+    // The client may retry after a transport timeout where the first write
+    // actually committed. Scope + authenticated actor + operation id make that
+    // retry return the original audit row rather than duplicating it.
+    if (req.userId) {
+      const existing = await db.select().from(importHistoryTable).where(and(
+        eq(importHistoryTable.scope, currentScope()),
+        eq(importHistoryTable.actorId, req.userId),
+        eq(importHistoryTable.operationId, operationId),
+      )).limit(1);
+      if (existing[0]) {
+        res.status(201).json({ import: toApi(existing[0]) });
+        return;
+      }
+    }
+    const inserted = await db.insert(importHistoryTable).values(values)
+      .onConflictDoNothing({
+        target: [importHistoryTable.scope, importHistoryTable.actorId, importHistoryTable.operationId],
+      })
+      .returning();
+    if (!inserted[0] && req.userId) {
+      const existing = await db.select().from(importHistoryTable).where(and(
+        eq(importHistoryTable.scope, currentScope()),
+        eq(importHistoryTable.actorId, req.userId),
+        eq(importHistoryTable.operationId, operationId),
+      )).limit(1);
+      if (existing[0]) {
+        res.status(201).json({ import: toApi(existing[0]) });
+        return;
+      }
+    }
+    if (!inserted[0]) throw new Error("Import history record was not inserted");
     // Keep the history bounded per scope; snapshots retain their separate policy.
     const old = await db.select({ id: importHistoryTable.id }).from(importHistoryTable)
       .where(eq(importHistoryTable.scope, currentScope()))

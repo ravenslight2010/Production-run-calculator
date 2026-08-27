@@ -518,7 +518,15 @@ const ROUTES: GatedRoute[] = [
     capability: "manage-profiles",
     method: "POST",
     path: () => "/api/import-history",
-    body: { importType: "spec", sourceLabel: "coverage.xlsx", status: "complete" },
+    body: { importType: "spec", sourceLabel: "coverage.xlsx", status: "complete", operationId: "import-history-profile-coverage-001" },
+    okStatus: 201,
+  },
+  {
+    name: "POST /import-history (inventory importer)",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/import-history",
+    body: { importType: "premix", sourceLabel: "coverage.xlsx", status: "complete", operationId: "import-history-inventory-coverage-001" },
     okStatus: 201,
   },
   {
@@ -776,7 +784,12 @@ describe("capability-based access control", () => {
     const user = USER_BY_ROLE[roleName];
     describe(`${roleName}`, () => {
       for (const route of ROUTES) {
-        const allowed = caps.includes(route.capability);
+        // Import history is a scoped operational audit shared by profile and
+        // inventory managers. Writes remain individually validated by import
+        // type in the route, so this GET matrix only tests the shared read.
+        const allowed = route.name === "GET /import-history"
+          ? caps.includes("manage-profiles") || caps.includes("manage-inventory")
+          : caps.includes(route.capability);
         if (allowed) {
           it(`allows ${route.name} (${route.okStatus})`, async () => {
             const itemId = await makeItem("ingredient:Target:lbs");
@@ -793,6 +806,32 @@ describe("capability-based access control", () => {
       }
     });
   }
+});
+
+describe("import history idempotency", () => {
+  it("rejects an audit write without an idempotency key", async () => {
+    const response = await req(MANAGER, "POST", "/api/import-history", {
+      importType: "spec", sourceLabel: "missing-key.xlsx", status: "complete", summary: {},
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("returns the original row when a manager retries the same audit operation", async () => {
+    const body = {
+      importType: "spec",
+      sourceLabel: "timeout-retry.xlsx",
+      status: "complete",
+      summary: { counts: { parsed: 1 } },
+      operationId: "import-history-timeout-retry-0001",
+    };
+    const first = await req(MANAGER, "POST", "/api/import-history", body);
+    const second = await req(MANAGER, "POST", "/api/import-history", body);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const firstPayload = await first.json() as { import: { id: number } };
+    const secondPayload = await second.json() as { import: { id: number } };
+    expect(firstPayload.import.id).toBe(secondPayload.import.id);
+  });
 });
 
 describe("POST /ingredients/merge endpoint behavior", () => {

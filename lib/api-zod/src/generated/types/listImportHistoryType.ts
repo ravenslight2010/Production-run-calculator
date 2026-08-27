@@ -12,4 +12,10 @@ export type ListImportHistoryType = typeof ListImportHistoryType[keyof typeof Li
 export const ListImportHistoryType = {
   spec: 'spec',
   premix: 'premix',
+  cheese: 'cheese',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+  shipping: 'shipping',
+  recipe: 'recipe',
 } as const;

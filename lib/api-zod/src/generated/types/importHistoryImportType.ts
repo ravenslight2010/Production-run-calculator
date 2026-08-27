@@ -12,4 +12,10 @@ export type ImportHistoryImportType = typeof ImportHistoryImportType[keyof typeo
 export const ImportHistoryImportType = {
   spec: 'spec',
   premix: 'premix',
+  cheese: 'cheese',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+  shipping: 'shipping',
+  recipe: 'recipe',
 } as const;

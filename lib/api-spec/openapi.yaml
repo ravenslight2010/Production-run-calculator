@@ -3381,7 +3381,7 @@ paths:
       parameters:
         - name: type
           in: query
-          schema: { type: string, enum: [spec, premix] }
+          schema: { type: string, enum: [spec, premix, cheese, sauce, dough, schedule, shipping, recipe] }
         - name: status
           in: query
           schema: { type: string, enum: [complete, partial, failed] }
@@ -7684,7 +7684,7 @@ components:
       required: [id, importType, sourceLabel, status, summary, createdAt]
       properties:
         id: { type: integer }
-        importType: { type: string, enum: [spec, premix] }
+        importType: { type: string, enum: [spec, premix, cheese, sauce, dough, schedule, shipping, recipe] }
         sourceKey: { type: string, nullable: true }
         sourceLabel: { type: string }
         customerScope: { type: string, nullable: true }
@@ -7692,6 +7692,7 @@ components:
         summary:
           $ref: "#/components/schemas/ImportHistorySummary"
         snapshotId: { type: integer, nullable: true }
+        operationId: { type: string, nullable: true }
         createdAt: { type: integer, description: Epoch milliseconds }
 
     ImportHistoryList:
@@ -7705,13 +7706,16 @@ components:
 
     ImportHistoryInput:
       type: object
-      required: [importType, sourceLabel, status, summary]
+      required: [importType, sourceLabel, status, operationId, summary]
       properties:
-        importType: { type: string, enum: [spec, premix] }
+        importType: { type: string, enum: [spec, premix, cheese, sauce, dough, schedule, shipping, recipe] }
         sourceKey: { type: string }
         sourceLabel: { type: string }
         customerScope: { type: string }
         status: { type: string, enum: [complete, partial, failed] }
+        operationId:
+          type: string
+          description: Client-generated idempotency key for safely retrying an audit write.
         summary:
           $ref: "#/components/schemas/ImportHistorySummary"
 

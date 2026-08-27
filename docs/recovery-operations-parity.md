@@ -5,7 +5,7 @@ for import history, data health, operational reports, and shift handoff.
 
 | Area | Result | Decision |
 | --- | --- | --- |
-| Import history | Recovered | Reopening a saved spec or premix snapshot is available from the history row and routes to the matching review panel. |
+| Import history | Recovered | The Import workspace shows a status and explicit manager action for every supported importer. Saved spec/premix snapshots reopen their scoped review; other incomplete records reopen the matching source picker and are always reviewed again. |
 | Data health | Recovered | Safe repair batches are retained and can be undone only while their profile values and LWW stamp are unchanged. |
 | Operational report | Recovered | Date-scoped inventory ledger totals and quality/incident detail links are retained alongside the current inventory snapshot. |
 | Shift handoff | Present | The current digest is retained; it already includes scoped source availability, historical events, and source navigation. |
@@ -50,6 +50,26 @@ pnpm run audit:recovery
 Recover only the missing feature files and their wiring, contracts, and focused tests.
 Do not reset the branch or replace `home.tsx` wholesale. Record intentional differences
 in `scripts/recovery-manifest.json` and explain them in the completion report.
+
+### Import audit and recovery boundaries
+
+- Import history is an audit of reviewed outcomes, not an automatic replay queue.
+  A saved spec or premix snapshot can reopen its original scoped review. All other
+  retries require the manager to select the source again and pass the normal
+  review/confirmation safeguards before any changes are applied.
+- The history view reconciles source and landed values side by side. A metric
+  reported by only one side is deliberately shown as not comparable rather than
+  inferred as zero; mismatches, skipped items, unresolved links, and
+  manager-approved mapping explanations remain visible on the record.
+- If a protected history write is unavailable, the manager sees an immediate
+  Import-workspace recovery notice and can retry the bounded pending audit
+  save. Pending records are stored only under the authenticated user and
+  current live/sandbox scope. Each has a server-enforced idempotency key, so a
+  timeout retry can neither cross accounts/scopes nor duplicate a record that
+  committed before its response was lost. Browser storage never retains source
+  files or workbook rows, and no import is replayed or rolled back.
+- Existing master-data undo remains the bounded recovery tool for an approved
+  outcome. It is never invoked automatically by retrying an importer.
 
 ### Completion report
 

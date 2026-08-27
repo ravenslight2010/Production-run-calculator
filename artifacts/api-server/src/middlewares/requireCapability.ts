@@ -32,7 +32,7 @@ export function requireLiveScope(req: Request, res: Response, next: NextFunction
   next();
 }
 
-export function requireCapability(capability: Capability) {
+function requireCapabilities(capabilitiesRequired: readonly Capability[], match: "all" | "any") {
   return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
     const userId = req.userId;
     if (!userId) {
@@ -45,8 +45,15 @@ export function requireCapability(capability: Capability) {
       const capabilities = def?.capabilities ?? [];
       req.role = role;
       req.capabilities = capabilities;
-      if (!capabilities.includes(capability)) {
-        res.status(403).json({ error: `Missing capability: ${capability}` });
+      const permitted = match === "all"
+        ? capabilitiesRequired.every((capability) => capabilities.includes(capability))
+        : capabilitiesRequired.some((capability) => capabilities.includes(capability));
+      if (!permitted) {
+        res.status(403).json({
+          error: match === "all"
+            ? `Missing capability: ${capabilitiesRequired.join(", ")}`
+            : `Missing one of capabilities: ${capabilitiesRequired.join(", ")}`,
+        });
         return;
       }
       // Staff/role administration operates on the users, user_roles, roles and
@@ -63,4 +70,13 @@ export function requireCapability(capability: Capability) {
       res.status(500).json({ error: "Capability check failed" });
     }
   };
+}
+
+export function requireCapability(capability: Capability) {
+  return requireCapabilities([capability], "all");
+}
+
+/** Gate a shared operational read surface that is valid for either role. */
+export function requireAnyCapability(capabilities: readonly Capability[]) {
+  return requireCapabilities(capabilities, "any");
 }

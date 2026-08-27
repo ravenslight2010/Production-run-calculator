@@ -1,4 +1,4 @@
-import { pgTable, serial, text, jsonb, timestamp, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, jsonb, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 /** Bounded, sanitized audit records for workbook imports. */
 export const importHistoryTable = pgTable(
@@ -13,10 +13,15 @@ export const importHistoryTable = pgTable(
     status: text("status").notNull(),
     summary: jsonb("summary").notNull(),
     snapshotId: text("snapshot_id"),
+    /** Client-generated idempotency key for safely retrying an audit write. */
+    operationId: text("operation_id"),
+    /** Server-authenticated author, never supplied by the browser. */
+    actorId: text("actor_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     scopeCreatedIdx: index("import_history_scope_created_idx").on(t.scope, t.createdAt),
+    scopeActorOperationIdx: uniqueIndex("import_history_scope_actor_operation_idx").on(t.scope, t.actorId, t.operationId),
   }),
 );
 

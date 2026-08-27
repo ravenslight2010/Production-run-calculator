@@ -2321,6 +2321,12 @@ export type ImportHistoryImportType = typeof ImportHistoryImportType[keyof typeo
 export const ImportHistoryImportType = {
   spec: 'spec',
   premix: 'premix',
+  cheese: 'cheese',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+  shipping: 'shipping',
+  recipe: 'recipe',
 } as const;
 
 export type ImportHistoryStatus = typeof ImportHistoryStatus[keyof typeof ImportHistoryStatus];
@@ -2341,6 +2347,7 @@ export interface ImportHistory {
   status: ImportHistoryStatus;
   summary: ImportHistorySummary;
   snapshotId?: number | null;
+  operationId?: string | null;
   /** Epoch milliseconds */
   createdAt: number;
 }
@@ -2355,6 +2362,12 @@ export type ImportHistoryInputImportType = typeof ImportHistoryInputImportType[k
 export const ImportHistoryInputImportType = {
   spec: 'spec',
   premix: 'premix',
+  cheese: 'cheese',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+  shipping: 'shipping',
+  recipe: 'recipe',
 } as const;
 
 export type ImportHistoryInputStatus = typeof ImportHistoryInputStatus[keyof typeof ImportHistoryInputStatus];
@@ -2372,6 +2385,8 @@ export interface ImportHistoryInput {
   sourceLabel: string;
   customerScope?: string;
   status: ImportHistoryInputStatus;
+  /** Client-generated idempotency key for safely retrying an audit write. */
+  operationId: string;
   summary: ImportHistorySummary;
 }
 
@@ -3993,6 +4008,12 @@ export type ListImportHistoryType = typeof ListImportHistoryType[keyof typeof Li
 export const ListImportHistoryType = {
   spec: 'spec',
   premix: 'premix',
+  cheese: 'cheese',
+  sauce: 'sauce',
+  dough: 'dough',
+  schedule: 'schedule',
+  shipping: 'shipping',
+  recipe: 'recipe',
 } as const;
 
 export type ListImportHistoryStatus = typeof ListImportHistoryStatus[keyof typeof ListImportHistoryStatus];
@@ -4068,4 +4089,3 @@ export type PutSyncToday200 = {
   stale?: boolean;
   epoch?: number;
 };
-

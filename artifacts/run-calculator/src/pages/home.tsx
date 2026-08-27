@@ -353,7 +353,8 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import MixReconcilePanel from "../components/MixReconcilePanel";
-import { recordImportHistory, type ImportHistoryReopenRequest } from "../importHistory";
+import ImportHistoryPanel from "../components/ImportHistoryPanel";
+import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
 import MixAssistChat from "../components/MixAssistChat";
 import {
   dispatchVoiceCommand,
@@ -2885,6 +2886,12 @@ export default function Home() {
     setFloorModeEnabled: persistFloorModeEnabled,
     setNotificationPrefs: persistNotificationPrefs,
   } = useAuth();
+  useEffect(() => {
+    setImportHistoryIdentity(me ? {
+      scope: me.sandbox ? "sandbox" : "live",
+      userId: me.userId,
+    } : null);
+  }, [me?.sandbox, me?.userId]);
   // Shared auto-track suppress ref — owned in Home, passed to LiveRunProvider
   // so both Home callbacks and useAutoTrack suppress the same latch.
   const autoSuppressUntilRef = useRef<number>(0);
@@ -2915,6 +2922,20 @@ export default function Home() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // A successful import must not silently lose its audit trail. The history
+  // helper queues only bounded metadata for a later retry and this notice sends
+  // the manager to the visible recovery control.
+  useEffect(() => {
+    const notifyPendingHistory = () => {
+      toast({
+        title: "Import applied — audit record pending",
+        description: "The reviewed changes remain applied. Open Import workspace to retry saving the audit record.",
+        variant: "destructive",
+      });
+    };
+    window.addEventListener("import-history-pending", notifyPendingHistory);
+    return () => window.removeEventListener("import-history-pending", notifyPendingHistory);
   }, []);
   const autoSandboxResetRef = useRef(false);
   useEffect(() => {
@@ -3983,6 +4004,12 @@ export default function Home() {
       ].filter(Boolean) as string[],
     ),
   );
+  const enabledImporterTypes = new Set<ImportHistoryImportType>([
+    ...(canImportSpec ? ["spec"] as const : []),
+    ...(canImportPremixOrCheese ? ["premix", "cheese"] as const : []),
+    ...(canImportProfileGuide ? ["shipping", "sauce", "dough"] as const : []),
+    ...(canManageProfiles ? ["schedule"] as const : []),
+  ]);
 
   // One-time pool-aware applicator-slot heal (v2 of the mix-slot cleanup).
   // Must wait for the server cheese/mix pools — the v1 pass ran at boot without
@@ -11532,7 +11559,8 @@ export default function Home() {
       setImportDefaultDate(todayStr());
       setImportResult(result);
       setShowImportDialog(true);
-    } catch {
+    } catch (err) {
+      recordImportPreparationFailure("schedule", file.name, err);
       toast({
         variant: "destructive",
         title: "Couldn't read that file",
@@ -11555,6 +11583,71 @@ export default function Home() {
   const shippingImportFileNameRef = useRef<string>("");
   const sauceGuideImportGenRef = useRef(0);
   const doughGuideImportGenRef = useRef(0);
+
+  /**
+   * History never auto-replays an import: snapshots open their existing
+   * scoped review, while every other retry deliberately opens the matching
+   * source picker. This keeps the original approval boundary intact and makes
+   * it clear that a changed source has to be reviewed again.
+   */
+  function startImporterFromOperations(importType: ImportHistoryImportType) {
+    const pickers: Partial<Record<ImportHistoryImportType, () => void>> = {
+      spec: () => specImportInputRef.current?.click(),
+      premix: () => premixImportInputRef.current?.click(),
+      cheese: () => cheeseImportInputRef.current?.click(),
+      shipping: () => shippingImportInputRef.current?.click(),
+      sauce: () => sauceGuideImportInputRef.current?.click(),
+      dough: () => doughGuideImportInputRef.current?.click(),
+      schedule: () => importInputRef.current?.click(),
+    };
+    const openPicker = pickers[importType];
+    if (!openPicker) return;
+    noteBreadcrumb(`import operations: ${importType} source picker opened`);
+    openPicker();
+  }
+
+  function retryImporterFromHistory(item: ImportHistoryItem) {
+    if (
+      item.snapshotId != null &&
+      (item.importType === "spec" || item.importType === "premix")
+    ) {
+      setImportReopenRequest((previous) => ({
+        importType: item.importType === "spec" ? "spec" : "premix",
+        snapshotId: item.snapshotId!,
+        requestId: (previous?.requestId ?? 0) + 1,
+      }));
+      setActiveTab(item.importType === "premix" ? "mixes" : "summary");
+      setShowManageDialog(false);
+      toast({
+        title: "Saved import review reopened",
+        description: "Review the retained source-versus-landed details before applying any scoped repair.",
+      });
+      return;
+    }
+    toast({
+      title: "Choose the original source to retry",
+      description: "Previously applied items stay intact. The source will be parsed and reviewed again before anything changes.",
+    });
+    startImporterFromOperations(item.importType);
+  }
+
+  function recordImportPreparationFailure(
+    importType: "shipping" | "sauce" | "dough" | "schedule",
+    sourceLabel: string,
+    error: unknown,
+  ) {
+    void recordImportHistory({
+      importType,
+      sourceLabel,
+      status: "failed",
+      summary: {
+        phases: { parse: "not completed", linking: "not started", commit: "not started" },
+        source: { files: 1 },
+        warnings: [error instanceof Error ? error.message : "Could not read or interpret the source file."],
+        followUp: ["Retry the original source file. Nothing was applied."],
+      },
+    }).catch(() => {});
+  }
 
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
@@ -11622,6 +11715,18 @@ export default function Home() {
       setSpecImportPrepared(prepared);
     } catch (err) {
       if (gen !== specImportGenRef.current) return;
+      void recordImportHistory({
+        importType: "spec",
+        sourceKey: deriveSourceKey(files.map((file) => file.name)),
+        sourceLabel: files.map((file) => file.name).join(", ") || "Spec sheet",
+        status: "failed",
+        summary: {
+          phases: { parse: "not completed", linking: "not started", commit: "not started" },
+          source: { files: files.length },
+          warnings: [err instanceof Error ? err.message : "Could not read or interpret the source files."],
+          followUp: ["Retry the original source files. Nothing was applied."],
+        },
+      }).catch(() => {});
       setSpecImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -11740,7 +11845,7 @@ export default function Home() {
         sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
         sourceLabel: (toCommit.sourceNames ?? []).join(", ") || "Spec sheet",
         customerScope: [...new Set(appliedParsed.profiles.map((p) => p.brand).filter(Boolean))].join(", "),
-        status: aliasSaveFailed ? "partial" : "complete",
+        status: aliasSaveFailed || toCommit.note?.includes("could not be read") ? "partial" : "complete",
         summary: {
           phases: { parse: toCommit.note?.includes("reused") ? "reused saved parse" : "fresh AI parse", linking: "deterministic linking", commit: "committed changes" },
           counts: {
@@ -11786,8 +11891,22 @@ export default function Home() {
                 entity: rename.kind,
                 message: `Renames "${rename.externalName.trim()}" to "${rename.canonicalName.trim()}".`,
               })),
+            ...learnedRenames
+              .filter((rename) => {
+                const from = rename.externalName.trim().toLowerCase();
+                const to = rename.canonicalName.trim().toLowerCase();
+                return from && to && from !== to;
+              })
+              .map((rename) => ({
+                kind: "approved-name-match",
+                entity: rename.kind,
+                message: `Manager-approved mapping: "${rename.externalName.trim()}" → "${rename.canonicalName.trim()}".`,
+              })),
           ],
-          followUp: aliasSaveFailed ? ["Reopen the saved import review and confirm the name mappings again."] : [],
+          followUp: [
+            ...(aliasSaveFailed ? ["Reopen the saved import review and confirm the name mappings again."] : []),
+            ...(toCommit.note?.includes("could not be read") ? ["Reopen the saved review and resolve or retry the skipped source files."] : []),
+          ],
           snapshotId: specSnapshotId,
         },
       }).catch(() => {});
@@ -12196,6 +12315,18 @@ export default function Home() {
       setPremixImportPrepared(prepared);
     } catch (err) {
       if (gen !== premixImportGenRef.current) return;
+      void recordImportHistory({
+        importType: "premix",
+        sourceKey: deriveSourceKey(files.map((file) => file.name)),
+        sourceLabel: files.map((file) => file.name).join(", ") || "Premix sheet",
+        status: "failed",
+        summary: {
+          phases: { parse: "not completed", linking: "not started", commit: "not started" },
+          source: { files: files.length },
+          warnings: [err instanceof Error ? err.message : "Could not read or interpret the source files."],
+          followUp: ["Retry the original source files. Nothing was applied."],
+        },
+      }).catch(() => {});
       setPremixImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -12279,7 +12410,17 @@ export default function Home() {
           ],
           warnings: [premixImportPrepared.note ?? "", result.warning ?? ""].filter(Boolean),
           skipped: premixImportPrepared.candidates.filter((c) => !mixesToApply.some((m) => m.id === c.mix.id)).map((c) => c.mix.name),
-          followUp: result.warning ? ["Open Freezer Pull settings and save the missing reminders."] : [],
+          changes: newAliases
+            .filter((alias) => alias.externalName.trim() && alias.canonicalName.trim() && alias.externalName.trim().toLowerCase() !== alias.canonicalName.trim().toLowerCase())
+            .map((alias) => ({
+              kind: "approved-name-match",
+              entity: alias.kind,
+              message: `Manager-approved mapping: "${alias.externalName.trim()}" → "${alias.canonicalName.trim()}".`,
+            })),
+          followUp: [
+            ...(result.warning ? ["Open Freezer Pull settings and save the missing reminders."] : []),
+            ...(premixImportPrepared.note?.includes("could not be read") ? ["Reopen the saved review and resolve or retry the skipped source files."] : []),
+          ],
           snapshotId: premixSnapshotId,
         },
       }).catch(() => {});
@@ -12354,6 +12495,7 @@ export default function Home() {
       setShippingImportPrepared(prepared);
     } catch (err) {
       if (gen !== shippingImportGenRef.current) return;
+      recordImportPreparationFailure("shipping", file.name, err);
       setShippingImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -12477,6 +12619,7 @@ export default function Home() {
       setSauceGuideImportPrepared(prepared);
     } catch (err) {
       if (gen !== sauceGuideImportGenRef.current) return;
+      recordImportPreparationFailure("sauce", file.name, err);
       setSauceGuideImportError(err instanceof Error ? err.message : "Could not read the sauce guide.");
     } finally {
       if (gen === sauceGuideImportGenRef.current) setSauceGuideImportLoading(false);
@@ -12551,6 +12694,7 @@ export default function Home() {
       setDoughGuideImportPrepared(prepared);
     } catch (err) {
       if (gen !== doughGuideImportGenRef.current) return;
+      recordImportPreparationFailure("dough", file.name, err);
       setDoughGuideImportError(err instanceof Error ? err.message : "Could not read the dough recipe guide.");
     } finally {
       if (gen === doughGuideImportGenRef.current) setDoughGuideImportLoading(false);
@@ -12650,6 +12794,18 @@ export default function Home() {
       setCheeseImportPrepared(prepared);
     } catch (err) {
       if (gen !== cheeseImportGenRef.current) return;
+      void recordImportHistory({
+        importType: "cheese",
+        sourceKey: deriveSourceKey(files.map((file) => file.name)),
+        sourceLabel: files.map((file) => file.name).join(", ") || "Cheese recipe sheet",
+        status: "failed",
+        summary: {
+          phases: { parse: "not completed", linking: "not started", commit: "not started" },
+          source: { files: files.length },
+          warnings: [err instanceof Error ? err.message : "Could not read or interpret the source files."],
+          followUp: ["Retry the original source files. Nothing was applied."],
+        },
+      }).catch(() => {});
       setCheeseImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -12704,7 +12860,7 @@ export default function Home() {
         sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
         sourceLabel: (cheeseImportPrepared.sourceNames ?? []).join(", ") || "Cheese recipe sheet",
         customerScope: [...new Set(recipesToApply.map((r) => r.brand).filter(Boolean))].join(", "),
-        status: recipesToRemove.length > 0 ? "partial" : "complete",
+        status: recipesToRemove.length > 0 || cheeseImportPrepared.note?.includes("could not be read") ? "partial" : "complete",
         summary: {
           phases: { parse: "deterministic parse", linking: "reviewed recipe links", commit: "committed recipe pool" },
           source: {
@@ -12743,7 +12899,18 @@ export default function Home() {
                   },
                 ],
               }
-            : {}),
+            : {
+                changes: newAliases
+                  .filter((alias) => alias.externalName.trim() && alias.canonicalName.trim() && alias.externalName.trim().toLowerCase() !== alias.canonicalName.trim().toLowerCase())
+                  .map((alias) => ({
+                    kind: "approved-name-match",
+                    entity: alias.kind,
+                    message: `Manager-approved mapping: "${alias.externalName.trim()}" → "${alias.canonicalName.trim()}".`,
+                  })),
+              }),
+          followUp: cheeseImportPrepared.note?.includes("could not be read")
+            ? ["Review the skipped source files and retry them before relying on this import."]
+            : [],
         },
       }).catch(() => {});
       // Refresh the shared cheese-recipes query so imported recipes appear
@@ -12759,6 +12926,17 @@ export default function Home() {
       // recipes by name, and refresh pending runs + the open form.
       void propagateCheeseRecipeUpdates(result.saved);
     } catch (err) {
+      void recordImportHistory({
+        importType: "cheese",
+        sourceKey: deriveSourceKey(cheeseImportPrepared?.sourceNames ?? []),
+        sourceLabel: (cheeseImportPrepared?.sourceNames ?? []).join(", ") || "Cheese recipe sheet",
+        status: "failed",
+        summary: {
+          phases: { parse: "completed", linking: "completed", commit: "not completed" },
+          warnings: [err instanceof Error ? err.message : "Import failed while saving."],
+          followUp: ["Retry the import from its reviewed source; no automatic rollback was performed."],
+        },
+      }).catch(() => {});
       setCheeseImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
       );
@@ -12786,7 +12964,8 @@ export default function Home() {
       setImportDefaultDate(scheduleEditorDate || todayStr());
       setImportResult(result);
       setShowImportDialog(true);
-    } catch {
+    } catch (err) {
+      recordImportPreparationFailure("schedule", file.name, err);
       toast({
         variant: "destructive",
         title: "Couldn't read that file",
@@ -15030,6 +15209,22 @@ export default function Home() {
                 {manageCategory === "import" && (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
+                    {(canManageProfiles || canManageInventory) && (
+                      <ImportHistoryPanel
+                        refreshSignal={sheetListSignal}
+                        enabledImporters={enabledImporterTypes}
+                        onStart={startImporterFromOperations}
+                        onRetry={retryImporterFromHistory}
+                        onReopen={(request) => {
+                          setImportReopenRequest((previous) => ({
+                            ...request,
+                            requestId: (previous?.requestId ?? 0) + 1,
+                          }));
+                          setActiveTab(request.importType === "premix" ? "mixes" : "summary");
+                          setShowManageDialog(false);
+                        }}
+                      />
+                    )}
                     {canImportSpec && (
                       <div className="rounded-md border border-border bg-muted/40 p-3 space-y-1.5">
                         <p className="text-xs font-semibold text-foreground">Best import order</p>
@@ -16645,6 +16840,9 @@ export default function Home() {
                     }}
                     importHistory={hasCapability("manage-profiles") ? {
                       refreshSignal: sheetListSignal,
+                      enabledImporters: enabledImporterTypes,
+                      onStart: startImporterFromOperations,
+                      onRetry: retryImporterFromHistory,
                       onReopen: (request) => {
                         setImportReopenRequest((previous) => ({
                           ...request,

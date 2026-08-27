@@ -15,5 +15,7 @@ export interface ImportHistoryInput {
   sourceLabel: string;
   customerScope?: string;
   status: ImportHistoryInputStatus;
+  /** Client-generated idempotency key for safely retrying an audit write. */
+  operationId: string;
   summary: ImportHistorySummary;
 }

@@ -18,6 +18,7 @@ export interface ImportHistory {
   status: ImportHistoryStatus;
   summary: ImportHistorySummary;
   snapshotId?: number | null;
+  operationId?: string | null;
   /** Epoch milliseconds */
   createdAt: number;
 }
