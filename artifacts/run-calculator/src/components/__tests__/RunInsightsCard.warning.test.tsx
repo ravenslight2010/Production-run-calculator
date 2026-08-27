@@ -74,7 +74,12 @@ function renderCard(
   const qc = makeQueryClient();
   return render(
     <QueryClientProvider client={qc}>
-      <RunInsightsCard onAccept={onAccept} getAcceptWarning={getAcceptWarning} />
+      <RunInsightsCard
+        brand="Acme"
+        flavor="Pepperoni"
+        onAccept={onAccept}
+        getAcceptWarning={getAcceptWarning}
+      />
     </QueryClientProvider>,
   );
 }
@@ -92,6 +97,46 @@ afterEach(() => {
 });
 
 describe("RunInsightsCard — accept warning visibility", () => {
+  it("renders only suggestions for the product being reviewed", async () => {
+    vi.mocked(fetchRunSuggestions).mockResolvedValue([
+      makeSuggestion(),
+      makeSuggestion({
+        id: "sug-other",
+        brand: "Other Brand",
+        flavor: "Other Flavor",
+        updatedAt: Date.now() + 1,
+      }),
+    ]);
+
+    renderCard(() => null);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("suggestion-speed-target")).toBeTruthy(),
+    );
+
+    expect(screen.getByTestId("suggestion-speed-target").textContent).toContain("Acme Pepperoni");
+    expect(screen.queryByText(/Other Brand Other Flavor/)).toBeNull();
+  });
+
+  it("cancels the suggestions query when the card unmounts", async () => {
+    let querySignal: AbortSignal | undefined;
+    vi.mocked(fetchRunSuggestions).mockImplementation((signal) => {
+      querySignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+
+    const { unmount } = renderCard(() => null);
+    await waitFor(() => expect(querySignal).toBeInstanceOf(AbortSignal));
+
+    unmount();
+
+    expect(querySignal?.aborted).toBe(true);
+  });
+
   it("shows the warning element when getAcceptWarning returns a non-empty string", async () => {
     renderCard(() => "No saved setup for this product — open its Setup profile first.");
 
@@ -162,7 +207,12 @@ describe("RunInsightsCard — accept warning visibility", () => {
 
     const { rerender } = render(
       <QueryClientProvider client={qc}>
-        <RunInsightsCard onAccept={onAccept} getAcceptWarning={(s) => getAcceptWarningFn(s)} />
+        <RunInsightsCard
+          brand="Acme"
+          flavor="Pepperoni"
+          onAccept={onAccept}
+          getAcceptWarning={(s) => getAcceptWarningFn(s)}
+        />
       </QueryClientProvider>,
     );
 
@@ -178,7 +228,12 @@ describe("RunInsightsCard — accept warning visibility", () => {
 
     rerender(
       <QueryClientProvider client={qc}>
-        <RunInsightsCard onAccept={onAccept} getAcceptWarning={(s) => getAcceptWarningFn(s)} />
+        <RunInsightsCard
+          brand="Acme"
+          flavor="Pepperoni"
+          onAccept={onAccept}
+          getAcceptWarning={(s) => getAcceptWarningFn(s)}
+        />
       </QueryClientProvider>,
     );
 

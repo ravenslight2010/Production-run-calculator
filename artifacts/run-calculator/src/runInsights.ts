@@ -359,8 +359,10 @@ export function statFromRun(meta: RunMeta, vals: FormValues): FinishedRunStat | 
 export async function reportRunInsightsAfterFinalize(
   endedRuns: RunMeta[],
   todayRuns: RunMeta[],
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
+    if (signal?.aborted) return;
     const scopes = new Set<string>();
     for (const r of endedRuns) {
       if (r.brand || r.flavor) {
@@ -389,15 +391,18 @@ export async function reportRunInsightsAfterFinalize(
 
     const candidates = evaluateRunInsights(stats, scopes);
     for (const c of candidates) {
-      await observeRunSuggestion(c).catch(() => {});
+      if (signal?.aborted) return;
+      await observeRunSuggestion(c, signal).catch(() => {});
     }
 
     // Post-accept feedback: if an accepted suggestion for one of these scopes
     // has no follow-up note yet, judge the just-finished run against it.
     if (candidates.length < scopes.size || candidates.length === 0) {
-      const suggestions = await fetchRunSuggestions().catch(() => [] as RunSuggestion[]);
+      if (signal?.aborted) return;
+      const suggestions = await fetchRunSuggestions(signal).catch(() => [] as RunSuggestion[]);
       const accepted = suggestions.filter((s) => s.status === "accepted" && !s.followUpNote);
       for (const s of accepted) {
+        if (signal?.aborted) return;
         const key = insightScopeKey(s.brand, s.flavor, s.dieType);
         if (!scopes.has(key)) continue;
         const latest = stats
@@ -405,7 +410,7 @@ export async function reportRunInsightsAfterFinalize(
           .sort((a, b) => b.endedAt - a.endedAt)[0];
         if (!latest) continue;
         const note = computeFollowUpNote(latest, s);
-        if (note) await followUpRunSuggestion(s.id, note).catch(() => {});
+        if (note) await followUpRunSuggestion(s.id, note, signal).catch(() => {});
       }
     }
   } catch {
@@ -437,20 +442,25 @@ function headers(): Record<string, string> {
   return { "Content-Type": "application/json", "x-client-id": inventoryClientId() };
 }
 
-export async function fetchRunSuggestions(): Promise<RunSuggestion[]> {
+export async function fetchRunSuggestions(signal?: AbortSignal): Promise<RunSuggestion[]> {
   const res = await fetch("/api/run-suggestions", {
     headers: { "x-client-id": inventoryClientId() },
+    signal,
   });
   if (!res.ok) throw new Error(`List run suggestions failed (${res.status})`);
   const data = (await res.json()) as { suggestions?: RunSuggestion[] };
   return Array.isArray(data.suggestions) ? data.suggestions : [];
 }
 
-export async function observeRunSuggestion(candidate: SuggestionCandidate): Promise<void> {
+export async function observeRunSuggestion(
+  candidate: SuggestionCandidate,
+  signal?: AbortSignal,
+): Promise<void> {
   const res = await fetch("/api/run-suggestions/observe", {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(candidate),
+    signal,
   });
   if (!res.ok) throw new Error(`Observe run suggestion failed (${res.status})`);
 }
@@ -469,11 +479,16 @@ export async function updateRunSuggestion(
   return Array.isArray(data.suggestions) ? data.suggestions : [];
 }
 
-export async function followUpRunSuggestion(id: string, note: string): Promise<void> {
+export async function followUpRunSuggestion(
+  id: string,
+  note: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const res = await fetch("/api/run-suggestions/follow-up", {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ id, note }),
+    signal,
   });
   if (!res.ok) throw new Error(`Run suggestion follow-up failed (${res.status})`);
 }

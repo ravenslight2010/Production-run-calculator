@@ -2958,6 +2958,15 @@ export default function Home() {
         // let the NEXT app load (or a manual reset) try again — never mid-session.
       });
   }, [me]);
+  const runInsightsAbortControllerRef = useRef(new AbortController());
+  useEffect(() => {
+    // Strict Mode performs a setup → cleanup → setup cycle in development.
+    // Allocate per setup so the second mount never inherits the aborted signal
+    // from the first cleanup.
+    const controller = new AbortController();
+    runInsightsAbortControllerRef.current = controller;
+    return () => controller.abort();
+  }, []);
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   // Declared here (not with the other sync refs below) because render-time
   // callers — e.g. the mergeUniverse memo via collectMergeSurfaces() — run
@@ -10572,7 +10581,13 @@ export default function Home() {
       (r, i) =>
         i !== index && r.endedAt === now && base.runs[i]?.startedAt && !base.runs[i]?.endedAt,
     );
-    if (autoEnded.length > 0) void reportRunInsightsAfterFinalize(autoEnded, newRuns);
+    if (autoEnded.length > 0) {
+      void reportRunInsightsAfterFinalize(
+        autoEnded,
+        newRuns,
+        runInsightsAbortControllerRef.current.signal,
+      );
+    }
   }
 
   function pauseRun() {
@@ -10870,6 +10885,7 @@ export default function Home() {
     void reportRunInsightsAfterFinalize(
       newRuns.filter((r) => r.id === activeRunId),
       newRuns,
+      runInsightsAbortControllerRef.current.signal,
     );
     if (nextIndex !== index) {
       const nextId = base.runs[nextIndex].id;
@@ -16070,6 +16086,8 @@ export default function Home() {
                     suppresses. Renders nothing when there's nothing to show. */}
                 {isManager && (
                   <RunInsightsCard
+                    brand={currentRun?.brand ?? ""}
+                    flavor={currentRun?.flavor ?? ""}
                     onAccept={applyRunSuggestion}
                     getAcceptWarning={getRunSuggestionAcceptWarning}
                   />

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Lightbulb, Check, X, RefreshCw, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,9 @@ import {
   updateRunSuggestion,
   type RunSuggestion,
 } from "@/runInsights";
-import { RUN_SUGGESTIONS_QUERY_KEY } from "@/runInsightsQuery";
+import {
+  runSuggestionsQueryKey,
+} from "@/runInsightsQuery";
 
 // Manager-only "Run Insights" card (Setup tab). Shows ONE pending suggestion
 // at a time — a deterministic, pattern-based recommendation to adjust a
@@ -17,9 +19,14 @@ import { RUN_SUGGESTIONS_QUERY_KEY } from "@/runInsightsQuery";
 // until it recurs. Also surfaces post-accept follow-up notes ("the update
 // seems accurate") with a Got-it clear action. Nothing is ever auto-applied.
 export default function RunInsightsCard({
+  brand,
+  flavor,
   onAccept,
   getAcceptWarning,
 }: {
+  /** Product currently being reviewed in Setup. */
+  brand: string;
+  flavor: string;
   /** Applies the accepted setting change; resolves to a confirmation line. */
   onAccept: (s: RunSuggestion) => Promise<string>;
   /**
@@ -34,14 +41,32 @@ export default function RunInsightsCard({
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showDismissed, setShowDismissed] = useState(false);
+  const normalizedBrand = brand.trim().toLowerCase();
+  const normalizedFlavor = flavor.trim().toLowerCase();
+  const hasProductIdentity = Boolean(normalizedBrand || normalizedFlavor);
+  const queryKey = useMemo(
+    () => runSuggestionsQueryKey(normalizedBrand, normalizedFlavor),
+    [normalizedBrand, normalizedFlavor],
+  );
+
+  useEffect(() => {
+    setConfirmation(null);
+    setError(null);
+    setShowDismissed(false);
+  }, [normalizedBrand, normalizedFlavor]);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: RUN_SUGGESTIONS_QUERY_KEY,
-    queryFn: fetchRunSuggestions,
+    queryKey,
+    queryFn: ({ signal }) => fetchRunSuggestions(signal),
     staleTime: 30_000,
+    enabled: hasProductIdentity,
   });
 
-  const suggestions = data ?? [];
+  const suggestions = (data ?? []).filter(
+    (s) =>
+      s.brand.trim().toLowerCase() === normalizedBrand &&
+      s.flavor.trim().toLowerCase() === normalizedFlavor,
+  );
   const pending = suggestions
     .filter((s) => s.status === "pending")
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -57,11 +82,11 @@ export default function RunInsightsCard({
       const updated = await updateRunSuggestion(s.id, { status: "accepted" });
       return { message, updated };
     },
-    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
+    onMutate: () => qc.cancelQueries({ queryKey }),
     onSuccess: ({ message, updated }) => {
       setError(null);
       setConfirmation(message);
-      qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated);
+      qc.setQueryData(queryKey, updated);
     },
     onError: (err) => {
       setConfirmation(null);
@@ -71,10 +96,10 @@ export default function RunInsightsCard({
 
   const dismissMutation = useMutation({
     mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { status: "dismissed" }),
-    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
+    onMutate: () => qc.cancelQueries({ queryKey }),
     onSuccess: (updated) => {
       setError(null);
-      qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated);
+      qc.setQueryData(queryKey, updated);
     },
     onError: (err) =>
       setError(err instanceof Error ? err.message : "Couldn't dismiss the suggestion."),
@@ -82,23 +107,26 @@ export default function RunInsightsCard({
 
   const clearFollowUpMutation = useMutation({
     mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { clearFollowUp: true }),
-    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
-    onSuccess: (updated) => qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated),
+    onMutate: () => qc.cancelQueries({ queryKey }),
+    onSuccess: (updated) => qc.setQueryData(queryKey, updated),
   });
 
   const reopenMutation = useMutation({
     mutationFn: (s: RunSuggestion) => updateRunSuggestion(s.id, { status: "pending" }),
-    onMutate: () => qc.cancelQueries({ queryKey: RUN_SUGGESTIONS_QUERY_KEY }),
+    onMutate: () => qc.cancelQueries({ queryKey }),
     onSuccess: (updated) => {
       setError(null);
-      qc.setQueryData(RUN_SUGGESTIONS_QUERY_KEY, updated);
+      qc.setQueryData(queryKey, updated);
     },
     onError: (err) =>
       setError(err instanceof Error ? err.message : "Couldn't re-open the suggestion."),
   });
 
   // Nothing to show at all → render nothing (keeps the Setup tab clean).
-  if (!isLoading && !current && followUps.length === 0 && dismissed.length === 0 && !confirmation && !error) return null;
+  if (
+    !hasProductIdentity ||
+    (!isLoading && !current && followUps.length === 0 && dismissed.length === 0 && !confirmation && !error)
+  ) return null;
 
   const busy = acceptMutation.isPending || dismissMutation.isPending || reopenMutation.isPending;
   const acceptWarning = current ? (getAcceptWarning?.(current) ?? null) : null;

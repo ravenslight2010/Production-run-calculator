@@ -93,12 +93,37 @@ async function apiSignUp(
  * Browser sign-in form → wait for the main app to be ready.
  * Assumes onboarding_seen = true (no overlay to dismiss).
  */
-async function signIn(page: Page, username: string, password: string): Promise<void> {
+async function signIn(
+  page: Page,
+  username: string,
+  password: string,
+  product: { brand: string; flavor: string },
+): Promise<void> {
   // This fixture creates a synthetic server profile without mutating the shared
   // factory brand list. Skip the one-time legacy orphan-profile cleanup so it
   // does not delete that deliberately isolated record during startup.
-  await page.addInitScript(() => {
+  await page.addInitScript(({ brand, flavor, runId }) => {
     localStorage.setItem("run-calc-purge-orphaned-profiles-v1", "1");
+    localStorage.setItem("run-calc-day", JSON.stringify({
+      runs: [{ id: runId, brand, flavor, seeded: false }],
+      currentIndex: 0,
+      date: new Date().toISOString().slice(0, 10),
+      resetAt: 0,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+      prepPhase: {
+        prepStartedAt: null,
+        prepBatchesDough: 0,
+        prepBatchesSauce: 0,
+        prepCarriedOver: false,
+      },
+    }));
+    localStorage.setItem(`run-calc-run-${runId}`, JSON.stringify({}));
+  }, {
+    brand: product.brand,
+    flavor: product.flavor,
+    runId: `run-insights-${username}`,
   });
   await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
   await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
@@ -214,9 +239,18 @@ test.afterAll(async () => {
 
 test.describe("Run Insights — accept, dismiss, follow-up", () => {
   const FIXTURE_SUFFIX = uid();
-  const BRAND = `InsightBrand_${FIXTURE_SUFFIX}`;
-  const FLAVOR_A = `FlavorAccept_${FIXTURE_SUFFIX}`;
-  const FLAVOR_B = `FlavorDismiss_${FIXTURE_SUFFIX}`;
+  const ACCEPT_PRODUCT = {
+    brand: `InsightBrandAccept_${FIXTURE_SUFFIX}`,
+    flavor: `FlavorAccept_${FIXTURE_SUFFIX}`,
+  };
+  const DISMISS_PRODUCT = {
+    brand: `InsightBrandDismiss_${FIXTURE_SUFFIX}`,
+    flavor: `FlavorDismiss_${FIXTURE_SUFFIX}`,
+  };
+  const FOLLOW_UP_PRODUCT = {
+    brand: `InsightBrandFollowUp_${FIXTURE_SUFFIX}`,
+    flavor: `FlavorFollowUp_${FIXTURE_SUFFIX}`,
+  };
   const CONFIGURED_SPEED = 10;
   const RECOMMENDED_SPEED = 12.5;
 
@@ -227,15 +261,26 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // Suggestions are factory-wide, not user-scoped. A timed-out release run
     // can be terminated before afterEach cleanup, leaving a pending fixture
     // that would be rendered alongside this test's deliberately unique one.
-    await db.query("DELETE FROM run_suggestions WHERE brand LIKE 'InsightBrand_e2e_ri_%'");
-    await db.query("DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand_e2e_ri_%'");
+    await db.query("DELETE FROM run_suggestions WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
+    await db.query("DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
+    await db.query(
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [new Date().toISOString().slice(0, 10)],
+    );
   });
 
-  test.afterEach(async () => {
-    // Clean up test suggestions, brand profiles, and user (user_roles cascades)
-    await db.query("DELETE FROM run_suggestions WHERE brand = $1", [BRAND]);
-    await db.query("DELETE FROM brand_profiles WHERE brand = $1", [BRAND]);
-    await db.query("DELETE FROM users WHERE username = $1", [username]);
+  test.afterEach(async ({ page }) => {
+    // Close the page before deleting shared fixtures. This aborts any
+    // finalize-time observation still owned by the scenario instead of letting
+    // it recreate a suggestion after cleanup.
+    await page.close();
+    await db.query("DELETE FROM run_suggestions WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
+    await db.query("DELETE FROM brand_profiles WHERE brand LIKE 'InsightBrand%_e2e_ri_%'");
+    await db.query(
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [new Date().toISOString().slice(0, 10)],
+    );
+    if (username) await db.query("DELETE FROM users WHERE username = $1", [username]);
   });
 
   test("Accept changes cycleSpeed in the saved profile and shows confirmation", async ({
@@ -248,11 +293,24 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // so the profile exists when the app's startup sync (seedProfilesFromServer)
     // runs and populates localStorage.
     ({ token } = await apiSignUp(request, db, username, "TestPass123!"));
-    await createProfile(request, token, BRAND, FLAVOR_A, CONFIGURED_SPEED);
-    await observeSuggestion(request, token, BRAND, FLAVOR_A, CONFIGURED_SPEED, RECOMMENDED_SPEED);
+    await createProfile(
+      request,
+      token,
+      ACCEPT_PRODUCT.brand,
+      ACCEPT_PRODUCT.flavor,
+      CONFIGURED_SPEED,
+    );
+    await observeSuggestion(
+      request,
+      token,
+      ACCEPT_PRODUCT.brand,
+      ACCEPT_PRODUCT.flavor,
+      CONFIGURED_SPEED,
+      RECOMMENDED_SPEED,
+    );
 
     // Step 2: Browser sign-in — the startup sync reads the server profile into localStorage
-    await signIn(page, username, "TestPass123!");
+    await signIn(page, username, "TestPass123!", ACCEPT_PRODUCT);
 
     // Step 3: Navigate to Setup tab and refresh the Insights card
     await goToSetup(page);
@@ -263,8 +321,8 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     // Step 4: Verify the suggestion card is rendered
     const suggestionBlock = page.locator('[data-testid="suggestion-speed-target"]');
     await suggestionBlock.waitFor({ state: "visible", timeout: 10_000 });
-    await expect(suggestionBlock).toContainText(BRAND);
-    await expect(suggestionBlock).toContainText(FLAVOR_A);
+    await expect(suggestionBlock).toContainText(ACCEPT_PRODUCT.brand);
+    await expect(suggestionBlock).toContainText(ACCEPT_PRODUCT.flavor);
     await expect(suggestionBlock).toContainText(String(RECOMMENDED_SPEED));
 
     // Step 5: Accept the suggestion
@@ -295,7 +353,8 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
               crustValues: Record<string, unknown>;
             }>;
           };
-          const key = `${BRAND.toLowerCase()}__${FLAVOR_A.toLowerCase()}`;
+          const key =
+            `${ACCEPT_PRODUCT.brand.toLowerCase()}__${ACCEPT_PRODUCT.flavor.toLowerCase()}`;
           return items.find((p) => p.key === key)?.crustValues?.cycleSpeed;
         },
         {
@@ -312,9 +371,22 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
   }) => {
     username = uid();
     ({ token } = await apiSignUp(request, db, username, "TestPass123!"));
-    await createProfile(request, token, BRAND, FLAVOR_B, CONFIGURED_SPEED);
-    await observeSuggestion(request, token, BRAND, FLAVOR_B, CONFIGURED_SPEED, RECOMMENDED_SPEED);
-    await signIn(page, username, "TestPass123!");
+    await createProfile(
+      request,
+      token,
+      DISMISS_PRODUCT.brand,
+      DISMISS_PRODUCT.flavor,
+      CONFIGURED_SPEED,
+    );
+    await observeSuggestion(
+      request,
+      token,
+      DISMISS_PRODUCT.brand,
+      DISMISS_PRODUCT.flavor,
+      CONFIGURED_SPEED,
+      RECOMMENDED_SPEED,
+    );
+    await signIn(page, username, "TestPass123!", DISMISS_PRODUCT);
 
     await goToSetup(page);
     const refreshBtn = page.locator('[data-testid="button-run-insights-refresh"]');
@@ -323,7 +395,9 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
 
     const suggestionBlock = page.locator('[data-testid="suggestion-speed-target"]');
     await suggestionBlock.waitFor({ state: "visible", timeout: 10_000 });
-    await expect(suggestionBlock).toContainText(BRAND);
+    await expect(suggestionBlock).toContainText(DISMISS_PRODUCT.brand);
+    await expect(suggestionBlock).toContainText(DISMISS_PRODUCT.flavor);
+    await expect(suggestionBlock).not.toContainText(ACCEPT_PRODUCT.flavor);
 
     // Dismiss the suggestion
     const dismissBtn = page.locator('[data-testid="button-run-insights-dismiss"]');
@@ -340,8 +414,8 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
       headers: { "Content-Type": "application/json", Cookie: `rc_auth=${token}` },
       data: {
         type: "speed-target",
-        brand: BRAND,
-        flavor: FLAVOR_B,
+        brand: DISMISS_PRODUCT.brand,
+        flavor: DISMISS_PRODUCT.flavor,
         dieType: "",
         observedValue: RECOMMENDED_SPEED,
         configuredValue: CONFIGURED_SPEED,
@@ -366,18 +440,33 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
   }) => {
     username = uid();
     ({ token } = await apiSignUp(request, db, username, "TestPass123!"));
-    await createProfile(request, token, BRAND, FLAVOR_A, CONFIGURED_SPEED);
-    await observeSuggestion(request, token, BRAND, FLAVOR_A, CONFIGURED_SPEED, RECOMMENDED_SPEED);
-    await signIn(page, username, "TestPass123!");
+    await createProfile(
+      request,
+      token,
+      FOLLOW_UP_PRODUCT.brand,
+      FOLLOW_UP_PRODUCT.flavor,
+      CONFIGURED_SPEED,
+    );
+    await observeSuggestion(
+      request,
+      token,
+      FOLLOW_UP_PRODUCT.brand,
+      FOLLOW_UP_PRODUCT.flavor,
+      CONFIGURED_SPEED,
+      RECOMMENDED_SPEED,
+    );
+    await signIn(page, username, "TestPass123!", FOLLOW_UP_PRODUCT);
 
     // Accept the suggestion first so it moves to "accepted" status
     await goToSetup(page);
     const refreshBtn = page.locator('[data-testid="button-run-insights-refresh"]');
     await refreshBtn.waitFor({ state: "visible", timeout: 10_000 });
     await refreshBtn.click();
-    await page
-      .locator('[data-testid="suggestion-speed-target"]')
-      .waitFor({ state: "visible", timeout: 10_000 });
+    const suggestionBlock = page.locator('[data-testid="suggestion-speed-target"]');
+    await suggestionBlock.waitFor({ state: "visible", timeout: 10_000 });
+    await expect(suggestionBlock).toContainText(FOLLOW_UP_PRODUCT.brand);
+    await expect(suggestionBlock).toContainText(FOLLOW_UP_PRODUCT.flavor);
+    await expect(suggestionBlock).not.toContainText(ACCEPT_PRODUCT.flavor);
     await page.locator('[data-testid="button-run-insights-accept"]').click();
     await page
       .locator('[data-testid="text-run-insights-confirmation"]')
@@ -392,7 +481,10 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
       suggestions: Array<{ id: string; brand: string; flavor: string; status: string }>;
     };
     const accepted = suggestions.find(
-      (s) => s.brand === BRAND && s.flavor === FLAVOR_A && s.status === "accepted",
+      (s) =>
+        s.brand === FOLLOW_UP_PRODUCT.brand &&
+        s.flavor === FOLLOW_UP_PRODUCT.flavor &&
+        s.status === "accepted",
     );
     expect(accepted, "accepted suggestion not found after Accept click").toBeTruthy();
 
@@ -410,6 +502,8 @@ test.describe("Run Insights — accept, dismiss, follow-up", () => {
     await refreshBtn.click();
     const followUpEl = page.locator('[data-testid="text-run-insights-followup-speed-target"]');
     await followUpEl.waitFor({ state: "visible", timeout: 10_000 });
+    await expect(followUpEl).toContainText(FOLLOW_UP_PRODUCT.brand);
+    await expect(followUpEl).toContainText(FOLLOW_UP_PRODUCT.flavor);
     await expect(followUpEl).toContainText("Speed target update seems accurate");
 
     // Click "Got it" — the note must disappear
