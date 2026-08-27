@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, ExternalLink, Lock, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,32 +14,99 @@ const age = (value: string) => {
   const days = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 86400000));
   return days ? `${days}d old` : "today";
 };
+const queueStatuses = ["open", "in_progress", "deferred", "resolved"] as const;
+type QueueData = { items: ActionItem[]; counts: Record<string, number> };
+type QueueMutationVariables = {
+  item: ActionItem;
+  input: Parameters<typeof updateActionItem>[1];
+  queryKey: readonly ["manager-action-queue", string, string];
+};
+
+const ActionQueueItemCard = memo(function ActionQueueItemCard({
+  item,
+  assignees,
+  mutationPending,
+  noteOpen,
+  note,
+  onNoteChange,
+  onToggleNote,
+  onUpdate,
+  onNavigate,
+}: {
+  item: ActionItem;
+  assignees: Array<{ userId: string; name: string }>;
+  mutationPending: boolean;
+  noteOpen: boolean;
+  note: string;
+  onNoteChange: (value: string) => void;
+  onToggleNote: (id: number) => void;
+  onUpdate: (item: ActionItem, input: Parameters<typeof updateActionItem>[1]) => void;
+  onNavigate?: (tab: string) => void;
+}) {
+  const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState;
+  return <div key={item.id} className="rounded-md border border-border bg-background p-3" style={{ contentVisibility: "auto", containIntrinsicSize: "0 124px" }}>
+    <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[state]}`} data-testid={`attention-state-${item.id}`}>{ATTENTION_STATE_LABEL[state]}</span><span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category] ?? item.category}</span></div>
+      <p className="mt-1 text-xs text-muted-foreground">{item.description} · {age(item.createdAt)} · {item.assigneeName ?? "Unassigned"}</p>
+    </div><a className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline" href={item.sourcePath} onClick={(event) => {
+      event.preventDefault();
+      window.location.hash = item.sourcePath.replace(/^#/, "");
+      onNavigate?.(item.sourcePath.startsWith("#incidents/")
+        ? "incidents"
+        : item.sourceType === "sync" ? "summary" : "setup");
+    }}>Open source <ExternalLink className="h-3 w-3" /></a></div>
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <select aria-label={`Status for ${item.title}`} className="rounded border border-border bg-background px-2 py-1 text-xs" value={item.status} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, status: e.target.value as ActionItem["status"] })}>
+        {queueStatuses.map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
+      </select>
+      {item.status !== "resolved" && <Button size="sm" variant="outline" className="h-7 text-xs" disabled={mutationPending} onClick={() => onUpdate(item, { version: item.version, status: "in_progress", assigneeId: "me" })}>Claim</Button>}
+      <select aria-label={`Owner for ${item.title}`} className="max-w-44 rounded border border-border bg-background px-2 py-1 text-xs" value={item.assigneeId ?? ""} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, assigneeId: e.target.value || null })}>
+        <option value="">Unassigned</option>{assignees.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}
+      </select>
+      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => onToggleNote(item.id)}>Add note</Button>
+    </div>
+    <p className="mt-2 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(state, item.status)}</p>
+      {noteOpen && <div className="mt-2 flex gap-2"><input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => onNoteChange(e.target.value)} /><Button size="sm" className="h-7 text-xs" disabled={!note.trim() || mutationPending} onClick={() => onUpdate(item, { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) })}>Save</Button></div>}
+    {item.deferReason && <p className="mt-1 text-xs text-amber-600">Deferred: {item.deferReason}</p>}{item.resolutionNote && <p className="mt-1 text-xs text-muted-foreground">Note: {item.resolutionNote}</p>}
+  </div>;
+});
 
 export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { hasCapability, isLoading: roleLoading } = useMe();
   const canView = hasCapability("manage-staff");
   const client = useQueryClient();
-  const query = useQuery({ queryKey: ["manager-action-queue"], queryFn: fetchActionQueue, enabled: canView, refetchInterval: 30000 });
-  const assignees = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canView });
   const [filter, setFilter] = useState("open");
   const [category, setCategory] = useState("all");
   const [noteFor, setNoteFor] = useState<number | null>(null);
   const [note, setNote] = useState("");
+  const queryKey = ["manager-action-queue", filter, category] as const;
+  const query = useQuery<QueueData>({
+    queryKey: queryKey,
+    queryFn: () => fetchActionQueue({ status: filter, category }),
+    enabled: canView,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  });
+  const assignees = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canView });
   const mutation = useMutation({
-    mutationFn: ({ item, input }: { item: ActionItem; input: Parameters<typeof updateActionItem>[1] }) => updateActionItem(item.id, input),
-    onSuccess: (updated) => {
+    mutationFn: ({ item, input }: QueueMutationVariables) => updateActionItem(item.id, input),
+    onSuccess: (updated, variables) => {
       // Patch the writer's cache from the authoritative PATCH response before
       // refetching. A refetch can briefly race another queue refresh, and the
       // manager should never see its own successful change revert in the UI.
-      client.setQueryData<{ items: ActionItem[]; counts: Record<string, number> }>(
-        ["manager-action-queue"],
+      client.setQueryData<QueueData>(
+        variables.queryKey,
         (current) => {
           if (!current) return current;
-          const items = current.items.map((item) => item.id === updated.id ? updated : item);
-          const counts = Object.fromEntries(
-            ["open", "in_progress", "deferred", "resolved"]
-              .map((status) => [status, items.filter((item) => item.status === status).length]),
-          );
+          const previous = current.items.find((item) => item.id === updated.id);
+          const counts = { ...current.counts };
+          if (previous && previous.status !== updated.status) {
+            counts[previous.status] = Math.max(0, (counts[previous.status] ?? 0) - 1);
+            counts[updated.status] = (counts[updated.status] ?? 0) + 1;
+          }
+          const items = current.items.some((item) => item.id === updated.id)
+            ? current.items.map((item) => item.id === updated.id ? updated : item)
+            : current.items;
           return { items, counts };
         },
       );
@@ -48,6 +115,12 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
       setNote("");
     },
   });
+  const handleToggleNote = useCallback((id: number) => {
+    setNoteFor((current) => current === id ? null : id);
+  }, []);
+  const handleUpdate = useCallback((item: ActionItem, input: Parameters<typeof updateActionItem>[1]) => {
+    mutation.mutate({ item, input, queryKey });
+  }, [mutation.mutate, queryKey]);
   const items = useMemo(() => (query.data?.items ?? []).filter((item) =>
     (filter === "all" || item.status === filter) && (category === "all" || item.category === category),
   ).sort((a, b) => {
@@ -64,7 +137,7 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
     <CardContent className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <select aria-label="Filter action status" className="rounded border border-border bg-background px-2 py-1.5 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
-          {["open", "in_progress", "deferred", "resolved", "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All" : value.replace("_", " ")}{value !== "all" ? ` (${query.data?.counts[value] ?? 0})` : ""}</option>)}
+          {[...queueStatuses, "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All" : value.replace("_", " ")}{value !== "all" ? ` (${query.data?.counts[value] ?? 0})` : ""}</option>)}
         </select>
         <select aria-label="Filter action category" className="rounded border border-border bg-background px-2 py-1.5 text-xs" value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="all">All sources</option>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -73,31 +146,18 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
       {query.isLoading ? <p className="py-8 text-center text-sm text-muted-foreground">Loading manager actions…</p> :
         query.isError ? <p className="py-8 text-center text-sm text-destructive">Could not load manager actions.</p> :
         items.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">{filter === "open" ? "No open actions. The facility is caught up." : "No actions match these filters."}</p> :
-        <div className="space-y-2">{items.map((item) => <div key={item.id} className="rounded-md border border-border bg-background p-3">
-          <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span>{(() => { const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState; return <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[state]}`} data-testid={`attention-state-${item.id}`}>{ATTENTION_STATE_LABEL[state]}</span>; })()}<span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category]}</span></div>
-            <p className="mt-1 text-xs text-muted-foreground">{item.description} · {age(item.createdAt)} · {item.assigneeName ?? "Unassigned"}</p>
-          </div><a className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline" href={item.sourcePath} onClick={(event) => {
-            event.preventDefault();
-            window.location.hash = item.sourcePath.replace(/^#/, "");
-            onNavigate?.(item.sourcePath.startsWith("#incidents/")
-              ? "incidents"
-              : item.sourceType === "sync" ? "summary" : "setup");
-          }}>Open source <ExternalLink className="h-3 w-3" /></a></div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <select aria-label={`Status for ${item.title}`} className="rounded border border-border bg-background px-2 py-1 text-xs" value={item.status} disabled={mutation.isPending} onChange={(e) => mutation.mutate({ item, input: { version: item.version, status: e.target.value as ActionItem["status"] } })}>
-              {["open", "in_progress", "deferred", "resolved"].map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
-            </select>
-            {item.status !== "resolved" && <Button size="sm" variant="outline" className="h-7 text-xs" disabled={mutation.isPending} onClick={() => mutation.mutate({ item, input: { version: item.version, status: "in_progress", assigneeId: "me" } })}>Claim</Button>}
-            <select aria-label={`Owner for ${item.title}`} className="max-w-44 rounded border border-border bg-background px-2 py-1 text-xs" value={item.assigneeId ?? ""} disabled={mutation.isPending} onChange={(e) => mutation.mutate({ item, input: { version: item.version, assigneeId: e.target.value || null } })}>
-              <option value="">Unassigned</option>{(assignees.data ?? []).map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}
-            </select>
-            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setNoteFor(noteFor === item.id ? null : item.id)}>Add note</Button>
-          </div>
-           <p className="mt-2 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(item.attentionState ?? attentionStateForSeverity(item.severity, item.status), item.status)}</p>
-          {noteFor === item.id && <div className="mt-2 flex gap-2"><input className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => setNote(e.target.value)} /><Button size="sm" className="h-7 text-xs" disabled={!note.trim() || mutation.isPending} onClick={() => mutation.mutate({ item, input: { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) } })}>Save</Button></div>}
-          {item.deferReason && <p className="mt-1 text-xs text-amber-600">Deferred: {item.deferReason}</p>}{item.resolutionNote && <p className="mt-1 text-xs text-muted-foreground">Note: {item.resolutionNote}</p>}
-        </div>)}</div>}
+         <div className="space-y-2">{items.map((item) => <ActionQueueItemCard
+           key={item.id}
+           item={item}
+           assignees={assignees.data ?? []}
+           mutationPending={mutation.isPending}
+           noteOpen={noteFor === item.id}
+           note={note}
+           onNoteChange={setNote}
+           onToggleNote={handleToggleNote}
+           onUpdate={handleUpdate}
+           onNavigate={onNavigate}
+         />)}</div>}
       {mutation.isError && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
         <span>{mutation.error instanceof Error ? mutation.error.message : "This item changed. Refresh and try again."}</span>
         <Button size="sm" variant="outline" className="h-7 border-destructive/40 text-xs text-destructive" onClick={() => { mutation.reset(); void query.refetch(); }}>Refresh queue</Button>

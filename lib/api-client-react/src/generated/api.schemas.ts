@@ -4010,6 +4010,35 @@ export type ListIncidentAssignees200Item = {
   role: string;
 };
 
+export type ListManagerActionQueueParams = {
+status?: ListManagerActionQueueStatus;
+category?: ListManagerActionQueueCategory;
+};
+
+export type ListManagerActionQueueStatus = typeof ListManagerActionQueueStatus[keyof typeof ListManagerActionQueueStatus];
+
+
+export const ListManagerActionQueueStatus = {
+  open: 'open',
+  in_progress: 'in_progress',
+  deferred: 'deferred',
+  resolved: 'resolved',
+  all: 'all',
+} as const;
+
+export type ListManagerActionQueueCategory = typeof ListManagerActionQueueCategory[keyof typeof ListManagerActionQueueCategory];
+
+
+export const ListManagerActionQueueCategory = {
+  incident: 'incident',
+  import: 'import',
+  'data-health': 'data-health',
+  sync: 'sync',
+  'production-rule': 'production-rule',
+  report: 'report',
+  all: 'all',
+} as const;
+
 export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
 };

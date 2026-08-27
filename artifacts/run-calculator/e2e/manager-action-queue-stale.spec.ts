@@ -19,6 +19,8 @@ let staleWriteFixtureId: number | null = null;
 let staleWriteDedupKey = "";
 let incidentFixtureId = "";
 let incidentQueueFixtureId: number | null = null;
+const LARGE_HISTORY_COUNT = 750;
+let largeHistoryPrefix = "";
 
 async function dismissWelcomeIfPresent(page: Page, timeout = 1_500): Promise<void> {
   const welcome = page.getByRole("dialog", { name: /welcome to production run calculator/i });
@@ -129,6 +131,7 @@ test.beforeAll(async () => {
     incidentFixtureId = uniqueTestId("incident_queue_source");
     fixtureDedupKey = `e2e:${uniqueTestId("manager_queue_source")}`;
     staleWriteDedupKey = `e2e:${uniqueTestId("manager_queue_stale")}`;
+    largeHistoryPrefix = `e2e:${uniqueTestId("manager_queue_history")}`;
     await db.query(
       `INSERT INTO incidents
         (id, scope, source, reporter_name, reporter_role, screen, app_platform, context, diagnosis, workaround, status, priority, workflow_state, notes, activity)
@@ -177,6 +180,16 @@ test.beforeAll(async () => {
       ],
     );
     incidentQueueFixtureId = incidentQueue.rows[0].id as number;
+    await db.query(
+      `INSERT INTO action_items
+        (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
+       SELECT 'live', $1 || ':' || series::text, 'import', 'warning',
+         'Historical queue item ' || series::text,
+         'Large-history performance fixture',
+         'report', $1 || ':' || series::text, '#manager-action-queue', 'resolved', 1
+       FROM generate_series(1, $2) AS series`,
+      [largeHistoryPrefix, LARGE_HISTORY_COUNT],
+    );
   } finally {
     await db.end().catch(() => {});
   }
@@ -207,6 +220,7 @@ test.afterAll(async () => {
     if (fixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [fixtureId]);
     if (staleWriteFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [staleWriteFixtureId]);
     if (incidentQueueFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [incidentQueueFixtureId]);
+    if (largeHistoryPrefix) await db.query("DELETE FROM action_items WHERE dedup_key LIKE $1", [`${largeHistoryPrefix}:%`]);
     if (incidentFixtureId) {
       await db.query("DELETE FROM action_items WHERE source_type = 'incident' AND source_id = $1", [incidentFixtureId]);
       await db.query("DELETE FROM incidents WHERE id = $1", [incidentFixtureId]);
@@ -215,6 +229,62 @@ test.afterAll(async () => {
   } finally {
     await db.end().catch(() => {});
   }
+});
+
+test("loads the active view without hiding large queue history", async ({ page }, testInfo: TestInfo) => {
+  const username = uniqueTestId("e2e_manager_queue_scale");
+  testUsernames.add(username);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  await signUp(page, username);
+  await promoteToManager(username);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  const initialResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/manager-action-queue") &&
+      !response.url().includes("status=all"),
+  );
+  await openQueue(page);
+  const initialPayload = await (await initialResponse).json() as {
+    items: Array<{ status: string; title: string }>;
+    counts: Record<string, number>;
+  };
+  expect(initialPayload.items.every((item) => item.status === "open")).toBe(true);
+  expect(initialPayload.items.some((item) => item.title.startsWith("Historical queue item"))).toBe(false);
+  expect(initialPayload.counts.resolved).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
+  await expect(
+    page.getByLabel("Filter action status").locator("option[value='resolved']"),
+  ).toContainText(String(LARGE_HISTORY_COUNT));
+  await expect(
+    page.getByTestId("manager-action-queue").locator('[data-testid^="attention-state-"]'),
+  ).toHaveCount(initialPayload.items.length);
+  await page.screenshot({ path: testInfo.outputPath("queue-large-history-default.png") });
+
+  const allResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/manager-action-queue") &&
+      !new URL(response.url()).searchParams.has("status"),
+  );
+  await page.getByLabel("Filter action status").selectOption("all");
+  const allPayload = await (await allResponse).json() as {
+    items: Array<{ status: string }>;
+    counts: Record<string, number>;
+  };
+  expect(allPayload.items.length).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
+  expect(allPayload.counts.resolved).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
+  await expect(
+    page.getByText(`Historical queue item 1`, { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("queue-large-history-all.png") });
+  expect(browserErrors).toEqual([]);
 });
 
 test("shows a stale update error, then refreshes and safely retries", async ({ browser }: { browser: Browser }, testInfo: TestInfo) => {

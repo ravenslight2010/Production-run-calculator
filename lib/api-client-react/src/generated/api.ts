@@ -99,6 +99,7 @@ import type {
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
   ListInventoryLedgerParams,
+  ListManagerActionQueueParams,
   ListMergeAliasesParams,
   ListQualityChecksParams,
   ManagerActionItemUpdate,
@@ -12530,20 +12531,27 @@ export const useResolveIncident = <TError = ErrorType<void>,
       return useMutation(getResolveIncidentMutationOptions(options));
     }
 
-export const getListManagerActionQueueUrl = () => {
+export const getListManagerActionQueueUrl = (params?: ListManagerActionQueueParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/manager-action-queue`
+  return stringifiedParams.length > 0 ? `/api/manager-action-queue?${stringifiedParams}` : `/api/manager-action-queue`
 }
 
 /**
  * @summary List the facility-scoped manager action queue
  */
-export const listManagerActionQueue = async ( options?: Parameters<typeof customFetch>[1]): Promise<ManagerActionQueue> => {
+export const listManagerActionQueue = async (params?: ListManagerActionQueueParams, options?: Parameters<typeof customFetch>[1]): Promise<ManagerActionQueue> => {
 
-  return customFetch<ManagerActionQueue>(getListManagerActionQueueUrl(),
+  return customFetch<ManagerActionQueue>(getListManagerActionQueueUrl(params),
   {
     ...options,
     method: 'GET'
@@ -12556,23 +12564,23 @@ export const listManagerActionQueue = async ( options?: Parameters<typeof custom
 
 
 
-export const getListManagerActionQueueQueryKey = () => {
+export const getListManagerActionQueueQueryKey = (params?: ListManagerActionQueueParams,) => {
     return [
-    `/api/manager-action-queue`
+    `/api/manager-action-queue`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListManagerActionQueueQueryOptions = <TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListManagerActionQueueQueryOptions = <TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(params?: ListManagerActionQueueParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListManagerActionQueueQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListManagerActionQueueQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listManagerActionQueue>>> = ({ signal }) => listManagerActionQueue({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listManagerActionQueue>>> = ({ signal }) => listManagerActionQueue(params, { signal, ...requestOptions });
 
 
 
@@ -12590,11 +12598,11 @@ export type ListManagerActionQueueQueryError = ErrorType<void>
  */
 
 export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof listManagerActionQueue>>, TError = ErrorType<void>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: ListManagerActionQueueParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagerActionQueue>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListManagerActionQueueQueryOptions(options)
+  const queryOptions = getListManagerActionQueueQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

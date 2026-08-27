@@ -3762,6 +3762,19 @@ paths:
       operationId: listManagerActionQueue
       tags: [audit]
       summary: List the facility-scoped manager action queue
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, in_progress, deferred, resolved, all]
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [incident, import, data-health, sync, production-rule, report, all]
       responses:
         "200":
           description: Current action items and status counts

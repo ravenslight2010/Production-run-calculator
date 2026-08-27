@@ -4633,6 +4633,11 @@ export const ResolveIncidentResponse = zod.object({
 /**
  * @summary List the facility-scoped manager action queue
  */
+export const ListManagerActionQueueQueryParams = zod.object({
+  "status": zod.enum(['open', 'in_progress', 'deferred', 'resolved', 'all']).optional(),
+  "category": zod.enum(['incident', 'import', 'data-health', 'sync', 'production-rule', 'report', 'all']).optional()
+})
+
 export const ListManagerActionQueueResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.number().int(),

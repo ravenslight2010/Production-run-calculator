@@ -16,6 +16,7 @@ import { dataHealthWorkspace } from "./profileDataHealth";
 
 const router = Router();
 const statuses = new Set(["open", "in_progress", "deferred", "resolved"]);
+const refreshes = new Map<string, Promise<void>>();
 
 type Candidate = {
   dedupKey: string;
@@ -113,37 +114,81 @@ async function candidates(): Promise<Candidate[]> {
 
 async function refreshQueue(): Promise<void> {
   const scope = currentScope();
-  const items = await candidates();
-  if (items.length === 0) return;
+  const currentRefresh = refreshes.get(scope);
+  if (currentRefresh) return currentRefresh;
   // Refresh all derived candidates in one upsert. The previous per-item
   // awaited loop made opening the queue scale linearly with accumulated
   // findings, delaying manually inserted queue items behind hundreds of
   // round-trips and making concurrent manager views race their UI budget.
-  await db.insert(actionItemsTable).values(items.map((item) => ({ scope, ...item }))).onConflictDoUpdate({
-    target: [actionItemsTable.scope, actionItemsTable.dedupKey],
-    set: {
-      category: sql`excluded.category`,
-      severity: sql`excluded.severity`,
-      title: sql`excluded.title`,
-      description: sql`excluded.description`,
-      sourceType: sql`excluded.source_type`,
-      sourceId: sql`excluded.source_id`,
-      sourcePath: sql`excluded.source_path`,
-      updatedAt: sql`NOW()`,
-    },
-  });
+  const refresh = (async () => {
+    const items = await candidates();
+    if (items.length === 0) return;
+    await db.insert(actionItemsTable).values(items.map((item) => ({ scope, ...item }))).onConflictDoUpdate({
+      target: [actionItemsTable.scope, actionItemsTable.dedupKey],
+      set: {
+        category: sql`excluded.category`,
+        severity: sql`excluded.severity`,
+        title: sql`excluded.title`,
+        description: sql`excluded.description`,
+        sourceType: sql`excluded.source_type`,
+        sourceId: sql`excluded.source_id`,
+        sourcePath: sql`excluded.source_path`,
+        updatedAt: sql`NOW()`,
+      },
+      setWhere: sql`
+        ${actionItemsTable.category} IS DISTINCT FROM excluded.category OR
+        ${actionItemsTable.severity} IS DISTINCT FROM excluded.severity OR
+        ${actionItemsTable.title} IS DISTINCT FROM excluded.title OR
+        ${actionItemsTable.description} IS DISTINCT FROM excluded.description OR
+        ${actionItemsTable.sourceType} IS DISTINCT FROM excluded.source_type OR
+        ${actionItemsTable.sourceId} IS DISTINCT FROM excluded.source_id OR
+        ${actionItemsTable.sourcePath} IS DISTINCT FROM excluded.source_path
+      `,
+    });
+  })();
+  refreshes.set(scope, refresh);
+  try {
+    await refresh;
+  } finally {
+    if (refreshes.get(scope) === refresh) refreshes.delete(scope);
+  }
 }
 
 router.get("/manager-action-queue", requireCapability("manage-staff"), async (req: Request, res: Response) => {
+  const requestedStatus = typeof req.query.status === "string" ? req.query.status : undefined;
+  const requestedCategory = typeof req.query.category === "string" ? clean(req.query.category, 40) : undefined;
+  if (requestedStatus && requestedStatus !== "all" && !statuses.has(requestedStatus)) {
+    res.status(400).json({ error: "Invalid action queue status filter" });
+    return;
+  }
   try {
     await refreshQueue();
-    const rows = await db.select().from(actionItemsTable)
-      .where(eq(actionItemsTable.scope, currentScope()))
-      .orderBy(desc(actionItemsTable.status), desc(actionItemsTable.updatedAt), desc(actionItemsTable.id));
+    const scope = currentScope();
+    const itemConditions = [eq(actionItemsTable.scope, scope)];
+    if (requestedStatus && requestedStatus !== "all") {
+      itemConditions.push(eq(actionItemsTable.status, requestedStatus));
+    }
+    if (requestedCategory && requestedCategory !== "all") {
+      itemConditions.push(eq(actionItemsTable.category, requestedCategory));
+    }
+    const [rows, groupedCounts] = await Promise.all([
+      db.select().from(actionItemsTable)
+        .where(and(...itemConditions))
+        .orderBy(desc(actionItemsTable.status), desc(actionItemsTable.updatedAt), desc(actionItemsTable.id)),
+      db.select({
+        status: actionItemsTable.status,
+        count: sql<number>`count(*)::int`,
+      }).from(actionItemsTable)
+        .where(eq(actionItemsTable.scope, scope))
+        .groupBy(actionItemsTable.status),
+    ]);
+    const counts = Object.fromEntries(["open", "in_progress", "deferred", "resolved"].map((status) => [
+      status,
+      groupedCounts.find((row) => row.status === status)?.count ?? 0,
+    ]));
     res.json({
       items: rows,
-      counts: Object.fromEntries(["open", "in_progress", "deferred", "resolved"]
-        .map((status) => [status, rows.filter((row) => row.status === status).length])),
+      counts,
     });
   } catch (err) {
     req.log.error({ err }, "failed to load manager action queue");

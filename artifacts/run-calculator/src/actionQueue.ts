@@ -17,8 +17,15 @@ function headers(json = false): Record<string, string> {
   return { "x-client-id": inventoryClientId(), ...(json ? { "Content-Type": "application/json" } : {}) };
 }
 
-export async function fetchActionQueue(): Promise<{ items: ActionItem[]; counts: Record<string, number> }> {
-  const response = await fetch("/api/manager-action-queue", { headers: headers() });
+export async function fetchActionQueue(filters: {
+  status?: string;
+  category?: string;
+} = {}): Promise<{ items: ActionItem[]; counts: Record<string, number> }> {
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== "all") params.set("status", filters.status);
+  if (filters.category && filters.category !== "all") params.set("category", filters.category);
+  const query = params.toString();
+  const response = await fetch(`/api/manager-action-queue${query ? `?${query}` : ""}`, { headers: headers() });
   if (!response.ok) throw new Error(`Load action queue failed (${response.status})`);
   return response.json();
 }
