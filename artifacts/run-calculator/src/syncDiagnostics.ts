@@ -24,24 +24,39 @@ export type SyncDiagnostic = {
 };
 
 export type SyncMeasurementPath = "complete" | "partial";
+export type SyncMeasurementDirection = "push" | "peer";
+export type SyncMeasurementTrigger = "edit" | "auto-track" | "recovery" | "periodic";
 
 export type SyncDiagnosticMeasurement = {
   path: SyncMeasurementPath;
+  direction?: SyncMeasurementDirection;
+  trigger?: SyncMeasurementTrigger;
+  runCount?: number;
+  changedRuns?: number;
   requestBytes: number;
   responseBytes: number;
   latencyMs: number;
   mergeMs: number;
+  queueDelayMs?: number;
+  ackLatencyMs?: number;
+  serverQueueAgeMs?: number;
+  peerApplyMs?: number;
   retries: number;
   converged: boolean;
 };
 
 export type SyncMeasurementSummary = {
   path: SyncMeasurementPath;
+  direction?: SyncMeasurementDirection;
   samples: number;
   requestBytes: number;
   responseBytes: number;
   averageLatencyMs: number;
   averageMergeMs: number;
+  averageQueueDelayMs?: number;
+  averageAckLatencyMs?: number;
+  averageServerQueueAgeMs?: number;
+  averagePeerApplyMs?: number;
   retries: number;
   convergedSamples: number;
 };
@@ -115,10 +130,19 @@ export function loadSyncMeasurements(date: string): SyncDiagnosticMeasurement[] 
     return parsed.filter((item): item is SyncDiagnosticMeasurement =>
       item && typeof item === "object" &&
       (item.path === "complete" || item.path === "partial") &&
+      (item.direction === undefined || item.direction === "push" || item.direction === "peer") &&
+      (item.trigger === undefined || item.trigger === "edit" || item.trigger === "auto-track" ||
+        item.trigger === "recovery" || item.trigger === "periodic") &&
+      (item.runCount === undefined || (Number.isInteger(item.runCount) && item.runCount >= 0)) &&
+      (item.changedRuns === undefined || (Number.isInteger(item.changedRuns) && item.changedRuns >= 0)) &&
       Number.isFinite(item.requestBytes) && item.requestBytes >= 0 &&
       Number.isFinite(item.responseBytes) && item.responseBytes >= 0 &&
       Number.isFinite(item.latencyMs) && item.latencyMs >= 0 &&
       Number.isFinite(item.mergeMs) && item.mergeMs >= 0 &&
+      (item.queueDelayMs === undefined || (Number.isFinite(item.queueDelayMs) && item.queueDelayMs >= 0)) &&
+      (item.ackLatencyMs === undefined || (Number.isFinite(item.ackLatencyMs) && item.ackLatencyMs >= 0)) &&
+      (item.serverQueueAgeMs === undefined || (Number.isFinite(item.serverQueueAgeMs) && item.serverQueueAgeMs >= 0)) &&
+      (item.peerApplyMs === undefined || (Number.isFinite(item.peerApplyMs) && item.peerApplyMs >= 0)) &&
       Number.isInteger(item.retries) && item.retries >= 0 &&
       typeof item.converged === "boolean",
     ).slice(-MAX_MEASUREMENTS);
@@ -146,6 +170,14 @@ function summarizeMeasurements(
   return (["complete", "partial"] as const).flatMap((path) => {
     const samples = measurements.filter((measurement) => measurement.path === path);
     if (samples.length === 0) return [];
+    const average = (field: "queueDelayMs" | "ackLatencyMs" | "serverQueueAgeMs" | "peerApplyMs") => {
+      const measured = samples
+        .map((sample) => sample[field])
+        .filter((value): value is number => typeof value === "number");
+      return measured.length > 0
+        ? measured.reduce((total, value) => total + value, 0) / measured.length
+        : undefined;
+    };
     return [{
       path,
       samples: samples.length,
@@ -153,6 +185,10 @@ function summarizeMeasurements(
       responseBytes: samples.reduce((total, sample) => total + sample.responseBytes, 0),
       averageLatencyMs: samples.reduce((total, sample) => total + sample.latencyMs, 0) / samples.length,
       averageMergeMs: samples.reduce((total, sample) => total + sample.mergeMs, 0) / samples.length,
+      averageQueueDelayMs: average("queueDelayMs"),
+      averageAckLatencyMs: average("ackLatencyMs"),
+      averageServerQueueAgeMs: average("serverQueueAgeMs"),
+      averagePeerApplyMs: average("peerApplyMs"),
       retries: samples.reduce((total, sample) => total + sample.retries, 0),
       convergedSamples: samples.filter((sample) => sample.converged).length,
     }];

@@ -58,11 +58,14 @@ describe("sync diagnostics", () => {
   it("records complete and partial wire measurements and summarizes them", () => {
     recordSyncMeasurement("2026-08-21", {
       path: "complete", requestBytes: 1000, responseBytes: 3000,
-      latencyMs: 40, mergeMs: 4, retries: 1, converged: true,
+      direction: "push", trigger: "edit", runCount: 32, changedRuns: 1,
+      latencyMs: 40, mergeMs: 4, queueDelayMs: 120, ackLatencyMs: 40,
+      serverQueueAgeMs: 7, retries: 1, converged: true,
     });
     recordSyncMeasurement("2026-08-21", {
       path: "partial", requestBytes: 250, responseBytes: 3000,
-      latencyMs: 20, mergeMs: 3, retries: 0, converged: true,
+      direction: "peer", runCount: 32, changedRuns: 1,
+      latencyMs: 20, mergeMs: 3, peerApplyMs: 3, retries: 0, converged: true,
     });
     expect(loadSyncMeasurements("2026-08-21")).toHaveLength(2);
     const report = buildSyncDiagnosticReport({
@@ -71,8 +74,14 @@ describe("sync diagnostics", () => {
       measurements: loadSyncMeasurements("2026-08-21"),
     });
     expect(report.measurementSummary).toEqual([
-      expect.objectContaining({ path: "complete", requestBytes: 1000, retries: 1, convergedSamples: 1 }),
-      expect.objectContaining({ path: "partial", requestBytes: 250, retries: 0, convergedSamples: 1 }),
+      expect.objectContaining({
+        path: "complete", requestBytes: 1000, retries: 1, convergedSamples: 1,
+        averageQueueDelayMs: 120, averageAckLatencyMs: 40, averageServerQueueAgeMs: 7,
+      }),
+      expect.objectContaining({
+        path: "partial", requestBytes: 250, retries: 0, convergedSamples: 1,
+        averagePeerApplyMs: 3,
+      }),
     ]);
     clearSyncDiagnostics("2026-08-21");
     expect(loadSyncMeasurements("2026-08-21")).toEqual([]);

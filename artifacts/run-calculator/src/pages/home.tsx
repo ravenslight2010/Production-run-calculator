@@ -290,7 +290,16 @@ import AuditLogCard from "../components/AuditLogCard";
 import SyncConflictStatsCard from "../components/SyncConflictStatsCard";
 import DataHealthWorkspace from "../components/DataHealthWorkspace";
 import SyncStatusPopover, { type SyncStatus } from "../components/SyncStatusPopover";
-import { buildSyncDiagnosticReport, loadSyncDiagnostics, recordSyncDiagnostic, type SyncDiagnostic, type SyncDiagnosticKind } from "../syncDiagnostics";
+import {
+  buildSyncDiagnosticReport,
+  loadSyncDiagnostics,
+  loadSyncMeasurements,
+  recordSyncDiagnostic,
+  recordSyncMeasurement,
+  type SyncDiagnostic,
+  type SyncDiagnosticKind,
+  type SyncMeasurementTrigger,
+} from "../syncDiagnostics";
 import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
@@ -5090,6 +5099,7 @@ export default function Home() {
     // the values captured during the previous render.
     const reportDate = todayStr();
     const reportDiagnostics = loadSyncDiagnostics(reportDate);
+    const reportMeasurements = loadSyncMeasurements(reportDate);
     const report = buildSyncDiagnosticReport({
       date: reportDate,
       status: syncStatus,
@@ -5097,6 +5107,7 @@ export default function Home() {
       pendingCount: syncPendingCount,
       failedCount: syncFailedCount,
       diagnostics: reportDiagnostics,
+      measurements: reportMeasurements,
     });
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -7077,13 +7088,28 @@ export default function Home() {
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPushQueueRef = useRef(
-    new SingleFlightSyncQueue<{ payload: SyncPayload; sig?: string }>(),
+    new SingleFlightSyncQueue<{
+      payload: SyncPayload;
+      sig?: string;
+      queuedAtPerf?: number;
+      queuedAtEpoch?: number;
+      trigger?: SyncMeasurementTrigger;
+    }>(),
   );
+  const syncPushTimingRef = useRef<{ queuedAtPerf: number; queuedAtEpoch: number } | null>(null);
+  const syncPushTriggerRef = useRef<SyncMeasurementTrigger>("edit");
   const latestSyncPayloadRef = useRef<SyncPayload | null>(null);
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
   const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
   const applySyncCallbackRef = useRef<
-    (p: SyncPayload, options?: { initialSnapshot?: boolean }) => void
+    (
+      p: SyncPayload,
+      options?: {
+        initialSnapshot?: boolean;
+        peerReceivedAt?: number;
+        peerResponseBytes?: number;
+      },
+    ) => void
   >(() => {});
   const applyProfileReconcileRef = useRef<
     (result: ProfileReconcileResult) => void
@@ -7248,7 +7274,11 @@ export default function Home() {
   useEffect(() => {
     applySyncCallbackRef.current = (
       payload: SyncPayload,
-      options?: { initialSnapshot?: boolean },
+      options?: {
+        initialSnapshot?: boolean;
+        peerReceivedAt?: number;
+        peerResponseBytes?: number;
+      },
     ) => {
       isSyncApplyingRef.current = true;
       const arraysEqual = (a: string[], b: string[]) =>
@@ -7884,6 +7914,25 @@ export default function Home() {
       }
 
       requestAnimationFrame(() => {
+        if (options?.peerReceivedAt !== undefined) {
+          const peerApplyMs =
+            typeof performance === "undefined"
+              ? 0
+              : Math.max(0, performance.now() - options.peerReceivedAt);
+          recordSyncMeasurement(todayStr(), {
+            path: payload.completeness === "partial" ? "partial" : "complete",
+            direction: "peer",
+            runCount: payload.dayState.runs.length,
+            changedRuns: Object.keys(payload.runValues ?? {}).length,
+            requestBytes: 0,
+            responseBytes: options.peerResponseBytes ?? 0,
+            latencyMs: peerApplyMs,
+            mergeMs: peerApplyMs,
+            peerApplyMs,
+            retries: 0,
+            converged: true,
+          });
+        }
         isSyncApplyingRef.current = false;
         if (packagingFenceRaised && !foregroundSyncBarrierRef.current) {
           setAutoTrackBlocked(false);
@@ -7995,7 +8044,7 @@ export default function Home() {
       // Queue the reconnect recovery push. It is released only after the stream's
       // first frame has established a baseline, so a new/stale device cannot
       // upload its local day before applying today's shared row.
-      schedulePush(dayStateRef.current, 1000);
+      schedulePush(dayStateRef.current, 1000, "recovery");
     };
     es.onmessage = (e: MessageEvent) => {
       try {
@@ -8014,15 +8063,21 @@ export default function Home() {
           if (applyResetWipe(msg.resetEpoch)) window.location.reload();
           return;
         }
-         if (msg.unchanged) {
-           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
-           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
-         } else if (msg.data) {
-           if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
-           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
+        if (msg.unchanged) {
+          if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+          if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
+        } else if (msg.data) {
+          if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+          canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
             initialSnapshot: msg.initial === true,
+            ...(!msg.initial && typeof performance !== "undefined"
+              ? {
+                  peerReceivedAt: performance.now(),
+                  peerResponseBytes: new Blob([e.data as string]).size,
+                }
+              : {}),
           });
           if (!msg.initial) recordSyncEvent("merge", "Remote state merged into this device");
         } else if (msg.initial) {
@@ -8066,6 +8121,7 @@ export default function Home() {
         clearTimeout(syncRetryTimerRef.current);
         syncRetryTimerRef.current = null;
       }
+      syncPushTimingRef.current = null;
       syncPushQueueRef.current.reset();
       es.close();
     };
@@ -8091,6 +8147,7 @@ export default function Home() {
       }
       setSyncRetryWaiting(false);
       syncPushQueueRef.current.reset();
+      syncPushTimingRef.current = null;
       for (const controller of syncPushAbortControllersRef.current) controller.abort();
       syncPushAbortControllersRef.current.clear();
       if (pushTimerRef.current) {
@@ -8275,7 +8332,7 @@ export default function Home() {
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
   useEffect(() => {
-    const id = setInterval(() => { schedulePush(dayStateRef.current, 0); }, 30_000);
+    const id = setInterval(() => { schedulePush(dayStateRef.current, 0, "periodic"); }, 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -8581,12 +8638,18 @@ export default function Home() {
     sig?: string,
     generation = syncPushGenerationRef.current,
     internalRetry = false,
+    timing?: {
+      queuedAtPerf?: number;
+      queuedAtEpoch?: number;
+      trigger?: SyncMeasurementTrigger;
+    },
   ) {
     if (generation !== syncPushGenerationRef.current) return;
+    const work = { payload, sig, ...timing };
     // A local edit, focus event, and online event can all arrive while a
     // request is retrying. Keep only the newest payload; never start a second
     // retry chain for the same tab.
-    if (!syncPushQueueRef.current.begin({ payload, sig }, internalRetry)) {
+    if (!syncPushQueueRef.current.begin(work, internalRetry)) {
       // Retain the newest local intent for the manual Retry action if the
       // active request later ends in an authorization/stale/exhausted failure.
       latestSyncPayloadRef.current = payload;
@@ -8604,7 +8667,7 @@ export default function Home() {
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       setSyncRetryWaiting(false);
       if (queued) {
-        doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current);
+        doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
       } else {
         latestSyncPayloadRef.current = null;
         pushAcknowledgedRef.current = true;
@@ -8617,10 +8680,18 @@ export default function Home() {
     // "tomorrow" row — clobbering a scheduled day (and its case counts).
     const controller = new AbortController();
     syncPushAbortControllersRef.current.add(controller);
+    const requestStartedAt = typeof performance === "undefined" ? null : performance.now();
+    const requestBody = JSON.stringify({
+      senderId: clientId.current,
+      payload,
+      snapshotId: syncSnapshotIdRef.current || undefined,
+      ...(timing?.queuedAtEpoch ? { syncMeta: { queuedAt: timing.queuedAtEpoch } } : {}),
+    });
+    const requestBytes = new Blob([requestBody]).size;
     fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ senderId: clientId.current, payload, snapshotId: syncSnapshotIdRef.current || undefined }),
+      body: requestBody,
       signal: controller.signal,
     }).then(async (res) => {
       if (generation !== syncPushGenerationRef.current) return;
@@ -8642,12 +8713,14 @@ export default function Home() {
       // sync write must not be recorded as acknowledged just because the
       // server returned parseable JSON with a 5xx status.
       if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
+      const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
       const { stale } = await consumeCanonicalSyncWriteResponse(
         res,
         true,
         () => generation === syncPushGenerationRef.current,
       );
       if (generation !== syncPushGenerationRef.current) return;
+      const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
         // The server dropped this write (data reset not yet honoured). The
@@ -8661,6 +8734,32 @@ export default function Home() {
         setSyncRetryWaiting(false);
         return;
       }
+      const latencyMs = requestStartedAt === null || acknowledgedAt === null
+        ? 0
+        : Math.max(0, acknowledgedAt - requestStartedAt);
+      const serverQueueAgeMs = Number(res.headers.get("X-Sync-Queue-Age-Ms"));
+      recordSyncMeasurement(todayStr(), {
+        path: payload.completeness === "partial" ? "partial" : "complete",
+        direction: "push",
+        trigger: timing?.trigger ?? "edit",
+        runCount: payload.dayState.runs.length,
+        changedRuns: Object.keys(payload.runValues ?? {}).length,
+        requestBytes,
+        responseBytes: Number(res.headers.get("X-Sync-Response-Bytes")) || 0,
+        latencyMs,
+        mergeMs: mergeStartedAt === null || acknowledgedAt === null
+          ? 0
+          : Math.max(0, acknowledgedAt - mergeStartedAt),
+        queueDelayMs: timing?.queuedAtPerf !== undefined && requestStartedAt !== null
+          ? Math.max(0, requestStartedAt - timing.queuedAtPerf)
+          : 0,
+        ackLatencyMs: latencyMs,
+        ...(Number.isFinite(serverQueueAgeMs) && serverQueueAgeMs >= 0
+          ? { serverQueueAgeMs }
+          : {}),
+        retries: 3 - retriesLeft,
+        converged: true,
+      });
       setSyncPushFailed(false);
       setSyncPendingCount(0);
       setSyncFailedCount(0);
@@ -8673,7 +8772,9 @@ export default function Home() {
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
-      if (queued) doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current);
+      if (queued) {
+        doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+      }
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
       if (retriesLeft > 0) {
@@ -8685,13 +8786,8 @@ export default function Home() {
           syncRetryTimerRef.current = null;
           setSyncRetryWaiting(false);
           const queued = syncPushQueueRef.current.takeQueued();
-          doFetch(
-            queued?.payload ?? payload,
-            retriesLeft - 1,
-            queued?.sig ?? sig,
-            generation,
-            true,
-          );
+          const next = queued ?? work;
+          doFetch(next.payload, retriesLeft - 1, next.sig, generation, true, next);
         }, retryDelay);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
@@ -8797,9 +8893,15 @@ export default function Home() {
     };
   }
 
-  const SYNC_EDIT_DEBOUNCE_MS = 300;
+  // A short debounce keeps ordinary edits responsive without turning a burst
+  // of keystrokes/auto-track updates into a request storm.
+  const SYNC_EDIT_DEBOUNCE_MS = 120;
 
-  function schedulePush(ds: DayState, delay = SYNC_EDIT_DEBOUNCE_MS) {
+  function schedulePush(
+    ds: DayState,
+    delay = SYNC_EDIT_DEBOUNCE_MS,
+    trigger: SyncMeasurementTrigger = "edit",
+  ) {
     if (foregroundSyncBarrierRef.current) {
       foregroundPushPendingRef.current = true;
       return;
@@ -8814,6 +8916,13 @@ export default function Home() {
     // one pending recovery push instead of letting any of them race that read.
     if (!syncBaselineGateRef.current.requestPush()) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+    if (!syncPushTimingRef.current) {
+      syncPushTimingRef.current = {
+        queuedAtPerf: typeof performance === "undefined" ? 0 : performance.now(),
+        queuedAtEpoch: Date.now(),
+      };
+    }
+    syncPushTriggerRef.current = trigger;
     pushAcknowledgedRef.current = false;
     setSyncPendingCount(1);
     recordSyncEvent("local", "Local change is queued for server sync");
@@ -8825,18 +8934,28 @@ export default function Home() {
       // fetches that row and "pulls them up" as if they were pre-scheduled, so
       // the daily reset never clears. Skip until the rollover swaps in the fresh
       // day. The SSE-onopen reconnect re-push is the main offender here.
-      if (ds.date && ds.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
+      if (ds.date && ds.date !== todayStr()) {
+        syncPushTimingRef.current = null;
+        pushAcknowledgedRef.current = true;
+        return;
+      }
       const payload = buildSyncPayload(ds);
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
       const sig = JSON.stringify(payload);
       if (sig === lastSyncSigRef.current) {
+        syncPushTimingRef.current = null;
         pushAcknowledgedRef.current = true;
         setSyncPendingCount(0);
         return;
       }
-      doFetch(payload, 3, sig);
+      const timing = syncPushTimingRef.current;
+      syncPushTimingRef.current = null;
+      doFetch(payload, 3, sig, syncPushGenerationRef.current, false, {
+        ...timing,
+        trigger: syncPushTriggerRef.current,
+      });
     }, delay);
   }
   function retryLatestSync(): void {
@@ -8993,10 +9112,10 @@ export default function Home() {
       }
     }
     lastLocalEditRef.current = now;
-    // Use the default 600ms debounce so the push fires between 1-second
-    // auto-track ticks (2000ms was starving the push — the timer kept being
-    // reset before it could fire, delaying syncs up to the 30s interval).
-    schedulePush(ds);
+    // Keep the edit debounce below the one-second auto-track cadence so a
+    // normal edit is shared promptly while rapid edits still collapse into
+    // one newest-snapshot request.
+    schedulePush(ds, undefined, "edit");
     flashSaved();
   }, [v]);
 

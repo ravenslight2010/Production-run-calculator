@@ -2074,6 +2074,24 @@ describe("PUT /sync — payload sanitizer", () => {
     expect(stored).toHaveProperty("dayState");
   });
 
+  it("returns safe wire-size and queue-age measurements without persisting client timing metadata", async () => {
+    const queuedAt = Date.now() - 100;
+    const res = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "timing-test",
+        syncMeta: { queuedAt },
+        payload: { dayState: { runs: [], resetAt: 0 } },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(Number(res.headers.get("X-Sync-Response-Bytes"))).toBeGreaterThan(0);
+    expect(Number(res.headers.get("X-Sync-Queue-Age-Ms"))).toBeGreaterThanOrEqual(0);
+    const stored = await getStored();
+    expect(stored).not.toHaveProperty("syncMeta");
+  });
+
   it("caps oversized name-list arrays so they cannot flood the shared blob", async () => {
     const bigBrands = Array.from({ length: 600 }, (_, i) => `brand-${i}`);
     await putPayload({

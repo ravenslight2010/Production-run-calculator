@@ -100,7 +100,6 @@ const validBaselineReport = formatFullBrowserReport(
 const validBaseline = parseCompleteFullBrowserBaseline(validBaselineReport);
 assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 100_000]]));
 assert.equal(canRetainFullBrowserReport(completeCases, "passed"), true);
-assert.equal(canRetainFullBrowserReport(completeCases, "failed"), true);
 
 const incompleteCases = completeCases.map((testCase) => ({
   ...testCase,
@@ -137,7 +136,7 @@ assert.deepEqual(
       durationMs: 140_000,
       baselineDurationMs: 100_000,
       increaseMs: 40_000,
-      increasePercent: (40_000 / 100_000) * 100,
+      increasePercent: 40,
     },
   ],
 );

@@ -140,9 +140,12 @@ describe("SSE sync baseline gate", () => {
 
   it("coalesces ordinary edits quickly while keeping recovery pushes immediate", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
-    expect(source).toContain("const SYNC_EDIT_DEBOUNCE_MS = 300;");
-    expect(source).toContain("function schedulePush(ds: DayState, delay = SYNC_EDIT_DEBOUNCE_MS)");
-    expect(source).toContain("setInterval(() => { schedulePush(dayStateRef.current, 0); }, 30_000)");
+    expect(source).toContain("const SYNC_EDIT_DEBOUNCE_MS = 120;");
+    expect(source).toContain("function schedulePush(");
+    expect(source).toContain("delay = SYNC_EDIT_DEBOUNCE_MS");
+    expect(source).toContain("setInterval(() => { schedulePush(dayStateRef.current, 0, \"periodic\"); }, 30_000)");
+    expect(source).toContain("syncMeta: { queuedAt: timing.queuedAtEpoch }");
+    expect(source).toContain("X-Sync-Response-Bytes");
   });
 
   it("omits unchanged history from hot pushes and records it only after acknowledgement", () => {

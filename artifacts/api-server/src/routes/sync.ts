@@ -540,10 +540,11 @@ router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<vo
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
-  const { senderId = "", payload, snapshotId: requestedId } = req.body as {
+  const { senderId = "", payload, snapshotId: requestedId, syncMeta } = req.body as {
     senderId?: string;
     payload: unknown;
     snapshotId?: unknown;
+    syncMeta?: unknown;
   };
   const today = clientToday(req);
     const scope = currentScope();
@@ -565,16 +566,18 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     ? "unchanged"
     : result.partialFallback ? "partial-fallback" : "full");
   res.setHeader("X-Sync-Retry-Count", String(result.retries));
-  res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(sanitized) ?? ""));
+  res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
-  res.json(!result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
+  const responseBody = !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? { ok: true, unchanged: true, snapshotId }
     : {
         ok: true,
         data: merged,
         ...(snapshotId ? { snapshotId } : {}),
         ...(result.partialFallback ? { partialFallback: true } : {}),
-      });
+      };
+  res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  res.json(responseBody);
 });
 
 router.get("/sync/events", async (req: Request, res: Response): Promise<void> => {
@@ -683,10 +686,11 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
 router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
-  const { senderId = "", payload, snapshotId: requestedId } = req.body as {
+  const { senderId = "", payload, snapshotId: requestedId, syncMeta } = req.body as {
     senderId?: string;
     payload: unknown;
     snapshotId?: unknown;
+    syncMeta?: unknown;
   };
     const scope = currentScope();
 
@@ -709,18 +713,18 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
     ? "unchanged"
     : result.partialFallback ? "partial-fallback" : "full");
   res.setHeader("X-Sync-Retry-Count", String(result.retries));
-  res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(sanitized) ?? ""));
+  res.setHeader("X-Sync-Queue-Age-Ms", String(queueAgeMs(syncMeta) ?? ""));
   res.setHeader("X-Sync-Convergence", result.wrote ? "written" : "fallback");
-  if (!result.partialFallback && snapshotId !== undefined && requestedId === snapshotId) {
-    res.json({ ok: true, unchanged: true, snapshotId });
-  } else {
-    res.json({
+  const responseBody = !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
+    ? { ok: true, unchanged: true, snapshotId }
+    : {
       ok: true,
       data: merged,
       ...(snapshotId ? { snapshotId } : {}),
       ...(result.partialFallback ? { partialFallback: true } : {}),
-    });
-  }
+    };
+  res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  res.json(responseBody);
 });
 
 router.delete("/sync/:date", requireCapability("manage-factory-settings"), async (req: Request<{ date: string }>, res: Response): Promise<void> => {
