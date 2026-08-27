@@ -366,6 +366,12 @@ export function useAutoTrack({
   // normally because prevExpected was updated to expectedRaw on the skipped
   // tick, so deltaCases is then ≈ 1 case.
   const formResetSkippedRef = useRef<boolean>(false);
+  // A paused packaging drain measures output from its own pause-relative
+  // clock. Retain that clock's most recent reading so Resume can reconcile
+  // the final partial interval before switching back to the normal run clock.
+  const packagingDrainElapsedSecRef = useRef<number>(0);
+  const packagingDrainWallMsRef = useRef<number>(0);
+  const previousPackagingDrainActiveRef = useRef(false);
 
   // Freezer-drain window: after End Run, packaging keeps casing product for as
   // long as the tunnel takes to empty. Case/skid auto-track keeps ticking
@@ -442,6 +448,9 @@ export function useAutoTrack({
     batchSeededRef.current = false;
     drainFreezerRef.current = -1;
     formResetSkippedRef.current = false;
+    packagingDrainElapsedSecRef.current = 0;
+    packagingDrainWallMsRef.current = 0;
+    previousPackagingDrainActiveRef.current = false;
     // Clear dough-timer pause on run change / stop so it never bleeds across runs.
     doughTimerPausedRef.current = 0;
     setIsDoughTimerPaused(false);
@@ -505,6 +514,32 @@ export function useAutoTrack({
     rearmDoughTimers(Date.now());
   }, [rearmDoughTimers]);
 
+  const applyPackagingCaseIncrement = useCallback((increment: number) => {
+    const wholeIncrement = Math.floor(Math.max(0, increment));
+    const cps = v.casesPerSkid;
+    if (wholeIncrement <= 0 || cps <= 0) return;
+
+    const curTotal =
+      (Number(form.getValues("skidsCompleted")) || 0) * cps +
+      (Number(form.getValues("casesOnCurrentSkid")) || 0);
+    const target = curTotal + wholeIncrement;
+    // Never pull a value down below what the operator already has on the floor.
+    const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
+    if (newTotal === curTotal) return;
+
+    const nextSkids = Math.floor(newTotal / cps);
+    const nextCases = Math.round(newTotal % cps);
+    if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) !== false) {
+      form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+      form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+    }
+  }, [
+    form,
+    onPackagingProgressAutoAdvance,
+    v.casesNeeded,
+    v.casesPerSkid,
+  ]);
+
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
   // changes) the refs are reset FIRST and the write effect then fires exactly once
@@ -556,6 +591,66 @@ export function useAutoTrack({
       rearmDoughTimers(nowMs);
     }
   }, [autoTrackProgress, nowTime, rearmCaseTimer, rearmDoughTimers, resetBookkeeping]);
+
+  // The normal run clock deliberately excludes paused time. A continued-tunnel
+  // pause instead uses a pause-relative packaging clock, so the two baselines
+  // cannot be compared directly after Resume. Reconcile the unfinished drain
+  // interval once, then switch the shared case baseline to the normal clock.
+  useEffect(() => {
+    const wasPackagingDrainActive = previousPackagingDrainActiveRef.current;
+    const resumedFromPackagingDrain =
+      wasPackagingDrainActive && runStatus === "running" && !packagingDrainActive;
+
+    if (packagingDrainActive) {
+      packagingDrainElapsedSecRef.current = Math.max(0, packagingDrainElapsedSec);
+      packagingDrainWallMsRef.current = nowTime.getTime();
+    }
+
+    if (resumedFromPackagingDrain) {
+      const finalDrainExpected =
+        packagingDrainWallMsRef.current > 0 && v.pizzasPerCase > 0
+          ? Math.floor(
+            ((packagingDrainElapsedSecRef.current
+              + Math.max(0, Date.now() - packagingDrainWallMsRef.current) / 1000)
+              * calc.ppm)
+              / (v.pizzasPerCase * 60),
+          )
+          : -1;
+      const previousDrainExpected = lastExpectedCasesRef.current;
+      const suppressed = Date.now() < autoSuppressUntilRef.current;
+      if (
+        finalDrainExpected >= 0
+        && previousDrainExpected >= 0
+        && !suppressed
+        && !autoTrackBlockedRef?.current
+        && !autoTrackBlocked
+        && !disabled
+        && autoTrackProgress
+      ) {
+        applyPackagingCaseIncrement(finalDrainExpected - previousDrainExpected);
+      }
+
+      // Re-base even when an automatic write is suppressed or rejected. That
+      // keeps the pause interval from replaying once normal tracking resumes.
+      lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1;
+      packagingDrainElapsedSecRef.current = 0;
+      packagingDrainWallMsRef.current = 0;
+    }
+
+    previousPackagingDrainActiveRef.current = packagingDrainActive;
+  }, [
+    applyPackagingCaseIncrement,
+    autoTrackBlocked,
+    autoTrackProgress,
+    autoTrackSuggestion?.expectedCasesRaw,
+    calc.ppm,
+    disabled,
+    nowTime,
+    packagingDrainActive,
+    packagingDrainElapsedSec,
+    runStatus,
+    v.pizzasPerCase,
+  ]);
 
   // Clear the independent dough-timer pause whenever the run becomes globally
   // running (covers the paused → running resume transition). Without this, a

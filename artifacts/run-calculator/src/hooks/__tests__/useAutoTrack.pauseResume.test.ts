@@ -1225,6 +1225,173 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(0);
   });
 
+  it("hands continued-tunnel packaging from the pause clock to the normal run clock once", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+      traysOnLine: 5,
+      batchesReady: 2,
+    });
+    const calcPackagingOnly = { ...BASE_CALC, pressDone: true };
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (args: {
+      status: "running" | "paused";
+      nowMs: number;
+      elapsedBatchSec: number;
+      packagingDrainActive: boolean;
+      packagingDrainElapsedSec: number;
+    }): Props => ({
+      runId: "continued-tunnel-pause-handoff",
+      runStatus: args.status,
+      nowTime: ms(args.nowMs),
+      elapsedBatchSec: args.elapsedBatchSec,
+      packagingDrainActive: args.packagingDrainActive,
+      packagingDrainElapsedSec: args.packagingDrainElapsedSec,
+      calc: calcPackagingOnly,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+    });
+
+    const { result, rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      {
+        initialProps: props({
+          status: "paused",
+          nowMs: T0,
+          // 60 paused seconds = 10 packed cases. The initial paused-drain
+          // render establishes this baseline and must not replay it.
+          elapsedBatchSec: ELAPSED_SEC,
+          packagingDrainActive: true,
+          packagingDrainElapsedSec: 60,
+        }),
+      },
+    );
+
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(31);
+
+    // Resume exactly one packing interval later. The normal run clock still
+    // says 16 expected cases (it deliberately excludes the pause), while the
+    // paused packaging clock reached 11. The handoff must add that one paused
+    // case once, then re-base normal tracking at 16.
+    const resumeAt = T0 + CASE_PERIOD_MS;
+    act(() => {
+      vi.setSystemTime(resumeAt);
+      rerender(props({
+        status: "running",
+        nowMs: resumeAt,
+        elapsedBatchSec: ELAPSED_SEC,
+        packagingDrainActive: false,
+        packagingDrainElapsedSec: 0,
+      }));
+    });
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(32);
+    expect(result.current.tickDueRefs.case.current).toBe(resumeAt + CASE_PERIOD_MS);
+
+    // A same-state rerender cannot replay the paused case.
+    act(() => {
+      rerender(props({
+        status: "running",
+        nowMs: resumeAt,
+        elapsedBatchSec: ELAPSED_SEC,
+        packagingDrainActive: false,
+        packagingDrainElapsedSec: 0,
+      }));
+    });
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(32);
+
+    // The next ordinary interval advances immediately from the normal
+    // baseline, rather than waiting for normal elapsed time to catch up to the
+    // 60-second pause clock.
+    const nextCaseAt = resumeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(nextCaseAt);
+      rerender(props({
+        status: "running",
+        nowMs: nextCaseAt,
+        elapsedBatchSec: ELAPSED_SEC + CASE_PERIOD_MS / 1000 + 0.001,
+        packagingDrainActive: false,
+        packagingDrainElapsedSec: 0,
+      }));
+    });
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(33);
+    expect(store.traysOnLine).toBe(5);
+    expect(store.batchesReady).toBe(2);
+  });
+
+  it("re-bases after a rejected paused packaging write so manual progress is not replayed", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 4,
+      casesOnCurrentSkid: 9,
+      traysOnLine: 5,
+      batchesReady: 2,
+    });
+    const persistAutomaticProgress = vi.fn(() => false);
+    const calcPackagingOnly = { ...BASE_CALC, pressDone: true };
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (args: {
+      status: "running" | "paused";
+      nowMs: number;
+      elapsedBatchSec: number;
+      packagingDrainActive: boolean;
+      packagingDrainElapsedSec: number;
+    }): Props => ({
+      runId: "manual-packaging-pause-handoff",
+      runStatus: args.status,
+      nowTime: ms(args.nowMs),
+      elapsedBatchSec: args.elapsedBatchSec,
+      packagingDrainActive: args.packagingDrainActive,
+      packagingDrainElapsedSec: args.packagingDrainElapsedSec,
+      calc: calcPackagingOnly,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      onPackagingProgressAutoAdvance: persistAutomaticProgress,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      {
+        initialProps: props({
+          status: "paused",
+          nowMs: T0,
+          elapsedBatchSec: ELAPSED_SEC,
+          packagingDrainActive: true,
+          packagingDrainElapsedSec: 60,
+        }),
+      },
+    );
+
+    const resumeAt = T0 + CASE_PERIOD_MS;
+    act(() => {
+      vi.setSystemTime(resumeAt);
+      rerender(props({
+        status: "running",
+        nowMs: resumeAt,
+        elapsedBatchSec: ELAPSED_SEC,
+        packagingDrainActive: false,
+        packagingDrainElapsedSec: 0,
+      }));
+    });
+    expect(persistAutomaticProgress).toHaveBeenCalledWith(5, 0);
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(49);
+
+    // Simulate the manual-override window expiring. The rejected catch-up must
+    // not replay; only the next one-case normal interval may be accepted.
+    persistAutomaticProgress.mockReturnValue(true);
+    const nextCaseAt = resumeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(nextCaseAt);
+      rerender(props({
+        status: "running",
+        nowMs: nextCaseAt,
+        elapsedBatchSec: ELAPSED_SEC + CASE_PERIOD_MS / 1000 + 0.001,
+        packagingDrainActive: false,
+        packagingDrainElapsedSec: 0,
+      }));
+    });
+    expect(persistAutomaticProgress).toHaveBeenLastCalledWith(5, 0);
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(50);
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // 10. batchProdNextDueMsRef is reset on global resume — no phantom +1 batch
   //
