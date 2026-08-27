@@ -1,0 +1,25 @@
+{
+  "revision": "518880654ac925be6d3e8caa23b7c30d746642e3",
+  "mode": "full",
+  "results": [
+    {
+      "label": "production dependency audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1862
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 19426
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 765
+    }
+  ],
+  "updatedAt": "2026-08-27T09:46:07.696Z"
+}
